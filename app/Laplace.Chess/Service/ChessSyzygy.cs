@@ -337,8 +337,7 @@ public static class ChessSyzygy
     {
         var node = graphNode.Node;
         b.AddEntity(node.Id, node.Tier, graphNode.TypeId, SourceId);
-        if (!b.TrySeePhysicality(node.PhysId)) return;
-        b.AddPhysicalityPreSeen(new PhysicalityRow(
+        b.AddPhysicality(new PhysicalityRow(
             node.PhysId, node.Id, SourceId, PhysicalityType.Content,
             node.Coord[0], node.Coord[1], node.Coord[2], node.Coord[3], node.Hb,
             node.Trajectory, node.NConstituents, null, null, nowUs));
@@ -440,6 +439,7 @@ public static class ChessSyzygy
     /// </summary>
     public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game, ISyzygyProber prober)
     {
+        b.DeclareSourcePrior(SourceId, Weight);
         var m = new ChessModality();
         if (ChessAnalyze.InitialState(game.StartFen, m) is not { } start) return;
         var cur = start.Initial;

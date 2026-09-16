@@ -30,6 +30,7 @@ internal static class IngestExistenceGate
             return ((TRecord Record, long Units)[])(object)sc;
         }
 
+        var presenceScope = reader.CapturePresenceScope();
         var shortcircuited = new List<(TRecord, long)>();
         var perFile = handler as DocumentIngestHandler;
         var roots = new List<(int Index, Hash128 RootId)>();
@@ -66,7 +67,7 @@ internal static class IngestExistenceGate
                     continue;
                 }
                 ApplyWitness(records[i], rootId, handler, builder);
-                reader.MarkProven([rootId]);
+                reader.MarkProven([rootId], presenceScope);
                 shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
                 ReleaseNativeArtifacts(records[i], handler);
                 rootIndex[i] = -2;
@@ -102,12 +103,12 @@ internal static class IngestExistenceGate
                     continue;
                 }
                 ApplyWitness(records[i], roots[k].RootId, handler, builder);
-                reader.MarkProven([roots[k].RootId]);
+                reader.MarkProven([roots[k].RootId], presenceScope);
                 shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
                 ReleaseNativeArtifacts(records[i], handler);
                 rootIndex[i] = -2;
             }
-            if (confirmed is { Count: > 0 }) reader.MarkProven(confirmed);
+            if (confirmed is { Count: > 0 }) reader.MarkProven(confirmed, presenceScope);
         }
 
         if (perFile is not null && presentFileRoots.Count > 0)
@@ -143,6 +144,7 @@ internal static class IngestExistenceGate
         ISet<Hash128>? probedAbsent,
         CancellationToken ct)
     {
+        var presenceScope = reader.CapturePresenceScope();
         IIngestRecordHandler<RelationTripleRecord> h = handler;
         var shortcircuited = new List<(RelationTripleRecord, long)>();
         var roots = new (Hash128 Subject, Hash128 Object)[records.Count];
@@ -207,7 +209,7 @@ internal static class IngestExistenceGate
                 if (Present(s)) proven.Add(probeIds[s]);
                 else probedAbsent?.Add(probeIds[s]);
             }
-            if (proven.Count > 0) reader.MarkProven(proven);
+            if (proven.Count > 0) reader.MarkProven(proven, presenceScope);
 
             foreach (var (i, sSlot, oSlot) in candidates)
             {

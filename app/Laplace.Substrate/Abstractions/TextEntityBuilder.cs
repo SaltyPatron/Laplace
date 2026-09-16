@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Decomposers.Abstractions;
 
@@ -16,16 +17,9 @@ public sealed class TextEntityBuilder
     public static readonly Hash128 DocumentTypeId = EntityTypeRegistry.Document;
 
 
-    private const byte WordTier = 2;
-    private const byte SentenceTier = 3;
-
     private readonly TierTree _tree;
     private readonly Hash128 _sourceId;
     private readonly byte[]? _existingBitmap;
-    private readonly HashSet<Hash128> _emittedIds = new();
-
-    private readonly ImmutableArray<EntityRow>.Builder _entities;
-    private readonly ImmutableArray<PhysicalityRow>.Builder _physicalities;
 
     public TextEntityBuilder(TierTree tree, Hash128 sourceId, byte[]? existingBitmap = null)
     {
@@ -33,103 +27,50 @@ public sealed class TextEntityBuilder
         _tree = tree;
         _sourceId = sourceId;
         _existingBitmap = existingBitmap;
-        int n = tree.NodeCount;
-        _entities = ImmutableArray.CreateBuilder<EntityRow>(n);
-        _physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>(n);
     }
 
-    public (ImmutableArray<EntityRow> Entities, ImmutableArray<PhysicalityRow> Physicalities) Build()
+    public unsafe (ImmutableArray<EntityRow> Entities, ImmutableArray<PhysicalityRow> Physicalities) Build()
     {
         int nodeCount = _tree.NodeCount;
-        if (nodeCount == 0)
-            return (_entities.ToImmutable(), _physicalities.ToImmutable());
+        if (nodeCount == 0) return ([], []);
+        if (_existingBitmap is { Length: > 0 }
+            && _existingBitmap.LongLength < (nodeCount + 7L) / 8L)
+            throw new ArgumentException("existing bitmap must cover every source tree node", nameof(_existingBitmap));
 
-        long nowUs = IngestClock.NowUnixUs();
-
-        if (_existingBitmap is { Length: > 0 })
+        long grant = IngestSizing.ResolveWorkingSetBudgetBytes();
+        using var stage = IntentStage.NewBounded(nodeCount, grant);
+        if (!stage.EmitContentTree(_tree, _sourceId, _existingBitmap, out _))
+            throw new InvalidOperationException("native content tree emission failed");
+        // The same native owner supplies all identities, tiers, geometry, RLE
+        // carriers and raw observations. A known entity does not erase a new
+        // source observation; an atomic root uses its actual floor placement.
+        var entities = CopyTupleParser.DecodeEntityRows([stage.TupleBuffer(IntentStageTable.Entities)]);
+        var physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>(stage.PhysicalityCount);
+        long remaining = checked(grant - stage.AllocatedBytes);
+        if (remaining <= 0)
+            throw new InvalidOperationException("native content stage exhausted its row-export allocation grant");
+        stage.VisitPhysicalityRows(remaining, (inputs, observations) =>
         {
-            var novelIdx = new uint[nodeCount];
-            int novelCount = MerkleDedup.TrunkShortcircuit(_tree, _existingBitmap, novelIdx);
-            for (int i = 0; i < novelCount; i++)
-                EmitNode(novelIdx[i], nowUs);
-        }
-        else
-        {
-            for (uint idx = 0; idx < (uint)nodeCount; idx++)
-                EmitNode(idx, nowUs);
-        }
-
-        return (_entities.ToImmutable(), _physicalities.ToImmutable());
-    }
-
-    private void EmitNode(uint idx, long nowUs)
-    {
-        var node = _tree.GetNode(idx);
-
-        if (node.Tier == 0) return;
-        if (!_tree.ShouldEmitCompositional(idx)) return;
-
-        if (!_emittedIds.Add(node.Id)) return;
-
-        var typeId = TierTypeId(node.Tier);
-        _entities.Add(new EntityRow(node.Id, node.Tier, typeId, _sourceId));
-
-        double[]? trajectoryXyzm = null;
-        int nConstituents = 0;
-
-        // A composition of exactly one child is content-identical to that child (same law as
-        // "cat has no separate sentence entity -- a one-word reply IS the sentence"): building
-        // an explicit length-1 trajectory here manufactures a distinct physicality id for
-        // something that should hash identically to its sole child's own physicality, which is
-        // exactly what silently duplicated ~1100 physicality rows against BuildTier0Seed's
-        // atomic (no-trajectory) seeding of the same content -- see .scratchpad/02 Issue 25 residual.
-        if (node.ChildCount > 1)
-        {
-            var childIds = new Hash128[node.ChildCount];
-            var childFlags = new ulong[node.ChildCount];
-            for (uint ci = 0; ci < node.ChildCount; ci++)
+            for (int i = 0; i < inputs.Length; ++i)
             {
-
-
-                var child = _tree.GetNode(_tree.CollapseIndex(node.FirstChildIdx + ci));
-                childIds[ci] = child.Id;
-                childFlags[ci] = Trajectory.VertexFlags(
-                    child.Tier, hasAtom: child.Tier == 0, atom: child.Atom);
+                var input = inputs[i];
+                var observation = observations[i];
+                if (observation.SourceStageIndex != 0 || observation.SourceRowIndex != (nuint)i)
+                    throw new InvalidOperationException("native text physicality rows lost their source order");
+                int width = checked((int)(input.TrajectoryVertices * 4));
+                double[]? trajectory = width == 0 ? null
+                    : new ReadOnlySpan<double>(input.Trajectory, width).ToArray();
+                physicalities.Add(new PhysicalityRow(observation.PlacementId,
+                    input.EntityId, _sourceId, (PhysicalityType)input.Type,
+                    input.Coordinate[0], input.Coordinate[1], input.Coordinate[2], input.Coordinate[3],
+                    input.HilbertIndex, trajectory, input.Constituents,
+                    input.AlignmentResidualIsNull != 0 ? null : input.AlignmentResidual,
+                    input.SourceDimIsNull != 0 ? null : input.SourceDim,
+                    observation.ObservedAtUnixUs));
             }
-            trajectoryXyzm = Trajectory.Build(childIds, childFlags);
-            nConstituents = (int)node.ChildCount;
-        }
-
-        double cx, cy, cz, cm;
-        unsafe { cx = node.Coord[0]; cy = node.Coord[1]; cz = node.Coord[2]; cm = node.Coord[3]; }
-
-        var physId = PhysicalityId.Compute(node.Id, PhysicalityType.Content);
-
-        _physicalities.Add(new PhysicalityRow(
-            Id: physId,
-            EntityId: node.Id,
-            SourceId: _sourceId,
-            Type: PhysicalityType.Content,
-            CoordX: cx,
-            CoordY: cy,
-            CoordZ: cz,
-            CoordM: cm,
-            HilbertIndex: node.Hilbert,
-            TrajectoryXyzm: trajectoryXyzm,
-            NConstituents: nConstituents,
-            AlignmentResidual: null,
-            SourceDim: null,
-            ObservedAtUnixUs: nowUs));
+        });
+        return (entities.ToImmutableArray(), physicalities.MoveToImmutable());
     }
-
-    private static Hash128 TierTypeId(byte tier) => tier switch
-    {
-        0 => CodepointTypeId,
-        1 => GraphemeTypeId,
-        2 => WordTypeId,
-        3 => SentenceTypeId,
-        _ => DocumentTypeId,
-    };
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     public static unsafe int Resolver(

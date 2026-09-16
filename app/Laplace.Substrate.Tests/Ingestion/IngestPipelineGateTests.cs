@@ -73,6 +73,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                 records,
                 (utf8, b) => ContentTierSpine.TryStageIntoBuilder(b, utf8, SourceId, out _),
                 SourceId,
+                sourceTrust: 1.0,
                 "synthetic",
                 context.Reader,
                 options,
@@ -162,7 +163,8 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
     {
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var id = Hash128.Blake3(Encoding.UTF8.GetBytes("proven-trunk-gate"));
-        reader.MarkProven([id]);
+        var presenceScope = reader.CapturePresenceScope();
+        reader.MarkProven([id], presenceScope);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var bm = await reader.ContentDescentBitmapAsync([id], [-1]);

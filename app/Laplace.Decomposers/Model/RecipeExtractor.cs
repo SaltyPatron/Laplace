@@ -80,7 +80,8 @@ public sealed class RecipeExtractor
         Hash128 hasNumLayersTypeId)
     {
         var b = new SubstrateChangeBuilder(sourceId, "recipe/laplace.recipe",
-            entityCapacity: 4, physicalityCapacity: 0, attestationCapacity: 4);
+            entityCapacity: 4, physicalityCapacity: 0, attestationCapacity: 4)
+            .DeclareSourcePrior(SourceTrust.AiModelProbe);
         StageRecipe(b, recipe, sourceId, modelRecipeTypeId, hasHiddenSizeTypeId, hasNumLayersTypeId);
         return b.Build();
     }

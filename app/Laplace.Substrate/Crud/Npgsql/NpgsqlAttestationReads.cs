@@ -15,24 +15,32 @@ public static class NpgsqlAttestationReads
         byte[] Id, byte[] SubjectId, byte[] TypeId, byte[]? ObjectId,
         byte[] SourceId, byte[]? ContextId, short Outcome, long ObservationCount);
 
-    /// <summary>Read complete witness identity fields for a bounded subject/type/source set.
-    /// The relation predicate retains partition pruning; callers compare their selected
-    /// contexts without one database crossing per witness.</summary>
+    public readonly record struct WitnessScope(
+        Hash128 SubjectId, Hash128 TypeId, Hash128 SourceId, Hash128? ContextId);
+
+    /// <summary>Read complete witness bodies in the exact selected proposition scopes.
+    /// Objects and outcomes remain unfiltered so conflicting testimony is observable.
+    /// The relation predicate retains partition pruning in one set-sized read.</summary>
     public static Task<IReadOnlyList<WitnessRow>> WitnessesAsync(
-        NpgsqlDataSource dataSource, byte[][] subjects, byte[][] types, byte[][] sources,
-        byte[][] contexts, byte[][] contextlessSubjects, CancellationToken ct)
-        => NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("attestations.witnesses_selected"),
+        NpgsqlDataSource dataSource, IReadOnlyList<WitnessScope> scopes, CancellationToken ct)
+    {
+        // Deduplicate complete tuples, never independent columns: independent ANY
+        // sets select their Cartesian product and admit unrelated header witnesses.
+        var selected = scopes.Distinct().ToArray();
+        if (selected.Length == 0)
+            return Task.FromResult<IReadOnlyList<WitnessRow>>(Array.Empty<WitnessRow>());
+        return NpgsqlRead.ReadRowsAsync(dataSource, SqlCatalog.Get("attestations.witnesses_selected"),
             static r => new WitnessRow(
                 (byte[])r[0], (byte[])r[1], (byte[])r[2], r.IsDBNull(3) ? null : (byte[])r[3],
                 (byte[])r[4], r.IsDBNull(5) ? null : (byte[])r[5], r.GetInt16(6), r.GetInt64(7)),
             p =>
             {
-                p.Add("subjects", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = subjects;
-                p.Add("types", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = types;
-                p.Add("sources", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = sources;
-                p.Add("contexts", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = contexts;
-                p.Add("contextless_subjects", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = contextlessSubjects;
+                p.Add("subjects", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = selected.Select(s => s.SubjectId.ToBytes()).ToArray();
+                p.Add("types", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = selected.Select(s => s.TypeId.ToBytes()).ToArray();
+                p.Add("sources", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = selected.Select(s => s.SourceId.ToBytes()).ToArray();
+                p.Add("contexts", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value = selected.Select(s => s.ContextId?.ToBytes()).ToArray();
             }, ct: ct, label: "attestation_witnesses_batch");
+    }
 
     /// <summary>
     /// Return the subset of <paramref name="ids"/> already present in one relation partition.

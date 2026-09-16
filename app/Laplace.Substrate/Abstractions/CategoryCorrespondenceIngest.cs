@@ -92,7 +92,7 @@ public static class CategoryCorrespondenceIngestSupport
         var config = IngestPipelineDefaults.ApplyMaxInputUnits(
             IngestPipelineDefaults.CategoryCorrespondence(sourceId, batchLabelPrefix, options, reader),
             options);
-        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
+        return IngestBatchPipeline.RunAsync(stream, handler, config, ct).WithSourcePrior(sourceId, trust, ct);
     }
 
     private static async IAsyncEnumerable<SubstrateChange> Empty()

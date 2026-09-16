@@ -143,4 +143,91 @@ public sealed class TextEntityBuilderEmissionTests
         Assert.Empty(atts);
         Assert.Contains(ents, e => e.Id.EqualsBytewise(rootId));
     }
+
+    [Theory]
+    [InlineData("A")]
+    [InlineData("7")]
+    [InlineData(".")]
+    public void SingleAtomRetainsItsActualFloorPhysicalityWithoutAWrapper(string text)
+    {
+        Assert.True(TextEntityBuilder.TryBuildRows(Encoding.UTF8.GetBytes(text), Src,
+            out var entities, out var physicalities, out var root, out var tier));
+        ref readonly var atom = ref CodepointPerfcache.Records[text[0]];
+        Assert.Equal(atom.Hash, root);
+        Assert.Equal((byte)0, tier);
+        Assert.Empty(entities);
+        var physicality = Assert.Single(physicalities);
+        Assert.Equal(root, physicality.EntityId);
+        Assert.Equal(PhysicalityId.Compute(root, PhysicalityType.Content), physicality.Id);
+        Assert.Equal(Src, physicality.SourceId);
+        Assert.Equal(atom.CoordX, physicality.CoordX);
+        Assert.Equal(atom.CoordY, physicality.CoordY);
+        Assert.Equal(atom.CoordZ, physicality.CoordZ);
+        Assert.Equal(atom.CoordM, physicality.CoordM);
+        Assert.Equal(atom.Hilbert, physicality.HilbertIndex);
+        Assert.Null(physicality.TrajectoryXyzm);
+        Assert.Equal(0, physicality.NConstituents);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public unsafe void ManagedRowsExactlyMatchNativeEmissionIncludingKnownRawForms(bool known)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes("alpha alpha. alpha beta.");
+        using var tree = TextDecomposer.Run(bytes);
+        HashComposer.Run(tree, &TextEntityBuilder.Resolver);
+        byte[]? bitmap = known ? Enumerable.Repeat((byte)255, (tree.NodeCount + 7) / 8).ToArray() : null;
+        using var expected = IntentStage.New(tree.NodeCount);
+        Assert.True(expected.EmitContentTree(tree, Src, bitmap, out var expectedRoot));
+        var (entities, physicalities) = new TextEntityBuilder(tree, Src, bitmap).Build();
+        if (known) Assert.Empty(entities);
+        Assert.NotEmpty(physicalities);
+        Assert.True(physicalities.Length > physicalities.Select(p => p.EntityId).Distinct().Count(),
+            "Repeated content must retain each actual native raw occurrence.");
+        using var transported = IntentStage.New(tree.NodeCount);
+        foreach (var entity in entities)
+            transported.AddEntity(entity.Id, entity.Tier, entity.TypeId, entity.FirstObservedBy);
+        foreach (var p in physicalities)
+        {
+            Assert.Equal(Src, p.SourceId);
+            transported.AddPhysicality(p.Id, p.EntityId, (short)p.Type,
+                new double[] { p.CoordX, p.CoordY, p.CoordZ, p.CoordM }, p.HilbertIndex,
+                p.TrajectoryXyzm, p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
+        }
+        Assert.Equal(expected.EmitCopyBinary(IntentStageTable.Entities),
+            transported.EmitCopyBinary(IntentStageTable.Entities));
+        Assert.Equal(expected.EmitCopyBinary(IntentStageTable.Physicalities),
+            transported.EmitCopyBinary(IntentStageTable.Physicalities));
+        Assert.Equal(bytes, ReconstructFromPhysicalities(physicalities, expectedRoot));
+    }
+
+    [Fact]
+    public void PromptSourceUnitsRetainExplicitPriorAndAnAtomicObservationEach()
+    {
+        Assert.True(UserPromptContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes("A"), "prompt-one",
+            out var first, out var firstRoot));
+        Assert.True(UserPromptContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes("A"), "prompt-two",
+            out var second, out var secondRoot));
+        Assert.Equal(firstRoot, secondRoot);
+        Assert.NotEqual(first.Metadata.IntentId, second.Metadata.IntentId);
+        foreach (var change in new[] { first, second })
+        {
+            var physicality = Assert.Single(change.PhysicalityObservations);
+            Assert.Equal(firstRoot, physicality.EntityId);
+            Assert.Equal(UserPromptContent.Source, physicality.SourceId);
+            Assert.Equal(SourceTrust.UserPrompt, change.RequireSourcePrior(physicality.SourceId));
+            Assert.Empty(change.Attestations); // HAS evidence is the normal writer's later native admission.
+        }
+    }
+
+    [Fact]
+    public unsafe void ExistingBitmapMustCoverTheActualNativeTree()
+    {
+        using var tree = TextDecomposer.Run(Encoding.UTF8.GetBytes("a longer tree with many source nodes"));
+        HashComposer.Run(tree, &TextEntityBuilder.Resolver);
+        Assert.True(tree.NodeCount > 8);
+        var error = Assert.Throws<ArgumentException>(() => new TextEntityBuilder(tree, Src, [255]).Build());
+        Assert.Contains("cover every source tree node", error.Message);
+    }
 }

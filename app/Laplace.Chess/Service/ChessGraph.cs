@@ -348,14 +348,12 @@ public static class ChessGraph
             ObservedAtUnixUs: nowUs));
     }
 
-    // Staged once per DISTINCT node per batch, not once per ply. A position's ~34 substructure
-    // tokens recur in nearly every position of the same game, so this is called ~2,380 times per
-    // game to keep ~222 physicalities — claim the id first and construct the row only on a miss.
+    // Reused entities retain each supplied physicality body for native exact-form
+    // identification. A placement address alone cannot prove body equivalence.
     private static void AddNode(SubstrateChangeBuilder b, in ChessNode n, Hash128 typeId, long nowUs, Hash128 src)
     {
         b.AddEntity(n.Id, n.Tier, typeId, src);
-        if (!b.TrySeePhysicality(n.PhysId)) return;
-        b.AddPhysicalityPreSeen(new PhysicalityRow(
+        b.AddPhysicality(new PhysicalityRow(
             Id: n.PhysId,
             EntityId: n.Id,
             SourceId: src,

@@ -243,7 +243,8 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
 
             // Native text admission supplies the whole Word entity directly.
             // These are new fixture facts, not observations attributed to WordNet.
-            var facts = new SubstrateChangeBuilder(source, "antonym-execution-content/" + scope);
+            var facts = new SubstrateChangeBuilder(source, "antonym-execution-content/" + scope)
+                .DeclareSourcePrior(source, SourceTrust.SubstrateMandate);
             facts.AddEntity(source, EntityTier.Word, EntityTypeRegistry.SourceReference, source);
             facts.AddEntity(context, EntityTier.Word, EntityTypeRegistry.SourceReference, source);
             facts.AddEntity(answer, EntityTier.Word, EntityTypeRegistry.WordNetSynset, source);
@@ -542,7 +543,8 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
                 await AssertFullBundleReceipt(authoredRoot, authoredRun);
             }
 
-            var facts = new SubstrateChangeBuilder(source, "operational-execution-facts/" + scope);
+            var facts = new SubstrateChangeBuilder(source, "operational-execution-facts/" + scope)
+                .DeclareSourcePrior(source, SourceTrust.SubstrateMandate);
             facts.AddEntity(source, EntityTier.Word, EntityTypeRegistry.SourceReference, source);
             facts.AddEntity(context, EntityTier.Word, EntityTypeRegistry.SourceReference, source);
             facts.AddEntity(input, EntityTier.Word, acceptedType, source);

@@ -15,10 +15,10 @@ BEGIN ATOMIC
         SELECT g.*
         FROM generation.forward_program(
                  p_prompt, p_steps, p_max_stride, p_spread, p_top_k,
-                 COALESCE(
-                     p_seed,
-                     laplace.hash128_lo(public.laplace_hash128_blake3(
-                         convert_to(p_prompt, 'UTF8')))),
+                 -- The native program owns the omitted-seed policy, exactly
+                 -- as on forward_program/forward_trace/forward_prompt. A text
+                 -- adapter must not silently elect a different semantic act.
+                 p_seed,
                  p_hops, p_fanout, p_prior_frontier,
                  NULL::bytea[]) g
     ), receipt AS MATERIALIZED (

@@ -26,7 +26,8 @@ public sealed class BootstrapIntentBuilder
         _substrateCanonicalTypeId = SourceTypeId;
         _sourceCanonicalSource = sourceId;
         _inner = new SubstrateChangeBuilder(
-            sourceId, $"bootstrap/{sourceName}", parentIntentId: null);
+            sourceId, $"bootstrap/{sourceName}", parentIntentId: null)
+            .DeclareSourcePrior(SourceTrust.SubstrateMandate);
 
         _inner.AddEntity(sourceId, EntityTier.Word, SourceTypeId, sourceId);
 

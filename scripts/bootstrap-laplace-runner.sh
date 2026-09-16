@@ -173,6 +173,8 @@ Modes:
   prefix      Account + apt + /opt/laplace dirs only (setup-host runs this
               before vendor deps so pgsql-18 exists for full bootstrap)
   bootstrap   Full Layer 0: runner, PG cluster, API unit, chess-lab, secrets
+  chess-gui-runtime
+              Install host X11 libraries and virtual-display acceptance tools only
   status      Print current state (no changes)
   stripe      Stripe sandbox block into runner .env
   pg-bounce-sudoers
@@ -222,13 +224,74 @@ bootstrap_user() {
     fi
 }
 
+bootstrap_chess_gui_runtime() {
+    say "Cute Chess GUI: X11 runtime and isolated interaction tools"
+    # Qt comes from the selected official SDK. Inventory the host packages first:
+    # a provisioned runner must not need sudo merely to verify installed versions.
+    local package state version attempt architecture package_arch package_state package_version
+    architecture="$(dpkg --print-architecture)"
+    local -a packages=(
+        xvfb xauth xdotool x11-utils
+        libxcb-cursor0 libxkbcommon-x11-0
+        libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0
+        libxcb-randr0 libxcb-xinerama0 libxcb-xkb1
+        libxcb-shape0 libxcb-xfixes0 libxcb-sync1 libxcb-shm0
+        libxcb-render0 libxcb-util1 libxcb1 libx11-xcb1 fonts-dejavu-core
+    )
+    local -a missing=() installer=(apt-get)
+    for attempt in 1 2; do
+        missing=()
+        for package in "${packages[@]}"; do
+            state="$(dpkg-query -W -f='${Architecture}\t${Status}\t${Version}\n' "$package" 2>/dev/null)" || state=""
+            version=""
+            while IFS=$'\t' read -r package_arch package_state package_version; do
+                if [[ "$package_arch" == "$architecture" || "$package_arch" == all ]] \
+                    && [[ "$package_state" == *" ok installed" && -n "$package_version" ]]; then
+                    version="$package_version"
+                    break
+                fi
+            done <<< "$state"
+            if [ -n "$version" ]; then
+                printf 'chess-gui-package\t%s\t%s\n' "$package" "$version"
+                continue
+            fi
+            missing+=("$package")
+        done
+        if [ "${#missing[@]}" -eq 0 ]; then
+            green "✓ X11 host dependencies present; GUI interaction is verified by explicit acceptance"
+            return 0
+        fi
+        if [ "$attempt" -eq 2 ]; then
+            red "X11 package verification failed after installation: ${missing[*]}"
+            return 1
+        fi
+        if [ "$(id -u)" -ne 0 ]; then
+            if ! command -v sudo >/dev/null 2>&1; then
+                red "Missing X11 packages require root installation: ${missing[*]}"
+                return 1
+            fi
+            installer=(sudo -n env DEBIAN_FRONTEND=noninteractive apt-get)
+        fi
+        # Noninteractive escalation happens only for missing packages. Retain a
+        # finite apt lock/network envelope; the acceptance caller also bounds
+        # this entire mode, including package configuration and readback.
+        if ! DEBIAN_FRONTEND=noninteractive "${installer[@]}" \
+            -o DPkg::Lock::Timeout=60 -o Acquire::Retries=1 \
+            -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+            install -y --no-install-recommends "${missing[@]}"; then
+            red "Could not install missing X11 host packages: ${missing[*]}"
+            return 1
+        fi
+    done
+}
+
 bootstrap_build_environment() {
     say "Build environment: apt build-deps + /opt/laplace prefix"
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build autoconf automake libtool pkg-config \
         bison flex perl python3 python3-venv ca-certificates git \
-        libgl-dev libegl-dev libopengl-dev libxkbcommon-dev libxcb-cursor0 \
+        libgl-dev libegl-dev libopengl-dev libxkbcommon-dev \
         sqlite3 \
         shellcheck \
         libssl-dev zlib1g-dev libreadline-dev uuid-dev \
@@ -240,6 +303,7 @@ bootstrap_build_environment() {
         nginx \
         >/dev/null
     green "✓ Build-deps + nginx present (chess tools built from official source releases)"
+    bootstrap_chess_gui_runtime
 
     mkdir -p /opt/laplace
     chgrp "$RUNNER_GROUP" /opt/laplace
@@ -1914,7 +1978,7 @@ bootstrap_chess_lab() {
         yellow "missing $script — skip"
         return 0
     fi
-    bash "$script" || yellow "chess-lab incomplete — packages/build will be retried by CI publish"
+    bash "$script" --cutechess-gui || yellow "chess-lab incomplete — packages/build will be retried by CI publish"
 }
 
 case "$MODE" in
@@ -1928,6 +1992,9 @@ case "$MODE" in
     reset)
         require_root
         do_reset
+        ;;
+    chess-gui-runtime)
+        bootstrap_chess_gui_runtime
         ;;
     status)
         do_status

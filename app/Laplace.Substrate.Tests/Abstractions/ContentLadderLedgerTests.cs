@@ -6,18 +6,9 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// The ledger lets ContentTierSpine.TryStageIntoBuilder answer "this surface's ladder is
-/// already deposited" BEFORE deriving the ladder — closing the re-emit path that put
-/// hundreds of thousands of already-present rows into the working-set apply's merge lane
-/// on every batch boundary.
-///
-/// A skip that fires wrongly does not make the ingest slow, it makes it LOSSY: the ladder
-/// never stages and the entity never lands. So the invariants pinned here are the ones
-/// that make a wrong skip impossible —
-///   1. disarmed  => never skip (default state for every non-bulk caller and every test);
-///   2. armed but unrecorded => never skip;
-///   3. recorded => skip, and hand back the SAME root id the deriving path produces.
-/// Identity is exact, so (3) is the one that would silently fork the substrate.
+/// Entity presence and exact root memoization must preserve identity while
+/// retaining physicality observations for each source unit. A committed root
+/// cannot act as a receipt for another observation.
 /// </summary>
 [Collection("GrammarPerfcache")]
 public sealed class ContentLadderLedgerTests : IDisposable
@@ -80,7 +71,7 @@ public sealed class ContentLadderLedgerTests : IDisposable
     }
 
     [Fact]
-    public void Armed_empty_run_memoizes_before_first_commit_and_skips_after_commit()
+    public void Armed_empty_run_memoizes_and_retains_observations_after_commit()
     {
         const string surface = "memoize before first committed apply";
         ContentLadderLedger.Begin();
@@ -96,12 +87,12 @@ public sealed class ContentLadderLedgerTests : IDisposable
         Assert.True(ContentTierSpine.TryStageIntoBuilder(
             repeated, System.Text.Encoding.UTF8.GetBytes(surface), Source, out var repeatedRoot));
         Assert.Equal(root, repeatedRoot);
-        Assert.Equal(0, repeated.ContentStage.EntityCount);
+        Assert.True(repeated.ContentStage.PhysicalityCount > 0);
     }
 
     [Theory]
     [MemberData(nameof(Surfaces))]
-    public void Recorded_skips_and_returns_the_identical_root(string surface)
+    public void Recorded_root_retains_observation_and_returns_the_identical_identity(string surface)
     {
         var derived = Stage(surface, "baseline");
 
@@ -109,23 +100,20 @@ public sealed class ContentLadderLedgerTests : IDisposable
         ContentLadderLedger.MarkPersisted([derived]);
         Assert.True(ContentLadderLedger.IsPersisted(derived));
 
-        // Bit-identical id from the skipping path — the whole point.
+        // Presence never changes the canonical root.
         Assert.Equal(derived, Stage(surface, "recorded"));
 
-        // And the skip really skipped: nothing reaches the native ContentStage.
+        // The new source unit still reaches the native physicality owner.
         var skipped = NewBuilder("recorded-empty");
         Assert.True(ContentTierSpine.TryStageIntoBuilder(
             skipped, System.Text.Encoding.UTF8.GetBytes(surface), Source, out var id));
         Assert.Equal(derived, id);
-        Assert.Equal(0, skipped.ContentStage.EntityCount);
+        Assert.True(skipped.ContentStage.PhysicalityCount > 0);
     }
 
     [Fact]
-    public void The_skip_is_what_removes_the_staging_work()
+    public void Recorded_root_preserves_the_actual_source_span()
     {
-        // A multi-codepoint surface has a real ladder to stage — single codepoints do
-        // not (tier 0 is a closed, already-seeded space, so the deriving path stages
-        // nothing for them either and could not tell a skip from a no-op).
         const string surface = "New York";
         var control = NewBuilder("control");
         Assert.True(ContentTierSpine.TryStageIntoBuilder(
@@ -141,7 +129,46 @@ public sealed class ContentLadderLedgerTests : IDisposable
             skipped, System.Text.Encoding.UTF8.GetBytes(surface), Source, out var id));
 
         Assert.Equal(derived, id);
-        Assert.Equal(0, skipped.ContentStage.EntityCount);
+        Assert.True(skipped.ContentStage.PhysicalityCount > 0);
+        var range = Assert.Single(skipped.ContentStage.PhysicalitySourceRanges);
+        Assert.Equal(Source, range.SourceId);
+        Assert.Equal(skipped.ContentStage.PhysicalityCount, range.RowCount);
+    }
+
+    [Fact]
+    public void Warm_root_memo_retains_each_native_source_observation()
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes("ab");
+        Hash128 root = ContentTierSpine.ResolveRoot(bytes)!.Value;
+        ContentLadderLedger.Begin();
+        ContentLadderLedger.MarkPersisted([root]);
+        var other = new Hash128(401, 402);
+        var builder = NewBuilder("warm-distinct-source");
+        foreach (var source in new[] { Source, Source, other })
+        {
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(builder, bytes, source, out var observed));
+            Assert.Equal(root, observed);
+        }
+        Assert.Equal(1, builder.ContentStage.EntityCount);
+        Assert.Equal(3, builder.ContentStage.PhysicalityCount);
+        Assert.Equal(new[] { new PhysicalitySourceRange(0, 2, Source),
+            new PhysicalitySourceRange(2, 1, other) }, builder.ContentStage.PhysicalitySourceRanges.ToArray());
+    }
+
+    [Fact]
+    public void Warm_atomic_root_retains_floor_observation_without_entity_or_wrapper()
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes("a");
+        Hash128 root = ContentTierSpine.ResolveRoot(bytes)!.Value;
+        ContentLadderLedger.Begin();
+        ContentLadderLedger.MarkPersisted([root]);
+        var builder = NewBuilder("warm-atomic-source");
+        Assert.True(ContentTierSpine.TryStageIntoBuilder(builder, bytes, Source, out var observed));
+        Assert.Equal(root, observed);
+        Assert.Equal(0, builder.ContentStage.EntityCount);
+        Assert.Equal(1, builder.ContentStage.PhysicalityCount);
+        Assert.Equal(new PhysicalitySourceRange(0, 1, Source),
+            Assert.Single(builder.ContentStage.PhysicalitySourceRanges));
     }
 
     [Fact]

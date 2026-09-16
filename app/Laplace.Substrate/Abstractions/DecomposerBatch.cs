@@ -13,6 +13,7 @@ public static class IngestComposePipeline
         IAsyncEnumerable<T> records,
         Action<T, SubstrateChangeBuilder> compose,
         Hash128 sourceId,
+        double sourceTrust,
         string labelPrefix,
         ISubstrateReader? reader,
         DecomposerOptions options,
@@ -33,7 +34,7 @@ public static class IngestComposePipeline
         return IngestBatchPipeline.RunAsync(
             new AsyncEnumerableRecordStream<T>(records),
             new DirectComposeHandler<T>(compose, trunkShortcircuit),
-            config, ct);
+            config, ct).WithSourcePrior(sourceId, sourceTrust, ct);
     }
 
     private static async IAsyncEnumerable<SubstrateChange> Empty()

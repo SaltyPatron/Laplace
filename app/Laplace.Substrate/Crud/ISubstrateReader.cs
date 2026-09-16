@@ -2,6 +2,13 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD;
 
+/// <summary>A reader-owned cache lifetime captured before a presence proof or committed write.</summary>
+public readonly struct PresenceCacheScope
+{
+    internal object? State { get; }
+    internal PresenceCacheScope(object state) => State = state;
+}
+
 
 
 public readonly record struct CircuitRelation(
@@ -108,32 +115,31 @@ public interface ISubstrateReader
         => EntitiesExistBitmapAsync(ids, ct);
 
     /// <summary>
-    /// True iff <paramref name="id"/> has been confirmed present in the DB
-    /// (via a real batch probe result), or is part of this transaction's
-    /// guaranteed-to-be-committed write set. This is NOT "has this id been
-    /// seen/probed before" -- an id a probe round positively determined was
-    /// ABSENT must never be marked proven. Backing this with a
-    /// process-lifetime cache (e.g. NpgsqlSubstrateReader's `_proven`) must
-    /// only ever populate it via <see cref="MarkProven"/> calls filtered by
-    /// a real presence result -- never unconditionally over a whole probe
-    /// batch. Unconditional marking here was the root cause of a real,
-    /// live-reproduced bug: a single call's MarkProven(ids) covering the
-    /// WHOLE candidate list (including ids that same call had just proven
-    /// absent) permanently poisoned the cache, silently skipping every
-    /// later occurrence of that content anywhere in the ingest run from
-    /// emission (the dorian.txt repro).
+    /// True only for confirmed stored presence within this reader's current
+    /// cache lifetime. Queued/staged entities are not persisted-presence proof.
+    /// False is a cache miss, not a statement that the entity is absent.
     /// </summary>
     bool IsProvenPresent(Hash128 id) => false;
 
     /// <summary>
-    /// Records ids positively confirmed present (see
-    /// <see cref="IsProvenPresent"/>). Callers MUST filter to only the
-    /// subset of a probe round's candidates that round's own bitmap
-    /// actually confirmed present -- never the round's whole candidate
-    /// list.
+    /// Capture before the query or acknowledged write that supplies a positive
+    /// presence hint. Readers that cache mutable database presence bind this
+    /// scope to their current cache lifetime.
+    /// </summary>
+    PresenceCacheScope CapturePresenceScope() => default;
+
+    /// <summary>
+    /// Promote only positively confirmed IDs using the scope captured before
+    /// obtaining that proof. After eviction, stale scopes cannot populate the
+    /// replacement cache. Staged-but-uncommitted rows are never valid hints.
+    /// </summary>
+    void MarkProven(IReadOnlyList<Hash128> ids, PresenceCacheScope scope) => MarkProven(ids);
+
+    /// <summary>
+    /// Compatibility hint for readers without mutable database-presence caches.
+    /// A generation-aware reader must not publish IDs from this unscoped path.
     /// </summary>
     void MarkProven(IReadOnlyList<Hash128> ids) { }
-
 
 
     bool TryGetCachedRoot(Hash128 canonicalKey, out Hash128 rootId) { rootId = default; return false; }

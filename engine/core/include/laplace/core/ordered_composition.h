@@ -34,6 +34,11 @@ typedef struct {
     hilbert128_t hilbert;
     uint8_t      tier;
     uint8_t      _pad[7];
+    /* Exact span appended by this request to the supplied stage. These are
+     * zero for compose-only results. Stage spans can be out of request order:
+     * legacy placement winners precede alternate raw observations. */
+    size_t       first_physicality_row;
+    size_t       emitted_physicality_rows;
 } laplace_ordered_composition_result_t;
 
 /*
@@ -63,13 +68,21 @@ int laplace_ordered_composition_compose_batch(
 
 /*
  * Compose and stage independent ordered component sequences in one native
- * crossing. A multi-component trajectory retains one flagged vertex for every
- * supplied constituent, including repeated adjacent runs: the existing RLE
- * codec cannot retain per-vertex atom flags. A singleton stages no wrapper
- * entity or self physicality.
+ * crossing. A multi-component trajectory retains every logical constituent
+ * and its atom flags through the shared flagged-RLE owner. A singleton stages no
+ * wrapper entity or self composition. A tier-0 singleton observes the exact
+ * loaded atomic Content body, with no E row; supplied atom/E/coord must match
+ * that floor. Other singleton operands supply
+ * only a reference and coordinate, not the full child body: they emit no P;
+ * an observation requires that body through its actual provider/source path.
  *
+ * Every computed multi-component candidate physicality is retained as a raw
+ * observation, including exact repeats and alternate geometry of the same E.
+ * Entity creation retains existing dedup/minimum-floor behavior. Existing
+ * placement winners are emitted first so downstream first-placement selection
+ * stays compatible. Source-unit replay and exact-form reuse belong to admission.
  * The operation validates every request before mutating `stage`. `out_results`
- * holds `request_count` entries in request order.
+ * holds request-order entries with actual emitted physicality spans.
  */
 int laplace_ordered_composition_stage_batch(
     intent_stage_t*                              stage,

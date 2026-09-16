@@ -77,7 +77,8 @@ public sealed class ChessStockfishEvalDecomposer
             context.Writer, ChessStockfishEval.SourceId, SourceName, ChessStockfishEval.TrustClassId, ct);
         // The full artifact manifest is one source-level input, not work repeated for every
         // line/position. Persist it once through the shared writer before emitting references.
-        var metadata = new SubstrateChangeBuilder(SourceId, $"{BatchLabelPrefix}/recipe/{Recipe.Id}");
+        var metadata = new SubstrateChangeBuilder(SourceId, $"{BatchLabelPrefix}/recipe/{Recipe.Id}")
+            .DeclareSourcePrior(SourceTrust);
         _recipeMetadataRoot = ContentEmitter.Emit(metadata, Recipe.CanonicalManifest, SourceId)
             ?? throw new InvalidDataException("Stockfish evaluation recipe could not be admitted as content.");
         await context.Writer.ApplyAsync(await metadata.BuildAsync(ct), ct);

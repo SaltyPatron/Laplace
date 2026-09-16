@@ -82,22 +82,21 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
     {
         var b = state.Board;
 
-        if (b.HalfmoveClock >= 100) return GameOutcome.Draw;
-
-        if (IsThreefold(state)) return GameOutcome.Draw;
-
-        if (IsInsufficientMaterial(b)) return GameOutcome.Draw;
-
         var moves = MoveGen.Legal(b);
-        if (moves.Count > 0) return null;
-
-        bool inCheck = MoveGen.InCheck(b, b.WhiteToMove);
-        if (inCheck)
+        if (moves.Count == 0)
         {
-            int winner = b.WhiteToMove ? 1 : 0;
-            return GameOutcome.WonBy(winner);
+            if (MoveGen.InCheck(b, b.WhiteToMove))
+            {
+                int winner = b.WhiteToMove ? 1 : 0;
+                return GameOutcome.WonBy(winner);
+            }
+            return GameOutcome.Draw;
         }
-        return GameOutcome.Draw;
+        // A mating move ends the game before a simultaneous draw counter or
+        // repetition claim can supersede its result.
+        if (b.HalfmoveClock >= 100 || IsThreefold(state) || IsInsufficientMaterial(b))
+            return GameOutcome.Draw;
+        return null;
     }
 
     private static bool IsThreefold(ChessState state)
@@ -146,7 +145,7 @@ public sealed class ChessModality : ITurnModality<ChessState, ChessMove>
         if (whiteMinors == 0 && blackMinors == 0) return true;
         if (whiteMinors == 1 && blackMinors == 0) return true;
         if (blackMinors == 1 && whiteMinors == 0) return true;
-        if (whiteKnights == 0 && blackKnights == 0 && whiteBishops >= 1 && blackBishops >= 1)
+        if (whiteKnights == 0 && blackKnights == 0 && whiteBishops + blackBishops > 0)
         {
             bool anyLight = whiteBishopOnLight || blackBishopOnLight;
             bool anyDark = whiteBishopOnDark || blackBishopOnDark;

@@ -12,9 +12,16 @@ public sealed class ContentBatch : IDisposable
     private sealed class Entry
     {
         public required byte[] Canonical;
-        public Hash128 Source;
+        public readonly List<Hash128> Sources = new();
+        private readonly HashSet<Hash128> _seenSources = new();
         public Hash128 RootId;
         public TierTree? Tree;
+        public byte[]? ExistingBitmap;
+
+        public void ObserveSource(Hash128 source)
+        {
+            if (_seenSources.Add(source)) Sources.Add(source);
+        }
     }
 
     private readonly Dictionary<Hash128, Entry> _map = new();
@@ -35,32 +42,28 @@ public sealed class ContentBatch : IDisposable
         if (canonical.IsEmpty) return false;
 
         var key = Hash128.Blake3(canonical);
-        if (_reader.TryGetCachedRoot(key, out rootId))
-            return true;
-
         if (_map.TryGetValue(key, out var existing))
         {
+            existing.ObserveSource(sourceId);
             rootId = existing.RootId;
             return true;
         }
 
-        Hash128? cheapRoot = ContentTierSpine.ResolveRoot(canonical);
-        if (cheapRoot is null) return false;
-        rootId = cheapRoot.Value;
-
-        if (_reader.IsProvenPresent(rootId))
+        if (!_reader.TryGetCachedRoot(key, out rootId))
         {
-            _reader.CacheRoot(key, rootId);
-            return true;
+            Hash128? cheapRoot = ContentTierSpine.ResolveRoot(canonical);
+            if (cheapRoot is null) return false;
+            rootId = cheapRoot.Value;
         }
 
-        _map[key] = new Entry
+        var entry = new Entry
         {
             Canonical = canonical.ToArray(),
-            Source = sourceId,
             RootId = rootId,
             Tree = null,
         };
+        entry.ObserveSource(sourceId);
+        _map[key] = entry;
         return true;
     }
 
@@ -79,6 +82,7 @@ public sealed class ContentBatch : IDisposable
         for (int i = 0; i < entries.Count; i++)
             roots.Add(entries[i].RootId);
 
+        var presenceScope = _reader.CapturePresenceScope();
         byte[] rootBm = roots.Count > 0
             ? await _reader.EntitiesExistBitmapAsync(roots, ct).ConfigureAwait(false)
             : [];
@@ -90,10 +94,18 @@ public sealed class ContentBatch : IDisposable
         for (int i = 0; i < entries.Count; i++)
         {
             var e = entries[i];
+            e.Tree ??= ContentTierSpine.BuildTree(e.Canonical);
+            if (e.Tree is null)
+                throw new InvalidOperationException("previously resolved content could not produce its native tree");
             if (BitmapBits.IsSet(rootBm, i))
             {
-                _reader.MarkProven([e.RootId]);
+                _reader.MarkProven([e.RootId], presenceScope);
                 _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);
+                // Keep the real root proof for native entity filtering; its
+                // physicality observations still belong to this source unit.
+                e.ExistingBitmap = new byte[(e.Tree.NodeCount + 7) / 8];
+                int rootIndex = checked((int)e.Tree.NaturalUnitIndex());
+                e.ExistingBitmap[rootIndex >> 3] |= (byte)(1 << (rootIndex & 7));
                 continue;
             }
 
@@ -102,8 +114,6 @@ public sealed class ContentBatch : IDisposable
             // does not immediately issue the same indexed lookup a second time.
             rootsProvenAbsent.Add(e.RootId);
 
-            e.Tree ??= ContentTierSpine.BuildTree(e.Canonical);
-            if (e.Tree is null) continue;
             probeTrees.Add(e.Tree);
             emitEntries.Add(e);
         }
@@ -114,18 +124,15 @@ public sealed class ContentBatch : IDisposable
             : [];
 
         for (int t = 0; t < emitEntries.Count; t++)
+            emitEntries[t].ExistingBitmap = t < bitmaps.Length ? bitmaps[t] : null;
+
+        foreach (var e in entries)
         {
-            var e = emitEntries[t];
-            if (e.Tree is null) continue;
-            byte[]? bm = t < bitmaps.Length ? bitmaps[t] : null;
-            if (bm is { Length: > 0 })
-            {
-                for (int i = 0; i < bm.Length; i++)
-                    if (bm[i] != 0) goto emit;
-                bm = null;
-            }
-        emit:
-            ContentTierSpine.EmitTree(stage, e.Tree, e.Source, bm ?? ReadOnlySpan<byte>.Empty, out _);
+            foreach (Hash128 source in e.Sources)
+                if (!ContentTierSpine.EmitTree(stage, e.Tree!, source,
+                        e.ExistingBitmap ?? ReadOnlySpan<byte>.Empty, out var emittedRoot)
+                    || emittedRoot != e.RootId)
+                    throw new InvalidOperationException("native content observation emission failed or changed its root identity");
             _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);
         }
 

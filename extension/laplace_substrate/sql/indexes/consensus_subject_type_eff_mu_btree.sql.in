@@ -1,1 +1,5 @@
+-- Each exact relation/direction has its own ordered response range. These
+-- indexes let native coupling seek between types without scanning a populous
+-- plane's discarded tail or losing less populous planes to a global top-K.
 CREATE INDEX IF NOT EXISTS consensus_subject_type_eff_mu_btree ON consensus (subject_id, type_id, ((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS consensus_object_type_eff_mu_btree ON consensus (object_id, type_id, ((rating - 2*rd)) DESC) WHERE object_id IS NOT NULL;

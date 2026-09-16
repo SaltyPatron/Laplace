@@ -24,6 +24,7 @@ CC_BUILD="${LAPLACE_CUTECHESS_BUILD:-/build/cutechess}"
 CC_BIN_DIR="$PREFIX/bin"
 APP_DIR="$PREFIX/app"
 ENV_FILE="$APP_DIR/laplace-api.env"
+CUTECHESS_GUI_BUILD="${LAPLACE_CUTECHESS_GUI_BUILD:-0}"
 
 green()  { printf '\033[0;32m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$1"; }
@@ -33,7 +34,7 @@ say()    { echo; echo "=== $1 ==="; }
 run_as_owner() {
   if [ "$(id -u)" -eq 0 ]; then
     local key
-    local -a build_env=("LAPLACE_EXTERNAL=$EXTERNAL" "TMPDIR=$WORK" "TMP=$WORK" "TEMP=$WORK")
+    local -a build_env=("LAPLACE_EXTERNAL=$EXTERNAL" "LAPLACE_INSTALL_PREFIX=$PREFIX" "TMPDIR=$WORK" "TMP=$WORK" "TEMP=$WORK")
     for key in LAPLACE_STOCKFISH_SOURCE LAPLACE_STOCKFISH_COMP LAPLACE_STOCKFISH_ARCH \
       LAPLACE_STOCKFISH_JOBS LAPLACE_BUILD_JOBS LAPLACE_DEPS_PREFIX CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS CC CXX; do
       if [[ -v "$key" ]]; then build_env+=("$key=${!key}"); fi
@@ -83,9 +84,16 @@ build_cutechess() {
   run_as_owner env GIT_NO_REPLACE_OBJECTS=1 cmake -S "$src" -B "$CC_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF -DCMAKE_PREFIX_PATH="$qt" \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH="$qt/lib"
-  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 cmake --build "$CC_BUILD" --clean-first --target cli
+  local -a targets=(cli)
+  if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then targets+=(gui); fi
+  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 cmake --build "$CC_BUILD" --clean-first --target "${targets[@]}"
   run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" \
     --binary "$CC_BUILD/cutechess-cli" --receipt "$CC_BUILD/laplace-cutechess-build.json"
+  if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
+    run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" \
+      --gui --binary "$CC_BUILD/cutechess" --qt-prefix "$qt" --work "$WORK" \
+      --receipt "$CC_BUILD/laplace-cutechess-gui-build.json"
+  fi
   local staged
   staged="$(mktemp "$CC_BIN_DIR/.cutechess-cli.XXXXXX")"
   if install -m 0755 "$CC_BUILD/cutechess-cli" "$staged"; then
@@ -93,6 +101,15 @@ build_cutechess() {
   else
     rm -f "$staged"
     return 1
+  fi
+  if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
+    staged="$(mktemp "$CC_BIN_DIR/.cutechess.XXXXXX")"
+    if install -m 0755 "$CC_BUILD/cutechess" "$staged"; then
+      mv -Tf "$staged" "$CC_BIN_DIR/cutechess"
+    else
+      rm -f "$staged"
+      return 1
+    fi
   fi
 }
 
@@ -112,7 +129,8 @@ write_api_env() {
     return 0
   fi
 
-  local sf qt cc
+  local sf qt cc selected_source
+  selected_source="$(python3 "$SCRIPT_DIR/install-stockfish.py" --print-source)"
   sf="$(resolve_stockfish || true)"
   qt="$(resolve_qt_bin || true)"
   cc="${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}"
@@ -138,10 +156,14 @@ write_api_env() {
   {
     echo "$marker_begin"
     [ -n "$cc" ] && echo "LAPLACE_CUTECHESS=$cc"
+    if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
+      echo "LAPLACE_CUTECHESS_GUI=${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}"
+      echo "LAPLACE_CUTECHESS_GUI_RECEIPT=$CC_BUILD/laplace-cutechess-gui-build.json"
+    fi
     [ -n "$sf" ] && echo "LAPLACE_STOCKFISH=$sf"
     [ -n "$qt" ] && echo "LAPLACE_QT_BIN=$qt"
     echo "LAPLACE_EXTERNAL=$EXTERNAL"
-    [ -z "${LAPLACE_STOCKFISH_SOURCE:-}" ] || echo "LAPLACE_STOCKFISH_SOURCE=$LAPLACE_STOCKFISH_SOURCE"
+    echo "LAPLACE_STOCKFISH_SOURCE=$selected_source"
     [ -z "${LAPLACE_ZSTD_LIBRARY:-}" ] || echo "LAPLACE_ZSTD_LIBRARY=$LAPLACE_ZSTD_LIBRARY"
     [ -z "${LAPLACE_ZSTD_SOURCE:-}" ] || echo "LAPLACE_ZSTD_SOURCE=$LAPLACE_ZSTD_SOURCE"
     [ -z "${LAPLACE_ZSTD_BUILD:-}" ] || echo "LAPLACE_ZSTD_BUILD=$LAPLACE_ZSTD_BUILD"
@@ -173,6 +195,10 @@ verify() {
   sf="$(resolve_stockfish || true)"
   qt="$(resolve_qt_bin || true)"
   python3 "$SCRIPT_DIR/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}" || { red "✗ cutechess-cli / Qt runtime"; fail=1; }
+  if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
+    python3 "$SCRIPT_DIR/provision-cutechess.py" --gui --binary "${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}" \
+      --verify-receipt "$CC_BUILD/laplace-cutechess-gui-build.json" --work "$WORK" || { red "✗ cutechess GUI / Qt offscreen runtime"; fail=1; }
+  fi
   python3 "$SCRIPT_DIR/install-stockfish.py" --check-binary "$sf" || { red "✗ stockfish"; fail=1; }
   zstd_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$REPO_ROOT/deploy/zstd-release.json")"
   python3 "$SCRIPT_DIR/check-zstd-runtime.py" --require-version "$zstd_version" || { red "✗ native Zstandard PGN decoder"; fail=1; }
@@ -182,6 +208,21 @@ verify() {
 }
 
 main() {
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --cutechess-gui) CUTECHESS_GUI_BUILD=1 ;;
+      *) red "unknown chess provisioning option: $1"; return 2 ;;
+    esac
+    shift
+  done
+  [[ "$CUTECHESS_GUI_BUILD" == 0 || "$CUTECHESS_GUI_BUILD" == 1 ]] || {
+    red "LAPLACE_CUTECHESS_GUI_BUILD must be 0 or 1"; return 2;
+  }
+  # Existing GUI presence selects a fresh source build; it never skips verification.
+  if [[ -e "$CC_BIN_DIR/cutechess" || -e "$CC_BUILD/cutechess" ||
+        -e "$CC_BUILD/laplace-cutechess-gui-build.json" || -n "${LAPLACE_CUTECHESS_GUI:-}" ]]; then
+    CUTECHESS_GUI_BUILD=1
+  fi
   ensure_dirs
   build_cutechess
   build_zstd

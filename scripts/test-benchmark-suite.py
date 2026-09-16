@@ -124,6 +124,19 @@ class BenchmarkSuiteTests(unittest.TestCase):
             self.assertNotIn("--max-moves", command)
             self.assertFalse(result["result"]["targetMet"])
 
+    def test_chess_configuration_profile_requests_complete_games(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "chess-environment/report.json"
+            target.parent.mkdir()
+            target.write_text('{"status":"complete"}')
+            with mock.patch.object(self.suite, "capture_rapl", return_value=[]), \
+                 mock.patch.object(self.suite, "run_and_tee", return_value=(0,100)) as run:
+                self.suite.run_profile(self.suite.profile_map(self.registry)["chess-environment"],
+                    Path(folder), {}, 3, Path(folder), Path(folder), None, "unused")
+            command=run.call_args.args[0]
+            self.assertEqual("0",command[command.index("--max-moves")+1])
+            self.assertEqual("8",command[command.index("--match-depth")+1])
+
     def test_raw_harness_scaling_points_still_expose_full_topology_for_explicit_use(self):
         self.assertEqual([1, 2, 3, 4, 6, 8, 10, 12], self.scale.default_worker_counts(6, 12))
         self.assertEqual([1, 2, 3, 4, 8], self.scale.default_worker_counts(8, 8))
@@ -154,18 +167,30 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual(12, cap)
         self.assertEqual("derived", source)
 
-    def test_workflow_is_manual_or_post_deploy_and_routes_through_suite_runner(self):
+    def test_workflow_explicit_invocations_route_through_owned_runners(self):
         import yaml
         path = ROOT / ".github/workflows/benchmark-evidence.yml"
         workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         triggers = workflow["on"]
         names = {triggers} if isinstance(triggers, str) else set(triggers)
-        self.assertEqual({"workflow_dispatch", "workflow_call"}, names)
+        self.assertEqual({"workflow_dispatch", "workflow_call", "push"}, names)
+        self.assertEqual({"branches": ["verify/chess-acceptance-*"]}, triggers["push"])
         inputs = workflow["on"]["workflow_dispatch"]["inputs"]
         self.assertIn("query", inputs["suite"]["options"])
         self.assertIn("chess", inputs["suite"]["options"])
+        self.assertIn("acceptance", inputs["suite"]["options"])
         self.assertEqual("chess", workflow["on"]["workflow_call"]["inputs"]["suite"]["default"])
         job = workflow["jobs"]["benchmark"]
+        self.assertEqual(
+            "inputs.suite != 'acceptance' && (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/verify/chess-acceptance-'))",
+            job["if"])
+        acceptance = workflow["jobs"]["acceptance"]
+        self.assertEqual(
+            "(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/verify/chess-acceptance-')) || inputs.suite == 'acceptance'",
+            acceptance["if"])
+        acceptance_commands = "\n".join(step.get("run", "") for step in acceptance["steps"])
+        self.assertIn("python3 scripts/accept-chess-environment.py", acceptance_commands)
+        self.assertIn("flock --exclusive --close /build/laplace/work/host-resource.lock", acceptance_commands)
         commands = "\n".join(step.get("run", "") for step in job["steps"] if isinstance(step, dict))
         self.assertIn("python3 scripts/benchmark_suite.py validate", commands)
         self.assertIn("python3 scripts/benchmark_scale_plan.py", commands)

@@ -2029,6 +2029,20 @@ parent = null
 family_root = "HAS_COST"
 
 
+# Exact structural association E -> immutable physicality descriptor D.
+# A source-owned unit/receipt is the context. Repeated internal candidates in
+# one unit are one association, not independent empirical observations; normal
+# source-unit journal replay preserves that disposition. The descriptor's own
+# ordered content proves the association; source provenance remains distinct
+# from generated reference-view geometry and its selected-child receipts.
+[[relation]]
+canonical = "HAS_PHYSICALITY"
+bit = 225
+rank = "standards_structural"
+symmetry = "asymmetric"
+parent = null
+family_root = "HAS_PHYSICALITY"
+
 [[alias]]
 surface = "DEFINED_AS"
 canonical = "HAS_DEFINITION"

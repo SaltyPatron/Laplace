@@ -7,17 +7,10 @@
 #include "laplace/core/math4d.h"
 #include "laplace/core/tier_tree.h"
 
-void hash_composer_compose_node(
-    uint8_t          tier,
-    const hash128_t* child_ids,
-    const double*    child_coords,
-    size_t           n,
-    hash128_t*       out_id,
-    double           out_coord[4],
-    hilbert128_t*    out_hb) {
+static void compose_identity_and_hilbert(uint8_t tier, const hash128_t* child_ids,
+    size_t n, const double coord[4], hash128_t* out_id, hilbert128_t* out_hb) {
     if (n == 0) {
         hash128_zero(out_id);
-        out_coord[0] = out_coord[1] = out_coord[2] = out_coord[3] = 0.0;
         for (int b = 0; b < 16; ++b) out_hb->bytes[b] = 0;
         return;
     }
@@ -26,8 +19,37 @@ void hash_composer_compose_node(
     } else {
         hash128_merkle(tier, child_ids, n, out_id);
     }
+    hilbert4d_encode(coord, out_hb);
+}
+
+void hash_composer_compose_node(
+    uint8_t          tier,
+    const hash128_t* child_ids,
+    const double*    child_coords,
+    size_t           n,
+    hash128_t*       out_id,
+    double           out_coord[4],
+    hilbert128_t*    out_hb) {
     math4d_centroid(child_coords, n, out_coord);
-    hilbert4d_encode(out_coord, out_hb);
+    compose_identity_and_hilbert(tier, child_ids, n, out_coord, out_id, out_hb);
+}
+
+int hash_composer_compose_node_with_workspace(
+    uint8_t tier, const hash128_t* child_ids, const double* child_coords, size_t n,
+    void* workspace, size_t workspace_bytes,
+    hash128_t* out_id, double out_coord[4], hilbert128_t* out_hb) {
+    if (out_id == NULL || out_coord == NULL || out_hb == NULL ||
+        (n != 0u && (child_ids == NULL || child_coords == NULL))) return -1;
+    double coord[4];
+    if (math4d_centroid_with_workspace(child_coords, n, workspace, workspace_bytes, coord) != 0)
+        return -1;
+    hash128_t id;
+    hilbert128_t hilbert;
+    compose_identity_and_hilbert(tier, child_ids, n, coord, &id, &hilbert);
+    *out_id = id;
+    for (size_t axis = 0; axis < 4u; ++axis) out_coord[axis] = coord[axis];
+    *out_hb = hilbert;
+    return 0;
 }
 
 int hash_composer_run(

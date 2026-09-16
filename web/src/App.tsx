@@ -18,7 +18,8 @@ import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import { AmbientFamiliar } from './layout/AmbientFamiliar';
 import { ViewErrorBoundary } from './layout/ViewErrorBoundary';
 import { AccountControls } from './auth/AccountControls';
-import { apiGet } from './api/client';
+import { SettingsView, BillingReturnView } from './auth/SettingsView';
+import { apiGet, setApiWorkspace } from './api/client';
 import type { AuthProvider, AuthUser } from './store';
 import styles from './App.module.css';
 
@@ -32,6 +33,7 @@ const TABS: { id: string; label: string; path: string }[] = [
   { id: 'play', label: 'Play', path: '/play' },
   { id: 'lab', label: 'Lab', path: '/lab' },
   { id: 'billing', label: 'Billing', path: '/billing' },
+  { id: 'settings', label: 'Settings', path: '/settings' },
   { id: 'operator', label: 'Operator', path: '/operator' },
 ];
 function isActive(pathname: string, tabPath: string): boolean {
@@ -45,7 +47,11 @@ function Shell() {
   useEffect(() => {
     let live = true;
     void apiGet<{ authenticated: boolean; user: AuthUser | null; providers: AuthProvider[] }>('/v1/auth/me')
-      .then((result) => { if (live) setAuth(result.authenticated ? result.user : null, result.providers ?? []); })
+      .then((result) => {
+        if (!live) return;
+        setApiWorkspace(result.authenticated ? result.user?.tenantId ?? null : null);
+        setAuth(result.authenticated ? result.user : null, result.providers ?? []);
+      })
       .catch(() => { if (live) setAuth(null, []); });
     return () => { live = false; };
   }, [setAuth]);
@@ -72,6 +78,9 @@ function Shell() {
           <Route path="/play" element={<ChessView />} />
           <Route path="/lab/*" element={<LabView />} />
           <Route path="/billing" element={<BillingView />} />
+          <Route path="/billing/success" element={<BillingReturnView />} />
+          <Route path="/billing/cancel" element={<BillingReturnView />} />
+          <Route path="/settings" element={<SettingsView />} />
           <Route path="/operator" element={<AdminView />} />
           <Route path="*" element={<Panel title="Workspace not found"><p>This address does not match a Laplace workspace. Use the navigation above or return Home.</p><RouterLink to="/">Return Home</RouterLink></Panel>} />
         </Routes>

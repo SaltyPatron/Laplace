@@ -148,21 +148,13 @@ TEST(GrammarCompose, TsvRowProducesEntitiesAndSpans) {
 
 
 
-// GH #595: laplace_compose_span_lookup was a linear scan called once per AST
-// node from the C# compose loop — O(n) lookups x O(n) scan each, O(n^2)
-// total, measured pinning a real ingest for 40+ minutes on a file with tens
-// of thousands of nodes. Proves the fix at real scale: every one of several
-// thousand distinct spans resolves to its OWN correct entity id (not just
-// "doesn't crash" — a broken index could silently drop or cross-wire entries
-// under load in a way a single-span test would never catch), and does so
-// fast enough that a regression back to O(n^2) would make this test itself
-// balloon rather than fail silently.
+// GH #595: the span index must resolve every emitted occurrence at scale.
+// Occurrence spans are not entity identities: all CSV commas reuse one
+// codepoint, while the 3,000 different cell values retain different content IDs.
 TEST(GrammarCompose, SpanLookupResolvesEveryDistinctSpanAtScale) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("csv");
     ASSERT_NE(recipe, nullptr);
 
-    // Each cell gets a distinct value so every span's composed entity id is
-    // unique — a collision or a wrong-index bug would surface as a mismatch.
     constexpr int kCols = 500;
     constexpr int kRows = 6;
     std::string src;
@@ -189,43 +181,88 @@ TEST(GrammarCompose, SpanLookupResolvesEveryDistinctSpanAtScale) {
         reinterpret_cast<const uint8_t*>(src.data()), src.size(), ast,
         "csv", source_id, type_meta, &result), 0);
     ASSERT_NE(result, nullptr);
+    ASSERT_NE(result->span_index, nullptr);
+    ASSERT_GT(result->span_index_cap, 0u);
 
-    // Walk the AST's own node list — the exact same source of (start_byte,
-    // end_byte) pairs the real C# compose loop uses — rather than hand-
-    // predicting byte offsets, which would make this a test of my arithmetic
-    // instead of the fix. Every node's span must resolve, and distinct spans
-    // must resolve to distinct entity ids (the failure mode a broken
-    // hash/probe would produce, invisible to a "did it crash" check alone).
-    size_t node_count = laplace_ast_node_count(ast);
+    // The emitted native span records are independent of the lookup index.
+    // Keep the first record for a repeated span, matching the public lookup's
+    // documented linear-scan fallback, without reproducing its hash/probe code.
+    using Span = std::pair<uint32_t, uint32_t>;
+    std::map<Span, hash128_t> expected_spans;
+    for (size_t i = 0; i < result->span_count; ++i) {
+        const auto& span = result->spans[i];
+        expected_spans.emplace(Span{span.start_byte, span.end_byte}, span.entity_id);
+    }
+    ASSERT_GT(expected_spans.size(), static_cast<size_t>(kCols * kRows));
+
+    // Query the AST's actual spans, including repeated canonical content.
+    const size_t node_count = laplace_ast_node_count(ast);
     ASSERT_GT(node_count, static_cast<size_t>(kCols * kRows));
-
-    std::vector<std::pair<uint32_t, uint32_t>> spans;
+    std::vector<Span> spans;
     for (size_t i = 0; i < node_count; ++i) {
-        laplace_ast_node_t nd;
-        if (laplace_ast_get_node(ast, i, &nd) != 0) continue;
-        spans.emplace_back(nd.start_byte, nd.end_byte);
+        laplace_ast_node_t node;
+        ASSERT_EQ(laplace_ast_get_node(ast, i, &node), 0);
+        spans.emplace_back(node.start_byte, node.end_byte);
     }
     std::sort(spans.begin(), spans.end());
     spans.erase(std::unique(spans.begin(), spans.end()), spans.end());
 
-    std::vector<hash128_t> ids;
-    ids.reserve(spans.size());
-    for (auto& [start, end] : spans) {
-        hash128_t id;
-        if (laplace_compose_span_lookup(result, start, end, &id) != 0) continue;
-        ids.push_back(id);
-    }
-    ASSERT_GT(ids.size(), static_cast<size_t>(kCols * kRows))
-        << "too few spans resolved — the index dropped entries the linear scan would have found";
+    hash128_t comma_id;
+    ASSERT_EQ(laplace_content_root_id(
+        reinterpret_cast<const uint8_t*>(","), 1, &comma_id), 0);
+    size_t resolved = 0;
+    size_t comma_spans = 0;
+    std::vector<hash128_t> cell_ids;
+    for (const auto& [start, end] : spans) {
+        SCOPED_TRACE(::testing::Message() << "span [" << start << "," << end << ")");
+        const auto expected = expected_spans.find(Span{start, end});
+        hash128_t id{};
+        const int lookup = laplace_compose_span_lookup(result, start, end, &id);
+        if (expected == expected_spans.end()) {
+            EXPECT_NE(lookup, 0) << "lookup fabricated an unemitted span";
+            continue;
+        }
+        ASSERT_EQ(lookup, 0) << "index dropped an emitted span";
+        EXPECT_TRUE(hash128_equals(&id, &expected->second))
+            << "index returned another occurrence's entity";
+        ++resolved;
 
-    std::sort(ids.begin(), ids.end(), [](const hash128_t& a, const hash128_t& b) {
+        ASSERT_LE(start, end);
+        ASSERT_LE(static_cast<size_t>(end), src.size());
+        const std::string surface = src.substr(start, end - start);
+        if (surface == ",") {
+            EXPECT_TRUE(hash128_equals(&id, &comma_id))
+                << "identical punctuation acquired a different entity ID";
+            ++comma_spans;
+        } else if (surface.size() > 1 && surface[0] == 'v' &&
+                   std::all_of(surface.begin() + 1, surface.end(),
+                       [](char c) { return c >= '0' && c <= '9'; })) {
+            hash128_t content_id;
+            ASSERT_EQ(laplace_content_root_id(
+                reinterpret_cast<const uint8_t*>(surface.data()),
+                surface.size(), &content_id), 0);
+            EXPECT_TRUE(hash128_equals(&id, &content_id))
+                << "cell lookup differs from its independent content composition";
+            cell_ids.push_back(id);
+        }
+    }
+    EXPECT_EQ(resolved, expected_spans.size());
+    EXPECT_EQ(comma_spans, static_cast<size_t>(kRows * (kCols - 1)));
+    ASSERT_EQ(cell_ids.size(), static_cast<size_t>(kCols * kRows));
+    std::sort(cell_ids.begin(), cell_ids.end(), [](const hash128_t& a, const hash128_t& b) {
         return a.hi != b.hi ? a.hi < b.hi : a.lo < b.lo;
     });
-    size_t distinct = std::unique(ids.begin(), ids.end(), [](const hash128_t& a, const hash128_t& b) {
-        return a.hi == b.hi && a.lo == b.lo;
-    }) - ids.begin();
-    EXPECT_EQ(distinct, ids.size()) << "some distinct spans aliased to the same entity id";
+    const size_t distinct_cells = std::unique(cell_ids.begin(), cell_ids.end(),
+        [](const hash128_t& a, const hash128_t& b) {
+            return hash128_equals(&a, &b);
+        }) - cell_ids.begin();
+    EXPECT_EQ(distinct_cells, cell_ids.size())
+        << "different cell contents aliased to one entity";
 
+    hash128_t missing{};
+    EXPECT_NE(laplace_compose_span_lookup(
+        result, static_cast<uint32_t>(src.size()),
+        static_cast<uint32_t>(src.size() + 1), &missing), 0);
     laplace_compose_result_free(result);
     laplace_ast_free(ast);
 }

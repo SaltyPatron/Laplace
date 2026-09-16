@@ -19,6 +19,12 @@
     <ProjectReference Include="..\Laplace.Substrate\Laplace.Substrate.csproj" />
     <ProjectReference Include="..\Laplace.Decomposers\Laplace.Decomposers.csproj" />
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
+    <ProjectReference Include="..\Laplace.Chess\Laplace.Chess.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../Laplace.Chess.Tests/Fixtures/position-playing-game-*.pgn"
+          Link="Fixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

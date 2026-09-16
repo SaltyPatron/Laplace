@@ -1,5 +1,6 @@
 using global::Npgsql;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
@@ -61,6 +62,20 @@ public sealed class SubstrateRootBias : IRootBias
     private long _transitionPerfcacheHits;
     private long _transitionNovelHits;
     private long _transitionCompositions;
+    private long _frontierTicks;
+    private long _evidenceReadTicks;
+
+    internal readonly record struct WorkSnapshot(
+        long BackendReads, long EvidenceCacheHits, long FrontierBuilds,
+        long TransitionPerfcacheHits, long TransitionNovelHits, long TransitionCompositions,
+        long FrontierTicks, long EvidenceReadTicks);
+
+    // Provider-instance counters. Deltas are exclusive only when callers do not overlap,
+    // as in one UCI engine's serial searches. Factory time includes failed attempts.
+    internal WorkSnapshot ObserveWork() => new(
+        BackendReads, EvidenceCacheHits, FrontierBuilds,
+        TransitionPerfcacheHits, TransitionNovelHits, TransitionCompositions,
+        Interlocked.Read(ref _frontierTicks), Interlocked.Read(ref _evidenceReadTicks));
 
     public long RootReads => Volatile.Read(ref _rootReads);
     public long BackendReads => Volatile.Read(ref _backendReads);
@@ -134,9 +149,17 @@ public sealed class SubstrateRootBias : IRootBias
                 new Lazy<Evidence>(() =>
                 {
                     Interlocked.Increment(ref _backendReads);
-                    var pair = _read(frontier.TransitionEdges, ChessVocabulary.MoveType,
-                        frontier.MoveOutcomeEdges, ChessVocabulary.OutcomeType);
-                    return new Evidence(pair.First, pair.Second);
+                    long started = Stopwatch.GetTimestamp();
+                    try
+                    {
+                        var pair = _read(frontier.TransitionEdges, ChessVocabulary.MoveType,
+                            frontier.MoveOutcomeEdges, ChessVocabulary.OutcomeType);
+                        return new Evidence(pair.First, pair.Second);
+                    }
+                    finally
+                    {
+                        Interlocked.Add(ref _evidenceReadTicks, Stopwatch.GetTimestamp() - started);
+                    }
                 }, LazyThreadSafetyMode.ExecutionAndPublication));
             bool installed = current is null
                 ? _cache.TryAdd(key, replacement)
@@ -189,36 +212,44 @@ public sealed class SubstrateRootBias : IRootBias
 
     private Frontier BuildFrontier(Board root, FrontierKey key)
     {
-        Interlocked.Increment(ref _frontierBuilds);
-        var moveIds = new Hash128[key.Moves.Length];
-        var transitions = new Hash128[key.Moves.Length];
-        var outcomes = new Hash128[key.Moves.Length];
-        for (int i = 0; i < key.Moves.Length; i++)
+        long started = Stopwatch.GetTimestamp();
+        try
         {
-            ChessMove move = key.Moves[i];
-            Hash128 moveId = ChessCompose.MoveId(root.Squares[move.From], move);
-            moveIds[i] = moveId;
-            Hash128 transitionKey = ChessCompose.TransitionKey(key.Root, moveId);
-            Hash128 toId;
-            if (ChessTransitionFloor.TryLookup(transitionKey, out toId, out var source))
+            Interlocked.Increment(ref _frontierBuilds);
+            var moveIds = new Hash128[key.Moves.Length];
+            var transitions = new Hash128[key.Moves.Length];
+            var outcomes = new Hash128[key.Moves.Length];
+            for (int i = 0; i < key.Moves.Length; i++)
             {
-                if (source == ChessTransitionFloor.LookupSource.Persistent)
-                    Interlocked.Increment(ref _transitionPerfcacheHits);
+                ChessMove move = key.Moves[i];
+                Hash128 moveId = ChessCompose.MoveId(root.Squares[move.From], move);
+                moveIds[i] = moveId;
+                Hash128 transitionKey = ChessCompose.TransitionKey(key.Root, moveId);
+                Hash128 toId;
+                if (ChessTransitionFloor.TryLookup(transitionKey, out toId, out var source))
+                {
+                    if (source == ChessTransitionFloor.LookupSource.Persistent)
+                        Interlocked.Increment(ref _transitionPerfcacheHits);
+                    else
+                        Interlocked.Increment(ref _transitionNovelHits);
+                }
                 else
-                    Interlocked.Increment(ref _transitionNovelHits);
+                {
+                    var next = root.Clone();
+                    MoveApply.Make(next, move);
+                    toId = ChessCompose.PositionId(next);
+                    ChessTransitionFloor.Remember(transitionKey, toId);
+                    Interlocked.Increment(ref _transitionCompositions);
+                }
+                transitions[i] = ConsensusKeys.EdgeId(key.Root, ChessVocabulary.MoveType, toId);
+                outcomes[i] = ConsensusKeys.EdgeId(moveId, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject);
             }
-            else
-            {
-                var next = root.Clone();
-                MoveApply.Make(next, move);
-                toId = ChessCompose.PositionId(next);
-                ChessTransitionFloor.Remember(transitionKey, toId);
-                Interlocked.Increment(ref _transitionCompositions);
-            }
-            transitions[i] = ConsensusKeys.EdgeId(key.Root, ChessVocabulary.MoveType, toId);
-            outcomes[i] = ConsensusKeys.EdgeId(moveId, ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject);
+            return new Frontier(moveIds, transitions, outcomes);
         }
-        return new Frontier(moveIds, transitions, outcomes);
+        finally
+        {
+            Interlocked.Add(ref _frontierTicks, Stopwatch.GetTimestamp() - started);
+        }
     }
 
     private void TrimCache()

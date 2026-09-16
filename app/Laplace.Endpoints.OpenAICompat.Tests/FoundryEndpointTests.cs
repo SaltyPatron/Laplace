@@ -14,6 +14,7 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 public sealed class FoundryEndpointTests : IClassFixture<FoundryTestFactory>
 {
     private readonly HttpClient _client;
+    private readonly FoundryTestFactory _factory;
     private readonly Dictionary<string,string> _quoteTenants = new();
 
     private const string SampleRecipe = """
@@ -37,7 +38,11 @@ public sealed class FoundryEndpointTests : IClassFixture<FoundryTestFactory>
         }
         """;
 
-    public FoundryEndpointTests(FoundryTestFactory factory) => _client = factory.CreateClient();
+    public FoundryEndpointTests(FoundryTestFactory factory)
+    {
+        _factory = factory;
+        _client = factory.CreateClient();
+    }
 
     [Fact]
     public async Task RecipeCompile_WithoutQuote_Returns402()
@@ -101,21 +106,11 @@ public sealed class FoundryEndpointTests : IClassFixture<FoundryTestFactory>
         });
         using var preJson = JsonDocument.Parse(await preflight.Content.ReadAsStringAsync());
         var quoteId = preJson.RootElement.GetProperty("quote_id").GetString()!;
-        var payload = JsonSerializer.Serialize(new
-        {
-            id = $"evt_{serviceId}_{tenant}",
-            type = "checkout.session.completed",
-            data = new
-            {
-                @object = new
-                {
-                    id = $"cs_{tenant}",
-                    customer = $"cus_{tenant}",
-                    subscription = (string?)null,
-                    metadata = new { tenant, service_id = serviceId, quote_id = quoteId }
-                }
-            }
-        });
+        var eventId = $"evt_{serviceId}_{tenant}";
+        var sessionId = $"cs_{tenant}";
+        await WebhookTestEvents.BindCheckoutAsync(_factory.Services, quoteId!, sessionId);
+        var payload = WebhookTestEvents.PaidCheckout(eventId, tenant, serviceId, quoteId!, sessionId);
+
         using var webhook = new HttpRequestMessage(HttpMethod.Post, "/v1/billing/webhooks/stripe")
         {
             Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json")
@@ -165,7 +160,7 @@ public sealed class FoundryTestFactory : WebApplicationFactory<Program>
             {
                 TestBillingOptions.IsolateFromHostStripe(o);
                 o.WebhookSecret = SignedWebhookFactory.WebhookSecret;
-                o.SkipSignatureVerification = true;
+                o.SkipSignatureVerification = false;
                 o.Bypass = false;
             });
         });

@@ -2,7 +2,7 @@
 
 Tracking: `#1432`, `#1436`, `#1451`, `#1561`.
 
-`.github/workflows/benchmark-evidence.yml` is deliberately `workflow_dispatch`-only. Long measurements are evidence, calibration, capacity, billing-estimator and optimization inputs; they are not automatic source-push or pull-request gates.
+`.github/workflows/benchmark-evidence.yml` accepts explicit `workflow_dispatch` and `workflow_call` invocations. Its complete chess acceptance job also accepts a push to a deliberately named `verify/chess-acceptance-*` operator branch, created at the exact deployed main commit. Ordinary main pushes and pull requests do not select these domain measurements or depend on them.
 
 The workflow is only the dispatcher. Benchmark meaning lives in versioned source:
 
@@ -13,7 +13,8 @@ The workflow is only the dispatcher. Benchmark meaning lives in versioned source
 - `scripts/bench-compose-scale.py` — finite unique-corpus/file-grain scaling diagnostic;
 - `scripts/bench-compose-stream-scale.py` — aggregate independent-stream scaling;
 - `scripts/bench-forward-program.py` — installed canonical forward-program work benchmark;
-- `scripts/benchmark-forward-cases.json` — versioned prompt/hops/fanout query matrix.
+- `scripts/benchmark-forward-cases.json` — versioned prompt/hops/fanout query matrix;
+- `scripts/accept-chess-environment.py` — explicit installed chess acceptance, with its own fixed multi-phase profile and receipts.
 
 ## Current suites
 
@@ -26,10 +27,14 @@ The workflow is only the dispatcher. Benchmark meaning lives in versioned source
 | `moby` | `moby-roundtrip` | bit-perfect Moby Dick engine roundtrip |
 | `query` | `query-forward` | exact-installed-runtime canonical forward-program work receipts |
 | `all` | source/core profiles except `query-forward` | composition/scaling/roundtrip evidence without mutating or requiring installation |
+| `chess` | `chess-environment` | official engine and complete-game configuration calibration |
+| `geometry` | `postgres-geometry` | exact existing GeometryZM payloads through logged storage and committed binary readback |
+| `recorded` | `recorded-chess` | complete generated and recorded games through a duration-qualified readback window |
+| `acceptance` (workflow selection) | separate acceptance owner | exact installed runtime, dependencies/GUI/service startup, full Stockfish corpus, recorded/retained/storage measurements |
 
 `query` is intentionally explicit rather than silently included in `all`. The source/core profiles can benchmark an arbitrary selected ref without installing it. A database-backed cognition measurement is valid only when the installed extension/execution module is the exact content-versioned runtime built from the selected source. The query harness refuses a mismatch rather than measuring stale production code and labeling it with the checked-out SHA.
 
-Future storage, full-corpus admission, GPU/provider, model export, competitor-equivalent accepted-work and calibrated wall-energy profiles belong in this same registry with their own declared execution/state boundaries.
+Storage and recorded-game profiles retain their own execution and state boundaries. The separate acceptance owner combines those existing validators with corpus, retained replay, GUI and startup proof; see [the chess dependency guide](../guides/chess-dependencies.md#explicit-complete-acceptance-on-the-installed-machine). Future GPU/provider, model export, competitor-equivalent accepted-work and calibrated wall-energy profiles require their own declared boundaries.
 
 ## Exact-artifact and exact-runtime law
 

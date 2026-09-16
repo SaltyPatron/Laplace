@@ -4,22 +4,12 @@ namespace Laplace.SubstrateCRUD;
 
 public static class PhysicalityId
 {
-    // Physicality identity is CONTENT-derived, exactly like entity identity, and
-    // must stay bit-identical to the native physicality_id_compute in
-    // engine/core/src/content_witness_batch.c. entityId is already the current
-    // BLAKE3-derived 128-bit content address: for multi-child composition,
-    // hash128_merkle's preimage is the Merkle domain plus the ORDERED child-id
-    // sequence. The retained tier argument is explicitly ignored by hash128.c;
-    // singleton composition preserves the child id. This is a finite executable
-    // address, not a theorem of global injectivity over the unbounded composition
-    // domain. Geometry (centroid coord + trajectory) is a DERIVED physical
-    // realization of that content and does not replace exact identity (Substrate
-    // Invariant Rule #1: content identity is exact under the current recipe;
-    // centroid/hilbert identity is not -- centroids can collide, e.g. cat/act).
-    // So physicality identity is (entityId, type) ONLY; coord/trajectory are stored
-    // as payload but never enter the id. Hashing float geometry made identity
-    // fragile to sub-ULP divergence across compose paths and re-ingests, forging
-    // spurious duplicate physicalities (observed: 319 chess-move entities).
+    // Compatibility lookup address for the current typed placement of entityId.
+    // Keep it bit-identical to laplace_physicality_id_compute. Several exact
+    // physicality bodies may be observed at this address while entityId stays
+    // unchanged. Native physicality descriptors represent those bodies as
+    // ordinary canonical content; this address is not their immutable form ID.
+    // Derived geometry never replaces the realized entity's ordered identity.
     // LAYOUT IS LITTLE-ENDIAN BY SPECIFICATION, not by host accident (GH #904).
     // BitConverter writes the HOST's byte order, and the C twin
     // (laplace_physicality_id_compute) memcpy'd an int16_t, also host order: the

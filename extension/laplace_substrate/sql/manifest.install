@@ -103,6 +103,7 @@ functions/readback/is_all_whitespace.sql.in
 functions/readback/constituents.sql.in
 functions/readback/constituents_closure.sql.in
 functions/readback/content_carrier_vertices.sql.in
+functions/readback/physicality_descriptors.sql.in
 functions/readback/vertex_atom.sql.in
 functions/readback/vertex_tier.sql.in
 functions/readback/render_text.sql.in
@@ -277,6 +278,7 @@ functions/ops/source_tier_census.sql.in
 functions/ops/surface_sample.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in
+functions/ingest/physicality_descriptor_materialize.sql.in
 functions/generation/relation_plane.sql.in
 functions/generation/entity_relation_plane.sql.in
 functions/generation/consensus_layer_plane.sql.in

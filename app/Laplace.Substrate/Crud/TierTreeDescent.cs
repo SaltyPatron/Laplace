@@ -378,6 +378,7 @@ public static class TierTreeDescent
             }
             if (ids.Count == 0) continue;
 
+            var presenceScope = reader.CapturePresenceScope();
             byte[] bm = await reader.TierBatchExistenceProbeAsync(ids, (short)tier, ct).ConfigureAwait(false);
 
             var confirmedPresent = new List<Hash128>();
@@ -401,7 +402,7 @@ public static class TierTreeDescent
             // Only the ids THIS round's real query positively confirmed
             // present are ever marked proven -- never the round's whole,
             // unfiltered candidate list (that was the bug).
-            if (confirmedPresent.Count > 0) reader.MarkProven(confirmedPresent);
+            if (confirmedPresent.Count > 0) reader.MarkProven(confirmedPresent, presenceScope);
         }
 
         for (int t = 0; t < treeCount; t++)

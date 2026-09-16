@@ -6,32 +6,31 @@ graph. The full modality reference — identity law, the three lanes, the
 census, and the closed loop — is [chess.md](chess.md). Verify
 commands against `api('chess')` and `/chess/lab/catalog` if this drifts.
 
-## How to measure Laplace (read this before cutechess)
+## Measuring guided search, recorded throughput and external play
 
-**Primary protocol — does the SoR help?** In-process guided vs pure at matched
-depth, on positions the corpus actually covers:
+The in-process guided-versus-classical experiment measures the effect of the
+selected substrate providers at matched search depth:
 
 ```sh
-laplace chess substrate-test --mode fold --openings --learned --games 200 --depth 4
+laplace chess substrate-test --mode transition --openings --games 200 --depth 4
 ```
 
-- `fold` = substructure OUTCOME generalization (default UCI `Substrate`); `edge`
-  = raw MOVE-edge μ (poisoned at startpos — Na3 can outrank e4; see #447 / #834).
-- `--openings` seeds from ECO TSV under the chess games dir (this host:
-  `/vault/Data/Games/Chess/openings/`).
-- `--learned` blends corpus PST (UCI always does this; CLI does not unless flagged).
-- Tune STEER straw: `--cp-per-point` / `--cap` (UCI hardcodes 8 / 150 today).
+- `transition` selects transition and position evidence; legacy `fold` and
+  `edge` spellings resolve to that same provider configuration.
+- `--openings` selects replayed ECO positions from the configured opening
+  directory. Terminal positions are rejected before a game starts.
+- The selected position evaluator includes constituent outcomes, the learned
+  PST residual and available tactical evidence. Syzygy probes participate when
+  the current position fits the installed tablebase coverage.
+- This experiment's move ceiling can produce adjudicated games. Its game count
+  alone does not establish complete-game recorded throughput.
 
-**Preflight the eyes:** `POST /chess/explore` with the FEN (and optional
-`player`) before trusting any Elo number — you are reading SCAN/WEIGHT, not
-guessing. Syzygy / shape / motifs / think-class are queryable (`api('chess')`)
-but **not yet wired into UCI STEER** (#833).
-
-**cutechess vs Stockfish** (`st=1`, `UCI_Elo=2000`) is a **watchable external
-demo**, not the scientific floor. It does not pass an openings book, does not
-expose cp/cap, and is easy to misread as “Laplace is weak” when the recipe never
-took advantage of fold+openings+explore. Tracked: #834. Framing:
-`.scratchpad/44` §8.
+Use the recorded-chess measurement for complete-game admission, acknowledged
+commits and exact witness readback. Use CuteChess for external engine play,
+retaining the actual engine configuration, colors, openings, transcript and PGN.
+Strength conclusions require their own sufficient matched experiment; two
+calibration games or a capped-Elo demonstration cannot establish playing strength.
+`POST /chess/explore` exposes the selected FEN's available substrate evidence.
 
 ## The UCI engine (`laplace-uci`)
 
@@ -43,36 +42,48 @@ with `laplace-uci.dll` missing. CI and publish execute the copied runtime's
 apphost-only copy must fail that check. This proves packaging/search, not
 substrate learning or playing strength.
 
-`app/Laplace.Chess.Uci` builds a standalone UCI engine. Truncated Chess Forward
-Pass: classical alpha-beta (`PROPOSE`) with root consensus STEER (`Substrate`
-fold/edge/off) and learned PST overlay. Any UCI GUI (cutechess, Arena,
+`app/Laplace.Chess.Uci` builds a standalone UCI engine. Its conventional search
+uses the selected root and position evidence providers plus available Syzygy
+results. Any UCI GUI (cutechess, Arena,
 BanksiaGUI) or `cutechess-cli` can drive it — point the GUI at the binary, no
 arguments needed.
 
 - Resolution order when the lab launches it: deployed install → build output
   (`build/app/bin/Laplace.Chess.Uci/Release/net10.0/laplace-uci`) → `PATH`.
-- Substrate mode: UCI option `Substrate` = `fold` (default; substructure
-  OUTCOME folds), `edge` (raw MOVE-edge consensus), `off` (pure search). Env
-  override: `LAPLACE_UCI_SUBSTRATE`.
-- The engine connects to Postgres on `isready`, never on the move clock, and
-  degrades to pure search with an `info string` if the DB is unreachable.
+- Substrate mode: UCI option `Substrate` advertises `substrate` (default) and
+  `off` (classical control). `fold` and `edge` remain accepted aliases for
+  `substrate`. Environment override: `LAPLACE_UCI_SUBSTRATE`.
+- The engine initializes PostgreSQL providers on `isready`, before the move
+  clock. Initialization errors are emitted explicitly. A later `go` without
+  the required provider state fails; it does not silently change the player.
 
 Manual cutechess-cli invocation (every `key=value` is its own token, and
 `proto=uci` is required — cutechess defaults to xboard):
 
 ```sh
+stockfish_exe="$(python3 scripts/install-stockfish.py --print-path)"
 cutechess-cli \
   -engine name=Laplace cmd=/path/to/laplace-uci proto=uci \
-  -engine name=Stockfish cmd=/opt/laplace/bin/stockfish proto=uci \
+  -engine name=Stockfish cmd="$stockfish_exe" proto=uci \
       option.UCI_LimitStrength=true option.UCI_Elo=2000 \
   -each st=1 timemargin=2000 \
   -rounds 10 -pgnout games.pgn -debug all
 ```
 
-`st=1` = one second per move (watchable, ~2–3 min/game). Depth-limited play
-(`-each tc=inf depth=8`) has **no clock at all** — a deep search can sit on a
-single move for up to its 120 s internal ceiling; use it only for strength
-tests you don't intend to watch.
+`st=1` selects one second per move; complete game duration depends on the game.
+Depth-limited play (`-each tc=inf depth=8`) has **no implicit move clock**.
+Laplace combines explicit UCI `depth`, `nodes`, `movetime`, and the moving
+side's clock budget, stopping when a selected bound is reached. `movetime`
+is passed in milliseconds without an undeclared overhead deduction; ordinary
+clock allocation uses the declared increment and `movestogo` when present.
+Omitted time/node bounds use the existing search representation's maxima
+(`int.MaxValue` milliseconds and `long.MaxValue` nodes); supported depth remains
+1..64. A bare `go` adds no two-second or million-node cutoff. `go infinite`
+retains any completed terminal/mate result until `stop`, and `stop` cancels
+in-flight work. See the [official UCI command reference](https://official-stockfish.github.io/docs/stockfish-wiki/UCI-Protocol-and-Stockfish-Commands.html#go).
+Use an explicit move clock for bounded per-move latency. Benchmark collectors'
+declared external deadlines still apply independently; a requested depth is
+not proof that the search completed that depth.
 
 `-rounds 10` is **ten games**, not ten pairs: cutechess-cli(6) says the option
 "should be used to set the total number of games to play" for a two-engine
@@ -179,7 +190,8 @@ python3 scripts/benchmark-chess-environment.py \
   --stockfish "$LAPLACE_EXTERNAL/stockfish/src/stockfish" \
   --cutechess /opt/laplace/bin/cutechess-cli \
   --reserve-cpus 2 --memory-mib 2048 --repeats 3 \
-  --hash-mib 16,64,256 --max-seconds 180
+  --hash-mib 16,64,256 --match-depth 8 --max-moves 0 \
+  --max-seconds 1800 --case-timeout 600
 ```
 
 The default thread sweep includes powers of two, the observed physical-core count
@@ -198,19 +210,35 @@ NPS values remain visible because different Threads/Hash settings can search
 different amounts of work at the same depth. `--bench-limit-type nodes` changes
 the per-position limit; SMP can still overshoot that limit.
 
-CuteChess runs actual move-limited Stockfish games at each admitted concurrency,
+CuteChess runs complete Stockfish games at each admitted concurrency,
 with the same game count and per-move depth, strength limiting disabled and
 pondering off. Memory planning includes both resident engines per game;
 active search planning uses one search team per game. Completed-game counts,
-UCI best moves, PGN results and ply counts must reconcile. Adjudicated draws from
-`--max-moves` are throughput workload boundaries, not playing-strength evidence.
+UCI best moves, PGN results and ply counts must reconcile. Normal calibration has
+no move-count cutoff. Each PGN mainline is legally replayed from the standard
+initial position, and its result must match checkmate or a rules-supported draw
+with complete history. A result tag alone cannot establish completion. A positive
+`--max-moves` explicitly selects a short diagnostic; that mode emits no complete-game
+capacity recommendation and accepts a length adjudication only at that exact cap.
+Wall and per-process time budgets still apply, and an
+unfinished game fails the measurement while retaining its available evidence.
+
+This external-game audit uses the `chess` 1.11.2 source artifact pinned by size
+and SHA-256 in `deploy/chess-pgn-validator.json`. The archive, exact runtime files,
+module origins, version and upstream GPL-3.0-or-later license are verified and
+retained in the benchmark's `pgn_validation_provider` receipt. The provider is
+loaded from `${LAPLACE_WORK_ROOT:-/build/laplace/work}/chess-pgn-validation`;
+`--pgn-validator-cache` or `LAPLACE_CHESS_PGN_CACHE` selects another cache, and
+`--pgn-validator-offline` requires the pinned archive to be present. It does not
+install a global Python package or change Laplace's chess rules implementation.
+Planning and runtime-only capability checks do not require this provider.
 
 To include a separate two-game Laplace-versus-Stockfish acceptance, provide
 `--laplace-uci /path/to/laplace-uci`. It preserves Laplace's configured substrate
 mode and records the advertised effective setting. `--laplace-substrate off`
 explicitly requests a substrate-disabled packaging check. Both colors are
 verified; matched depth is recorded without pretending the engines perform equal
-work or inferring Elo from two bounded games.
+work or inferring Elo from two games.
 
 The output directory contains `report.json`, raw command/transcript logs and
 PGNs. Recommendations distinguish bench completion latency, search-node

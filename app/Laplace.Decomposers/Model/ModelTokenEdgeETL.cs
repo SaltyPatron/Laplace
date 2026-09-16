@@ -182,6 +182,7 @@ public sealed class ModelTokenEdgeETL
             var builder = new SubstrateChangeBuilder(
                     _source, $"model/contraction/{plane}/L{layer}/H{head}/{afterSubject}/{afterObject}",
                     entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: page.Rows.Count)
+                .DeclareSourcePrior(sourceTrust)
                 .SetCommitEpoch(commitEpoch)
                 .SetInputUnitsConsumed(page.Rows.Count);
             for (int i = 0; i < page.Rows.Count; i++)

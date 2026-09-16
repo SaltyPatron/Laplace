@@ -145,9 +145,9 @@ static int push_phys(laplace_compose_result_t* r, const source_node_t* n) {
     return 0;
 }
 
-/* Exact identity deduplication for both emitted row sets. Every composition
- * used to scan all preceding entities and physicalities separately. The index
- * keeps insertion order and the same minimum-tier election without O(n²) scans. */
+/* The identity index elects one entity and its minimum observed tier. Every
+ * computed composition retains its physicality in occurrence order, including
+ * another exact body or geometry for an already represented entity. */
 static int push_composition(laplace_compose_result_t* r, const source_node_t* n,
                             uint32_t* index, size_t capacity) {
     size_t slot = (size_t)(n->id.lo & (capacity - 1));
@@ -155,7 +155,7 @@ static int push_composition(laplace_compose_result_t* r, const source_node_t* n,
         laplace_compose_entity_t* prior = &r->entities[index[slot]];
         if (hash128_equals(&prior->id, &n->id)) {
             if (n->tier < prior->tier) prior->tier = n->tier;
-            return 0;
+            return push_phys(r, n);
         }
         slot = (slot + 1) & (capacity - 1);
     }

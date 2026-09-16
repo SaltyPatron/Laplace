@@ -5,16 +5,20 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 internal static class TestEnvironmentPin
 {
     /// <summary>
-    /// Billing store resolution is auto (Postgres-preferred) in the app; tests must
-    /// stay on the in-memory stores so WebApplicationFactory runs never write
-    /// quotes/keys/usage into the live app.billing_* tables. The Postgres store
-    /// contract is covered explicitly by BillingStoreContractTests, which constructs
-    /// the Postgres implementations directly.
+    /// WebApplicationFactory hosts use a coherent, process-local development
+    /// baseline before AppComposition selects its stores. Neither an inherited
+    /// production auth mode nor deployed Stripe settings may turn the in-memory
+    /// test host into an authenticated company deployment at startup. Likewise,
+    /// an inherited Postgres billing setting must not let these hosts write test
+    /// quotes, keys or usage into the live app.billing_* tables.
+    /// Key/identity enforcement scenarios still select their own authentication
+    /// options in ConfigureTestServices. BillingStoreContractTests constructs the
+    /// Postgres implementations directly and retains its database coverage.
     /// </summary>
     [ModuleInitializer]
     internal static void PinBillingStoreToMemory()
     {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LAPLACE_BILLING_STORE")))
-            Environment.SetEnvironmentVariable("LAPLACE_BILLING_STORE", "memory");
+        Environment.SetEnvironmentVariable("LAPLACE_AUTH_MODE", "header");
+        Environment.SetEnvironmentVariable("LAPLACE_BILLING_STORE", "memory");
     }
 }

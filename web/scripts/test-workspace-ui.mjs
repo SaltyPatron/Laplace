@@ -123,6 +123,11 @@ try {
   const invocations = [];
   await page.route('**/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/v1/account') {
+      const tenantId = route.request().headers()['x-laplace-tenant'];
+      assert.ok(tenantId, 'workspace permissions must be scoped to the selected tenant');
+      return route.fulfill({ json: { tenantId, workspaces: [{ tenantId, role: 'owner' }] } });
+    }
     if (path === '/v1/ops/catalog') return route.fulfill({ json: { object: 'op.catalog', truncated_at: null, operations: [
       { name: 'ops.fixture_read', args: 'p_id bigint, p_text text, p_optional text DEFAULT NULL', returns: 'TABLE(answer text)', kind: 'function', writable: false, destructive: false,
         parameters: [{ name: 'p_id', type: 'bigint', optional: false }, { name: 'p_text', type: 'text', optional: false }, { name: 'p_optional', type: 'text', optional: true }] },

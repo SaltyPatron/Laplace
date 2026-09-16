@@ -35,7 +35,10 @@ class StockfishSourceTests(unittest.TestCase):
         self.original_root = installer.ROOT
         installer.ROOT = self.base
         self.addCleanup(setattr, installer, "ROOT", self.original_root)
-        self.environment = patch.dict(os.environ, {"LAPLACE_EXTERNAL": str(self.base / "external")})
+        self.environment = patch.dict(os.environ, {
+            "LAPLACE_EXTERNAL": str(self.base / "external"),
+            "LAPLACE_INSTALL_PREFIX": str(self.base / "install"),
+            "LAPLACE_STOCKFISH_SOURCE": "", "LAPLACE_STOCKFISH": ""})
         self.environment.start()
         self.addCleanup(self.environment.stop)
         self.git("init", "--quiet")
@@ -74,6 +77,136 @@ class StockfishSourceTests(unittest.TestCase):
         self.assertEqual(self.source / "src/stockfish", installer.binary_path())
         with patch.dict(os.environ, {"LAPLACE_STOCKFISH_SOURCE": str(self.base / "own-checkout")}):
             self.assertEqual(self.base / "own-checkout", installer.source_root())
+
+    def test_source_selection_retains_installed_path_across_later_invocations(self):
+        config = self.base / "install/app/laplace-api.env"
+        config.parent.mkdir(parents=True)
+        config.write_text('LICHESS_API=must-not-be-read\n'
+                          'LAPLACE_STOCKFISH_SOURCE=/obsolete\n'
+                          'LAPLACE_STOCKFISH_SOURCE="' + str(self.source) + '"\n')
+        self.assertEqual((self.source, "installed-service"), installer.source_selection())
+        self.assertEqual(self.source / "src/stockfish", installer.binary_path())
+        with patch.dict(os.environ, {"LAPLACE_STOCKFISH_SOURCE": str(self.base / "explicit")}):
+            self.assertEqual((self.base / "explicit", "environment"), installer.source_selection())
+            self.assertEqual((self.source, "command-line"), installer.source_selection(self.source))
+        self.assertEqual((self.source, "installed-service"), installer.source_selection())
+
+    def test_explicit_missing_source_cannot_create_or_clone_a_checkout(self):
+        missing = self.base / "local/SF_19"
+        for explicit in (True, False):
+            with self.subTest(command_line=explicit):
+                environment = {} if explicit else {"LAPLACE_STOCKFISH_SOURCE": str(missing)}
+                with patch.dict(os.environ, environment), patch.object(installer.subprocess, "run") as run:
+                    with self.assertRaisesRegex(ValueError, "existing directory"):
+                        installer.build(missing if explicit else None, jobs=1)
+                run.assert_not_called()
+                self.assertFalse(missing.parent.exists())
+
+    def test_host_receipt_keeps_actual_checkout_when_requested_local_path_is_absent(self):
+        missing = self.base / "local/SF_19"
+        observed = installer.host_source_receipt(missing)
+        self.assertFalse(observed["requested"]["available"])
+        self.assertEqual("requested-local-path-unavailable",
+                         observed["requested"]["reason"])
+        self.assertEqual(str(self.source), observed["configured_source"])
+        self.assertEqual(str(self.source.resolve()), observed["source"])
+        self.assertEqual(str(self.source.resolve()), observed["git_root"])
+        self.assertEqual(self.commit, observed["commit"])
+        self.assertEqual("external-default", observed["selection"])
+        self.assertFalse(missing.parent.exists())
+
+    def test_unreadable_requested_local_path_does_not_hide_configured_checkout(self):
+        requested = self.base / "unreadable/SF_19"
+        original_exists = Path.exists
+        def observed_exists(path):
+            if path == requested:
+                raise PermissionError("fixture local mount is not accessible")
+            return original_exists(path)
+        with patch.object(Path, "exists", observed_exists):
+            observed = installer.host_source_receipt(requested)
+        self.assertIsNone(observed["requested"]["exists"])
+        self.assertFalse(observed["requested"]["available"])
+        self.assertEqual("requested-local-path-unavailable", observed["requested"]["reason"])
+        self.assertEqual(str(self.source.resolve()), observed["source"])
+
+    def test_uninstalled_default_is_receipted_as_pending_without_creating_a_checkout(self):
+        self.source.rename(self.base / "preserved-fixture")
+        with patch.object(installer.subprocess, "run") as run:
+            observed = installer.host_source_receipt(self.base / "absent-local/SF_19")
+        run.assert_not_called()
+        self.assertEqual("external-default", observed["selection"])
+        self.assertEqual("pending-default-install", observed["checkout_status"])
+        self.assertEqual(str(self.source.resolve()), observed["source"])
+        self.assertIsNone(observed["git_root"])
+        self.assertIsNone(observed["origin"])
+        self.assertIsNone(observed["commit"])
+        self.assertEqual(self.lock["repository"], observed["planned_repository"])
+        self.assertFalse(self.source.exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlink path validation")
+    def test_resolved_checkout_path_cannot_inject_environment_assignments(self):
+        target = self.base / "source\nINJECTED=value"
+        self.source.rename(target)
+        self.source.symlink_to(target, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "one environment assignment"):
+            installer.existing_source(self.source)
+
+    def test_host_receipt_selects_real_requested_checkout_without_copying_it(self):
+        preferred = self.base / "local/SF_19 with spaces"
+        preferred.parent.mkdir()
+        self.source.rename(preferred)
+        observed = installer.host_source_receipt(preferred)
+        self.assertTrue(observed["requested"]["available"])
+        self.assertEqual("requested-existing-local-checkout", observed["selection"])
+        self.assertEqual(str(preferred.resolve()), observed["source"])
+        self.assertEqual(str(preferred.resolve() / "src/stockfish"), observed["executable"])
+        self.assertEqual(self.commit, observed["commit"])
+        self.assertFalse(self.source.exists())
+
+    def test_host_preference_never_overrides_explicit_source_or_accepts_unofficial_origin(self):
+        preferred = self.base / "local/SF_19"
+        subprocess.run(["git", "clone", "--quiet", str(self.source), str(preferred)], check=True)
+        observed = installer.host_source_receipt(preferred)
+        self.assertFalse(observed["requested"]["available"])
+        self.assertEqual(str(self.source.resolve()), observed["source"])
+        subprocess.run(["git", "-C", str(preferred), "remote", "set-url", "origin",
+                        self.lock["repository"]], check=True)
+        with patch.dict(os.environ, {"LAPLACE_STOCKFISH_SOURCE": str(self.source)}):
+            observed = installer.host_source_receipt(preferred)
+            self.assertTrue(observed["requested"]["available"])
+            self.assertEqual("environment", observed["selection"])
+            self.assertEqual(str(self.source.resolve()), observed["source"])
+        with patch.dict(os.environ, {"LAPLACE_STOCKFISH_SOURCE": str(self.base / "missing")}):
+            with self.assertRaisesRegex(ValueError, "existing directory"):
+                installer.host_source_receipt(preferred)
+
+    @unittest.skipIf(os.name == "nt", "Linux bootstrap environment persistence")
+    def test_bootstrap_republication_keeps_selected_source_without_reexporting_it(self):
+        script = (ROOT / "scripts/bootstrap-chess-lab.sh").read_text()
+        script = script.replace('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+                                'SCRIPT_DIR="$SOURCE_SELECTION_TEST_SCRIPTS"')
+        script = script.replace('main "$@"', 'id() { printf "1\n"; }\nwrite_api_env')
+        prefix = self.base / "install"
+        (prefix / "app").mkdir(parents=True)
+        (prefix / "app/laplace-api.env").write_text("PRESERVED_SETTING=unchanged\n")
+        (prefix / "bin").mkdir()
+        cutechess = prefix / "bin/cutechess-cli"
+        cutechess.write_text("#!/bin/sh\nexit 0\n")
+        cutechess.chmod(0o755)
+        environment = dict(os.environ, SOURCE_SELECTION_TEST_SCRIPTS=str(ROOT / "scripts"),
+                           LAPLACE_STOCKFISH_SOURCE=str(self.source))
+        subprocess.run(["bash", "-c", script], env=environment, check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        environment.pop("LAPLACE_STOCKFISH_SOURCE")
+        environment["LAPLACE_EXTERNAL"] = str(self.base / "different-external")
+        subprocess.run(["bash", "-c", script], env=environment, check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        content = (prefix / "app/laplace-api.env").read_text()
+        self.assertEqual(1, content.count("LAPLACE_STOCKFISH_SOURCE="))
+        self.assertIn("LAPLACE_STOCKFISH_SOURCE=" + str(self.source) + "\n", content)
+        self.assertIn("LAPLACE_STOCKFISH=" + str(self.source / "src/stockfish") + "\n", content)
+        self.assertIn("PRESERVED_SETTING=unchanged\n", content)
+        self.assertFalse((self.base / "different-external").exists())
 
     def test_clean_pinned_checkout_is_reused_without_network(self):
         self.assertEqual(self.commit, installer.update_source(self.source, self.lock))
@@ -204,6 +337,29 @@ class StockfishSourceTests(unittest.TestCase):
         state = json.loads((self.source / ".git/laplace-stockfish-build.json").read_text())
         self.assertEqual("git-committed-bytes-and-modes-v1", state["recipe"]["source_integrity"])
         self.assertEqual(installer.digest(installer.binary_path(self.source)), state["binary_sha256"])
+
+    def test_built_source_receipt_binds_actual_checkout_and_executable(self):
+        selected = self.base / "source-selection.json"
+        selected.write_text(json.dumps(installer.host_source_receipt()))
+        run, _ = self.build_peer()
+        with patch.object(installer.subprocess, "run", side_effect=run):
+            installer.build(self.source, jobs=1)
+        observed = installer.verify_source_receipt(selected)
+        self.assertEqual(str(self.source.resolve()), observed["source"])
+        self.assertEqual(self.commit, observed["build_verification"]["commit"])
+        self.assertEqual(installer.digest(self.source / "src/stockfish"),
+                         observed["build_verification"]["binary_sha256"])
+        (self.source / "src/stockfish").write_bytes(b"different executable")
+        with self.assertRaisesRegex(ValueError, "build receipt"):
+            installer.verify_source_receipt(selected)
+
+    def test_built_source_receipt_rejects_a_different_checkout_before_build_readback(self):
+        selected = self.base / "source-selection.json"
+        observed = installer.host_source_receipt()
+        observed["source"] = str(self.base / "other-source")
+        selected.write_text(json.dumps(observed))
+        with self.assertRaisesRegex(ValueError, "retained host selection"):
+            installer.verify_source_receipt(selected)
 
     def test_old_receipt_without_source_integrity_requires_rebuild(self):
         run, calls = self.build_peer()
@@ -404,6 +560,84 @@ class StockfishSourceTests(unittest.TestCase):
         self.assertEqual(Path("/operator/stockfish"), installer.configured_binary(prefix))
         with patch.dict(os.environ, {"LAPLACE_STOCKFISH": "/explicit/stockfish"}):
             self.assertEqual(Path("/explicit/stockfish"), installer.configured_binary(prefix))
+
+    def test_publish_rollback_restores_exact_prior_binary_and_source_settings(self):
+        prefix = self.base / "install"
+        config = prefix / "app/laplace-api.env"
+        config.parent.mkdir(parents=True)
+        state = self.base / "stockfish-snapshot.json"
+        cases = (
+            ["LAPLACE_STOCKFISH=/old/binary\n",
+             'LAPLACE_STOCKFISH_SOURCE="/old source/SF_19"\n'],
+            ["LAPLACE_STOCKFISH=/old/binary\n"],
+            ['LAPLACE_STOCKFISH_SOURCE="/old source/SF_19"\n'],
+            [],
+            ["LAPLACE_STOCKFISH=/shadowed/binary\n",
+             "LAPLACE_STOCKFISH_SOURCE=/shadowed/source\n",
+             "LAPLACE_STOCKFISH=/old/binary\n",
+             'LAPLACE_STOCKFISH_SOURCE="/old source/SF_19"\n'],
+        )
+        keys = ("LAPLACE_STOCKFISH=", "LAPLACE_STOCKFISH_SOURCE=")
+        for old_settings in cases:
+            with self.subTest(old_settings=old_settings):
+                original_other = "# installed before publication\nUNCHANGED=original\nLICHESS_API=secret\n"
+                config.write_text(original_other + "".join(old_settings))
+                installer.snapshot(prefix, state)
+                retained = state.read_bytes()
+                saved = json.loads(retained)
+                self.assertEqual(old_settings, saved["config"])
+                self.assertEqual(2, saved["config_version"])
+                self.assertNotIn("LICHESS_API", retained.decode())
+                later_other = "# operator setting preserved during rollback\nUNCHANGED=updated\nLICHESS_API=new-secret\n"
+                config.write_text(later_other + "LAPLACE_STOCKFISH=/new/binary\n"
+                                  + "LAPLACE_STOCKFISH_SOURCE=/new/source\n")
+                with self.assertRaises(FileExistsError):
+                    installer.snapshot(prefix, state)
+                self.assertEqual(retained, state.read_bytes())
+                with patch.dict(os.environ, {"LAPLACE_STOCKFISH": "/process/new/binary",
+                                             "LAPLACE_STOCKFISH_SOURCE": "/process/new/source"}):
+                    installer.restore(prefix, state)
+                restored = config.read_text()
+                self.assertEqual(later_other + "".join(old_settings), restored)
+                self.assertEqual(old_settings, [line for line in restored.splitlines(keepends=True)
+                                               if line.startswith(keys)])
+                installer.restore(prefix, state)
+                self.assertEqual(restored, config.read_text())
+                self.assertEqual(retained, state.read_bytes())
+                state.unlink()
+
+    def test_legacy_snapshot_preserves_source_setting_it_never_captured(self):
+        prefix = self.base / "install"
+        config = prefix / "app/laplace-api.env"
+        config.parent.mkdir(parents=True)
+        config.write_text("UNCHANGED=value\nLAPLACE_STOCKFISH=/new/binary\n"
+                          "LAPLACE_STOCKFISH_SOURCE=/retained/source\n")
+        state = self.base / "legacy-snapshot.json"
+        state.write_text(json.dumps({"link": None, "regular_file": False,
+                                     "config": ["LAPLACE_STOCKFISH=/old/binary\n"]}))
+        installer.restore(prefix, state)
+        self.assertEqual("UNCHANGED=value\nLAPLACE_STOCKFISH_SOURCE=/retained/source\n"
+                         "LAPLACE_STOCKFISH=/old/binary\n", config.read_text())
+
+    def test_unknown_snapshot_configuration_version_refuses_before_pointer_changes(self):
+        prefix = self.base / "install"
+        (prefix / "bin").mkdir(parents=True)
+        link = prefix / "bin/stockfish"
+        link.symlink_to(prefix / "stockfish/current/binary")
+        config = prefix / "app/laplace-api.env"
+        config.parent.mkdir()
+        original = "LAPLACE_STOCKFISH=/current/binary\nLAPLACE_STOCKFISH_SOURCE=/current/source\n"
+        config.write_text(original)
+        state = self.base / "unknown-snapshot.json"
+        for version in (0, 3, True, "2"):
+            with self.subTest(version=version):
+                state.write_text(json.dumps({"config_version": version,
+                    "link": None, "regular_file": False, "config": []}))
+                with self.assertRaisesRegex(ValueError, "snapshot configuration version"):
+                    installer.restore(prefix, state)
+                self.assertTrue(link.is_symlink())
+                self.assertEqual(str(prefix / "stockfish/current/binary"), os.readlink(link))
+                self.assertEqual(original, config.read_text())
 
     def test_latest_check_verifies_release_tag_and_source_commit(self):
         with patch.object(installer, "github_json", side_effect=[{"tag_name": "sf_19"}, {"sha": self.commit}]):

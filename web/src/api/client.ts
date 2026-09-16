@@ -24,6 +24,12 @@ export interface ApiOptions {
   signal?: AbortSignal;
 }
 
+// The shell supplies the server-confirmed workspace, not a browser identity.
+// This header asserts request intent so a workspace switch in another tab cannot
+// silently apply a stale form to the newly selected company.
+let browserWorkspace: string | null = null;
+export function setApiWorkspace(tenant: string | null): void { browserWorkspace = tenant; }
+
 export class PaymentRequiredError extends Error {
   constructor(public readonly body: PaymentRequiredResponse) {
     super(body.error?.message ?? 'Payment required');
@@ -39,8 +45,9 @@ export class ApiError extends Error {
 }
 
 export function laplaceHeaders(opts: ApiOptions): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Laplace-Request': '1' };
   if (opts.tenant) headers['X-Laplace-Tenant'] = opts.tenant;
+  if (browserWorkspace) headers['X-Laplace-Workspace'] = opts.tenant ?? browserWorkspace;
   if (opts.quoteId) headers['X-Laplace-Quote-Id'] = opts.quoteId;
   if (opts.session) headers['X-Laplace-Session'] = opts.session;
   if (opts.operatorToken) headers['X-Laplace-Operator-Token'] = opts.operatorToken;
@@ -66,7 +73,9 @@ async function parseError(res: Response): Promise<never> {
 
 /** One transport/error/cancellation contract for every product surface. No implicit retries. */
 async function request<T>(path: string, init: RequestInit, opts: ApiOptions): Promise<T> {
-  const res = await fetch(path, { ...init, headers: laplaceHeaders(opts), signal: opts.signal });
+  const res = await fetch(path, {
+    ...init, headers: laplaceHeaders(opts), signal: opts.signal, credentials: 'same-origin',
+  });
   if (!res.ok) await parseError(res);
   if (res.status === 204) return undefined as T;
   return await res.json() as T;
@@ -88,4 +97,12 @@ export function apiPost<T>(path: string, payload: unknown, opts: ApiOptions = {}
 /** Send an already formed JSON request without rounding its numeric literals. */
 export function apiPostJson<T>(path: string, json: string, opts: ApiOptions = {}): Promise<T> {
   return request<T>(path, { method: 'POST', body: json }, opts);
+}
+
+export function apiPut<T>(path: string, payload: unknown, opts: ApiOptions = {}): Promise<T> {
+  return apiPutText<T>(path, JSON.stringify(payload), opts);
+}
+
+export function apiDelete<T = void>(path: string, opts: ApiOptions = {}): Promise<T> {
+  return request<T>(path, { method: 'DELETE' }, opts);
 }

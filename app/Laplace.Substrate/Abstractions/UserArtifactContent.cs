@@ -63,7 +63,8 @@ public static class UserArtifactContent
             boot.AddRelationType(relation);
 
         var attribution = new SubstrateChangeBuilder(
-            scope.Source, $"bootstrap/user-content/{scope.Tenant}", parentIntentId: null);
+            scope.Source, $"bootstrap/user-content/{scope.Tenant}", parentIntentId: null)
+            .DeclareSourcePrior(SourceTrust.SubstrateMandate);
         if (ContentEmitter.Emit(attribution, scope.Tenant, scope.Source) is { } tenantRoot)
             attribution.AddAttestation(NativeAttestation.Categorical(
                 scope.Source, AttributionRelation, tenantRoot,
@@ -99,15 +100,17 @@ public static class UserArtifactContent
         var builder = new SubstrateChangeBuilder(
             scope.Source,
             $"user-content/{scope.Tenant}/{metadata.RelativePath}",
-            parentIntentId: null);
+            parentIntentId: null)
+            .DeclareSourcePrior(SourceTrust.UserPrompt * scope.TenantTrust);
 
         if (!ContentTierSpine.TryStageIntoBuilder(
                 builder, contentUtf8, documentId, out var emittedContent)
             || emittedContent != file.ContentRootId)
             return false;
+        builder.DeclareSourcePrior(documentId, SourceTrust.UserPrompt * scope.TenantTrust);
 
         FileIdentity emittedFile = FileEntity.Emit(
-            builder, scope.Source, contentUtf8, metadata);
+            builder, scope.Source, contentUtf8, metadata, SourceTrust.UserPrompt * scope.TenantTrust);
         if (emittedFile != file)
             throw new InvalidOperationException("user artifact file identity changed during compose");
 

@@ -51,7 +51,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
     }
 
     public IIngestDeferredUnit CreateDeferredUnit(GrammarComposeRecord record) =>
-        record.RawText ? new RawFileUnit(record, _sourceId)
+        record.RawText ? new RawFileUnit(record, _sourceId, _trust)
             : new Unit(record, _sourceId, _trust, _reader);
 
     /// <summary>
@@ -96,14 +96,15 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
     {
         private readonly GrammarComposeRecord _record;
         private readonly Hash128 _sourceId;
+        private readonly double _trust;
         private readonly IIngestDeferredUnit _content;
-        public RawFileUnit(GrammarComposeRecord record, Hash128 sourceId)
+        public RawFileUnit(GrammarComposeRecord record, Hash128 sourceId, double trust)
         {
             if (record.Modality != "text" || record.FileMetadata is null || record.FileMetadata.Value.Modality != "text"
                 || record.StructureWitness is not null || record.ObservedPromptUtf8 is not null
                 || !GrammarSourceFileSupport.IsExactNativeText(record.Utf8))
                 throw new InvalidDataException("Raw source admission requires exact native text and physical file metadata.");
-            _record = record; _sourceId = sourceId;
+            _record = record; _sourceId = sourceId; _trust = trust;
             _content = new ContentIngestHandler(sourceId).CreateDeferredUnit(new ContentIngestRecord(record.Utf8));
         }
         public TierTree? TreeForBatchProbe => _content.TreeForBatchProbe;
@@ -114,7 +115,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
         {
             Hash128 content = _content.DrainInto(builder, witnessWeight, bitmap);
             var tree = _content.TreeForBatchProbe ?? throw new InvalidDataException("Raw source native content tree is absent.");
-            FileIdentity file = FileEntity.Emit(builder, _sourceId, FileEntity.RootComponent(tree), _record.FileMetadata!.Value);
+            FileIdentity file = FileEntity.Emit(builder, _sourceId, FileEntity.RootComponent(tree), _record.FileMetadata!.Value, _trust);
             if (content == default || content != file.ContentRootId)
                 throw new InvalidDataException("Raw source changed between native content and file composition.");
             builder.SetFileId(file.FileId);
@@ -230,7 +231,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             if (!string.Equals(metadata.Modality, _record.Modality, StringComparison.Ordinal))
                 throw new InvalidOperationException(
                     "whole-source file metadata modality does not match its grammar recipe");
-            FileIdentity file = FileEntity.Emit(builder, _sourceId, _root, metadata);
+            FileIdentity file = FileEntity.Emit(builder, _sourceId, _root, metadata, _trust);
             if (file.ContentRootId != _rootId)
                 throw new InvalidOperationException(
                     "whole-source file composition changed its grammar content identity");
@@ -328,7 +329,7 @@ public static class GrammarComposeIngestSupport
         var config = IngestPipelineDefaults.ApplyMaxInputUnits(
             IngestPipelineDefaults.GrammarCompose(sourceId, batchLabelPrefix, options, reader),
             options);
-        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
+        return IngestBatchPipeline.RunAsync(stream, handler, config, ct).WithSourcePrior(sourceId, trust, ct);
     }
 
     private static async IAsyncEnumerable<SubstrateChange> Empty()

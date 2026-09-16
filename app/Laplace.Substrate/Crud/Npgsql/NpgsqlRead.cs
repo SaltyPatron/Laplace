@@ -21,6 +21,28 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// </summary>
 public static class NpgsqlRead
 {
+    /// <summary>Typed command ownership for consumers that must retain sequential streaming.
+    /// The caller owns command execution and disposal; binding uses the same catalog
+    /// contract as the materialized row transports.</summary>
+    public static NpgsqlCommand CreateCommand(
+        NpgsqlDataSource source, NativeSqlQuery query,
+        Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0)
+    {
+        var command = source.CreateCommand(query.Text);
+        try
+        {
+            if (timeoutSeconds > 0) command.CommandTimeout = timeoutSeconds;
+            bind?.Invoke(command.Parameters);
+            ValidateParameters(query, command.Parameters);
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
     public static Task<IReadOnlyList<T>> ReadRowsAsync<T>(
         NpgsqlConnection conn, NativeSqlQuery query, Func<NpgsqlDataReader, T> map,
         Action<NpgsqlParameterCollection>? bind = null, int timeoutSeconds = 0,

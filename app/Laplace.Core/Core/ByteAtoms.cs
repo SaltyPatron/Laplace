@@ -9,27 +9,21 @@ public static class ByteAtoms
 
     public static readonly Hash128 TypeId = Hash128.Blake3("Byte"u8);
 
-    private static readonly double[] Coords = ComputeCoords();
-    private static readonly Hilbert128[] Hilberts = ComputeHilberts();
+    private static readonly Hash128[] Ids = new Hash128[Count];
+    private static readonly double[] Coords = new double[Count * 4];
+    private static readonly Hilbert128[] Hilberts = new Hilbert128[Count];
 
-    private static unsafe double[] ComputeCoords()
+    static unsafe ByteAtoms()
     {
-        var q = new double[Count * 4];
-        fixed (double* p = q) NativeInterop.SuperFibonacci(Count, p);
-        return q;
-    }
-
-    private static unsafe Hilbert128[] ComputeHilberts()
-    {
-        var hs = new Hilbert128[Count];
+        fixed (Hash128* ids = Ids)
         fixed (double* p = Coords)
-        fixed (Hilbert128* h = hs)
-            for (int i = 0; i < Count; i++)
-                NativeInterop.Hilbert4dEncode(p + i * 4, h + i);
-        return hs;
+        fixed (Hilbert128* h = Hilberts)
+            if (NativeInterop.ByteAtomsCopy(ids, p, h, Count) != 0)
+                throw new InvalidOperationException("Native byte basis could not be initialized");
     }
 
-    public static Hash128 Id(byte b) => Hash128.Blake3(stackalloc byte[1] { b });
+    public static Hash128 Id(byte b) => b >= First ? Ids[b - First]
+        : Hash128.Blake3(stackalloc byte[1] { b });
 
     public static ReadOnlySpan<double> Coord(byte b)
     {

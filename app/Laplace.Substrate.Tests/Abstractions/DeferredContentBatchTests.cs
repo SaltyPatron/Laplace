@@ -25,6 +25,16 @@ public sealed class DeferredContentBatchTests
         public FakeReader(bool present) => _present = present;
         public int RootProbeCalls { get; private set; }
         public List<Hash128> TierCandidates { get; } = [];
+        private readonly Dictionary<Hash128, Hash128> _roots = new();
+        private readonly HashSet<Hash128> _proven = new();
+        public bool TryGetCachedRoot(Hash128 canonicalKey, out Hash128 rootId) =>
+            _roots.TryGetValue(canonicalKey, out rootId);
+        public void CacheRoot(Hash128 canonicalKey, Hash128 rootId) => _roots[canonicalKey] = rootId;
+        public bool IsProvenPresent(Hash128 id) => _proven.Contains(id);
+        public void MarkProven(IReadOnlyList<Hash128> ids)
+        {
+            foreach (var id in ids) _proven.Add(id);
+        }
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
             => Task.FromResult(false);
         public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default)
@@ -74,7 +84,7 @@ public sealed class DeferredContentBatchTests
     [InlineData("dog")]
     [InlineData("hello world")]
     [InlineData("a longer example sentence, with punctuation.")]
-    public async Task PresentBitmap_DefersAndStagesZero(string s)
+    public async Task PresentBitmap_DefersEntitiesAndRetainsPhysicalityObservations(string s)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(s);
         var reader = new FakeReader(present: true);
@@ -87,6 +97,7 @@ public sealed class DeferredContentBatchTests
 
         var change = await b.SetInputUnitsConsumed(1).BuildAsync();
         Assert.Equal(0, ContentEntityCount(change));
+        Assert.True(change.IntentStages.Sum(stage => stage.PhysicalityCount) > 0);
     }
 
     [Theory]
@@ -146,5 +157,34 @@ public sealed class DeferredContentBatchTests
         Assert.Equal(1, reader.RootProbeCalls);
         Assert.DoesNotContain(root, reader.TierCandidates);
         Assert.NotEmpty(reader.TierCandidates);
+    }
+
+    [Theory]
+    [InlineData("ab")]
+    [InlineData("a")]
+    public async Task CachedPresentRootPreservesDistinctSourcesAndCoalescesTheSameUncomputedCandidate(string surface)
+    {
+        var bytes = Encoding.UTF8.GetBytes(surface);
+        var root = ContentTierSpine.ResolveRoot(bytes)!.Value;
+        var reader = new FakeReader(present: true);
+        reader.CacheRoot(Hash128.Blake3(bytes), root);
+        reader.MarkProven([root]);
+        var other = new Hash128(501, 502);
+        var builder = new SubstrateChangeBuilder(Src, "cached-sources")
+            .EnableDeferredContent(reader);
+        foreach (var source in new[] { Src, other, other })
+        {
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(builder, bytes, source, out var observed));
+            Assert.Equal(root, observed);
+        }
+        Assert.True(builder.DeferredContent!.HasPending);
+        var change = await builder.SetInputUnitsConsumed(1).BuildAsync();
+        var stage = Assert.Single(change.IntentStages);
+        Assert.Equal(0, stage.EntityCount);
+        Assert.Equal(2, stage.PhysicalityCount);
+        Assert.Equal(new[] { new PhysicalitySourceRange(0, 1, Src),
+            new PhysicalitySourceRange(1, 1, other) }, stage.PhysicalitySourceRanges.ToArray());
+        Assert.Equal(1, reader.RootProbeCalls);
+        Assert.Empty(reader.TierCandidates);
     }
 }

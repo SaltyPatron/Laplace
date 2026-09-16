@@ -39,7 +39,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
     internal Task<ApplyResult> ApplyWorkingSetAtomicAsync(
         IReadOnlyList<SubstrateChange> changes,
-        Func<NpgsqlConnection, NpgsqlTransaction, IReadOnlySet<Hash128>, CancellationToken, Task> transactionParticipant,
+        Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task> transactionParticipant,
         WorkingSetReconciliation? reconciliation,
         CancellationToken ct = default)
     {
@@ -57,7 +57,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
     private async Task<ApplyResult> ApplyManyInternalAsync(
         IReadOnlyList<SubstrateChange> changes,
         Hash128? legacyWorkingSetToken,
-        Func<NpgsqlConnection, NpgsqlTransaction, IReadOnlySet<Hash128>, CancellationToken, Task>? transactionParticipant,
+        Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task>? transactionParticipant,
         WorkingSetReconciliation? reconciliation,
         CancellationToken ct)
     {
@@ -90,15 +90,6 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             foreach (var name in change.CanonicalNames)
                 (canonicalNames ??= new(StringComparer.Ordinal)).Add(name);
         }
-        if (canonicalNames is { Count: > 0 })
-        {
-            // Durable-before-complete: a crash may leave harmless names ahead of the
-            // file marker, but can never leave a completed file without its readback names.
-            var registration = await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(
-                _ds, canonicalNames, ct);
-            roundTrips += registration.RoundTrips;
-        }
-
         Hash128? workingSetSource = null;
         Hash128[] workingSetSources = [];
         if (legacyWorkingSetToken is not null)
@@ -139,12 +130,11 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
 
 
-        IntentStage? managedStage = null;
-        if (managedEntitiesAttempted > 0 || managedPhysAttempted > 0 || managedAttAttempted > 0)
+        using IntentStage? managedStage = managedEntitiesAttempted > 0 || managedPhysAttempted > 0 || managedAttAttempted > 0
+            ? IntentStage.New(Math.Max(Math.Max(managedEntitiesAttempted, managedPhysAttempted), managedAttAttempted))
+            : null;
+        if (managedStage is not null)
         {
-            managedStage = IntentStage.New(
-                Math.Max(Math.Max(managedEntitiesAttempted, managedPhysAttempted), managedAttAttempted));
-            Span<double> coord = stackalloc double[4];
             var seenEntity = new HashSet<Hash128>();
             var seenPhys = new HashSet<Hash128>();
 
@@ -154,18 +144,17 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                     if (!seenEntity.Add(e.Id)) continue;
                     managedStage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
                 }
+            var selectedPhysicalities = new List<PhysicalityRow>(managedPhysAttempted);
             foreach (var c in changes)
                 foreach (var p in c.Physicalities)
                 {
                     if (!seenPhys.Add(p.Id)) continue;
-                    coord[0] = p.CoordX; coord[1] = p.CoordY; coord[2] = p.CoordZ; coord[3] = p.CoordM;
-                    managedStage.AddPhysicality(
-                        p.Id, p.EntityId, (short)p.Type,
-                        coord, p.HilbertIndex,
-                        p.TrajectoryXyzm is null ? ReadOnlySpan<double>.Empty
-                                                  : p.TrajectoryXyzm.AsSpan(),
-                        p.NConstituents, p.AlignmentResidual, p.SourceDim, p.ObservedAtUnixUs);
+                    selectedPhysicalities.Add(p);
                 }
+            if (selectedPhysicalities.Count != 0)
+                PhysicalityAdmissionBatch.StageManagedObservations(managedStage,
+                    System.Runtime.InteropServices.CollectionsMarshal.AsSpan(selectedPhysicalities),
+                    IngestSizing.ResolveWorkingSetBudgetBytes());
             // No dedup here: duplicate attestation ids across changes carry
             // real observation counts. The apply core collapses them exactly
             // like apply_batch did (latest-ts representative, summed games)
@@ -239,12 +228,24 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         int copyTransactionsStarted = 0, copyTransactionsCommitted = 0;
         bool anyRows = entCount > 0 || physCount > 0 || attCount > 0;
 
+        PhysicalityAdmissionBatch? physicalityAdmission = null;
         try
         {
+            physicalityAdmission = PhysicalityAdmissionBatch.Capture(changes, sourceStages);
+            anyRows |= physicalityAdmission is not null;
+            if (canonicalNames is { Count: > 0 })
+            {
+                // Validate the complete physicality transport before any database
+                // access. Names still become durable before the file's completion
+                // marker, through the existing shared registry owner.
+                var registration = await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(
+                    _ds, canonicalNames, ct);
+                roundTrips += registration.RoundTrips;
+            }
             if (anyRows)
             {
                 var r = await ApplyStagesCoreAsync(
-                    sourceStages, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
+                    sourceStages, physicalityAdmission, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
                     workingSetSource, workingSetSources, transactionParticipant, reconciliation, ct);
                 entitiesInserted = r.e;
                 physicalitiesInserted = r.p;
@@ -257,6 +258,12 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 postgresCommit = r.commit;
                 copyTransactionsStarted = r.copy.Started;
                 copyTransactionsCommitted = r.copy.Committed;
+                if (physicalityAdmission is not null)
+                {
+                    entitiesAttempted = checked(entitiesAttempted + physicalityAdmission.GeneratedEntityCount);
+                    physAttempted = checked(physAttempted + physicalityAdmission.GeneratedPhysicalityCount);
+                    attAttempted = checked(attAttempted + physicalityAdmission.GeneratedAttestationCount);
+                }
 
                 // Apply-side bitmap verify is the presence gate: compose descent
                 // stages the working set (content-addressed, deduped in the
@@ -285,7 +292,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         }
         finally
         {
-            managedStage?.Dispose();
+            physicalityAdmission?.Dispose();
         }
 
         sw.Stop();
@@ -308,6 +315,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             JournalReplayHit: journalReplayHit)
         {
             PostgresCommit = postgresCommit,
+            PhysicalityAdmission = physicalityAdmission?.Receipt,
             CopyTransactionsStarted = copyTransactionsStarted,
             CopyTransactionsCommitted = copyTransactionsCommitted,
         };

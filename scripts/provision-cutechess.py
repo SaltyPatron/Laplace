@@ -219,6 +219,170 @@ def verify_build(source, binary, lock, qt_version=None, receipt_path=None):
     return receipt
 
 
+GUI_MODULES = ("Core", "Gui", "Widgets", "Concurrent", "Svg", "PrintSupport", "Core5Compat")
+
+
+def gui_inventory(qt_prefix, lock):
+    """Identify selected SDK inputs; runtime loading is established by probe_gui."""
+    qt_prefix = qt_prefix.resolve(strict=True)
+    version_file = qt_prefix / "lib/cmake/Qt6/Qt6ConfigVersion.cmake"
+    version_text = version_file.read_text()
+    version_files = {str(version_file): digest(version_file)}
+    # Qt 6.11 wraps CMake's basic version file in its compatibility policy.
+    # Follow only the fixed same-directory include emitted by upstream Qt.
+    if re.search(r'^\s*include\s*\(\s*"\$\{CMAKE_CURRENT_LIST_DIR\}/Qt6ConfigVersionImpl\.cmake"\s*\)\s*$',
+                 version_text, re.M):
+        implementation = version_file.with_name("Qt6ConfigVersionImpl.cmake")
+        version_text += "\n" + implementation.read_text()
+        version_files[str(implementation)] = digest(implementation)
+    versions = re.findall(r'^\s*set\s*\(\s*PACKAGE_VERSION\s+"?(\d+\.\d+\.\d+)"?\s*\)\s*$', version_text, re.M)
+    if len(versions) != 1 or versions[0] != lock["qt_version"] or tuple(map(int, versions[0].split("."))) < (6, 8, 0):
+        raise RuntimeError(f"GUI requires the selected Qt {lock['qt_version']} SDK >=6.8")
+    modules = {}
+    for name in GUI_MODULES:
+        config = qt_prefix / f"lib/cmake/Qt6{name}/Qt6{name}Config.cmake"
+        if not config.is_file():
+            raise RuntimeError(f"GUI requires Qt module {name}: {config}")
+        modules[name] = {"config": str(config), "config_sha256": digest(config)}
+    plugin_names = ("platforms/qoffscreen.dll", "platforms/qminimal.dll", "platforms/qwindows.dll",
+                    "imageformats/qsvg.dll", "iconengines/qsvgicon.dll") if os.name == "nt" else (
+                    "platforms/libqoffscreen.so", "platforms/libqminimal.so", "platforms/libqxcb.so",
+                    "platforms/libqwayland.so", "platforms/libqwayland-generic.so", "platforms/libqwayland-egl.so",
+                    "imageformats/libqsvg.so", "iconengines/libqsvgicon.so")
+    plugins = {}
+    for name in plugin_names:
+        path = qt_prefix / "plugins" / name
+        plugins[name] = {"path": str(path), "present": path.is_file(),
+                         "sha256": digest(path) if path.is_file() else None}
+    offscreen = plugins[plugin_names[0]]
+    if not offscreen["present"]:
+        raise RuntimeError(f"GUI offscreen platform plugin missing: {offscreen['path']}")
+    return {"prefix": str(qt_prefix), "version": versions[0], "version_files": version_files, "modules": modules,
+            "module_identity_scope": "SDK CMake configuration files, not loaded library identities",
+            "plugins": plugins, "offscreen": offscreen}
+
+
+def gui_environment(qt_prefix):
+    qt_prefix = qt_prefix.resolve(strict=True)
+    environment = {"QT_PLUGIN_PATH": str(qt_prefix / "plugins"),
+                   "QT_QPA_PLATFORM_PLUGIN_PATH": str(qt_prefix / "plugins/platforms")}
+    if sys.platform.startswith("linux"):
+        # GNU DT_RUNPATH is searched after LD_LIBRARY_PATH. Select this SDK's
+        # runtime first for both the probe and the reported direct launch.
+        selected = str(qt_prefix / "lib")
+        inherited = [path for path in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep)
+                     if path and path != selected]
+        environment["LD_LIBRARY_PATH"] = os.pathsep.join([selected, *inherited])
+    return environment
+
+
+def probe_gui(binary, lock, qt_prefix, work=None):
+    """Run upstream QApplication initialization without opening a desktop window."""
+    if binary.is_symlink() or not binary.is_file():
+        raise RuntimeError(f"GUI executable must be a regular direct build/install file: {binary}")
+    binary = binary.resolve(strict=True)
+    inventory = gui_inventory(qt_prefix, lock)
+    before = digest(binary)
+    scratch = Path(work) if work else Path(os.environ.get("LAPLACE_WORK_ROOT", "/build/laplace/work")) / "chess-tools"
+    scratch.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env.update(gui_environment(qt_prefix))
+    env.update({"QT_QPA_PLATFORM": "offscreen", "QT_DEBUG_PLUGINS": "1",
+                "QT_LOGGING_RULES": "qt.core.library.debug=true;qt.core.plugin.*.debug=true",
+                "QT_MESSAGE_PATTERN": "%{category}: %{message}"})
+    for key in ("DISPLAY", "WAYLAND_DISPLAY", "QT_QPA_PLATFORMTHEME", "QT_QPA_GENERIC_PLUGINS"):
+        env.pop(key, None)
+    with tempfile.TemporaryDirectory(prefix="cutechess-gui-probe-", dir=scratch) as temporary:
+        root = Path(temporary)
+        for key, name in (("XDG_CONFIG_HOME", "config"), ("XDG_CONFIG_DIRS", "config-dirs"),
+                          ("XDG_DATA_HOME", "data"), ("XDG_DATA_DIRS", "data-dirs"),
+                          ("XDG_CACHE_HOME", "cache"), ("XDG_RUNTIME_DIR", "runtime")):
+            path = root / name
+            path.mkdir(mode=0o700)
+            env[key] = str(path)
+        # Upstream constructs CuteChessApplication/QApplication before --version.
+        # This proves the offscreen QApplication/platform loader, not an event loop.
+        result = subprocess.run([str(binary), "-platform", "offscreen", "--version"],
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                timeout=30, env=env, cwd=root)
+    if result.returncode:
+        raise RuntimeError(f"CuteChess GUI initialization failed ({result.returncode}): {result.stderr[-2000:]}")
+    if not re.search(r"^Cute Chess " + re.escape(lock["version"]) + r"\s*$", result.stdout, re.M):
+        raise RuntimeError(f"GUI is not locked Cute Chess {lock['version']}: {result.stdout[:800]}")
+    if not re.search(r"^Using Qt version " + re.escape(lock["qt_version"]) + r"\s*$", result.stdout, re.M):
+        raise RuntimeError(f"GUI does not use selected Qt {lock['qt_version']}: {result.stdout[:800]}")
+    loaded = set()
+    for match in re.finditer(r'^qt\.core\.library:\s+("(?:[^"\\]|\\.)*")\s+loaded library\s*$', result.stderr, re.M):
+        path = Path(json.loads(match[1]))
+        if path.name in ("libqoffscreen.so", "qoffscreen.dll"):
+            loaded.add(str(path.resolve(strict=True)))
+    expected = str(Path(inventory["offscreen"]["path"]).resolve(strict=True))
+    if loaded != {expected}:
+        raise RuntimeError(f"GUI did not load the selected offscreen plugin: expected {expected}, observed {sorted(loaded)}")
+    if digest(binary) != before or gui_inventory(qt_prefix, lock) != inventory:
+        raise RuntimeError("GUI executable or selected Qt inputs changed during the runtime probe")
+    return {"component": "cutechess-gui", "version": lock["version"], "qt_version": lock["qt_version"],
+            "path": str(binary), "binary_sha256": before, "ready": True, "status": "ready-headless",
+            "qapplication_initialized": True, "qt": inventory, "loaded_platform_plugin": expected,
+            "plugin_diagnostics_sha256": hashlib.sha256(result.stderr.encode()).hexdigest(),
+            "scope": "official GUI QApplication initialization and offscreen platform loading through --version",
+            "settings_scope": "isolated XDG directories" if sys.platform.startswith("linux") else
+                              "temporary XDG directories; platform native settings are not isolated",
+            "interactive_desktop_tested": False, "interactive_desktop_ready": None,
+            "direct_launch": {"argv": [str(binary)], "environment": gui_environment(qt_prefix)}}
+
+
+def verify_gui_build(source, binary, lock, qt_prefix, receipt_path, work=None):
+    source = source.resolve(strict=True)
+    verify_source(source, lock)
+    runtime = probe_gui(binary, lock, qt_prefix, work)
+    integrity = verify_source(source, lock)
+    if digest(binary) != runtime["binary_sha256"]:
+        raise RuntimeError("CuteChess GUI executable changed after its runtime probe")
+    cache = binary.parent / "CMakeCache.txt"
+    receipt = {"schema": "laplace.cutechess-gui-source-build.v1", "repository": lock["repository"],
+               "commit": lock["commit"], "source": str(source), "source_integrity": integrity,
+               "build_target": "gui", "binary": str(binary.resolve(strict=True)),
+               "binary_sha256": runtime["binary_sha256"], "runtime": runtime,
+               "cmake_cache_sha256": digest(cache) if cache.is_file() else None}
+    if receipt_path:
+        receipt_path = receipt_path.absolute()
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".cutechess-gui-receipt-", dir=receipt_path.parent) as temporary:
+            pending = Path(temporary) / "receipt.json"
+            pending.write_text(json.dumps(receipt, sort_keys=True) + "\n")
+            os.replace(pending, receipt_path)
+    return receipt
+
+
+def verify_gui_install(binary, receipt_path, lock, work=None):
+    """Bind the direct installed executable and selected SDK to a verified build."""
+    receipt_bytes = receipt_path.read_bytes()
+    receipt = json.loads(receipt_bytes)
+    if (receipt.get("schema") != "laplace.cutechess-gui-source-build.v1" or
+            receipt.get("repository") != lock["repository"] or receipt.get("commit") != lock["commit"] or
+            receipt.get("build_target") != "gui"):
+        raise RuntimeError("GUI build receipt does not match the selected official source")
+    source = Path(receipt["source"])
+    integrity = verify_source(source, lock)
+    if integrity != receipt["source_integrity"]:
+        raise RuntimeError("GUI source identity differs from the retained build")
+    if binary.is_symlink() or not binary.is_file() or digest(binary) != receipt.get("binary_sha256"):
+        raise RuntimeError("GUI installed executable differs from the retained official build")
+    qt = receipt["runtime"]["qt"]
+    qt_prefix = Path(qt["prefix"])
+    if gui_inventory(qt_prefix, lock) != qt:
+        raise RuntimeError("GUI selected Qt inputs differ from the retained build")
+    runtime = probe_gui(binary, lock, qt_prefix, work)
+    if runtime["binary_sha256"] != receipt["binary_sha256"] or verify_source(source, lock) != integrity:
+        raise RuntimeError("GUI installed executable or source changed during verification")
+    if receipt_path.read_bytes() != receipt_bytes:
+        raise RuntimeError("GUI retained build receipt changed during verification")
+    return {"build_receipt": str(receipt_path), "build_receipt_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+            "repository": receipt["repository"], "commit": receipt["commit"], "source": str(source),
+            "build_target": "gui", "runtime": runtime}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lock", type=Path, default=LOCK)
@@ -228,6 +392,10 @@ def main():
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--receipt", type=Path, help="Retain verified source and binary identity after the build")
     parser.add_argument("--qt-version")
+    parser.add_argument("--gui", action="store_true", help="Verify the official GUI through offscreen QApplication initialization")
+    parser.add_argument("--qt-prefix", type=Path, help="Selected Qt SDK for GUI build verification")
+    parser.add_argument("--verify-receipt", type=Path, help="Read-only GUI installed-binary verification against its retained source build")
+    parser.add_argument("--work", type=Path, help="Build-volume directory for isolated GUI probe settings")
     parser.add_argument("--check-latest", action="store_true")
     args = parser.parse_args()
     lock = json.loads(args.lock.read_text())
@@ -239,6 +407,12 @@ def main():
         parser.error("--reset-build-cache requires --verify-source without another action")
     if args.receipt and not (args.verify_source and args.binary):
         parser.error("--receipt requires --verify-source and --binary")
+    if args.gui and (not args.binary or (not args.verify_receipt and not args.qt_prefix)):
+        parser.error("--gui requires --binary and either --qt-prefix or --verify-receipt")
+    if args.verify_receipt and (not args.gui or args.receipt or args.source_dir or args.verify_source):
+        parser.error("--verify-receipt requires --gui and --binary without a source/build mutation")
+    if (args.qt_prefix or args.verify_receipt or args.work) and not args.gui:
+        parser.error("GUI options require --gui")
     try:
         if args.check_latest:
             print(json.dumps(check_latest(lock)))
@@ -246,13 +420,19 @@ def main():
             print(provision(args.source_dir.resolve(), lock))
         if args.reset_build_cache:
             print(json.dumps(reset_build_cache(args.verify_source, args.reset_build_cache, lock)))
+        elif args.gui and args.verify_receipt:
+            print(json.dumps(verify_gui_install(args.binary, args.verify_receipt, lock, args.work)))
+        elif args.gui and args.verify_source:
+            print(json.dumps(verify_gui_build(args.verify_source, args.binary, lock, args.qt_prefix, args.receipt, args.work)))
+        elif args.gui:
+            print(json.dumps(probe_gui(args.binary, lock, args.qt_prefix, args.work)))
         elif args.verify_source and args.binary:
             print(json.dumps(verify_build(args.verify_source, args.binary, lock, args.qt_version, args.receipt)))
         elif args.verify_source:
             print(json.dumps(verify_source(args.verify_source, lock)))
         elif args.binary:
             print(json.dumps(probe(args.binary, lock, args.qt_version)))
-    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.TimeoutExpired) as error:
         print(f"CuteChess: {error}", file=sys.stderr)
         return 1
     return 0

@@ -3,7 +3,7 @@ import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { Button, Field, Input, Modal, NavTabs, Panel, ReadStatus, Select, TextArea, TooltipProvider, useReadResource } from '../src/ui';
-import { apiGet } from '../src/api/client';
+import { apiGet, setApiWorkspace } from '../src/api/client';
 import { QueryConsole } from '../src/query/QueryConsole';
 import { BillingView } from '../src/billing/BillingView';
 import { Activity } from '../src/admin/Activity';
@@ -66,5 +66,11 @@ function Surface() {
   if (view === 'activity') return <Activity />;
   if (view === 'operations') return <OpConsole />;
   return <Fixture />;
+}
+// Fixture-only identity: production still obtains it from the authenticated API.
+if (new URLSearchParams(location.search).get('view') === 'billing') {
+  const state = useAppStore.getState();
+  state.setAuth({ id: 'workspace-fixture-user', tenantId: state.tenant }, []);
+  setApiWorkspace(state.tenant);
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><TooltipProvider><BrowserRouter><Surface /></BrowserRouter></TooltipProvider></StrictMode>);

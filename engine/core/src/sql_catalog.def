@@ -6,11 +6,12 @@ SQL_QUERY("browse.names", "bytea[]",
     "consensus.relation_family_ids('HAS_NAME') || consensus.relation_family_ids('HAS_NAME_ALIAS'))")
 SQL_QUERY("entity.facets", "bytea[]",
     "SELECT id, tier, type_id FROM laplace.entities WHERE id = ANY($1)")
-SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[],bytea[]",
+SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[]",
     "SELECT a.id,a.subject_id,a.type_id,a.object_id,a.source_id,a.context_id,a.outcome,a.observation_count "
-    "FROM laplace.attestations a WHERE a.subject_id=ANY($1) AND a.type_id=ANY($2) "
-    "AND a.source_id=ANY($3) AND (a.context_id=ANY($4) "
-    "OR (a.context_id IS NULL AND a.subject_id=ANY($5)))")
+    "FROM laplace.attestations a JOIN unnest($1::bytea[],$2::bytea[],$3::bytea[],$4::bytea[]) "
+    "AS s(subject_id,type_id,source_id,context_id) ON a.subject_id=s.subject_id "
+    "AND a.type_id=s.type_id AND a.source_id=s.source_id "
+    "AND a.context_id IS NOT DISTINCT FROM s.context_id WHERE a.type_id=ANY($2)")
 SQL_QUERY("content.carrier_vertices_selected", "bytea[],bytea[]",
     "SELECT parent_id,n_constituents,ordinal,child_id,run_length,flags "
     "FROM structural.content_carrier_vertices($1::bytea[],$2::bytea[]) ORDER BY parent_id,ordinal")
@@ -186,10 +187,18 @@ SQL_QUERY("conversation.forward_trace", "text,int4,int4,float8,int4,int4,int4",
     "t.declared_result,t.event,t.routing_round FROM generation.forward_trace("
     "$1,$2,$3,$4,$5,NULL::bigint,$6,$7,NULL::bytea[],NULL::bytea[]) t "
     "ORDER BY t.step,t.routing_round,CASE t.event WHEN 'route' THEN 0 ELSE 1 END")
-SQL_QUERY("conversation.append_turns", "bytea,bytea[],timestamptz",
-    "SELECT converse.session_append_turns($1,$2,$3)")
+SQL_QUERY("conversation.append_turns", "bytea,bytea[],timestamptz,bytea,int8,int4,int8",
+    "SELECT converse.session_append_turns($1,$2,$3,$4,$5,$6,$7)")
+SQL_QUERY("conversation.register_projection_sources", "bytea[],text[]",
+    "WITH requested AS MATERIALIZED (SELECT * FROM unnest($1::bytea[],$2::text[]) r(id,name)),"
+    "inserted AS (INSERT INTO laplace.canonical_names(id,name) SELECT id,name FROM requested "
+    "ON CONFLICT(id) DO NOTHING RETURNING id,name) "
+    "SELECT count(*) FROM requested r WHERE EXISTS(SELECT FROM inserted i WHERE i.id=r.id AND i.name=r.name) "
+    "OR EXISTS(SELECT FROM laplace.canonical_names c WHERE c.id=r.id AND c.name=r.name)")
 SQL_QUERY("conversation.manifest", "bytea,bytea",
-    "SELECT public.ST_AsBinary(p.trajectory),p.type FROM laplace.physicalities p "
+    "SELECT public.ST_AsBinary(p.trajectory,'NDR'),p.type,public.ST_X(p.coord),public.ST_Y(p.coord),"
+    "public.ST_Z(p.coord),public.ST_M(p.coord),p.hilbert_index,p.n_constituents,"
+    "p.alignment_residual,p.source_dim,p.observed_at FROM laplace.physicalities p "
     "WHERE p.id IN ($1,$2)")
 SQL_QUERY("conversation.lock", "bytea",
     "SELECT id FROM laplace.entities WHERE id=$1 FOR UPDATE")
@@ -205,7 +214,7 @@ SQL_QUERY("conversation.write_manifest", "bytea,bytea,bytea,float8,float8,float8
     "VALUES ($1,$2,3,public.ST_GeomFromWKB($3),public.ST_MakePoint($4,$5,$6,$7),$8,$9,$10) "
     "ON CONFLICT(id) DO UPDATE SET trajectory=EXCLUDED.trajectory,coord=EXCLUDED.coord,"
     "hilbert_index=EXCLUDED.hilbert_index,n_constituents=EXCLUDED.n_constituents,"
-    "observed_at=EXCLUDED.observed_at")
+    "alignment_residual=NULL,source_dim=NULL,observed_at=EXCLUDED.observed_at")
 /* Retained for already mapped versioned execution modules during live upgrade. */
 SQL_QUERY("generation.observation_bindings", "bytea[]",
     "SELECT context_id FROM laplace.attestations "
@@ -250,6 +259,8 @@ SQL_QUERY("ingest.verified_artifact_run_status", "uuid,text",
     "SELECT status FROM laplace.ingest_run_journal WHERE run_id=$1 AND source_name=$2")
 SQL_QUERY("ingest.verified_artifact_journal", "uuid",
     "SELECT file_label,status,disposition,relative_path,file_id FROM laplace.ingest_file_journal WHERE run_id=$1")
+SQL_QUERY("ingest.flush_receipt_exists", "bytea",
+    "SELECT EXISTS(SELECT FROM laplace.ingest_flush_journal WHERE working_set_id=$1)")
 SQL_QUERY("ingest.verified_file_carrier", "bytea,bytea",
     "SELECT c.ordinal,c.entity_id,c.run_length,c.flags "
     "FROM public.laplace_trajectory_constituents((SELECT trajectory FROM laplace.physicalities "
@@ -260,56 +271,246 @@ SQL_QUERY("write.commit_settings", "",
     "current_setting('full_page_writes')::boolean")
 SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch')")
 
+SQL_QUERY("ingest.physicality_descriptor_provider_metadata", "bytea[]",
+    "SELECT p.id,p.entity_id,p.type,p.coord,p.hilbert_index,p.trajectory,"
+    "p.n_constituents,p.alignment_residual,p.source_dim,p.observed_at "
+    "FROM laplace.physicalities p WHERE p.id=ANY($1)")
+SQL_QUERY("ingest.physicality_descriptor_provider_payload", "bytea[]",
+    "SELECT p.id,p.entity_id,p.type,public.ST_AsBinary(p.coord,'NDR'),p.hilbert_index,"
+    "public.ST_AsBinary(p.trajectory,'NDR'),p.n_constituents,p.alignment_residual,"
+    "p.source_dim,p.observed_at FROM laplace.physicalities p WHERE p.id=ANY($1)")
+SQL_QUERY("ingest.physicality_descriptor_materialize",
+    "bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],int8,int8,int4,int8",
+    "SELECT * FROM ops.physicality_descriptor_materialize("
+    "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+
 SQL_QUERY("ingest.selected_chess_scope", "bytea[],bytea[],bytea[],bytea[]",
     "SELECT 1::int2 AS kind,e.id,0::int8 AS observation_count FROM laplace.entities e WHERE e.id=ANY($1) "
     "UNION ALL SELECT 2::int2,p.id,0::int8 FROM laplace.physicalities p WHERE p.id=ANY($2) "
     "UNION ALL SELECT 3::int2,a.id,a.observation_count FROM laplace.attestations a "
     "WHERE a.id=ANY($3) AND a.type_id=ANY($4)")
 
-SQL_QUERY("identity.create_user", "uuid,text,text,text",
-    "INSERT INTO app.users (user_id, display_name, email, avatar_url) VALUES ($1, $2, $3, $4);")
-SQL_QUERY("identity.create_tenant", "text,text",
-    "INSERT INTO app.tenants (tenant_id, display_name, kind) VALUES ($1, $2, 'personal');")
-SQL_QUERY("identity.create_external", "uuid,uuid,text,text,text,text",
-    "INSERT INTO app.external_identities (identity_id, user_id, provider, issuer, subject, email) VALUES "
-    "($1, $2, $3, $4, $5, $6);")
-SQL_QUERY("identity.create_membership", "text,uuid",
-    "INSERT INTO app.tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, 'owner');")
-SQL_QUERY("identity.read_account", "text,text,text",
-    "SELECT u.user_id, m.tenant_id, m.role, i.provider, u.email, u.display_name, u.avatar_url FROM "
-    "app.external_identities i JOIN app.users u ON u.user_id = i.user_id JOIN app.tenant_memberships m ON "
-    "m.user_id = u.user_id WHERE i.provider = $1 AND i.issuer = $2 AND i.subject = $3 ORDER BY CASE m.role "
-    "WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.created_at LIMIT 1;")
-SQL_QUERY("identity.update_user", "text,text,text,uuid",
-    "UPDATE app.users SET display_name = COALESCE($1, display_name), email = COALESCE($2, email), "
-    "avatar_url = COALESCE($3, avatar_url), updated_at = now() WHERE user_id = $4;")
-SQL_QUERY("identity.update_external", "text,text,text,text",
-    "UPDATE app.external_identities SET email = COALESCE($1, email), last_login_at = now() WHERE provider = "
-    "$2 AND issuer = $3 AND subject = $4;")
+/* Native generated-stage deposit: one caller transaction and fixed set queries. */
+SQL_QUERY("ingest.generated_stage_sink.lock", "",
+    "SELECT pg_advisory_xact_lock(hashtextextended('laplace_apply_batch',0))")
+SQL_QUERY("ingest.generated_stage_sink.epoch", "",
+    "SELECT nextval('laplace.apply_write_epoch')")
+SQL_QUERY("ingest.generated_stage_sink.presence", "bytea[]",
+    "SELECT DISTINCT id FROM laplace.entities WHERE id=ANY($1)")
+SQL_QUERY("ingest.generated_stage_sink.entities", "bytea[],int2[],bytea[],bytea[]",
+    "INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) SELECT r.* FROM unnest($1,$2,$3,$4) r(id,tier,type_id,source) WHERE NOT EXISTS(SELECT 1 FROM laplace.entities e WHERE e.id=r.id) ORDER BY r.id ON CONFLICT(id,tier) DO NOTHING RETURNING id")
+SQL_QUERY("ingest.generated_stage_sink.physicalities", "bytea[],bytea[],int2[],bytea[],bytea[],bytea[],int4[],float8[],int4[],timestamptz[]",
+    "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT r.id,r.entity,r.type,public.ST_GeomFromEWKB(r.coord),r.hilbert,public.ST_GeomFromEWKB(r.trajectory),r.n,r.residual,r.dim,r.observed FROM unnest($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) r(id,entity,type,coord,hilbert,trajectory,n,residual,dim,observed) ORDER BY r.id ON CONFLICT(id) DO NOTHING RETURNING id")
+SQL_QUERY("ingest.generated_stage_sink.attestations", "bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],int2[],timestamptz[],int8[],int8[],int8[],int8[],bool[],bytea[]",
+    "INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,fold_replayable,highway_mask) SELECT r.* FROM unnest($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) r(id,subject,type,object,source,context,outcome,observed,games,score,rd,rating,replayable,mask) ORDER BY r.type,r.subject,r.id ON CONFLICT(id,type_id,subject_id) DO NOTHING RETURNING id")
+SQL_QUERY("ingest.generated_stage_sink.fold", "bytea[],bytea[],bytea[],int8[],int8[],int8[],timestamptz[],int8[],int8[],int8[],int8[],int8[],int8[]",
+    "SELECT consensus.upsert($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+SQL_QUERY("ingest.generated_stage_sink.masks", "bytea[],bytea[]",
+    "SELECT consensus.highway_mask_deposit($1,$2)")
+/* Direct indexed containment selects candidates, never unverified body rows. */
+SQL_QUERY("readback.physicality_form_candidates", "bytea,bytea[],bytea,int4",
+    "SELECT candidate.entity_id FROM ("
+    "SELECT p.entity_id FROM laplace.physicalities p "
+    "WHERE p.type=9 AND p.trajectory IS NOT NULL "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1] "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $2 AND p.entity_id>$3 "
+    "UNION SELECT p.entity_id FROM laplace.physicalities p "
+    "WHERE p.type=1 AND p.trajectory IS NOT NULL "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) @> ARRAY[$1] "
+    "AND public.laplace_trajectory_constituent_ids(p.trajectory) && $2 AND p.entity_id>$3"
+    ") candidate ORDER BY candidate.entity_id LIMIT $4")
+SQL_QUERY("readback.physicality_descriptors", "bytea[],int8,int4,int8",
+    "SELECT * FROM structural.physicality_descriptor_read($1,$2,$3,$4)")
+SQL_QUERY("readback.physicality_forms", "bytea[],bytea,int4,int8,int4,int8",
+    "SELECT * FROM structural.physicality_forms($1,$2,$3,$4,$5,$6)")
+
+SQL_QUERY("maintenance.database_identity", "",
+    "SELECT current_database(), "
+    "    (SELECT oid::text FROM pg_database WHERE datname=current_database()), "
+    "    (SELECT system_identifier::text FROM pg_control_system()) ")
+SQL_QUERY("source.observation_contexts", "bytea,bytea,bytea,bytea[]",
+    "SELECT DISTINCT context_id FROM laplace.attestations "
+    "WHERE source_id=$1 AND type_id=$2 AND object_id=$3 AND context_id=ANY($4) ")
+SQL_QUERY("source.observation_inventory", "bytea,bytea,bytea,bytea",
+    "SELECT count(*), "
+    "       count(*) FILTER (WHERE type_id=$2 AND object_id=$3 AND context_id IS NULL), "
+    "       count(*) FILTER (WHERE type_id=$2 AND object_id=$3 AND context_id IS NOT NULL), "
+    "       coalesce(sum(observation_count) FILTER (WHERE type_id=$2 AND object_id=$3),0)::bigint, "
+    "       count(DISTINCT context_id) FILTER (WHERE type_id=$2 AND object_id=$3), "
+    "       (SELECT count(*) FROM laplace.entities WHERE type_id=$4 AND first_observed_by=$1), "
+    "       current_database(), current_setting('server_version') "
+    "FROM laplace.attestations WHERE source_id=$1 ")
+SQL_QUERY("source.migration_retention", "bytea,bytea",
+    "WITH owned_receipts AS MATERIALIZED ( "
+    "    SELECT receipt.* FROM laplace.ingest_flush_journal receipt "
+    "    WHERE receipt.source_id=$1 OR EXISTS ( "
+    "        SELECT FROM laplace.ingest_flush_journal_sources owner "
+    "        WHERE owner.working_set_id=receipt.working_set_id AND owner.source_id=$1) "
+    "), rows AS ( "
+    "    SELECT 'source_evidence' AS section, to_jsonb(a) AS body "
+    "    FROM laplace.attestations a WHERE a.source_id=$1 "
+    "    UNION ALL "
+    "    SELECT 'affected_standing',to_jsonb(c) FROM laplace.consensus c "
+    "    WHERE EXISTS (SELECT FROM laplace.attestations a WHERE a.source_id=$1 "
+    "        AND a.type_id=c.type_id AND a.subject_id=c.subject_id "
+    "        AND a.object_id IS NOT DISTINCT FROM c.object_id) "
+    "    UNION ALL "
+    "    SELECT 'surviving_evidence',to_jsonb(a) FROM laplace.attestations a "
+    "    WHERE a.source_id<>$1 AND EXISTS ( "
+    "        SELECT FROM laplace.attestations old WHERE old.source_id=$1 "
+    "        AND old.type_id=a.type_id AND old.subject_id=a.subject_id "
+    "        AND old.object_id IS NOT DISTINCT FROM a.object_id) "
+    "    UNION ALL "
+    "    SELECT 'source_markers',to_jsonb(e) FROM laplace.entities e "
+    "    WHERE e.first_observed_by=$1 AND e.type_id=$2 "
+    "    UNION ALL "
+    "    SELECT 'marker_physicalities',to_jsonb(p) || jsonb_build_object( "
+    "        'coord_ewkb',encode(ST_AsEWKB(p.coord),'hex'), "
+    "        'trajectory_ewkb',encode(ST_AsEWKB(p.trajectory),'hex')) FROM laplace.physicalities p "
+    "    WHERE EXISTS (SELECT FROM laplace.entities e WHERE e.id=p.entity_id "
+    "        AND e.first_observed_by=$1 AND e.type_id=$2) "
+    "    UNION ALL "
+    "    SELECT 'flush_receipts',to_jsonb(r) FROM owned_receipts r "
+    "    UNION ALL "
+    "    SELECT 'flush_receipt_sources',to_jsonb(s) FROM laplace.ingest_flush_journal_sources s "
+    "    WHERE EXISTS (SELECT FROM owned_receipts r WHERE r.working_set_id=s.working_set_id) "
+    "    UNION ALL "
+    "    SELECT 'file_completion_evidence',to_jsonb(a) FROM laplace.attestations a "
+    "    WHERE EXISTS ( "
+    "        SELECT FROM laplace.ingest_run_journal r "
+    "        JOIN laplace.ingest_file_journal f ON f.run_id=r.run_id "
+    "        WHERE r.source_id=$1 AND f.file_id=a.source_id "
+    "        AND a.type_id=realize.canonical_id('substrate/type/HasLayerCompleted/' || r.layer::text || '/v1') "
+    "        AND (a.context_id=r.source_id OR a.context_id IS NULL)) "
+    ") "
+    "SELECT convert_to(jsonb_build_object('section',section,'row',body)::text || E'\\n','UTF8') FROM rows ")
+SQL_QUERY("chess.witness_inputs", "bytea[],bytea[],bytea[],bytea[],int4",
+    "SELECT subject_id,type_id, "
+    "       CASE WHEN octet_length(object_id)=16 THEN object_id END, "
+    "       CASE WHEN context_id IS NULL OR octet_length(context_id)=16 THEN context_id "
+    "            ELSE decode('00','hex') END "
+    "FROM laplace.attestations "
+    "WHERE subject_id=ANY($1) AND type_id=ANY($2) AND source_id=ANY($3) "
+    "  AND ($4::bytea[] IS NULL OR context_id=ANY($4)) "
+    "LIMIT $5 ")
+SQL_QUERY("chess.content_preflight", "bytea[],int4",
+    "SELECT entity_id,id,ST_MemSize(trajectory)::bigint,ST_NPoints(trajectory)::bigint "
+    "FROM laplace.physicalities "
+    "WHERE entity_id=ANY($1) AND type=1 AND trajectory IS NOT NULL "
+    "LIMIT $2 ")
+SQL_QUERY("chess.render_preflighted_results", "bytea[],int4",
+    "SELECT realize.render_text_batch($1,$2)")
+
+/* Account and payment projections use the same fixed statement owner.
+ * Compound admissions are single transactional statements, not semicolon
+ * batches that depend on named-placeholder rewriting. */
+SQL_QUERY("account.workspaces", "uuid",
+    "SELECT t.tenant_id,t.display_name,t.kind,m.role FROM app.tenant_memberships m "
+    "JOIN app.tenants t USING(tenant_id) WHERE m.user_id=$1 ORDER BY t.display_name,t.tenant_id")
+SQL_QUERY("account.membership_role", "text,uuid",
+    "SELECT role FROM app.tenant_memberships WHERE tenant_id=$1 AND user_id=$2")
+SQL_QUERY("account.create_workspace", "text,text,uuid",
+    "WITH workspace AS (INSERT INTO app.tenants(tenant_id,display_name,kind) "
+    "VALUES($1,$2,'organization') RETURNING tenant_id) "
+    "INSERT INTO app.tenant_memberships(tenant_id,user_id,role) SELECT tenant_id,$3,'owner' FROM workspace")
+SQL_QUERY("account.rename_workspace", "text,uuid,text",
+    "UPDATE app.tenants SET display_name=$3,updated_at=now() WHERE tenant_id=$1 "
+    "AND EXISTS(SELECT 1 FROM app.tenant_memberships WHERE tenant_id=$1 AND user_id=$2 AND role IN('owner','admin'))")
+SQL_QUERY("account.members", "text",
+    "SELECT u.user_id,u.display_name,u.email,m.role FROM app.tenant_memberships m "
+    "JOIN app.users u USING(user_id) WHERE m.tenant_id=$1 ORDER BY m.created_at,u.user_id")
+SQL_QUERY("account.create_invitation", "uuid,text,bytea,text,uuid,timestamptz",
+    "INSERT INTO app.workspace_invitations(invitation_id,tenant_id,token_hash,role,created_by,expires_at) "
+    "SELECT $1,$2,$3,$4,$5,$6 WHERE EXISTS(SELECT 1 FROM app.tenant_memberships "
+    "WHERE tenant_id=$2 AND user_id=$5 AND (role='owner' OR (role='admin' AND $4='member')))")
+SQL_QUERY("account.invitations", "text",
+    "SELECT invitation_id,role,created_at,expires_at FROM app.workspace_invitations WHERE tenant_id=$1 "
+    "AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>now() ORDER BY created_at DESC,invitation_id")
+SQL_QUERY("account.revoke_invitation", "uuid,text,uuid",
+    "UPDATE app.workspace_invitations SET revoked_at=now() "
+    "WHERE invitation_id=$1 AND tenant_id=$2 AND accepted_at IS NULL AND revoked_at IS NULL "
+    "AND EXISTS(SELECT 1 FROM app.tenant_memberships WHERE tenant_id=$2 AND user_id=$3 AND role IN('owner','admin'))")
+SQL_QUERY("account.lock_invitation", "bytea",
+    "SELECT i.invitation_id,i.tenant_id,i.role FROM app.workspace_invitations i "
+    "JOIN app.tenant_memberships m ON m.tenant_id=i.tenant_id AND m.user_id=i.created_by "
+    "WHERE i.token_hash=$1 AND i.expires_at>now() AND i.revoked_at IS NULL AND i.accepted_at IS NULL "
+    "AND (m.role='owner' OR (m.role='admin' AND i.role='member')) FOR UPDATE OF i")
+SQL_QUERY("account.accept_invitation", "text,uuid,text,uuid",
+    "WITH membership AS (INSERT INTO app.tenant_memberships(tenant_id,user_id,role) "
+    "VALUES($1,$2,$3) ON CONFLICT(tenant_id,user_id) DO NOTHING RETURNING user_id) "
+    "UPDATE app.workspace_invitations SET accepted_at=now(),accepted_by=$2 WHERE invitation_id=$4 AND tenant_id=$1")
+SQL_QUERY("account.lock_workspace", "text",
+    "SELECT tenant_id FROM app.tenants WHERE tenant_id=$1 FOR UPDATE")
+SQL_QUERY("account.remove_member", "text,uuid,uuid",
+    "DELETE FROM app.tenant_memberships target WHERE target.tenant_id=$1 AND target.user_id=$2 "
+    "AND EXISTS(SELECT 1 FROM app.tenant_memberships actor WHERE actor.tenant_id=$1 AND actor.user_id=$3 "
+    "AND (actor.role='owner' OR (actor.role='admin' AND target.role='member'))) "
+    "AND (target.role<>'owner' OR (SELECT count(*) FROM app.tenant_memberships WHERE tenant_id=$1 AND role='owner')>1)")
+SQL_QUERY("identity.revoke_workspace_sessions", "text,uuid",
+    "UPDATE app.web_sessions SET revoked_at=now() WHERE tenant_id=$1 AND user_id=$2 AND revoked_at IS NULL")
+SQL_QUERY("identity.create_account", "uuid,uuid,text,text,text,text,text,text,text,text",
+    "WITH new_user AS (INSERT INTO app.users(user_id,display_name,email,avatar_url) VALUES($1,$9,$8,$10) RETURNING user_id), "
+    "new_tenant AS (INSERT INTO app.tenants(tenant_id,display_name,kind) VALUES($3,$4,'personal') RETURNING tenant_id), "
+    "new_identity AS (INSERT INTO app.external_identities(identity_id,user_id,provider,issuer,subject,email) "
+    "SELECT $2,user_id,$5,$6,$7,$8 FROM new_user RETURNING user_id) "
+    "INSERT INTO app.tenant_memberships(tenant_id,user_id,role) "
+    "SELECT t.tenant_id,i.user_id,'owner' FROM new_tenant t CROSS JOIN new_identity i")
+SQL_QUERY("identity.account", "text,text,text",
+    "SELECT u.user_id,m.tenant_id,m.role,i.provider,u.email,u.display_name,u.avatar_url "
+    "FROM app.external_identities i JOIN app.users u ON u.user_id=i.user_id "
+    "JOIN app.tenant_memberships m ON m.user_id=u.user_id JOIN app.tenants t ON t.tenant_id=m.tenant_id "
+    "WHERE i.provider=$1 AND i.issuer=$2 AND i.subject=$3 "
+    "ORDER BY CASE t.kind WHEN 'personal' THEN 0 ELSE 1 END, "
+    "CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,m.created_at,m.tenant_id LIMIT 1")
+SQL_QUERY("identity.update_profile", "uuid,text,text,text,text,text,text",
+    "WITH profile AS (UPDATE app.users SET display_name=COALESCE($6,display_name),email=COALESCE($5,email), "
+    "avatar_url=COALESCE($7,avatar_url),updated_at=now() WHERE user_id=$1 RETURNING user_id) "
+    "UPDATE app.external_identities SET email=COALESCE($5,email),last_login_at=now() "
+    "WHERE provider=$2 AND issuer=$3 AND subject=$4 AND user_id IN(SELECT user_id FROM profile)")
 SQL_QUERY("identity.upsert_client", "text,text,text",
-    "INSERT INTO app.auth_clients (provider, client_id, authority, enabled, updated_at) VALUES ($1, $2, $3, "
-    "true, now()) ON CONFLICT (provider) DO UPDATE SET client_id = EXCLUDED.client_id, authority = "
-    "EXCLUDED.authority, enabled = true, updated_at = now();")
-SQL_QUERY("identity.put_web_session", "text,uuid,text,bytea,timestamptz,timestamptz,timestamptz",
-    "INSERT INTO app.web_sessions (session_id, user_id, tenant_id, ticket, created_at, last_seen_at, "
-    "expires_at, revoked_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL) ON CONFLICT (session_id) DO UPDATE "
-    "SET ticket = EXCLUDED.ticket, last_seen_at = EXCLUDED.last_seen_at, expires_at = EXCLUDED.expires_at, "
-    "revoked_at = NULL;")
-SQL_QUERY("identity.get_web_session", "text",
-    "SELECT session_id, user_id, tenant_id, ticket, created_at, last_seen_at, expires_at, revoked_at FROM "
-    "app.web_sessions WHERE session_id = $1 AND revoked_at IS NULL AND expires_at > now();")
-SQL_QUERY("identity.revoke_web_session", "text,uuid",
-    "UPDATE app.web_sessions SET revoked_at = now() WHERE session_id = $1 AND user_id = $2 AND revoked_at "
-    "IS NULL;")
-SQL_QUERY("identity.list_web_sessions", "uuid",
-    "SELECT session_id, user_id, tenant_id, ticket, created_at, last_seen_at, expires_at, revoked_at FROM "
-    "app.web_sessions WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now() ORDER BY "
-    "last_seen_at DESC;")
+    "INSERT INTO app.auth_clients(provider,client_id,authority,enabled,updated_at) VALUES($1,$2,$3,true,now()) "
+    "ON CONFLICT(provider) DO UPDATE SET client_id=EXCLUDED.client_id,authority=EXCLUDED.authority,enabled=true,updated_at=now()")
+SQL_QUERY("identity.put_session", "text,uuid,text,bytea,timestamptz,timestamptz,timestamptz",
+    "INSERT INTO app.web_sessions(session_id,user_id,tenant_id,ticket,created_at,last_seen_at,expires_at,revoked_at) "
+    "VALUES($1,$2,$3,$4,$5,$6,$7,NULL) ON CONFLICT(session_id) DO UPDATE SET ticket=EXCLUDED.ticket, "
+    "last_seen_at=EXCLUDED.last_seen_at,expires_at=EXCLUDED.expires_at "
+    "WHERE app.web_sessions.user_id=EXCLUDED.user_id AND app.web_sessions.tenant_id=EXCLUDED.tenant_id "
+    "AND app.web_sessions.revoked_at IS NULL")
+SQL_QUERY("identity.session", "text",
+    "SELECT session_id,user_id,tenant_id,ticket,created_at,last_seen_at,expires_at,revoked_at "
+    "FROM app.web_sessions WHERE session_id=$1 AND revoked_at IS NULL AND expires_at>now()")
+SQL_QUERY("identity.revoke_session", "text,uuid",
+    "UPDATE app.web_sessions SET revoked_at=now() WHERE session_id=$1 AND user_id=$2 AND revoked_at IS NULL")
+SQL_QUERY("identity.sessions", "uuid",
+    "SELECT session_id,user_id,tenant_id,ticket,created_at,last_seen_at,expires_at,revoked_at "
+    "FROM app.web_sessions WHERE user_id=$1 AND revoked_at IS NULL AND expires_at>now() ORDER BY last_seen_at DESC,session_id")
 SQL_QUERY("identity.upsert_conversation", "text,text,uuid,text",
-    "INSERT INTO app.conversation_sessions (tenant_id, session_key, user_id, title, created_at, "
-    "last_turn_at) VALUES ($1, $2, $3, $4, now(), now()) ON CONFLICT (tenant_id, session_key) DO UPDATE SET "
-    "last_turn_at = now(), title = COALESCE(app.conversation_sessions.title, EXCLUDED.title) WHERE "
-    "app.conversation_sessions.user_id = EXCLUDED.user_id;")
-SQL_QUERY("identity.list_conversations", "uuid,text",
-    "SELECT session_key, title, created_at, last_turn_at FROM app.conversation_sessions WHERE user_id = $1 "
-    "AND tenant_id = $2 AND archived_at IS NULL ORDER BY last_turn_at DESC;")
+    "INSERT INTO app.conversation_sessions(tenant_id,session_key,user_id,title,created_at,last_turn_at) "
+    "VALUES($1,$2,$3,$4,now(),now()) ON CONFLICT(tenant_id,session_key) DO UPDATE SET last_turn_at=now(), "
+    "title=COALESCE(app.conversation_sessions.title,EXCLUDED.title) WHERE app.conversation_sessions.user_id=EXCLUDED.user_id")
+SQL_QUERY("identity.conversations", "uuid,text",
+    "SELECT session_key,title,created_at,last_turn_at FROM app.conversation_sessions "
+    "WHERE user_id=$1 AND tenant_id=$2 AND archived_at IS NULL ORDER BY last_turn_at DESC,session_key")
+SQL_QUERY("billing.apply_subscription", "text,text,text,timestamptz,timestamptz,jsonb,text,text,int8,bool",
+    "SELECT tenant,plan_id,status,period_start,period_end,monthly_credits,used_credits, "
+    "stripe_customer_id,stripe_subscription_id,updated_at,cancel_at_period_end "
+    "FROM app.apply_subscription($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+SQL_QUERY("billing.deactivate_subscription", "text,text",
+    "UPDATE app.billing_entitlements SET status=$1,updated_at=now() WHERE stripe_subscription_id=$2 AND status<>'replaced' "
+    "RETURNING tenant,plan_id,status,period_start,period_end,monthly_credits,used_credits, "
+    "stripe_customer_id,stripe_subscription_id,updated_at,cancel_at_period_end")
+SQL_QUERY("billing.entitlements", "text",
+    "SELECT tenant,plan_id,status,period_start,period_end,monthly_credits,used_credits, "
+    "stripe_customer_id,stripe_subscription_id,updated_at,cancel_at_period_end "
+    "FROM app.billing_entitlements WHERE tenant=$1 ORDER BY plan_id")
+SQL_QUERY("billing.consume_credit", "text,text,int4",
+    "SELECT plan_id,remaining,period_end FROM app.consume_credit($1,$2,$3)")
+SQL_QUERY("billing.begin_webhook", "text,text",
+    "INSERT INTO app.billing_webhook_events(event_id,status,updated_at) VALUES($1,$2,now()) "
+    "ON CONFLICT(event_id) DO UPDATE SET status=EXCLUDED.status,updated_at=now() "
+    "WHERE app.billing_webhook_events.status='retryable' OR (app.billing_webhook_events.status LIKE 'processing:%' "
+    "AND app.billing_webhook_events.updated_at<now()-interval '5 minutes')")
+SQL_QUERY("billing.complete_webhook", "text,text",
+    "UPDATE app.billing_webhook_events SET status=$2,updated_at=now() WHERE event_id=$1")
+SQL_QUERY("billing.webhook_status", "text",
+    "SELECT status FROM app.billing_webhook_events WHERE event_id=$1")

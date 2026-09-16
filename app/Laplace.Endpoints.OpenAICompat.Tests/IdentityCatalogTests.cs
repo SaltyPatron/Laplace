@@ -1,5 +1,6 @@
 using Laplace.Engine.Core;
-using Laplace.Endpoints.OpenAICompat.Auth;
+using Laplace.SubstrateCRUD.Npgsql;
+using Npgsql;
 using Xunit;
 
 namespace Laplace.Endpoints.OpenAICompat.Tests;
@@ -7,24 +8,21 @@ namespace Laplace.Endpoints.OpenAICompat.Tests;
 public sealed class IdentityCatalogTests
 {
     [Theory]
-    [InlineData("identity.create_user", "uuid,text,text,text")]
-    [InlineData("identity.create_tenant", "text,text")]
-    [InlineData("identity.create_external", "uuid,uuid,text,text,text,text")]
-    [InlineData("identity.create_membership", "text,uuid")]
-    [InlineData("identity.read_account", "text,text,text")]
-    [InlineData("identity.update_user", "text,text,text,uuid")]
-    [InlineData("identity.update_external", "text,text,text,text")]
+    [InlineData("identity.create_account", "uuid,uuid,text,text,text,text,text,text,text,text")]
+    [InlineData("identity.account", "text,text,text")]
+    [InlineData("identity.update_profile", "uuid,text,text,text,text,text,text")]
     [InlineData("identity.upsert_client", "text,text,text")]
-    [InlineData("identity.put_web_session", "text,uuid,text,bytea,timestamptz,timestamptz,timestamptz")]
-    [InlineData("identity.get_web_session", "text")]
-    [InlineData("identity.revoke_web_session", "text,uuid")]
-    [InlineData("identity.list_web_sessions", "uuid")]
+    [InlineData("identity.put_session", "text,uuid,text,bytea,timestamptz,timestamptz,timestamptz")]
+    [InlineData("identity.session", "text")]
+    [InlineData("identity.revoke_session", "text,uuid")]
+    [InlineData("identity.sessions", "uuid")]
     [InlineData("identity.upsert_conversation", "text,text,uuid,text")]
-    [InlineData("identity.list_conversations", "uuid,text")]
+    [InlineData("identity.conversations", "uuid,text")]
     public void EveryIdentityCommandUsesNativeTextAndTypedPositionalBindings(string name, string declaration)
     {
         var types = declaration.Split(',');
-        var command = PostgresIdentityStore.Query(name, new object?[types.Length]);
+        using var connection = new NpgsqlConnection();
+        using var command = NpgsqlCatalog.Command(connection, null, name, new object?[types.Length]);
         Assert.Equal(SqlCatalog.Get(name).Text, command.CommandText);
         Assert.Equal(types.Length, command.Parameters.Count);
         for (int i = 0; i < types.Length; i++)
@@ -41,19 +39,22 @@ public sealed class IdentityCatalogTests
     {
         var user = Guid.NewGuid();
         const string exactTitle = "  Owner's workspace; 日本語  ";
-        var command = PostgresIdentityStore.Query("identity.create_user", user, exactTitle, null, "");
+        using var connection = new NpgsqlConnection();
+        using var command = NpgsqlCatalog.Command(connection, null, "identity.create_account",
+            user, Guid.NewGuid(), "fixture-tenant", exactTitle, "provider", "issuer", "subject", null, "", null);
         Assert.Equal(user, command.Parameters[0].Value);
-        Assert.Equal(exactTitle, command.Parameters[1].Value);
-        Assert.Same(DBNull.Value, command.Parameters[2].Value);
-        Assert.Equal("text", command.Parameters[2].DataTypeName);
-        Assert.Equal("", command.Parameters[3].Value);
+        Assert.Equal(exactTitle, command.Parameters[3].Value);
+        Assert.Same(DBNull.Value, command.Parameters[7].Value);
+        Assert.Equal("text", command.Parameters[7].DataTypeName);
+        Assert.Equal("", command.Parameters[8].Value);
         Assert.DoesNotContain(exactTitle, command.CommandText);
     }
 
     [Fact]
     public void WrongArityAndUnknownQueryFailBeforeTransport()
     {
-        Assert.Throws<ArgumentException>(() => PostgresIdentityStore.Query("identity.read_account", "provider"));
-        Assert.Throws<ArgumentException>(() => PostgresIdentityStore.Query("identity.not_installed"));
+        using var connection = new NpgsqlConnection();
+        Assert.Throws<ArgumentException>(() => NpgsqlCatalog.Command(connection, null, "identity.account", "provider"));
+        Assert.Throws<ArgumentException>(() => NpgsqlCatalog.Command(connection, null, "identity.not_installed"));
     }
 }

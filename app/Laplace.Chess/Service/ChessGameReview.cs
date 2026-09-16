@@ -58,14 +58,14 @@ public static class ChessGameReview
             if (played is null) break;
             bool white = state.Board.WhiteToMove;
 
-            var br = best.Think(state.Board, new Search.Limits(MaxDepth: depth));
+            var br = best.Think(state, new Search.Limits(MaxDepth: depth));
             int whiteEval = white ? br.Score : -br.Score;
             if (Math.Abs(whiteEval) < MateRange) { minWhiteEval = Math.Min(minWhiteEval, whiteEval); maxWhiteEval = Math.Max(maxWhiteEval, whiteEval); }
             int cpl = 0; string bestUci = br.BestMove?.ToUci() ?? "";
             if (br.BestMove is { } bm && bm.ToUci() != played.Value.ToUci())
             {
                 var afterPlayed = m.Apply(state, played.Value);
-                var pr = verify.Think(afterPlayed.Board, new Search.Limits(MaxDepth: Math.Max(1, depth - 1)));
+                var pr = verify.Think(afterPlayed, new Search.Limits(MaxDepth: Math.Max(1, depth - 1)));
                 int playedValue = -pr.Score;
                 cpl = Clamp(br.Score, playedValue);
             }

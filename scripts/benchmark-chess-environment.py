@@ -32,6 +32,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from lib import chess_pgn
+
 ROOT = Path(__file__).resolve().parents[1]
 MIB = 1024 * 1024
 SCHEMA = "laplace.benchmark.chess-environment/v1"
@@ -851,25 +853,10 @@ def parse_benches(text):
             for ms, nodes, nps in summaries]
 
 
-def parse_pgn(text, expected):
-    records = [part for part in re.split(r'(?=^\[Event ")', text, flags=re.M) if part.strip()]
-    if len(records) != expected:
-        raise ValueError(f"expected {expected} PGN games, found {len(records)}")
-    games = []
-    for record in records:
-        tags = dict(re.findall(r'^\[(\w+) "(.*)"\]$', record, re.M))
-        result = tags.get("Result")
-        if result not in ("1-0", "0-1", "1/2-1/2"):
-            raise ValueError("PGN includes an unscored or incomplete game")
-        if tags.get("Termination", "").lower() not in ("normal", "adjudication"):
-            raise ValueError("PGN records a failed engine/game termination")
-        if not tags.get("PlyCount", "").isdigit() or int(tags["PlyCount"]) == 0:
-            raise ValueError("PGN lacks a numeric PlyCount")
-        if not record.rstrip().endswith(result):
-            raise ValueError("PGN movetext is truncated or disagrees with its Result tag")
-        games.append({"white": tags.get("White"), "black": tags.get("Black"), "result": result,
-                      "plies": int(tags["PlyCount"]), "termination": tags.get("Termination", "unspecified")})
-    return games
+def parse_pgn(text, expected, *, allow_adjudication=False, max_moves=0, provider=None):
+    if allow_adjudication != (max_moves > 0):
+        raise ValueError("PGN adjudication requires the explicit diagnostic move cap")
+    return chess_pgn.validate_games(text, expected, provider=provider, max_moves=max_moves)
 
 
 def verify_tournament(transcript, games):
@@ -895,14 +882,18 @@ def match_command(cutechess, stockfish, pgn, concurrency, games, args, laplace=N
         first = ["name=Laplace", "cmd=" + str(laplace), "proto=uci"]
         if args.laplace_substrate != "inherit":
             first.append("option.Substrate=" + args.laplace_substrate)
-    return [str(cutechess), "-engine", *first, "-engine", "name=Stockfish-B", "cmd=" + str(stockfish), *settings,
+    command = [str(cutechess), "-engine", *first, "-engine", "name=Stockfish-B", "cmd=" + str(stockfish), *settings,
             "-each", "tc=inf", "depth=" + str(args.match_depth), "-rounds", str(games), "-concurrency", str(concurrency),
-            "-maxmoves", str(args.max_moves), "-pgnout", str(pgn), "-debug", "all"]
+            "-pgnout", str(pgn), "-debug", "all"]
+    if args.max_moves:
+        command.extend(["-maxmoves", str(args.max_moves)])
+    return command
 
 
 def recommendations(report):
     sf = [case for case in report["stockfish_bench"] if case.get("status") == "complete"]
-    cc = [case for case in report["cutechess_matches"] if case.get("status") == "complete"]
+    cc = [case for case in report["cutechess_matches"] if case.get("status") == "complete"
+          and report["parameters"].get("max_moves", 0) == 0]
     result = {"scope": "Only measured configurations, exact executable identities and this host's admitted resource envelope.",
               "strength": "No Elo or Laplace-versus-Stockfish strength conclusion is supported by these calibration workloads.",
               "application": "Recommendations are proposals; this command changes no application configuration.",
@@ -934,7 +925,9 @@ def recommendations(report):
             "median_plies_per_second": winner["steady_plies_per_second"]["median"],
             "observed_range_overlaps_another_configuration": any(
                 item is not winner and item["steady_plies_per_second"]["max"] >= winner["steady_plies_per_second"]["min"] for item in cc),
-            "scope": "Measured move-limited Stockfish self-play with pondering off; Laplace gauntlet capacity requires its own paired measurement."}
+            "scope": "Measured complete Stockfish self-play games with pondering off; Laplace capacity requires its own paired measurement."}
+    if report["parameters"].get("max_moves", 0):
+        result["tournament_diagnostic_only"] = "Move-limited runs establish no complete-game capacity or tournament configuration recommendation."
     return result
 
 
@@ -958,7 +951,8 @@ def main():
     parser.add_argument("--match-hash-mb", type=int, default=16)
     parser.add_argument("--games", type=int)
     parser.add_argument("--match-depth", type=int, default=4)
-    parser.add_argument("--max-moves", type=int, default=8)
+    parser.add_argument("--max-moves", type=int, default=0,
+                        help="0 plays complete games; a positive cap requests only a move-limited diagnostic")
     parser.add_argument("--bench-limit", type=int, default=12)
     parser.add_argument("--bench-limit-type", choices=("depth", "nodes"), default="depth")
     parser.add_argument("--repeats", type=int, default=3)
@@ -968,13 +962,17 @@ def main():
     parser.add_argument("--api-base", type=api_base,
                         default=os.environ.get("LAPLACE_API_BASE", "http://127.0.0.1:" + os.environ.get("LAPLACE_API_PORT", "5187")))
     parser.add_argument("--plan-only", action="store_true", help="Inspect capability/resource admission without launching benchmark tools")
+    parser.add_argument("--pgn-validator-cache", type=Path, default=chess_pgn.default_cache(),
+                        help="Cache for the exact pinned external rules provider; no global Python installation")
+    parser.add_argument("--pgn-validator-offline", action="store_true",
+                        help="Require the verified PGN provider archive to be present in its cache")
     parser.add_argument("--runtime-only", action="store_true", help="Observe services, chess readiness before/after one depth-one Laplace evaluation, GPU, NNUE files and Stockfish UCI bootstrap; skip Stockfish search calibration and tournaments")
     args = parser.parse_args()
     if args.plan_only and args.runtime_only:
         parser.error("--plan-only and --runtime-only describe different execution scopes")
-    if min(args.repeats, args.match_threads, args.match_hash_mb, args.match_depth, args.max_moves, args.bench_limit,
-           args.engine_overhead_mb, args.max_seconds, args.case_timeout) <= 0 or args.reserve_cpus < 0 or not 0 < args.memory_fraction <= 1:
-        parser.error("counts/timeouts must be positive, reserve nonnegative, and memory fraction in (0,1]")
+    if min(args.repeats, args.match_threads, args.match_hash_mb, args.match_depth, args.bench_limit,
+           args.engine_overhead_mb, args.max_seconds, args.case_timeout) <= 0 or args.max_moves < 0 or args.reserve_cpus < 0 or not 0 < args.memory_fraction <= 1:
+        parser.error("counts/timeouts must be positive, move cap/reserve nonnegative, and memory fraction in (0,1]")
     output = args.output_dir.absolute()
     output.mkdir(parents=True, exist_ok=True)
     if (output / "report.json").exists():
@@ -999,6 +997,7 @@ def main():
               "purpose": "Machine-specific installed chess-tool environment calibration; this hostname identifies the measured machine.",
               "host": host, "plan": budget, "parameters": {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
               "stockfish_bench": [], "cutechess_matches": [], "paired_acceptance": None, "failures": [],
+              "tournament_scope": "complete-games" if args.max_moves == 0 else "move-limited-diagnostic",
               "cache_contract": {"machine_cold": "Not measured; OS filesystem cache is neither flushed nor controlled.",
                   "stockfish_first_sample": "First bench in a new process after capability discovery; process state cold, OS cache uncontrolled.",
                   "stockfish_steady_samples": "Subsequent bench commands in the same process; upstream bench issues ucinewgame and resets TT each bench.",
@@ -1038,6 +1037,9 @@ def main():
             report["status"] = "complete"
             print(f"CHESS_ENVIRONMENT_BENCHMARK status=complete scope=runtime_only report={report_path}")
             return 0
+        provider = chess_pgn.load_provider(args.pgn_validator_cache, offline=args.pgn_validator_offline)
+        report["pgn_validation_provider"] = provider[2]
+        save()
         for name, values in (("Threads", budget["threads"] + [args.match_threads]), ("Hash", budget["hash_mib"] + [args.match_hash_mb])):
             option = options.get(name)
             if not option or any(not int(option["min"]) <= value <= int(option["max"]) for value in values):
@@ -1078,9 +1080,12 @@ def main():
                 case["samples"].append(sample)
                 if not result["success"]:
                     raise ValueError(f"CuteChess tournament failed at concurrency {concurrency}")
-                games = parse_pgn(pgn.read_text(), budget["games_per_match_sample"])
+                games = parse_pgn(pgn.read_text(), budget["games_per_match_sample"], allow_adjudication=args.max_moves > 0,
+                                  max_moves=args.max_moves, provider=provider)
                 verify_tournament(Path(result["log"]).read_text(), games)
-                sample.update({"games": games, "pgn_sha256": sha256(pgn), "total_plies": sum(game["plies"] for game in games),
+                sample.update({"games": games, "pgn_sha256": sha256(pgn),
+                               "normal_completed_games": sum(game["normal_completion"] for game in games),
+                               "legal_moves_validated": True, "total_plies": sum(game["plies"] for game in games),
                                "games_per_second": len(games) / result["wall_seconds"],
                                "plies_per_second": sum(game["plies"] for game in games) / result["wall_seconds"]})
                 save()
@@ -1091,7 +1096,8 @@ def main():
         if args.laplace_uci:
             laplace = args.laplace_uci.absolute()
             pgn = output / "laplace-stockfish-paired.pgn"
-            paired = {"identity": source_identity(laplace), "scope": "Two move-limited paired search acceptance games; no Elo inference.",
+            paired = {"identity": source_identity(laplace),
+                      "scope": "Two complete paired games; no Elo inference." if args.max_moves == 0 else "Two move-limited diagnostic games; no complete-game or Elo inference.",
                       "substrate_requested": args.laplace_substrate,
                       "fairness": "Same per-move depth and process affinity; Stockfish Threads/Hash explicit, Laplace has no equivalent UCI knobs. No equal-work claim."}
             report["paired_acceptance"] = paired
@@ -1108,11 +1114,14 @@ def main():
             paired["process"] = result
             if not result["success"]:
                 raise ValueError("Laplace/Stockfish paired acceptance failed")
-            games = parse_pgn(pgn.read_text(), 2)
+            games = parse_pgn(pgn.read_text(), 2, allow_adjudication=args.max_moves > 0,
+                                  max_moves=args.max_moves, provider=provider)
             verify_tournament(Path(result["log"]).read_text(), games)
             if sorted(game["white"] for game in games) != ["Laplace", "Stockfish-B"]:
                 raise ValueError("paired acceptance did not exercise Laplace with both colors")
-            paired.update({"games": games, "pgn": str(pgn), "pgn_sha256": sha256(pgn)})
+            paired.update({"games": games, "pgn": str(pgn), "pgn_sha256": sha256(pgn),
+                           "normal_completed_games": sum(game["normal_completion"] for game in games),
+                           "legal_moves_validated": True})
         for key, binary in (("stockfish_identity", sf), ("cutechess_identity", cc)):
             if report[key]["sha256"] != sha256(binary):
                 report["evidence_invalid"] = True

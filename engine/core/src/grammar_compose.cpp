@@ -192,9 +192,10 @@ static int emit_grapheme_floor_entities(
          * row for a tier-0 identity. Only multi-codepoint clusters (combining
          * stacks, ZWJ sequences, Hangul, emoji) are real tier-1 content. */
         if (gv.child_count == 1) continue;
-        if (compose_id_push(emitted_entity, emitted_entity_n, emitted_entity_cap, gv.id) != 1)
-            continue;
-        if (push_entity(r, gv.id, 1, grapheme_type, 0) != 0) return -3;
+        const int novel_entity = compose_id_push(
+            emitted_entity, emitted_entity_n, emitted_entity_cap, gv.id);
+        if (novel_entity < 0) return -3;
+        if (novel_entity && push_entity(r, gv.id, 1, grapheme_type, 0) != 0) return -3;
         uint64_t gf = laplace_vertex_flags(1, 0, 0);
         hash128_t gid = gv.id;
         if (push_phys(r, gv.id, gv.coord, &gv.hilbert, &gid, &gf, 1) != 0)
@@ -923,8 +924,9 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     for (size_t idx = n; idx-- > 0;) {
         if (!st.comp_valid[idx]) continue;
         hash128_t id = st.comp_id[idx];
-        if (compose_id_push(&emitted_entity, &emitted_entity_n, &emitted_entity_cap, id) != 1)
-            continue;
+        const int novel_entity = compose_id_push(
+            &emitted_entity, &emitted_entity_n, &emitted_entity_cap, id);
+        if (novel_entity < 0) { rc = -3; goto fail_emit; }
 
         laplace_ast_node_t node;
         if (laplace_ast_get_node(ast, idx, &node) != 0) continue;
@@ -1026,7 +1028,8 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
          * asserts the value id is findable here). Whether a node becomes a ROW is the
          * drain's decision, and it reads this flag. */
         hash128_t tier_type = laplace_content_tier_type_id(st.comp_tier[idx]);
-        if (push_entity(r, id, st.comp_tier[idx], tier_type, (uint8_t)packaging) != 0) {
+        if (novel_entity &&
+            push_entity(r, id, st.comp_tier[idx], tier_type, (uint8_t)packaging) != 0) {
             rc = -3; goto fail_emit;
         }
 
@@ -1081,7 +1084,11 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
                 }
             }
         }
-        if (m > 0 && child_ids && materialize_phys && !packaging) {
+        /* Entity reuse cannot discard another computed composition. Keep the
+         * existing first candidate first; a collapsed duplicate AST wrapper
+         * still contributes only its span, without a new self physicality. */
+        if (m > 0 && child_ids && materialize_phys && !packaging &&
+            (novel_entity || m > 1)) {
             if (push_phys(r, id, st.comp_coord + idx * 4, &hb,
                           child_ids, child_flags, m) != 0) {
                 free(child_ids); free(child_flags);
@@ -1382,15 +1389,13 @@ typedef struct {
     uint8_t  emit_all;
     uint8_t* novel_entity;
     size_t   entity_n;
-    hash128_t* novel_ids;
-    size_t   novel_id_n;
 } compose_emit_filter_t;
 
 static compose_emit_filter_t make_emit_filter(
     const laplace_compose_result_t* r,
     const uint8_t*                  existing_bitmap,
     size_t                          bitmap_bits) {
-    compose_emit_filter_t f = {1, NULL, 0, NULL, 0};
+    compose_emit_filter_t f = {1, NULL, 0};
     if (!r || !existing_bitmap || existing_bitmap == NULL || bitmap_bits == 0) return f;
     tier_tree_t* tree = r->tree;
     if (!tree) return f;
@@ -1413,14 +1418,6 @@ static compose_emit_filter_t make_emit_filter(
     for (size_t i = 0; i < novel_count; ++i)
         f.novel_entity[novel_idx[i]] = 1;
 
-    f.novel_ids = (hash128_t*)malloc(novel_count * sizeof(hash128_t));
-    f.novel_id_n = 0;
-    if (f.novel_ids) {
-        for (size_t i = 0; i < r->entity_count; ++i) {
-            if (!f.novel_entity[i]) continue;
-            f.novel_ids[f.novel_id_n++] = r->entities[i].id;
-        }
-    }
     free(novel_idx);
     return f;
 }
@@ -1428,21 +1425,11 @@ static compose_emit_filter_t make_emit_filter(
 static void free_emit_filter(compose_emit_filter_t* f) {
     if (!f) return;
     free(f->novel_entity);
-    free(f->novel_ids);
     f->novel_entity = NULL;
-    f->novel_ids = NULL;
 }
 
 static int entity_novel(const compose_emit_filter_t* f, size_t idx) {
     return f->emit_all || (f->novel_entity && idx < f->entity_n && f->novel_entity[idx]);
-}
-
-static int phys_novel(const compose_emit_filter_t* f, const hash128_t* entity_id) {
-    if (f->emit_all || !f->novel_ids) return 1;
-    for (size_t i = 0; i < f->novel_id_n; ++i) {
-        if (hash128_equals(entity_id, &f->novel_ids[i])) return 1;
-    }
-    return 0;
 }
 
 int laplace_compose_drain_into_stage(
@@ -1481,13 +1468,18 @@ int laplace_compose_drain_into_stage(
             free_emit_filter(&filter);
             return -1;
         }
-        intent_stage_witness_record(stage, &e->id);
+        if (intent_stage_witness_record(stage, &e->id) != 0 ||
+            intent_stage_allocation_failed(stage)) {
+            free_emit_filter(&filter);
+            return -1;
+        }
     }
 
+    /* Presence and witness filters govern canonical entity creation. Every
+     * physicality already computed by the owner is a raw source observation,
+     * including another body or another observation of the same placement. */
     for (size_t i = 0; i < r->phys_count; ++i) {
         const laplace_compose_physicality_t* ph = &r->physicalities[i];
-        if (!phys_novel(&filter, &ph->entity_id)) continue;
-        if (intent_stage_witness_seen(stage, &ph->id)) continue;
         if (intent_stage_add_physicality(
                 stage, &ph->id, &ph->entity_id, 1, ph->coord, &ph->hilbert,
                 ph->trajectory_xyzm, (uint32_t)(ph->trajectory_n / 4), (int32_t)ph->n_constituents,
@@ -1495,7 +1487,11 @@ int laplace_compose_drain_into_stage(
             free_emit_filter(&filter);
             return -1;
         }
-        intent_stage_witness_record(stage, &ph->id);
+        (void)intent_stage_witness_record(stage, &ph->id);
+        if (intent_stage_allocation_failed(stage)) {
+            free_emit_filter(&filter);
+            return -1;
+        }
     }
 
     /* Text word-adjacency PRECEDES is NOT drained. Sequence is already carried by

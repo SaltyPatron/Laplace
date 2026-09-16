@@ -10,6 +10,25 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class DecomposerMultiPhaseBudgetTests
 {
     [Fact]
+    public async Task PhaseSourcePriorsArePreservedWithoutAssigningTheContainerPrior()
+    {
+        var first = new SyntheticPhase(1, 0.85);
+        var second = new SyntheticPhase(2, 0.7);
+        var decomposer = new SyntheticMultiPhase(first, second);
+        var changes = new List<SubstrateChange>();
+        await foreach (var change in decomposer.DecomposeAsync(new Context(), DecomposerOptions.Default))
+            changes.Add(change);
+        Assert.Equal(3, changes.Count);
+        foreach (var change in changes)
+        {
+            var expected = change.Metadata.SourceId == first.SourceId ? 0.85 : 0.7;
+            Assert.Equal(expected, change.RequireSourcePrior(change.Metadata.SourceId));
+            Assert.Single(change.PhysicalitySourcePriors);
+            Assert.False(change.PhysicalitySourcePriors.ContainsKey(decomposer.SourceId));
+        }
+    }
+
+    [Fact]
     public async Task MaxInputUnits_IsSharedAcrossPhases()
     {
         var first = new SyntheticPhase(3);
@@ -106,7 +125,7 @@ public sealed class DecomposerMultiPhaseBudgetTests
         }
     }
 
-    private sealed class SyntheticPhase(int count) : IDecomposer
+    private sealed class SyntheticPhase(int count, double? sourcePrior = null) : IDecomposer
     {
         public int Count => count;
         public long ReceivedCap { get; private set; }
@@ -130,9 +149,9 @@ public sealed class DecomposerMultiPhaseBudgetTests
             for (int i = 0; i < emit; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                yield return new SubstrateChangeBuilder(SourceId, $"phase/{i}")
-                    .SetInputUnitsConsumed(1)
-                    .Build();
+                var builder = new SubstrateChangeBuilder(SourceId, $"phase/{i}").SetInputUnitsConsumed(1);
+                if (sourcePrior is { } declared) builder.DeclareSourcePrior(declared);
+                yield return builder.Build();
                 await Task.Yield();
             }
         }

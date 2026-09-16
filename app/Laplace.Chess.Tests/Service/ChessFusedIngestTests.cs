@@ -23,6 +23,66 @@ public sealed class ChessFusedIngestTests
         return b.SetInputUnitsConsumed(1).Build();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ActualComposedObservationsRetainEveryOwningSourcePrior(bool analyzeInline)
+    {
+        var change = Compose(analyzeInline);
+        Assert.NotEmpty(change.PhysicalityObservations);
+        var declared = new Dictionary<Hash128, double>
+        {
+            [ChessVocabulary.PgnSourceId] = SourceTrust.StructuredCorpus,
+            [ChessAnalyze.SourceId] = SourceTrust.StructuredCorpus,
+            [ChessTransitions.SourceId] = SourceTrust.StructuredCorpus,
+            [ChessPositionOutcomes.SourceId] = SourceTrust.StructuredCorpus,
+            [ChessTacticOutcomes.SourceId] = SourceTrust.StructuredCorpus,
+            [ChessVocabulary.TrajectorySourceId] = SourceTrust.StructuredCorpus,
+            [ChessSyzygy.SourceId] = SourceTrust.StandardsDerived,
+        };
+        var observedSources = new HashSet<Hash128>();
+        void VerifySource(Hash128 sourceId)
+        {
+            Assert.True(declared.TryGetValue(sourceId, out var expected),
+                $"unexpected physicality source {sourceId}");
+            Assert.Equal(expected, change.RequireSourcePrior(sourceId));
+            observedSources.Add(sourceId);
+        }
+
+        try
+        {
+            Assert.All(change.PhysicalityObservations, row => VerifySource(row.SourceId));
+            foreach (var stage in change.IntentStages)
+            {
+                int covered = 0;
+                foreach (var range in stage.PhysicalitySourceRanges)
+                {
+                    Assert.Equal(covered, range.FirstRow);
+                    Assert.True(range.RowCount > 0);
+                    VerifySource(range.SourceId);
+                    covered = checked(covered + range.RowCount);
+                }
+                Assert.Equal(stage.PhysicalityCount, covered);
+            }
+
+            Assert.Contains(change.PhysicalityObservations,
+                row => row.SourceId == ChessVocabulary.PgnSourceId);
+            if (analyzeInline)
+            {
+                // Analysis content is emitted through native stages; the ordered
+                // position projection has the trajectory lane's own source.
+                Assert.Contains(ChessAnalyze.SourceId, observedSources);
+                Assert.Contains(change.PhysicalityObservations,
+                    row => row.SourceId == ChessVocabulary.TrajectorySourceId
+                        && row.Type == PhysicalityType.Projection);
+            }
+        }
+        finally
+        {
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
+    }
+
     [Fact]
     public void FusedCompose_EmitsWitnessedAndDerivedLayersTogether()
     {

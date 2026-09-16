@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -41,6 +42,18 @@ public sealed class ServiceControlTests
         public HttpClient Client() => CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
     }
 
+    private static async Task AssertOperatorRefusedAsync(HttpResponseMessage response)
+    {
+        using (response)
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var error = body.RootElement.GetProperty("error");
+            Assert.Equal("authentication_error", error.GetProperty("type").GetString());
+            Assert.Equal("operator_token_required", error.GetProperty("code").GetString());
+        }
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("incorrect")]
@@ -50,8 +63,8 @@ public sealed class ServiceControlTests
         using var client = factory.Client();
         client.DefaultRequestHeaders.Add("X-Laplace-Tenant", "operator");
         if (presented is not null) client.DefaultRequestHeaders.Add(OperatorAuth.TokenHeader, presented);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/v1/admin/services/mcp")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/v1/admin/services/mcp/stop", new { })).StatusCode);
+        await AssertOperatorRefusedAsync(await client.GetAsync("/v1/admin/services/mcp"));
+        await AssertOperatorRefusedAsync(await client.PostAsJsonAsync("/v1/admin/services/mcp/stop", new { }));
         Assert.Empty(factory.Control.Calls);
     }
 
@@ -61,7 +74,7 @@ public sealed class ServiceControlTests
         await using var factory = new Factory(token: null);
         using var client = factory.Client();
         client.DefaultRequestHeaders.Add(OperatorAuth.TokenHeader, "operator-test-only");
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/v1/admin/services/lichess")).StatusCode);
+        await AssertOperatorRefusedAsync(await client.GetAsync("/v1/admin/services/lichess"));
         Assert.Empty(factory.Control.Calls);
     }
 
@@ -117,7 +130,7 @@ public sealed class ServiceControlTests
     {
         await using var factory = new Factory(mode: mode);
         using var client = factory.Client();
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/v1/admin/services/mcp")).StatusCode);
+        await AssertOperatorRefusedAsync(await client.GetAsync("/v1/admin/services/mcp"));
         client.DefaultRequestHeaders.Add(OperatorAuth.TokenHeader, "operator-test-only");
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/v1/admin/services/mcp")).StatusCode);
         Assert.Single(factory.Control.Calls);

@@ -165,7 +165,10 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         await _writeGate.WaitAsync(ct);
         try
         {
-            var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext);
+            var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, session.LearnContext)
+                .DeclareSourcePrior(SourceTrust.Response)
+                .DeclareSourcePrior(ChessTransitions.SourceId, SourceTrust.StructuredCorpus)
+                .DeclareSourcePrior(ChessPositionOutcomes.SourceId, SourceTrust.StructuredCorpus);
 
             Hash128 playingId = default;
             if (session.PositionIds.Count > 0)

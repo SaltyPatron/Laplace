@@ -20,7 +20,8 @@ public static class UserPromptContent
 
     public static SubstrateChange BuildBootstrapChange()
     {
-        var b = new SubstrateChangeBuilder(Source, "bootstrap/UserPrompt", parentIntentId: null);
+        var b = new SubstrateChangeBuilder(Source, "bootstrap/UserPrompt", parentIntentId: null)
+            .DeclareSourcePrior(SourceTrust.SubstrateMandate);
         b.AddEntity(Source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId, Source);
         b.AddEntity(TextEntityBuilder.GraphemeTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
         b.AddEntity(TextEntityBuilder.WordTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
@@ -45,7 +46,8 @@ public static class UserPromptContent
 
         var b = new SubstrateChangeBuilder(Source, intentLabel, parentIntentId: null,
             entityCapacity: entities.Length, physicalityCapacity: physicalities.Length,
-            attestationCapacity: attestations.Length);
+            attestationCapacity: attestations.Length)
+            .DeclareSourcePrior(SourceTrust.UserPrompt);
         foreach (var e in entities) b.AddEntity(e);
         foreach (var p in physicalities) b.AddPhysicality(p);
         foreach (var a in attestations) b.AddAttestation(a);

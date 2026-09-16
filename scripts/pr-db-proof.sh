@@ -312,8 +312,32 @@ prove_native_database() {
 # and loads branch-native modules through dynamic_library_path. Preserve the
 # pg_regress diffs in the job log on failure so a red gate names the actual SQL or
 # native defect rather than collapsing back into an opaque CI failure.
+# Verify the built CTest command, not merely the source registration: a cached
+# BUILD_TESTING=OFF or missing pg_regress must not silently omit this acceptance.
+mkdir -p "$BUILD/test-results"
+native_selection="$BUILD/test-results/private-native-selection.json"
+ctest --test-dir "$BUILD" --show-only=json-v1 -L regress > "$native_selection"
+python3 - "$native_selection" <<'PY_NATIVE_SELECTION'
+import json
+import sys
+
+selection = json.load(open(sys.argv[1], encoding="utf-8"))
+suites = [test for test in selection.get("tests", [])
+          if test.get("name") == "regress_laplace_substrate"]
+if len(suites) != 1:
+    raise SystemExit("private database proof requires the built substrate regression suite")
+if any(prop.get("name") == "DISABLED" and prop.get("value")
+       for prop in suites[0].get("properties", [])):
+    raise SystemExit("private database proof cannot skip a disabled substrate regression suite")
+command = suites[0].get("command", [])
+required = ("physicality_descriptor_admission", "physicality_readback", "physicality_readback_cold")
+if any(command.count(fixture) != 1 for fixture in required):
+    raise SystemExit("private database proof is missing exact physicality admission/readback fixtures")
+if command.index("physicality_readback") >= command.index("physicality_readback_cold"):
+    raise SystemExit("private database proof must deposit retained forms before the cold-backend fixture")
+PY_NATIVE_SELECTION
 set +e
-ctest --test-dir "$BUILD" --output-on-failure -L regress
+ctest --test-dir "$BUILD" --output-on-failure --no-tests=error -L regress
 ctest_rc=$?
 set -e
 
@@ -342,10 +366,11 @@ PATH="$PG_PREFIX/bin:$PATH" \
 LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=laplace_substratecrud_test" \
 LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
 LAPLACE_OPERATIONAL_EXEMPLAR_RECEIPT="$exemplar_results/exemplar.json" \
+LAPLACE_CHESS_OBSERVATION_TEST_DIRECTORY="$exemplar_results/chess-position-observation" \
 LD_LIBRARY_PATH="$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
   dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj \
     -c Release --no-build --nologo --verbosity minimal \
-    --filter 'FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredAntonymExemplar_AdmitsCompleteSourceWithNativeParseProvenance|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredAntonymTask_ExecutesNovelRequestThroughAdmittedWordBinding|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery' \
+    --filter 'FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredTaskSource_BindsSynsetThroughTwoWitnessedNamingHops|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredAntonymExemplar_AdmitsCompleteSourceWithNativeParseProvenance|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.OperationalSourceExecutionTests.AuthoredAntonymTask_ExecutesNovelRequestThroughAdmittedWordBinding|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.ChessPositionPlayingPersistenceTests.CompleteDistinctPlayingsFoldOnceAndExactReplayPreservesEvidenceAndStanding|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.NativeSqlBatchTests.WitnessScopesExcludeCrossProductsButRetainConflictingObjects|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.PhysicalityObservationWriterTests.OrdinaryWriterRetainsBothRawFormsAndReusesDurableDescriptorViewEvidence|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.PhysicalityObservationWriterTests.ConsensusFoldsGeneratedEvidenceOncePerDistinctActualSourceUnit|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.PhysicalityObservationWriterTests.SourceOnlyJournalBackfillRequiresFreshVerificationAndAtomicGeneratedEvidence|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.PhysicalityObservationWriterTests.SourceOnlyConversationBackfillDoesNotAppendTheOriginalTurnAgain|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.PhysicalityObservationWriterTests.InvalidRawMetadataIsRejectedBeforeOpeningTheDatabase|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.SessionPhysicalityObservationTests.ExistingTurnAppendRetainsOldAndNewFormsAndWriterReplayDoesNotAppendAgain|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.SessionPhysicalityObservationTests.NativeSessionRollbackRetainsOriginalProjectionEvidenceAndFold|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.SessionPhysicalityObservationTests.WaitingReadCommittedAppenderReadsTheBodyCommittedAfterItsStatementStarted|FullyQualifiedName=Laplace.SubstrateCRUD.Tests.PhysicalityObservationWriterTests.MissingCarrierRetainsDescriptorAndLaterContentCompletesOnlyItsView' \
     --logger 'trx;LogFileName=operational-source-execution.trx' \
     --results-directory "$managed_results"
 python3 - "$managed_results/operational-source-execution.trx" <<'PY'
@@ -356,9 +381,9 @@ import xml.etree.ElementTree as ET
 
 root = ET.parse(sys.argv[1]).getroot()
 counters = root.find("{*}ResultSummary/{*}Counters")
-expected = {"total": "7", "executed": "7", "passed": "7", "failed": "0", "notExecuted": "0"}
+expected = {"total": "22", "executed": "22", "passed": "22", "failed": "0", "notExecuted": "0"}
 if counters is None or any(counters.get(key) != value for key, value in expected.items()):
-    raise SystemExit("private database proof did not execute and pass all seven required acceptance cases")
+    raise SystemExit("private database proof did not execute and pass all 22 required acceptance cases")
 prefix = "Laplace.SubstrateCRUD.Tests."
 expected_names = Counter([
     prefix + "OperationalSourceExecutionTests.AuthoredTaskSource_ExecutesNovelRequestAfterSharedAdmissionAndFold",
@@ -368,19 +393,118 @@ expected_names = Counter([
     prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent(batchPrefix: false)",
     prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent(batchPrefix: true)",
     prefix + "NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery",
+    prefix + "ChessPositionPlayingPersistenceTests.CompleteDistinctPlayingsFoldOnceAndExactReplayPreservesEvidenceAndStanding",
+    prefix + "NativeSqlBatchTests.WitnessScopesExcludeCrossProductsButRetainConflictingObjects",
+    prefix + "PhysicalityObservationWriterTests.OrdinaryWriterRetainsBothRawFormsAndReusesDurableDescriptorViewEvidence",
+    prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness(variant: 0, transportedForms: 1, expectedWitnesses: 1)",
+    prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness(variant: 1, transportedForms: 2, expectedWitnesses: 2)",
+    prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness(variant: 2, transportedForms: 3, expectedWitnesses: 2)",
+    prefix + "PhysicalityObservationWriterTests.ConsensusFoldsGeneratedEvidenceOncePerDistinctActualSourceUnit",
+    prefix + "PhysicalityObservationWriterTests.SourceOnlyJournalBackfillRequiresFreshVerificationAndAtomicGeneratedEvidence",
+    prefix + "PhysicalityObservationWriterTests.SourceOnlyConversationBackfillDoesNotAppendTheOriginalTurnAgain",
+    prefix + "PhysicalityObservationWriterTests.InvalidRawMetadataIsRejectedBeforeOpeningTheDatabase(partialTrajectory: false)",
+    prefix + "PhysicalityObservationWriterTests.InvalidRawMetadataIsRejectedBeforeOpeningTheDatabase(partialTrajectory: true)",
+    prefix + "SessionPhysicalityObservationTests.ExistingTurnAppendRetainsOldAndNewFormsAndWriterReplayDoesNotAppendAgain",
+    prefix + "SessionPhysicalityObservationTests.NativeSessionRollbackRetainsOriginalProjectionEvidenceAndFold",
+    prefix + "SessionPhysicalityObservationTests.WaitingReadCommittedAppenderReadsTheBodyCommittedAfterItsStatementStarted",
+    prefix + "PhysicalityObservationWriterTests.MissingCarrierRetainsDescriptorAndLaterContentCompletesOnlyItsView",
 ])
 results = root.findall("{*}Results/{*}UnitTestResult")
 # xUnit adapters render Boolean argument values with either .NET or C# casing.
 # Only that spelling may vary; both distinct theory rows must execute once.
-names = Counter(re.sub(r"(?<=batchPrefix: )(True|False)(?=\))",
+names = Counter(re.sub(r"(?<=: )(True|False)(?=\))",
                        lambda match: match.group(0).lower(), result.get("testName", ""))
                 for result in results)
 if names != expected_names or any(result.get("outcome") != "Passed" for result in results):
-    raise SystemExit("private database proof is missing an exact passing source/session acceptance case")
+    raise SystemExit("private database proof is missing an exact passing source/session/physicality/chess acceptance case")
 print("OPERATIONAL_SOURCE_EXECUTION_OK selected=3 executed=3 passed=3 skipped=0 postgres=isolated")
 print("OPERATIONAL_EXEMPLAR_ADMISSION_OK selected=1 executed=1 passed=1 skipped=0 postgres=isolated")
 print("SESSION_PROJECTION_EXECUTION_OK selected=3 executed=3 passed=3 skipped=0 postgres=isolated")
+print("CHESS_PLAYING_OBSERVATION_OK selected=1 executed=1 passed=1 skipped=0 postgres=isolated")
+print("CHESS_WITNESS_SCOPE_OK selected=1 executed=1 passed=1 skipped=0 postgres=isolated")
+print("PHYSICALITY_WRITER_EXECUTION_OK selected=10 executed=10 passed=10 skipped=0 postgres=isolated")
+print("SESSION_PHYSICALITY_EXECUTION_OK selected=3 executed=3 passed=3 skipped=0 postgres=isolated")
 PY
+
+# The endpoint database tier is also excluded from the later managed profile.
+# Exercise real identity and billing stores against the canonical migration
+# chain and branch-owned SQL catalog in this exact private postmaster.
+identity_database="${REGRESS_DB}_identity"
+identity_receipt="$managed_results/browser-identity.trx"
+rm -f -- "$identity_receipt"
+"$PG_PREFIX/bin/createdb" "$identity_database"
+"$PG_PREFIX/bin/psql" -X -v ON_ERROR_STOP=1 -d "$identity_database" \
+  -f "$ROOT/db/migrations/20260611000000_app_billing.sql" \
+  -f "$ROOT/db/migrations/20260722000000_app_billing_identity.sql" \
+  -f "$ROOT/db/migrations/20260807020000_app_consume_credit.sql" \
+  -f "$ROOT/db/migrations/20260915000000_app_identity_sessions.sql" \
+  -f "$ROOT/db/migrations/20260916000000_app_workspace_invitations.sql" \
+  -f "$ROOT/db/migrations/20260916000100_app_subscription_sync.sql" \
+  -f "$ROOT/db/migrations/20260916000200_browser_ticket_identity_binding.sql" >/dev/null
+LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=$identity_database" \
+LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
+LD_LIBRARY_PATH="$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
+  dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
+    -c Release --no-build --nologo --verbosity minimal \
+    --filter 'FullyQualifiedName=Laplace.Endpoints.OpenAICompat.Tests.BrowserIdentityTests.PostgresIdentityStorePersistsAccountSessionAndConversation' \
+    --logger 'trx;LogFileName=browser-identity.trx' \
+    --results-directory "$managed_results"
+python3 - "$identity_receipt" <<'PY_IDENTITY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+counters = root.find("{*}ResultSummary/{*}Counters")
+expected = {"total": "1", "executed": "1", "passed": "1", "failed": "0", "notExecuted": "0"}
+results = root.findall("{*}Results/{*}UnitTestResult")
+name = "Laplace.Endpoints.OpenAICompat.Tests.BrowserIdentityTests.PostgresIdentityStorePersistsAccountSessionAndConversation"
+if (counters is None or any(counters.get(key) != value for key, value in expected.items())
+        or len(results) != 1 or results[0].get("testName") != name
+        or results[0].get("outcome") != "Passed"):
+    raise SystemExit("private database proof did not execute and pass the exact identity store acceptance case")
+print("BROWSER_IDENTITY_EXECUTION_OK selected=1 executed=1 passed=1 skipped=0 postgres=isolated")
+PY_IDENTITY
+
+# Run every durable store contract against the same freshly migrated private
+# database. The exact TRX inventory makes an unavailable/skipped store a failure.
+billing_receipt="$managed_results/billing-stores.trx"
+rm -f -- "$billing_receipt"
+LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=$identity_database" \
+LAPLACE_PERFCACHE_BIN="$t0_perfcache" \
+LD_LIBRARY_PATH="$BUILD/engine/core:$BUILD/engine/dynamics:$BUILD/engine/synthesis:${LD_LIBRARY_PATH:-}" \
+  dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
+    -c Release --no-build --nologo --verbosity minimal \
+    --filter 'FullyQualifiedName~Laplace.Endpoints.OpenAICompat.Tests.PostgresBillingStoreContractTests.' \
+    --logger 'trx;LogFileName=billing-stores.trx' \
+    --results-directory "$managed_results"
+python3 - "$billing_receipt" <<'PY_BILLING'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+counters = root.find("{*}ResultSummary/{*}Counters")
+methods = {
+    "QuoteStore_PutGetUpdate_RoundTrips",
+    "Ledger_RecordsAndReadsNewestFirst",
+    "Entitlements_ActivateConsumeExhaustDeactivate",
+    "Entitlements_RenewResetsUsedCredits",
+    "WebhookEvents_DuplicateBeginIsRejected",
+    "PriceMap_SetOverwritesAndGets",
+    "ApiKeys_PutGetRevokeAndLabelLookup",
+    "Config_SetOverwritesAndGets",
+}
+prefix = "Laplace.Endpoints.OpenAICompat.Tests.PostgresBillingStoreContractTests."
+names = {prefix + method for method in methods}
+expected = {"total": "8", "executed": "8", "passed": "8", "failed": "0", "notExecuted": "0"}
+results = root.findall("{*}Results/{*}UnitTestResult")
+if (counters is None or any(counters.get(key) != value for key, value in expected.items())
+        or len(results) != len(names)
+        or {result.get("testName") for result in results} != names
+        or any(result.get("outcome") != "Passed" for result in results)):
+    raise SystemExit("private database proof did not execute and pass all eight exact billing store contracts")
+print("BILLING_STORE_EXECUTION_OK selected=8 executed=8 passed=8 skipped=0 postgres=isolated")
+PY_BILLING
+"$PG_PREFIX/bin/dropdb" "$identity_database"
 
 }
 

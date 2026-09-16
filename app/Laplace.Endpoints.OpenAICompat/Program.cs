@@ -113,6 +113,7 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionEnvelopeMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.ApiKeyEnforcementMiddleware>();
+app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.BillingAccountBoundaryMiddleware>();
 
 app.MapPrometheusScrapingEndpoint();
 app.MapOpenApi();
@@ -126,6 +127,7 @@ app.MapFoundryEndpoints();
 app.MapBillingEndpoints();
 app.MapBillingIdentityEndpoints();
 app.MapIdentityEndpoints();
+app.MapAccountEndpoints();
 app.MapChessEndpoints();
 app.MapChessPlayerModelEndpoints();
 app.MapChessReadEndpoints();

@@ -141,7 +141,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 {
                     ct.ThrowIfCancellationRequested();
                     experiment?.ValidateGame(gameText);
-                    if (ChessPgnDecomposer.TryParseGame(gameText) is not { } game) continue;
+                    if (ChessPgnDecomposer.TryParseGame(gameText,
+                        requireNormalCompletion: measurement?.RequiresNormalCompletion == true) is not { } game) continue;
                     measurement?.ObserveParsed(game);
                     parsed++;
                     chunk.Add(game);
@@ -213,7 +214,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 var (sourceId, _, _, weight) = ProfileSource(profile.Provider);
 
                 var b = new SubstrateChangeBuilder(sourceId,
-                    $"chess/player-profile/{profile.Provider}/{ChessGameFetcher.Sanitize(profile.ProviderId)}");
+                    $"chess/player-profile/{profile.Provider}/{ChessGameFetcher.Sanitize(profile.ProviderId)}")
+                    .DeclareSourcePrior(weight);
                 string identityName = profile.Provider.Equals("fide", StringComparison.OrdinalIgnoreCase)
                     ? profile.DisplayName : profile.ProviderId;
                 var playerId = ChessVocabulary.PlayerId(identityName);
@@ -327,9 +329,14 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         // retain only exact playing-grain attestation ids absent from durable evidence, and apply
         // those rows once. This repairs schema/identity evolution without treating a replay of the
         // same PGN as a second observation.
-        var record = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/ingest");
-        var analyze = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "chess/lab/ingest");
-        var repair = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/repair-playing");
+        var record = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/ingest")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
+        var analyze = new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "chess/lab/ingest")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
+            .DeclareSourcePrior(ChessTransitions.SourceId, SourceTrust.StructuredCorpus)
+            .DeclareSourcePrior(ChessPositionOutcomes.SourceId, SourceTrust.StructuredCorpus);
+        var repair = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/repair-playing")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
         int novel = 0;
         var novelIds = new HashSet<Hash128>();
         var observedPositions = new HashSet<Hash128>();

@@ -15,6 +15,43 @@ public sealed record SubstrateChange(
 {
     public bool CountsAsUnit { get; init; } = true;
     public SubstrateApplyEnvelope? ApplyEnvelope { get; init; }
+    /// <summary>
+    /// Source physicality bodies before current-placement selection. The native
+    /// descriptor owner identifies exact forms and retains their observation scope.
+    /// Default means a caller supplied only <see cref="Physicalities"/>.
+    /// </summary>
+    public ImmutableArray<PhysicalityRow> PhysicalityObservations { get; init; }
+    /// <summary>Explicit priors for the source owners of this unit's raw physicality
+    /// observations. This is producer metadata, not a trust inferred from entity
+    /// identity, relation weight, or the first selected placement.</summary>
+    public ImmutableDictionary<Hash128, double> PhysicalitySourcePriors { get; init; } =
+        ImmutableDictionary<Hash128, double>.Empty;
+
+    public SubstrateChange WithSourcePrior(Hash128 sourceId, double sourceTrust)
+    {
+        ValidateSourcePrior(sourceTrust);
+        if (PhysicalitySourcePriors.TryGetValue(sourceId, out double prior))
+        {
+            if (BitConverter.DoubleToInt64Bits(prior) != BitConverter.DoubleToInt64Bits(sourceTrust))
+                throw new InvalidOperationException($"source {sourceId} has conflicting priors in one physicality observation unit");
+            return this;
+        }
+        return this with { PhysicalitySourcePriors = PhysicalitySourcePriors.Add(sourceId, sourceTrust) };
+    }
+
+    public double RequireSourcePrior(Hash128 sourceId)
+    {
+        if (!PhysicalitySourcePriors.TryGetValue(sourceId, out double prior))
+            throw new InvalidOperationException($"physicality source {sourceId} has no declared prior in intent {Metadata.IntentId}");
+        ValidateSourcePrior(prior);
+        return prior;
+    }
+
+    internal static void ValidateSourcePrior(double sourceTrust)
+    {
+        if (!double.IsFinite(sourceTrust) || sourceTrust < 0 || sourceTrust > 1)
+            throw new ArgumentOutOfRangeException(nameof(sourceTrust), "source prior must be finite and in [0,1]");
+    }
 }
 
 public sealed record TestimonyWalkRow(

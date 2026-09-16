@@ -126,9 +126,37 @@ def visible_phases(job: dict, kind: str) -> tuple[list[str], int, int]:
 def result_authority(name: str, workflow: dict) -> None:
     """Optional diagnostics never acquire proof authority; readiness is deferred."""
     if name == "benchmark-evidence.yml":
-        if set(workflow.get("jobs") or {}) != {"benchmark"}:
-            fail("benchmark-evidence.yml: the reusable workflow may expose only its measurement job")
-        for job in (workflow.get("jobs") or {}).values():
+        jobs = workflow.get("jobs") or {}
+        if set(jobs) != {"benchmark", "acceptance"}:
+            fail("benchmark-evidence.yml: the reusable workflow may expose only its measurement job and explicit acceptance job")
+        if (workflow.get("on") or {}).get("push") != {"branches": ["verify/chess-acceptance-*"]}:
+            fail("benchmark-evidence.yml: acceptance push trigger must remain an explicitly named operator branch")
+        if jobs.get("benchmark", {}).get("if") != "inputs.suite != 'acceptance' && (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/verify/chess-acceptance-'))":
+            fail("benchmark-evidence.yml: ordinary suites must exclude explicit acceptance selection")
+        acceptance = jobs.get("acceptance", {})
+        if acceptance.get("if") != "(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/verify/chess-acceptance-')) || inputs.suite == 'acceptance'":
+            fail("benchmark-evidence.yml: acceptance must remain explicitly selected")
+        if "needs" in acceptance:
+            fail("benchmark-evidence.yml: acceptance must remain independent from deployment")
+        if acceptance.get("timeout-minutes") != "600":
+            fail("benchmark-evidence.yml: acceptance must retain its finite whole-job envelope")
+        acceptance_steps = acceptance.get("steps") or []
+        execution = unique_step(acceptance_steps, "id", "chess_acceptance", "benchmark-evidence.yml:acceptance")
+        evidence = unique_step(acceptance_steps, "name", "Upload complete chess acceptance evidence", "benchmark-evidence.yml:acceptance")
+        if execution:
+            for token in ("set -euo pipefail", "flock --exclusive --close /build/laplace/work/host-resource.lock",
+                          "python3 scripts/accept-chess-environment.py", '--output-dir "$LAPLACE_BENCH_RECEIPT/acceptance"'):
+                if token not in execution[1].get("run", ""):
+                    fail(f"benchmark-evidence.yml: acceptance lost its canonical locked owner: {token}")
+        if evidence:
+            upload = evidence[1]
+            if upload.get("if") != "always()" or not upload.get("uses", "").startswith("actions/upload-artifact@"):
+                fail("benchmark-evidence.yml: acceptance evidence must upload on failure")
+            if (upload.get("with") or {}).get("if-no-files-found") != "error":
+                fail("benchmark-evidence.yml: missing acceptance evidence must fail")
+            if "selection.private.json" not in (upload.get("with") or {}).get("path", ""):
+                fail("benchmark-evidence.yml: private corpus selection must remain excluded")
+        for job in jobs.values():
             for token in ("product-ci.sh", "ci-session.py", "pipeline.sh install", "pipeline.sh migrate", "publish-applications.sh", "systemctl ", "sudo "):
                 if token in runs(job):
                     fail(f"benchmark-evidence.yml: measurement may not acquire product mutation authority: {token}")
@@ -224,33 +252,11 @@ def result_authority(name: str, workflow: dict) -> None:
 
 def product_topology(main: dict) -> None:
     jobs = main.get("jobs") or {}
-    if set(jobs) != {"product", "chess_environment"}:
-        fail(f"laplace.yml must expose one product job and its chess measurement, found {sorted(jobs)}")
-    calibration = jobs.get("chess_environment") or {}
-    allowed_keys = {"name", "needs", "if", "uses", "with"}
-    if set(calibration) - allowed_keys:
-        fail("laplace.yml: chess measurement may only call the bounded reusable workflow")
-    if calibration.get("needs") != "product":
-        fail("laplace.yml: chess measurement must depend on the single product authority")
-    if calibration.get("uses") != "./.github/workflows/benchmark-evidence.yml":
-        fail("laplace.yml: chess measurement must use the canonical benchmark workflow")
-    if calibration.get("if") != "always() && !cancelled() && needs.product.outputs.chess_benchmark_ready == 'true'":
-        fail("laplace.yml: chess measurement requires current-job completed corpus acceptance")
-    options = calibration.get("with") or {}
-    if options.get("suite") != "chess" or options.get("target_ref") != "${{ needs.product.outputs.activated_ref }}":
-        fail("laplace.yml: post-activation measurement must bind chess to the activated source")
-    if set(options) - {"suite", "target_ref", "repeats", "reserve_logical_cpus", "allow_saturation"}:
-        fail("laplace.yml: post-activation measurement accepts only bounded chess inputs")
+    if set(jobs) != {"product"}:
+        fail(f"laplace.yml must expose product delivery without domain measurement jobs, found {sorted(jobs)}")
     product_job = jobs.get("product") or {}
-    expected_outputs = {
-        "chess_benchmark_ready": "${{ steps.product_chess_completion.outputs.chess_benchmark_ready }}",
-        "activated_ref": "${{ steps.product_chess_completion.outputs.activated_ref }}",
-        "chess_acceptance_stage": "${{ steps.product_chess_completion.outputs.chess_acceptance_stage }}",
-    }
-    if product_job.get("outputs") != expected_outputs:
-        fail("laplace.yml: measurement outputs must come from the current lifecycle completion")
     steps = product_job.get("steps") or []
-    phases, start_index, stop_index = visible_phases(product_job, "product")
+    phases, _, _ = visible_phases(product_job, "product")
     plans = [canonical_phases("product", stage) for stage in (
         "check", "build", "test", "deploy", "integrate", "all",
         "application-check", "applications")]
@@ -258,53 +264,21 @@ def product_topology(main: dict) -> None:
     if set(phases) != required:
         fail(f"laplace.yml: visible phases differ from the complete shared lifecycle: {sorted(required ^ set(phases))}")
     for plan in plans:
-        selected = [phase for phase in phases if phase in plan]
-        if selected != plan:
+        if [phase for phase in phases if phase in plan] != plan:
             fail("laplace.yml: visible phase order differs from the shared lifecycle")
-    completion = unique_step(steps, "id", "product_chess_completion", "laplace.yml:product")
     session = unique_step(steps, "id", "product_session", "laplace.yml:product")
-    corpus_if = "always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')"
     if session:
         environment = session[1].get("env") or {}
-        for key, directory in (
-            ("LAPLACE_OPERATIONAL_PROOF_DIRECTORY", "operational-proof"),
-            ("LAPLACE_STOCKFISH_CORPUS_DIRECTORY", "stockfish-corpus-evidence"),
-            ("LAPLACE_RECORDED_CHESS_DIRECTORY", "recorded-chess-evidence"),
-            ("LAPLACE_RETAINED_CHESS_DIRECTORY", "retained-chess-evidence"),
-            ("LAPLACE_CHESS_RUNTIME_DIRECTORY", "chess-runtime-evidence"),
-            ("LAPLACE_POSTGRES_GEOMETRY_DIRECTORY", "postgres-geometry-evidence"),
-        ):
-            if environment.get(key) != "/build/laplace/work/" + directory + "/${{ github.run_id }}-${{ github.run_attempt }}":
-                fail("laplace.yml: lifecycle evidence must identify this exact run and attempt")
-    for phase, name, directory in (
-        ("stockfish-corpus", "Retain official Stockfish corpus admission evidence", "stockfish-corpus-evidence"),
-        ("recorded-chess", "Retain installed recorded-game benchmark evidence", "recorded-chess-evidence"),
-        ("recorded-chess", "Retain installed retained-PGN admission and replay evidence", "retained-chess-evidence"),
-        ("chess-runtime", "Retain installed chess service and bootstrap observations", "chess-runtime-evidence"),
-        ("recorded-chess", "Retain PostgreSQL geometry write and readback measurements", "postgres-geometry-evidence"),
-    ):
-        attempted = unique_step(steps, "id", "product_" + phase.replace("-", "_"), "laplace.yml:product")
-        upload = unique_step(steps, "name", name, "laplace.yml:product")
-        if upload and attempted:
-            if upload[0] <= attempted[0] or upload[1].get("if") != corpus_if:
-                fail("laplace.yml: application-publishing stage failure evidence must upload after the attempted phase")
-            if not upload[1].get("uses", "").startswith("actions/upload-artifact@"):
-                fail("laplace.yml: recorded-game failure evidence must upload as an artifact")
-            expected_paths = ["/build/laplace/work/" + directory + "/${{ github.run_id }}-${{ github.run_attempt }}/"]
-            if phase == "stockfish-corpus":
-                expected_paths.append("!" + expected_paths[0] + "selection.private.json")
-            if (upload[1].get("with") or {}).get("path", "").strip().splitlines() != expected_paths:
-                fail("laplace.yml: lifecycle upload must retain this exact run and attempt")
+        if environment.get("LAPLACE_OPERATIONAL_PROOF_DIRECTORY") != "/build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}":
+            fail("laplace.yml: operational evidence must identify this exact run and attempt")
     operational = unique_step(steps, "name", "Upload operational seed and execution receipts", "laplace.yml:product")
-    post = unique_step(steps, "id", "product_post_stockfish_execution", "laplace.yml:product")
-    if operational and post:
-        expected = "always() && steps.product_session.outcome != 'skipped' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')"
-        if operational[0] <= post[0] or operational[1].get("if") != expected:
-            fail("laplace.yml: operational proof evidence must upload after the attempted post-Stockfish phase")
-    if any(step.get("id") == "chess_benchmark_gate" or "ready=true" in step.get("run", "")
-           or "scripts/ingest-stockfish-corpus.py" in step.get("run", "") for step in steps
-           if step.get("name") != "Classify source-only change"):
-        fail("laplace.yml: corpus execution and completion must stay inside the product lifecycle")
+    execution = unique_step(steps, "id", "product_operational_execution", "laplace.yml:product")
+    if operational and execution:
+        expected = "always() && steps.product_session.outcome == 'success' && contains(env.LAPLACE_CI_PHASES, '|operational-seed|')"
+        if operational[0] <= execution[0] or operational[1].get("if") != expected:
+            fail("laplace.yml: retain operational receipts after attempted execution, including seed-only stages")
+        if (operational[1].get("with") or {}).get("path") != "/build/laplace/work/operational-proof/${{ github.run_id }}-${{ github.run_attempt }}/":
+            fail("laplace.yml: operational upload must retain this exact run and attempt")
 
 
 
@@ -372,8 +346,8 @@ else:
     product = PRODUCT.read_text(encoding="utf-8")
     required_order = [
         "policy", "dependencies", "build", "native-dev", "managed-dev", "uci-dev", "browser-dev",
-        "native-install", "database-maintenance", "foundation", "operational-seed", "publish", "chess-runtime",
-        "operational-execution", "stockfish-corpus", "post-stockfish-execution", "chess-completion", "recorded-chess", "db-health", "native-db", "managed-db", "live-floor", "live-api",
+        "native-install", "database-maintenance", "foundation", "operational-seed", "publish",
+        "operational-execution", "db-health", "native-db", "managed-db", "live-floor", "live-api",
         "managed-live", "generation-eval", "performance",
     ]
     if canonical_phases("product", "all") != required_order:
@@ -392,11 +366,6 @@ else:
         'db-health|managed-db) run_suite db "$1"',
         'run_suite db native-db',
         'operational-execution) verify_operational_execution ;;',
-        'chess-runtime) observe_chess_runtime ;;',
-        'stockfish-corpus) run_stockfish_corpus_acceptance ;;',
-        'post-stockfish-execution) verify_operational_execution post-stockfish- ;;',
-        'chess-completion) record_chess_completion ;;',
-        'recorded-chess) run_recorded_chess_benchmark ;;',
     ):
         if token not in product:
             fail(f"product lifecycle missing {token}")
@@ -501,7 +470,7 @@ for name, workflow in workflows.items():
             fail(f"{name}: seed mutation lacks explicit invocation")
 
 push = {name for name, workflow in workflows.items() if "push" in triggers(workflow)}
-if push != {"laplace.yml", "repo-hygiene.yml"}:
+if push != {"laplace.yml", "repo-hygiene.yml", "benchmark-evidence.yml"}:
     fail(f"automatic push workflows drifted: {sorted(push)}")
 
 runner = (ROOT / "scripts" / "bootstrap-laplace-runner.sh").read_text(encoding="utf-8")
