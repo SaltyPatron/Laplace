@@ -1,0 +1,28 @@
+name: Qualify chess floor adoption controls
+on:
+  push:
+    branches: [qualify/chess-floor-adoption-20260916]
+permissions:
+  contents: read
+jobs:
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: d1e40fc7afc1fdc6aa09e175a69aefc8135d34ec
+          persist-credentials: false
+      - name: Qualify exact corrected publication and cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d1e40fc7afc1fdc6aa09e175a69aefc8135d34ec
+          test "$(git write-tree)" = 43a682dca3f5df9e5a72f0ca3cd05a4d0756ab9a
+          mkdir -p "$RUNNER_TEMP/chess-floor-adoption"
+          export TMPDIR="$RUNNER_TEMP/chess-floor-adoption"
+          python3 -m venv "$RUNNER_TEMP/floor-venv"
+          "$RUNNER_TEMP/floor-venv/bin/python" -m pip install --disable-pip-version-check PyYAML==6.0.2
+          "$RUNNER_TEMP/floor-venv/bin/python" -m py_compile scripts/chess-floor-artifacts.py scripts/test-chess-floor-artifacts.py scripts/test-managed-host.py
+          "$RUNNER_TEMP/floor-venv/bin/python" scripts/test-chess-floor-artifacts.py
+          "$RUNNER_TEMP/floor-venv/bin/python" scripts/test-managed-host.py
