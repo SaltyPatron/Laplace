@@ -43,7 +43,6 @@ jobs:
               return result.stdout.strip()
           git('fetch', 'origin', '+refs/heads/*:refs/remotes/origin/*', '+refs/pull/*/head:refs/recovery/pulls/*')
           previous = git('show', '79de57897d10d7f5c6da5c829bc624b2cf326091:.github/workflows/repo-hygiene.yml')
-          # Parse immutable data only; never execute previous workflow code.
           raw = previous.split("PLAN_JSON = r'''",1)[1].split("'''",1)[0]
           plan = json.loads(raw)
           corrected = {
@@ -55,10 +54,15 @@ jobs:
           for entry in plan['entries']:
               if entry['path'] in corrected:
                   entry['sha'] = corrected[entry['path']]
-          if plan['base'] != '088ca5c01de2eea68e9ec171edb21a870cf5d9b4' or plan['expected_tree'] != 'e0d8adb6c796e694150a3a09dbdf9f22e57ff389' or len(plan['entries']) != 34:
-              raise RuntimeError('Unexpected source plan identity')
+              if entry['path'] == 'scripts/test-postgresql-release.py':
+                  wrapped = '+        cmake_spec = importlib.util.spec_from_file_location(\n+            "cmake_fixture_owner", project / "scripts/provision-cmake.py")'
+                  unwrapped = '+        cmake_spec = importlib.util.spec_from_file_location("cmake_fixture_owner", project / "scripts/provision-cmake.py")'
+                  if entry['patch'].count(wrapped) != 1:
+                      raise RuntimeError('Unexpected PostgreSQL transfer patch')
+                  entry['patch'] = entry['patch'].replace(wrapped, unwrapped)
           canonical = (json.dumps(plan,separators=(',',':'))+'\n').encode()
-          print('PLAN_DATA_SHA256 '+hashlib.sha256(canonical).hexdigest(),flush=True)
+          if hashlib.sha256(canonical).hexdigest() != 'b60448db7b7491670487deace27e321a970fb340d5ace82e702b22ac83c9ce3d':
+              raise RuntimeError('Full plan data differs from the locally verified source manifest')
           current = git('rev-parse','refs/remotes/origin/main')
           changed = git('diff','--name-only',plan['base'],current).splitlines()
           if set(changed)-{'.github/workflows/repo-hygiene.yml'}:
