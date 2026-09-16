@@ -191,19 +191,13 @@ A new user message does not silently discard already accepted work. Treat correc
 
 ## Mainline development and branch continuity
 
-`Laplace/main` and `Laplace-Refactor/main` are the two authoritative development
-lines. CI/CD attached to them is a development capability, not evidence that the
-projects are production or legacy systems. Do not impose release ceremony or
-substitute reviews, tests, receipts, or a parked branch for implementing the
-accepted work and integrating it into cumulative main.
+`Laplace/main` and `Laplace-Refactor/main` are the two authoritative development lines. CI/CD attached to them is a development capability, not evidence that the projects are production or legacy systems.
 
-Do not create a new branch for each diagnostic or qualification run. Reuse the
-existing tools and workflows. When repository rules require a PR, use a
-short-lived integration path, resolve its conflicts, land it, and retire it.
-Before removing a branch, preserve its exact history and reconcile its actual
-source changes; ancestry alone is not evidence that later merges retained them.
-Keep genuinely unfinished implementation explicit rather than describing an
-archive, an empty PR list, or a small intermediate fix as completion.
+Implementation work is cumulative on the current authoritative `main` by default. Do not create an agent branch, diagnostic branch, qualification branch, detached worktree, or private checkout merely to isolate a session. Before editing, fetch and fast-forward/reconcile the current mainline. Commit completed implementation to that mainline and continue from the new head.
+
+A branch/PR is permitted only when the user explicitly asks for one or when a repository rule technically requires it. That branch is short-lived: keep it rebased/merged with current `main`, resolve conflicts immediately, land it as part of the same task, and retire it. A parked branch, recovery tag, draft PR, test-only branch, or worktree is never a substitute for cumulative integration.
+
+Do not create a new branch for each diagnostic or qualification run. Reuse the existing tools and workflows. Before removing any historical branch, preserve its exact tip and reconcile its actual source changes against current `main`; branch naming, closure state, age, ancestry, or a prose “superseded” label is not proof that unique behavior was retained. Keep genuinely unfinished implementation explicit rather than describing an archive, an empty PR list, or a small intermediate fix as completion.
 
 ## Delivery accountability
 
@@ -280,13 +274,12 @@ Do not abandon an accepted end-to-end task to work a globally high-priority issu
 
 ## Repository discipline
 
-- Worktrees, builds, compiler/package scratch, test outputs, logs, scripts, and recovery evidence must use permanent storage. Do not operate in `/tmp`, `/var/tmp`, or a memory-backed filesystem, or create a new checkout there.
-- Use `/build/laplace/worktrees` for worktrees, `/build/laplace/build` for builds, `/build/laplace/work` for tool scratch, and `/build/laplace/recovery` for preserved artifacts and branch bundles. Set `TMPDIR`, `TMP`, and `TEMP` to a shared directory under the build drive before running tools. Never silently fall back to OS temp when the drive is missing or unwritable.
+- Builds, compiler/package scratch, test outputs, logs, and recovery evidence must use permanent storage. Do not operate in `/tmp`, `/var/tmp`, or a memory-backed filesystem, or create a new checkout there.
+- Do not create new agent worktrees or session-specific checkouts. `/build/laplace/worktrees` is recovery/history only. Use the authoritative repository checkout, `/build/laplace/build` for build output, `/build/laplace/work` for tool scratch, and `/build/laplace/recovery` for preserved historical artifacts/branch bundles. Set `TMPDIR`, `TMP`, and `TEMP` to a shared directory under the build drive before running tools.
 - PostgreSQL data belongs on the configured data volume (`/opt/laplace/pgdata`), WAL on `/var/lib/pgwal`, database spill on `/pgtemp`, and admitted source data on its configured `/vault` volume. Do not repurpose those volumes for builds.
-- Preserve and verify dirty/untracked work and branch tips before cleanup. Move cross-device worktrees with verified copies followed by `git worktree repair`. Do not delete unique branch behavior merely because its branch is old or closed.
+- Preserve and verify dirty/untracked work and branch tips before cleanup. Do not delete unique branch behavior merely because its branch is old or closed.
 - Operators and CI share the `laplace-runner` group. Preserve existing user owners; reconcile group ownership, group write, setgid inheritance, and `umask 0002` on mutable build/work/output directories. Setup and repair must not remove an artifact or seize its user ownership merely because another group member made it. PostgreSQL cluster roots retain PostgreSQL's required service ownership and data-directory modes; shared parent directories do not inherit those restrictions.
-- Prefer repairing/finishing an existing owning issue/branch/PR to creating parallel partial work.
-- Do not leave multiple open PRs carrying overlapping slices of one accepted task.
+- Finish existing accepted work on current `main`; do not create parallel partial branches/PRs for the same obligation.
 - Keep commits coherent and mergeable; update generated inventories/ratchets/tests in the same change that changes their authority.
 - Preserve unrelated user work and local changes.
 - Do not enable or request automatic Copilot code review.
