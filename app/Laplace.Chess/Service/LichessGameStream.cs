@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
@@ -33,7 +32,7 @@ internal static class LichessGameStream
             long connectedAt = Stopwatch.GetTimestamp();
             // Disposal happens before the delay and next request, including when
             // the consumer stops on a terminal result or its writer throws.
-            await using (var attempt = ReadAttemptAsync(http, path, null, log, ct, receiveTimeout, cleanupTimeout).GetAsyncEnumerator(ct))
+            await using (var attempt = LichessBot.ReadStreamAttemptAsync(http, path, null, log, ct, receiveTimeout, cleanupTimeout).GetAsyncEnumerator(ct))
             {
                 while (true)
                 {
@@ -69,97 +68,6 @@ internal static class LichessGameStream
             await wait(delay, ct).ConfigureAwait(false);
             backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, MaximumBackoff.Ticks));
         }
-    }
-
-    internal static async IAsyncEnumerable<JsonElement> ReadAttemptAsync(
-        HttpClient http, string path, Action? connected, ILogger log,
-        [EnumeratorCancellation] CancellationToken ct,
-        TimeSpan? receiveTimeout = null, TimeSpan? cleanupTimeout = null)
-    {
-        var receiveBudget = receiveTimeout ?? TimeSpan.FromSeconds(30);
-        var cleanupBudget = cleanupTimeout ?? TimeSpan.FromSeconds(5);
-        if (receiveBudget <= TimeSpan.Zero || cleanupBudget <= TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(receiveTimeout), "Receive and cleanup budgets must be positive.");
-        using var request = new HttpRequestMessage(HttpMethod.Get, path);
-        using var response = await ReceiveAsync(
-            token => http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token),
-            request.Dispose, receiveBudget, cleanupBudget, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw HttpFailure(response);
-        }
-        connected?.Invoke();
-        await using var stream = await ReceiveAsync(
-            token => response.Content.ReadAsStreamAsync(token), response.Dispose,
-            receiveBudget, cleanupBudget, ct).ConfigureAwait(false);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        // Each blank heartbeat is activity. The receive timer ends before yielding
-        // a state, so caller search/recording time is never treated as socket silence.
-        while (await ReceiveAsync(token => reader.ReadLineAsync(token).AsTask(), stream.Dispose,
-            receiveBudget, cleanupBudget, ct).ConfigureAwait(false) is { } line)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            JsonDocument doc;
-            try { doc = JsonDocument.Parse(line); }
-            catch (JsonException)
-            {
-                // An invalid streamed state cannot safely be omitted before a
-                // later terminal event is accepted.
-                throw new InvalidDataException("Lichess stream contained malformed NDJSON.");
-            }
-            using (doc) yield return doc.RootElement;
-        }
-    }
-
-    private static async Task<T> ReceiveAsync<T>(
-        Func<CancellationToken, Task<T>> receive, Action interrupt,
-        TimeSpan budget, TimeSpan cleanupBudget, CancellationToken ct)
-    {
-        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var pending = receive(lifetime.Token);
-        try { return await pending.WaitAsync(budget, ct).ConfigureAwait(false); }
-        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
-        {
-            var cancellation = lifetime.CancelAsync();
-            Exception? interruptionError = null;
-            try { interrupt(); }
-            catch (Exception error) { interruptionError = error; }
-            var settlement = Task.WhenAll(cancellation, pending);
-            try { await settlement.WaitAsync(cleanupBudget).ConfigureAwait(false); }
-            catch (Exception) when (settlement.IsCompleted) { }
-            catch (TimeoutException)
-            {
-                // Do not open another connection while an old receive remains live.
-                // Observe eventual failure, and dispose any response arriving late.
-                _ = settlement.ContinueWith(static task => { _ = task.Exception; },
-                    CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-                ObserveLateResult(pending);
-                throw new LichessStreamCleanupException("Lichess receive did not stop after cancellation and disposal.", ex);
-            }
-            try { DisposeResult(pending); }
-            catch (Exception error) { interruptionError ??= error; }
-            if (interruptionError is not null)
-                throw new LichessStreamCleanupException("Lichess receive cleanup failed.", interruptionError);
-            ct.ThrowIfCancellationRequested();
-            throw new IOException("Lichess receive deadline expired or the transport canceled its receive.", ex);
-        }
-    }
-
-    private static void ObserveLateResult<T>(Task<T> pending)
-        => _ = pending.ContinueWith(static task =>
-        {
-            _ = task.Exception;
-            // The session already failed explicitly; a late successful transport
-            // result must still release its socket and cannot become a new stream.
-            try { DisposeResult(task); }
-            catch (Exception) { }
-        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-
-    private static void DisposeResult<T>(Task<T> pending)
-    {
-        if (pending.Status == TaskStatus.RanToCompletion && pending.Result is IDisposable resource)
-            resource.Dispose();
     }
 
     internal static HttpRequestException HttpFailure(HttpResponseMessage response)

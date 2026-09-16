@@ -138,7 +138,7 @@ public sealed class LichessGameStreamTests
         using var http = Client(handler);
         var replay = new LichessGameReplay("startpos");
         var delays = new List<TimeSpan>();
-        var error = await Assert.ThrowsAsync<HttpRequestException>(async () =>
+        var error = await Assert.ThrowsAnyAsync<HttpRequestException>(async () =>
         {
             await foreach (var ev in LichessGameStream.ReadGameAsync(
                 http, Path, NullLogger.Instance, default, Wait(delays)))
@@ -386,7 +386,7 @@ public sealed class LichessGameStreamTests
         var response = Response("");
         var stream = ((ProbeContent)response.Content).Stream;
         IAsyncEnumerable<JsonElement> Read(CancellationToken token)
-            => LichessGameStream.ReadAttemptAsync(http, "/api/stream/event", null, NullLogger.Instance, token,
+            => LichessBot.ReadStreamAttemptAsync(http, "/api/stream/event", null, NullLogger.Instance, token,
                 receiveTimeout: TimeSpan.FromMilliseconds(50), cleanupTimeout: TimeSpan.FromMilliseconds(50));
         try
         {
@@ -416,7 +416,7 @@ public sealed class LichessGameStreamTests
         var account = new LichessAccountReadiness(true, true, true, "fixture-bot");
         var delays = new List<TimeSpan>();
         IAsyncEnumerable<JsonElement> Read(CancellationToken token)
-            => LichessGameStream.ReadAttemptAsync(http, "/api/stream/event", null, NullLogger.Instance, token);
+            => LichessBot.ReadStreamAttemptAsync(http, "/api/stream/event", null, NullLogger.Instance, token);
         var run = bot.RunVerifiedAsync(account, 1, lifetime.Token, Read, Wait(delays));
         await blocked.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         lifetime.Cancel();
