@@ -1007,7 +1007,8 @@ phase_chess_lab() {
     python3 "$ROOT/scripts/install-stockfish.py" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --source-dir "${LAPLACE_EXTERNAL:-/build/external}/cutechess" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$bin}" || return 1
-    python3 "$ROOT/scripts/provision-cutechess.py" --gui --binary "$gui" --verify-receipt "$gui_receipt" || return 1
+    python3 "$ROOT/scripts/provision-cutechess.py" --gui --binary "$gui" --verify-receipt "$gui_receipt" \
+      --install-desktop "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" || return 1
     python3 "$ROOT/scripts/install-stockfish.py" --check-binary "${LAPLACE_STOCKFISH:-$sf}" || return 1
     python3 "$ROOT/scripts/install-zstd.py" --print-path >/dev/null || return 1
     zstd_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/deploy/zstd-release.json")"

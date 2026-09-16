@@ -242,15 +242,29 @@ unit, and an enabled unit does not override an operator stop marker.
 readiness with the existing OS caches, not machine boot duration.
 
 CuteChess has a separate desktop lifecycle. Chess provisioning installs the
-official GUI and retains its selected Qt runtime/build receipt; the virtual-X11
-acceptance owns a temporary display, exercises the real window and dialog, then
-exits both GUI and display. It installs no persistent GUI session or user login
-autostart. Launching the GUI requires the operator's actual desktop session.
-The installed-binary verifier's `runtime.direct_launch` contains the direct
-executable and selected Qt environment; its build receipt alone may name the
-build-tree executable. A desktop launcher must use the verified installed
-selection and the real login user's display, rather than a service account or a
-new remote desktop listener.
+official GUI and its retained Qt runtime/build receipt, then publishes
+`/opt/laplace/bin/laplace-cutechess` and
+`/opt/laplace/share/applications/laplace-cutechess.desktop` (under the selected
+prefix). The existing root bootstrap registers that entry at
+`/usr/local/share/applications/laplace-cutechess.desktop` for ordinary menu
+discovery; later CI refreshes the same prefix artifacts through that link.
+`share/laplace/cutechess-desktop.json` records installed file hashes and whether
+the conventional entry is registered. A nonroot installation still provides
+the direct launcher and prefix desktop file without claiming menu registration.
+
+Launch **Cute Chess (Laplace)** from the desktop's applications menu, or run
+`/opt/laplace/bin/laplace-cutechess` in that user's session. The launcher preserves
+arguments and the current display, authorization and XDG settings, selects the
+verified Qt libraries/plugins, and checks the installed executable hash before
+launch. It contains only public launch data from the installed-binary verifier;
+it never reads the API environment or executes the build-tree receipt path.
+Root registration does not execute the GUI.
+
+The virtual-X11 acceptance separately owns a temporary display, exercises the
+real window and dialog, then exits both GUI and display. Neither provisioning
+nor that acceptance installs a persistent GUI session, remote desktop listener,
+or user login autostart. Installed launcher receipts declare
+`operator_desktop_tested=false`; actual desktop behavior needs separate observation.
 
 The transaction remains open through the existing smoke/eval jobs. Only their
 successful conclusion commits/stamps publish. Failure restores the prior API
