@@ -108,7 +108,9 @@ def exact_source(expected):
 
 
 def cli_identity(owner):
-    directory = ROOT / "app/Laplace.Cli/bin/Release/net10.0"
+    build_root = os.environ.get("LAPLACE_BUILD_ROOT")
+    directory = (Path(build_root) / "app/bin/Laplace.Cli/Release/net10.0" if build_root
+                 else ROOT / "app/Laplace.Cli/bin/Release/net10.0")
     required = ["Laplace.Cli.dll", "Laplace.Cli.deps.json", "Laplace.Cli.runtimeconfig.json",
                 "liblaplace_core.so", "liblaplace_dynamics.so", "liblaplace_synthesis.so"]
     if any(not (directory / name).is_file() for name in required):
@@ -233,6 +235,7 @@ def run(args, owner=None):
         proof["sourceFile"] = source
         proof["databaseTarget"] = phase("database-target", database_target)
         command("native-before", [sys.executable, ROOT / "scripts/check-application-runtime.py",
+                                  "--purpose", "recording",
                                   "--snapshot", args.output_dir / "native-before.json"], 240)
         native_bound = True
         command("cli-build", ["dotnet", "build", ROOT / "app/Laplace.Cli/Laplace.Cli.csproj",
@@ -268,6 +271,7 @@ def run(args, owner=None):
         if native_bound:
             try:
                 command("native-after", [sys.executable, ROOT / "scripts/check-application-runtime.py",
+                        "--purpose", "recording",
                         "--compare", args.output_dir / "native-before.json",
                         "--snapshot", args.output_dir / "native-after.json"], 240)
             except BaseException as error:

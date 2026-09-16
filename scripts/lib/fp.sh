@@ -11,6 +11,7 @@ FP_NATIVE_PATHS=(
   cmake
   CMakeLists.txt
   deploy/postgresql-release.json
+  scripts/postgresql-release.py
   scripts/codegen-attestation-law.py
   deploy/cmake-release.json
   scripts/provision-cmake.py
@@ -40,6 +41,13 @@ fp_compute() {
       printf 'new %s %s\n' "$f" "${h%% *}"
     done < <(git -C "$ROOT" ls-files --others --exclude-standard -- "$@" 2>/dev/null)
   } | LC_ALL=C sort | sha256sum | cut -d' ' -f1
+}
+
+# Bind build/install identity to the tools and headers actually consumed.
+# This adds input identity; CMake/MSBuild remain the only skip authorities.
+fp_postgresql_inputs() {
+  python3 "$ROOT/scripts/postgresql-release.py" build-inputs \
+    --prefix "${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 }
 
 fp_chess_corpus_inputs() {
@@ -78,22 +86,26 @@ fp_chess_openings_inputs() {
 }
 
 fp_native() {
-  local corpus_inputs
+  local corpus_inputs postgresql_inputs
   corpus_inputs=$(fp_chess_corpus_inputs) || return
+  postgresql_inputs=$(fp_postgresql_inputs) || return
   {
     fp_compute "${FP_NATIVE_PATHS[@]}"
     fp_chess_openings_inputs
     printf '%s\n' "$corpus_inputs"
+    printf '%s\n' "$postgresql_inputs"
   } | sha256sum | cut -d' ' -f1
 }
 
 fp_runtime() {
-  local corpus_inputs
+  local corpus_inputs postgresql_inputs
   corpus_inputs=$(fp_chess_corpus_inputs) || return
+  postgresql_inputs=$(fp_postgresql_inputs) || return
   {
     fp_compute "${FP_NATIVE_PATHS[@]}" app/Laplace.Migrations
     fp_chess_openings_inputs
     printf '%s\n' "$corpus_inputs"
+    printf '%s\n' "$postgresql_inputs"
   } | sha256sum | cut -d' ' -f1
 }
 

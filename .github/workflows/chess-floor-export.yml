@@ -65,25 +65,20 @@ jobs:
             [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
             selection="$PWD/.github/chess-floor-export-selection.json"
             test -f "$selection"
-            candidate_sha=$(python3 - "$selection" << "PY_SOURCE"
-          import json, re, sys
+            driver="$PWD/scripts/export-qualified-chess-floors.py"
+            candidate_root=$(python3 - "$selection" "$driver" << "PY_SOURCE"
+          import importlib.util, sys
           from pathlib import Path
-          path = Path(sys.argv[1])
-          if path.stat().st_size > 65536:
-              raise ValueError("export selection exceeds its metadata envelope")
-          plan = json.loads(path.read_bytes())
-          sha = plan.get("candidate_commit") if isinstance(plan, dict) else None
-          if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
-              raise ValueError("export candidate must be a complete immutable commit")
-          print(sha)
+          source = Path(sys.argv[2])
+          spec = importlib.util.spec_from_file_location("selected_export_driver", source)
+          owner = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = owner
+          spec.loader.exec_module(owner)
+          plan = owner.load(Path(sys.argv[1]), 65536)
+          print(owner.candidate_checkout(plan))
           PY_SOURCE
             )
-            candidate_root=/build/laplace/worktrees/chess-floor-export-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
-            test ! -e "$candidate_root"
-            driver="$PWD/scripts/export-qualified-chess-floors.py"
-            timeout --signal=TERM --kill-after=5s 120s git fetch --no-tags origin "$candidate_sha"
-            git worktree add --detach "$candidate_root" "$candidate_sha"
-            # Retain this exact source worktree beside the export evidence.
+            # Reuse the exact existing candidate; source selection never changes it.
             # exec preserves the lock FD through driver-owned child cleanup.
             cp "$selection" "$LAPLACE_EXPORT_EVIDENCE/selection.json"
             export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"

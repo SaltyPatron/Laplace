@@ -352,22 +352,36 @@ if postgresql_restart_required; then exit 0; else exit $?; fi
                                           RUNNING_VERSION="180003").returncode)
 
     def test_native_and_runtime_fingerprints_change_with_tracked_postgresql_release(self):
+        import runpy
+        fixture = runpy.run_path(str(ROOT / "scripts/test-postgresql-release.py"))["write_postgresql_fixture"]
         source = self.base / "fingerprint-source"
         (source / "scripts/lib").mkdir(parents=True)
         (source / "deploy").mkdir()
         shutil.copy2(ROOT / "scripts/lib/fp.sh", source / "scripts/lib/fp.sh")
-        shutil.copy2(ROOT / "scripts/chess-floor-artifacts.py", source / "scripts/chess-floor-artifacts.py")
+        for name in ("chess-floor-artifacts.py", "postgresql-release.py"):
+            shutil.copy2(ROOT / "scripts" / name, source / "scripts" / name)
         release = source / "deploy/postgresql-release.json"
         release.write_bytes((ROOT / "deploy/postgresql-release.json").read_bytes())
+        prefix = self.base / "selected-postgresql"
+        fixture(prefix, "18.6")
         subprocess.run(["git", "init", "--quiet", str(source)], check=True, timeout=10)
         subprocess.run(["git", "-C", str(source), "add", "."], check=True, timeout=10)
         body = 'source "$ROOT/scripts/lib/fp.sh"\nfp_native\nfp_runtime\n'
         env = {"ROOT": str(source), "LAPLACE_CHESS_OPENINGS": str(source / "absent-openings"),
-               "LAPLACE_CHESS_CORPUS_EXPORT": ""}
+               "LAPLACE_CHESS_CORPUS_EXPORT": "", "LAPLACE_PG_PREFIX": str(prefix)}
         before = self.run_shell(body, **env)
         self.assertEqual(0, before.returncode, before.stderr)
         self.assertEqual(before.stdout, self.run_shell(body, **env).stdout)
-        release.write_text(release.read_text().replace('"18.6"', '"18.7"'))
+        # A tracked selection cannot make an older physical header/tool tree
+        # eligible for native build or a matching stamp.
+        selected = json.loads(release.read_text())
+        selected["version"], selected["tag"] = "18.7", "REL_18_7"
+        selected["archive"]["url"] = selected["archive"]["url"].replace("18.6", "18.7")
+        release.write_text(json.dumps(selected))
+        refused = self.run_shell(body, **env)
+        self.assertNotEqual(0, refused.returncode)
+        self.assertEqual("", refused.stdout)
+        fixture(prefix, "18.7")
         after = self.run_shell(body, **env)
         self.assertEqual(0, after.returncode, after.stderr)
         old_hashes, new_hashes = before.stdout.splitlines(), after.stdout.splitlines()
