@@ -52,13 +52,6 @@ jobs:
 
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Build exact ingest runtime
-        run: |
-          set -euo pipefail
-          mkdir -p "$INGEST_LOGDIR"
-          bash scripts/pipeline.sh build
-          echo "LAPLACE_INGEST_RUNTIME_PREPARED=1" >> "$GITHUB_ENV"
-
       - name: Evict selected source
         if: inputs.evict_before_ingest
         env:
@@ -88,6 +81,7 @@ jobs:
           LANGS_INPUT: ${{ inputs.langs }}
         run: |
           set -euo pipefail
+          mkdir -p "$INGEST_LOGDIR"
           if [[ -n "$LANGS_INPUT" ]]; then
             export LAPLACE_INGEST_LANGS="$LANGS_INPUT"
           else
