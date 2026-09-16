@@ -12,8 +12,6 @@ jobs:
     name: Actual corpus workflow and registry controls
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      TMPDIR: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -24,6 +22,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export TMPDIR="$RUNNER_TEMP"
           [[ "$(git write-tree)" == "dcc9d3ef0d4c81ee5a2b6c63cb8dfd3abee0d8df" ]]
           python3 --version
           python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
