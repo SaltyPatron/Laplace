@@ -155,7 +155,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             if (selectedPhysicalities.Count != 0)
                 PhysicalityAdmissionBatch.StageManagedObservations(managedStage,
                     System.Runtime.InteropServices.CollectionsMarshal.AsSpan(selectedPhysicalities),
-                    IngestSizing.ResolveWorkingSetBudgetBytes());
+                    IngestSizing.ResolveWorkingSetBudgetBytes(), ct);
             // No dedup here: duplicate attestation ids across changes carry
             // real observation counts. The apply core collapses them exactly
             // like apply_batch did (latest-ts representative, summed games)
