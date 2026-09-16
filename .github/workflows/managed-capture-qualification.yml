@@ -133,6 +133,27 @@ jobs:
               "required_file_sha256":hashlib.sha256(query.read_bytes()).hexdigest()}
           (Path(os.environ["QUALIFICATION_DIR"])/"evidence/grammar-query.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
           PY
+      - name: Generate canonical Highway fixture and supply owned data-root discovery
+        run: |
+          set -euo pipefail
+          cd "$QUALIFICATION_DIR/source"
+          timeout --signal=TERM --kill-after=5s 60s python3 scripts/codegen-attestation-law.py             --bin-out-dir="$LAPLACE_ENGINE_BUILD/core/perfcache"             2>&1 | tee "$QUALIFICATION_DIR/evidence/highway-generation.log"
+          git diff --exit-code
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          root=Path(os.environ["QUALIFICATION_DIR"]);source=root/"source"
+          ingest=(source/"../../Data/Ingest").resolve()
+          ingest.mkdir(parents=True,exist_ok=True)
+          inputs=[source/"scripts/codegen-attestation-law.py",
+              source/"engine/manifest/relation_types.toml",source/"engine/manifest/pos_tags.toml",
+              root/"engine/core/perfcache/laplace_highway_perfcache.bin"]
+          report={"scope":"Existing canonical Highway generator; owned empty optional data-root discovery. Game inputs remain checked-in complete PGN fixtures; no installed corpus or opening-catalog claim.",
+              "ingest_discovery_root":str(ingest),"opening_catalog_present":False,
+              "inputs":[{"path":str(p),"bytes":p.stat().st_size,"sha256":hashlib.sha256(p.read_bytes()).hexdigest()} for p in inputs]}
+          (root/"evidence/hosted-fixtures.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(report,sort_keys=True))
+          PY
       - name: Compile changed managed owners and their test assemblies
         shell: bash
         run: |
