@@ -11,14 +11,14 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: cd4e3dcf19e3b304ae30ce1b8c77c2fb7e3835d4
+          ref: 828b329f6216be08b278602e4d7998feec876c78
           persist-credentials: false
       - name: Execute exact production orchestration controls
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = cd4e3dcf19e3b304ae30ce1b8c77c2fb7e3835d4
-          test "$(git write-tree)" = 31455d376555eb1f5447dcc24e5581122a770fd4
+          test "$(git rev-parse HEAD)" = 828b329f6216be08b278602e4d7998feec876c78
+          test "$(git write-tree)" = 9090614ae610ca6232cfeb027d268e0a0fefb678
           export TMPDIR="$RUNNER_TEMP/lexical-control-scratch"
           export TMP="$TMPDIR" TEMP="$TMPDIR"
           mkdir -p "$TMPDIR"

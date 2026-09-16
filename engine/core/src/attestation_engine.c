@@ -658,6 +658,7 @@ int laplace_attestation_aggregated_batch_build(
         o->opponent_rating_fp1e9 = opponent_rating;
         o->sum_score_fp1e9 = c->sum_score_fp1e9;
         o->is_aggregated = 1;
+        o->fold_replayable = 1;
 
         if (laplace_attestation_id_compute(
                 &o->subject_id, &o->type_id,
