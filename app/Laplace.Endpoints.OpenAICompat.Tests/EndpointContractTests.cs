@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
@@ -97,15 +99,42 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     }
 
     [Fact]
-    public async Task ChatCompletions_ValidPayloadWithoutQuote_ReturnsPaymentRequired()
+    public async Task ChatCompletions_AvailableWitnessWithoutQuote_ReturnsPaymentRequired()
     {
-        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
+        await using var available = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IConversationWitness>();
+                services.AddSingleton<IConversationWitness, RecordingConversationWitness>();
+            }));
+        using var client = available.CreateClient();
+        Assert.True(available.Services.GetRequiredService<IConversationWitness>().IsAvailable);
+        using var response = await client.PostAsJsonAsync("/v1/chat/completions", new
         {
             model = "laplace-converse-001",
             messages = new[] { new { role = "user", content = "hello" } }
         });
 
         Assert.Equal(HttpStatusCode.PaymentRequired, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("payment_required", json.RootElement.GetProperty("error").GetProperty("type").GetString());
+        Assert.Equal("quote_not_found", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task ChatCompletions_UnavailableWitnessIsRejectedBeforeTheMissingQuote()
+    {
+        Assert.False(_factory.Services.GetRequiredService<IConversationWitness>().IsAvailable);
+        using var response = await _client.PostAsJsonAsync("/v1/chat/completions", new
+        {
+            model = "laplace-converse-001",
+            messages = new[] { new { role = "user", content = "hello" } }
+        });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("service_unavailable", json.RootElement.GetProperty("error").GetProperty("type").GetString());
+        Assert.Equal("witness_unavailable", json.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
     [Fact]

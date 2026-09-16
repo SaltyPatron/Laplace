@@ -113,8 +113,12 @@ The separate virtual-X11 acceptance helper tests the installed GUI's event loop
 and actions on an owned display:
 
 ```sh
-bash scripts/bootstrap-laplace-runner.sh chess-gui-runtime
+python3 scripts/chess-x11-runtime.py \
+  --root /opt/laplace/tools/chess/x11-runtime --deadline-seconds 280 \
+  --output /build/laplace/recovery/cutechess-x11-manual-001.json \
+  --evidence-output /build/laplace/recovery/cutechess-x11-manual-001
 python3 scripts/check-cutechess-gui-session.py \
+  --x11-runtime-receipt /build/laplace/recovery/cutechess-x11-manual-001.json \
   --binary /opt/laplace/bin/cutechess \
   --receipt /build/cutechess/laplace-cutechess-gui-build.json \
   --work /build/laplace/work \
@@ -124,9 +128,20 @@ python3 scripts/check-cutechess-gui-session.py \
 
 Use the installed configuration's GUI and receipt paths when they differ. The
 output directory must be new so a prior acceptance result cannot be overwritten.
-Normal host setup installs the same X11 runtime dependencies. The narrow
-`chess-gui-runtime` bootstrap mode installs only those host libraries, fonts and
-tools; it does not modify the PostgreSQL cluster or register a runner.
+The runtime owner first inventories the complete installed tool set. On the
+measured Ubuntu 22.04 amd64 machine, missing Xvfb and xdotool can instead come
+from authenticated official Ubuntu packages extracted under the selected private
+prefix. Apt resolves the missing library closure; signed archive indexes, package
+SHA-256 values and selected executable/library/resource hashes are retained.
+Both helper processes authenticate the exact selection, and the GUI worker keeps
+the selected Qt libraries first when adding the private X11 library directories.
+A `tools-selected` receipt establishes dependency selection; the separate actual
+GUI session establishes interaction readiness.
+
+Normal host setup can still install X11 host dependencies through the narrow
+`bash scripts/bootstrap-laplace-runner.sh chess-gui-runtime` command. It inventories
+installed versions before attempting missing-package installation through root
+or noninteractive sudo.
 
 The helper requires `xvfb`, `xauth`, `xdotool` and `x11-utils`, plus the host
 libraries needed by the selected SDK's xcb platform plugin, following
@@ -157,13 +172,14 @@ identities and the observed resource envelope remained stable.
 | Workload | Best measured starting setting | Median result |
 | --- | --- | --- |
 | One Stockfish process, 51-position depth-12 suite | Threads=4, Hash=64 MiB | 2.186 seconds |
-| CuteChess short-game throughput | Concurrency=4; each engine Threads=1, Hash=16 MiB; ponder off | 11.518 games/second |
-| Next CuteChess concurrency point | Concurrency=6; same engine settings | 11.297 games/second |
+| Stockfish self-play, capped 24-ply launch diagnostic | Concurrency=4; each engine Threads=1, Hash=16 MiB; ponder off | 11.518 games/second |
+| Same capped Stockfish diagnostic, next concurrency point | Concurrency=6; same engine settings | 11.297 games/second |
 
 The full grid tested Stockfish Threads=1,2,4,6,8,12 with Hash=16,64,256 MiB, and
 CuteChess concurrency=1,2,4,6,8,12. Each profile has one warmup and three measured
 samples: 96 timed processes, 24 PGNs, and 384 games including warmups. Every game
-ended at the imposed 24-ply limit. All transcript/PGN hashes and the medians were
+ended at the imposed 24-ply limit. These generated samples were not complete
+recorded games and establish no Laplace recording rate. All transcript/PGN hashes and the medians were
 independently checked. The single-process winner's measured range was
 2.128–2.511 seconds. CuteChess concurrency four led six by about 1.96%, with
 overlapping ranges. Repeat calibration for a different machine, CPU reservation,
@@ -344,8 +360,9 @@ and runtime configuration bytes. A mismatched runtime blocks corpus admission
 and game recording; it is never attributed to the requested revision.
 
 Before measurement, the explicit job inventories the requested local Stockfish
-directory without reading source/configuration contents, installs the bounded X11
-host package set, invokes the normal official-source chess provisioning owner,
+directory without reading source/configuration contents, selects the authenticated
+X11 runtime without requiring host package installation, invokes the normal
+official-source chess provisioning owner,
 and records latest-release/NNUE/dependency and actual GUI interaction checks.
 It retains API/UI response observations, service timestamps, and sanitized Lichess
 account/event-stream readiness. A running process alone does not establish online
@@ -386,8 +403,8 @@ scope, content inventory and qualification rules.
 The job preserves failure evidence and excludes the private corpus selection file
 from its uploaded artifact. Service response times are labeled as response latency;
 current unit timestamps do not constitute a cold application boot measurement.
-The narrow GUI package command inventories installed package versions without sudo
-and installs only missing packages through root or noninteractive sudo.
+The explicit runtime selection and its acquisition evidence are retained with the
+GUI proof. Private tool selection is authenticated again immediately before launch.
 Before corpus and game measurement, the explicit startup phase invokes the existing
 API restart and managed activation owners, then verifies the complete application,
 UI, and configured Lichess account/event stream. It records old/new process IDs and

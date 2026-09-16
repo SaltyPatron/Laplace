@@ -386,5 +386,71 @@ else:
         self.assertNotIn("X11 host dependencies present", runs[0].stdout)
 
 
+class SelectedRuntimeControls(unittest.TestCase):
+    def test_worker_reapplies_runtime_after_direct_launch_overlay_with_selected_qt(self):
+        runtime = {"qt": {"prefix": "/selected/qt"},
+                   "direct_launch": {"environment": {"LD_LIBRARY_PATH": "/selected/qt/lib",
+                                                       "QT_PLUGIN_PATH": "/selected/qt/plugins"}}}
+        receipt = Path("/selected/runtime.json")
+        def bind(path, environment, deadline, *, qt_prefix):
+            self.assertEqual(receipt, path)
+            self.assertEqual("/selected/qt/lib", environment["LD_LIBRARY_PATH"])
+            self.assertEqual(Path("/selected/qt"), qt_prefix)
+            return {**environment, "LD_LIBRARY_PATH": "/selected/qt/lib:/private/lib"}, {"mode": "private"}
+        with mock.patch.dict(session.os.environ, {"LD_LIBRARY_PATH": "/wrong/lib"}), \
+             mock.patch.object(session, "bind_x11", side_effect=bind) as selected:
+            environment, observed = session.gui_environment(runtime, receipt, 30)
+        selected.assert_called_once()
+        self.assertEqual("/selected/qt/lib:/private/lib", environment["LD_LIBRARY_PATH"])
+        self.assertEqual({"mode": "private"}, observed)
+
+    def test_explicit_failed_runtime_selection_is_never_replaced_by_host_tools(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            output = directory / "evidence"
+            with mock.patch.object(session, "bind_x11", side_effect=RuntimeError("runtime package bytes changed")), \
+                 mock.patch.object(session.shutil, "which") as host, \
+                 mock.patch.object(session.subprocess, "Popen") as launch, \
+                 mock.patch("builtins.print"):
+                code = session.main(["--binary", str(directory / "cutechess"),
+                                     "--receipt", str(directory / "build.json"),
+                                     "--output-dir", str(output), "--work", str(directory),
+                                     "--x11-runtime-receipt", str(directory / "runtime.json")])
+            host.assert_not_called()
+            launch.assert_not_called()
+            self.assertEqual(1, code)
+            retained = json.loads((output / "receipt.json").read_text())
+            self.assertEqual("failed", retained["status"])
+            self.assertIn("runtime package bytes changed", retained["error"])
+
+    def test_outer_launch_uses_bound_wrapper_and_passes_selection_to_worker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            output = directory / "evidence"
+            receipt = directory / "runtime.json"
+            selected_tools = {"xvfb-run": "/private/usr/bin/xvfb-run", "Xvfb": "/private/usr/bin/Xvfb"}
+            process = mock.Mock()
+            def complete(**_kwargs):
+                session.save(output / "receipt.json", {"schema": session.SCHEMA, "status": "passed"})
+                return 0
+            process.wait.side_effect = complete
+            with mock.patch.object(session, "bind_x11", return_value=(
+                    {"PATH": "/private/usr/bin:/usr/bin", "LD_LIBRARY_PATH": "/private/usr/lib"},
+                    {"tools": selected_tools})) as selection, \
+                 mock.patch.object(session.subprocess, "Popen", return_value=process) as launch, \
+                 mock.patch.object(session, "stop_group"), mock.patch("builtins.print"):
+                code = session.main(["--binary", str(directory / "cutechess"),
+                                     "--receipt", str(directory / "build.json"),
+                                     "--output-dir", str(output), "--work", str(directory),
+                                     "--x11-runtime-receipt", str(receipt)])
+            self.assertEqual(0, code)
+            selection.assert_called_once()
+            command = launch.call_args.args[0]
+            self.assertEqual("/private/usr/bin/xvfb-run", command[0])
+            self.assertEqual(str(receipt), command[command.index("--x11-runtime-receipt") + 1])
+            self.assertEqual("/private/usr/lib", launch.call_args.kwargs["env"]["LD_LIBRARY_PATH"])
+            self.assertTrue(launch.call_args.kwargs["start_new_session"])
+
+
 if __name__ == "__main__":
     unittest.main()
