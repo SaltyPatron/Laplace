@@ -10,8 +10,7 @@ jobs:
     timeout-minutes: 12
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: 82505a762c57c9b3653f09175940e2f23ddd5715
-      SOURCE_TREE: f031f739f4fd8fb461fe302271663b4404d79369
+      SOURCE_SHA: ${{ github.sha }}
       TMPDIR: /build/laplace/work/postgresql-release/tmp
       TMP: /build/laplace/work/postgresql-release/tmp
       TEMP: /build/laplace/work/postgresql-release/tmp
@@ -26,9 +25,9 @@ jobs:
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$TMPDIR" "$EVIDENCE" /build/laplace/worktrees
-          test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git worktree add --detach /build/laplace/worktrees/postgresql-release "$SOURCE_SHA"
-          printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
+          printf '%s\n' "$SOURCE_SHA $(git rev-parse HEAD^{tree})" > "$EVIDENCE/source.txt"
       - name: Execute dependency and existing owner controls
         run: |
           set -euo pipefail
