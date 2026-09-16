@@ -1,0 +1,109 @@
+name: Hosted recorded-floor export lifecycle controls
+on:
+  push:
+    branches: [verify/floor-export-lifecycle-20260916]
+permissions:
+  contents: read
+jobs:
+  protocol-controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TMPDIR: /build/laplace/work/floor-export-lifecycle/tmp
+      TMP: /build/laplace/work/floor-export-lifecycle/tmp
+      TEMP: /build/laplace/work/floor-export-lifecycle/tmp
+      PYTHONDONTWRITEBYTECODE: '1'
+      CANDIDATE_SHA: c703215240f1bf1049de8a00ddbe6b6105322a43
+      CANDIDATE_TREE: 58655c56c0e79e3f1d638959283d0776f017f9d9
+    steps:
+      - name: Prepare permanent work and evidence directories
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /build/laplace
+          sudo chown "$(id -u):$(id -g)" /build/laplace
+          mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/floor-export-lifecycle
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: c703215240f1bf1049de8a00ddbe6b6105322a43
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Bind the exact candidate in the permanent worktree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          git worktree add --detach /build/laplace/worktrees/floor-export-lifecycle "$CANDIDATE_SHA"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          Path("/build/laplace/recovery/floor-export-lifecycle/source.json").write_text(json.dumps({
+              "candidate_commit":os.environ["CANDIDATE_SHA"],
+              "candidate_tree":os.environ["CANDIDATE_TREE"],
+              "workflow_commit":os.environ["GITHUB_SHA"],
+              "claim":"python-export-publication-and-cancellation-controls",
+              "installed_acceptance_executed":False,
+              "native_chess_runtime_executed":False
+          },indent=2)+"\n")
+          PY
+      - name: Parse Python sources and actual export workflow shell blocks
+        working-directory: /build/laplace/worktrees/floor-export-lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee /build/laplace/recovery/floor-export-lifecycle/syntax.log
+          import ast, re, subprocess, textwrap
+          from pathlib import Path
+          for name in ("export-qualified-chess-floors.py", "test-qualified-chess-floor-export.py"):
+              ast.parse((Path("scripts") / name).read_text(), filename=name)
+              print("PASS Python syntax " + name)
+          lines = Path(".github/workflows/chess-floor-export.yml").read_text().splitlines(keepends=True)
+          count = 0
+          for index, line in enumerate(lines):
+              if not re.fullmatch(r" +run: *\|\s*", line):
+                  continue
+              level = len(line) - len(line.lstrip())
+              block = []
+              for following in lines[index + 1:]:
+                  if following.strip() and len(following) - len(following.lstrip()) <= level:
+                      break
+                  block.append(following)
+              result = subprocess.run(["bash", "-n"], input=textwrap.dedent("".join(block)),
+                                      text=True, capture_output=True, timeout=10)
+              if result.returncode:
+                  print(result.stderr)
+                  raise SystemExit(result.returncode)
+              count += 1
+              print("PASS actual export workflow shell block " + str(count))
+          if count != 3:
+              raise SystemExit("export workflow run-block coverage changed")
+          PY
+      - name: Execute real export lifecycle controls
+        working-directory: /build/laplace/worktrees/floor-export-lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence=/build/laplace/recovery/floor-export-lifecycle
+          python3 --version 2>&1 | tee "$evidence/python-version.log"
+          printf 'suite\texit_code\n' > "$evidence/test-summary.tsv"
+          failed=0
+          for suite in test-qualified-chess-floor-export.py; do
+            set +e
+            timeout --signal=TERM --kill-after=10s 60s \
+              python3 "scripts/$suite" -v \
+              2>&1 | tee "$evidence/$suite.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            printf '%s\t%s\n' "$suite" "$status" >> "$evidence/test-summary.tsv"
+            if [[ "$status" != 0 ]]; then failed=1; fi
+          done
+          cat "$evidence/test-summary.tsv"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          exit "$failed"
+      - name: Retain exact protocol evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chess-floor-export-lifecycle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/recovery/floor-export-lifecycle/
+          if-no-files-found: error
+          retention-days: 30
