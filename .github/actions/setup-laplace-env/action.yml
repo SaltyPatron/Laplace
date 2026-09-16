@@ -20,6 +20,10 @@ runs:
         source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
         set -u
         printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
+        cmake_bin=$(python3 scripts/provision-cmake.py \
+          --root "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/tools/cmake" \
+          --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+        export PATH="$cmake_bin:$PATH"
         echo "PATH=$PATH" >> "$GITHUB_ENV"
         echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
         echo "PGDATABASE=${PGDATABASE:-laplace}" >> "$GITHUB_ENV"

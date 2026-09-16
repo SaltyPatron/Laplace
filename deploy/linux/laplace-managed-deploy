@@ -38,7 +38,7 @@ NGINX_CONFIG = Path("/etc/nginx/sites-available/laplace-managed")
 NGINX_ENABLED = Path("/etc/nginx/sites-enabled/laplace-managed")
 TRUSTED_UID = 0
 ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C",
-       **{key: "/build/laplace/work/legacy-scratch" for key in ("TMPDIR", "TMP", "TEMP")}}
+       **{key: "/build/laplace/work/scratch" for key in ("TMPDIR", "TMP", "TEMP")}}
 
 
 def run(*args):
@@ -186,9 +186,9 @@ StartLimitBurst=3
 [Service]
 Type=oneshot
 User=root
-Environment=TMPDIR=/build/laplace/work/legacy-scratch
-Environment=TMP=/build/laplace/work/legacy-scratch
-Environment=TEMP=/build/laplace/work/legacy-scratch
+Environment=TMPDIR=/build/laplace/work/scratch
+Environment=TMP=/build/laplace/work/scratch
+Environment=TEMP=/build/laplace/work/scratch
 ExecStart={LIBEXEC}/laplace-managed-deploy reconcile-host
 TimeoutStartSec=180
 SuccessExitStatus=75

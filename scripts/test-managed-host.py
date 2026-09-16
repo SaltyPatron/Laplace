@@ -85,7 +85,7 @@ class HostTests(unittest.TestCase):
             self.assertEqual(("-q", "/build"), argv[1:])
         elif argv[0] == "/usr/bin/install":
             destination = Path(argv[-1])
-            if destination.parent == Path("/build/laplace/work") and destination.name in ("legacy-mcp", "legacy-lichess"):
+            if destination.parent == Path("/build/laplace/work") and destination.name in ("mcp", "lichess"):
                 self.assertIn("laplace-runner", argv)
                 self.assertIn("2770", argv)
                 destination = self.base / "scratch" / destination.name

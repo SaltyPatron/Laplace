@@ -2,6 +2,22 @@
   "schema_version": 1,
   "suites": [
     {
+      "id": "policy-cmake-release",
+      "profile": "policy",
+      "owner": "build",
+      "runner": "script",
+      "command": [
+        "python3",
+        "scripts/test-cmake-release.py"
+      ],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-chess-floor-serving",
       "profile": "policy",
       "owner": "chess",
@@ -211,6 +227,22 @@
       "owner": "chess",
       "runner": "script",
       "command": ["python3", "scripts/test-stockfish-release.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-postgresql-release",
+      "profile": "policy",
+      "owner": "database",
+      "runner": "script",
+      "command": [
+        "python3",
+        "scripts/test-postgresql-release.py"
+      ],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",

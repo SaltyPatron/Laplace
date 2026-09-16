@@ -521,7 +521,7 @@ runner = (ROOT / "scripts" / "bootstrap-laplace-runner.sh").read_text(encoding="
 for token in (
     'RUNNER_SERVICE="actions.runner.SaltyPatron-Laplace.hart-server.service"',
     "--name hart-server",
-    "--work /build/laplace/work/legacy-runner",
+    "--work /build/laplace/work/runner",
 ):
     if token not in runner:
         fail(f"runner contract missing {token}")
