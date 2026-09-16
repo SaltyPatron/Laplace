@@ -1,169 +1,267 @@
-name: Dispatch the unchanged corpus pilot after exact native installation
-
+name: Observe active Original corpus progress without shared-host work
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
-
 permissions:
   contents: read
-  actions: write
-
 jobs:
-  operation:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  observe:
+    runs-on: [self-hosted, Linux, X64, laplace-refactor]
+    timeout-minutes: 2
     steps:
-      - name: Dispatch the unchanged corpus pilot after exact native installation
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Read two bounded diagnostic snapshots from the exact active pilot
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import hashlib, json, os, pathlib, re, shutil, tempfile, urllib.error, urllib.request, zipfile
-          REPOSITORY = "SaltyPatron/Laplace"
-          EXPECTED_SOURCE = "baba1ccea538c5f7380692cd7432b94d6f4bf46b"
-          EXPECTED_TREE = "a2394ec45d026812fe5805bbca331c353260e237"
-          EXPECTED_OPERATOR = "68dd3c7c986759afc658ebcb2b639a2a5052178d"
-          NATIVE_RUN, NATIVE_ATTEMPT, NATIVE_JOB = 35142154113, 1, 104949056631
-          ARTIFACT_ID = 10465762490
-          EXPECTED_ZIP_BYTES = 38820
-          EXPECTED_ZIP_SHA256 = "fda32128785565e49a8eee33c07966827c5c94c945ee9e1244cfd8abf493e3ca"
-          TARGET_REF = "verify/chess-corpus-pilot-20260916-4fa186e"
-          OBSERVED_PGN = "/vault/Data/Games/Chess/Lumbras/otb/LumbrasGigaBase_OTB_2025.pgn"
-          def require(value, message):
-              if not value: raise ValueError(message)
-          require(all(re.fullmatch(r"[0-9a-f]{40}", v) for v in (EXPECTED_SOURCE, EXPECTED_TREE, EXPECTED_OPERATOR)),
-                  "exact immutable source identities required")
-          require(re.fullmatch(r"[0-9a-f]{64}", EXPECTED_ZIP_SHA256)
-                  and min(NATIVE_RUN, NATIVE_ATTEMPT, NATIVE_JOB, ARTIFACT_ID, EXPECTED_ZIP_BYTES) > 0
-                  and EXPECTED_ZIP_BYTES <= 2 * 1024**3, "exact bounded terminal artifact required")
-          require(re.fullmatch(r"verify/chess-corpus-pilot-[a-z0-9-]+", TARGET_REF),
-                  "reuse an exact non-triggering historical pilot reference")
-          base = "https://api.github.com/repos/" + REPOSITORY
-          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json",
-                     "X-GitHub-Api-Version": "2026-03-10"}
-          def api(path):
-              with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=30) as response:
-                  raw = response.read(2 * 1024**2 + 1)
-              require(len(raw) <= 2 * 1024**2, "API metadata exceeded its bound")
-              return json.loads(raw)
-          run = api("/actions/runs/" + str(NATIVE_RUN))
-          require(run["head_sha"] == EXPECTED_OPERATOR and run["status"] == "completed"
-                  and run["conclusion"] == "success" and run["event"] == "push"
-                  and run["head_branch"] == "verify/chess-floor-serving-controls-20260916"
-                  and run["path"] == ".github/workflows/chess-floor-serving-controls.yml"
-                  and run["run_attempt"] == NATIVE_ATTEMPT, "native operator attempt differs from observed success")
-          jobs = api("/actions/runs/" + str(NATIVE_RUN) + "/attempts/" + str(NATIVE_ATTEMPT) + "/jobs?per_page=100")
-          selected = [job for job in jobs["jobs"] if job["id"] == NATIVE_JOB]
-          require(jobs["total_count"] == 1 and len(selected) == 1, "native job absent or ambiguous")
-          job = selected[0]
-          require(job["status"] == "completed" and job["conclusion"] == "success", "native job did not succeed")
-          required_steps = ("Prepare retained native execution paths",
-              "Execute existing native dependency build proof and install owners", "Observe fixed public managed service state",
-              "Retain native operator outcome", "Retain native execution evidence")
-          positions = []
-          for name in required_steps:
-              matches = [s for s in job["steps"] if s["name"] == name]
-              require(len(matches) == 1 and matches[0]["status"] == "completed" and matches[0]["conclusion"] == "success",
-                      "required native step did not succeed: " + name)
-              positions.append(job["steps"].index(matches[0]))
-          require(positions == sorted(positions), "native operator step order changed")
-          require(not any(s["conclusion"] in ("failure", "cancelled") for s in job["steps"]), "native step failed or cancelled")
-          artifact = api("/actions/artifacts/" + str(ARTIFACT_ID))
-          require(not artifact.get("expired") and artifact["workflow_run"]["id"] == NATIVE_RUN
-                  and artifact["workflow_run"]["head_sha"] == EXPECTED_OPERATOR
-                  and artifact["name"] == "original-native-install-" + str(NATIVE_RUN) + "-" + str(NATIVE_ATTEMPT)
-                  and artifact["size_in_bytes"] == EXPECTED_ZIP_BYTES
-                  and artifact.get("digest") == "sha256:" + EXPECTED_ZIP_SHA256, "native artifact identity changed")
-          class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self, request, fp, code, message, response_headers, new_url): return None
-          try:
-              urllib.request.build_opener(NoRedirect).open(
-                  urllib.request.Request(base + "/actions/artifacts/" + str(ARTIFACT_ID) + "/zip", headers=headers), timeout=30)
-              raise ValueError("expected authenticated artifact redirect")
-          except urllib.error.HTTPError as redirect:
-              if redirect.code != 302: raise
-              location = redirect.headers["Location"]
-          require(location.startswith("https://"), "artifact download must use HTTPS")
-          work = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "native-dispatch-artifact"
-          work.mkdir(mode=0o700, exist_ok=False)
-          require(shutil.disk_usage(work).free >= EXPECTED_ZIP_BYTES + 512 * 1024**2, "insufficient artifact disk")
-          documents, document_identities = {}, {}
-          with tempfile.TemporaryFile(prefix="native-install-", dir=work) as handle:
-              digest, total = hashlib.sha256(), 0
-              # The signed URL receives no GitHub bearer header.
-              with urllib.request.urlopen(location, timeout=60) as response:
-                  while True:
-                      block = response.read(min(1 << 20, EXPECTED_ZIP_BYTES + 1 - total))
-                      if not block: break
-                      total += len(block)
-                      require(total <= EXPECTED_ZIP_BYTES, "download exceeds observed artifact bytes")
-                      digest.update(block)
-                      handle.write(block)
-              require(total == EXPECTED_ZIP_BYTES and digest.hexdigest() == EXPECTED_ZIP_SHA256, "artifact bytes differ")
-              handle.seek(0)
-              with zipfile.ZipFile(handle) as archive:
-                  entries = archive.infolist()
-                  require(len(entries) <= 10000, "native archive entry count exceeded")
-                  for name in ("receipt.json", "selection.json", "workflow-outcome.json", "service-status.json"):
-                      matches = [e for e in entries if e.filename == name]
-                      require(len(matches) == 1 and not matches[0].is_dir() and matches[0].file_size <= 131072,
-                              "missing, duplicate or oversized native document: " + name)
-                      with archive.open(matches[0]) as stream: raw = stream.read(131073)
-                      require(len(raw) == matches[0].file_size, "native document bytes differ")
-                      documents[name] = json.loads(raw)
-                      document_identities[name] = {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
-          receipt, selection, outcome = (documents[name] for name in ("receipt.json", "selection.json", "workflow-outcome.json"))
-          for value in (receipt, selection):
-              require(value["schema"] == "laplace.native-only-install/v1" and value["source"] == EXPECTED_SOURCE
-                      and value["tree"] == EXPECTED_TREE and str(value["runId"]) == str(NATIVE_RUN)
-                      and str(value["attempt"]) == str(NATIVE_ATTEMPT) and value["managedPublication"] == "not_attempted"
-                      and value["fullLifecyclePassed"] is False and value["databaseRecreation"] is False
-                      and value["foundationIngestion"] is False, "native receipt scope or identity differs")
-          require(selection["operatorSource"] == EXPECTED_OPERATOR and selection["status"] == "running"
-                  and receipt["status"] == "completed", "native selection/completion differs")
-          require(selection["postgresqlSelection"]["commit"] == "724edf9bde9d356724ad384a2e196edc3c9f80f7"
-                  and selection["postgresqlSelection"]["version"] == "18.6" and receipt["serverVersionNum"] == 180006,
-                  "PostgreSQL release or activation differs")
-          expected = ["pg-pin", "pg-checkout", "pg-source", "dependency-build", "dependency-identity", "native-managed-build",
-              "isolated-native-database", "native-tests", "managed-tests", "uci-tests", "quiet-native-owner", "native-install",
-              "extension-sql", "database-health", "postgres-activation"]
-          require(receipt["completedPhases"] in (expected, expected[:1] + ["pg-fetch"] + expected[1:]),
-                  "completed native phases differ from the required order")
-          require(outcome == {"workflowOutcome": "success", "source": EXPECTED_SOURCE,
-                              "applicationPublication": "not_attempted", "fullLifecyclePassed": False}, "native outcome differs")
-          required_files = ("/opt/laplace/lib/liblaplace_core.so", "/opt/laplace/pgsql-18/bin/postgres",
-                            "/opt/laplace/pgsql-18/bin/pg_config")
-          require(set(receipt["identities"]) == set(required_files), "native installed file inventory differs")
-          for name, identity in receipt["identities"].items():
-              require(isinstance(identity["bytes"], int) and identity["bytes"] > 0
-                      and re.fullmatch(r"[0-9a-f]{64}", identity["sha256"])
-                      and pathlib.PurePosixPath(identity["path"]).is_absolute(), "invalid native identity: " + name)
-          require(api("/git/commits/" + EXPECTED_SOURCE)["tree"]["sha"] == EXPECTED_TREE, "selected product tree differs")
-          require(api("/git/ref/heads/" + TARGET_REF)["object"]["sha"] == EXPECTED_SOURCE, "pilot ref is not installed product")
-          # Main/operator refs may advance independently. The exact pilot target and
-          # subsequent actual run head/native-before/native-after bind this product.
-          print("VERIFIED_NATIVE_INSTALLATION_EVIDENCE " + json.dumps({
-              "operatorSource": EXPECTED_OPERATOR, "productSource": EXPECTED_SOURCE, "productTree": EXPECTED_TREE,
-              "runId": NATIVE_RUN, "attempt": NATIVE_ATTEMPT, "jobId": NATIVE_JOB, "artifactId": ARTIFACT_ID,
-              "artifactBytes": EXPECTED_ZIP_BYTES, "artifactSha256": EXPECTED_ZIP_SHA256, "receipt": receipt,
-              "workflowOutcome": outcome, "documentIdentities": document_identities,
-              "observedServiceState": documents["service-status.json"],
-              "pilotScope": "Native-only. Corpus wrapper independently binds native/extension/DB, source-built CLI and PGN before/after. No application/full lifecycle or recording success claim."
-          }), flush=True)
-          body = {"ref": TARGET_REF, "inputs": {"mode": "measure", "pgn": OBSERVED_PGN, "family": "otb-2025", "games": "2000"}}
-          request = urllib.request.Request(base + "/actions/workflows/chess-corpus-evidence.yml/dispatches",
-              data=json.dumps(body).encode(), headers={**headers, "Content-Type": "application/json"}, method="POST")
-          # Exactly one POST; ambiguous transport errors are never retried.
-          with urllib.request.urlopen(request, timeout=30) as response: code, raw = response.status, response.read(65537)
-          require(code in (200, 204) and len(raw) <= 65536, "unexpected bounded dispatch response")
-          result = json.loads(raw) if raw else {}
-          require(api("/git/ref/heads/" + TARGET_REF)["object"]["sha"] == EXPECTED_SOURCE,
-                  "pilot ref moved during dispatch; inspect created run before claiming identity")
-          print("CHESS_CORPUS_PILOT_DISPATCH " + json.dumps({
-              "status": "requested", "expectedHead": EXPECTED_SOURCE, "ref": TARGET_REF, "nativeInstallationRun": NATIVE_RUN,
-              "nativeInstallationAttempt": NATIVE_ATTEMPT, "fullLifecyclePassed": False, "applicationPublication": "not_attempted",
-              "inputs": body["inputs"], "workflowRunId": result.get("workflow_run_id"), "runUrl": result.get("html_url")
-          }), flush=True)
+          timeout --signal=TERM --kill-after=5s 40s python3 - <<'PY'
+          import datetime, hashlib, json, math, os, re, signal, stat, time
+          from pathlib import Path
+          
+          RUN, ATTEMPT = int("35143136205"), int("1")
+          SHA = "baba1ccea538c5f7380692cd7432b94d6f4bf46b"
+          assert RUN > 0 and ATTEMPT > 0 and len(SHA) == 40 and all(c in "0123456789abcdef" for c in SHA)
+          ROOT = Path(f"/build/laplace/work/chess-corpus-evidence/{RUN}-{ATTEMPT}/corpus")
+          STARTED = time.monotonic()
+          
+          def deadline(signum, frame):
+              raise TimeoutError("bounded read-only pilot observation deadline")
+          signal.signal(signal.SIGALRM, deadline)
+          signal.alarm(30)
+          
+          def text(value):
+              return value[:160] if isinstance(value, str) else None
+          
+          def scalar(value):
+              return value if type(value) is int or type(value) is bool or value is None or (
+                  type(value) is float and math.isfinite(value)) else None
+          
+          def projection(data, names):
+              if not isinstance(data, dict):
+                  raise ValueError("expected an object")
+              return {key: text(data[key]) if isinstance(data[key], str) else scalar(data[key])
+                      for key in names if key in data}
+          
+          def metadata(relative):
+              try:
+                  path = ROOT / relative
+                  item = path.lstat()
+                  return {"present": True, "regular": stat.S_ISREG(item.st_mode), "bytes": item.st_size,
+                          "modifiedUtc": datetime.datetime.fromtimestamp(item.st_mtime, datetime.timezone.utc).isoformat()}
+              except OSError as error:
+                  return {"present": False, "errorType": type(error).__name__, "errno": error.errno}
+          
+          def read_json(relative, schema):
+              path = ROOT / relative
+              if path.parent.resolve(strict=True) != path.parent:
+                  raise ValueError("fixed evidence parent resolves through a symlink")
+              fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+              with os.fdopen(fd, "rb") as stream:
+                  before = os.fstat(stream.fileno())
+                  if not stat.S_ISREG(before.st_mode) or before.st_size > 262144:
+                      raise ValueError("evidence is not a bounded regular file")
+                  raw = stream.read(262145)
+                  after = os.fstat(stream.fileno())
+              if len(raw) > 262144 or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                  raise ValueError("evidence changed or exceeded the observation budget")
+              data = json.loads(raw)
+              if not isinstance(data, dict) or data.get("schema") != schema:
+                  raise ValueError("unexpected evidence schema")
+              return data, {"path": str(path), "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+          
+          PREVIOUS_PROCESSES = {}
+          
+          def bounded_proc(path, budget):
+              descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+              with os.fdopen(descriptor, "rb") as stream:
+                  if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                      raise ValueError("process evidence is not regular")
+                  raw = stream.read(budget + 1)
+              if len(raw) > budget:
+                  raise ValueError("process evidence exceeded budget")
+              return raw.decode("ascii", errors="strict")
+          
+          def process_stat(pid):
+              raw = bounded_proc(f"/proc/{pid}/stat", 4096)
+              end = raw.rfind(")")
+              if end < 0 or raw.split(" ", 1)[0] != str(pid):
+                  raise ValueError("unexpected process stat identity")
+              fields = raw[end + 2:].split()
+              if len(fields) < 22:
+                  raise ValueError("incomplete process stat")
+              return {"processId": pid, "userTicks": int(fields[11]), "systemTicks": int(fields[12]),
+                      "threads": int(fields[17]), "startTicks": int(fields[19]),
+                      "virtualBytes": int(fields[20]), "residentPages": int(fields[21])}
+          
+          def process_snapshot(sample, source_bound):
+              result = {"observed": False, "scope": "Read-only process counters; no command line or environment."}
+              if not source_bound:
+                  return dict(result, unavailableReason="wrapper_source_unbound")
+              try:
+                  pid = sample.get("processId")
+                  if type(pid) is not int or not 0 < pid < 2147483648:
+                      raise ValueError("invalid progress process identity")
+                  started = sample.get("processStartedAt")
+                  if not isinstance(started, str):
+                      raise ValueError("progress process start time unavailable")
+                  parsed_start = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})", started)
+                  if parsed_start is None:
+                      raise ValueError("progress process start time is not bounded ISO8601")
+                  fraction = ((parsed_start.group(2) or "") + "000000")[:6]
+                  expected = datetime.datetime.strptime(parsed_start.group(1) + "." + fraction + parsed_start.group(3).replace("Z", "+00:00"), "%Y-%m-%dT%H:%M:%S.%f%z")
+                  if expected.tzinfo is None:
+                      raise ValueError("progress process start time has no offset")
+                  tick_hz = os.sysconf("SC_CLK_TCK")
+                  page_bytes = os.sysconf("SC_PAGE_SIZE")
+                  before = process_stat(pid)
+                  boot_lines = bounded_proc("/proc/stat", 262144).splitlines()
+                  boot_values = [int(line.split()[1]) for line in boot_lines if line.startswith("btime ")]
+                  if len(boot_values) != 1 or tick_hz <= 0 or page_bytes <= 0:
+                      raise ValueError("kernel process clock unavailable")
+                  kernel_start = boot_values[0] + before["startTicks"] / tick_hz
+                  difference = abs(expected.timestamp() - kernel_start)
+                  if difference > 2:
+                      raise ValueError("kernel start time differs from recorded process")
+                  optional = {}
+                  try:
+                      status = bounded_proc(f"/proc/{pid}/status", 65536)
+                      wanted = {"VmRSS": "residentKiB", "VmHWM": "peakResidentKiB", "Threads": "threads",
+                                "voluntary_ctxt_switches": "voluntaryContextSwitches",
+                                "nonvoluntary_ctxt_switches": "involuntaryContextSwitches"}
+                      status_metrics = {}
+                      for line in status.splitlines():
+                          key, sep, value = line.partition(":")
+                          if sep and key in wanted:
+                              parts = value.split()
+                              if not parts or not parts[0].isdigit():
+                                  raise ValueError("invalid process status metric")
+                              if key in ("VmRSS", "VmHWM") and parts[1:] != ["kB"]:
+                                  raise ValueError("unexpected process memory unit")
+                              status_metrics[wanted[key]] = int(parts[0])
+                      optional["statusMetrics"] = status_metrics
+                  except (OSError, ValueError, UnicodeError) as error:
+                      optional["statusUnavailableErrorType"] = type(error).__name__
+                  try:
+                      io_text = bounded_proc(f"/proc/{pid}/io", 4096)
+                      wanted = {"read_bytes": "readBytes", "write_bytes": "writeBytes",
+                                "rchar": "readCharacters", "wchar": "writeCharacters",
+                                "syscr": "readSyscalls", "syscw": "writeSyscalls"}
+                      io_metrics = {}
+                      for line in io_text.splitlines():
+                          key, sep, value = line.partition(":")
+                          if sep and key in wanted:
+                              if not value.strip().isdigit():
+                                  raise ValueError("invalid process I/O metric")
+                              io_metrics[wanted[key]] = int(value)
+                      optional["ioMetrics"] = io_metrics
+                  except (OSError, ValueError, UnicodeError) as error:
+                      optional["ioUnavailableErrorType"] = type(error).__name__
+                  after = process_stat(pid)
+                  if (before["processId"], before["startTicks"]) != (after["processId"], after["startTicks"]):
+                      raise ValueError("process identity changed during observation")
+                  return dict(result, observed=True, processId=pid, startTicks=after["startTicks"],
+                              startTimeDifferenceSeconds=difference, startTimeToleranceSeconds=2,
+                              ticksPerSecond=tick_hz, userCpuSeconds=after["userTicks"] / tick_hz,
+                              systemCpuSeconds=after["systemTicks"] / tick_hz,
+                              residentBytes=after["residentPages"] * page_bytes,
+                              virtualBytes=after["virtualBytes"], threads=after["threads"],
+                              sampleMonotonicSeconds=time.monotonic(), **optional)
+              except (OSError, ValueError, TypeError, KeyError, UnicodeError) as error:
+                  return dict(result, unavailableErrorType=type(error).__name__)
+          
+          def process_delta(phase, current):
+              previous = PREVIOUS_PROCESSES.pop(phase, None)
+              if not current.get("observed"):
+                  return
+              PREVIOUS_PROCESSES[phase] = current.copy()
+              if previous is None:
+                  current["deltaUnavailableReason"] = "no_verified_prior_sample"
+                  return
+              if (current["processId"], current["startTicks"]) != (previous["processId"], previous["startTicks"]):
+                  current["deltaUnavailableReason"] = "process_identity_changed"
+                  return
+              elapsed = current["sampleMonotonicSeconds"] - previous["sampleMonotonicSeconds"]
+              user = current["userCpuSeconds"] - previous["userCpuSeconds"]
+              system = current["systemCpuSeconds"] - previous["systemCpuSeconds"]
+              if elapsed <= 0 or user < 0 or system < 0:
+                  current["deltaUnavailableReason"] = "non_monotonic_process_sample"
+                  return
+              current["delta"] = {"sampleSeconds": elapsed, "userCpuSeconds": user, "systemCpuSeconds": system,
+                                  "cpuCoreEquivalents": (user + system) / elapsed}
+              for key in ("readBytes", "writeBytes"):
+                  prior_value = previous.get("ioMetrics", {}).get(key)
+                  current_value = current.get("ioMetrics", {}).get(key)
+                  if type(prior_value) is int and type(current_value) is int and current_value >= prior_value:
+                      current["delta"][key] = current_value - prior_value
+          
+          def observe():
+              result = {"schema": "laplace.chess-pilot-live-observation/v3", "runId": RUN, "attempt": ATTEMPT,
+                        "expectedSourceSha": SHA, "observedUtc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "scope": "Read-only fixed evidence paths; no checkout, host lock, database or process mutation. Diagnostic samples are not a throughput or completed-recording result. Heartbeats do not establish forward admission progress."}
+              bound = False
+              try:
+                  data, identity = read_json("receipt.json", "laplace.installed-native-corpus-measurement/v1")
+                  if data.get("sourceSha") != SHA:
+                      raise ValueError("wrapper source identity is absent or differs from the selected pilot")
+                  bound = True
+                  phases = data.get("phases")
+                  if not isinstance(phases, list) or len(phases) > 64:
+                      raise ValueError("unexpected phase list")
+                  result["wrapper"] = projection(data, ("schema", "status", "mode", "sourceSha", "observedUtc", "finishedUtc",
+                                                        "errorType", "postflightErrorType", "sourcePostflightErrorType",
+                                                        "nativePostflightErrorType"))
+                  result["wrapper"]["errorPresent"] = bool(data.get("error"))
+                  result["wrapper"]["phases"] = [projection(row, ("name", "status", "wallSeconds", "errorType")) for row in phases]
+                  result["wrapperIdentity"] = identity
+              except (OSError, ValueError, TypeError, KeyError) as error:
+                  result["wrapperReadErrorType"] = type(error).__name__
+                  if isinstance(error, OSError):
+                      result["wrapperReadErrno"] = error.errno
+              result["sourceBoundByWrapper"] = bound
+              result["progress"] = {}
+              for phase in ("fresh", "replay-01"):
+                  relative = f"measurement/{phase}/progress.json"
+                  item = {"file": metadata(relative), "sourceBoundByWrapper": bound}
+                  try:
+                      data, identity = read_json(relative, "laplace.chess-recording-progress/v1")
+                      item["identity"] = identity
+                      item["sample"] = projection(data, ("schema", "processId", "processStartedAt", "heartbeatAt",
+                                                          "heartbeatElapsedSeconds"))
+                      checkpoint = data.get("checkpoint")
+                      item["sample"]["checkpoint"] = projection(checkpoint, (
+                          "sequence", "observedElapsedSeconds", "phaseEnteredElapsedSeconds", "phase", "boundary", "admissionStatus"))
+                      counters = checkpoint.get("counters")
+                      item["sample"]["checkpoint"]["counters"] = projection(counters, (
+                          "requestedGames", "parsedGames", "parseAttempts", "parseRejected", "parsedPlies",
+                          "chunksStarted", "chunksSealed", "currentChunkGames", "novelGamesComposed", "novelPliesComposed",
+                          "positionOccurrencesComposed", "repairGamesComposed", "builtChanges", "builtManagedEntityRows",
+                          "builtManagedPhysicalityRows", "builtManagedPhysicalityObservationRows", "builtManagedAttestationRows",
+                          "builtNativeStages", "writerApplyAttempts", "writerCallsAcknowledged", "copyTransactionsAcknowledged",
+                          "gamesEnteredReadback", "exactReadbackGames", "gamesWithSealedChunkEvidence",
+                          "newlyRecordedGamesWithSealedChunkEvidence"))
+                      writer = checkpoint.get("lastWriterBoundary")
+                      if writer is not None:
+                          item["sample"]["checkpoint"]["lastWriterBoundary"] = projection(writer, (
+                              "ownerPhase", "phase", "boundary", "observedElapsedSeconds", "elapsedMilliseconds", "returned"))
+                      item["sample"]["diagnostics"] = projection(data.get("diagnostics"), (
+                          "successfulWrites", "writeFailures", "logFailures", "observationFailures", "heartbeatIntervalSeconds",
+                          "loopCheckpointIntervalSeconds", "lastDiagnosticErrorType"))
+                  except (OSError, ValueError, TypeError, KeyError) as error:
+                      item["readErrorType"] = type(error).__name__
+                      if isinstance(error, OSError):
+                          item["readErrno"] = error.errno
+                  if "sample" in item:
+                      item["processObservation"] = process_snapshot(item["sample"], bound)
+                      process_delta(phase, item["processObservation"])
+                  result["progress"][phase] = item
+              result["fileMetadata"] = {relative: metadata(relative) for relative in (
+                  "native-before.log", "cli-build.log", "cli-native-sync.log", "measurement.log", "native-after.log",
+                  "measurement/selection.jsonl", "measurement/preparation.json", "measurement/corpus-recording.json",
+                  "measurement/fresh/chunks.jsonl", "measurement/replay-01/chunks.jsonl")}
+              result["observerElapsedSeconds"] = time.monotonic() - STARTED
+              print("PILOT_LIVE_CHECKPOINT " + json.dumps(result, sort_keys=True, allow_nan=False), flush=True)
+          
+          observe()
+          time.sleep(10)
+          observe()
+          signal.alarm(0)
           PY
