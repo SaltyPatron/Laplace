@@ -35,8 +35,36 @@ def external_root():
     return Path(os.environ.get("LAPLACE_EXTERNAL", str(default))).absolute()
 
 
+def installed_source(prefix=None):
+    """Read only the durable source setting, never execute or expose service env."""
+    prefix = Path(prefix or os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
+    config = prefix / "app/laplace-api.env"
+    selected = None
+    if config.is_file():
+        for line in config.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip() == "LAPLACE_STOCKFISH_SOURCE":
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                selected = value.strip() or None
+    return Path(selected).absolute() if selected else None
+
+
+def source_selection(source=None):
+    if source is not None:
+        return Path(source).absolute(), "command-line"
+    explicit = os.environ.get("LAPLACE_STOCKFISH_SOURCE", "").strip()
+    if explicit:
+        return Path(explicit).absolute(), "environment"
+    installed = installed_source()
+    if installed is not None:
+        return installed, "installed-service"
+    return external_root() / "stockfish", "external-default"
+
+
 def source_root():
-    return Path(os.environ.get("LAPLACE_STOCKFISH_SOURCE", str(external_root() / "stockfish"))).absolute()
+    return source_selection()[0]
 
 
 def binary_path(source=None):
@@ -211,12 +239,20 @@ def verify_source(source, expected_commit):
     return verify_checkout(source, expected_commit, "Stockfish")
 
 
-def update_source(source, lock):
-    """Fetch the stable source pin without resetting local edits or branch history."""
-    if not source.exists():
-        source.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "--no-replace-objects", "clone", "--branch", lock["tag"], "--depth", "1",
-                        lock["repository"], str(source)], check=True)
+def receipt_source_path(source):
+    source = Path(source)
+    resolved = source.resolve()
+    if any(character in str(path) for path in (source, resolved) for character in ("\n", "\r")):
+        raise ValueError("Stockfish source path must fit one environment assignment")
+    return resolved
+
+
+def existing_source(source):
+    """Qualify a real checkout without creating, moving or relabelling it."""
+    source = Path(source)
+    resolved = receipt_source_path(source)
+    if not source.is_dir():
+        raise ValueError(f"Selected Stockfish source is not an existing directory: {source}")
     if Path(git(source, "rev-parse", "--show-toplevel")).resolve() != source.resolve():
         raise ValueError(f"Stockfish source is not a repository root: {source}")
     origin = git(source, "config", "--get", "remote.origin.url").rstrip("/")
@@ -224,6 +260,74 @@ def update_source(source, lock):
             "https://github.com/official-stockfish/Stockfish",
             "git@github.com:official-stockfish/Stockfish"):
         raise ValueError(f"Stockfish source origin is not the official repository: {source}")
+    return {"source": str(resolved), "git_root": str(resolved),
+            "origin": origin, "commit": git(source, "rev-parse", "HEAD"),
+            "checkout_status": "existing-official-checkout"}
+
+
+def host_source_receipt(preferred=None, source=None):
+    configured, selection = source_selection(source)
+    configured_source = str(configured)
+    requested = {"path": str(preferred) if preferred is not None else None,
+                 "exists": False, "available": False, "reason": "not-requested"}
+    preferred_observation = None
+    if preferred is not None:
+        requested["exists"] = Path(preferred).exists()
+        try:
+            preferred_observation = existing_source(preferred)
+            requested.update(available=True, reason="existing-official-checkout",
+                             **preferred_observation)
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            requested["reason"] = ("requested-local-path-not-official-checkout" if requested["exists"]
+                                   else "requested-local-path-unavailable")
+    if selection not in ("command-line", "environment") and preferred_observation is not None:
+        configured = Path(preferred_observation["source"])
+        selection = "requested-existing-local-checkout"
+    if selection == "external-default" and not configured.exists():
+        observed = {"source": str(receipt_source_path(configured)), "git_root": None,
+                    "origin": None, "commit": None, "checkout_status": "pending-default-install",
+                    "planned_repository": load_lock()["repository"]}
+    else:
+        observed = existing_source(configured)
+    return {"schema": "laplace.stockfish-source-selection.v1", "host": platform.node(),
+            "requested": requested, "configured_source": configured_source,
+            "selection": selection, **observed,
+            "executable": str(binary_path(Path(observed["source"])))}
+
+
+def verify_source_receipt(path):
+    selected = json.loads(Path(path).read_text(encoding="utf-8"))
+    source = source_root().resolve(strict=True)
+    if selected.get("schema") != "laplace.stockfish-source-selection.v1" or selected.get("source") != str(source):
+        raise ValueError("Stockfish build source differs from the retained host selection")
+    observed = existing_source(source)
+    lock = load_lock()
+    verify_source(source, lock["commit"])
+    state = Path(git(source, "rev-parse", "--git-path", "laplace-stockfish-build.json"))
+    if not state.is_absolute():
+        state = source / state
+    built = json.loads(state.read_text(encoding="utf-8"))
+    binary = binary_path(source)
+    binary_sha256 = digest(binary)
+    if (built.get("recipe", {}).get("commit") != lock["commit"] or
+            built.get("recipe", {}).get("source_integrity") != "git-committed-bytes-and-modes-v1" or
+            built.get("binary_sha256") != binary_sha256):
+        raise ValueError("Stockfish build receipt does not match the selected source and executable")
+    prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
+    if configured_binary(prefix).resolve(strict=True) != binary.resolve(strict=True):
+        raise ValueError("Configured Stockfish executable is not the selected direct source build")
+    return {**selected, **observed, "build_verification": {
+        "commit": lock["commit"], "executable": str(binary), "binary_sha256": binary_sha256,
+        "receipt": str(state), "source_integrity": "git-committed-bytes-and-modes-v1"}}
+
+
+def update_source(source, lock):
+    """Fetch the stable source pin without resetting local edits or branch history."""
+    if not source.exists():
+        source.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "--no-replace-objects", "clone", "--branch", lock["tag"], "--depth", "1",
+                        lock["repository"], str(source)], check=True)
+    existing_source(source)
     if git(source, "status", "--porcelain", "--untracked-files=all"):
         raise ValueError(f"Stockfish source has local changes; preserved without checkout or rebuild: {source}")
     previous = git(source, "rev-parse", "HEAD")
@@ -305,7 +409,9 @@ def regenerate_dependencies(source, state_directory):
 
 
 def build(source=None, jobs=None, make=None, compiler=None, rebuild=False):
-    source = (source or source_root()).absolute()
+    source, selection = source_selection(source)
+    if selection != "external-default":
+        existing_source(source)
     lock = load_lock()
     for tool in ("git", "sh"):
         if not shutil.which(tool):
@@ -385,7 +491,8 @@ def build(source=None, jobs=None, make=None, compiler=None, rebuild=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-dir", type=Path, help="Official source checkout; defaults to the existing external/stockfish dependency")
+    parser.add_argument("--source-dir", type=Path, help="Existing official source checkout; defaults to the installed selection or external/stockfish dependency")
+    parser.add_argument("--prefer-source", type=Path, help="For a source receipt, prefer this local path only when it is an existing official checkout")
     parser.add_argument("--jobs", type=int, help="Parallel compiler jobs; honors CMAKE_BUILD_PARALLEL_LEVEL/LAPLACE_BUILD_JOBS before available CPUs")
     parser.add_argument("--make", help="GNU make executable")
     parser.add_argument("--compiler", choices=("gcc", "clang", "mingw", "icx"))
@@ -396,9 +503,20 @@ if __name__ == "__main__":
     action.add_argument("--restore", type=Path, help="Restore the previous CI launch configuration")
     action.add_argument("--check-latest", action="store_true", help="Check the official latest stable tag and source commit")
     action.add_argument("--check-binary", type=Path, help="Verify the selected executable version, UCI readiness and legal search")
+    action.add_argument("--verify-source-receipt", type=Path, help="Verify the direct build against a retained host source selection")
+    action.add_argument("--source-receipt", action="store_true", help="Inspect the selected existing official checkout without changing it")
+    action.add_argument("--print-source", action="store_true", help="Print the selected source path, including the installed service setting")
     action.add_argument("--print-path", "--print-binary", action="store_true", help="Print the direct source-build executable path without installing")
     args = parser.parse_args()
-    if args.check_latest:
+    if args.prefer_source is not None and not args.source_receipt:
+        parser.error("--prefer-source is only valid with --source-receipt")
+    if args.verify_source_receipt:
+        print(json.dumps(verify_source_receipt(args.verify_source_receipt), sort_keys=True))
+    elif args.source_receipt:
+        print(json.dumps(host_source_receipt(args.prefer_source, args.source_dir), sort_keys=True))
+    elif args.print_source:
+        print(source_selection(args.source_dir)[0])
+    elif args.check_latest:
         check_latest()
     elif args.check_binary:
         print(probe(args.check_binary, load_lock()["version"]))

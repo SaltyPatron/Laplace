@@ -33,7 +33,7 @@ say()    { echo; echo "=== $1 ==="; }
 run_as_owner() {
   if [ "$(id -u)" -eq 0 ]; then
     local key
-    local -a build_env=("LAPLACE_EXTERNAL=$EXTERNAL" "TMPDIR=$WORK" "TMP=$WORK" "TEMP=$WORK")
+    local -a build_env=("LAPLACE_EXTERNAL=$EXTERNAL" "LAPLACE_INSTALL_PREFIX=$PREFIX" "TMPDIR=$WORK" "TMP=$WORK" "TEMP=$WORK")
     for key in LAPLACE_STOCKFISH_SOURCE LAPLACE_STOCKFISH_COMP LAPLACE_STOCKFISH_ARCH \
       LAPLACE_STOCKFISH_JOBS LAPLACE_BUILD_JOBS LAPLACE_DEPS_PREFIX CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS CC CXX; do
       if [[ -v "$key" ]]; then build_env+=("$key=${!key}"); fi
@@ -112,7 +112,8 @@ write_api_env() {
     return 0
   fi
 
-  local sf qt cc
+  local sf qt cc selected_source
+  selected_source="$(python3 "$SCRIPT_DIR/install-stockfish.py" --print-source)"
   sf="$(resolve_stockfish || true)"
   qt="$(resolve_qt_bin || true)"
   cc="${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}"
@@ -141,7 +142,7 @@ write_api_env() {
     [ -n "$sf" ] && echo "LAPLACE_STOCKFISH=$sf"
     [ -n "$qt" ] && echo "LAPLACE_QT_BIN=$qt"
     echo "LAPLACE_EXTERNAL=$EXTERNAL"
-    [ -z "${LAPLACE_STOCKFISH_SOURCE:-}" ] || echo "LAPLACE_STOCKFISH_SOURCE=$LAPLACE_STOCKFISH_SOURCE"
+    echo "LAPLACE_STOCKFISH_SOURCE=$selected_source"
     [ -z "${LAPLACE_ZSTD_LIBRARY:-}" ] || echo "LAPLACE_ZSTD_LIBRARY=$LAPLACE_ZSTD_LIBRARY"
     [ -z "${LAPLACE_ZSTD_SOURCE:-}" ] || echo "LAPLACE_ZSTD_SOURCE=$LAPLACE_ZSTD_SOURCE"
     [ -z "${LAPLACE_ZSTD_BUILD:-}" ] || echo "LAPLACE_ZSTD_BUILD=$LAPLACE_ZSTD_BUILD"

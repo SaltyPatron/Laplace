@@ -14,7 +14,8 @@ public readonly struct UDSource : ISeedSource
         SubstrateCanonicalIds.TrustClass("AcademicCurated");
 
     public static IReadOnlyList<string> Relations { get; } =
-        ["HAS_LANGUAGE", "IS_A", "HAS_PARSE", "CONTAINS"];
+        ["HAS_LANGUAGE", "IS_A", "HAS_PARSE", "CONTAINS",
+         "HAS_POS", "HAS_XPOS", "IS_LEMMA_OF"];
 
     internal static readonly Hash128 HasParseTypeId =
         RelationTypeRegistry.RelationTypeId(Relations[2]);

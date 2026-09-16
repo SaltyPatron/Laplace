@@ -215,6 +215,14 @@ public static class UdParseStructure
         if (sourceFileContext is { } fileContext)
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
                 fileContext, UDSource.ContainsTypeId, occurrenceId, sourceId, fileContext, witnessWeight));
+
+        // The same exact parse supplies its explicit typed annotations to the
+        // common attestation/consensus machine. One native call retains source
+        // occurrence context and multiplicity without reminting forms or
+        // rebuilding ordinal/adjacency facts already present in the trajectory.
+        NativeUdWitness.Project(
+            builder, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(flat),
+            sourceId, occurrenceId, MiscKeyId("Lang"), witnessWeight);
         return parseId;
     }
 
