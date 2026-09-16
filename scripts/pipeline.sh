@@ -1007,17 +1007,21 @@ phase_chess_lab() {
 
 # Materialize /opt/laplace/secrets from the job environment.
 # CI source of truth: GitHub repository Secrets injected by laplace.yml publish
-# (LICHESS_API, STRIPE_API_SECRET, STRIPE_WEBHOOK_SECRET) + optional var
-# STRIPE_API_PUBLISHABLE. Machine ~/.config/shell/secrets.env is NOT a deploy path.
+# (LICHESS_API, STRIPE_API_SECRET, STRIPE_WEBHOOK_SECRET, and optional Microsoft /
+# Google OAuth client pairs) + optional var STRIPE_API_PUBLISHABLE. Machine
+# ~/.config/shell/secrets.env is NOT a deploy path.
 phase_runtime_secrets() {
   echo "===== PHASE — RUNTIME SECRETS DROP ====="
   local dst_dir="$LAPLACE_INSTALL_PREFIX/secrets"
   mkdir -p "$dst_dir"
+  mkdir -p "$dst_dir/data-protection"
   chmod 2770 "$dst_dir" 2>/dev/null || true
+  chmod 2770 "$dst_dir/data-protection" 2>/dev/null || true
   local in_ci=0
   [ -n "${GITHUB_ACTIONS:-}" ] && in_ci=1
 
   local dst tok stripe_secret stripe_whsec missing=0
+  local microsoft_id microsoft_secret google_id google_secret
   local name secret value
   RUNTIME_SECRETS_CHANGED=0
   for name in mcp operator; do
@@ -1090,6 +1094,49 @@ phase_runtime_secrets() {
 
   if [ "$in_ci" -eq 1 ] && [ -z "$stripe_whsec" ] && [ -n "$stripe_secret" ]; then
     echo "::warning::STRIPE_WEBHOOK_SECRET unset — Checkout works; signed webhooks will fail until set"
+  fi
+
+  dst="$dst_dir/identity.env"
+  microsoft_id="${LAPLACE_AUTH_MICROSOFT_CLIENT_ID:-}"
+  microsoft_secret="${LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET:-}"
+  google_id="${LAPLACE_AUTH_GOOGLE_CLIENT_ID:-}"
+  google_secret="${LAPLACE_AUTH_GOOGLE_CLIENT_SECRET:-}"
+  if { [ -n "$microsoft_id" ] && [ -z "$microsoft_secret" ]; } \
+      || { [ -z "$microsoft_id" ] && [ -n "$microsoft_secret" ]; }; then
+    echo "::error::Microsoft OAuth requires both LAPLACE_AUTH_MICROSOFT_CLIENT_ID and LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET" >&2
+    missing=1
+  fi
+  if { [ -n "$google_id" ] && [ -z "$google_secret" ]; } \
+      || { [ -z "$google_id" ] && [ -n "$google_secret" ]; }; then
+    echo "::error::Google OAuth requires both LAPLACE_AUTH_GOOGLE_CLIENT_ID and LAPLACE_AUTH_GOOGLE_CLIENT_SECRET" >&2
+    missing=1
+  fi
+  if { [ -n "$microsoft_id" ] && [ -n "$microsoft_secret" ]; } \
+      || { [ -n "$google_id" ] && [ -n "$google_secret" ]; }; then
+    {
+      if [ -n "$microsoft_id" ] && [ -n "$microsoft_secret" ]; then
+        printf 'LAPLACE_AUTH_MICROSOFT_CLIENT_ID=%s\n' "$microsoft_id"
+        printf 'LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET=%s\n' "$microsoft_secret"
+      fi
+      if [ -n "$google_id" ] && [ -n "$google_secret" ]; then
+        printf 'LAPLACE_AUTH_GOOGLE_CLIENT_ID=%s\n' "$google_id"
+        printf 'LAPLACE_AUTH_GOOGLE_CLIENT_SECRET=%s\n' "$google_secret"
+      fi
+    } >"$dst.tmp"
+    chmod 640 "$dst.tmp"
+    if ! cmp -s "$dst.tmp" "$dst"; then RUNTIME_SECRETS_CHANGED=1; fi
+    mv "$dst.tmp" "$dst"
+    echo "identity.env refreshed with configured OAuth providers"
+  elif [ "$in_ci" -eq 1 ]; then
+    printf '# No browser OAuth provider configured for this deployment.\n' >"$dst.tmp"
+    chmod 640 "$dst.tmp"
+    if ! cmp -s "$dst.tmp" "$dst"; then RUNTIME_SECRETS_CHANGED=1; fi
+    mv "$dst.tmp" "$dst"
+    echo "::warning::no OAuth client pairs configured — browser sign-in is disabled"
+  elif [ -f "$dst" ]; then
+    echo "identity.env kept (local drop; not refreshed)"
+  else
+    echo "::warning::no identity.env — Microsoft and Google sign-in are disabled"
   fi
 
   if [ "$missing" -eq 1 ]; then

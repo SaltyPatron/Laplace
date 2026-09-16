@@ -1,0 +1,27 @@
+@layer components {
+  .account {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .identity {
+    display: grid;
+    text-align: right;
+    line-height: 1.15;
+    max-width: 18rem;
+  }
+
+  .identity > span,
+  .identity > :last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .identity > :last-child {
+    font-size: var(--text-xs);
+  }
+}

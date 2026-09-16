@@ -1,5 +1,5 @@
 #requires -Version 7
-# Sync repo-root .env → deploy/secrets/{lichess,stripe}.env (gitignored).
+# Sync repo-root .env → deploy/secrets/{lichess,stripe,identity}.env (gitignored).
 # Optionally refresh STRIPE_WEBHOOK_SECRET from `stripe listen --print-secret`.
 [CmdletBinding()]
 param(
@@ -108,5 +108,23 @@ if ($whsec) { $stripeLines += "STRIPE_WEBHOOK_SECRET=$whsec" }
 else { $stripeLines += "# STRIPE_WEBHOOK_SECRET=whsec_...  # install-stripe-listen.cmd or: stripe listen --print-secret" }
 $stripeLines | Set-Content -LiteralPath $stripePath -Encoding utf8NoBOM
 
+$identityPath = Join-Path $secretsDir "identity.env"
+$identityLines = @("# Synced by scripts/win/sync-operator-secrets.ps1 — do not commit.")
+foreach ($provider in @("MICROSOFT", "GOOGLE")) {
+  $idKey = "LAPLACE_AUTH_${provider}_CLIENT_ID"
+  $secretKey = "LAPLACE_AUTH_${provider}_CLIENT_SECRET"
+  $id = if ($map.ContainsKey($idKey)) { $map[$idKey] } else { $null }
+  $secret = if ($map.ContainsKey($secretKey)) { $map[$secretKey] } else { $null }
+  if ([string]::IsNullOrWhiteSpace($id) -xor [string]::IsNullOrWhiteSpace($secret)) {
+    throw "$provider OAuth requires both $idKey and $secretKey"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($id)) {
+    $identityLines += "$idKey=$id"
+    $identityLines += "$secretKey=$secret"
+  }
+}
+$identityLines | Set-Content -LiteralPath $identityPath -Encoding utf8NoBOM
+
 Write-Host "[sync-operator-secrets] wrote $lichessPath"
 Write-Host "[sync-operator-secrets] wrote $stripePath (webhook_secret=$(if ($whsec) { 'set' } else { 'missing' }))"
+Write-Host "[sync-operator-secrets] wrote $identityPath"

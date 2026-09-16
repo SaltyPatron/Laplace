@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Link as RouterLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppHeader, NavTabs, TenantField } from '@ui';
 import { ChatView } from './chat/ChatView';
@@ -13,6 +14,9 @@ import { AdminView } from './admin/AdminView';
 import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import { AmbientFamiliar } from './layout/AmbientFamiliar';
+import { AccountControls } from './auth/AccountControls';
+import { apiGet } from './api/client';
+import type { AuthProvider, AuthUser } from './store';
 import styles from './App.module.css';
 
 /**
@@ -41,9 +45,21 @@ function isActive(pathname: string, tabPath: string): boolean {
 }
 
 function Shell() {
-  const { tenant, setTenant } = useAppStore();
+  const { tenant, setTenant, authReady, authUser, authProviders, setAuth } = useAppStore();
   const nav = useNavigate();
   const { pathname } = useLocation();
+
+  useEffect(() => {
+    let live = true;
+    void apiGet<{ authenticated: boolean; user: AuthUser | null; providers: AuthProvider[] }>('/v1/auth/me')
+      .then((result) => {
+        if (live) setAuth(result.authenticated ? result.user : null, result.providers ?? []);
+      })
+      .catch(() => {
+        if (live) setAuth(null, []);
+      });
+    return () => { live = false; };
+  }, [setAuth]);
 
   return (
     <div className={styles.shell}>
@@ -60,7 +76,11 @@ function Shell() {
             }))}
           />
         }
-        tenant={<TenantField value={tenant} onChange={setTenant} />}
+        tenant={
+          authReady && (authUser || authProviders.length > 0)
+            ? <AccountControls user={authUser} providers={authProviders} returnUrl={pathname} />
+            : <TenantField value={tenant} onChange={setTenant} />
+        }
       />
       <SubstrateStatusBanner />
       <main className={styles.main}>
