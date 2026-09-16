@@ -51,6 +51,8 @@ jobs:
           git checkout --force "$TARGET_SHA"
 
       - uses: ./.github/actions/setup-laplace-env
+        with:
+          use_cmake: false
 
       - name: Evict selected source
         if: inputs.evict_before_ingest

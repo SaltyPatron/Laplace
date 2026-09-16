@@ -46,6 +46,8 @@ jobs:
           git checkout --force "$TARGET_SHA"
 
       - uses: ./.github/actions/setup-laplace-env
+        with:
+          use_cmake: false
 
       - name: Run requested database operation
         run: |
