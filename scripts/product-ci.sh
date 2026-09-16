@@ -60,29 +60,38 @@ run_live_suite() {
 }
 
 product_phases() {
-  if [[ "$stage" == reconcile ]]; then echo reconcile; return; fi
-
-  printf '%s\n' dependencies build
-  [[ "$stage" != build ]] || return 0
-
-  printf '%s\n' native-dev managed-dev uci-dev browser-dev
-  [[ "$stage" != test ]] || return 0
-
-  if [[ "$stage" == application-check || "$stage" == applications ]]; then
-    echo application-check
-    [[ "$stage" != applications ]] || echo publish
-    return 0
-  fi
-
-  printf '%s\n' native-install database-maintenance
-  [[ "$stage" != deploy ]] || return 0
-
-  [[ "$stage" != all ]] || echo publish
-  printf '%s\n' db-health native-db managed-db
-  [[ "$stage" != integrate ]] || return 0
-
-  printf '%s\n' live-floor live-api managed-live generation-eval
-  [[ "${LAPLACE_GENERATION_BENCHMARK:-}" != 1 ]] || echo performance
+  case "$stage" in
+    reconcile)
+      echo reconcile
+      ;;
+    build)
+      printf '%s\n' dependencies build
+      ;;
+    test)
+      printf '%s\n' dependencies build native-dev managed-dev uci-dev browser-dev
+      ;;
+    deploy)
+      printf '%s\n' dependencies build native-install database-maintenance
+      ;;
+    integrate)
+      printf '%s\n' dependencies build db-health native-db managed-db
+      ;;
+    application-check)
+      printf '%s\n' dependencies build application-check
+      ;;
+    applications)
+      printf '%s\n' dependencies build application-check publish
+      ;;
+    all)
+      printf '%s\n' \
+        dependencies build \
+        native-dev managed-dev uci-dev browser-dev \
+        native-install database-maintenance publish \
+        db-health native-db managed-db \
+        live-floor live-api managed-live generation-eval
+      [[ "${LAPLACE_GENERATION_BENCHMARK:-}" != 1 ]] || echo performance
+      ;;
+  esac
 }
 
 run_phase() {
