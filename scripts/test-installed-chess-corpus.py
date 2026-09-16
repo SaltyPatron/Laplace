@@ -198,6 +198,57 @@ class InstalledCorpusTests(unittest.TestCase):
                 wrapper.cli_identity(owner)
             self.assertTrue((conventional / "Laplace.Cli.dll").is_file())
 
+    def test_measurement_requires_prepared_cli_and_never_builds_or_syncs(self):
+        # Real CLI/native bytes; command execution is an explicit transport double.
+        repo = self.root / "prepared-source"
+        (repo / "scripts").mkdir(parents=True)
+        (repo / "scripts/laplace").write_bytes(b"prepared launcher fixture")
+        directory = repo / "app/Laplace.Cli/bin/Release/net10.0"
+        directory.mkdir(parents=True)
+        for name in ("Laplace.Cli.dll", "Laplace.Cli.deps.json", "Laplace.Cli.runtimeconfig.json",
+                     "liblaplace_core.so", "liblaplace_dynamics.so", "liblaplace_synthesis.so"):
+            (directory / name).write_bytes(("prepared fixture " + name).encode())
+        for component in ("core", "dynamics", "synthesis"):
+            path = repo / "build/engine" / component / ("liblaplace_" + component + ".so")
+            path.parent.mkdir(parents=True)
+            path.write_bytes((directory / path.name).read_bytes())
+        for incomplete in (False, True):
+            with self.subTest(incomplete=incomplete):
+                args = self.arguments(name="prepared-" + str(incomplete))
+                if incomplete:
+                    (directory / "Laplace.Cli.dll").unlink()
+                calls = []
+                def command(argv, log, timeout):
+                    values = [str(value) for value in argv]
+                    calls.append(values)
+                    log.write_text("synthetic command control\n")
+                    if "measure-corpus" in values:
+                        destination = args.output_dir / "measurement"
+                        destination.mkdir()
+                        self.save(destination / "corpus-recording.json", receipt(self.source))
+                owner = SimpleNamespace(
+                    save=self.save, command=command,
+                    sha256=lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest())
+                with patch.object(wrapper, "ROOT", repo), \
+                     patch.object(wrapper, "exact_source", return_value="a" * 40), \
+                     patch.object(wrapper, "source_identity", return_value=self.source), \
+                     patch.dict(wrapper.os.environ, {}, clear=True), \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    result = wrapper.run(args, owner=owner)
+                self.assertEqual(1 if incomplete else 0, result)
+                self.assertFalse(any("build" in values or "dotnet" in values or any(
+                    value.endswith("/sync-managed-native-artifacts.sh") for value in values)
+                                     for values in calls), calls)
+                self.assertEqual(0 if incomplete else 1,
+                                 sum("measure-corpus" in values for values in calls))
+                saved = json.loads((args.output_dir / "receipt.json").read_text())
+                names = [row["name"] for row in saved["phases"]]
+                self.assertNotIn("cli-build", names)
+                self.assertNotIn("cli-native-sync", names)
+                if incomplete:
+                    self.assertIn("output is incomplete", saved["error"])
+                    self.assertFalse((directory / "Laplace.Cli.dll").exists())
+
     def test_measurement_argv_preserves_original_path_hash_and_owned_output(self):
         path = self.otb / "original game $(literal).pgn"
         path.write_bytes(self.pgn.read_bytes())
