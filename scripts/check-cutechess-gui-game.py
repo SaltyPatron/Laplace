@@ -276,37 +276,52 @@ def verify_protocol(log, pgn):
             and evidence["Result"] in ("1-0", "0-1", "1/2-1/2"),
             "native PGN verification does not describe the selected full game")
     rows = []
-    providers = []
     prepared = False
+    active = {WHITE: None, BLACK: None}
+    identities = {}
     sent_clock = {WHITE: False, BLACK: False}
     for line in log.splitlines():
         match = re.fullmatch(r"([<>])(.+)\(([0-9]+)\): (.*)", line)
         if not match:
             continue
-        direction, name, _identifier, body = match.groups()
+        direction, name, identifier, body = match.groups()
         if name not in sent_clock:
             continue
+        require(identities.setdefault(name, identifier) == identifier,
+                "GUI changed a selected protocol engine identity")
         if direction == ">" and body.startswith("go "):
+            require(active[name] is None, "GUI overlapped searches for one engine")
             require(not re.search(r"(?:^| )(?:depth|nodes|movetime|infinite)(?: |$)", body)
                     and re.search(r"(?:^| )wtime \d+(?: |$)", body)
                     and re.search(r"(?:^| )btime \d+(?: |$)", body),
                     "GUI search did not use the uncapped game clock")
+            active[name] = []
             sent_clock[name] = True
-        if direction == "<" and body.startswith("bestmove "):
-            parts = body.split()
-            require(len(parts) in (2, 4), "GUI engine bestmove is malformed")
-            rows.append((name, parts[1]))
         if direction == "<" and name == BLACK:
             if body.startswith("info string substrate provider stack prepared ("):
                 prepared = True
             if body.startswith("info string providers ") and not body.startswith("info string providers depth "):
-                providers.append(engine.provider_receipt([body]))
+                require(active[name] is not None, "provider receipt has no owning GUI search")
+                active[name].append(engine.provider_receipt([body]))
+        if direction == "<" and body.startswith("bestmove "):
+            parts = body.split()
+            require(len(parts) in (2, 4) and active[name] is not None,
+                    "GUI engine bestmove has no owning search")
+            rows.append({"name": name, "move": parts[1], "providers": active[name]})
+            active[name] = None
     accepted = [(WHITE if i % 2 == 0 else BLACK, move)
                 for i, move in enumerate(evidence["MovesUci"])]
+    moves = [(row["name"], row["move"]) for row in rows]
     require(len(accepted) == evidence["Plies"] and len(accepted) >= 2
-            and rows[:len(accepted)] == accepted and all(sent_clock.values()),
+            and moves[:len(accepted)] == accepted and all(sent_clock.values()),
             "GUI engine traffic does not reproduce every accepted PGN move")
-    extra = rows[len(accepted):]
+    providers = []
+    for index, row in enumerate(rows[:len(accepted)]):
+        if row["name"] == BLACK:
+            require(len(row["providers"]) == 1,
+                    "accepted Laplace move lacks its own final substrate search receipt")
+            providers.append({"accepted_ply": index + 1, **row["providers"][0]})
+    extra = moves[len(accepted):]
     require(not extra or (evidence["Termination"] == "time forfeit"
                           and len(extra) == 1 and extra[0][0] == (WHITE if len(accepted) % 2 == 0 else BLACK)),
             "GUI emitted unexplained extra engine moves")

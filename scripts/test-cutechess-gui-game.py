@@ -63,6 +63,7 @@ class GuiGameControls(unittest.TestCase):
                         traffic().replace("bestmove d8h4", "bestmove d8h5"),
                         traffic().replace("go wtime 60000", "go depth 4 wtime 60000"),
                         traffic().replace(PROVIDER, "readyok"),
+                        traffic().rsplit(PROVIDER, 1)[0] + "readyok" + traffic().rsplit(PROVIDER, 1)[1],
                         traffic().replace("root=1/0", "root=0/0")):
             with self.subTest(changed=changed[-80:]), self.assertRaises(ValueError):
                 OWNER.verify_protocol(changed, document())

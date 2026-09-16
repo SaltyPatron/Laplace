@@ -22,8 +22,8 @@ jobs:
       DOTNET_NOLOGO: '1'
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       MSBUILDDISABLENODEREUSE: '1'
-      CANDIDATE_SHA: e504696deb689bef614ab88dbe207b8531e9818a
-      CANDIDATE_TREE: 82f36d05ce184c4f8c1467d4cc1ce79bb4f3a61b
+      CANDIDATE_SHA: 053eb4846680f7d22a0168942227c4ab0c6aefe9
+      CANDIDATE_TREE: 9416d933628deecf8f3ae91aceb30511740efdde
     steps:
       - name: Prepare permanent build and evidence directories
         run: |
@@ -33,7 +33,7 @@ jobs:
           mkdir -p "$LAPLACE_BUILD_ROOT" "$TMPDIR" "$DOTNET_CLI_HOME" "$DOTNET_INSTALL_DIR" "$NUGET_PACKAGES" /build/laplace/worktrees /build/laplace/recovery/cutechess-gui-game-controls
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: e504696deb689bef614ab88dbe207b8531e9818a
+          ref: 053eb4846680f7d22a0168942227c4ab0c6aefe9
           fetch-depth: 1
           persist-credentials: false
       - name: Bind the exact candidate in the permanent worktree
@@ -49,7 +49,7 @@ jobs:
               "candidate_commit":os.environ["CANDIDATE_SHA"],
               "candidate_tree":os.environ["CANDIDATE_TREE"],
               "workflow_commit":os.environ["GITHUB_SHA"],
-              "claim":"local-protocol-controls-and-managed-compilation-only",
+              "claim":"local-protocol-controls-only; unchanged managed leaves compiled in run35127310166",
               "native_runtime_executed":False
           },indent=2)+"\n")
           PY
@@ -79,74 +79,7 @@ jobs:
           done
           test -z "$(git status --porcelain --untracked-files=all)"
           exit "$failed"
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
-        with:
-          dotnet-version: '10.0.x'
-      - name: Provision immutable upstream resources for compilation
-        run: |
-          set -euo pipefail
-          timeout --signal=TERM --kill-after=15s 300s python3 - <<'PY' 2>&1 | tee /build/laplace/recovery/cutechess-gui-game-controls/dependency-provision.log
-          import hashlib,json,os,subprocess
-          from pathlib import Path
-          root=Path(os.environ["LAPLACE_EXTERNAL"])
-          root.mkdir(parents=True)
-          selected=[
-              ("tree-sitter-grammars/tree-sitter-c","https://github.com/tree-sitter/tree-sitter-c","b780e47fc780ddc8da13afa35a3f4ed5c157823d","9194799a7a7dcedf020ba2558fc92fc430633d73680243ae1f1d9de78c719528","queries/tags.scm"),
-              ("blake3","https://github.com/BLAKE3-team/BLAKE3.git","f3149ec5bb5449af877ba20377a11008ff499fa2","b8352186f14559127a324333c3378f4208a2de9aea855746bf2fcd1f883efef1","c/blake3.h")
-          ]
-          report={"scope":"diagnostic-compilation-only","pin_source_repository":"SaltyPatron/Laplace-Refactor","pin_source_commit":"e5fb773c3c5758679eb13c3dd228a0ba2aab27af","matches_original_installed_dependencies":False,"status":"running","dependencies":[]}
-          receipt=Path("/build/laplace/recovery/cutechess-gui-game-controls/dependencies.json")
-          try:
-              for name,url,revision,archive_sha,required in selected:
-                  path=root/name
-                  path.parent.mkdir(parents=True,exist_ok=True)
-                  def git(*args,capture=False):
-                      result=subprocess.run(["git","-C",str(path),*args],check=True,timeout=90,stdout=subprocess.PIPE if capture else None)
-                      return result.stdout
-                  subprocess.run(["git","init","--quiet",str(path)],check=True,timeout=10)
-                  git("remote","add","origin",url)
-                  git("fetch","--quiet","--no-tags","--depth=1","origin",revision)
-                  git("checkout","--quiet","--detach",revision)
-                  assert git("rev-parse","HEAD",capture=True).decode().strip()==revision
-                  observed_archive=hashlib.sha256(git("archive","--format=tar",revision,capture=True)).hexdigest()
-                  assert observed_archive==archive_sha,(name,observed_archive,archive_sha)
-                  assert not git("status","--porcelain","--untracked-files=all",capture=True)
-                  content=(path/required).read_bytes()
-                  report["dependencies"].append({"path":str(path),"upstream":url,"revision":revision,"git_archive_sha256":observed_archive,"required_file":required,"required_file_sha256":hashlib.sha256(content).hexdigest()})
-              report["status"]="completed"
-          except BaseException as error:
-              report["status"]="failed"
-              report["failure_type"]=type(error).__name__
-              raise
-          finally:
-              receipt.write_text(json.dumps(report,indent=2)+"\n")
-          PY
-      - name: Compile native-backed PGN orchestration owners
-        working-directory: /build/laplace/worktrees/cutechess-gui-game-controls
-        shell: bash
-        run: |
-          set -euo pipefail
-          evidence=/build/laplace/recovery/cutechess-gui-game-controls
-          dotnet --info 2>&1 | tee "$evidence/dotnet-info.log"
-          printf 'project\texit_code\n' > "$evidence/build-summary.tsv"
-          failed=0
-          for project in ChessCatalogSurfaces Laplace.Chess.Tests; do
-            set +e
-            timeout --signal=TERM --kill-after=15s 360s \
-              dotnet build "app/$project/$project.csproj" --configuration Release \
-              --disable-build-servers --nologo --verbosity normal \
-              -p:UseSharedCompilation=false \
-              "-bl:$evidence/$project.binlog" \
-              2>&1 | tee "$evidence/$project.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            printf '%s\t%s\n' "$project" "$status" >> "$evidence/build-summary.tsv"
-            if [[ "$status" != 0 ]]; then failed=1; fi
-          done
-          cat "$evidence/build-summary.tsv"
-          test -z "$(git status --porcelain --untracked-files=all)"
-          exit "$failed"
-      - name: Retain exact compilation evidence
+      - name: Retain exact protocol evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
