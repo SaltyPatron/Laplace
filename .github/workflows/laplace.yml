@@ -7,22 +7,18 @@ on:
         description: "explicit operator lifecycle stage"
         type: choice
         required: true
-        default: all
-        options: [check, build, test, deploy, integrate, all, application-check, applications]
+        default: build
+        options: [build, install, database, applications, deploy, test-dev, test-db, test-live, reconcile, check]
       full_clean:
-        description: "wipe build/ before building"
+        description: "build/deploy: wipe build/ before building"
         type: boolean
         default: false
       force_codegen:
-        description: "regenerate attestation-law source before building"
+        description: "build/deploy: regenerate attestation-law source before building"
         type: boolean
         default: false
       serial_tests:
-        description: "force serial ctest"
-        type: boolean
-        default: false
-      generation_benchmark:
-        description: "run the expensive generation benchmark"
+        description: "test stages: force serial ctest"
         type: boolean
         default: false
 
@@ -53,7 +49,6 @@ jobs:
       LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
-      LAPLACE_GENERATION_BENCHMARK: ${{ inputs.generation_benchmark && '1' || '' }}
       LICHESS_API: ${{ secrets.LICHESS_API }}
       LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
       LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
@@ -83,4 +78,4 @@ jobs:
           mkdir -p /build/laplace/work
           exec 9>/build/laplace/work/host-resource.lock
           flock 9
-          bash scripts/product-ci.sh "$LAPLACE_STAGE"
+          exec bash scripts/product-ci.sh "$LAPLACE_STAGE"
