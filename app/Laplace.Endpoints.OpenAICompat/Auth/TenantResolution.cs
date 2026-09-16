@@ -19,18 +19,13 @@ public interface ITenantResolver
 
 internal sealed class LaplaceAuthOptions
 {
-    /// <summary>
-    /// "header" trusts X-Laplace-Tenant for local development; "key" and
-    /// "identity" require a Laplace API key or authenticated browser session.
-    /// </summary>
     public string Mode { get; set; } = "header";
-
-    /// <summary>Shared secret for explicit host/operator endpoints.</summary>
     public string? OperatorToken { get; set; }
-
     public bool KeyMode => string.Equals(Mode, "key", StringComparison.OrdinalIgnoreCase);
     public bool IdentityMode => string.Equals(Mode, "identity", StringComparison.OrdinalIgnoreCase);
-    public bool RequiresIdentity => KeyMode || IdentityMode;
+    // Only the explicitly selected development mode trusts headers. A typo must
+    // never turn a public deployment into an anonymous tenant selector.
+    public bool RequiresIdentity => !string.Equals(Mode, "header", StringComparison.OrdinalIgnoreCase);
 }
 
 internal sealed class HeaderTenantResolver : ITenantResolver
@@ -46,12 +41,6 @@ internal sealed class HeaderTenantResolver : ITenantResolver
     }
 }
 
-/// <summary>
-/// Resolves an API key (Authorization: Bearer sk-laplace-… or X-Api-Key) to its tenant;
-/// falls back to header tenancy when no key is presented. A presented-but-invalid key
-/// resolves to AuthKind "invalid_key" so the middleware can reject it, never to a
-/// fallback tenant. The result is cached per request in HttpContext.Items.
-/// </summary>
 internal sealed class ApiKeyTenantResolver : ITenantResolver
 {
     private const string CacheKey = "laplace.tenant_context";
@@ -64,7 +53,6 @@ internal sealed class ApiKeyTenantResolver : ITenantResolver
     {
         if (context.Items.TryGetValue(CacheKey, out var cached) && cached is TenantContext hit)
             return hit;
-
         var resolved = await ResolveUncachedAsync(context, ct);
         context.Items[CacheKey] = resolved;
         return resolved;
@@ -75,29 +63,31 @@ internal sealed class ApiKeyTenantResolver : ITenantResolver
         var presented = PresentedKey(context.Request);
         if (presented is null)
         {
+            // Explicit credentials must not silently fall back to an unrelated
+            // browser account or caller-controlled development tenant.
+            if (context.Request.Headers.ContainsKey("Authorization")
+                || context.Request.Headers.ContainsKey("X-Api-Key"))
+                return new TenantContext("", "invalid_key", TenantContext.NoClaims);
+
             var principal = context.User;
             var tenant = principal.FindFirstValue(LaplaceClaimTypes.Tenant);
             var user = principal.FindFirstValue(LaplaceClaimTypes.User);
             if (principal.Identity?.IsAuthenticated == true
                 && !string.IsNullOrWhiteSpace(tenant)
-                && !string.IsNullOrWhiteSpace(user))
-            {
-                var claims = new Dictionary<string, string>
+                && Guid.TryParse(user, out _))
+                return new TenantContext(tenant, "browser", new Dictionary<string, string>
                 {
-                    ["user_id"] = user,
+                    ["user_id"] = user!,
                     ["provider"] = principal.FindFirstValue(LaplaceClaimTypes.Provider) ?? "oidc"
-                };
-                return new TenantContext(tenant, "browser", claims);
-            }
+                });
             return await _header.ResolveAsync(context, ct);
         }
 
         var record = await _apiKeys.ValidateAsync(presented, ct);
-        if (record is null)
-            return new TenantContext("", "invalid_key", TenantContext.NoClaims);
-
-        return new TenantContext(record.Tenant, "api_key",
-            new Dictionary<string, string> { ["key_prefix"] = record.KeyPrefix });
+        return record is null
+            ? new TenantContext("", "invalid_key", TenantContext.NoClaims)
+            : new TenantContext(record.Tenant, "api_key",
+                new Dictionary<string, string> { ["key_prefix"] = record.KeyPrefix });
     }
 
     public static string? PresentedKey(HttpRequest request)
@@ -106,38 +96,15 @@ internal sealed class ApiKeyTenantResolver : ITenantResolver
         if (auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
             var token = auth["Bearer ".Length..].Trim();
-            if (token.StartsWith(ApiKeyService.KeyPrefix, StringComparison.Ordinal))
-                return token;
+            if (token.StartsWith(ApiKeyService.KeyPrefix, StringComparison.Ordinal)) return token;
         }
-
         var headerKey = request.Headers["X-Api-Key"].ToString().Trim();
         return headerKey.StartsWith(ApiKeyService.KeyPrefix, StringComparison.Ordinal) ? headerKey : null;
     }
 }
 
-/// <summary>
-/// In key mode, /v1/* and /chess/* require a valid API key except for the anonymous
-/// /v1 surface a not-yet-customer needs to sign up: discovery, billing
-/// catalog/plans/preflight, checkout redemption, and Stripe webhooks. Header mode
-/// enforces nothing. /chess/* has no anonymous prefixes — GH #489 / C04.
-/// </summary>
 internal sealed class ApiKeyEnforcementMiddleware
 {
-    private static readonly string[] AnonymousPrefixes =
-    {
-        "/v1/models",
-        "/v1/capabilities",
-        "/v1/billing/catalog",
-        "/v1/billing/products",
-        "/v1/billing/plans",
-        "/v1/billing/preflight",
-        "/v1/billing/quotes",
-        "/v1/billing/keys/redeem",
-        "/v1/billing/webhooks",
-        "/v1/billing/operator",
-        "/v1/auth"
-    };
-
     private readonly RequestDelegate _next;
     private readonly LaplaceAuthOptions _options;
 
@@ -147,75 +114,123 @@ internal sealed class ApiKeyEnforcementMiddleware
         _options = options.Value;
     }
 
-    /// <summary>
-    /// True when <paramref name="path"/> IS <paramref name="segment"/> or sits beneath it.
-    /// "/v1" and "/v1/models" match "/v1"; "/v10" and "/v1x" do not.
-    /// </summary>
     private static bool IsUnder(string path, string segment) =>
         path.Equals(segment, StringComparison.OrdinalIgnoreCase)
         || (path.StartsWith(segment, StringComparison.OrdinalIgnoreCase)
-            && path.Length > segment.Length
-            && path[segment.Length] == '/');
+            && path.Length > segment.Length && path[segment.Length] == '/');
+
+    private static bool PublicRead(HttpRequest request, string path) =>
+        (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
+        && (path.Equals("/v1/models", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/v1/capabilities", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/v1/billing/catalog", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/v1/billing/products", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/v1/billing/plans", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/v1/auth/config", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/v1/auth/me", StringComparison.OrdinalIgnoreCase)
+            || IsUnder(path, "/v1/auth/login"));
 
     public async Task InvokeAsync(HttpContext context, ITenantResolver resolver)
     {
-        var path = context.Request.Path.Value ?? "";
-        // The dedicated host-administration surface still owns the temporary operator
-        // credential. Chess routes, including Lichess controls, follow the same normal
-        // /chess/* tenancy/API-key policy instead of inventing a second auth scheme.
-        if (IsUnder(path, "/v1/admin/services"))
+        var request = context.Request;
+        var path = request.Path.Value ?? "";
+        if (!IsUnder(path, "/v1") && !IsUnder(path, "/chess"))
         {
-            if (!OperatorAuth.IsAuthorized(context.Request, _options))
+            await _next(context);
+            return;
+        }
+
+        // Provider callbacks authenticate the signed payload, not a customer cookie.
+        if (path.Equals("/v1/billing/webhooks/stripe", StringComparison.OrdinalIgnoreCase)
+            && HttpMethods.IsPost(request.Method))
+        {
+            await _next(context);
+            return;
+        }
+
+        if (IsUnder(path, "/v1/admin") || IsUnder(path, "/v1/billing/operator")
+            || path.Equals("/v1/billing/catalog/sync", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!OperatorAuth.IsAuthorized(request, _options))
             {
-                context.RequestServices.GetRequiredService<ILogger<ApiKeyEnforcementMiddleware>>()
-                    .LogWarning("service control authorization denied: method={Method} path={Path}", context.Request.Method, path);
-                await Reject(context, "operator_token_required", "This endpoint requires the operator credential.");
+                await Reject(context, "operator_token_required", "This endpoint requires the operator credential.", 403);
                 return;
             }
             await _next(context);
             return;
         }
-        // Playing surface sits at /chess/* (outside /v1); without this branch key mode
-        // never sees it and C04 stays open (GH #489).
-        //
-        // Match on a SEGMENT boundary, not a bare prefix. StartsWith("/v1") also matched
-        // /v10/*, and StartsWith("/chess") also matched /chessboard/* — this decides
-        // whether tenant governance applies at all, so a prefix collision is an
-        // authorization-surface bug, not a routing nicety. No such route exists today,
-        // which is exactly why nobody would notice when one is added.
-        var governed = IsUnder(path, "/v1") || IsUnder(path, "/chess");
-        if (!governed)
-        {
-            await _next(context);
-            return;
-        }
 
         var tenant = await resolver.ResolveAsync(context, context.RequestAborted);
-        if (string.Equals(tenant.AuthKind, "invalid_key", StringComparison.Ordinal))
+        if (tenant.AuthKind == "invalid_key")
         {
-            await Reject(context, "invalid_api_key", "The provided API key is unknown or revoked.");
+            await Reject(context, "invalid_api_key", "The provided API key is unknown, malformed, or revoked.");
             return;
         }
 
-        if (_options.RequiresIdentity &&
-            !string.Equals(tenant.AuthKind, "api_key", StringComparison.Ordinal) &&
-            !string.Equals(tenant.AuthKind, "browser", StringComparison.Ordinal) &&
-            !AnonymousPrefixes.Any(prefix => IsUnder(path, prefix)))
+        if (_options.RequiresIdentity && tenant.AuthKind is not ("api_key" or "browser")
+            && !PublicRead(request, path))
         {
-            await Reject(context,
-                _options.KeyMode ? "api_key_required" : "authentication_required",
-                _options.KeyMode
-                    ? "This endpoint requires an API key or signed-in browser session. Subscribe to a plan and redeem your checkout session at POST /v1/billing/keys/redeem."
-                    : "This endpoint requires a signed-in browser session or Laplace API key.");
+            await Reject(context, "authentication_required", "Sign in or provide a Laplace API key for this workspace.");
             return;
+        }
+
+        if (tenant.AuthKind == "browser")
+        {
+            if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method)
+                && !HttpMethods.IsOptions(request.Method) && !SameOrigin(request))
+            {
+                await Reject(context, "same_origin_required", "Browser account changes must originate from this Laplace host.", 403);
+                return;
+            }
+
+            // Read membership from PostgreSQL, not a role frozen into a cookie.
+            // Removing a member affects the next request, including data reads.
+            if (!IsUnder(path, "/v1/auth"))
+            {
+                var substrate = context.RequestServices.GetRequiredService<SubstrateClient>();
+                await using var command = substrate.DataSource.CreateCommand("""
+                    SELECT role FROM app.tenant_memberships
+                    WHERE tenant_id = @tenant AND user_id = @user;
+                    """);
+                command.Parameters.AddWithValue("tenant", tenant.TenantId);
+                command.Parameters.AddWithValue("user", Guid.Parse(tenant.Claims["user_id"]));
+                var role = await command.ExecuteScalarAsync(context.RequestAborted) as string;
+                if (role is null)
+                {
+                    await Reject(context, "workspace_membership_required", "This account no longer belongs to the selected workspace.", 403);
+                    return;
+                }
+                context.Items["laplace.workspace_role"] = role;
+                var managesBilling = IsUnder(path, "/v1/billing/keys")
+                    || IsUnder(path, "/v1/billing/checkout")
+                    || IsUnder(path, "/v1/billing/portal")
+                    || (IsUnder(path, "/v1/billing/plans") && HttpMethods.IsPost(request.Method));
+                if (managesBilling && role is not ("owner" or "admin"))
+                {
+                    await Reject(context, "workspace_admin_required", "A workspace owner or administrator must manage subscriptions and API keys.", 403);
+                    return;
+                }
+            }
         }
 
         await _next(context);
     }
 
-    private static Task Reject(HttpContext context, string code, string message)
+    private static bool SameOrigin(HttpRequest request)
     {
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        var origin = request.Headers.Origin.ToString();
+        if (!string.IsNullOrWhiteSpace(origin))
+            return Uri.TryCreate(origin, UriKind.Absolute, out var source)
+                && Uri.TryCreate($"{request.Scheme}://{request.Host}", UriKind.Absolute, out var target)
+                && source.Scheme.Equals(target.Scheme, StringComparison.OrdinalIgnoreCase)
+                && source.Authority.Equals(target.Authority, StringComparison.OrdinalIgnoreCase);
+        return request.Headers["Sec-Fetch-Site"].ToString() == "same-origin"
+            || request.Headers["X-Laplace-Request"].ToString() == "1";
+    }
+
+    private static Task Reject(HttpContext context, string code, string message, int status = 401)
+    {
+        context.Response.StatusCode = status;
         return context.Response.WriteAsJsonAsync(new Laplace.Api.Contracts.ErrorResponse(
             new Laplace.Api.Contracts.ErrorBody("authentication_error", code, message)));
     }
@@ -225,14 +240,11 @@ internal static class OperatorAuth
 {
     public const string TokenHeader = "X-Laplace-Operator-Token";
 
-    /// <summary>Constant-time comparison for the remaining explicit host/operator controls.</summary>
     public static bool IsAuthorized(HttpRequest request, LaplaceAuthOptions options)
     {
-        if (string.IsNullOrWhiteSpace(options.OperatorToken))
-            return false;
+        if (string.IsNullOrWhiteSpace(options.OperatorToken)) return false;
         var presented = request.Headers[TokenHeader].ToString();
-        if (string.IsNullOrWhiteSpace(presented))
-            return false;
+        if (string.IsNullOrWhiteSpace(presented)) return false;
         var a = System.Text.Encoding.UTF8.GetBytes(presented);
         var b = System.Text.Encoding.UTF8.GetBytes(options.OperatorToken);
         return a.Length == b.Length && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(a, b);
