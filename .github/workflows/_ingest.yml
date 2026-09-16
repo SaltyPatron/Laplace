@@ -18,12 +18,6 @@ on:
       timeout_minutes:
         type: number
         default: 720
-      run_gate:
-        type: boolean
-        default: false
-      run_idempotency:
-        type: boolean
-        default: false
       evict_before_ingest:
         type: boolean
         default: false
