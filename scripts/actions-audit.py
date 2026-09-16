@@ -255,8 +255,8 @@ def result_authority(name: str, workflow: dict) -> None:
             policy = unique_step(steps, "id", f"{prefix}_policy", context)
             if baseline and upload and policy:
                 allowed.update((baseline[0], upload[0]))
-                if not baseline[0] < upload[0] < policy[0]:
-                    fail(f"{context}: retained native diagnostics must precede build execution")
+                if not policy[0] < baseline[0] < upload[0]:
+                    fail(f"{context}: source checks must precede optional native diagnostics")
                 expected = "env.LAPLACE_FAST_ONLY != '1'" if prefix == "product" else "env.LAPLACE_PR_FULL_PROOF == '1'"
                 if baseline[1].get("if") != expected:
                     fail(f"{context}: retained native diagnostics have incorrect selection")
@@ -411,8 +411,8 @@ if "product" in main_jobs:
     command = runs(main_jobs["product"])
     if "ci-session.py" not in command or "--kind product" not in command:
         fail("main product job bypasses the shared product phase executor")
-    if "bash scripts/product-ci.sh reconcile" not in command:
-        fail("main fast path bypasses installed-product reconciliation")
+    if "bash scripts/product-ci.sh check" not in command:
+        fail("main fast path must check source without reconciling the installed product")
     if "LAPLACE_FAST_ONLY" not in command:
         fail("main product job has no proportional source/tooling path")
     for forbidden in (

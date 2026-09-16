@@ -380,12 +380,13 @@ class EntryPointTests(unittest.TestCase):
             step["name"]: step.get("run", "")
             for step in steps if "name" in step
         }
-        command = commands["Fast source/tooling proof and installed-product reconciliation"]
+        command = commands["Check source-only changes without touching the installed host"]
         self.assertIn("set -euo pipefail", command)
-        # Fast reconciliation owns the lock in one command. Full delivery keeps
-        # the same host reservation across its separate canonical phases.
-        self.assertRegex(command, r"flock --exclusive --close /build/laplace/work/host-resource\.lock\s+\\\s+"
-                         + re.escape("bash scripts/product-ci.sh reconcile"))
+        self.assertIn("bash scripts/product-ci.sh check", command)
+        # Source checks neither reserve nor reconcile the installed host.
+        # Physical phases retain the session's continuous reservation.
+        for forbidden in ("flock", "product-ci.sh reconcile", "systemctl", "pg_ctl"):
+            self.assertNotIn(forbidden, command)
         session = next(step for step in steps if step.get("id") == "product_session")
         native_install = next(step for step in steps if step.get("id") == "product_native_install")
         self.assertIn("set -euo pipefail", session["run"])

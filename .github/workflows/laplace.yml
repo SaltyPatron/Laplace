@@ -137,16 +137,16 @@ jobs:
           echo "LAPLACE_VERIFY_RECURSIVE_PROOF=$verify_recursive" >> "$GITHUB_ENV"
           echo "change classification: fast_only=$fast verify_recursive=$verify_recursive"
 
-      - name: Fast source/tooling proof and installed-product reconciliation
+      - name: Check source-only changes without touching the installed host
         if: env.LAPLACE_FAST_ONLY == '1'
         run: |
           set -euo pipefail
           umask 0002
           mkdir -p /build/laplace/work
-          # Both repositories deploy on this host; GitHub concurrency is scoped
-          # to one repository. Do not pass the lock descriptor to service children.
-          flock --exclusive --close /build/laplace/work/host-resource.lock \
-            bash scripts/product-ci.sh reconcile
+          # Documentation/tooling edits do not own application or database state.
+          # Keep the explicit reconciliation stage available to operators, not
+          # as an implicit dependency of every source-only push.
+          bash scripts/product-ci.sh check
 
       - name: Verify changed recursive proof against the live product
         if: env.LAPLACE_FAST_ONLY == '1' && env.LAPLACE_VERIFY_RECURSIVE_PROOF == '1'
@@ -181,7 +181,7 @@ jobs:
           PY
 
 
-      - name: Reserve host for product phases
+      - name: Start ordered development phases
         id: product_session
         if: env.LAPLACE_FAST_ONLY != '1'
         env:
@@ -199,6 +199,11 @@ jobs:
           python3 scripts/ci-session.py start --directory "$directory" \
             --lock /build/laplace/work/host-resource.lock --checkout "$GITHUB_WORKSPACE" \
             --kind product --stage "$LAPLACE_STAGE"
+
+      - name: Check source and policy
+        id: product_policy
+        if: contains(env.LAPLACE_CI_PHASES, '|policy|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase policy
 
       - name: Retain native regression baseline before build
         continue-on-error: true
@@ -219,11 +224,6 @@ jobs:
           path: /build/laplace/work/native-regression-evidence/${{ github.run_id }}-${{ github.run_attempt }}-product/baseline/
           if-no-files-found: warn
           retention-days: 30
-
-      - name: Check source and policy
-        id: product_policy
-        if: contains(env.LAPLACE_CI_PHASES, '|policy|')
-        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase policy
 
       - name: Resolve build dependencies
         id: product_dependencies

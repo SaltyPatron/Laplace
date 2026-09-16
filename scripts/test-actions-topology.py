@@ -250,7 +250,8 @@ raise SystemExit(code)
         product = workflow["jobs"]["product"]
         command = commands(product)
         self.assertIn('--kind product --stage "$LAPLACE_STAGE"', command)
-        self.assertIn("bash scripts/product-ci.sh reconcile", command)
+        self.assertIn("bash scripts/product-ci.sh check", command)
+        self.assertNotIn("bash scripts/product-ci.sh reconcile", command)
         for split_job in ("deploy", "db-ops", "publish", "restore-api", "smoke", "integration-test"):
             self.assertNotIn(split_job, workflow["jobs"])
 
@@ -371,11 +372,20 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
         for stage in ("check", "build", "test", "deploy", "integrate", "all", "application-check", "applications"):
             self.assertFalse(any("chess" in phase or "stockfish" in phase for phase in plan(stage)))
 
-    def test_tooling_only_main_changes_reconcile_without_native_rebuild_or_seed(self):
+    def test_tooling_only_main_changes_check_without_host_reservation_or_mutation(self):
         source = MAIN.read_text(encoding="utf-8")
         self.assertIn("LAPLACE_FAST_ONLY", source)
         self.assertIn("scripts/check-*", source)
-        self.assertIn("bash scripts/product-ci.sh reconcile", source)
+        step = next(step for step in load(MAIN)["jobs"]["product"]["steps"]
+                    if step.get("name") == "Check source-only changes without touching the installed host")
+        self.assertIn("bash scripts/product-ci.sh check", step["run"])
+        for forbidden in ("flock", "host-resource.lock", "product-ci.sh reconcile", "pg_ctl", "systemctl"):
+            self.assertNotIn(forbidden, step["run"])
+        for workflow, job, prefix in ((MAIN, "product", "product"), (PR, "prove", "pr")):
+            steps = load(workflow)["jobs"][job]["steps"]
+            policy = next(index for index, item in enumerate(steps) if item.get("id") == prefix + "_policy")
+            baseline = next(index for index, item in enumerate(steps) if item.get("id") == prefix + "_native_baseline")
+            self.assertLess(policy, baseline)
         product = PRODUCT.read_text(encoding="utf-8")
         reconcile = product.split("reconcile_installed_product() {", 1)[1].split("\n}", 1)[0]
         self.assertIn("check-database-health.sh", reconcile)
