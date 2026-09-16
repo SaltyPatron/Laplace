@@ -377,7 +377,7 @@ else:
     product = PRODUCT.read_text(encoding="utf-8")
     required_order = [
         "policy", "dependencies", "build", "native-dev", "managed-dev", "uci-dev", "browser-dev",
-        "native-install", "database-maintenance", "foundation", "operational-seed", "publish",
+        "native-install", "database-maintenance", "foundation", "lexical-foundation", "operational-seed", "publish",
         "operational-execution", "db-health", "native-db", "managed-db", "live-floor", "live-api",
         "managed-live", "generation-eval", "performance",
     ]
@@ -388,6 +388,8 @@ else:
         "pipeline.sh install",
         "check-database-health.sh",
         "ensure-foundation.sh --check-only",
+        "ensure-foundation.sh --required-lexical",
+        "lexical-foundation) ensure_required_lexical_foundation ;;",
         "check-substrate-floor.sh",
         "LAPLACE_RESTORE_FOUNDATION",
         "foundation restore not requested — no ingest",
@@ -486,8 +488,19 @@ if not recreate_step or "ensure-foundation.sh" in recreate_step.get("run", ""):
     fail("DB recreate structural step must not seed")
 if not restore_step or restore_step.get("if") != "inputs.operation == 'recreate' && inputs.restore_foundation":
     fail("DB foundation restore is not an explicit recreate opt-in")
-if restore_step and "ensure-foundation.sh --force" not in restore_step.get("run", ""):
-    fail("explicit DB foundation restore does not invoke canonical foundation owner")
+if restore_step and re.findall(r"(?m)^\s*bash scripts/ensure-foundation\.sh[^\n]*$", restore_step.get("run", "")) != ["bash scripts/ensure-foundation.sh"]:
+    fail("explicit DB foundation restore must invoke ordinary completion without forced replay")
+lexical = unique_step(manual_steps, "name", "Admit required lexical foundation", "DB recreate lexical foundation")
+if lexical:
+    lexical_index, lexical_step = lexical
+    if lexical_step.get("if") != "inputs.operation == 'recreate'":
+        fail("DB recreate must always admit required lexical sources")
+    if lexical_step.get("run", "").strip() != "bash scripts/ensure-foundation.sh --required-lexical":
+        fail("DB recreate must use the canonical required lexical owner")
+    if recreate_step and restore_step and not manual_steps.index(recreate_step) < lexical_index < manual_steps.index(restore_step):
+        fail("DB recreate lexical admission must follow structure and precede optional restoration")
+    if enabled(lexical_step.get("continue-on-error")):
+        fail("DB recreate lexical admission must propagate failure")
 manual_db_commands = "\n".join(runs(job) for job in (manual_db.get("jobs") or {}).values())
 if "check-database-health.sh" not in manual_db_commands:
     fail("manual DB lifecycle lacks canonical structural health verification")

@@ -53,6 +53,7 @@ public sealed partial class NpgsqlSubstrateWriter
             IReadOnlyList<SubstrateChange> changes, IReadOnlyList<IntentStage> originalStages)
         {
             var result = new PhysicalityAdmissionBatch { OriginalStages = originalStages };
+            long activeScratchBytes = 0;
             try
             {
                 long count = 0;
@@ -102,16 +103,16 @@ public sealed partial class NpgsqlSubstrateWriter
                                 throw new InvalidOperationException("native physicality observations lack exact source ownership");
                         }
                     long scratch = CaptureScratchBytes(change);
+                    activeScratchBytes = scratch;
                     if (scratch == 0) continue;
                     long remaining = checked(result.MaximumBytes - result.ObservationPayloadBytes
                         - result.OwnedRawBytes - scratch);
                     if (remaining <= 0)
                         throw new InvalidOperationException("physicality source stages exhausted their aggregate allocation grant");
                     var observations = CaptureManagedObservations(change);
-                    var raw = IntentStage.NewBounded(observations.Length, remaining);
+                    var raw = CaptureManagedPhysicalityStage(observations.AsSpan(), remaining, scratch);
                     result.OwnedRawStages.Add(raw);
                     result.RawStages.Add(raw);
-                    StageManagedObservations(raw, observations.AsSpan(), scratch);
                     result.OwnedRawBytes = checked(result.OwnedRawBytes + raw.AllocatedBytes);
                     foreach (var physicality in observations)
                         result.AddObservation(physicality.SourceId, change.Metadata.IntentId,
@@ -121,7 +122,18 @@ public sealed partial class NpgsqlSubstrateWriter
                 result.Dispose();
                 return null;
             }
-            catch { result.Dispose(); throw; }
+            catch (Exception error)
+            {
+                string context = $"physicality admission capture failed: aggregateGrantBytes={result.MaximumBytes}, "
+                    + $"observationMetadataBytes={result.ObservationPayloadBytes}, "
+                    + $"ownedRawStageBytes={result.OwnedRawBytes}, scratchBytes={activeScratchBytes}; {error.Message}";
+                result.Dispose();
+                if (error is OutOfMemoryException)
+                    throw new OutOfMemoryException(context, error);
+                if (error is InvalidOperationException)
+                    throw new InvalidOperationException(context, error);
+                throw;
+            }
         }
 
         private void AddObservation(Hash128 source, Hash128 unit, double prior)
@@ -226,6 +238,39 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 stage.AddPhysicalityBatch(inputs, declaredIds, times);
             }
+        }
+    }
+
+    /// <summary>
+    /// Capture only physicality tuples under the caller's remaining aggregate
+    /// grant. A general row hint reserves all three native table buffers, even
+    /// though this source-observation stage never emits entities or attestations.
+    /// </summary>
+    internal static IntentStage CaptureManagedPhysicalityStage(
+        ReadOnlySpan<PhysicalityRow> observations, long stageMaximumBytes, long scratchMaximumBytes)
+    {
+        IntentStage? stage = null;
+        try
+        {
+            stage = IntentStage.NewBounded(0, stageMaximumBytes);
+            PhysicalityAdmissionBatch.StageManagedObservations(stage, observations, scratchMaximumBytes);
+            return stage;
+        }
+        catch (Exception error) when (error is OutOfMemoryException or InvalidOperationException)
+        {
+            long allocatedBytes = stage?.AllocatedBytes ?? 0;
+            stage?.Dispose();
+            string context = $"physicality source capture failed: observations={observations.Length}, "
+                + $"stageGrantBytes={stageMaximumBytes}, scratchGrantBytes={scratchMaximumBytes}, "
+                + $"allocatedStageBytes={allocatedBytes}; {error.Message}";
+            if (error is OutOfMemoryException)
+                throw new OutOfMemoryException(context, error);
+            throw new InvalidOperationException(context, error);
+        }
+        catch
+        {
+            stage?.Dispose();
+            throw;
         }
     }
 

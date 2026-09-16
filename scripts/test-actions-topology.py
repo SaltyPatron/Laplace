@@ -89,7 +89,7 @@ class ActionsAuthorityTests(unittest.TestCase):
         product = workflow["jobs"]["product"]
         steps = product["steps"]
         indexes = {step.get("id"): index for index, step in enumerate(steps) if step.get("id")}
-        phases = ["operational_seed", "publish", "operational_execution", "db_health"]
+        phases = ["lexical_foundation", "operational_seed", "publish", "operational_execution", "db_health"]
         positions = [indexes["product_" + phase] for phase in phases]
         self.assertEqual(sorted(positions), positions)
         for phase in phases:
@@ -231,19 +231,17 @@ raise SystemExit(code)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(2, len(calls))
 
-    def test_operational_proof_preserves_only_explicit_fresh_unrestored_exception(self):
-        result, calls, retained, _ = self.run_operational_proof([], fresh="1")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("fresh DB intentionally left unseeded", result.stdout)
-        self.assertEqual([], calls)
-        self.assertEqual({}, retained)
-        result, calls, _, _ = self.run_operational_proof([], fresh="1", restore="1")
-        self.assertNotEqual(0, result.returncode, result.stderr)
-        self.assertEqual([], calls)
+    def test_fresh_database_requires_operational_proof_with_or_without_broader_restore(self):
         seed = {"disposition": "verified", "run": {"run_id": "e56a93c8-36b4-46ef-b6b7-6a224a2b5cb9"}}
-        result, calls, _, _ = self.run_operational_proof([seed], fresh="1", restore="1")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(2, len(calls))
+        for restore in ("0", "1"):
+            with self.subTest(restore=restore):
+                result, calls, retained, _ = self.run_operational_proof([], fresh="1", restore=restore)
+                self.assertNotEqual(0, result.returncode, result.stderr)
+                self.assertEqual([], calls)
+                self.assertEqual({}, retained)
+                result, calls, _, _ = self.run_operational_proof([seed], fresh="1", restore=restore)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(2, len(calls))
 
     def test_main_has_one_product_job_and_one_mutation_authority(self):
         workflow = load(MAIN)
@@ -273,6 +271,7 @@ run_install() { step native-install; }
 run_database_maintenance() { step database-maintenance; }
 resume_chess_observation_if_needed() { :; }
 restore_foundation_if_requested() { step foundation; }
+ensure_required_lexical_foundation() { step lexical-foundation; }
 seed_operational_memory() { step operational-seed; }
 run_publish_with_recovery() { step publish; }
 verify_operational_execution() { step operational-execution; }
@@ -295,13 +294,13 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
                 result, calls, outputs = self.run_lifecycle_order(failed=failed)
                 self.assertEqual(41, result.returncode, result.stderr)
                 self.assertEqual(failed, calls[-1])
-                ordered = ["operational-seed", "publish", "operational-execution", failed]
+                ordered = ["lexical-foundation", "operational-seed", "publish", "operational-execution", failed]
                 positions = [calls.index(name) for name in ordered]
                 self.assertEqual(sorted(positions), positions)
                 self.assertEqual({}, outputs)
 
     def test_prerequisite_failure_stops_later_delivery(self):
-        for failed in ("operational-seed", "publish", "operational-execution"):
+        for failed in ("lexical-foundation", "operational-seed", "publish", "operational-execution"):
             with self.subTest(failed=failed):
                 result, calls, outputs = self.run_lifecycle_order(failed=failed)
                 self.assertEqual(41, result.returncode, result.stderr)
@@ -314,9 +313,9 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
         result, calls, outputs = self.run_lifecycle_order(stage="applications")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(["policy", "dependencies", "build", "native-dev", "managed-dev", "uci-dev", "browser-dev",
-                          "application-check", "operational-seed", "publish", "operational-execution"], calls)
+                          "application-check", "lexical-foundation", "operational-seed", "publish", "operational-execution"], calls)
         self.assertEqual({}, outputs)
-        for failed in ("publish", "operational-seed", "operational-execution"):
+        for failed in ("lexical-foundation", "publish", "operational-seed", "operational-execution"):
             with self.subTest(failed=failed):
                 result, _, outputs = self.run_lifecycle_order(stage="applications", failed=failed)
                 self.assertEqual(41, result.returncode)
@@ -329,10 +328,11 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
         self.assertEqual([
             "policy", "dependencies", "build", "native-dev", "managed-dev",
             "uci-dev", "browser-dev", "native-install", "database-maintenance", "foundation",
-            "operational-seed", "publish", "operational-execution", "db-health", "native-db", "managed-db", "live-floor", "live-api", "managed-live",
+            "lexical-foundation", "operational-seed", "publish", "operational-execution", "db-health", "native-db", "managed-db", "live-floor", "live-api", "managed-live",
             "generation-eval", "performance"], result.stdout.splitlines())
         text = PRODUCT.read_text()
         for command in ("check-database-health.sh", "ensure-foundation.sh --check-only",
+                        "ensure-foundation.sh --required-lexical",
                         "publish-applications.sh deploy", "publish-applications.sh recover"):
             self.assertIn(command, text)
 
@@ -355,12 +355,19 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
         fresh = plan("all", LAPLACE_FRESH_DB="1")
         self.assertIn("operational-seed", fresh)
         self.assertIn("managed-db", fresh)
-        self.assertNotIn("operational-execution", fresh)
+        self.assertIn("lexical-foundation", fresh)
+        self.assertIn("operational-execution", fresh)
         self.assertNotIn("live-floor", fresh)
         restored = plan("all", LAPLACE_FRESH_DB="1", LAPLACE_RESTORE_FOUNDATION="1")
         self.assertIn("foundation", restored)
+        self.assertIn("lexical-foundation", restored)
         self.assertIn("operational-execution", restored)
         self.assertIn("live-floor", restored)
+        for stage in ("deploy", "integrate", "all", "applications"):
+            self.assertIn("lexical-foundation", plan(stage))
+            self.assertNotIn("foundation", plan(stage))
+        for stage in ("check", "build", "test", "application-check"):
+            self.assertNotIn("lexical-foundation", plan(stage))
         for stage in ("check", "build", "test", "deploy", "integrate", "all", "application-check", "applications"):
             self.assertFalse(any("chess" in phase or "stockfish" in phase for phase in plan(stage)))
 
@@ -421,7 +428,7 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
             self.assertEqual(43, result.returncode, result.stderr)
             self.assertFalse(envfile.exists())
 
-    def test_foundation_restore_is_explicit_in_main_lifecycle(self):
+    def test_broader_foundation_restore_remains_explicit_in_main_lifecycle(self):
         workflow = load(MAIN)
         restore = workflow["on"]["workflow_dispatch"]["inputs"]["restore_foundation"]
         self.assertEqual("false", restore["default"])
@@ -696,7 +703,7 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
         names = {trigger} if isinstance(trigger, str) else set(trigger)
         self.assertEqual({"workflow_dispatch"}, names)
 
-    def test_database_recreate_does_not_seed_unless_explicitly_requested(self):
+    def test_database_recreate_admits_required_sources_and_keeps_broader_restore_optional(self):
         path = WORKFLOWS / "db-ops.yml"
         db = load(path)
         inputs = db["on"]["workflow_dispatch"]["inputs"]
@@ -706,7 +713,14 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
         recreate = next(step for step in steps if step.get("name") == "Recreate database structure and runtime")
         restore = next(step for step in steps if step.get("name") == "Restore canonical foundation (explicit opt-in)")
         self.assertNotIn("ensure-foundation.sh", recreate["run"])
-        self.assertIn("ensure-foundation.sh --force", restore["run"])
+        lexical = next(step for step in steps if step.get("name") == "Admit required lexical foundation")
+        self.assertEqual("inputs.operation == 'recreate'", lexical["if"])
+        self.assertEqual("bash scripts/ensure-foundation.sh --required-lexical", lexical["run"].strip())
+        self.assertNotIn("continue-on-error", lexical)
+        self.assertLess(steps.index(recreate), steps.index(lexical))
+        self.assertLess(steps.index(lexical), steps.index(restore))
+        self.assertEqual("bash scripts/ensure-foundation.sh", restore["run"].splitlines()[0])
+        self.assertNotIn("--force", restore["run"])
         self.assertEqual("inputs.operation == 'recreate' && inputs.restore_foundation", restore["if"])
 
 
@@ -725,6 +739,102 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
                     continue
                 use = line.split("uses:", 1)[1].strip()
                 self.assertRegex(use, r"^[^@\s]+@[0-9a-f]{40}$", path.name)
+
+
+class RequiredLexicalAdmissionTests(unittest.TestCase):
+    """Execute the shell owner with isolated boundaries; never claim source/DB proof."""
+
+    def run_foundation(self, args, *, complete=True, repeats=1, ingest_rc=0, journal_rc=0):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            shutil.copy2(ROOT / "scripts/ensure-foundation.sh", scripts / "ensure-foundation.sh")
+            calls = root / "calls.jsonl"
+            common = (
+                "import json, os, sys\n"
+                "from pathlib import Path\n"
+                "def record(value):\n"
+                "    with Path(os.environ['TEST_CALLS']).open('a') as stream:\n"
+                "        stream.write(json.dumps(value) + '\\n')\n"
+            )
+            boundaries = {
+                "psql": (
+                    "sql = sys.argv[-1]\n"
+                    "if 'FROM pg_database' in sql: print('1')\n"
+                    "elif 'evidence_count' in sql: print(os.environ['TEST_COMPLETE'])\n"
+                ),
+                "ingest-source.sh": (
+                    "record({'kind': 'ingest', 'args': sys.argv[1:], "
+                    "'force': os.environ.get('LAPLACE_INGEST_FORCE'), "
+                    "'max_units': os.environ.get('LAPLACE_INGEST_MAX_UNITS'), "
+                    "'langs': os.environ.get('LAPLACE_INGEST_LANGS')})\n"
+                    "raise SystemExit(int(os.environ['TEST_INGEST_RC']))\n"
+                ),
+                "verify-ingest-journal.sh": (
+                    "record({'kind': 'journal', 'args': sys.argv[1:]})\n"
+                    "raise SystemExit(int(os.environ['TEST_JOURNAL_RC']))\n"
+                ),
+            }
+            for name, body in boundaries.items():
+                script = scripts / name
+                script.write_text("#!" + sys.executable + "\n" + common + body)
+                script.chmod(0o755)
+            # The real owner invokes its journal via bash; adapt that boundary only.
+            journal = scripts / "verify-ingest-journal.sh"
+            journal.rename(scripts / "journal.py")
+            journal.write_text('#!/usr/bin/env bash\nexec "' + sys.executable
+                               + '" "$(dirname "$0")/journal.py" "$@"\n')
+            environment = {
+                **os.environ, "PATH": str(scripts) + os.pathsep + os.environ["PATH"],
+                "TEST_CALLS": str(calls), "TEST_COMPLETE": "t" if complete else "f",
+                "TEST_INGEST_RC": str(ingest_rc), "TEST_JOURNAL_RC": str(journal_rc),
+                "LAPLACE_INGEST_FORCE": "1", "LAPLACE_INGEST_MAX_UNITS": "3",
+                "LAPLACE_INGEST_LANGS": "en", "LAPLACE_DBNAME": "test_lexical",
+            }
+            results = [
+                subprocess.run(["bash", str(scripts / "ensure-foundation.sh"), *args],
+                               env=environment, text=True, capture_output=True, timeout=20)
+                for _ in range(repeats)
+            ]
+            recorded = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+            return results, recorded
+
+    def test_required_sources_delegate_completed_and_incomplete_markers_without_forced_replay(self):
+        for complete in (True, False):
+            with self.subTest(complete=complete):
+                results, calls = self.run_foundation(["--required-lexical"], complete=complete, repeats=2)
+                for result in results:
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                admissions = [call for call in calls if call["kind"] == "ingest"]
+                self.assertEqual(2, len(admissions))
+                for call in admissions:
+                    self.assertEqual(["chain", "unicode", "iso639", "cili", "wordnet"], call["args"])
+                    self.assertEqual("0", call["force"])
+                    self.assertEqual("0", call["max_units"])
+                    self.assertIsNone(call["langs"])
+                journals = [call["args"] for call in calls if call["kind"] == "journal"]
+                self.assertEqual([[source] for source in
+                                  ("UnicodeDecomposer", "ISO639Decomposer", "CILIDecomposer", "WordNetDecomposer")] * 2,
+                                 journals)
+
+    def test_required_check_only_is_read_only_and_broader_restore_still_skips_complete_markers(self):
+        for complete in (True, False):
+            with self.subTest(complete=complete):
+                results, calls = self.run_foundation(["--required-lexical", "--check-only"], complete=complete)
+                self.assertEqual(0 if complete else 1, results[0].returncode)
+                self.assertEqual([], calls)
+        results, calls = self.run_foundation([])
+        self.assertEqual(0, results[0].returncode, results[0].stderr)
+        self.assertEqual([], calls)
+
+    def test_source_failure_prevents_journal_certification_and_journal_failure_propagates(self):
+        results, calls = self.run_foundation(["--required-lexical"], ingest_rc=43)
+        self.assertEqual(43, results[0].returncode, results[0].stderr)
+        self.assertEqual(["ingest"], [call["kind"] for call in calls])
+        results, calls = self.run_foundation(["--required-lexical"], journal_rc=44)
+        self.assertEqual(44, results[0].returncode, results[0].stderr)
+        self.assertEqual(["ingest", "journal"], [call["kind"] for call in calls])
 
 
 class ActionsAuditFailurePropagationTests(unittest.TestCase):
@@ -817,6 +927,19 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
 
     def test_deferred_readiness_and_optional_baseline_are_accepted(self):
         self.check_audit()
+
+    def test_required_lexical_admission_cannot_be_optional_or_force_broader_replay(self):
+        self.check_audit(lambda ws: self.step(ws, "db-ops.yml", "name",
+            "Admit required lexical foundation").update(
+                {"if": "inputs.operation == 'recreate' && inputs.restore_foundation"}),
+            "must always admit required lexical sources")
+        self.check_audit(lambda ws: self.step(ws, "db-ops.yml", "name",
+            "Restore canonical foundation (explicit opt-in)").update(
+                {"run": "bash scripts/ensure-foundation.sh --force"}),
+            "without forced replay")
+        self.check_audit(lambda ws: self.step(ws, "laplace.yml", "id",
+            "product_lexical_foundation").update({"if": "inputs.restore_foundation"}),
+            "canonical selection")
 
     def test_database_maintenance_cannot_bypass_managed_quiescence(self):
         path = self.root / "scripts/product-ci.sh"

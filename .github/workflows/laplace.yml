@@ -20,11 +20,11 @@ on:
         type: boolean
         default: false
       fresh_db:
-        description: "recreate DB structure/runtime; does not seed by itself"
+        description: "recreate DB structure/runtime and restore required lexical sources"
         type: boolean
         default: false
       restore_foundation:
-        description: "after database work, restore missing canonical foundation (can take hours)"
+        description: "also restore the broader canonical foundation (can take hours)"
         type: boolean
         default: false
       serial_tests:
@@ -274,6 +274,11 @@ jobs:
         id: product_foundation
         if: contains(env.LAPLACE_CI_PHASES, '|foundation|')
         run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase foundation
+
+      - name: Admit required lexical foundation
+        id: product_lexical_foundation
+        if: contains(env.LAPLACE_CI_PHASES, '|lexical-foundation|')
+        run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase lexical-foundation
 
       - name: Admit operational memory
         id: product_operational_seed

@@ -4,9 +4,8 @@ name: DB — lifecycle ops
 # lifecycle. It shares the product lifecycle lock with laplace.yml, so a manual
 # operation cannot overlap install/schema/publication mutation.
 #
-# Database structure and corpus population are separate decisions. `recreate`
-# destroys and rebuilds the database/runtime structure. Restoring the canonical
-# foundation is an explicit opt-in because it can take hours.
+# Recreate restores the authentic lexical sources required by product task execution.
+# Restoring the broader canonical foundation remains an explicit option.
 
 on:
   workflow_dispatch:
@@ -22,14 +21,14 @@ on:
           - repair      # Re-sync extension SQL + re-tune + re-point perfcache/API env. NO DATA LOSS.
           - reindex     # Rebuild INVALID indexes. CONCURRENTLY; NO DATA LOSS.
           - remigrate   # `reset` + `up`: re-apply ALL migrations. Keeps substrate data.
-          - recreate    # DESTRUCTIVE. Nuke + migrate + runtime repair; no corpus ingest by default.
+          - recreate    # DESTRUCTIVE. Nuke + migrate + runtime repair + required lexical sources.
       confirm:
         description: "type the database name to authorize a destructive operation (recreate)"
         type: string
         required: false
         default: ""
       restore_foundation:
-        description: "after recreate, ingest the canonical foundation (can take hours)"
+        description: "after recreate, also ingest the broader canonical foundation (can take hours)"
         type: boolean
         required: false
         default: false
@@ -50,7 +49,7 @@ jobs:
   db:
     name: "DB — ${{ inputs.operation }}"
     runs-on: [self-hosted, laplace]
-    timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || (inputs.operation == 'recreate' && inputs.restore_foundation && 480) || 30 }}
+    timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || (inputs.operation == 'recreate' && 480) || 30 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: { submodules: false, clean: false }
@@ -69,7 +68,7 @@ jobs:
               if [ "${{ inputs.restore_foundation }}" = "true" ]; then
                 echo "::notice::restore_foundation=true: canonical foundation ingest will run after structural recreation."
               else
-                echo "::notice::restore_foundation=false: recreation ends after structural/runtime health proof; no seed is started."
+                echo "::notice::restore_foundation=false: required lexical sources are restored; broader foundation is not requested."
               fi
               ;;
             remigrate)
@@ -159,11 +158,16 @@ jobs:
           bash scripts/check-database-health.sh "${{ inputs.database }}"
           python3 scripts/verify-application-release.py --readiness-only --timeout-seconds 120
 
+      - name: Admit required lexical foundation
+        if: inputs.operation == 'recreate'
+        timeout-minutes: 360
+        run: bash scripts/ensure-foundation.sh --required-lexical
+
       - name: Restore canonical foundation (explicit opt-in)
         if: inputs.operation == 'recreate' && inputs.restore_foundation
-        timeout-minutes: 450
+        timeout-minutes: 360
         run: |
-          bash scripts/ensure-foundation.sh --force
+          bash scripts/ensure-foundation.sh
           bash scripts/check-substrate-floor.sh "${{ inputs.database }}"
           python3 scripts/verify-application-release.py --readiness-only --timeout-seconds 120
 

@@ -66,6 +66,10 @@ restore_foundation_if_requested() {
   fi
 }
 
+ensure_required_lexical_foundation() {
+  bash scripts/ensure-foundation.sh --required-lexical
+}
+
 seed_operational_memory() {
   # The versioned operational source ships with this executable generation.
   # Its per-file content completion skips unchanged artifacts; do not use
@@ -76,11 +80,6 @@ seed_operational_memory() {
   if [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
     printf '%s\n' "$operational_proof_directory" > "$LAPLACE_CI_SESSION_DIRECTORY/operational-proof-directory"
   fi
-  if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
-    printf '%s\n' '{"disposition":"intentionally-unseeded","reason":"fresh database without foundation restoration"}' \
-      > "$operational_proof_directory/disposition.json"
-    return 0
-  fi
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
   LAPLACE_INGEST_MAX_UNITS=0 LAPLACE_INGEST_FORCE=0 \
     python3 scripts/verify-operational-seed.py --ingest --report "$operational_proof_directory/seed.json"
@@ -88,10 +87,6 @@ seed_operational_memory() {
 
 verify_operational_execution() {
   local seed_run_id remaining deadline=$((SECONDS + 900))
-  if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
-    echo "fresh DB intentionally left unseeded — operational execution proof skipped"
-    return 0
-  fi
   if [[ -n "${LAPLACE_CI_SESSION_DIRECTORY:-}" ]]; then
     IFS= read -r operational_proof_directory < "$LAPLACE_CI_SESSION_DIRECTORY/operational-proof-directory"
     [[ -d "$operational_proof_directory" ]] || { echo "missing operational proof directory" >&2; return 1; }
@@ -191,15 +186,15 @@ run_publish_with_recovery() {
 
 run_live_suite() {
   if [[ "${LAPLACE_FRESH_DB:-}" == 1 && "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]]; then
-    echo "fresh DB intentionally left unseeded — seeded live product proof skipped"
+    echo "broader foundation restoration not requested after reset — full-foundation live suite skipped"
     return 0
   fi
   export LAPLACE_API_BASE="${LAPLACE_API_BASE:-http://127.0.0.1:8080}"
   run_suite live "$1"
 }
 
-# Delivery owns the operational bundle, not optional source imports or benchmarks.
-# Domain ingestion and measurement use their independent operator workflows.
+# Delivery admits the lexical sources required by operational task execution.
+# Broader foundation restoration and domain benchmarks retain their explicit owners.
 product_phases() {
   echo policy
   if [[ "$stage" == reconcile ]]; then echo reconcile; return; fi
@@ -211,19 +206,17 @@ product_phases() {
   if [[ "$stage" == application-check || "$stage" == applications ]]; then
     echo application-check
     if [[ "$stage" == applications ]]; then
-      printf '%s\n' operational-seed publish operational-execution
+      printf '%s\n' lexical-foundation operational-seed publish operational-execution
     fi
     return 0
   fi
   printf '%s\n' native-install database-maintenance
   [[ "${LAPLACE_RESTORE_FOUNDATION:-}" != 1 ]] || echo foundation
-  echo operational-seed
+  printf '%s\n' lexical-foundation operational-seed
   [[ "$stage" != deploy ]] || return 0
   if [[ "$stage" == all ]]; then
     echo publish
-    if [[ "${LAPLACE_FRESH_DB:-}" != 1 || "${LAPLACE_RESTORE_FOUNDATION:-}" == 1 ]]; then
-      echo operational-execution
-    fi
+    echo operational-execution
   fi
   printf '%s\n' db-health native-db managed-db
   [[ "$stage" != integrate ]] || return 0
@@ -254,6 +247,7 @@ run_phase() {
     native-install) run_install ;;
     database-maintenance) run_database_maintenance ;;
     foundation) restore_foundation_if_requested ;;
+    lexical-foundation) ensure_required_lexical_foundation ;;
     operational-seed) seed_operational_memory ;;
     publish) run_publish_with_recovery ;;
     operational-execution) verify_operational_execution ;;

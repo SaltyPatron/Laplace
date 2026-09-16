@@ -43,7 +43,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
     public void InvalidateLearnedPst() => _boardEvaluator = null;
 
-    private ChessLiveGameHost(
+    internal ChessLiveGameHost(
         NpgsqlDataSource ds, ConsensusAccumulatingWriter writer, SubstrateTurnHost turnHost)
     {
         _ds = ds;
@@ -95,6 +95,22 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         return Task.CompletedTask;
     }
 
+    // The scope owns this exact ephemeral session, not every future session
+    // with the same external game id. Disposing it never writes a game result.
+    internal IDisposable? CaptureGameScope(Hash128 eventId)
+        => _games.TryGetValue(eventId, out var session)
+            ? new LiveGameScope(this, eventId, session) : null;
+
+    private void AbandonGame(Hash128 eventId, LiveGameSession session)
+        => ((ICollection<KeyValuePair<Hash128, LiveGameSession>>)_games)
+            .Remove(new KeyValuePair<Hash128, LiveGameSession>(eventId, session));
+
+    private sealed class LiveGameScope(
+        ChessLiveGameHost owner, Hash128 eventId, LiveGameSession session) : IDisposable
+    {
+        public void Dispose() => owner.AbandonGame(eventId, session);
+    }
+
     public void SetGamePlayers(
         Hash128 eventId,
         Hash128? whitePlayerId,
@@ -140,12 +156,10 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         await _writeGate.WaitAsync(ct);
         try
         {
-            var (board, moving, move) = ResolveMove(fromKey, toKey, moveToken);
-            string san = San.ToSan(board, move);
-            session.Moves.Add(moveToken == "?" ? move.ToUci() : moveToken);
-            session.Plies.Add(new RecordedPly(
-                fromKey, toKey, move.ToUci(), san, session.MoverSide(ply), moving, move, moverPlayerId));
-            session.MoveIds.Add(ChessCompose.MoveId(moving, move));
+            var recorded = ResolveRecordedPly(fromKey, toKey, moveToken, moverPlayerId);
+            session.Moves.Add(moveToken == "?" ? recorded.MoveToken : moveToken);
+            session.Plies.Add(recorded);
+            session.MoveIds.Add(ChessCompose.MoveId(recorded.MovingPiece, recorded.Move));
             if (session.PositionIds.Count == 0)
                 session.PositionIds.Add(ChessCompose.PositionId(fromKey));
             session.PositionIds.Add(ChessCompose.PositionId(toKey));
@@ -416,6 +430,14 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         session.EntityEmitted = true;
     }
 
+    internal static RecordedPly ResolveRecordedPly(
+        string fromKey, string toKey, string moveToken, Hash128? moverPlayerId)
+    {
+        var (board, moving, move) = ResolveMove(fromKey, toKey, moveToken);
+        return new RecordedPly(fromKey, toKey, move.ToUci(), San.ToSan(board, move),
+            board.WhiteToMove ? 0 : 1, moving, move, moverPlayerId);
+    }
+
     private static (Board Board, Piece Moving, ChessMove Move) ResolveMove(
         string fromKey, string toKey, string token)
     {
@@ -664,10 +686,9 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
 
         public bool EntityEmitted { get; set; }
 
-        public int MoverSide(int ply) => (ply - 1) % 2;
     }
 
-    private readonly record struct RecordedPly(
+    internal readonly record struct RecordedPly(
         string FromKey, string ToKey, string MoveToken, string San, int MoverSide,
         Piece MovingPiece, ChessMove Move, Hash128? MoverPlayerId);
 }

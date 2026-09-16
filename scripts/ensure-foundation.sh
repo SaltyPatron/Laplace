@@ -9,11 +9,13 @@ PGUSER="${PGUSER:-laplace_admin}"
 DB="${LAPLACE_DBNAME:-${PGDATABASE:-laplace}}"
 FORCE=0
 CHECK_ONLY=0
+REQUIRED_LEXICAL=0
 
 usage() {
-  echo "Usage: $0 [--force|--check-only]" >&2
+  echo "Usage: $0 [--force|--check-only] [--required-lexical]" >&2
   echo "  --force       always re-ingest foundation sources (fresh_db path)" >&2
   echo "  --check-only  fail loud if any foundation layer is incomplete (no ingest; #792)" >&2
+  echo "  --required-lexical  admit Unicode, ISO639, CILI and WordNet through ordinary completion/resume" >&2
   exit 2
 }
 
@@ -21,6 +23,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --force) FORCE=1; shift ;;
     --check-only) CHECK_ONLY=1; shift ;;
+    --required-lexical) REQUIRED_LEXICAL=1; shift ;;
     -h|--help) usage ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -58,11 +61,24 @@ FOUNDATION=(
   "semlink:SemLinkDecomposer:3"
 )
 
+if [[ "$REQUIRED_LEXICAL" -eq 1 ]]; then
+  # Select from the existing ordered roster. The ordinary source/file completion
+  # owner must see these sources even when an older source-level marker exists.
+  # It skips completed inputs and can admit newly available complete artifacts.
+  required=()
+  for entry in "${FOUNDATION[@]}"; do
+    case "${entry%%:*}" in unicode|iso639|cili|wordnet) required+=("$entry") ;; esac
+  done
+  FOUNDATION=("${required[@]}")
+  export LAPLACE_INGEST_FORCE=0 LAPLACE_INGEST_MAX_UNITS=0
+  unset LAPLACE_INGEST_LANGS
+fi
+
 export LAPLACE_DBNAME="$DB"
 export LAPLACE_DB="Host=${PGHOST};Username=${PGUSER};Database=${DB}"
 
 needs_work=0
-if [[ "$FORCE" -eq 1 ]]; then
+if [[ "$FORCE" -eq 1 || ( "$REQUIRED_LEXICAL" -eq 1 && "$CHECK_ONLY" -eq 0 ) ]]; then
   needs_work=1
 else
   for entry in "${FOUNDATION[@]}"; do
@@ -106,7 +122,7 @@ CHAIN=()
 CHAIN_DECOMPOSERS=()
 for entry in "${FOUNDATION[@]}"; do
   IFS=':' read -r cli decomposer layer <<< "$entry"
-  if [[ "$FORCE" -eq 1 ]] || ! layer_ok "$decomposer" "$layer"; then
+  if [[ "$FORCE" -eq 1 || "$REQUIRED_LEXICAL" -eq 1 ]] || ! layer_ok "$decomposer" "$layer"; then
     CHAIN+=("$cli")
     CHAIN_DECOMPOSERS+=("$decomposer")
   else
