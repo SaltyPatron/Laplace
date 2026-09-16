@@ -77,16 +77,18 @@ static int buf_reserve(byte_buf_t* b, size_t additional) {
         }
         if ((bounded ? new_cap : new_cap - b->cap) > remaining) new_cap = needed;
     }
-    uint8_t* p = bounded ? (uint8_t*)malloc(new_cap) : (uint8_t*)realloc(b->data, new_cap);
+    /* Keep the same old-plus-new grant reservation before realloc: libc may
+     * relocate and temporarily retain both allocations, or grow in place.
+     * The recorded peak is this conservative requested-payload reservation,
+     * not an observation of allocator internals or process RSS. */
+    uint8_t* p = (uint8_t*)realloc(b->data, new_cap);
     if (!p) {
         if (b->allocation_failed != NULL) *b->allocation_failed = 1;
         return -1;
     }
     if (bounded) {
-        if (b->len != 0u) memcpy(p, b->data, b->len);
         const size_t peak = *b->allocated_bytes + new_cap;
         if (peak > *b->peak_bytes) *b->peak_bytes = peak;
-        free(b->data);
     }
     if (b->allocated_bytes != NULL) {
         *b->allocated_bytes += new_cap - b->cap;

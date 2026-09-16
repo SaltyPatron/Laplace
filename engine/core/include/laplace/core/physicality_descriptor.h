@@ -119,7 +119,9 @@ physicality_descriptor_status_t physicality_descriptor_plan_build(
 void physicality_descriptor_plan_free(physicality_descriptor_plan_t* plan);
 
 size_t physicality_descriptor_plan_bytes(const physicality_descriptor_plan_t* plan);
-/* Includes transient array growth; plan_bytes reports retained payload only. */
+/* Conservative high-water payload reservation, including old plus requested
+ * replacement arrays even when realloc grows in place. Not allocator RSS;
+ * plan_bytes reports retained payload only. */
 size_t physicality_descriptor_plan_peak_bytes(const physicality_descriptor_plan_t* plan);
 const physicality_descriptor_node_t* physicality_descriptor_plan_nodes(
     const physicality_descriptor_plan_t* plan, size_t* count);
