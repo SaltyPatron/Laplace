@@ -48,6 +48,7 @@ jobs:
           void *__real_realloc(void *, size_t);
           void __real_free(void *);
           void *__real_memcpy(void *, const void *, size_t);
+          void *__real___memcpy_chk(void *, const void *, size_t, size_t);
           
           struct allocation { void *pointer; size_t size; };
           static struct allocation tracked[8];
@@ -107,19 +108,29 @@ jobs:
               __real_free(pointer);
           }
           
-          void *__wrap_memcpy(void *destination, const void *source, size_t size) {
+          static void observe_copy(size_t size) {
               if (track_copies) {
                   ++copy_calls;
                   copy_bytes += size;
-                  /* During entity append every field copy is <=16 bytes. On the pinned
-                   * owner, larger copies are the entire previous growth buffer. */
                   if (size <= 16) ++small_copy_sizes[size];
                   if (size > 16) {
                       ++growth_calls;
                       growth_bytes += size;
                   }
               }
+          }
+          
+          void *__wrap_memcpy(void *destination, const void *source, size_t size) {
+              observe_copy(size);
               return __real_memcpy(destination, source, size);
+          }
+          
+          /* The retained Ubuntu GCC object lowers the actual growth and field copies to
+           * __memcpy_chk. Preserve libc's destination-bound enforcement unchanged. */
+          void *__wrap___memcpy_chk(void *destination, const void *source,
+                                   size_t size, size_t destination_size) {
+              observe_copy(size);
+              return __real___memcpy_chk(destination, source, size, destination_size);
           }
           
           static int append_entity(intent_stage_t *stage, size_t ordinal) {
@@ -244,7 +255,8 @@ jobs:
           cc -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -fno-builtin -fno-lto \
             -ffunction-sections -fdata-sections -I engine/core/include \
             "$diagnostic_dir/observe.c" "$diagnostic_dir/intent_stage.o" \
-            -Wl,--gc-sections -Wl,--wrap=memcpy -Wl,--wrap=malloc -Wl,--wrap=calloc \
+            -Wl,--gc-sections -Wl,--wrap=memcpy -Wl,--wrap=__memcpy_chk \
+            -Wl,--wrap=malloc -Wl,--wrap=calloc \
             -Wl,--wrap=realloc -Wl,--wrap=free -o "$diagnostic_dir/observe" 2>&1 | tee "$diagnostic_dir/compile-diagnostic.log"
           nm -u "$diagnostic_dir/intent_stage.o" | tee "$diagnostic_dir/undefined-symbols.txt"
           objdump -dr --disassemble=buf_reserve "$diagnostic_dir/intent_stage.o" | tee "$diagnostic_dir/buf-reserve-assembly.txt"
