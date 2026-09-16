@@ -322,6 +322,11 @@ class InstalledCorpusTests(unittest.TestCase):
                 self.assertEqual(75000, proof["measurement"]["newlyRecordedGames"])
                 self.assertTrue((args.output_dir / "measurement/corpus-recording.json").is_file())
                 self.assertTrue(any("--compare" in command for command in commands))
+                native_commands = [command for command in commands
+                                   if any(value.endswith("/check-application-runtime.py") for value in command)]
+                self.assertEqual(2, len(native_commands))
+                for command in native_commands:
+                    self.assertEqual("recording", command[command.index("--purpose") + 1])
                 self.assertIn("cli-identity-after", [phase["name"] for phase in proof["phases"]])
                 self.assertIn("source-after", [phase["name"] for phase in proof["phases"]])
                 self.assertIn("native-after", [phase["name"] for phase in proof["phases"]])

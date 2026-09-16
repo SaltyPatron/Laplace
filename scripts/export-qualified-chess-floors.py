@@ -25,6 +25,15 @@ REPOSITORY = "SaltyPatron/Laplace"
 DURABLE_ROOT = Path("/build/laplace/corpus-exports/chess")
 SESSION_ROOT = Path("/build/laplace/work/ci-sessions")
 BUILD_ROOT = Path("/build/laplace/build")
+NATIVE_ROOT = Path("/build/laplace/recovery/native-install")
+NATIVE_PREFIX = Path("/opt/laplace")
+NATIVE_WORKFLOW = ".github/workflows/chess-floor-serving-controls.yml"
+NATIVE_PHASES = [
+    "pg-pin", "pg-checkout", "pg-source", "dependency-build",
+    "dependency-identity", "native-managed-build", "isolated-native-database",
+    "native-tests", "managed-tests", "uci-tests", "quiet-native-owner",
+    "native-install", "extension-sql", "database-health", "postgres-activation",
+]
 
 
 def load(path, limit=4 * 1024 * 1024):
@@ -48,10 +57,10 @@ def module(root, name, filename):
     return value
 
 
-def run_json(run_id, suffix=""):
+def github_json(path):
     token = os.environ.get("GITHUB_TOKEN", "")
     request = urllib.request.Request(
-        "https://api.github.com/repos/" + REPOSITORY + "/actions/runs/" + str(run_id) + suffix,
+        "https://api.github.com/repos/" + REPOSITORY + "/" + path,
         headers={"Accept": "application/vnd.github+json", "Authorization": "Bearer " + token,
                  "X-GitHub-Api-Version": "2022-11-28"})
     class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -63,6 +72,10 @@ def run_json(run_id, suffix=""):
     if len(raw) > 4 * 1024 * 1024:
         raise ValueError("workflow metadata exceeded its envelope")
     return json.loads(raw)
+
+
+def run_json(run_id, suffix=""):
+    return github_json("actions/runs/" + str(run_id) + suffix)
 
 
 def selection_identity(plan):
@@ -78,114 +91,189 @@ def selection_identity(plan):
     return {"commit": values[0], "tree": values[1]}
 
 
-def lexical_failure_evidence(run_id, attempt, expected, state):
-    """Authenticate the one supported failed lifecycle without changing its status."""
-    prerequisites = ["policy", "dependencies", "build", "native-dev", "managed-dev",
-                     "uci-dev", "browser-dev", "native-install", "database-maintenance"]
-    failed_phase = "lexical-foundation"
-    if expected.count(failed_phase) != 1:
-        raise ValueError("canonical product phase list has no unique lexical boundary")
-    boundary = expected.index(failed_phase)
-    results = state.get("results")
-    if (expected[:boundary] != prerequisites or state.get("status") != "failed"
-            or state.get("next") != boundary + 1 or not isinstance(results, list)
-            or len(results) != boundary + 1
-            or results[:-1] != [{"phase": p, "exit_code": 0} for p in prerequisites]
-            or not isinstance(results[-1], dict) or set(results[-1]) != {"phase", "exit_code"}
-            or results[-1]["phase"] != failed_phase
-            or type(results[-1]["exit_code"]) is not int or results[-1]["exit_code"] <= 0):
-        raise ValueError("retained canonical product phases do not establish lexical-only failure")
-
-    jobs = run_json(run_id, "/attempts/" + str(attempt) + "/jobs?per_page=100")
-    rows = jobs.get("jobs") if isinstance(jobs, dict) else None
-    if (not isinstance(rows, list) or jobs.get("total_count") != 1 or len(rows) != 1
-            or not isinstance(rows[0], dict)):
-        raise ValueError("failed exact-main lifecycle job is absent or ambiguous")
-    job = rows[0]
-    if (type(job.get("id")) is not int or job["id"] <= 0 or job.get("run_id") != run_id
-            or job.get("head_sha") != state["source"]["commit"]
-            or job.get("status") != "completed" or job.get("conclusion") != "failure"):
-        raise ValueError("failed exact-main lifecycle job identity differs")
-    steps = job.get("steps")
-    if (not isinstance(steps, list) or any(not isinstance(step, dict)
-            or not all(isinstance(step.get(key), str) for key in ("name", "status", "conclusion"))
-            for step in steps)):
-        raise ValueError("failed exact-main lifecycle steps are incomplete")
-    installed = (
-        "Resolve the Stockfish checkout for application publication", "Reserve host for product phases",
-        "Check source and policy", "Resolve build dependencies", "Build native and managed artifacts",
-        "Test native engine", "Test managed code", "Test UCI runtime", "Test browser product",
-        "Install native artifacts", "Migrate and reconcile installed database",
-    )
-    downstream = (
-        "Admit operational memory", "Publish applications",
-        "Verify the installed direct build uses the selected Stockfish checkout",
-        "Verify ordinary operational execution", "Verify database health",
-        "Test native PostgreSQL extensions", "Test managed database integration",
-        "Prove live recursive substrate", "Verify live API endpoints", "Test live product behavior",
-        "Evaluate witnessed generation",
-    )
-    sequence = [(name, "success") for name in installed]
-    sequence += [("Admit required lexical foundation", "failure")]
-    sequence += [(name, "skipped") for name in downstream]
-    sequence += [("Release product host reservation", "success")]
-    observed = []
-    for name, conclusion in sequence:
-        matches = [(index, step) for index, step in enumerate(steps) if step["name"] == name]
-        if (len(matches) != 1 or matches[0][1]["status"] != "completed"
-                or matches[0][1]["conclusion"] != conclusion):
-            raise ValueError("failed exact-main lifecycle lacks required phase outcome: " + name)
-        observed.append(matches[0][0])
-    if observed != sorted(observed) or [step["name"] for step in steps
-            if step["conclusion"] == "failure"] != ["Admit required lexical foundation"]:
-        raise ValueError("failed exact-main lifecycle differs from ordered lexical-only failure")
-    return {"job_id": job["id"], "failed_phase": failed_phase,
-            "failed_exit_code": results[-1]["exit_code"],
-            "not_executed_phases": expected[boundary + 1:],
-            "workflow_steps": [{key: step[key] for key in ("name", "status", "conclusion")}
-                               for step in steps]}
+def file_identity(path):
+    path = Path(path)
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1048576), b""):
+            digest.update(block)
+    return {"path": str(path.resolve(strict=True)), "bytes": path.stat().st_size,
+            "sha256": digest.hexdigest()}
 
 
-def qualification(plan, root):
+def native_files(identities):
+    """Compare actual installed files with this completed installation receipt."""
+    selected = {
+        "/opt/laplace/lib/liblaplace_core.so": NATIVE_PREFIX / "lib/liblaplace_core.so",
+        "/opt/laplace/pgsql-18/bin/postgres": NATIVE_PREFIX / "pgsql-18/bin/postgres",
+        "/opt/laplace/pgsql-18/bin/pg_config": NATIVE_PREFIX / "pgsql-18/bin/pg_config",
+    }
+    if not isinstance(identities, dict) or set(identities) != set(selected):
+        raise ValueError("native installation receipt has unexpected file identities")
+    for name, path in selected.items():
+        value = identities[name]
+        if (not isinstance(value, dict) or type(value.get("bytes")) is not int
+                or value["bytes"] <= 0 or not isinstance(value.get("sha256"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", value["sha256"]) is None
+                or file_identity(path) != value):
+            raise ValueError("native installation file identity changed: " + name)
+
+
+def native_qualification(plan, root):
     source = selection_identity(plan)
-    run_id, attempt = plan["proof_run_id"], plan["proof_run_attempt"]
-    if type(run_id) is not int or type(attempt) is not int or run_id <= 0 or attempt <= 0:
-        raise ValueError("an explicit positive proof run and attempt are required")
+    run_id, attempt = plan.get("proof_run_id"), plan.get("proof_run_attempt")
+    for value in (run_id, attempt, plan.get("native_artifact_id")):
+        if type(value) is not int or value <= 0:
+            raise ValueError("native installation requires positive run, attempt and artifact IDs")
+    for key, width in (("proof_operator_commit", 40), ("native_workflow_blob", 40),
+                       ("native_receipt_sha256", 64), ("native_selection_sha256", 64),
+                       ("native_artifact_sha256", 64)):
+        if not isinstance(plan.get(key), str) or re.fullmatch(
+                "[0-9a-f]{" + str(width) + "}", plan[key]) is None:
+            raise ValueError("native installation requires an exact identity: " + key)
     remote = run_json(run_id)
-    if (remote.get("id") != run_id or remote.get("status") != "completed"
-            or remote.get("conclusion") not in ("success", "failure") or remote.get("event") != "push"
-            or remote.get("head_branch") != "main"
-            or remote.get("path") != ".github/workflows/laplace.yml"
-            or remote.get("run_attempt") != attempt or remote.get("head_sha") != source["commit"]):
-        raise ValueError("selected run is not a supported terminal exact-main product lifecycle")
-    path = SESSION_ROOT / (str(run_id) + "-" + str(attempt) + "-product/session.json")
-    if (path.is_symlink() or path.parent.is_symlink()
-            or path.parent.stat().st_uid != os.getuid()
-            or path.parent.stat().st_mode & 0o077):
-        raise ValueError("retained lifecycle session must remain private and owned by this runner")
-    state = load(path, 65536)
-    # A normal main push selects the full default product lifecycle. Environment
-    # inherited by this later export must not omit phases from the retained plan.
-    # A lexical-only failure retains the unexecuted suffix explicitly.
-    environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
-                       LAPLACE_GENERATION_BENCHMARK="")
-    expected = subprocess.check_output(
-        ["bash", str(root / "scripts/product-ci.sh"), "all", "--list-phases"],
-        cwd=root, text=True, timeout=10, env=environment).splitlines()
-    if (not expected or state.get("schema") != "laplace.ci-session.v1"
-            or state.get("kind") != "product" or state.get("stage") != "all"
-            or type(state.get("cleanup_exit_code")) is not int or state["cleanup_exit_code"] != 0
-            or "active" not in state or state["active"] is not None
-            or state.get("source") != source or state.get("phases") != expected):
-        raise ValueError("retained main session does not establish canonical product phase identity and cleanup")
-    failed = None
-    if remote["conclusion"] == "success":
-        if (state.get("status") != "stopped" or state.get("next") != len(expected)
-                or state.get("results") != [{"phase": p, "exit_code": 0} for p in expected]):
-            raise ValueError("retained main session does not establish every completed canonical product phase")
+    if (remote.get("id") != run_id or remote.get("run_attempt") != attempt
+            or remote.get("status") != "completed" or remote.get("conclusion") != "success"
+            or remote.get("event") != "push"
+            or remote.get("head_branch") != "verify/chess-floor-serving-controls-20260916"
+            or remote.get("path") != NATIVE_WORKFLOW
+            or remote.get("head_sha") != plan["proof_operator_commit"]):
+        raise ValueError("native installation run does not match the exact completed operator")
+    workflow = github_json("contents/" + NATIVE_WORKFLOW + "?ref=" + plan["proof_operator_commit"])
+    if workflow.get("path") != NATIVE_WORKFLOW or workflow.get("sha") != plan["native_workflow_blob"]:
+        raise ValueError("native installation workflow differs from the reviewed source")
+    jobs = run_json(run_id, "/attempts/" + str(attempt) + "/jobs?per_page=100")
+    if jobs.get("total_count") != 1 or len(jobs.get("jobs", [])) != 1:
+        raise ValueError("native installation must retain one exact completed job")
+    job = jobs["jobs"][0]
+    if (type(job.get("id")) is not int or job["id"] <= 0 or job.get("run_id") != run_id
+            or job.get("head_sha") != plan["proof_operator_commit"]
+            or job.get("status") != "completed" or job.get("conclusion") != "success"):
+        raise ValueError("native installation job identity or outcome differs")
+    required_steps = [
+        "Prepare retained native execution paths",
+        "Execute existing native dependency build proof and install owners",
+        "Observe fixed public managed service state",
+        "Retain native operator outcome", "Retain native execution evidence",
+    ]
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        raise ValueError("native installation has no completed execution steps")
+    observed_steps = [step for step in steps if step.get("name") in required_steps]
+    if ([step.get("name") for step in observed_steps] != required_steps
+            or any(step.get("status") != "completed" or step.get("conclusion") != "success"
+                   for step in observed_steps)):
+        raise ValueError("native installation required steps did not complete in order")
+    inventory = run_json(run_id, "/artifacts?per_page=100")
+    candidates = [item for item in inventory.get("artifacts", [])
+                  if item.get("id") == plan["native_artifact_id"]]
+    if len(candidates) != 1:
+        raise ValueError("native installation artifact is missing or ambiguous")
+    artifact = candidates[0]
+    artifact_run = artifact.get("workflow_run", {})
+    if (artifact.get("name") != "original-native-install-" + str(run_id) + "-" + str(attempt)
+            or artifact.get("expired") is not False
+            or artifact.get("digest") != "sha256:" + plan["native_artifact_sha256"]
+            or artifact_run.get("id") != run_id
+            or artifact_run.get("head_sha") != plan["proof_operator_commit"]):
+        raise ValueError("native installation artifact identity differs")
+
+    directory = NATIVE_ROOT / (str(run_id) + "-" + str(attempt))
+    if (directory.resolve(strict=True) != directory or directory.stat().st_uid != os.getuid()
+            or directory.stat().st_mode & 0o077):
+        raise ValueError("native installation evidence must remain private and runner-owned")
+    paths = {name: directory / name for name in (
+        "receipt.json", "selection.json", "workflow-outcome.json", "completed-phases.txt")}
+    receipts = {}
+    for name, path in paths.items():
+        if path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid():
+            raise ValueError("native installation evidence file ownership changed")
+        if path.stat().st_size > 65536:
+            raise ValueError("native installation evidence exceeds its envelope")
+        receipts[name] = {"path": str(path), "sha256": file_identity(path)["sha256"]}
+    if (receipts["receipt.json"]["sha256"] != plan["native_receipt_sha256"]
+            or receipts["selection.json"]["sha256"] != plan["native_selection_sha256"]):
+        raise ValueError("native installation selected receipt bytes changed")
+    state, selected, outcome = (load(paths[name], 65536) for name in (
+        "receipt.json", "selection.json", "workflow-outcome.json"))
+    phases = state.get("completedPhases")
+    with_fetch = NATIVE_PHASES[:1] + ["pg-fetch"] + NATIVE_PHASES[1:]
+    if phases not in (NATIVE_PHASES, with_fetch):
+        raise ValueError("native installation phase sequence is incomplete or reordered")
+    if paths["completed-phases.txt"].read_text().splitlines() != phases:
+        raise ValueError("native installation phase journal differs from the receipt")
+    contract = load(root / "deploy/postgresql-release.json", 65536)
+    if contract.get("version") != "18.6" or contract.get("major") != 18:
+        raise ValueError("native installation operator requires the selected PostgreSQL18.6 source")
+    for value, status in ((state, "completed"), (selected, "running")):
+        if (value.get("schema") != "laplace.native-only-install/v1"
+                or value.get("status") != status or value.get("source") != source["commit"]
+                or value.get("tree") != source["tree"] or value.get("runId") != str(run_id)
+                or value.get("attempt") != str(attempt)
+                or value.get("managedPublication") != "not_attempted"
+                or value.get("fullLifecyclePassed") is not False
+                or value.get("databaseRecreation") is not False
+                or value.get("foundationIngestion") is not False):
+            raise ValueError("native installation receipt source or scope differs")
+    if (selected.get("operatorSource") != plan["proof_operator_commit"]
+            or type(selected.get("uid")) is not int or selected["uid"] != os.getuid()
+            or selected.get("postgresqlSelection") != contract
+            or type(state.get("serverVersionNum")) is not int or state["serverVersionNum"] != 180006):
+        raise ValueError("native installation PostgreSQL source, operator or server differs")
+    if outcome != {"workflowOutcome": "success", "source": source["commit"],
+                   "applicationPublication": "not_attempted", "fullLifecyclePassed": False}:
+        raise ValueError("native installation retained workflow outcome differs")
+    checkout = Path(plan["native_checkout"])
+    # This checkout/build observation is made now. The v1 native receipt does not
+    # contain a historical checkout path or native fingerprint.
+    if (git(checkout, "rev-parse", "HEAD") != source["commit"]
+            or git(checkout, "rev-parse", "HEAD^{tree}") != source["tree"]
+            or git(checkout, "status", "--porcelain", "--untracked-files=no")):
+        raise ValueError("native installation current checkout differs from selected source")
+    build, fingerprint = retained_build(checkout)
+    placement = {"checkout": str(checkout), "buildDirectory": str(build),
+                 "buildNativeStamp": fingerprint, "installNativeStamp": fingerprint}
+    for key, expected in placement.items():
+        if key in state and state[key] != expected:
+            raise ValueError("native installation retained placement differs: " + key)
+    if "checkout" in selected and selected["checkout"] != str(checkout):
+        raise ValueError("native installation selected checkout differs")
+    native_files(state["identities"])
+    result = {
+        "proof_kind": "native-only-install", "run_id": run_id, "run_attempt": attempt,
+        "source": source, "operator_source": plan["proof_operator_commit"],
+        "workflow_blob": plan["native_workflow_blob"], "job_id": job["id"],
+        "lifecycle_event": remote["event"], "lifecycle_conclusion": remote["conclusion"],
+        "full_lifecycle_passed": False, "managed_publication": "not_attempted",
+        "database_recreation": False, "foundation_ingestion": False,
+        "lexical_failure": None, "native_install_status": "completed",
+        "phases": [{"phase": phase, "exit_code": 0} for phase in phases],
+        "native_build": str(build), "lifecycle_checkout": str(checkout),
+        "native_fingerprint": fingerprint,
+        "checkout_build_observation": "current source/cache/stamps verification; historical placement fields checked when recorded",
+        "recorded_placement": {key: state[key] for key in placement if key in state},
+        "server_version_num": state["serverVersionNum"], "installed_identities": state["identities"],
+        "evidence_receipts": list(receipts.values()),
+        "artifact": {"id": artifact["id"], "sha256": plan["native_artifact_sha256"],
+                     "name": artifact["name"],
+                     "binding": "authenticated run artifact metadata; private receipt hashes selected separately"},
+    }
+    verify_qualification_receipts(result)
+    return build, result
+
+
+def verify_qualification_receipts(qualification):
+    if qualification.get("proof_kind") == "native-only-install":
+        rows = qualification["evidence_receipts"]
     else:
-        failed = lexical_failure_evidence(run_id, attempt, expected, state)
-    checkout = Path(state["checkout"])
+        rows = [{"path": qualification["session_receipt"], "sha256": qualification["session_sha256"]}]
+    for row in rows:
+        if file_identity(Path(row["path"]))["sha256"] != row["sha256"]:
+            raise ValueError("qualified lifecycle evidence changed")
+
+
+def retained_build(checkout):
+    checkout = Path(checkout)
     if (not checkout.is_absolute() or checkout.resolve(strict=True) != checkout
             or str(checkout).startswith(("/tmp/", "/var/tmp/", "/dev/shm/"))):
         raise ValueError("qualified checkout identity was not permanent")
@@ -209,30 +297,81 @@ def qualification(plan, root):
     if (any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in stamps.values())
             or len(set(stamps.values())) != 1):
         raise ValueError("qualified native build/install stamps are absent or disagree")
+    return build, stamps["build-native"]
+
+
+def qualification(plan, root):
+    if plan.get("proof_kind") == "native-only-install":
+        return native_qualification(plan, root)
+    if plan.get("proof_kind") not in (None, "main-lifecycle"):
+        raise ValueError("unsupported qualification proof kind")
+    source = selection_identity(plan)
+    run_id, attempt = plan["proof_run_id"], plan["proof_run_attempt"]
+    if type(run_id) is not int or type(attempt) is not int or run_id <= 0 or attempt <= 0:
+        raise ValueError("an explicit positive proof run and attempt are required")
+    remote = run_json(run_id)
+    if (remote.get("id") != run_id or remote.get("status") != "completed"
+            or remote.get("conclusion") != "success" or remote.get("event") != "push"
+            or remote.get("head_branch") != "main"
+            or remote.get("path") != ".github/workflows/laplace.yml"
+            or remote.get("run_attempt") != attempt or remote.get("head_sha") != source["commit"]):
+        raise ValueError("selected run is not a supported terminal exact-main product lifecycle")
+    path = SESSION_ROOT / (str(run_id) + "-" + str(attempt) + "-product/session.json")
+    if (path.is_symlink() or path.parent.is_symlink()
+            or path.parent.stat().st_uid != os.getuid()
+            or path.parent.stat().st_mode & 0o077):
+        raise ValueError("retained lifecycle session must remain private and owned by this runner")
+    state = load(path, 65536)
+    # A normal main push selects the full default product lifecycle. Environment
+    # inherited by this later export must not omit phases from the retained plan.
+    environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
+                       LAPLACE_GENERATION_BENCHMARK="")
+    expected = subprocess.check_output(
+        ["bash", str(root / "scripts/product-ci.sh"), "all", "--list-phases"],
+        cwd=root, text=True, timeout=10, env=environment).splitlines()
+    if (not expected or state.get("schema") != "laplace.ci-session.v1"
+            or state.get("kind") != "product" or state.get("stage") != "all"
+            or type(state.get("cleanup_exit_code")) is not int or state["cleanup_exit_code"] != 0
+            or "active" not in state or state["active"] is not None
+            or state.get("source") != source or state.get("phases") != expected):
+        raise ValueError("retained main session does not establish canonical product phase identity and cleanup")
+    if (state.get("status") != "stopped" or state.get("next") != len(expected)
+            or state.get("results") != [{"phase": p, "exit_code": 0} for p in expected]):
+        raise ValueError("retained main session does not establish every completed canonical product phase")
+    checkout = Path(state["checkout"])
+    build, fingerprint = retained_build(checkout)
     return build, {"run_id": run_id, "run_attempt": attempt, "source": state["source"],
                    "lifecycle_conclusion": remote["conclusion"],
-                   "full_lifecycle_passed": remote["conclusion"] == "success",
+                   "full_lifecycle_passed": True,
                    "session_status": state["status"], "cleanup_exit_code": state["cleanup_exit_code"],
-                   "lexical_failure": failed,
+                   "lexical_failure": None,
                    "phases": state["results"], "native_build": str(build),
-                   "lifecycle_checkout": str(checkout), "native_fingerprint": stamps["build-native"],
+                   "lifecycle_checkout": str(checkout), "native_fingerprint": fingerprint,
                    "session_receipt": str(path),
                    "session_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def recording_compatible(guard, before, after):
+    """Retain all runtime identities; only observed journal occupancy may differ."""
+    if not guard.compatible(before, after, purpose="recording"):
+        raise ValueError("installed native/database selection differs from the recording baseline")
 
 
 def installed_state(guard, prefix, pg, baseline, qualification):
     if qualification["native_fingerprint"] != baseline["native_fingerprint"]:
         raise ValueError("retained native generation differs from the exact installed pilot")
     database = guard.read_database(pg)
-    if database != baseline["database"]:
-        raise ValueError("installed database/SQL contract differs from the exact pilot baseline")
-    # The same source is now proved and installed. Reuse the full existing guard:
-    # staged CMake installed bytes, native/SQL identities, ROMs, pair receipt,
-    # migrations, actual build/install stamps and zero active ingests.
+    if qualification.get("proof_kind") == "native-only-install":
+        native_files(qualification["installed_identities"])
+        if int(database["server_version"]) != qualification["server_version_num"]:
+            raise ValueError("native installation running PostgreSQL release changed")
+    verify_qualification_receipts(qualification)
+    # The actual source, stamps, installed native/SQL bytes, ROMs and floor pair
+    # remain authoritative. Journal occupancy is recorded without reinterpreting
+    # unrelated historical entries as an admission lock.
     observed = guard.snapshot(Path(qualification["lifecycle_checkout"]), prefix, database,
-                              baseline["native_fingerprint"])
-    if observed != baseline:
-        raise ValueError("installed native/floor generation differs from the exact pilot baseline")
+                              baseline["native_fingerprint"], purpose="recording")
+    recording_compatible(guard, baseline, observed)
     return observed
 
 def payload(artifact, directory):
@@ -295,7 +434,7 @@ def execute(plan, root, prefix, pg, output):
              "installed_source": source["commit"], "installed_payload_mutated": False,
              "database_write_requested": False, "selection_attempted": False, "selection_completed": False,
              "managed_provenance": "rebuilt from qualified source and checked in this invocation",
-             "native_provenance": "retained main build path/source/stamps; current bytes installed-form verified against the completed pilot and focused-tested now",
+             "native_provenance": "selected retained build/source/stamps; current bytes installed-form verified against the completed pilot and focused-tested now",
              "native_historical_byte_comparison": False,
              "claim": "completed observed-read-interval export; no snapshot, historical coverage or throughput claim"}
     evidence = output / "evidence"
@@ -329,8 +468,9 @@ def execute(plan, root, prefix, pg, output):
             if artifact.sha256(pilot / "native-before.json") != plan["pilot_native_snapshot_sha256"]:
                 raise ValueError("selected pilot native snapshot changed")
             baseline = load(pilot / "native-before.json")
-            if baseline != load(pilot / "native-after.json") or baseline.get("format") != 1:
-                raise ValueError("pilot installed runtime changed")
+            if baseline.get("format") != 1:
+                raise ValueError("pilot installed runtime has an unsupported format")
+            recording_compatible(guard, baseline, load(pilot / "native-after.json"))
             if os.environ.get("LAPLACE_CHESS_CORPUS_EXPORT"):
                 raise ValueError("explicit export override would hide the persisted selection")
             selection_parent = prefix / "etc"
@@ -422,12 +562,11 @@ def execute(plan, root, prefix, pg, output):
             proof["installed_after"] = installed_state(guard, prefix, pg, baseline, proof["qualification"])
             if (artifact.sha256(pilot / "receipt.json") != plan["pilot_receipt_sha256"]
                     or artifact.sha256(pilot / "native-before.json") != plan["pilot_native_snapshot_sha256"]
-                    or baseline != load(pilot / "native-after.json")):
+                    or not guard.compatible(baseline, load(pilot / "native-after.json"), purpose="recording")):
                 raise ValueError("pilot evidence changed")
             if git(root, "status", "--porcelain", "--untracked-files=all"):
                 raise ValueError("candidate source changed across export")
-            if artifact.sha256(Path(proof["qualification"]["session_receipt"])) != proof["qualification"]["session_sha256"]:
-                raise ValueError("qualified lifecycle session changed across export")
+            verify_qualification_receipts(proof["qualification"])
             save()
             # The ordinary publisher owns this one persistent configuration write.
             # It does not replace serving files; the subsequent normal build/install does.

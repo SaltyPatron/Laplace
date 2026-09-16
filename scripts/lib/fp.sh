@@ -24,6 +24,7 @@ FP_NATIVE_PATHS=(
   CMakeLists.txt
   # A PostgreSQL release changes the headers and server used by native extensions.
   deploy/postgresql-release.json
+  scripts/postgresql-release.py
   scripts/codegen-attestation-law.py
   deploy/cmake-release.json
   scripts/provision-cmake.py
@@ -65,13 +66,23 @@ fp_compute() {
 }
 
 fp_native() {
-  local corpus_inputs
+  local corpus_inputs postgresql_inputs
   corpus_inputs=$(fp_chess_corpus_inputs) || return
+  postgresql_inputs=$(fp_postgresql_inputs) || return
   {
     fp_compute "${FP_NATIVE_PATHS[@]}"
     fp_chess_openings_inputs
     printf '%s\n' "$corpus_inputs"
+    printf '%s\n' "$postgresql_inputs"
   } | sha256sum | cut -d' ' -f1
+}
+
+# A selected source release alone cannot identify headers already installed on
+# this host. Check the consumed PostgreSQL tools and header bytes before any
+# native build/install or runtime-test stamp can match.
+fp_postgresql_inputs() {
+  python3 "$ROOT/scripts/postgresql-release.py" build-inputs \
+    --prefix "${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 }
 
 fp_chess_corpus_inputs() {
@@ -111,8 +122,9 @@ fp_chess_openings_inputs() {
 }
 
 fp_runtime() {
-  local corpus_inputs
+  local corpus_inputs postgresql_inputs
   corpus_inputs=$(fp_chess_corpus_inputs) || return
+  postgresql_inputs=$(fp_postgresql_inputs) || return
   # Salt for dotnet test staleness: app tests exercise the native .so, the
   # installed extension, and the migrated schema — any of those moving must
   # re-run tests even when no C# changed.
@@ -120,6 +132,7 @@ fp_runtime() {
     fp_compute "${FP_NATIVE_PATHS[@]}" app/Laplace.Migrations
     fp_chess_openings_inputs
     printf '%s\n' "$corpus_inputs"
+    printf '%s\n' "$postgresql_inputs"
   } | sha256sum | cut -d' ' -f1
 }
 

@@ -1,4 +1,4 @@
-name: API-only publication source controls
+name: Cumulative application and PostgreSQL source controls
 on:
   push:
     branches: [verify/postgresql-activation-20260916]
@@ -10,12 +10,12 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: fed152f24971300e7f52e9c18b18c936f784d0e3
-      SOURCE_TREE: 74a8dea369f62f3c3175984712e64a019913f1c9
-      TMPDIR: /build/laplace/work/api-publication/tmp
-      TMP: /build/laplace/work/api-publication/tmp
-      TEMP: /build/laplace/work/api-publication/tmp
-      EVIDENCE: /build/laplace/recovery/api-publication
+      SOURCE_SHA: 7e14d823f81d0a2abf04480bd9b544a206eb0f85
+      SOURCE_TREE: f82b6f6de5403d746f148859da7878f54d8a2b5e
+      TMPDIR: /build/laplace/work/cumulative-publication/tmp
+      TMP: /build/laplace/work/cumulative-publication/tmp
+      TEMP: /build/laplace/work/cumulative-publication/tmp
+      EVIDENCE: /build/laplace/recovery/cumulative-publication
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -27,14 +27,14 @@ jobs:
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$TMPDIR" "$EVIDENCE" /build/laplace/worktrees
           test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
-          git worktree add --detach /build/laplace/worktrees/api-publication "$SOURCE_SHA"
+          git worktree add --detach /build/laplace/worktrees/cumulative-publication "$SOURCE_SHA"
           printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
           command -v rsync
           rsync --version > "$EVIDENCE/rsync.txt"
       - name: Execute API publication and existing owner controls
         run: |
           set -euo pipefail
-          cd /build/laplace/worktrees/api-publication
+          cd /build/laplace/worktrees/cumulative-publication
           status=0
           qualify() {
             local label="$1"
@@ -46,21 +46,29 @@ jobs:
             printf '%s\t%s\n' "$label" "$result" >> "$EVIDENCE/exit-codes.tsv"
             if [ "$result" -ne 0 ]; then status=1; fi
           }
-          qualify application-publish python3 scripts/test-application-publish.py -v
-          qualify profile-registry python3 scripts/test-test-profile-registry.py -v
+          for suite in postgresql-release pipeline-install app-fingerprints application-publish test-profile-registry application-runtime installed-chess-corpus qualified-chess-floor-export; do
+            qualify "$suite" python3 "scripts/test-$suite.py" -v
+          done
           qualify payload-sync bash scripts/test-deploy-payload-sync.sh
           qualify publish-snapshot bash scripts/test-managed-publish-snapshot.sh
           qualify shellcheck shellcheck -S warning -x deploy/linux/deploy.sh deploy/linux/managed-publish.sh
           python3 - <<'PY' 2>&1 | tee "$EVIDENCE/python-ast.log"
           import ast
           from pathlib import Path
-          for name in ("verify-api-payload.py", "test-application-publish.py"):
+          for name in ("verify-api-payload.py", "test-application-publish.py", "postgresql-release.py",
+                       "test-postgresql-release.py", "test-pipeline-install.py", "test-app-fingerprints.py",
+                       "check-application-runtime.py", "test-application-runtime.py", "measure-installed-chess-corpus.py",
+                       "test-installed-chess-corpus.py", "export-qualified-chess-floors.py",
+                       "test-qualified-chess-floor-export.py", "test-test-profile-registry.py"):
               ast.parse((Path("scripts") / name).read_text())
               print(f"PASS Python AST {name}")
           PY
           bash -n deploy/linux/deploy.sh
           bash -n deploy/linux/payload-sync.sh
           bash -n scripts/publish-applications.sh
+          bash -n scripts/lib/fp.sh
+          bash -n scripts/pipeline.sh
+          qualify fingerprint-shellcheck shellcheck --severity=warning scripts/lib/fp.sh
           printf '%s\n' "PASS Bash syntax" | tee "$EVIDENCE/bash.log"
           test -z "$(git status --porcelain --untracked-files=all)"
           exit "$status"
@@ -68,7 +76,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: api-publication-source-controls
-          path: /build/laplace/recovery/api-publication/
+          name: cumulative-publication-source-controls
+          path: /build/laplace/recovery/cumulative-publication/
           if-no-files-found: error
           retention-days: 30

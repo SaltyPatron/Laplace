@@ -47,12 +47,12 @@ class LiveRecursiveProofGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "root is not an object"):
             self.proof.parse_single_json_document('[{"schema":"proof"}]')
 
-    def test_recursive_proof_edits_use_fast_live_verification_lane(self):
+    def test_recursive_proof_has_no_bespoke_push_pipeline(self):
         workflow = (ROOT / ".github/workflows/laplace.yml").read_text(encoding="utf-8")
-        self.assertIn("scripts/prove-*|scripts/test-live-recursive-proof-gate.py", workflow)
-        self.assertIn("LAPLACE_VERIFY_RECURSIVE_PROOF", workflow)
-        self.assertIn("Verify changed recursive proof against the live product", workflow)
-        self.assertIn('python3 scripts/prove-live-recursive-substrate.py "${PGDATABASE:-laplace}"', workflow)
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        self.assertNotIn("LAPLACE_VERIFY_RECURSIVE_PROOF", workflow)
+        self.assertNotIn("Verify changed recursive proof against the live product", workflow)
+        self.assertIn("live-floor|live-api|managed-live|generation-eval) run_live_suite", product)
 
     def test_storage_gate_checks_identity_duplicates_and_parent_bounds(self):
         sql = self.proof.storage_sql(1e-12, 20)
