@@ -67,8 +67,9 @@ typedef struct {
 } physicality_descriptor_input_t;
 
 typedef struct {
-    /* Declared retained plan allocation; excludes borrowed input/vocabulary
-     * and allocator bookkeeping, and is not a process RSS measurement. */
+    /* Maximum live owned plan payload, including old plus replacement arrays
+     * during growth. Excludes borrowed input/vocabulary and allocator
+     * bookkeeping; this is not a process RSS measurement. */
     size_t maximum_plan_bytes;
 } physicality_descriptor_limits_t;
 
@@ -118,6 +119,8 @@ physicality_descriptor_status_t physicality_descriptor_plan_build(
 void physicality_descriptor_plan_free(physicality_descriptor_plan_t* plan);
 
 size_t physicality_descriptor_plan_bytes(const physicality_descriptor_plan_t* plan);
+/* Includes transient array growth; plan_bytes reports retained payload only. */
+size_t physicality_descriptor_plan_peak_bytes(const physicality_descriptor_plan_t* plan);
 const physicality_descriptor_node_t* physicality_descriptor_plan_nodes(
     const physicality_descriptor_plan_t* plan, size_t* count);
 const hash128_t* physicality_descriptor_plan_children(
@@ -161,6 +164,9 @@ void physicality_descriptor_capture_free(physicality_descriptor_capture_t* captu
 /* Total retained capture + owned plan allocation; maximum_capture_bytes caps
  * this combined allocation. Borrowed stages and allocator bookkeeping excluded. */
 size_t physicality_descriptor_capture_bytes(const physicality_descriptor_capture_t* capture);
+/* Peak capture plus owned plan payload, including transient plan growth;
+ * borrowed stages and allocator bookkeeping are excluded. */
+size_t physicality_descriptor_capture_peak_bytes(const physicality_descriptor_capture_t* capture);
 const physicality_descriptor_plan_t* physicality_descriptor_capture_plan(
     const physicality_descriptor_capture_t* capture);
 const physicality_descriptor_input_t* physicality_descriptor_capture_inputs(

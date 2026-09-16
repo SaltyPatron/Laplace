@@ -639,10 +639,22 @@ static void admission_materialize(admission_state *s,
     floor = *physicality_descriptor_vocabulary_floor_receipt(s->vocabulary);
     admission_logical(s, s->source_logical);
     limits.maximum_plan_bytes = s->maximum_bytes - s->bytes;
-    admission_status(physicality_descriptor_capture_stages(
-        (const intent_stage_t *const *)s->source.items, s->source.count,
-        physicality_descriptor_vocabulary_basis(s->vocabulary), &limits,
-        s->maximum_bytes - s->bytes, &s->capture), "original-form capture");
+    {
+        physicality_descriptor_status_t status = physicality_descriptor_capture_stages(
+            (const intent_stage_t *const *)s->source.items, s->source.count,
+            physicality_descriptor_vocabulary_basis(s->vocabulary), &limits,
+            s->maximum_bytes - s->bytes, &s->capture);
+        if (status != PHYSICALITY_DESCRIPTOR_OK)
+            ereport(ERROR, (errcode(status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED ?
+                                   ERRCODE_PROGRAM_LIMIT_EXCEEDED : ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("physicality descriptor admission original-form capture failed (native status %d)",
+                       (int)status),
+                errdetail("grant_bytes=%zu retained_bytes=%zu remaining_bytes=%zu "
+                          "source_forms=%zu preflight_stored_vertices=%zu",
+                          s->maximum_bytes, s->bytes, s->maximum_bytes - s->bytes,
+                          source_count, s->stored_vertices)));
+    }
+    admission_native_peak(s, physicality_descriptor_capture_peak_bytes(s->capture));
     admission_charge(s, physicality_descriptor_capture_bytes(s->capture));
 
     s->snapshot = RegisterSnapshot(GetActiveSnapshot());

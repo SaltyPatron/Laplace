@@ -311,7 +311,7 @@ physicality_descriptor_status_t physicality_descriptor_readback_build(
         &verified_plan);
     if (status == PHYSICALITY_DESCRIPTOR_OK) {
         const hash128_t* verified = physicality_descriptor_plan_roots(verified_plan, NULL);
-        readback->peak_bytes = bytes + physicality_descriptor_plan_bytes(verified_plan);
+        readback->peak_bytes = bytes + physicality_descriptor_plan_peak_bytes(verified_plan);
         for (size_t i = 0; i < root_count; ++i) {
             if (!hash128_equals(&verified[i], &roots[i])) {
                 status = PHYSICALITY_DESCRIPTOR_INVALID_BODY;

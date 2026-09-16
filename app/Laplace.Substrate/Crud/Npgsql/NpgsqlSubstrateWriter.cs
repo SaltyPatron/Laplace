@@ -130,6 +130,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
 
 
+        using var stagingDiagnostic = MeasureApplyPhase("managed-staging");
         using IntentStage? managedStage = managedEntitiesAttempted > 0 || managedPhysAttempted > 0 || managedAttAttempted > 0
             ? IntentStage.New(Math.Max(Math.Max(managedEntitiesAttempted, managedPhysAttempted), managedAttAttempted))
             : null;
@@ -202,6 +203,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             }
         }
 
+        stagingDiagnostic?.Complete();
+
         var sourceStages = new List<IntentStage>(prebuiltStages.Count + 1);
         sourceStages.AddRange(prebuiltStages);
         if (managedStage is not null
@@ -231,16 +234,22 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         PhysicalityAdmissionBatch? physicalityAdmission = null;
         try
         {
-            physicalityAdmission = PhysicalityAdmissionBatch.Capture(changes, sourceStages);
+            using (var captureDiagnostic = MeasureApplyPhase("physicality-capture"))
+            {
+                physicalityAdmission = PhysicalityAdmissionBatch.Capture(changes, sourceStages);
+                captureDiagnostic?.Complete();
+            }
             anyRows |= physicalityAdmission is not null;
             if (canonicalNames is { Count: > 0 })
             {
                 // Validate the complete physicality transport before any database
                 // access. Names still become durable before the file's completion
                 // marker, through the existing shared registry owner.
+                using var registryDiagnostic = MeasureApplyPhase("canonical-registration");
                 var registration = await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(
                     _ds, canonicalNames, ct);
                 roundTrips += registration.RoundTrips;
+                registryDiagnostic?.Complete();
             }
             if (anyRows)
             {
@@ -319,6 +328,52 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             CopyTransactionsStarted = copyTransactionsStarted,
             CopyTransactionsCommitted = copyTransactionsCommitted,
         };
+    }
+
+
+    // Opt-in, one scope per batch boundary through the existing logger. Disposal
+    // records an interrupted window as well as successful return. These logs are
+    // diagnostic child windows, not durable-success receipts.
+    private ApplyDiagnosticPhase? MeasureApplyPhase(string phase)
+    {
+        // Diagnostics cannot reject an apply, including a sink that throws while
+        // checking its level or allocating its scope.
+        try { return _log.IsEnabled(LogLevel.Information) ? new(_log, phase) : null; }
+        catch { return null; }
+    }
+
+    private sealed class ApplyDiagnosticPhase(ILogger log, string phase) : IDisposable
+    {
+        private long _started = Stopwatch.GetTimestamp();
+        private bool _completed;
+        public void Complete()
+        {
+            _completed = true;
+            Dispose();
+        }
+        public void Dispose()
+        {
+            long started = Interlocked.Exchange(ref _started, 0);
+            if (started == 0) return;
+            try
+            {
+                log.LogInformation(
+                    "WS_APPLY phase: {Phase} returned={Returned} elapsed_ms={ElapsedMs}",
+                    phase, _completed, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            }
+            catch
+            {
+                // Never mask the original failure during finally disposal or
+                // turn a returned COMMIT into a failed acknowledgement.
+            }
+        }
+    }
+
+    private async Task CommitMeasuredAsync(NpgsqlTransaction transaction, CancellationToken ct)
+    {
+        using var diagnostic = MeasureApplyPhase("control-transaction-commit");
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        diagnostic?.Complete();
     }
 
     internal static AttestationStagedNative StageAttestation(AttestationRow a) => new()

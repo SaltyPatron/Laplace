@@ -316,24 +316,138 @@ TEST(PhysicalityDescriptor, RejectsContentParentMismatchAndNoncanonicalCarrierBi
     EXPECT_EQ(output, nullptr);
 }
 
-TEST(PhysicalityDescriptor, EnforcesExactDeclaredRetainedAllocationIncludingEmptyBatch) {
+TEST(PhysicalityDescriptor, EnforcesPeakAllocationIncludingEmptyBatch) {
     const auto vocabulary = basis();
     for (const auto& inputs : {std::vector<physicality_descriptor_input_t>{},
             std::vector<physicality_descriptor_input_t>{body()}}) {
         const auto plan = build(inputs);
         ASSERT_NE(plan, nullptr);
-        const size_t bytes = physicality_descriptor_plan_bytes(plan.get());
-        ASSERT_GT(bytes, 0u);
-        physicality_descriptor_limits_t limits{bytes - 1u};
+        const size_t retained = physicality_descriptor_plan_bytes(plan.get());
+        const size_t peak = physicality_descriptor_plan_peak_bytes(plan.get());
+        ASSERT_GT(retained, 0u);
+        ASSERT_GE(peak, retained);
+        physicality_descriptor_limits_t limits{0u};
         physicality_descriptor_plan_t* output = nullptr;
         EXPECT_EQ(physicality_descriptor_plan_build(inputs.data(), inputs.size(), &vocabulary,
             &limits, &output), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
         EXPECT_EQ(output, nullptr);
-        limits.maximum_plan_bytes = bytes;
-        EXPECT_EQ(physicality_descriptor_plan_build(inputs.data(), inputs.size(), &vocabulary,
+        limits.maximum_plan_bytes = peak;
+        ASSERT_EQ(physicality_descriptor_plan_build(inputs.data(), inputs.size(), &vocabulary,
             &limits, &output), PHYSICALITY_DESCRIPTOR_OK);
-        physicality_descriptor_plan_free(output);
+        Plan bounded(output, physicality_descriptor_plan_free);
+        EXPECT_LE(physicality_descriptor_plan_peak_bytes(bounded.get()), peak);
+        const auto expected = roots(plan), actual = roots(bounded);
+        ASSERT_EQ(actual.size(), expected.size());
+        for (size_t i = 0; i < actual.size(); ++i)
+            EXPECT_TRUE(hash128_equals(&actual[i], &expected[i]));
+        if (inputs.empty()) {
+            limits.maximum_plan_bytes = retained - 1u;
+            output = nullptr;
+            EXPECT_EQ(physicality_descriptor_plan_build(nullptr, 0u, &vocabulary,
+                &limits, &output), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+            EXPECT_EQ(output, nullptr);
+        }
     }
+}
+
+TEST(PhysicalityDescriptor, RepeatedFormsFitTheirActualGraphWithoutLosingOccurrences) {
+    constexpr size_t occurrences = 4096u;
+    constexpr size_t grant = 1024u * 1024u;
+    const auto input = body();
+    const auto singleton = build({input});
+    ASSERT_NE(singleton, nullptr);
+    std::vector<physicality_descriptor_input_t> inputs(occurrences, input);
+    const auto vocabulary = basis();
+    const physicality_descriptor_limits_t limits{grant};
+    physicality_descriptor_plan_t* output = nullptr;
+    // The previous estimate reserved 16 descriptor nodes per input before
+    // seeing exact reuse. Even its node array alone exceeded this same grant.
+    ASSERT_GT(occurrences * 16u * sizeof(physicality_descriptor_node_t), grant);
+    ASSERT_EQ(physicality_descriptor_plan_build(inputs.data(), inputs.size(), &vocabulary,
+        &limits, &output), PHYSICALITY_DESCRIPTOR_OK);
+    Plan repeated(output, physicality_descriptor_plan_free);
+    EXPECT_LE(physicality_descriptor_plan_peak_bytes(repeated.get()), grant);
+    const auto expected = roots(singleton)[0];
+    const auto actual = roots(repeated);
+    ASSERT_EQ(actual.size(), occurrences);
+    for (const auto& id : actual) EXPECT_TRUE(hash128_equals(&id, &expected));
+    size_t count = 0u, single_count = 0u;
+    const auto* nodes = physicality_descriptor_plan_nodes(repeated.get(), &count);
+    const auto* single_nodes = physicality_descriptor_plan_nodes(singleton.get(), &single_count);
+    ASSERT_EQ(count, single_count);
+    for (size_t i = 0u; i < count; ++i) {
+        EXPECT_TRUE(hash128_equals(&nodes[i].id, &single_nodes[i].id));
+        EXPECT_EQ(nodes[i].first_child, single_nodes[i].first_child);
+        EXPECT_EQ(nodes[i].child_count, single_nodes[i].child_count);
+    }
+    const auto* children = physicality_descriptor_plan_children(repeated.get(), &count);
+    const auto* single_children = physicality_descriptor_plan_children(singleton.get(), &single_count);
+    ASSERT_EQ(count, single_count);
+    EXPECT_EQ(std::memcmp(children, single_children, count * sizeof(hash128_t)), 0);
+    const auto* references = physicality_descriptor_plan_references(repeated.get(), &count);
+    ASSERT_EQ(count, occurrences);
+    for (size_t i = 0u; i < count; ++i) {
+        EXPECT_TRUE(hash128_equals(&references[i].entity_id, &input.entity_id));
+        EXPECT_EQ(references[i].input_index, i);
+        EXPECT_EQ(references[i].vertex_index, SIZE_MAX);
+        EXPECT_EQ(references[i].kind, PHYSICALITY_DESCRIPTOR_REALIZED_ENTITY);
+    }
+}
+
+TEST(PhysicalityDescriptor, RehashAndArrayGrowthPreserveOrderedIdentityUnderFiniteGrants) {
+    std::vector<physicality_descriptor_input_t> inputs;
+    for (size_t i = 0u; i < 257u; ++i) {
+        auto input = body();
+        input.entity_id.lo += i;
+        input.coord[0] = static_cast<double>(i) / 1024.0;
+        input.hilbert_index.bytes[0] = static_cast<uint8_t>(i);
+        inputs.push_back(input);
+    }
+    const auto reference = build(inputs);
+    ASSERT_NE(reference, nullptr);
+    const auto expected = roots(reference);
+    ASSERT_EQ(expected.size(), inputs.size());
+    for (size_t i = 0u; i < inputs.size(); ++i) {
+        const auto scalar = build({inputs[i]});
+        ASSERT_NE(scalar, nullptr);
+        EXPECT_TRUE(hash128_equals(&expected[i], &roots(scalar)[0]));
+    }
+    const size_t retained = physicality_descriptor_plan_bytes(reference.get());
+    const size_t peak = physicality_descriptor_plan_peak_bytes(reference.get());
+    ASSERT_GT(peak, retained); // A real replaced array coexisted with its old buffer.
+    const auto empty = build({});
+    ASSERT_NE(empty, nullptr);
+    const size_t fixed = physicality_descriptor_plan_bytes(empty.get())
+        + inputs.size() * (sizeof(hash128_t) + sizeof(physicality_descriptor_reference_t));
+    ASSERT_LT(fixed, retained);
+    const auto vocabulary = basis();
+    bool rejected_after_fixed = false, accepted = false;
+    // Tight grants may shed geometric slack. Acceptance always proves the
+    // measured old+new peak, not just retained storage, stayed within the grant.
+    for (size_t grant : {fixed, fixed + 128u, retained - 1u, retained, peak - 1u, peak}) {
+        const physicality_descriptor_limits_t limits{grant};
+        physicality_descriptor_plan_t* output = nullptr;
+        const auto status = physicality_descriptor_plan_build(inputs.data(), inputs.size(),
+            &vocabulary, &limits, &output);
+        if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED) {
+            EXPECT_EQ(output, nullptr);
+            rejected_after_fixed = true;
+            continue;
+        }
+        ASSERT_EQ(status, PHYSICALITY_DESCRIPTOR_OK);
+        ASSERT_NE(output, nullptr);
+        Plan bounded(output, physicality_descriptor_plan_free);
+        accepted = true;
+        EXPECT_LE(physicality_descriptor_plan_bytes(bounded.get()),
+            physicality_descriptor_plan_peak_bytes(bounded.get()));
+        EXPECT_LE(physicality_descriptor_plan_peak_bytes(bounded.get()), grant);
+        const auto actual = roots(bounded);
+        ASSERT_EQ(actual.size(), expected.size());
+        for (size_t i = 0u; i < actual.size(); ++i)
+            EXPECT_TRUE(hash128_equals(&actual[i], &expected[i]));
+    }
+    EXPECT_TRUE(rejected_after_fixed);
+    EXPECT_TRUE(accepted);
 }
 
 TEST(PhysicalityDescriptor, RejectsArithmeticOverflowWithoutReadingBorrowedBody) {
@@ -389,6 +503,42 @@ Capture capture(const std::vector<const intent_stage_t*>& stages) {
     EXPECT_EQ(physicality_descriptor_capture_stages(stages.data(), stages.size(), &vocabulary,
         &limits, 8u * 1024u * 1024u, &result), PHYSICALITY_DESCRIPTOR_OK);
     return Capture(result, physicality_descriptor_capture_free);
+}
+
+TEST(PhysicalityDescriptorStage, RepeatedRawFormsFitSameGrantAndKeepEveryObservation) {
+    constexpr size_t occurrences = 4096u;
+    constexpr size_t grant = 1024u * 1024u;
+    Stage stage(intent_stage_new(0), intent_stage_free);
+    ASSERT_NE(stage, nullptr);
+    const auto input = body();
+    for (size_t i = 0u; i < occurrences; ++i)
+        stage_body(stage.get(), input, INTENT_STAGE_PG_EPOCH_UNIX_US + static_cast<int64_t>(i));
+    const auto vocabulary = basis();
+    const physicality_descriptor_limits_t limits{grant};
+    const intent_stage_t* stages[]{stage.get()};
+    physicality_descriptor_capture_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_capture_stages(stages, 1u, &vocabulary,
+        &limits, grant, &raw), PHYSICALITY_DESCRIPTOR_OK);
+    Capture result(raw, physicality_descriptor_capture_free);
+    EXPECT_LE(physicality_descriptor_capture_bytes(result.get()),
+        physicality_descriptor_capture_peak_bytes(result.get()));
+    EXPECT_LE(physicality_descriptor_capture_peak_bytes(result.get()), grant);
+    const auto scalar = build({input});
+    ASSERT_NE(scalar, nullptr);
+    const auto expected = roots(scalar)[0];
+    size_t count = 0u;
+    const auto* ids = physicality_descriptor_plan_roots(
+        physicality_descriptor_capture_plan(result.get()), &count);
+    ASSERT_EQ(count, occurrences);
+    const auto* observations = physicality_descriptor_capture_observations(result.get(), &count);
+    ASSERT_EQ(count, occurrences);
+    for (size_t i = 0u; i < count; ++i) {
+        EXPECT_TRUE(hash128_equals(&ids[i], &expected));
+        EXPECT_EQ(observations[i].source_stage_index, 0u);
+        EXPECT_EQ(observations[i].source_row_index, i);
+        EXPECT_EQ(observations[i].observed_at_unix_us,
+            INTENT_STAGE_PG_EPOCH_UNIX_US + static_cast<int64_t>(i));
+    }
 }
 
 TEST(PhysicalityDescriptorStage, CapturesActualBodiesBeforePlacementDedupAndKeepsObservations) {
@@ -508,23 +658,33 @@ TEST(PhysicalityDescriptorStage, RejectsMalformedActualTupleAndIncorrectPlacemen
     EXPECT_EQ(output, nullptr);
 }
 
-TEST(PhysicalityDescriptorStage, EnforcesSeparateRetainedCaptureAndPlanBudgets) {
+TEST(PhysicalityDescriptorStage, EnforcesSeparateCaptureAndPlanPeakBudgets) {
     Stage stage(intent_stage_new(0), intent_stage_free);
     stage_body(stage.get(), body(), 0);
     const auto result = capture({stage.get()});
     ASSERT_NE(result, nullptr);
-    const size_t bytes = physicality_descriptor_capture_bytes(result.get());
+    const size_t retained = physicality_descriptor_capture_bytes(result.get());
+    const size_t peak = physicality_descriptor_capture_peak_bytes(result.get());
+    ASSERT_GE(peak, retained);
     const auto vocabulary = basis();
     physicality_descriptor_limits_t limits{8u * 1024u * 1024u};
     physicality_descriptor_capture_t* output = nullptr;
     const std::array<const intent_stage_t*,1> stages{stage.get()};
     EXPECT_EQ(physicality_descriptor_capture_stages(stages.data(), stages.size(), &vocabulary,
-        &limits, bytes - 1, &output), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+        &limits, 0u, &output), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
     EXPECT_EQ(output, nullptr);
     limits.maximum_plan_bytes = 0;
     EXPECT_EQ(physicality_descriptor_capture_stages(stages.data(), stages.size(), &vocabulary,
-        &limits, bytes, &output), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+        &limits, peak, &output), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
     EXPECT_EQ(output, nullptr);
+    limits.maximum_plan_bytes = peak;
+    ASSERT_EQ(physicality_descriptor_capture_stages(stages.data(), stages.size(), &vocabulary,
+        &limits, peak, &output), PHYSICALITY_DESCRIPTOR_OK);
+    Capture bounded(output, physicality_descriptor_capture_free);
+    EXPECT_LE(physicality_descriptor_capture_peak_bytes(bounded.get()), peak);
+    EXPECT_TRUE(hash128_equals(physicality_descriptor_plan_roots(
+        physicality_descriptor_capture_plan(result.get()), nullptr),
+        physicality_descriptor_plan_roots(physicality_descriptor_capture_plan(bounded.get()), nullptr)));
 }
 
 struct Catalog {
@@ -689,13 +849,20 @@ TEST(PhysicalityDescriptorReadback, AccountsForItsPeakWorksetAndRejectsInvalidOf
     const size_t retained = physicality_descriptor_readback_bytes(readback.get());
     const size_t bytes = physicality_descriptor_readback_peak_bytes(readback.get());
     EXPECT_GT(bytes, retained);
-    const size_t plan_bytes = physicality_descriptor_plan_bytes(plan.get());
+    const size_t plan_peak = physicality_descriptor_plan_peak_bytes(plan.get());
     size_t slots = 1u;
     while (slots < catalog.nodes.size() * 2u) slots *= 2u;
-    EXPECT_EQ(bytes, retained + slots * sizeof(size_t) + plan_bytes);
+    EXPECT_EQ(bytes, retained + slots * sizeof(size_t) + plan_peak);
     physicality_descriptor_readback_t* output = nullptr;
-    EXPECT_EQ(catalog.read(&output, bytes - 1u), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    // A grant consumed by the retained decoder/catalog has no room for the
+    // required verification plan, regardless of adaptive graph capacity.
+    EXPECT_EQ(catalog.read(&output, retained + slots * sizeof(size_t)),
+        PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
     EXPECT_EQ(output, nullptr);
+    ASSERT_EQ(catalog.read(&output, bytes), PHYSICALITY_DESCRIPTOR_OK);
+    Readback bounded(output, physicality_descriptor_readback_free);
+    EXPECT_LE(physicality_descriptor_readback_peak_bytes(bounded.get()), bytes);
+    output = nullptr;
     catalog.nodes[0].first_child = SIZE_MAX;
     EXPECT_EQ(catalog.read(&output), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
     EXPECT_EQ(output, nullptr);

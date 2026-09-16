@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Laplace.Engine.Core;
 using Laplace.Modality;
@@ -76,10 +75,16 @@ public sealed class LichessBot : IAsyncDisposable
         await RunVerifiedAsync(account, maxConcurrent, ct).ConfigureAwait(false);
     }
 
-    internal async Task RunVerifiedAsync(LichessAccountReadiness account, int maxConcurrent, CancellationToken ct)
+    internal async Task RunVerifiedAsync(
+        LichessAccountReadiness account, int maxConcurrent, CancellationToken ct,
+        Func<CancellationToken, IAsyncEnumerable<JsonElement>>? accountStream = null,
+        Func<TimeSpan, CancellationToken, Task>? wait = null)
     {
         if (!account.Ready) throw new InvalidOperationException(account.Error ?? "Lichess BOT account access has not been verified.");
         _botUsername = account.Username;
+        accountStream ??= token => StreamNdjsonAsync("/api/stream/event", token);
+        wait ??= LichessGameStream.WaitAsync;
+        LichessStreamCleanupException? terminalFailure = null;
         var games = new Dictionary<string, Task>();
         using var gameLifetime = new CancellationTokenSource();
         var backoff = TimeSpan.FromSeconds(1);
@@ -90,7 +95,7 @@ public sealed class LichessBot : IAsyncDisposable
             try
             {
                 _log.LogInformation("connecting to lichess event stream…");
-                await foreach (var ev in StreamNdjsonAsync("/api/stream/event", ct))
+                await foreach (var ev in accountStream(ct))
                 {
                     backoff = TimeSpan.FromSeconds(1);
                     var type = ev.TryGetProperty("type", out var t) ? t.GetString() : null;
@@ -120,24 +125,36 @@ public sealed class LichessBot : IAsyncDisposable
                             && col.GetString() == "white";
                         if (!games.TryGetValue(gid, out var existing) || existing.IsCompleted)
                         {
+                            if (existing is not null)
+                                await ObserveGameTaskAsync(existing, _log).ConfigureAwait(false);
                             _log.LogInformation("game {Id} started, we are {Color}", gid, weAreWhite ? "white" : "black");
                             games[gid] = Task.Run(() => PlayGameAsync(gid, weAreWhite, gameLifetime.Token));
                         }
                     }
 
                     foreach (var k in games.Keys.Where(k => games[k].IsCompleted).ToList())
+                    {
+                        await ObserveGameTaskAsync(games[k], _log).ConfigureAwait(false);
                         games.Remove(k);
+                    }
                 }
                 if (!ct.IsCancellationRequested) throw new IOException("Lichess event stream closed");
+            }
+            catch (LichessStreamCleanupException ex)
+            {
+                terminalFailure = ex;
+                _log.LogError(ex, "event stream cleanup failed; stopping before any replacement connection");
+                break;
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 _onConnectionChanged?.Invoke(false);
                 var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 500));
+                var delay = LichessGameStream.RetryDelay(backoff, ex) + jitter;
                 _log.LogWarning(ex, "event stream dropped — reconnecting in {Delay:0.#}s",
-                    (backoff + jitter).TotalSeconds);
-                try { await Task.Delay(backoff + jitter, ct).ConfigureAwait(false); }
+                    delay.TotalSeconds);
+                try { await wait(delay, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 backoff = TimeSpan.FromTicks(Math.Min((backoff + backoff).Ticks, backoffMax.Ticks));
             }
@@ -147,14 +164,36 @@ public sealed class LichessBot : IAsyncDisposable
         if (games.Count > 0)
         {
             _log.LogInformation("draining {N} in-flight games…", games.Count);
-            try { await Task.WhenAll(games.Values).WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false); }
-            catch (TimeoutException)
-            {
-                _log.LogWarning("game drain deadline reached; cancelling remaining games (no fabricated outcome)");
-                await gameLifetime.CancelAsync();
-                await Task.WhenAll(games.Values).ConfigureAwait(false);
-            }
+            await DrainGamesAsync(games.Values, gameLifetime, TimeSpan.FromSeconds(20), _log)
+                .ConfigureAwait(false);
         }
+        if (terminalFailure is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(terminalFailure).Throw();
+    }
+
+    internal static async Task DrainGamesAsync(
+        IEnumerable<Task> games, CancellationTokenSource lifetime, TimeSpan grace, ILogger log)
+    {
+        var completion = Task.WhenAll(games);
+        try { await completion.WaitAsync(grace).ConfigureAwait(false); }
+        catch (TimeoutException) when (!completion.IsCompleted)
+        {
+            log.LogWarning("game drain deadline reached; cancelling remaining games (no fabricated outcome)");
+            try { await lifetime.CancelAsync().ConfigureAwait(false); }
+            catch (Exception ex) { log.LogWarning(ex, "game cancellation callback failed"); }
+            await ObserveGameTaskAsync(completion, log).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            await ObserveGameTaskAsync(completion, log).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task ObserveGameTaskAsync(Task task, ILogger log)
+    {
+        try { await task.ConfigureAwait(false); }
+        catch (OperationCanceledException) { log.LogDebug("game task canceled without a completed result"); }
+        catch (Exception ex) { log.LogWarning(task.Exception ?? ex, "game task failed without a completed result"); }
     }
 
     private async Task PlayGameAsync(string lichessGameId, bool weAreWhite, CancellationToken ct)
@@ -180,7 +219,8 @@ public sealed class LichessBot : IAsyncDisposable
 
         try
         {
-            await foreach (var ev in StreamNdjsonAsync($"/api/bot/game/stream/{lichessGameId}", ct))
+            await foreach (var ev in LichessGameStream.ReadGameAsync(
+                _http, $"/api/bot/game/stream/{lichessGameId}", _log, ct))
             {
                 var type = ev.TryGetProperty("type", out var t) ? t.GetString() : null;
 
@@ -485,7 +525,8 @@ public sealed class LichessBot : IAsyncDisposable
         => SendPostAsync(_http, url, ct, _log);
 
     internal static async Task<LichessSubmissionDisposition> SendPostAsync(
-        HttpClient http, string url, CancellationToken ct, ILogger? log = null)
+        HttpClient http, string url, CancellationToken ct, ILogger? log = null,
+        Func<TimeSpan, CancellationToken, Task>? wait = null)
     {
         try
         {
@@ -494,6 +535,13 @@ public sealed class LichessBot : IAsyncDisposable
             using var resp = await http.PostAsync(url, content: null, reqCts.Token).ConfigureAwait(false);
             if (resp.IsSuccessStatusCode) return LichessSubmissionDisposition.Accepted;
             log?.LogWarning("POST {Url} → {Status}", url, (int)resp.StatusCode);
+            if ((int)resp.StatusCode == 429)
+            {
+                // Keep this attempt pending until the rate-limit wait has elapsed.
+                // The next clock snapshot must not immediately trigger another POST.
+                var delay = LichessGameStream.RetryDelay(TimeSpan.Zero, LichessGameStream.HttpFailure(resp));
+                await (wait ?? LichessGameStream.WaitAsync)(delay, ct).ConfigureAwait(false);
+            }
             // A timeout or server failure can follow a committed move. Keep that
             // attempt pending until the stream resolves it instead of resubmitting.
             int status = (int)resp.StatusCode;
@@ -508,29 +556,9 @@ public sealed class LichessBot : IAsyncDisposable
         }
     }
 
-    private async IAsyncEnumerable<JsonElement> StreamNdjsonAsync(
-        string path, [EnumeratorCancellation] CancellationToken ct)
-    {
-        using var req = new HttpRequestMessage(HttpMethod.Get, path);
-        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct)
-            .ConfigureAwait(false);
-        resp.EnsureSuccessStatusCode();
-        if (path == "/api/stream/event") _onConnectionChanged?.Invoke(true);
-
-        await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        using var reader = new System.IO.StreamReader(stream, System.Text.Encoding.UTF8);
-
-        string? line;
-        while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
-        {
-            if (ct.IsCancellationRequested) yield break;
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            JsonDocument doc;
-            try { doc = JsonDocument.Parse(line); }
-            catch { _log.LogDebug("unparseable ndjson line: {Line}", line); continue; }
-            using (doc) yield return doc.RootElement;
-        }
-    }
+    private IAsyncEnumerable<JsonElement> StreamNdjsonAsync(string path, CancellationToken ct)
+        => LichessGameStream.ReadAttemptAsync(_http, path,
+            path == "/api/stream/event" ? () => _onConnectionChanged?.Invoke(true) : null, _log, ct);
 
     public ValueTask DisposeAsync() { _http.Dispose(); return ValueTask.CompletedTask; }
 }
