@@ -20,3 +20,120 @@ jobs:
           fetch-depth: 1
       - name: Enforce source-tree hygiene and strong secret signatures
         run: python3 scripts/repo-hygiene-gate.py
+
+  integrated-branches:
+    name: Remove integrated branches and preserve unique work
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: repository-branch-consolidation
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Remove only branches already integrated into main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          repo = os.environ['GH_REPO']
+
+          def run(*args):
+              return subprocess.check_output(args, text=True).strip()
+
+          def pages(endpoint):
+              return [item for page in json.loads(run('gh', 'api', '--paginate', '--slurp', endpoint)) for item in page]
+
+          def api(endpoint):
+              return json.loads(run('gh', 'api', endpoint))
+
+          def open_heads():
+              return {pr['head']['ref'] for pr in pages(f'repos/{repo}/pulls?state=open&per_page=100')
+                      if (pr['head'].get('repo') or {}).get('full_name') == repo}
+
+          default = api(f'repos/{repo}')['default_branch']
+          subprocess.run(['git', 'fetch', '--prune', 'origin', '+refs/heads/*:refs/remotes/origin/*'], check=True)
+          base = run('git', 'rev-parse', f'refs/remotes/origin/{default}')
+          heads = pages(f'repos/{repo}/branches?per_page=100')
+          active = open_heads()
+          merged_heads = {}
+          for pr in pages(f'repos/{repo}/pulls?state=closed&per_page=100'):
+              if (pr.get('merged_at') and pr['base']['ref'] == default
+                      and (pr['head'].get('repo') or {}).get('full_name') == repo
+                      and pr.get('merge_commit_sha')):
+                  key = (pr['head']['ref'], pr['head']['sha'])
+                  merged_heads.setdefault(key, []).append(pr)
+          removed, retained, failures = [], [], []
+          for branch in heads:
+              name, sha = branch['name'], branch['commit']['sha']
+              reason = None
+              proof = {'kind': 'ancestor', 'base_sha': base}
+              if name == default:
+                  reason = 'default branch'
+              elif branch['protected']:
+                  reason = 'protected branch'
+              elif name in active:
+                  reason = 'open pull request'
+              else:
+                  ancestry = subprocess.run(['git', 'merge-base', '--is-ancestor', sha, base])
+                  if ancestry.returncode == 1:
+                      reason = 'uncontained changes; retained for integration'
+                      for pr in merged_heads.get((name, sha), []):
+                          merged = subprocess.run(['git', 'merge-base', '--is-ancestor', pr['merge_commit_sha'], base])
+                          if merged.returncode == 0:
+                              reason = None
+                              proof = {'kind': 'merged-pull-request', 'number': pr['number'],
+                                       'head_sha': sha, 'merge_commit_sha': pr['merge_commit_sha']}
+                              break
+                  elif ancestry.returncode != 0:
+                      reason = 'ancestry unavailable; retained'
+                      failures.append(name)
+              if reason:
+                  retained.append({'branch': name, 'sha': sha, 'reason': reason})
+                  continue
+              # Re-read PR ownership before each mutation. The server still enforces
+              # branch/ruleset protection. The explicit lease makes a moved tip undeletable.
+              if name in open_heads():
+                  retained.append({'branch': name, 'sha': sha, 'reason': 'new open pull request'})
+                  continue
+              deletion = subprocess.run(['git', 'push', '--porcelain',
+                  f'--force-with-lease=refs/heads/{name}:{sha}', 'origin', f':refs/heads/{name}'],
+                  text=True, capture_output=True)
+              if deletion.returncode:
+                  retained.append({'branch': name, 'sha': sha, 'reason': 'delete refused; retained'})
+                  failures.append(name)
+                  print(deletion.stderr)
+              else:
+                  removed.append({'branch': name, 'sha': sha, 'proof': proof})
+          report = {'repository': repo, 'default_branch': default, 'base_sha': base,
+                    'removed': removed, 'retained': retained, 'failures': failures}
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'branch-consolidation.json'
+          output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write(f'## Branch consolidation\n\nRemoved {len(removed)} contained branches; '
+                            f'retained {len(retained)} branches. Only ancestor or exact merged-PR heads were deleted.\n\n')
+              summary.write('```json\n' + json.dumps(report, indent=2) + '\n```\n')
+          print(json.dumps(report, indent=2))
+          if failures:
+              raise SystemExit('Some operations were refused; retained heads are listed in the report.')
+          PY
+      - name: Retain exact deletion and preservation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-consolidation
+          path: ${{ runner.temp }}/branch-consolidation.json
+          if-no-files-found: warn
