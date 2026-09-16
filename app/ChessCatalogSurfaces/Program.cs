@@ -11,8 +11,14 @@ static class Program
 {
     static int Main(string[] args)
     {
+        if (args.FirstOrDefault() == ChessRecordedFloorWitness.Mode)
+            return ChessRecordedFloorWitness.Run(args[1..]);
         if (args.FirstOrDefault() == ChessStartingSideInventory.Mode)
             return ChessStartingSideInventory.RunAsync(args[1..]).GetAwaiter().GetResult();
+        if (args.FirstOrDefault() == ChessRecordedFloorExport.Mode)
+            return ChessRecordedFloorExport.RunAsync(args[1..]).GetAwaiter().GetResult();
+        if (args.FirstOrDefault() == ChessRecordedFloorExport.MergeMode)
+            return ChessRecordedFloorExport.Merge(args[1..]);
 
         if (args.Length < 2)
         {
@@ -56,6 +62,8 @@ static class Program
                 var key = ChessCompose.TransitionKey(fromId, moveId);
                 MoveApply.Make(board, mv.Value);
                 var toId = ChessCompose.PositionId(board);
+                if (transitions.TryGetValue(key, out var previous) && previous != toId)
+                    throw new InvalidDataException("Seed transition has competing deterministic results.");
                 transitions[key] = toId;
                 NotePosition(board, toId);
                 fromId = toId;

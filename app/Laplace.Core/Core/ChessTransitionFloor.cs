@@ -45,9 +45,12 @@ public static unsafe class ChessTransitionFloor
         public readonly byte* Base;
         public readonly long Count;
         public readonly string Path;
+        private readonly long _bodyBytes;
+        private readonly Hash128 _validatedBodyHash;
 
-        public MappedFloor(string path)
+        public MappedFloor(string path, CancellationToken ct = default)
         {
+            ct.ThrowIfCancellationRequested();
             Path = System.IO.Path.GetFullPath(path);
             using var source = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.Read | FileShare.Delete);
@@ -71,11 +74,16 @@ public static unsafe class ChessTransitionFloor
                     if (recordBytes % RecordSize != 0 || count != (ulong)(recordBytes / RecordSize))
                         throw new InvalidOperationException("chess transition floor record layout mismatch");
                     long body = length - TrailerBytes;
-                    if (BodyHash(Base, body) != *(Hash128*)(Base + body))
+                    _bodyBytes = body;
+                    ct.ThrowIfCancellationRequested();
+                    _validatedBodyHash = BodyHash(Base, body);
+                    if (_validatedBodyHash != *(Hash128*)(Base + body))
                         throw new InvalidOperationException("chess transition floor body CRC mismatch");
+                    ct.ThrowIfCancellationRequested();
                     Count = checked((long)count);
                     for (long i = 1; i < Count; i++)
                     {
+                        ct.ThrowIfCancellationRequested();
                         var previous = (TransitionRec*)(Base + HeaderSize + (i - 1) * RecordSize);
                         if (Compare(previous->Key, (previous + 1)->Key) >= 0)
                             throw new InvalidOperationException("chess transition floor keys must be sorted and unique");
@@ -89,6 +97,17 @@ public static unsafe class ChessTransitionFloor
                 }
             }
             catch { _view?.Dispose(); _file.Dispose(); throw; }
+        }
+
+        public void VerifyUnchanged(CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            // Retain the checksum accepted before visitation; a changed body must
+            // not acquire a new identity merely by rewriting its trailer as well.
+            if (*(Hash128*)(Base + _bodyBytes) != _validatedBodyHash
+                || BodyHash(Base, _bodyBytes) != _validatedBodyHash)
+                throw new InvalidDataException("Chess transition floor changed during its visit.");
+            ct.ThrowIfCancellationRequested();
         }
 
         public bool TryAcquire()
@@ -299,44 +318,54 @@ public static unsafe class ChessTransitionFloor
         }
     }
 
+    /// <summary>Visit a privately validated v1 file without replacing the serving map.
+    /// The mapping and its open-file identity remain owned for the whole visit.</summary>
+    internal static void VisitEntries(string path, Action<Hash128, Hash128> visitor,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(visitor);
+        using var map = new MappedFloor(path, ct);
+        for (long i = 0; i < map.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var record = (TransitionRec*)(map.Base + HeaderSize + i * RecordSize);
+            visitor(record->Key, record->To);
+        }
+        // This detects ordinary in-place changes during the visit. Callers still
+        // own immutable input selection: mutate-and-restore races are not a snapshot.
+        map.VerifyUnchanged(ct);
+    }
+
     public static void WriteBlob(string path, IReadOnlyList<(Hash128 Key, Hash128 To)> sortedUnique)
     {
         ArgumentNullException.ThrowIfNull(sortedUnique);
-        for (int i = 1; i < sortedUnique.Count; i++)
-            if (Compare(sortedUnique[i - 1].Key, sortedUnique[i].Key) >= 0)
-                throw new ArgumentException("Chess transition keys must be sorted and unique.", nameof(sortedUnique));
+        WriteBlob(path, sortedUnique, (ulong)sortedUnique.Count);
+    }
+
+    /// <summary>Write one sorted, unique stream in the unchanged v1 layout. The declared
+    /// count is checked against the actual single enumeration; invalid input or cancellation
+    /// cannot publish a prefix or discard the currently serving map. No collection-sized
+    /// allocation or int-sized checksum span is used.</summary>
+    public static void WriteBlob(string path, IEnumerable<(Hash128 Key, Hash128 To)> sortedUnique,
+        ulong recordCount, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        ArgumentNullException.ThrowIfNull(sortedUnique);
+        if (recordCount > (ulong)((long.MaxValue - HeaderSize - TrailerBytes) / RecordSize))
+            throw new ArgumentOutOfRangeException(nameof(recordCount), "Transition blob exceeds the file-length envelope.");
+        ct.ThrowIfCancellationRequested();
+        long count = (long)recordCount;
+        long body = checked(HeaderSize + count * RecordSize);
+        long total = checked(body + TrailerBytes);
         string fullPath = Path.GetFullPath(path);
         string directory = Path.GetDirectoryName(fullPath)!;
         Directory.CreateDirectory(directory);
-
-        // The catalog generator composes positions while building this floor. Compose
-        // warmup loads an existing floor from the same perfcache directory, so an
-        // incremental build reaches here with its own destination mmap'd. Release only
-        // that mapping; an unrelated floor supplied by a test/caller is not ours to drop.
-        var pathComparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        lock (Publication)
-        {
-            State current = Volatile.Read(ref _state);
-            if (current.Map is not null && string.Equals(current.Map.Path, fullPath, pathComparison))
-            {
-                Interlocked.Exchange(ref _state, new State(null));
-                current.Map.Dispose();
-            }
-        }
-
-        long count = sortedUnique.Count;
-        long body = HeaderSize + count * RecordSize;
-        long total = body + TrailerBytes;
         string temporary = Path.Combine(directory,
             $".{Path.GetFileName(fullPath)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
         try
         {
-            // Publish only a complete, closed blob. Readers either retain the previous
-            // inode or open the complete replacement; they can never mmap a truncated
-            // FileMode.Create destination while generation is in progress. Unique temp
-            // names also make two deterministic generators safe to run concurrently.
+            // Unique same-directory temporary files preserve atomic replacement and the
+            // exact zero-filled reserved header bytes of the existing serializer.
             using (var fs = new FileStream(temporary, FileMode.CreateNew,
                        FileAccess.ReadWrite, FileShare.None))
             {
@@ -352,30 +381,68 @@ public static unsafe class ChessTransitionFloor
                 {
                     *(uint*)ptr = Magic;
                     *(uint*)(ptr + 4) = Version;
-                    *(ulong*)(ptr + 8) = (ulong)count;
-                    for (int i = 0; i < sortedUnique.Count; i++)
+                    *(ulong*)(ptr + 8) = recordCount;
+                    long i = 0;
+                    Hash128 previous = default;
+                    foreach (var (key, to) in sortedUnique)
                     {
-                        var rec = (TransitionRec*)(ptr + HeaderSize + (long)i * RecordSize);
-                        rec->Key = sortedUnique[i].Key;
-                        rec->To = sortedUnique[i].To;
+                        ct.ThrowIfCancellationRequested();
+                        if (i == count)
+                            throw new ArgumentException("Transition stream exceeds its declared count.", nameof(sortedUnique));
+                        if (i != 0 && Compare(previous, key) >= 0)
+                            throw new ArgumentException("Chess transition keys must be sorted and unique.", nameof(sortedUnique));
+                        var record = (TransitionRec*)(ptr + HeaderSize + i * RecordSize);
+                        record->Key = key;
+                        record->To = to;
+                        previous = key;
+                        i++;
                     }
+                    if (i != count)
+                        throw new ArgumentException("Transition stream is shorter than its declared count.", nameof(sortedUnique));
+                    ct.ThrowIfCancellationRequested();
                     var crc = BodyHash(ptr, body);
+                    ct.ThrowIfCancellationRequested();
                     *(Hash128*)(ptr + body) = crc;
                 }
-                finally
-                {
-                    view.SafeMemoryMappedViewHandle.ReleasePointer();
-                }
+                finally { view.SafeMemoryMappedViewHandle.ReleasePointer(); }
                 view.Flush();
                 fs.Flush(flushToDisk: true);
             }
 
-            File.Move(temporary, fullPath, overwrite: true);
+            ct.ThrowIfCancellationRequested();
+            var pathComparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            lock (Publication)
+            {
+                // Compose warmup can map this generator's destination. Release only that
+                // mapping, after the replacement is complete and all input has validated.
+                State current = Volatile.Read(ref _state);
+                bool replacingMapped = current.Map is not null
+                    && string.Equals(current.Map.Path, fullPath, pathComparison);
+                // Unix replacement preserves the old mapped inode. Rename first so a
+                // publication failure cannot discard the valid serving generation.
+                if (!OperatingSystem.IsWindows())
+                {
+                    File.Move(temporary, fullPath, overwrite: true);
+                    if (replacingMapped)
+                    {
+                        Interlocked.Exchange(ref _state, new State(null));
+                        current.Map!.Dispose();
+                    }
+                }
+                else
+                {
+                    // Keep the existing Windows mapped-destination release contract.
+                    if (replacingMapped)
+                    {
+                        Interlocked.Exchange(ref _state, new State(null));
+                        current.Map!.Dispose();
+                    }
+                    File.Move(temporary, fullPath, overwrite: true);
+                }
+            }
         }
-        finally
-        {
-            File.Delete(temporary);
-        }
+        finally { File.Delete(temporary); }
     }
 
     private static int Compare(Hash128 a, Hash128 b) => a.CompareToBytewise(b);

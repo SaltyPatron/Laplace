@@ -182,6 +182,16 @@ physicality_descriptor_status_t physicality_descriptor_capture_stage_rows(
     const intent_stage_t* const* stages, size_t stage_count,
     size_t maximum_capture_bytes, physicality_descriptor_capture_t** out_capture);
 
+/* Same owned row decoder with cooperative cancellation. This still does not
+ * validate a descriptor plan: an admission owner must run the shared complete
+ * plan builder over the returned inputs before admitting any body. It may
+ * retire an exclusively owned encoded source-stage copy after successful
+ * decoding, since the capture retains every scalar, trajectory and observation. */
+physicality_descriptor_status_t physicality_descriptor_capture_stage_rows_cancelable(
+    const intent_stage_t* const* stages, size_t stage_count,
+    size_t maximum_capture_bytes, const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_capture_t** out_capture);
+
 physicality_descriptor_status_t physicality_descriptor_capture_stages(
     const intent_stage_t* const* stages, size_t stage_count,
     const physicality_descriptor_basis_t* basis,

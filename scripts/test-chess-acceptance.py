@@ -18,6 +18,8 @@ spec.loader.exec_module(owner)
 
 
 class AcceptanceTests(unittest.TestCase):
+    BOOT = "01234567-89ab-cdef-0123-456789abcdef"
+
     def test_failed_phase_does_not_suppress_independent_evidence(self):
         with tempfile.TemporaryDirectory() as temporary:
             out = Path(temporary) / "proof"
@@ -140,11 +142,12 @@ class AcceptanceTests(unittest.TestCase):
     def startup_states(self, pid, stopped=False):
         return {name: {"pid": 0 if stopped and name != "laplace-api" else pid,
                        "startMonotonicUsec": pid * 100, "activeState": "inactive" if stopped and name != "laplace-api" else "active",
-                       "subState": "running"}
+                       "subState": "running", "unitFileState": "enabled"}
                 for name in ("laplace-api", "laplace-mcp", "laplace-lichess")}
 
     def test_startup_requires_new_process_instances_and_full_readiness(self):
         with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(owner, "boot_id", return_value=self.BOOT), \
              patch.object(owner, "unit_states", side_effect=[self.startup_states(11), self.startup_states(22)]), \
              patch.object(owner, "command") as run, \
              patch.object(owner, "services", return_value={"apiAndUiReady": True, "lichessReady": True}):
@@ -157,10 +160,15 @@ class AcceptanceTests(unittest.TestCase):
             saved = json.loads((out / "service-startup/receipt.json").read_text())
             self.assertEqual("passed", saved["status"])
             self.assertFalse(saved["machineColdBootMeasured"])
+            self.assertEqual(self.BOOT, saved["bootIdBefore"])
+            self.assertEqual(self.BOOT, saved["bootIdAfter"])
+            self.assertEqual(self.BOOT, proof["bootId"])
+            self.assertTrue(all(x["unitFileState"] == "enabled" for x in saved["after"].values()))
 
     def test_startup_cannot_claim_unchanged_pid_or_failed_full_readiness(self):
         for failing_ready in (False, True):
             with self.subTest(failing_ready=failing_ready), tempfile.TemporaryDirectory() as temporary, \
+                 patch.object(owner, "boot_id", return_value=self.BOOT), \
                  patch.object(owner, "unit_states", return_value=self.startup_states(11)), \
                  patch.object(owner, "command"), \
                  patch.object(owner, "services", return_value={}, side_effect=ValueError("not ready") if failing_ready else None):
@@ -171,6 +179,7 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_startup_retries_async_readiness_with_separate_attempt_evidence(self):
         with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(owner, "boot_id", return_value=self.BOOT), \
              patch.object(owner, "unit_states", side_effect=[self.startup_states(11), self.startup_states(22)]), \
              patch.object(owner, "command"), patch.object(owner.time, "sleep"), \
              patch.object(owner, "services", side_effect=[ValueError("stream connecting"), {"lichessReady": True}]) as ready:
@@ -185,12 +194,86 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_startup_does_not_claim_preserved_stopped_managed_services(self):
         with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(owner, "boot_id", return_value=self.BOOT), \
              patch.object(owner, "unit_states", side_effect=[self.startup_states(11, True), self.startup_states(22, True)]), \
              patch.object(owner, "command"), patch.object(owner, "services", return_value={"lichessReady": False}):
             proof = owner.measure_service_startup(Path(temporary))
             self.assertTrue(proof["services"]["laplace-api"]["started"])
             self.assertFalse(proof["services"]["laplace-mcp"]["started"])
             self.assertFalse(proof["services"]["laplace-lichess"]["started"])
+
+
+    def test_boot_identity_reads_bounded_complete_kernel_uuid(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "boot_id"
+            with patch.object(owner, "BOOT_ID_PATH", path):
+                for value in (self.BOOT, self.BOOT + "\n"):
+                    path.write_text(value, encoding="ascii")
+                    self.assertEqual(self.BOOT, owner.boot_id())
+                for value in ("", "not-a-boot", self.BOOT + "\nextra", self.BOOT + " " * 100000):
+                    path.write_text(value, encoding="ascii")
+                    with self.subTest(length=len(value)), self.assertRaises(ValueError):
+                        owner.boot_id()
+                path.unlink()
+                with self.assertRaises(FileNotFoundError):
+                    owner.boot_id()
+
+    def test_unit_state_preserves_observed_enablement_without_inventing_it(self):
+        states = ("enabled", "disabled", None)
+        responses = []
+        for state in states:
+            body = "MainPID=41\nExecMainStartTimestampMonotonic=123\nActiveState=active\nSubState=running\n"
+            if state is not None:
+                body += "UnitFileState=" + state + "\n"
+            responses.append(subprocess.CompletedProcess([], 0, stdout=body))
+        with patch.object(owner.subprocess, "run", side_effect=responses) as run:
+            actual = owner.unit_states()
+        self.assertEqual(list(states), [x["unitFileState"] for x in actual.values()])
+        for call in run.call_args_list:
+            self.assertIn("UnitFileState", call.args[0][-1])
+            self.assertEqual(15, call.kwargs["timeout"])
+            self.assertTrue(call.kwargs["check"])
+
+    def test_status_receipt_binds_boot_and_actual_unit_file_states(self):
+        payload = {"configured": True, "running": True, "connected": True,
+                   "account": {"tokenValid": True, "botAccount": True,
+                               "botPlayScope": True, "ready": True}}
+        replies = [(b'{"status":"ok"}', {}), (b"<html>installed</html>", {"contentType": "text/html"}),
+                   (json.dumps(payload).encode(), {})]
+        states = {"laplace-api": "enabled", "laplace-mcp": "disabled", "laplace-lichess": "static"}
+        def systemctl(argv, log, timeout):
+            self.assertEqual(["systemctl", "show"], argv[:2])
+            self.assertIn("UnitFileState", argv[-1])
+            log.write_text("Id=" + argv[2] + "\nUnitFileState=" + states[argv[2]] + "\n")
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(owner, "boot_id", return_value=self.BOOT), \
+             patch.object(owner, "response", side_effect=replies), \
+             patch.object(owner, "command", side_effect=systemctl):
+            out = Path(temporary)
+            result = owner.services(out)
+            saved = json.loads((out / "services.json").read_text())
+        self.assertTrue(result["apiAndUiReady"])
+        self.assertTrue(result["lichessReady"])
+        self.assertEqual(self.BOOT, saved["bootId"])
+        self.assertEqual(states, saved["unitFileStates"])
+        self.assertFalse(saved["coldBootMeasured"])
+
+    def test_startup_retains_changed_boot_as_failed_restart_observation(self):
+        after_boot = "fedcba98-7654-3210-fedc-ba9876543210"
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(owner, "boot_id", side_effect=[self.BOOT, after_boot]), \
+             patch.object(owner, "unit_states", side_effect=[self.startup_states(11), self.startup_states(22)]), \
+             patch.object(owner, "command"), \
+             patch.object(owner, "services", return_value={"apiAndUiReady": True, "lichessReady": True}):
+            out = Path(temporary)
+            with self.assertRaisesRegex(ValueError, "boot identity changed"):
+                owner.measure_service_startup(out)
+            saved = json.loads((out / "service-startup/receipt.json").read_text())
+        self.assertEqual("failed", saved["status"])
+        self.assertEqual(self.BOOT, saved["bootIdBefore"])
+        self.assertEqual(after_boot, saved["bootIdAfter"])
+        self.assertIn("wallSecondsIncludingFailedReadiness", saved)
+        self.assertFalse(saved["machineColdBootMeasured"])
 
     def test_lichess_process_health_is_not_account_stream_readiness(self):
         status = owner.lichess_status({"configured": True, "running": True, "connected": False,

@@ -64,10 +64,12 @@ ensure_dirs() {
   say "dirs under $PREFIX"
   if [ "$(id -u)" -eq 0 ]; then
     install -d -m 2775 -g "$RUNNER_GROUP" \
-      "$PREFIX" "$EXTERNAL" "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR" "$APP_DIR/logs" "$QT_ROOT" "$WORK"
+      "$PREFIX" "$EXTERNAL" "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR" "$APP_DIR/logs" "$QT_ROOT" "$WORK" \
+      "$PREFIX/share" "$PREFIX/share/applications" "$PREFIX/share/laplace"
     install -d -m 2770 -g "$RUNNER_GROUP" "$PREFIX/secrets"
   else
-    mkdir -p "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR/logs" "$PREFIX/secrets" "$QT_ROOT" "$WORK"
+    mkdir -p "$CC_BUILD" "$CC_BIN_DIR" "$APP_DIR/logs" "$PREFIX/secrets" "$QT_ROOT" "$WORK" \
+      "$PREFIX/share/applications" "$PREFIX/share/laplace"
     chmod 2770 "$PREFIX/secrets" 2>/dev/null || true
   fi
 }
@@ -196,8 +198,14 @@ verify() {
   qt="$(resolve_qt_bin || true)"
   python3 "$SCRIPT_DIR/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}" || { red "✗ cutechess-cli / Qt runtime"; fail=1; }
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
-    python3 "$SCRIPT_DIR/provision-cutechess.py" --gui --binary "${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}" \
-      --verify-receipt "$CC_BUILD/laplace-cutechess-gui-build.json" --work "$WORK" || { red "✗ cutechess GUI / Qt offscreen runtime"; fail=1; }
+    if run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --gui --binary "${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}" \
+      --verify-receipt "$CC_BUILD/laplace-cutechess-gui-build.json" --work "$WORK" --install-desktop "$PREFIX"; then
+      if [[ "$(id -u)" -eq 0 ]]; then
+        python3 "$SCRIPT_DIR/provision-cutechess.py" --register-desktop "$PREFIX" || { red "✗ CuteChess system desktop registration"; fail=1; }
+      fi
+    else
+      red "✗ cutechess GUI / Qt offscreen runtime / desktop launcher"; fail=1
+    fi
   fi
   python3 "$SCRIPT_DIR/install-stockfish.py" --check-binary "$sf" || { red "✗ stockfish"; fail=1; }
   zstd_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$REPO_ROOT/deploy/zstd-release.json")"

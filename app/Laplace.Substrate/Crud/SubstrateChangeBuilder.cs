@@ -3,7 +3,7 @@ using Laplace.Engine.Core;
 
 namespace Laplace.SubstrateCRUD;
 
-public sealed class SubstrateChangeBuilder
+public sealed class SubstrateChangeBuilder : IDisposable
 {
     private readonly ImmutableArray<EntityRow>.Builder _entities;
     private readonly ImmutableArray<PhysicalityRow>.Builder _physicalities;
@@ -22,6 +22,8 @@ public sealed class SubstrateChangeBuilder
     private readonly HashSet<Hash128> _seenPhysicalities = new();
     private readonly Dictionary<Hash128, int> _physByEntity = new();
     private int _physIndexWatermark;
+    private long _physicalityTrajectoryBytes;
+    private bool _disposed;
 
     // The canonical member order for a set composition. memcmp of the 16-byte host layout,
     // which is exactly hash128_compare — the same order the native side and the substrate's
@@ -55,12 +57,14 @@ public sealed class SubstrateChangeBuilder
 
     public SubstrateChangeBuilder SetInputUnitsConsumed(long n)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         _inputUnitsConsumed = n;
         return this;
     }
 
     public SubstrateChangeBuilder DeclareSourcePrior(Hash128 sourceId, double sourceTrust)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         SubstrateChange.ValidateSourcePrior(sourceTrust);
         if (_sourcePriors.TryGetValue(sourceId, out double prior)
             && BitConverter.DoubleToInt64Bits(prior) != BitConverter.DoubleToInt64Bits(sourceTrust))
@@ -74,12 +78,14 @@ public sealed class SubstrateChangeBuilder
 
     public SubstrateChangeBuilder SetCommitEpoch(int epoch)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         _commitEpoch = epoch;
         return this;
     }
 
     public SubstrateChangeBuilder SetFileId(Hash128 fileId)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_fileId is { } existing && existing != fileId)
             throw new InvalidOperationException(
                 $"one ingest unit cannot claim two file identities: {existing} and {fileId}");
@@ -89,6 +95,7 @@ public sealed class SubstrateChangeBuilder
 
     public SubstrateChangeBuilder AddEntity(EntityRow row)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(row);
         if (_seenEntities.Add(row.Id)) _entities.Add(row);
         return this;
@@ -103,16 +110,21 @@ public sealed class SubstrateChangeBuilder
     public SubstrateChangeBuilder AddEntity(
         Hash128 id, byte tier, Hash128 typeId, Hash128? firstObservedBy = null)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_seenEntities.Add(id)) _entities.Add(new EntityRow(id, tier, typeId, firstObservedBy));
         return this;
     }
 
     public SubstrateChangeBuilder AddPhysicality(PhysicalityRow row)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(row);
         // The placement address does not identify an immutable body. Capture
         // source forms before selecting the compatible first placement row.
+        long trajectoryBytes = checked(_physicalityTrajectoryBytes
+            + (long)(row.TrajectoryXyzm?.Length ?? 0) * sizeof(double));
         _physicalityObservations.Add(row);
+        _physicalityTrajectoryBytes = trajectoryBytes;
         if (_seenPhysicalities.Add(row.Id)) _physicalities.Add(row);
         return this;
     }
@@ -147,6 +159,7 @@ public sealed class SubstrateChangeBuilder
         ReadOnlySpan<Hash128> members, byte tier, Hash128 typeId, Hash128 sourceId,
         long observedAtUnixUs = 0)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (members.Length == 0)
             throw new ArgumentException("a collection needs at least one member", nameof(members));
 
@@ -192,6 +205,7 @@ public sealed class SubstrateChangeBuilder
         ReadOnlySpan<Hash128> members, ReadOnlySpan<double> memberCoordsXyzm, byte tier,
         Hash128 typeId, Hash128 sourceId, long observedAtUnixUs = 0)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (members.Length == 0)
             throw new ArgumentException("a collection needs at least one member", nameof(members));
         if (memberCoordsXyzm.Length != members.Length * 4)
@@ -264,14 +278,23 @@ public sealed class SubstrateChangeBuilder
             _physByEntity[_physicalities[_physIndexWatermark].EntityId] = _physIndexWatermark;
     }
 
-    public bool TrySeeEntity(Hash128 id) => _seenEntities.Add(id);
+    public bool TrySeeEntity(Hash128 id)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _seenEntities.Add(id);
+    }
 
     /// <summary>Mark a placement already carried by a native source stage.
     /// This cannot establish that another physicality body has been observed.</summary>
-    public void NoteStagedPhysicalityPlacement(Hash128 id) => _seenPhysicalities.Add(id);
+    public void NoteStagedPhysicalityPlacement(Hash128 id)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _seenPhysicalities.Add(id);
+    }
 
     public SubstrateChangeBuilder AddIntentStage(IntentStage stage)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(stage);
         _intentStages.Add(stage);
         return this;
@@ -281,6 +304,7 @@ public sealed class SubstrateChangeBuilder
     /// explicitly declared source. Mixed-source stages carry their own append ranges.</summary>
     public SubstrateChangeBuilder AddIntentStage(IntentStage stage, Hash128 sourceId)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(stage);
         stage.RecordPhysicalitySourceRange(0, stage.PhysicalityCount, sourceId);
         return AddIntentStage(stage);
@@ -306,12 +330,14 @@ public sealed class SubstrateChangeBuilder
 
     public SubstrateChangeBuilder SetPresenceOracle(ISubstrateReader? reader)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         PresenceOracle = reader;
         return this;
     }
 
     public SubstrateChangeBuilder EnableDeferredContent(ISubstrateReader? reader)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (reader is not null)
             _deferredContent ??= new ContentBatch(() => ContentStage, reader);
         return this;
@@ -319,6 +345,7 @@ public sealed class SubstrateChangeBuilder
 
     public async Task<SubstrateChange> BuildAsync(CancellationToken ct = default)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_deferredContent is { HasPending: true } cb)
             await cb.ProbeAndFlushAsync(ct);
         return Build();
@@ -328,6 +355,7 @@ public sealed class SubstrateChangeBuilder
     {
         get
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (_contentStage is null || _contentStage.IsInvalid)
             {
                 _contentStage = IntentStage.New(256);
@@ -346,6 +374,7 @@ public sealed class SubstrateChangeBuilder
     {
         get
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             long total = 0;
             foreach (var s in _intentStages)
                 if (!s.IsInvalid) total += s.TotalTupleBytes;
@@ -353,8 +382,10 @@ public sealed class SubstrateChangeBuilder
                    + (long)_physicalityObservations.Count * 160
                    + (long)_physicalities.Count * IntPtr.Size
                    + (long)_attestations.Count * 152;
-            foreach (var p in _physicalityObservations)
-                if (p.TrajectoryXyzm is { } t) total += (long)t.Length * 8;
+            // Every observation contributes, including reused placements. Array length is
+            // immutable; charge once on append instead of rescanning all prior trajectories
+            // at every complete-record memory check.
+            total += _physicalityTrajectoryBytes;
             return total;
         }
     }
@@ -366,6 +397,7 @@ public sealed class SubstrateChangeBuilder
 
     public SubstrateChangeBuilder AddTestimonyWalk(TestimonyWalkRow walk)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(walk);
         _walks.Add(walk);
         return this;
@@ -373,6 +405,7 @@ public sealed class SubstrateChangeBuilder
 
     public SubstrateChangeBuilder AddAttestation(AttestationRow row)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(row);
         if (_attestationIndex.TryGetValue(row.Id, out int at))
         {
@@ -416,6 +449,7 @@ public sealed class SubstrateChangeBuilder
     /// </summary>
     public SubstrateChangeBuilder AddEphemeralFold(EphemeralFoldInput input)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(input);
         if (input.ScoreFp1e9 < 0 || input.ScoreFp1e9 > 1_000_000_000)
             throw new ArgumentOutOfRangeException(nameof(input), "score must be on the native 1e9 scale");
@@ -427,6 +461,7 @@ public sealed class SubstrateChangeBuilder
 
     public SubstrateChange Build()
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         var entities = _entities.ToImmutable();
         var physicalities = _physicalities.ToImmutable();
         var attestations = _attestations.ToImmutable();
@@ -455,12 +490,10 @@ public sealed class SubstrateChangeBuilder
 
 
         var stages = _intentStages.ToImmutableArray();
-        _intentStages.Clear();
-        _contentStage = null;
-
         var walks = _walks.ToImmutableArray();
-        _walks.Clear();
-        return new SubstrateChange(
+        // Keep native ownership here until every immutable sidecar and the complete
+        // returned change exists. An allocation/validation failure must remain disposable.
+        var change = new SubstrateChange(
             entities, physicalities, attestations,
             new SubstrateChangeMetadata(
                 intentId,
@@ -479,6 +512,26 @@ public sealed class SubstrateChangeBuilder
             PhysicalityObservations = _physicalityObservations.ToImmutable(),
             PhysicalitySourcePriors = _sourcePriors.ToImmutable(),
         };
+        _intentStages.Clear();
+        _contentStage = null;
+        _walks.Clear();
+        return change;
+    }
+
+    /// <summary>
+    /// Release only native resources still owned by this builder. Build transfers its
+    /// stages to the returned change; that change's consumer owns their later disposal.
+    /// Call after outstanding BuildAsync work has returned.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _deferredContent?.Dispose();
+        _deferredContent = null;
+        foreach (var stage in _intentStages) stage.Dispose();
+        _intentStages.Clear();
+        _contentStage = null;
     }
 
     private static Hash128 ComputeIntentId(

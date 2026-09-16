@@ -124,3 +124,20 @@ if(WIN32)
         endif()
     endif()
 endif()
+
+# The source-policy suite deliberately does not load a native library. This
+# post-build case pins the Python publication verifier to this exact core,
+# checks known BLAKE3 vectors, and rejects a corrupted native-framed floor.
+if(UNIX)
+    set(_chess_floor_test_work "${CMAKE_CURRENT_BINARY_DIR}/chess-floor-artifact-test")
+    file(MAKE_DIRECTORY "${_chess_floor_test_work}")
+    add_test(NAME laplace_chess_floor_artifacts_native
+        COMMAND "${CMAKE_COMMAND}" -E env
+            "TMPDIR=${_chess_floor_test_work}"
+            "LAPLACE_TEST_NATIVE_CORE=$<TARGET_FILE:laplace_core>"
+            "${LAPLACE_CODEGEN_PYTHON}"
+            "${CMAKE_SOURCE_DIR}/scripts/test-chess-floor-artifacts.py"
+            ArtifactTests.test_native_hash_abi_and_floor_checksum_when_current_library_is_available)
+    set_tests_properties(laplace_chess_floor_artifacts_native PROPERTIES
+        TIMEOUT 60 LABELS "chess;artifact")
+endif()

@@ -14,7 +14,7 @@ internal sealed record WorkingSetAcceptedEvidence(
 
 public sealed partial class NpgsqlSubstrateWriter
 {
-    private sealed class PhysicalityAdmissionBatch : IDisposable
+    internal sealed class PhysicalityAdmissionBatch : IDisposable
     {
         internal required IReadOnlyList<IntentStage> OriginalStages;
         internal readonly List<IntentStage> RawStages = [];
@@ -50,8 +50,10 @@ public sealed partial class NpgsqlSubstrateWriter
         }
 
         internal static PhysicalityAdmissionBatch? Capture(
-            IReadOnlyList<SubstrateChange> changes, IReadOnlyList<IntentStage> originalStages)
+            IReadOnlyList<SubstrateChange> changes, IReadOnlyList<IntentStage> originalStages,
+            CancellationToken ct)
         {
+            ct.ThrowIfCancellationRequested();
             var result = new PhysicalityAdmissionBatch { OriginalStages = originalStages };
             long activeScratchBytes = 0;
             try
@@ -60,6 +62,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 long largestScratch = 0;
                 foreach (var change in changes)
                 {
+                    ct.ThrowIfCancellationRequested();
                     if (!change.IntentStages.IsDefaultOrEmpty)
                         foreach (var stage in change.IntentStages)
                             if (!stage.IsInvalid) count = checked(count + stage.PhysicalityCount);
@@ -70,10 +73,10 @@ public sealed partial class NpgsqlSubstrateWriter
                     // sidecar can add observations but cannot hide selected rows.
                     count = checked(count + observations.Length
                         + (supplement ? change.Physicalities.Length : 0));
-                    largestScratch = Math.Max(largestScratch, CaptureScratchBytes(change));
+                    largestScratch = Math.Max(largestScratch, CaptureScratchBytes(change, ct));
                 }
                 // Exact payload widths, excluding managed object/allocator bookkeeping.
-                // Reserve all source metadata and the largest transient batch before
+                // Reserve all source metadata and the largest reused transport before
                 // any owned raw native stage is allocated.
                 result.ObservationPayloadBytes = checked(count * 40L);
                 if (count > Array.MaxLength || result.ObservationPayloadBytes + largestScratch > result.MaximumBytes)
@@ -83,6 +86,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 result.ObservationPriors.Capacity = checked((int)count);
                 foreach (var change in changes)
                 {
+                    ct.ThrowIfCancellationRequested();
                     if (!change.IntentStages.IsDefaultOrEmpty)
                         foreach (var stage in change.IntentStages)
                         {
@@ -96,28 +100,36 @@ public sealed partial class NpgsqlSubstrateWriter
                                     throw new InvalidOperationException("native physicality source ranges are incomplete or overlap");
                                 double prior = change.RequireSourcePrior(range.SourceId);
                                 for (int i = 0; i < range.RowCount; ++i)
+                                {
+                                    ct.ThrowIfCancellationRequested();
                                     result.AddObservation(range.SourceId, change.Metadata.IntentId, prior);
+                                }
                                 covered = checked(covered + range.RowCount);
                             }
                             if (covered != stage.PhysicalityCount)
                                 throw new InvalidOperationException("native physicality observations lack exact source ownership");
                         }
-                    long scratch = CaptureScratchBytes(change);
+                    long scratch = CaptureScratchBytes(change, ct);
                     activeScratchBytes = scratch;
                     if (scratch == 0) continue;
                     long remaining = checked(result.MaximumBytes - result.ObservationPayloadBytes
                         - result.OwnedRawBytes - scratch);
                     if (remaining <= 0)
                         throw new InvalidOperationException("physicality source stages exhausted their aggregate allocation grant");
-                    var observations = CaptureManagedObservations(change);
-                    var raw = CaptureManagedPhysicalityStage(observations.AsSpan(), remaining, scratch);
+                    var observations = CaptureManagedObservations(change, ct);
+                    long transport = ManagedObservationBufferBytes(observations.AsSpan(), ct);
+                    var raw = CaptureManagedPhysicalityStage(observations.AsSpan(), remaining, transport, ct);
                     result.OwnedRawStages.Add(raw);
                     result.RawStages.Add(raw);
                     result.OwnedRawBytes = checked(result.OwnedRawBytes + raw.AllocatedBytes);
                     foreach (var physicality in observations)
+                    {
+                        ct.ThrowIfCancellationRequested();
                         result.AddObservation(physicality.SourceId, change.Metadata.IntentId,
                             change.RequireSourcePrior(physicality.SourceId));
+                    }
                 }
+                ct.ThrowIfCancellationRequested();
                 if (result.ObservationSources.Count != 0) return result;
                 result.Dispose();
                 return null;
@@ -143,20 +155,24 @@ public sealed partial class NpgsqlSubstrateWriter
             ObservationPriors.Add(prior);
         }
 
-        private static long CaptureScratchBytes(SubstrateChange change)
+        private static long CaptureScratchBytes(SubstrateChange change, CancellationToken ct)
         {
             var raw = change.PhysicalityObservations;
-            if (raw.IsDefaultOrEmpty) return ManagedObservationBytes(change.Physicalities);
-            if (change.Physicalities.IsEmpty) return ManagedObservationBytes(raw);
-            // Both possible tuple payloads, the merged reference array and the
-            // selected-row reference set fit before any join/native allocation.
-            // Reference-set bucket/object bookkeeping is outside payload bytes.
-            return checked(ManagedObservationBytes(raw) + ManagedObservationBytes(change.Physicalities)
-                + (raw.Length + (long)change.Physicalities.Length) * IntPtr.Size
+            if (raw.IsDefaultOrEmpty) return ManagedObservationBufferBytes(change.Physicalities.AsSpan(), ct);
+            if (change.Physicalities.IsEmpty) return ManagedObservationBufferBytes(raw.AsSpan(), ct);
+            // The transport is reused across bounded native calls. The possible
+            // merged reference array and selected-reference set coexist with it;
+            // hash buckets/object headers remain allocator bookkeeping.
+            long rawBuffer = ManagedObservationBufferBytes(raw.AsSpan(), ct);
+            long selectedBuffer = ManagedObservationBufferBytes(change.Physicalities.AsSpan(), ct);
+            long transport = Math.Min(checked(rawBuffer + selectedBuffer),
+                Math.Max(Math.Max(rawBuffer, selectedBuffer), IngestSizing.ResolveSequentialIoBufferBytes()));
+            return checked(transport + (raw.Length + (long)change.Physicalities.Length) * IntPtr.Size
                 + change.Physicalities.Length * (long)IntPtr.Size);
         }
 
-        private static ImmutableArray<PhysicalityRow> CaptureManagedObservations(SubstrateChange change)
+        private static ImmutableArray<PhysicalityRow> CaptureManagedObservations(
+            SubstrateChange change, CancellationToken ct)
         {
             var raw = change.PhysicalityObservations;
             if (raw.IsDefaultOrEmpty) return change.Physicalities;
@@ -164,79 +180,134 @@ public sealed partial class NpgsqlSubstrateWriter
             // Reference equality only avoids copying the exact same input row
             // twice. It never defines entity/form identity: separate row objects,
             // including byte-identical copies, go to the native canonical owner.
-            var missing = new HashSet<PhysicalityRow>(change.Physicalities, ReferenceEqualityComparer.Instance);
-            foreach (var row in raw) missing.Remove(row);
+            var missing = new HashSet<PhysicalityRow>(ReferenceEqualityComparer.Instance);
+            foreach (var row in change.Physicalities)
+            {
+                ct.ThrowIfCancellationRequested();
+                missing.Add(row);
+            }
+            foreach (var row in raw)
+            {
+                ct.ThrowIfCancellationRequested();
+                missing.Remove(row);
+            }
             if (missing.Count == 0) return raw;
             var complete = ImmutableArray.CreateBuilder<PhysicalityRow>(checked(raw.Length + missing.Count));
             complete.AddRange(raw);
             foreach (var row in change.Physicalities)
+            {
+                ct.ThrowIfCancellationRequested();
                 if (missing.Remove(row)) complete.Add(row);
+            }
             return complete.MoveToImmutable();
         }
 
-        private static unsafe long ManagedObservationBytes(ImmutableArray<PhysicalityRow> observations)
+        private static unsafe long ObservationTransportBytes(PhysicalityRow row)
         {
-            long values = 0;
+            int width = row.TrajectoryXyzm?.Length ?? 0;
+            if (width % 4 != 0)
+                throw new InvalidOperationException("physicality observation contains a partial trajectory vertex");
+            return checked(width * (long)sizeof(double)
+                + sizeof(PhysicalityDescriptorInputNative) + sizeof(Hash128) + sizeof(long));
+        }
+
+        private static long ManagedObservationBufferBytes(
+            ReadOnlySpan<PhysicalityRow> observations, CancellationToken ct)
+        {
+            long total = 0, widest = 0;
             foreach (var row in observations)
             {
-                int width = row.TrajectoryXyzm?.Length ?? 0;
-                if (width % 4 != 0)
-                    throw new InvalidOperationException("physicality observation contains a partial trajectory vertex");
-                values = checked(values + width);
+                ct.ThrowIfCancellationRequested();
+                long bytes = ObservationTransportBytes(row);
+                total = checked(total + bytes);
+                widest = Math.Max(widest, bytes);
             }
-            if (values > Array.MaxLength)
-                throw new InvalidOperationException("physicality trajectory transport exceeds the managed array limit");
-            return checked(values * sizeof(double) + observations.Length *
-                (long)(sizeof(PhysicalityDescriptorInputNative) + sizeof(Hash128) + sizeof(long)));
+            // Reuse the machine-derived I/O transit window, growing only for an
+            // indivisible row. This changes transport grain, never admission count.
+            long window = IngestSizing.ResolveSequentialIoBufferBytes();
+            return Math.Min(total, Math.Max(widest, window));
         }
 
         internal static unsafe void StageManagedObservations(
-            IntentStage stage, ReadOnlySpan<PhysicalityRow> observations, long maximumBytes)
+            IntentStage stage, ReadOnlySpan<PhysicalityRow> observations, long maximumBytes,
+            CancellationToken ct)
         {
-            long trajectoryValues = 0;
+            ct.ThrowIfCancellationRequested();
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
+            long total = 0;
             foreach (var row in observations)
             {
-                if ((row.TrajectoryXyzm?.Length ?? 0) % 4 != 0)
-                    throw new InvalidOperationException("physicality observation contains a partial trajectory vertex");
-                trajectoryValues = checked(trajectoryValues + (row.TrajectoryXyzm?.LongLength ?? 0));
+                ct.ThrowIfCancellationRequested();
+                long bytes = ObservationTransportBytes(row);
+                if (bytes > maximumBytes)
+                    throw new InvalidOperationException(
+                        $"one physicality transport requires {bytes} bytes; grant is {maximumBytes}");
+                total = checked(total + bytes);
             }
-            long transportBytes = checked(trajectoryValues * sizeof(double)
-                + observations.Length * (long)(sizeof(PhysicalityDescriptorInputNative) + sizeof(Hash128) + sizeof(long)));
-            if (trajectoryValues > Array.MaxLength || transportBytes > maximumBytes)
-                throw new InvalidOperationException(
-                    $"physicality transport requires {transportBytes} bytes; grant is {maximumBytes}");
-            var trajectories = new double[checked((int)trajectoryValues)];
-            var inputs = new PhysicalityDescriptorInputNative[observations.Length];
-            var times = new long[observations.Length];
-            var declaredIds = new Hash128[observations.Length];
-            fixed (double* basePointer = trajectories)
+            if (observations.IsEmpty) return;
+            // All four native payloads are blittable and eight-byte aligned.
+            // One pinned allocation is reused; no old per-batch arrays await GC.
+            long slots = Math.Min(total, maximumBytes) / sizeof(double);
+            if (slots > Array.MaxLength)
+                throw new InvalidOperationException("physicality transport buffer exceeds the managed array limit");
+            var buffer = new double[checked((int)slots)];
+            long bufferBytes = checked(buffer.LongLength * sizeof(double));
+            fixed (double* storage = buffer)
             {
-                int offset = 0;
-                for (int i = 0; i < observations.Length; ++i)
+                int first = 0;
+                while (first < observations.Length)
                 {
-                    var row = observations[i];
-                    ref var input = ref inputs[i];
-                    declaredIds[i] = row.Id;
-                    input.EntityId = row.EntityId;
-                    input.Type = (short)row.Type;
-                    input.Coordinate[0] = row.CoordX; input.Coordinate[1] = row.CoordY;
-                    input.Coordinate[2] = row.CoordZ; input.Coordinate[3] = row.CoordM;
-                    input.HilbertIndex = row.HilbertIndex;
-                    if (row.TrajectoryXyzm is { Length: > 0 } trajectory)
+                    ct.ThrowIfCancellationRequested();
+                    long bytes = 0;
+                    int count = 0;
+                    while (first + count < observations.Length)
                     {
-                        trajectory.CopyTo(trajectories, offset);
-                        input.Trajectory = basePointer + offset;
-                        input.TrajectoryVertices = (nuint)(trajectory.Length / 4);
-                        offset = checked(offset + trajectory.Length);
+                        ct.ThrowIfCancellationRequested();
+                        long next = ObservationTransportBytes(observations[first + count]);
+                        if (next > bufferBytes - bytes) break;
+                        bytes += next;
+                        count++;
                     }
-                    input.Constituents = row.NConstituents;
-                    input.AlignmentResidualIsNull = row.AlignmentResidual is null ? 1 : 0;
-                    input.AlignmentResidual = row.AlignmentResidual ?? 0;
-                    input.SourceDimIsNull = row.SourceDim is null ? 1 : 0;
-                    input.SourceDim = row.SourceDim ?? 0;
-                    times[i] = row.ObservedAtUnixUs;
+                    if (count == 0)
+                        throw new InvalidOperationException("one physicality transport does not fit its aligned buffer");
+                    var inputs = new Span<PhysicalityDescriptorInputNative>(storage, count);
+                    var ids = new Span<Hash128>((byte*)storage + count * (long)sizeof(PhysicalityDescriptorInputNative), count);
+                    var times = new Span<long>((byte*)storage + count *
+                        (long)(sizeof(PhysicalityDescriptorInputNative) + sizeof(Hash128)), count);
+                    double* trajectories = (double*)((byte*)storage + count *
+                        (long)(sizeof(PhysicalityDescriptorInputNative) + sizeof(Hash128) + sizeof(long)));
+                    int offset = 0;
+                    for (int i = 0; i < count; ++i)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var row = observations[first + i];
+                        ref var input = ref inputs[i];
+                        input = default;
+                        ids[i] = row.Id;
+                        input.EntityId = row.EntityId;
+                        input.Type = (short)row.Type;
+                        input.Coordinate[0] = row.CoordX; input.Coordinate[1] = row.CoordY;
+                        input.Coordinate[2] = row.CoordZ; input.Coordinate[3] = row.CoordM;
+                        input.HilbertIndex = row.HilbertIndex;
+                        if (row.TrajectoryXyzm is { Length: > 0 } trajectory)
+                        {
+                            trajectory.AsSpan().CopyTo(new Span<double>(trajectories + offset, trajectory.Length));
+                            input.Trajectory = trajectories + offset;
+                            input.TrajectoryVertices = (nuint)(trajectory.Length / 4);
+                            offset = checked(offset + trajectory.Length);
+                        }
+                        input.Constituents = row.NConstituents;
+                        input.AlignmentResidualIsNull = row.AlignmentResidual is null ? 1 : 0;
+                        input.AlignmentResidual = row.AlignmentResidual ?? 0;
+                        input.SourceDimIsNull = row.SourceDim is null ? 1 : 0;
+                        input.SourceDim = row.SourceDim ?? 0;
+                        times[i] = row.ObservedAtUnixUs;
+                    }
+                    ct.ThrowIfCancellationRequested();
+                    stage.AddPhysicalityBatch(inputs, ids, times);
+                    ct.ThrowIfCancellationRequested();
+                    first = checked(first + count);
                 }
-                stage.AddPhysicalityBatch(inputs, declaredIds, times);
             }
         }
     }
@@ -247,13 +318,15 @@ public sealed partial class NpgsqlSubstrateWriter
     /// though this source-observation stage never emits entities or attestations.
     /// </summary>
     internal static IntentStage CaptureManagedPhysicalityStage(
-        ReadOnlySpan<PhysicalityRow> observations, long stageMaximumBytes, long scratchMaximumBytes)
+        ReadOnlySpan<PhysicalityRow> observations, long stageMaximumBytes, long scratchMaximumBytes,
+        CancellationToken ct = default)
     {
         IntentStage? stage = null;
         try
         {
+            ct.ThrowIfCancellationRequested();
             stage = IntentStage.NewBounded(0, stageMaximumBytes);
-            PhysicalityAdmissionBatch.StageManagedObservations(stage, observations, scratchMaximumBytes);
+            PhysicalityAdmissionBatch.StageManagedObservations(stage, observations, scratchMaximumBytes, ct);
             return stage;
         }
         catch (Exception error) when (error is OutOfMemoryException or InvalidOperationException)

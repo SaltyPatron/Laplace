@@ -236,7 +236,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         {
             using (var captureDiagnostic = MeasureApplyPhase("physicality-capture"))
             {
-                physicalityAdmission = PhysicalityAdmissionBatch.Capture(changes, sourceStages);
+                physicalityAdmission = PhysicalityAdmissionBatch.Capture(changes, sourceStages, ct);
                 captureDiagnostic?.Complete();
             }
             anyRows |= physicalityAdmission is not null;

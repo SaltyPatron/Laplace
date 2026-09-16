@@ -689,5 +689,197 @@ main "$@"
         self.assertEqual("selected-sdk", after.stdout.strip())
 
 
+
+    def desktop_fixture(self, prefix_name="desktop prefix"):
+        """Real subprocess transport fixture; this is not a Qt GUI acceptance."""
+        source, binary, sdk, receipt = self.gui_fixture()
+        observed = self.root / "desktop-child.json"
+        program = binary.read_text()
+        offset = program.index("keys = ['XDG_CONFIG_HOME'")
+        program = program[:offset] + (
+            "if sys.argv[1:] != ['-platform', 'offscreen', '--version']:\n"
+            "    names = ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', "
+            "'XDG_CONFIG_HOME', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'LD_LIBRARY_PATH']\n"
+            "    Path(" + repr(str(observed)) + ").write_text(json.dumps({'argv': sys.argv, "
+            "'environment': {key: os.environ.get(key) for key in names}}))\n"
+            "    raise SystemExit(0)\n"
+        ) + program[offset:]
+        binary.write_text(program)
+        binary.chmod(0o755)
+        work = self.root / "desktop-work"
+        cutechess.verify_gui_build(source, binary, self.lock, sdk, receipt, work)
+        prefix = self.root / prefix_name
+        installed = prefix / "bin/cutechess"
+        installed.parent.mkdir(parents=True)
+        shutil.copy2(binary, installed)
+        return installed, sdk, receipt, work, prefix, observed
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux desktop subprocess contract")
+    def test_desktop_launcher_uses_verified_installed_binary_and_user_session(self):
+        installed, sdk, receipt, work, prefix, observed = self.desktop_fixture()
+        with patch.dict(os.environ, {"LD_LIBRARY_PATH": "/private-provisioning-path",
+                                     "LICHESS_API": "do-not-publish-fixture-secret"}):
+            verified = cutechess.verify_gui_install(installed, receipt, self.lock, work)
+            result = cutechess.install_desktop(prefix, verified)
+        launcher = Path(result["launcher"]["path"])
+        manifest = prefix / "share/laplace/cutechess-desktop.json"
+        for path in (launcher, Path(result["desktop"]["path"]), manifest):
+            self.assertNotIn("private-provisioning-path", path.read_text())
+            self.assertNotIn("do-not-publish-fixture-secret", path.read_text())
+        self.assertEqual(result, json.loads(manifest.read_text()))
+        self.assertFalse(result["operator_desktop_tested"])
+        self.assertFalse(result["autostart_installed"])
+        self.assertEqual(0o755, launcher.stat().st_mode & 0o777)
+        arguments = ["a b", "$literal", ";no-shell", "unicode-\u03a9", ""]
+        environment = dict(os.environ, DISPLAY=":73", XAUTHORITY="/operator/auth",
+                           WAYLAND_DISPLAY="wayland-7", XDG_RUNTIME_DIR="/operator/run",
+                           XDG_CONFIG_HOME="/operator/settings", QT_PLUGIN_PATH="/wrong/plugin",
+                           QT_QPA_PLATFORM_PLUGIN_PATH="/wrong/platform",
+                           LD_LIBRARY_PATH="/operator/lib:" + str(sdk / "lib"))
+        run = subprocess.run([str(launcher), *arguments], env=environment, capture_output=True, text=True, timeout=10)
+        self.assertEqual(0, run.returncode, run.stderr)
+        child = json.loads(observed.read_text())
+        self.assertEqual([str(installed), *arguments], child["argv"])
+        for key in ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME"):
+            self.assertEqual(environment[key], child["environment"][key])
+        self.assertEqual(str(sdk / "plugins"), child["environment"]["QT_PLUGIN_PATH"])
+        self.assertEqual(str(sdk / "plugins/platforms"), child["environment"]["QT_QPA_PLATFORM_PLUGIN_PATH"])
+        self.assertEqual(str(sdk / "lib") + ":/operator/lib", child["environment"]["LD_LIBRARY_PATH"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux installed launcher provenance")
+    def test_desktop_cli_install_and_changed_binary_refusal_preserve_prior_launcher(self):
+        installed, _, receipt, work, prefix, observed = self.desktop_fixture()
+        lock = self.root / "desktop-lock.json"
+        lock.write_text(json.dumps(self.lock))
+        argv = [sys.executable, cutechess.__file__, "--lock", str(lock), "--gui",
+                "--binary", str(installed), "--verify-receipt", str(receipt),
+                "--work", str(work), "--install-desktop", str(prefix)]
+        run = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        self.assertEqual(0, run.returncode, run.stderr)
+        result = json.loads(run.stdout)["desktop_install"]
+        launcher = Path(result["launcher"]["path"])
+        before = launcher.read_bytes()
+        installed.write_text(installed.read_text() + "\n# changed executable\n")
+        run = subprocess.run([str(launcher)], capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(0, run.returncode)
+        self.assertIn("installed CuteChess changed", run.stderr)
+        self.assertFalse(observed.exists())
+        refused = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(0, refused.returncode)
+        self.assertEqual(before, launcher.read_bytes())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux system desktop registration")
+    def test_system_desktop_registration_reuses_prefix_owner_and_preserves_foreign_entry(self):
+        installed, _, receipt, work, prefix, observed = self.desktop_fixture()
+        verified = cutechess.verify_gui_install(installed, receipt, self.lock, work)
+        result = cutechess.install_desktop(prefix, verified)
+        directory = self.root / "system-applications"
+        registered = cutechess.register_desktop(prefix, directory)
+        entry = directory / "laplace-cutechess.desktop"
+        self.assertEqual(Path(result["desktop"]["path"]), entry.resolve())
+        self.assertEqual(str(entry), registered["system_desktop_file"])
+        self.assertFalse(observed.exists(), "registration must never launch GUI fixture")
+        owner_before = (prefix / "share/laplace/cutechess-desktop.json").stat().st_uid
+        self.assertEqual(registered, cutechess.register_desktop(prefix, directory))
+        self.assertEqual(owner_before, (prefix / "share/laplace/cutechess-desktop.json").stat().st_uid)
+        cutechess.install_desktop(prefix, verified)
+        self.assertEqual(Path(result["desktop"]["path"]), entry.resolve())
+        entry.unlink()
+        entry.write_text("operator's existing desktop entry")
+        with self.assertRaisesRegex(RuntimeError, "another installation"):
+            cutechess.register_desktop(prefix, directory)
+        self.assertEqual("operator's existing desktop entry", entry.read_text())
+
+    @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("gio"), "real GIO desktop-entry launcher")
+    def test_desktop_entry_real_gio_preserves_quoted_prefix_path(self):
+        # GIO parses the generated Desktop Entry; no mirrored Exec parser.
+        prefix_name = 'prefix with "quote" $dollar %percent \\slash ' + chr(96) + 'tick' + chr(96)
+        installed, _, receipt, work, prefix, observed = self.desktop_fixture(prefix_name)
+        result = cutechess.install_desktop(prefix, cutechess.verify_gui_install(installed, receipt, self.lock, work))
+        launched = subprocess.run(["gio", "launch", result["desktop"]["path"]],
+                                  capture_output=True, text=True, timeout=10)
+        self.assertEqual(0, launched.returncode, launched.stderr)
+        import time
+        deadline = time.monotonic() + 5
+        while not observed.exists() and time.monotonic() < deadline:
+            time.sleep(.02)
+        self.assertTrue(observed.is_file(), "GIO must execute the generated launcher")
+        self.assertEqual([str(installed)], json.loads(observed.read_text())["argv"])
+
+
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux bootstrap desktop ownership")
+    def test_bootstrap_gui_probe_uses_runner_and_only_root_registers_verified_launcher(self):
+        bootstrap = Path(cutechess.__file__).with_name("bootstrap-chess-lab.sh").read_text()
+        script = self.root / "desktop-bootstrap.sh"
+        script.write_text(bootstrap.removesuffix('main "$@"\n') + r'''
+id() { if [[ "$*" == -u ]]; then printf '%s\n' "$FIXTURE_UID"; else command id "$@"; fi; }
+resolve_stockfish() { printf '%s\n' /fixture/stockfish; }
+resolve_qt_bin() { printf '%s\n' /fixture/qt; }
+python3() {
+  printf 'python' >> "$CALLS"
+  printf ' %q' "$@" >> "$CALLS"
+  printf '\n' >> "$CALLS"
+  if [[ "$*" == *" --gui "* && "$FAIL_GUI" == 1 ]]; then return 17; fi
+}
+run_as_owner() {
+  printf 'runner' >> "$CALLS"
+  printf ' %q' "$@" >> "$CALLS"
+  printf '\n' >> "$CALLS"
+  "$@"
+}
+CUTECHESS_GUI_BUILD=1
+verify
+''')
+        for uid, failure, expected in (("0", "0", 0), ("1000", "0", 0), ("0", "1", 1)):
+            with self.subTest(uid=uid, failure=failure):
+                calls = self.root / "desktop-bootstrap-calls"
+                calls.write_text("")
+                environment = dict(os.environ, FIXTURE_UID=uid, FAIL_GUI=failure, CALLS=str(calls),
+                                   LAPLACE_INSTALL_PREFIX=str(self.root / "selected-prefix"))
+                run = subprocess.run(["bash", str(script)], env=environment, capture_output=True, text=True, timeout=10)
+                self.assertEqual(expected, run.returncode, run.stderr)
+                observed = calls.read_text().splitlines()
+                gui = [line for line in observed if " --gui " in line]
+                self.assertEqual(2, len(gui), observed)
+                self.assertTrue(gui[0].startswith("runner "))
+                self.assertTrue(all("--install-desktop" in line for line in gui))
+                registration = [line for line in observed if "--register-desktop" in line]
+                self.assertEqual(1 if uid == "0" and failure == "0" else 0, len(registration), observed)
+
+
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux shared installation directory ownership")
+    def test_bootstrap_prepares_existing_public_desktop_directories_for_runner_group(self):
+        bootstrap = Path(cutechess.__file__).with_name("bootstrap-chess-lab.sh").read_text()
+        script = self.root / "desktop-directories.sh"
+        # Select the actual root branch while using the caller's real group.
+        # install(1) operates only on this fixture's existing owned directories.
+        script.write_text(bootstrap.removesuffix('main "$@"\n') + r'''
+id() { if [[ "$*" == -u ]]; then printf '0\n'; else command id "$@"; fi; }
+ensure_dirs
+''')
+        prefix = self.root / "shared-prefix"
+        directories = [prefix / suffix for suffix in ("share", "share/applications", "share/laplace")]
+        for path in directories:
+            path.mkdir(parents=True, exist_ok=True)
+            path.chmod(0o755)
+        owners = {path: path.stat().st_uid for path in directories}
+        group = subprocess.check_output(["id", "-gn"], text=True).strip()
+        gid = int(subprocess.check_output(["id", "-g"], text=True))
+        environment = dict(os.environ, RUNNER_GROUP=group, LAPLACE_INSTALL_PREFIX=str(prefix),
+                           LAPLACE_EXTERNAL=str(self.root / "directory-external"),
+                           LAPLACE_CUTECHESS_BUILD=str(self.root / "directory-build"),
+                           LAPLACE_QT_ROOT=str(self.root / "directory-qt"),
+                           LAPLACE_WORK_ROOT=str(self.root / "directory-work"))
+        run = subprocess.run(["bash", str(script)], env=environment, capture_output=True, text=True, timeout=10)
+        self.assertEqual(0, run.returncode, run.stderr)
+        for path in directories:
+            observed = path.stat()
+            self.assertEqual(0o2775, observed.st_mode & 0o7777)
+            self.assertEqual(gid, observed.st_gid)
+            self.assertEqual(owners[path], observed.st_uid)
+
+
 if __name__ == '__main__':
     unittest.main()

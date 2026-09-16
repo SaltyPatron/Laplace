@@ -33,9 +33,11 @@ to 32, expire after 30 idle minutes, and can be closed with DELETE. Bodies are
 limited to 1 MiB. Foreign/opaque origins and missing/wrong bearer tokens fail
 closed. See the [MCP transport specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports).
 
-Only nginx listens on the LAN: `192.168.1.2:8443`, restricted to
-`192.168.1.0/24`, TLS 1.2/1.3. The existing port-8080 API is not repointed or
-removed. Both new app listeners are explicitly loopback-only and ignore
+The managed LAN ingress is nginx on port `8443`, using TLS 1.2/1.3. Its
+`listen 8443 ssl` directive accepts on the IPv4 wildcard address; explicit
+`allow` for the configured LAN network (default `192.168.1.0/24`) followed by
+`deny all` restricts clients. This permits nginx to start before the configured
+LAN address is assigned. The existing port-8080 API is not repointed or removed. Both new app listeners are explicitly loopback-only and ignore
 `ASPNETCORE_URLS`. No PostgreSQL listener or pg_hba rule is changed. Dedicated
 `laplace-mcp` and `laplace-lichess` OS accounts use the existing Unix socket and
 local peer map to `laplace_admin`. That is privileged database access; the MCP
@@ -218,11 +220,51 @@ gate. New units are reconciled/enabled and non-stopped services restart.
 
 MCP `/health/ready` uses the API's typed estimated-inventory and perfcache probes,
 with a five-second deadline, not the health tool's full entity-count scan. This
-is serving readiness, not full-corpus integrity verification. Lichess readiness requires a configured
-token, initialized chess host and live authenticated event stream. `/health/live`
-only checks the process. CI additionally verifies MCP initialization and tool
-discovery through the authenticated HTTPS nginx URL. This does not claim an
-entire Lichess game has been played or a full corpus has been audited.
+is serving readiness, not full-corpus integrity verification. Lichess
+`/health/ready` confirms that a token is configured; it does not establish account
+authorization, chess-host initialization or a connected authenticated event
+stream. `/health/live` only checks the process. Explicit chess acceptance reads
+`/status` separately and requires configured/running/connected state plus valid
+token, BOT account, `bot:play` scope and account readiness. A configured account
+that fails those checks fails that acceptance and retains a sanitized receipt.
+
+CI additionally verifies MCP initialization and tool discovery through the
+authenticated HTTPS nginx URL. These checks do not claim an entire Lichess game
+has been played or a full corpus has been audited.
+
+The existing chess service snapshot records the current Linux `boot_id` and
+observed systemd `UnitFileState` for API, MCP and Lichess. The service-restart
+receipt records enablement with each before/after process observation and both
+boot identities; different boot identities invalidate a service-restart timing.
+Enablement values are observations: an active process does not imply an enabled
+unit, and an enabled unit does not override an operator stop marker.
+`machineColdBootMeasured` remains false. This measures service restart through
+readiness with the existing OS caches, not machine boot duration.
+
+CuteChess has a separate desktop lifecycle. Chess provisioning installs the
+official GUI and its retained Qt runtime/build receipt, then publishes
+`/opt/laplace/bin/laplace-cutechess` and
+`/opt/laplace/share/applications/laplace-cutechess.desktop` (under the selected
+prefix). The existing root bootstrap registers that entry at
+`/usr/local/share/applications/laplace-cutechess.desktop` for ordinary menu
+discovery; later CI refreshes the same prefix artifacts through that link.
+`share/laplace/cutechess-desktop.json` records installed file hashes and whether
+the conventional entry is registered. A nonroot installation still provides
+the direct launcher and prefix desktop file without claiming menu registration.
+
+Launch **Cute Chess (Laplace)** from the desktop's applications menu, or run
+`/opt/laplace/bin/laplace-cutechess` in that user's session. The launcher preserves
+arguments and the current display, authorization and XDG settings, selects the
+verified Qt libraries/plugins, and checks the installed executable hash before
+launch. It contains only public launch data from the installed-binary verifier;
+it never reads the API environment or executes the build-tree receipt path.
+Root registration does not execute the GUI.
+
+The virtual-X11 acceptance separately owns a temporary display, exercises the
+real window and dialog, then exits both GUI and display. Neither provisioning
+nor that acceptance installs a persistent GUI session, remote desktop listener,
+or user login autostart. Installed launcher receipts declare
+`operator_desktop_tested=false`; actual desktop behavior needs separate observation.
 
 The transaction remains open through the existing smoke/eval jobs. Only their
 successful conclusion commits/stamps publish. Failure restores the prior API
@@ -378,12 +420,15 @@ managed-service publication still requires a successful publish-stage rollout.
 
 ## LAN TLS verification repair (2026-08-28)
 
-On hart-server, the machine's own hostname resolves to `127.0.1.1`, while the
-managed nginx listener deliberately binds only `192.168.1.2:8443`. Deployment
-verification now connects to the provisioned LAN address while retaining the
+At the time of this repair, hart-server's hostname resolved to `127.0.1.1`
+while the managed nginx listener bound only `192.168.1.2:8443`. Deployment
+verification connects to the provisioned LAN address while retaining the
 configured hostname for TLS SNI, certificate verification and the HTTP Host
-header. It does not change DNS, widen the listener, disable certificate checks,
-use environment proxies, or follow redirects with the bearer token.
+header. The current renderer now uses the wildcard port-8443 listener with the
+explicit configured-LAN allow rule and deny-all fallback described above, so
+nginx startup does not require that address to exist yet. The verifier does not
+change DNS, disable certificate checks, use environment proxies, or follow
+redirects with the bearer token.
 
 `python3 scripts/test-managed-tls.py` exercises real loopback TLS with disposable
 certificates, including wrong-host and untrusted-certificate rejection before

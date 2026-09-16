@@ -45,6 +45,7 @@ typedef struct admission_state {
     stage_list source, admitted, current;
     physicality_descriptor_vocabulary_t *vocabulary;
     physicality_descriptor_capture_t *capture;
+    physicality_descriptor_plan_t *source_validation;
     physicality_descriptor_materialization_t *materialization;
     intent_stage_t *output[3];
     hash128_t *missing;
@@ -127,6 +128,8 @@ static void admission_cleanup(void *arg)
         }
     physicality_descriptor_materialization_free(s->materialization);
     s->materialization = NULL;
+    physicality_descriptor_plan_free(s->source_validation);
+    s->source_validation = NULL;
     physicality_descriptor_capture_free(s->capture);
     s->capture = NULL;
     physicality_descriptor_vocabulary_free(s->vocabulary);
@@ -643,11 +646,74 @@ static void admission_prepare_provider_plans(admission_state *s,
     if (!s->metadata_plan || !s->payload_plan) admission_invalid("could not prepare provider set queries");
 }
 
+/* Release only this owner's imported source copy. The caller's stages and
+ * SQL argument arrays are untouched. Decoded capture rows own their geometry. */
+static void admission_retire_source_stages(admission_state *s)
+{
+    for (size_t i = 0; i < s->source.count; ++i) {
+        size_t bytes = intent_stage_memory_bytes(s->source.items[i]);
+        intent_stage_free(s->source.items[i]);
+        s->source.items[i] = NULL;
+        s->bytes -= bytes;
+    }
+    s->bytes -= s->source.capacity * sizeof(*s->source.items);
+    if (s->source.items != NULL) pfree(s->source.items);
+    s->source.items = NULL;
+    s->source.count = s->source.capacity = 0;
+}
+
+static void admission_capture_status(admission_state *s,
+    physicality_descriptor_status_t status, const char *phase, size_t source_count)
+{
+    if (status == PHYSICALITY_DESCRIPTOR_OK) return;
+    if (status == PHYSICALITY_DESCRIPTOR_CANCELLED) admission_status(status, phase);
+    ereport(ERROR, (errcode(status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED ?
+                           ERRCODE_PROGRAM_LIMIT_EXCEEDED : ERRCODE_INVALID_PARAMETER_VALUE),
+        errmsg("physicality descriptor admission original-form capture failed (native status %d)",
+               (int)status),
+        errdetail("phase=%s grant_bytes=%zu retained_bytes=%zu remaining_bytes=%zu "
+                  "source_forms=%zu preflight_stored_vertices=%zu",
+                  phase, s->maximum_bytes, s->bytes, s->maximum_bytes - s->bytes,
+                  source_count, s->stored_vertices)));
+}
+
+static void admission_capture_source(admission_state *s,
+    const physicality_descriptor_basis_t *basis, size_t source_count)
+{
+    size_t count = 0;
+    physicality_descriptor_limits_t limits;
+    physicality_descriptor_status_t status =
+        physicality_descriptor_capture_stage_rows_cancelable(
+            (const intent_stage_t *const *)s->source.items, s->source.count,
+            s->maximum_bytes - s->bytes, &admission_cancellation, &s->capture);
+    admission_capture_status(s, status, "original-form row capture", source_count);
+    admission_native_peak(s, physicality_descriptor_capture_peak_bytes(s->capture));
+    admission_charge(s, physicality_descriptor_capture_bytes(s->capture));
+
+    /* The original implementation kept these encoded tuples alive alongside
+     * their complete decoded copy and the preliminary descriptor graph. No
+     * subsequent source read uses them. Record their real coexistence above,
+     * then reclaim only their exact retained allocation before graph validation. */
+    admission_retire_source_stages(s);
+    const physicality_descriptor_input_t *inputs =
+        physicality_descriptor_capture_inputs(s->capture, &count);
+    if (count != source_count) admission_invalid("decoded source count changed");
+    limits.maximum_plan_bytes = s->maximum_bytes - s->bytes;
+    status = physicality_descriptor_plan_build_cancelable(inputs, count, basis,
+        &limits, &admission_cancellation, &s->source_validation);
+    admission_capture_status(s, status, "original-form descriptor validation", source_count);
+    admission_native_peak(s, physicality_descriptor_plan_peak_bytes(s->source_validation));
+    /* Full original-form validation is still required, including excluded
+     * non-Content rows. Later materialization consumes the owned rows, not this
+     * preliminary plan. The outer context owns both objects on every error. */
+    physicality_descriptor_plan_free(s->source_validation);
+    s->source_validation = NULL;
+}
+
 static void admission_materialize(admission_state *s,
     const physicality_descriptor_source_observation_t *sources, size_t source_count,
     int64_t generated_at, laplace_physicality_pg_admission_result *result)
 {
-    physicality_descriptor_limits_t limits;
     hash128_t generated_source, floor;
     size_t form_count = 0, floor_bytes, source_peak = 0, actual_count = 0;
     Datum snapshot_text;
@@ -677,29 +743,7 @@ static void admission_materialize(admission_state *s,
     admission_charge(s, floor_bytes);
     floor = *physicality_descriptor_vocabulary_floor_receipt(s->vocabulary);
     admission_logical(s, s->source_logical);
-    limits.maximum_plan_bytes = s->maximum_bytes - s->bytes;
-    {
-        physicality_descriptor_status_t status = physicality_descriptor_capture_stages_cancelable(
-            (const intent_stage_t *const *)s->source.items, s->source.count,
-            physicality_descriptor_vocabulary_basis(s->vocabulary), &limits,
-            s->maximum_bytes - s->bytes, &admission_cancellation, &s->capture);
-        if (status == PHYSICALITY_DESCRIPTOR_CANCELLED) admission_status(status, "original-form capture");
-        if (status != PHYSICALITY_DESCRIPTOR_OK)
-            ereport(ERROR, (errcode(status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED ?
-                                   ERRCODE_PROGRAM_LIMIT_EXCEEDED : ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("physicality descriptor admission original-form capture failed (native status %d)",
-                       (int)status),
-                errdetail("grant_bytes=%zu retained_bytes=%zu remaining_bytes=%zu "
-                          "source_forms=%zu preflight_stored_vertices=%zu",
-                          s->maximum_bytes, s->bytes, s->maximum_bytes - s->bytes,
-                          source_count, s->stored_vertices)));
-    }
-    admission_native_peak(s, physicality_descriptor_capture_peak_bytes(s->capture));
-    /* This owner retains the fully validated source rows for materialization,
-     * not their preliminary plan. Preserve the observed capture peak and all
-     * logical-work charges; only its retained allocation is reduced. */
-    physicality_descriptor_capture_release_plan(s->capture);
-    admission_charge(s, physicality_descriptor_capture_bytes(s->capture));
+    admission_capture_source(s, physicality_descriptor_vocabulary_basis(s->vocabulary), source_count);
 
     s->snapshot = RegisterSnapshot(GetActiveSnapshot());
     snapshot_text = PointerGetDatum(admission_snapshot_text(s));

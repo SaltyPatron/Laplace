@@ -25,6 +25,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "laplace.chess-acceptance/v1"
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 PROFILE = {
     "recorded": {"games": 24, "depth": 4, "concurrency": [1, 2, 4],
                  "repeats": 3, "caseTimeoutSeconds": 600,
@@ -250,9 +251,21 @@ def lichess_status(payload):
             "verification": "Read-only configured account and event-stream state; no remote game or account mutation."}
 
 
+def boot_id():
+    """Observe the current Linux boot; this does not measure an OS restart."""
+    with BOOT_ID_PATH.open("r", encoding="ascii") as stream:
+        value = stream.read(38)
+    if re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\n?", value) is None:
+        raise ValueError("current Linux boot identity is malformed")
+    return value.rstrip("\n")
+
+
 def services(output):
     base = os.environ.get("LAPLACE_API_BASE", "http://127.0.0.1:5187")
     proof = {"coldBootMeasured": False, "scope": "Current response latency, not boot duration"}
+    save(output / "services.json", proof)
+    proof["bootId"] = boot_id()
+    proof["unitFileStates"] = {}
     save(output / "services.json", proof)
     health, proof["api"] = response(base, "/health", 65536)
     if json.loads(health).get("status") != "ok":
@@ -263,8 +276,11 @@ def services(output):
     save(output / "services.json", proof)
     for unit in ("laplace-api", "laplace-mcp", "laplace-lichess"):
         command(["systemctl", "show", unit, "--no-pager",
-                 "--property=Id,ActiveState,SubState,MainPID,ExecMainStartTimestamp,ActiveEnterTimestamp,ExecMainStartTimestampMonotonic,ActiveEnterTimestampMonotonic"],
+                 "--property=Id,LoadState,UnitFileState,ActiveState,SubState,MainPID,ExecMainStartTimestamp,ActiveEnterTimestamp,ExecMainStartTimestampMonotonic,ActiveEnterTimestampMonotonic"],
                 output / (unit + "-state.txt"), 15)
+        state = dict(line.split("=", 1) for line in (output / (unit + "-state.txt")).read_text().splitlines() if "=" in line)
+        proof["unitFileStates"][unit] = state.get("UnitFileState")
+        save(output / "services.json", proof)
     raw, http = response(os.environ.get("LAPLACE_LICHESS_STATUS_BASE", "http://127.0.0.1:5189"), "/status", 65536)
     online = lichess_status(json.loads(raw))
     online["http"] = http
@@ -279,12 +295,13 @@ def unit_states():
     result = {}
     for unit in ("laplace-api", "laplace-mcp", "laplace-lichess"):
         completed = subprocess.run(["systemctl", "show", unit, "--no-pager",
-                                    "--property=MainPID,ExecMainStartTimestampMonotonic,ActiveState,SubState"],
+                                    "--property=MainPID,ExecMainStartTimestampMonotonic,ActiveState,SubState,UnitFileState"],
                                    check=True, capture_output=True, text=True, timeout=15)
         values = dict(line.split("=", 1) for line in completed.stdout.splitlines() if "=" in line)
         result[unit] = {"pid": int(values.get("MainPID", "0")),
                         "startMonotonicUsec": int(values.get("ExecMainStartTimestampMonotonic", "0")),
-                        "activeState": values.get("ActiveState"), "subState": values.get("SubState")}
+                        "activeState": values.get("ActiveState"), "subState": values.get("SubState"),
+                        "unitFileState": values.get("UnitFileState")}
     return result
 
 
@@ -296,6 +313,8 @@ def measure_service_startup(output, readiness_timeout=60):
     save(directory / "receipt.json", proof)
     started = None
     try:
+        proof["bootIdBefore"] = boot_id()
+        save(directory / "receipt.json", proof)
         before = unit_states()
         proof["before"] = before
         save(directory / "receipt.json", proof)
@@ -332,6 +351,9 @@ def measure_service_startup(output, readiness_timeout=60):
                 time.sleep(min(1, remaining))
         after = unit_states()
         proof["after"] = after
+        proof["bootIdAfter"] = boot_id()
+        if proof["bootIdAfter"] != proof["bootIdBefore"]:
+            raise ValueError("Linux boot identity changed during service restart observation")
         for name, current in after.items():
             prior = before[name]
             if current["pid"] <= 0:
@@ -347,6 +369,7 @@ def measure_service_startup(output, readiness_timeout=60):
         proof["status"] = "passed"
         return {"serviceRestartStartupMeasured": True,
                 "restartToFullReadinessSeconds": time.monotonic() - started,
+                "bootId": proof["bootIdAfter"],
                 "services": proof["services"], "readiness": proof["readiness"]}
     finally:
         if started is not None:

@@ -107,6 +107,7 @@ phase_chess_lab
         self.assertEqual(1, len(checks), checks)
         self.assertIn("--binary " + str(self.base / "install/bin/cutechess"), checks[0])
         self.assertIn("--verify-receipt " + str(self.base / "cutechess-gui-build.json"), checks[0])
+        self.assertIn("--install-desktop " + str(self.base / "install"), checks[0])
 
     def test_chess_unchanged_stamp_requires_gui_artifacts_and_successful_reverification(self):
         _, script = self.chess_publication_fixture()
@@ -160,7 +161,11 @@ GUI_VERIFICATION_FAILURE=1 phase_chess_lab
         modules.mkdir(parents=True)
         core = self.base / "install/lib/liblaplace_core.so"
         dynamics = self.base / "install/lib/liblaplace_dynamics.so"
-        for artifact in (modules / "laplace_substrate.so", modules / "laplace_geom.so", core, dynamics):
+        floors = self.base / "install/share/laplace"
+        floors.mkdir(parents=True)
+        position = floors / "laplace_chess_position_perfcache.bin"
+        transition = floors / "laplace_chess_transition_perfcache.bin"
+        for artifact in (modules / "laplace_substrate.so", modules / "laplace_geom.so", core, dynamics, position, transition):
             artifact.write_bytes(b"installed image")
 
         def digest():
@@ -171,8 +176,8 @@ GUI_VERIFICATION_FAILURE=1 phase_chess_lab
         before = digest()
         self.assertEqual(before, digest())
         # An execution module can need new exports even when neither preload
-        # module changed. Each engine dependency independently requires reload.
-        for artifact in (core, dynamics):
+        # module changed. Each engine dependency and mapped chess floor independently requires reload.
+        for artifact in (core, dynamics, position, transition):
             with self.subTest(library=artifact.name):
                 artifact.write_bytes(b"new engine image")
                 self.assertNotEqual(before, digest())

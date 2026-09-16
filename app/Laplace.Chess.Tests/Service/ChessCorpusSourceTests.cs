@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
@@ -222,6 +223,49 @@ public sealed class ChessCorpusSourceTests
         finally { Directory.Delete(directory, true); }
     }
 
+
+    [Theory]
+    [InlineData("failed", 0)]
+    [InlineData("failed", 123)]
+    [InlineData("cancelled", 0)]
+    [InlineData("cancelled", 123)]
+    public void FailedSummaryRetainsPartialWorkButNeverPublishesANumericRate(string status, int sealedGames)
+    {
+        // Reporting-only control: these counters are not database or throughput evidence.
+        // A stale successful candidate may exist before late replay/disposal failure.
+        var result = ChessCorpusBenchmark.CreateResult(status, sealedGames, 45, 3000,
+            qualifiedWindow: true, targetMet: true, receiptPath: "retained/corpus-recording.json");
+        Assert.False(result.Completed);
+        Assert.Equal(sealedGames, result.NewlyRecordedGames);
+        Assert.Equal(45d, result.ElapsedSeconds);
+        Assert.Null(result.GamesPerSecond);
+        Assert.False(result.QualifiedWindow);
+        Assert.False(result.TargetMet);
+        using var summary = JsonDocument.Parse(JsonSerializer.Serialize(result,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(JsonValueKind.Null, summary.RootElement.GetProperty("gamesPerSecond").ValueKind);
+        Assert.Equal(sealedGames, summary.RootElement.GetProperty("newlyRecordedGames").GetInt32());
+        Assert.Equal("retained/corpus-recording.json",
+            summary.RootElement.GetProperty("receiptPath").GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CompletedSummaryPreservesSampleRateAndSeparateDurationQualification(bool qualified)
+    {
+        var result = ChessCorpusBenchmark.CreateResult("completed", 120_000,
+            qualified ? 40 : 20, qualified ? 3000 : 6000, qualified, qualified, "retained");
+        Assert.True(result.Completed);
+        Assert.Equal(qualified ? 3000d : 6000d, result.GamesPerSecond);
+        Assert.Equal(qualified, result.QualifiedWindow);
+        Assert.Equal(qualified, result.TargetMet);
+        using var summary = JsonDocument.Parse(JsonSerializer.Serialize(result,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(qualified ? 3000d : 6000d,
+            summary.RootElement.GetProperty("gamesPerSecond").GetDouble());
+    }
+
     private sealed class FailingCleanup(Exception failure) : IAsyncDisposable
     {
         public bool Disposed { get; private set; }
@@ -249,6 +293,8 @@ public sealed class ChessCorpusSourceTests
         Assert.Equal("failed", failure.Status);
         Assert.Equal(nameof(IOException), failure.ErrorType);
         Assert.Equal("retained cleanup failed", failure.Error);
+        Assert.Null(ChessCorpusBenchmark.CreateResult(failure.Status, 2000, 45, 2000d / 45,
+            qualifiedWindow: true, targetMet: false, receiptPath: "retained").GamesPerSecond);
     }
 
     [Fact]
@@ -264,6 +310,8 @@ public sealed class ChessCorpusSourceTests
         Assert.NotNull(failure);
         Assert.Equal("cancelled", failure.Status);
         Assert.Equal(nameof(OperationCanceledException), failure.ErrorType);
+        Assert.Null(ChessCorpusBenchmark.CreateResult(failure.Status, 2000, 45, 2000d / 45,
+            qualifiedWindow: true, targetMet: false, receiptPath: "retained").GamesPerSecond);
         Assert.Null(await ChessCorpusBenchmark.CaptureFailureAsync(() => Task.CompletedTask));
     }
 

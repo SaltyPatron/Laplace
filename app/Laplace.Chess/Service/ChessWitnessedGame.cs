@@ -35,4 +35,8 @@ public sealed record ChessWitnessedGame(
     /// <summary>The exact first constituent read from the stored line Content manifest.
     /// Null means this record was constructed without that native readback.</summary>
     public Hash128? StartPositionId { get; init; }
+
+    /// <summary>Derived complete replay retained only by the byte-preflighted strict read owner.
+    /// This is transient export work, not witnessed testimony or a content constituent.</summary>
+    internal ChessReplayResult? AdmittedReplay { get; init; }
 }
