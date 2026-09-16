@@ -24,6 +24,7 @@ registry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(registry)
 
 POLICY_IDS = {
+    "policy-cutechess-gui-game",
     "policy-cutechess-user-engines",
     "policy-chess-floor-serving",
     "policy-chess-floor-artifacts",
