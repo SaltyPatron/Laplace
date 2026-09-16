@@ -1,0 +1,81 @@
+name: Read retained Stockfish corpus coverage
+on:
+  push:
+    branches: [diag/read-stockfish-coverage-20260916]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  read-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify archive bytes and read bounded coverage fields
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, io, json, os, urllib.error, urllib.parse, urllib.request, zipfile
+          REPO = "SaltyPatron/Laplace"
+          ARTIFACT = 10423780984
+          EXPECTED_SIZE = 65240
+          EXPECTED_SHA = "0384e3ec69e51b0aa59691caf6ffb0ee2e44bc84fb7eaf7507a7fa04f21d02d3"
+          HEAD = "cf38c9f89b69ebed003168ea7c8bb26e8855dd73"
+          BASE = "https://api.github.com/repos/" + REPO + "/actions/artifacts/" + str(ARTIFACT)
+          HEADERS = {"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+          with urllib.request.urlopen(urllib.request.Request(BASE, headers=HEADERS), timeout=20) as response:
+              metadata = json.load(response)
+          assert metadata["id"] == ARTIFACT and metadata["name"] == "laplace-stockfish-corpus-35035410768-1"
+          assert not metadata["expired"] and metadata["size_in_bytes"] == EXPECTED_SIZE
+          assert metadata["digest"] == "sha256:" + EXPECTED_SHA
+          assert metadata["workflow_run"]["id"] == 35035410768 and metadata["workflow_run"]["head_sha"] == HEAD
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          try:
+              urllib.request.build_opener(NoRedirect()).open(urllib.request.Request(BASE + "/zip", headers=HEADERS), timeout=20)
+              raise RuntimeError("artifact endpoint did not return its expected redirect")
+          except urllib.error.HTTPError as error:
+              assert error.code == 302
+              location = error.headers["Location"]
+              error.close()
+          assert urllib.parse.urlsplit(location).scheme == "https"
+          # The storage download deliberately carries no GitHub Authorization header.
+          with urllib.request.urlopen(urllib.request.Request(location), timeout=20) as response:
+              payload = response.read(EXPECTED_SIZE + 1)
+          assert len(payload) == EXPECTED_SIZE
+          actual_sha = hashlib.sha256(payload).hexdigest()
+          assert actual_sha == EXPECTED_SHA
+          print("ARTIFACT_BYTES_VERIFIED " + json.dumps({"artifact": ARTIFACT, "run": 35035410768, "head": HEAD, "bytes": len(payload), "sha256": actual_sha}, sort_keys=True))
+          archive = zipfile.ZipFile(io.BytesIO(payload))
+          entries = archive.infolist()
+          assert len(entries) <= 128 and sum(entry.file_size for entry in entries) <= 32 * 1024 * 1024
+          print("ARTIFACT_MEMBERS " + json.dumps([{"name": item.filename, "bytes": item.file_size} for item in entries], sort_keys=True))
+          fields = {"schema","status","selected_files","selectedFiles","tracked_files","trackedFiles","selected_bytes","selectedBytes","unadmitted_entries","all_tracked_bytes_roundtripped","files_verified","tracked_entries","trackedEntries","verified"}
+          def report(value, path, depth=0):
+              if depth > 12:
+                  return
+              if isinstance(value, dict):
+                  for key, item in value.items():
+                      child = path + "." + key
+                      if key == "coverage":
+                          encoded = json.dumps(item, sort_keys=True)
+                          assert len(encoded) <= 65536
+                          print("COVERAGE " + child + " " + encoded)
+                      elif key in fields and isinstance(item, (str, int, float, bool, type(None))):
+                          print("FIELD " + child + " " + json.dumps(item))
+                      elif isinstance(item, dict):
+                          report(item, child, depth + 1)
+              elif isinstance(value, list):
+                  for index, item in enumerate(value[:32]):
+                      if isinstance(item, dict):
+                          report(item, path + "[" + str(index) + "]", depth + 1)
+          for entry in entries:
+              if entry.filename.endswith(".json") and not entry.is_dir():
+                  assert entry.file_size <= 8 * 1024 * 1024
+                  document = json.loads(archive.read(entry))
+                  print("JSON_KEYS " + entry.filename + " " + json.dumps(list(document) if isinstance(document, dict) else {"list_count":len(document)}))
+                  report(document, entry.filename)
+          PY
