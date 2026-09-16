@@ -193,6 +193,22 @@
       "required": true
     },
     {
+      "id": "policy-postgresql-release",
+      "profile": "policy",
+      "owner": "database",
+      "runner": "script",
+      "command": [
+        "python3",
+        "scripts/test-postgresql-release.py"
+      ],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-zstd-release",
       "profile": "policy",
       "owner": "chess",

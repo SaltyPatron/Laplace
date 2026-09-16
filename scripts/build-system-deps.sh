@@ -59,6 +59,7 @@ deps_fingerprint() {
     echo "isa=$ISA"
     echo "prefix=$PREFIX"
     echo "external=$EXT"
+    echo "postgresql-release=$(sha256sum "$ROOT/deploy/postgresql-release.json" | awk '{print $1}')"
     # HASH THE SUPERBUILD, don't just note its presence.
     #
     # external/CMakeLists.txt carries the postgres configure line, including
@@ -110,8 +111,12 @@ deps_fingerprint() {
       fi
 }
 
+postgresql_installed() {
+  python3 "$ROOT/scripts/postgresql-release.py" installed --prefix "$PREFIX/pgsql-18" >/dev/null
+}
+
 installs_present() {
-  [ -x "$PREFIX/pgsql-18/bin/postgres" ] || return 1
+  postgresql_installed || return 1
   [ -e "$PREFIX/proj/lib" ] || [ -e "$PREFIX/proj/lib64" ] || return 1
   [ -e "$PREFIX/geos/lib" ] || [ -e "$PREFIX/geos/lib64" ] || return 1
   [ -e "$PREFIX/gdal/lib" ] || [ -e "$PREFIX/gdal/lib64" ] || return 1
@@ -265,6 +270,9 @@ if [ ! -d "$EXT" ]; then
   red "missing $EXT — run sync-external / setup-host prefix first"
   exit 1
 fi
+# Refuse mutable host pins or a checkout that disagrees with the tracked release.
+python3 "$ROOT/scripts/postgresql-release.py" source --external "$EXT"
+
 if [ ! -f "$ROOT/external/CMakeLists.txt" ]; then
   # The superbuild is HOW deps are built from source, not WHETHER they are
   # installed. 391d9be7 deleted it (224 lines) with .gitmodules when the deps
@@ -349,7 +357,11 @@ if [ "$FORCE" != "1" ] && installs_present; then
   fi
 fi
 
-if [ "$FORCE" = "1" ]; then
+if ! postgresql_installed; then
+  yellow "PostgreSQL installed tools differ from the tracked release — rebuilding clean autoconf trees"
+  invalidate_ep_stamps
+  purge_autoconf_build_trees
+elif [ "$FORCE" = "1" ]; then
   yellow "LAPLACE_FORCE_DEPS=1 — rebuilding"
   invalidate_ep_stamps
   purge_autoconf_build_trees
