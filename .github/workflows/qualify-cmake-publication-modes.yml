@@ -47,7 +47,8 @@ jobs:
           case = module.CMakeProvisionTests()
           case.setUp()
           case.base.chmod(0o755)
-          case.root = case.base / "prefix" / "tools" / "cmake"
+          case.root = Path(os.environ["FIXTURE_ROOT"]) / "prefix" / "tools" / "cmake"
+          case.work = Path(os.environ["FIXTURE_ROOT"]) / "acquisition"
           raw = case.archive()
           previous = os.umask(0o077)
           try:
