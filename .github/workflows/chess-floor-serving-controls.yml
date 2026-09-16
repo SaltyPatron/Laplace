@@ -61,18 +61,16 @@ jobs:
           done <<'SOURCE_OWNERS'
           100644 24262d1a0bab0f10bf9d1d23540e7167718a8c1b deploy/linux/deploy.sh
           100644 08b77f507ba79051976407676b2677a636d685b0 deploy/linux/payload-sync.sh
-          100644 74735da619fdf755e992374b5f64a2d46d380a23 scripts/check-application-runtime.py
-          100644 10d187f6a49da2d97979e34633c9ab7ea5ec8717 scripts/export-qualified-chess-floors.py
+          100644 a8ff84e4cee7c3bb43ab7162a44ca04cc0976bf4 scripts/check-application-runtime.py
+          100644 008ce36f55246452e738436dbe3b33682a64db8a scripts/export-qualified-chess-floors.py
           100755 5ad0e037f56aef0827780b0609f9e5edfcc60124 scripts/measure-installed-chess-corpus.py
           100755 51e9a74ff7e309cf3bb040138c3de3b5174ef131 scripts/postgresql-release.py
           100755 de02b13620f96442f2ad0246dffe411da4418ffd scripts/publish-applications.sh
           100755 fa50997cce0157c8cc42217c5630b6770223707a scripts/verify-api-payload.py
           100755 663a756c609f26b006ca19c9f6494ed195b8a5cb deploy/linux/managed-publish.sh
           100755 3963399842a2ce24a668a30d1660ceb7a25c6c9f scripts/pipeline.sh
-          100755 46fa6bd8fa99279da4da523a65af7f84768eca8c scripts/wait-for-quiet-substrate.sh
           100755 d4b12520bf2783984c19d9b9d9fda63e8ba3f51b scripts/test-parallel.sh
-          100755 dce577c252299f378aed714e0a5c4f144a0104e3 scripts/bootstrap-ingest-liveness.py
-          100755 58621ba3680a1d10a47542002882d3365dbed640 scripts/product-ci.sh
+          100755 492c853750ee511b93c858390b587db647cbea53 scripts/product-ci.sh
           SOURCE_OWNERS
           [[ ! -L "$GITHUB_WORKSPACE" && "$(pwd -P)" == "$GITHUB_WORKSPACE" ]]
           python3 - <<'PY'
@@ -245,11 +243,6 @@ jobs:
           phase native-tests bash scripts/test-parallel.sh --profile dev-native --suite native-dev
           phase managed-tests bash scripts/test-parallel.sh --profile dev-managed --suite managed-dev
           phase uci-tests bash scripts/test-parallel.sh --profile dev-managed --suite uci-dev
-          prepare_and_wait_for_quiet() {
-            python3 scripts/bootstrap-ingest-liveness.py apply --database "$PGDATABASE" --user laplace_admin --psql /opt/laplace/pgsql-18/bin/psql
-            bash scripts/wait-for-quiet-substrate.sh "$PGDATABASE" 180
-          }
-          phase quiet-native-owner prepare_and_wait_for_quiet
           if /usr/bin/systemctl is-active --quiet laplace-api.service; then API_WAS_ACTIVE=1; fi
           NATIVE_INSTALL_STARTED=1
           phase native-install bash scripts/pipeline.sh install
