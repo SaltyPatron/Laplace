@@ -1,4 +1,4 @@
-name: Supersede the queued native source before execution
+name: Orderly foundation interruption for native update and recorded pilot
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
@@ -6,51 +6,57 @@ permissions:
   contents: read
   actions: write
 jobs:
-  cancel:
+  pause:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
-      - name: Cancel only the unassigned native attempt before current source binding
+      - name: Cancel only the observed foundation ladder and retain terminal state
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=5s 100s python3 -B - <<'PY'
+          timeout --signal=TERM --kill-after=5s 150s python3 -B - <<'PY'
           import json,os,time,urllib.request
           base="https://api.github.com/repos/SaltyPatron/Laplace"
           headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"}
+          run_id=35145274819
+          source="ab1d442ffe7f26deaac3e19784e0483abba4ee4f"
           def api(path,method="GET"):
               request=urllib.request.Request(base+path,headers=headers,method=method,data=b"{}" if method=="POST" else None)
-              with urllib.request.urlopen(request,timeout=15) as response:
-                  raw=response.read(262145)
+              with urllib.request.urlopen(request,timeout=15) as response: raw=response.read(262145)
               assert len(raw)<=262144
               return json.loads(raw) if raw else {}
-          selected=[(35152180781,"f06d5254ebd957f325f8334cbeb1294a9f58eebd")]
-          for run_id,source in selected:
-              run=api("/actions/runs/"+str(run_id))
-              assert run["id"]==run_id and run["head_sha"]==source and run["run_attempt"]==1
-              assert run["path"]==".github/workflows/chess-floor-serving-controls.yml"
-              assert run["head_branch"]=="verify/chess-floor-serving-controls-20260916" and run["event"]=="push"
-              jobs=api("/actions/runs/"+str(run_id)+"/jobs")["jobs"]
-              assert len(jobs)==1
-              job=jobs[0]
-              observation={"run":run_id,"source":source,"status":run["status"],"conclusion":run["conclusion"],
-                           "job":job["id"],"jobStatus":job["status"],"runnerId":job["runner_id"],"runnerName":job["runner_name"]}
-              print("OBSERVER_RETIRE_BEFORE "+json.dumps(observation),flush=True)
-              if run["status"]=="completed":
-                  print("OBSERVER_ALREADY_TERMINAL "+str(run_id),flush=True)
-                  continue
-              assert run["status"]=="queued" and job["status"]=="queued", "observer began: cancellation refused"
-              assert not job.get("runner_id") and not job.get("runner_name") and not job.get("steps"),"assigned observer preserved"
+          run=api("/actions/runs/"+str(run_id))
+          assert run["id"]==run_id and run["head_sha"]==source and run["run_attempt"]==1
+          assert run["event"]=="workflow_dispatch" and run["path"]==".github/workflows/seed-foundation.yml" and run["head_branch"]=="main"
+          jobs=api("/actions/runs/"+str(run_id)+"/jobs")["jobs"]
+          selected=[job for job in jobs if job["id"]==104959583060]
+          assert len(selected)==1
+          job=selected[0]
+          assert job["name"]=="foundation ladder → laplace"
+          print("FOUNDATION_HANDOFF_BEFORE "+json.dumps({"run":run_id,"source":source,"status":run["status"],"conclusion":run["conclusion"],
+              "job":job["id"],"jobStatus":job["status"],"runner":job["runner_name"],"steps":job["steps"]}),flush=True)
+          if run["status"]=="completed":
+              print("FOUNDATION_ALREADY_TERMINAL "+json.dumps({"run":run_id,"conclusion":run["conclusion"]}),flush=True)
+          else:
+              assert run["status"]=="in_progress" and job["status"]=="in_progress"
+              assert any(step["name"]=="Ensure foundation" and step["status"]=="in_progress" for step in job["steps"])
               api("/actions/runs/"+str(run_id)+"/cancel","POST")
-              print("OBSERVER_CANCEL_ACK "+str(run_id),flush=True)
-              end=time.monotonic()+30
+              print("FOUNDATION_CANCEL_ACK "+str(run_id),flush=True)
+              end=time.monotonic()+90
               while time.monotonic()<end:
-                  result=api("/actions/runs/"+str(run_id))
-                  assert result["head_sha"]==source and result["run_attempt"]==1
-                  if result["status"]=="completed": break
-                  time.sleep(1)
-              assert result["status"]=="completed" and result["conclusion"]=="cancelled"
-              print("OBSERVER_RETIRE_TERMINAL "+json.dumps({"run":run_id,"source":source,"status":result["status"],"conclusion":result["conclusion"]}),flush=True)
+                  run=api("/actions/runs/"+str(run_id))
+                  assert run["head_sha"]==source and run["run_attempt"]==1
+                  if run["status"]=="completed": break
+                  time.sleep(2)
+              assert run["status"]=="completed" and run["conclusion"]=="cancelled"
+              jobs=api("/actions/runs/"+str(run_id)+"/jobs")["jobs"]
+              job=next(job for job in jobs if job["id"]==104959583060)
+              print("FOUNDATION_HANDOFF_TERMINAL "+json.dumps({"run":run_id,"source":source,"status":run["status"],"conclusion":run["conclusion"],
+                  "jobStatus":job["status"],"jobConclusion":job["conclusion"],"completedAt":job["completed_at"],
+                  "scope":"Workflow terminal only; process/backend/journal quiescence remains to be observed"}),flush=True)
+          print("FOUNDATION_RESUME_INTENT "+json.dumps({"workflow":"seed-foundation.yml","source":"ladder","database":"laplace",
+              "force":False,"path":"","run_idempotency":False,"after":"native installation and authentic 2000-game pilot terminal",
+              "scope":"Future ordinary dispatch; no force/eviction, completed file markers retained"}),flush=True)
           PY
