@@ -8,10 +8,10 @@ NOTICE:  extension "laplace_substrate" already exists, skipping
 -- (3Ca: refutation is visible to scoring but a net-negative candidate is
 -- never walked into, even as the only option -- doc 15 I2 combined with the
 -- live regression this exact scenario caught via converse.sql's "syn_bad"
--- fixture), highway-mask gating (3Cb), and astar_path_raw's opt-in geometry
--- heuristic default-safety. Fixture ids are hand-picked distinct bytes,
--- same convention as entities_exist_bitmap.sql -- not real content-addressed
--- hashes.
+-- fixture), accelerator-mask fail-open parity, and astar_path_raw's opt-in
+-- geometry heuristic default-safety. Fixture ids are hand-picked distinct
+-- bytes, same convention as entities_exist_bitmap.sql -- not real
+-- content-addressed hashes.
 CREATE TEMP TABLE walk_c_fixtures AS
 SELECT * FROM (VALUES
     ('subject',          decode(repeat('a1', 16), 'hex')),
@@ -97,8 +97,7 @@ FROM consensus.walk_branches(
  t
 (1 row)
 
--- 3Cb: NULL intent mask -- unfiltered; confirmed edge still walked (refuted
--- stays excluded by the 3Ca score floor regardless of masking).
+-- NULL accelerator mask: canonical result remains visible.
 SELECT count(*) = 1 AS null_mask_confirmed_present
 FROM consensus.walk_branches(
     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
@@ -108,8 +107,8 @@ FROM consensus.walk_branches(
  t
 (1 row)
 
--- 3Cb: intent mask sharing a bit with the confirmed object's highway_mask --
--- confirmed edge survives the gate.
+-- A matching cached mask may accelerate a future implementation, but cannot be
+-- semantic authority. It therefore returns the same canonical result today.
 SELECT count(*) = 1 AS overlapping_mask_confirmed_present
 FROM consensus.walk_branches(
     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
@@ -120,15 +119,16 @@ FROM consensus.walk_branches(
  t
 (1 row)
 
--- 3Cb: intent mask with zero bit overlap against the confirmed object's
--- highway_mask -- gated out before scoring even runs.
-SELECT count(*) = 0 AS disjoint_mask_excludes_confirmed
+-- A stale/partial/disjoint cached mask must also return the same answer. This is
+-- the accelerator-only law from #529: a mask miss may change the physical plan,
+-- never the truth visible to the caller.
+SELECT count(*) = 1 AS disjoint_mask_cannot_hide_confirmed
 FROM consensus.walk_branches(
     (SELECT id FROM walk_c_fixtures WHERE name = 'subject'),
     laplace.relation_type_id('COMPLETES_TO'), 1, 10,
     decode(repeat('02', 32), 'hex'), NULL);
- disjoint_mask_excludes_confirmed 
-----------------------------------
+ disjoint_mask_cannot_hide_confirmed 
+-------------------------------------
  t
 (1 row)
 
