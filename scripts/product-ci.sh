@@ -6,6 +6,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 stage="${1:-all}"
+# A push to main is a development event, not an operator request to install,
+# mutate the shared database, ingest corpora, publish services, or benchmark.
+# Keep the explicit `all` dispatch semantics for operators, but cap an ordinary
+# push at the development-test boundary even if the workflow's historical
+# default still passes `all`.
+if [[ "${GITHUB_EVENT_NAME:-}" == "push" && "$stage" == "all" ]]; then
+  stage="test"
+fi
 case "$stage" in
   reconcile|check|build|test|deploy|integrate|all|application-check|applications) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
