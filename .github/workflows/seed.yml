@@ -1,0 +1,149 @@
+name: Seed — substrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "operation"
+        type: choice
+        required: true
+        default: source
+        options: [source, foundation-ladder, model]
+      source:
+        description: "ingest source key when mode=source"
+        type: string
+        required: false
+        default: ""
+      path:
+        description: "optional file, directory, corpus, or model snapshot path"
+        type: string
+        required: false
+        default: ""
+      langs:
+        description: "optional language scope; blank means all"
+        type: string
+        required: false
+        default: ""
+      database:
+        description: "target database"
+        type: choice
+        options: [laplace]
+        default: laplace
+      force:
+        description: "foundation-ladder: re-ingest every rung"
+        type: boolean
+        default: false
+      evict_before_ingest:
+        description: "source mode: retract the selected source before re-ingesting"
+        type: boolean
+        default: false
+      evict_confirm:
+        description: "exact decomposer source name required for eviction"
+        type: string
+        required: false
+        default: ""
+      chess_derived:
+        description: "after source=chess, derive move outcomes and transitions"
+        type: boolean
+        default: false
+      synthesize_model:
+        description: "after mode=model, synthesize the substrate GGUF"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    if: inputs.mode != 'foundation-ladder'
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: ${{ inputs.mode == 'model' && 'model' || inputs.source }}
+      path: ${{ inputs.path }}
+      langs: ${{ inputs.langs }}
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+      evict_before_ingest: ${{ inputs.mode == 'source' && inputs.evict_before_ingest }}
+      evict_confirm: ${{ inputs.evict_confirm }}
+
+  foundation:
+    if: inputs.mode == 'foundation-ladder'
+    name: "foundation ladder → ${{ inputs.database }}"
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 480
+    concurrency:
+      group: laplace-ingest-foundation-${{ inputs.database }}
+      cancel-in-progress: false
+    env:
+      LAPLACE_DATA_ROOT: /vault/Data
+      PGDATABASE: ${{ inputs.database }}
+      LAPLACE_DBNAME: ${{ inputs.database }}
+      LAPLACE_INGEST_CONSOLE: ci
+      INGEST_LOGDIR: /build/laplace/work/ingest-logs
+    steps:
+      - name: Checkout exact revision
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+      - uses: ./.github/actions/setup-laplace-env
+        with:
+          use_cmake: false
+          require_built_revision: true
+      - name: Ingest foundation
+        run: |
+          set -euo pipefail
+          mkdir -p "$INGEST_LOGDIR"
+          args=()
+          [[ "${{ inputs.force }}" != true ]] || args+=(--force)
+          exec bash scripts/ensure-foundation.sh "${args[@]}"
+
+  chess-move-outcomes:
+    if: inputs.mode == 'source' && inputs.source == 'chess' && inputs.chess_derived
+    needs: seed
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: chess-move-outcomes
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+
+  chess-transitions:
+    if: inputs.mode == 'source' && inputs.source == 'chess' && inputs.chess_derived
+    needs: seed
+    uses: ./.github/workflows/_ingest.yml
+    with:
+      source: chess-transitions
+      database: ${{ inputs.database }}
+      timeout_minutes: 720
+
+  synthesize:
+    if: inputs.mode == 'model' && inputs.synthesize_model
+    needs: seed
+    name: Synthesize substrate model
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 120
+    env:
+      MODEL_DIR: ${{ inputs.path }}
+      GGUF_OUT: /build/laplace/work/model-outputs/laplace-model-substrate.gguf
+    steps:
+      - name: Checkout exact revision
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+      - uses: ./.github/actions/setup-laplace-env
+        with:
+          use_cmake: false
+          require_built_revision: true
+      - name: Synthesize GGUF
+        run: |
+          set -euo pipefail
+          [[ -n "$MODEL_DIR" && -f "$MODEL_DIR/config.json" ]] || { echo "::error::mode=model requires path to a model snapshot containing config.json"; exit 1; }
+          mkdir -p "$(dirname "$GGUF_OUT")"
+          rm -f "$GGUF_OUT"
+          scripts/laplace synthesize substrate "$MODEL_DIR/config.json" "$GGUF_OUT"
+          [[ -s "$GGUF_OUT" ]] || { echo "::error::synthesis produced no GGUF"; exit 1; }
+          echo "GGUF_READY path=$GGUF_OUT bytes=$(stat -c%s "$GGUF_OUT")"

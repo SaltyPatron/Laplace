@@ -3,18 +3,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-stage="${1:-all}"
+stage="${1:-build}"
 case "$stage" in
-  reconcile|check|build|test|deploy|integrate|all|application-check|applications) ;;
+  provision|reconcile|check|build|install|database|applications|deploy|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
-run_deps() {
-  if [[ "${GITHUB_EVENT_NAME:-}" == push ]]; then
-    bash scripts/ci-deps.sh --check-only
-  else
-    bash scripts/ci-deps.sh
-  fi
+check_deps() {
+  bash scripts/ci-deps.sh --check-only
+}
+
+provision_deps() {
+  bash scripts/ci-deps.sh
 }
 
 run_build() {
@@ -34,7 +34,8 @@ run_dev_tests() {
 }
 
 run_install() {
-  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}" 60
+  python3 scripts/bootstrap-ingest-liveness.py apply --database "${PGDATABASE:-laplace}"
+  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}" 180
   bash scripts/pipeline.sh install
 }
 
@@ -61,7 +62,6 @@ run_live_tests() {
   bash scripts/test-parallel.sh --profile live --suite live-api
   bash scripts/test-parallel.sh --profile live --suite managed-live
   bash scripts/test-parallel.sh --profile live --suite generation-eval
-  [[ "${LAPLACE_GENERATION_BENCHMARK:-}" != 1 ]] || bash scripts/test-parallel.sh --perf
 }
 
 reconcile_installed_product() {
@@ -71,6 +71,9 @@ reconcile_installed_product() {
 }
 
 case "$stage" in
+  provision)
+    provision_deps
+    ;;
   check)
     bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-deps.sh scripts/test-parallel.sh
     ;;
@@ -78,44 +81,32 @@ case "$stage" in
     reconcile_installed_product
     ;;
   build)
-    run_deps
+    check_deps
     run_build
     ;;
-  test)
-    run_deps
-    run_build
-    run_dev_tests
-    ;;
-  deploy)
-    run_deps
-    run_build
+  install)
     run_install
+    ;;
+  database)
     run_database_maintenance
-    ;;
-  integrate)
-    run_deps
-    run_build
-    run_db_tests
-    ;;
-  application-check)
-    run_deps
-    run_build
-    bash scripts/publish-applications.sh check
     ;;
   applications)
-    run_deps
-    run_build
-    bash scripts/publish-applications.sh check
     run_publish
     ;;
-  all)
-    run_deps
-    run_build
+  test-dev)
     run_dev_tests
+    ;;
+  test-db)
+    run_db_tests
+    ;;
+  test-live)
+    run_live_tests
+    ;;
+  deploy)
+    check_deps
+    run_build
     run_install
     run_database_maintenance
     run_publish
-    run_db_tests
-    run_live_tests
     ;;
 esac

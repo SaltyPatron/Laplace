@@ -1,6 +1,8 @@
--- Bit-clearing work from source eviction/refolding is a durable obligation.
--- Native ingest deposits exact (entity,type) deltas inline; this queue is only
--- for recomputation that may turn bits OFF. A crash must not erase that work.
+-- Authoritative Highway-mask recomputation is a durable obligation whenever an
+-- existing cached value may differ from current consensus. This includes
+-- bit-clearing after source eviction/refolding and incremental accretion that
+-- deliberately skips a contended entity row so the accelerator cannot block
+-- canonical ingest. A crash must not erase either class of work.
 CREATE TABLE IF NOT EXISTS highway_mask_dirty (
     id bytea PRIMARY KEY
 );
@@ -15,7 +17,8 @@ CREATE TABLE IF NOT EXISTS highway_mask_pending (
 );
 
 -- Existing data needs one historical population pass. Subsequent writes use
--- native inline deposit; deployment only drains retained and dirty batches.
+-- native inline deposit when uncontended; deferred dirty identities and pending
+-- pairs remain repairable independently of canonical substrate completion.
 CREATE TABLE IF NOT EXISTS highway_mask_population_state (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     complete boolean NOT NULL DEFAULT false,

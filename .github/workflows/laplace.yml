@@ -1,30 +1,24 @@
-name: Laplace — development and operator lifecycle
+name: Laplace — operator lifecycle
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       stage:
         description: "explicit operator lifecycle stage"
         type: choice
         required: true
-        default: all
-        options: [check, build, test, deploy, integrate, all, application-check, applications]
+        default: build
+        options: [provision, build, install, database, applications, deploy, test-dev, test-db, test-live, reconcile, check]
       full_clean:
-        description: "wipe build/ before building"
+        description: "build/deploy: wipe build/ before building"
         type: boolean
         default: false
       force_codegen:
-        description: "regenerate attestation-law source before building"
+        description: "build/deploy: regenerate attestation-law source before building"
         type: boolean
         default: false
       serial_tests:
-        description: "force serial ctest"
-        type: boolean
-        default: false
-      generation_benchmark:
-        description: "run the expensive generation benchmark"
+        description: "test stages: force serial ctest"
         type: boolean
         default: false
 
@@ -42,30 +36,8 @@ env:
   LAPLACE_DATA_ROOT: /vault/Data
 
 jobs:
-  development:
-    name: Development — build and test
-    if: github.event_name == 'push'
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 120
-    concurrency:
-      group: laplace-development-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - name: Checkout exact revision
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-
-      - uses: ./.github/actions/setup-laplace-env
-
-      - name: Build and test the product
-        run: bash scripts/product-ci.sh test
-
   operator:
     name: Operator — ${{ inputs.stage }}
-    if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     concurrency:
@@ -73,11 +45,10 @@ jobs:
       cancel-in-progress: false
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}
-      LAPLACE_PROVISION_TOOLS: "1"
+      LAPLACE_PROVISION_TOOLS: ${{ inputs.stage == 'provision' && '1' || '0' }}
       LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
-      LAPLACE_GENERATION_BENCHMARK: ${{ inputs.generation_benchmark && '1' || '' }}
       LICHESS_API: ${{ secrets.LICHESS_API }}
       LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
       LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
@@ -98,7 +69,7 @@ jobs:
 
       - uses: ./.github/actions/setup-laplace-env
         with:
-          provision_tools: true
+          provision_tools: ${{ inputs.stage == 'provision' }}
 
       - name: Run requested lifecycle under one host reservation
         run: |
@@ -107,4 +78,4 @@ jobs:
           mkdir -p /build/laplace/work
           exec 9>/build/laplace/work/host-resource.lock
           flock 9
-          bash scripts/product-ci.sh "$LAPLACE_STAGE"
+          exec bash scripts/product-ci.sh "$LAPLACE_STAGE"

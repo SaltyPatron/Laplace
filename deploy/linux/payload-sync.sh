@@ -28,6 +28,20 @@ laplace_sync_payload() {
     "$source_dir/" "$destination_dir/"
 }
 
+# One API publication changes only the flat API/SPA payload. These paths are
+# owned by configuration, user data, or independently leased service releases.
+# Snapshot, install, and rollback must use the exact same exclusion set.
+LAPLACE_API_PAYLOAD_EXCLUDES=(
+  --exclude '/laplace-api.env' --exclude '/agents.json' --exclude '/logs/'
+  --exclude '/chess-lab-work/' --exclude '/mcp-runtime/' --exclude '/mcp/'
+  --exclude '/releases/' --exclude '/managed-services/'
+  --exclude '/laplace-uci' --exclude '/laplace-mcp' --exclude '/laplace-lichess'
+)
+
+laplace_sync_api_payload() {
+  laplace_sync_payload "$1" "$2" --checksum "${LAPLACE_API_PAYLOAD_EXCLUDES[@]}"
+}
+
 # Managed publish backups are rollback state only while a publish receipt owns them.
 # Completed/rolled-back transactions must not become an append-only archive on the
 # application LV. Delete only bootstrap-shaped managed.* directories under the exact
@@ -366,4 +380,47 @@ laplace_stage_managed_runtimes() {
   fi
 
   printf '%s\n' "$release"
+}
+
+
+# Stage only the UCI closure through the same immutable-payload and lease owners.
+# The ordinary three-service publisher above keeps its existing behavior.
+laplace_stage_uci_runtime() {
+  local app_dir="$1" uci_stage="$2" release suffix
+  test -x "$uci_stage/laplace-uci" || return 1
+  for suffix in dll deps.json runtimeconfig.json; do
+    test -s "$uci_stage/laplace-uci.$suffix" || return 1
+  done
+  install -d -m 2775 "$app_dir/releases" || return 1
+  release="$(mktemp -d "$app_dir/releases/runtime.XXXXXX")" || return 1
+  if ! (
+    chmod 0755 "$release" || exit $?
+    mkdir -m 0755 "$release/uci" || exit $?
+    laplace_stage_runtime_payload "$app_dir" uci "$app_dir/laplace-uci" \
+      "$uci_stage" "$release/uci" || exit $?
+    install -m 0644 /dev/null "$release/.runtime-lease" || exit $?
+    laplace_wrap_runtime_lease "$release/uci/laplace-uci" \
+      "$(laplace_current_runtime_dir "$app_dir" uci "$app_dir/laplace-uci" || true)" || exit $?
+    ln -s ../../../logs "$release/uci/logs" || exit $?
+  ); then
+    find "$release" -xdev -depth -delete || true
+    return 1
+  fi
+  printf '%s\n' "$release"
+}
+
+# Atomic selection within the existing app root. A caller holds the shared host
+# lock and keeps the previous immutable release leased until verification ends.
+laplace_select_uci_runtime() {
+  local app_dir="$1" target="$2" staging
+  [[ "$target" =~ ^releases/runtime\.[a-zA-Z0-9_.-]+/uci/laplace-uci$ ]] || {
+    echo "::error::UCI selection is outside immutable runtime ownership" >&2; return 1;
+  }
+  [[ -x "$app_dir/$target" && ! -d "$app_dir/laplace-uci" ]] || return 1
+  staging="$(mktemp -d "$app_dir/.uci-link.XXXXXX")" || return 1
+  if ! ln -s "$target" "$staging/laplace-uci" || ! mv -Tf "$staging/laplace-uci" "$app_dir/laplace-uci"; then
+    rm -rf -- "$staging"
+    return 1
+  fi
+  rmdir "$staging"
 }

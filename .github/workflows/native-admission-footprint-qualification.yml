@@ -1,4 +1,4 @@
-name: Final native bootstrap operator syntax
+name: Current ingest route and canonical quiet contracts
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -7,20 +7,39 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      TMPDIR: /build/laplace/work/final-native-bootstrap-syntax/tmp
-      TMP: /build/laplace/work/final-native-bootstrap-syntax/tmp
-      TEMP: /build/laplace/work/final-native-bootstrap-syntax/tmp
-      EVIDENCE: /build/laplace/recovery/final-native-bootstrap-syntax
+      DOTNET_NOLOGO: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      MSBUILDDISABLENODEREUSE: "1"
+      UseSharedCompilation: "false"
+      QUALIFICATION_DIR: /build/laplace/work/current-source-contracts
+      EVIDENCE: /build/laplace/work/current-source-contracts/evidence
+      TMPDIR: /build/laplace/work/current-source-contracts/tmp
+      TMP: /build/laplace/work/current-source-contracts/tmp
+      TEMP: /build/laplace/work/current-source-contracts/tmp
+      LAPLACE_BUILD_ROOT: /build/laplace/build/current-source-contracts
+      LAPLACE_ENGINE_BUILD: /build/laplace/work/current-source-contracts/unused-native
+      LAPLACE_EXTERNAL: /build/laplace/work/current-source-contracts/external
+      DOTNET_CLI_HOME: /build/laplace/work/current-source-contracts/dotnet-home
+      DOTNET_INSTALL_DIR: /build/laplace/work/current-source-contracts/dotnet
+      NUGET_PACKAGES: /build/laplace/work/current-source-contracts/nuget
     steps:
-      - name: Prepare permanent protocol evidence
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: e8b31e425e7a17fc24adcca852b586e82831d21a
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prepare permanent source qualification
         run: |
           set -euo pipefail
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$TMPDIR" "$EVIDENCE"
+          mkdir -p "$EVIDENCE" "$TMPDIR" "$DOTNET_CLI_HOME" "$DOTNET_INSTALL_DIR" "$NUGET_PACKAGES" "$LAPLACE_BUILD_ROOT" "$LAPLACE_ENGINE_BUILD"
+          test "$(git rev-parse HEAD)" = e8b31e425e7a17fc24adcca852b586e82831d21a
+          test "$(git rev-parse HEAD^{tree})" = 5e38a77a7e08abcc84745c923750ed723f1eedcf
+          git rev-parse HEAD HEAD^{tree} > "$EVIDENCE/source.txt"
       - name: Authenticate and parse the coordinated native operator
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -29,7 +48,7 @@ jobs:
           python3 - <<'PY' 2>&1 | tee "$EVIDENCE/operator-syntax.log"
           import ast, base64, hashlib, json, os, re, subprocess, textwrap, urllib.request, yaml
           from pathlib import Path
-          sha = "63f2de95d0603a2c217953e05353e5d89937dfd4"
+          sha = "7a46fb7ed533f8112ebdbfd04867335e438d4c7b"
           request = urllib.request.Request(
               "https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/" + sha,
               headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
@@ -50,7 +69,7 @@ jobs:
           assert environment["REQUIRED_ANCESTOR"] == "c490651eee906f44f944ae2c2b0d0783516f9e0c"
           native_program = document["jobs"]["native"]["steps"][1]["run"]
           pins = re.search(r"done <<'SOURCE_OWNERS'\n(.*?)\nSOURCE_OWNERS", native_program, re.S).group(1).splitlines()
-          assert len(pins) == 13, pins
+          assert len(pins) == 14, pins
           assert all(re.fullmatch(r"100(?:644|755) [0-9a-f]{40} .+", pin) for pin in pins)
           assert not any("physicality_descriptor.c" in pin or "physicality_descriptor_admission.cpp" in pin for pin in pins)
           assert "--exclusive --no-fork" in native_program
@@ -82,11 +101,60 @@ jobs:
                             "outerBash": outer, "innerBash": inner, "python": python,
                             "scope": "authenticated source syntax only; no native or host execution"}))
           PY
-      - name: Retain authenticated operator and protocol result
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Acquire the one pinned grammar query required by managed compilation
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=10s 300s python3 - <<'PY' 2>&1 | tee "$QUALIFICATION_DIR/evidence/grammar-query.log"
+          import hashlib,json,os,subprocess
+          from pathlib import Path
+          root=Path(os.environ["LAPLACE_EXTERNAL"])/"tree-sitter-grammars/tree-sitter-c"
+          root.parent.mkdir(parents=True)
+          revision="b780e47fc780ddc8da13afa35a3f4ed5c157823d"
+          expected="9194799a7a7dcedf020ba2558fc92fc430633d73680243ae1f1d9de78c719528"
+          def git(*args,capture=False):
+              result=subprocess.run(["git","-C",str(root),*args],check=True,timeout=90,stdout=subprocess.PIPE if capture else None)
+              return result.stdout
+          subprocess.run(["git","init","--quiet",str(root)],check=True,timeout=10)
+          git("remote","add","origin","https://github.com/tree-sitter/tree-sitter-c")
+          git("fetch","--quiet","--no-tags","--depth=1","origin",revision)
+          git("checkout","--quiet","--detach",revision)
+          assert git("rev-parse","HEAD",capture=True).decode().strip()==revision
+          assert hashlib.sha256(git("archive","--format=tar",revision,capture=True)).hexdigest()==expected
+          query=root/"queries/tags.scm";assert query.is_file()
+          report={"scope":"Exact upstream compile resource; source-contract tests do not execute native code",
+              "revision":revision,"git_archive_sha256":expected,"required_file":"queries/tags.scm",
+              "required_file_sha256":hashlib.sha256(query.read_bytes()).hexdigest()}
+          (Path(os.environ["QUALIFICATION_DIR"])/"evidence/grammar-query.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
+          PY
+      - name: Build actual test projects and execute the three corrected contracts
+        run: |
+          set -euo pipefail
+          for project in Laplace.Cli.Tests Laplace.Substrate.Tests; do
+            timeout --signal=TERM --kill-after=15s 300s dotnet build "app/$project/$project.csproj" --configuration Release --disable-build-servers --nologo --verbosity minimal -p:UseSharedCompilation=false "-bl:$EVIDENCE/$project.binlog" 2>&1 | tee "$EVIDENCE/$project.build.log"
+          done
+          timeout --signal=TERM --kill-after=10s 120s dotnet test app/Laplace.Cli.Tests/Laplace.Cli.Tests.csproj --configuration Release --no-build --no-restore --filter 'FullyQualifiedName=Laplace.Cli.Tests.IngestRosterParityTests.ShellWrapper_ExposesChessTacticOutcomeRoute' --logger "trx;LogFileName=cli.trx" --results-directory "$EVIDENCE" 2>&1 | tee "$EVIDENCE/cli-tests.log"
+          timeout --signal=TERM --kill-after=10s 120s dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj --configuration Release --no-build --no-restore --filter 'FullyQualifiedName=Laplace.Decomposers.Abstractions.Tests.MeasurementLaneGateTests.RunLivenessClass_AgreesBetweenCsharpAndCanonicalSql|FullyQualifiedName=Laplace.Decomposers.Abstractions.Tests.MeasurementLaneGateTests.QuietGate_PreSchemaBootstrapIsProvenWithoutFailingOpen' --logger "trx;LogFileName=substrate.trx" --results-directory "$EVIDENCE" 2>&1 | tee "$EVIDENCE/substrate-tests.log"
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/result.json"
+          import json,os,xml.etree.ElementTree as ET
+          from pathlib import Path
+          names=[]
+          for leaf,count in (("cli.trx",1),("substrate.trx",2)):
+              root=ET.parse(Path(os.environ["EVIDENCE"])/leaf).getroot()
+              results=root.findall(".//{*}UnitTestResult")
+              assert len(results)==count and all(row.attrib["outcome"]=="Passed" for row in results)
+              names.extend(row.attrib["testName"] for row in results)
+          assert len(set(names))==3
+          print(json.dumps({"source":"e8b31e425e7a17fc24adcca852b586e82831d21a","passed":len(names),"tests":names,"scope":"Actual repository test projects and exact source-reading contracts; no native or PostgreSQL execution"}))
+          PY
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Retain exact source contract evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: final-native-bootstrap-syntax
-          path: /build/laplace/recovery/final-native-bootstrap-syntax/
+          name: current-source-contracts
+          path: /build/laplace/work/current-source-contracts/evidence/
           if-no-files-found: error
           retention-days: 30
