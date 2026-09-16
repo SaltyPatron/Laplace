@@ -1,1 +1,64 @@
-# placeholder
+name: DB — lifecycle ops
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "database lifecycle operation"
+        type: choice
+        required: true
+        default: status
+        options: [status, create, drop, recreate, update, seed, verify]
+      seed_source:
+        description: "optional seed source for seed/update"
+        type: string
+        required: false
+        default: ""
+      seed_limit:
+        description: "optional seed limit"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+  PGHOST: /var/run/postgresql
+  PGPORT: 5432
+  PGUSER: laplace_admin
+  PGDATABASE: laplace
+  LAPLACE_DATA_ROOT: /vault/Data
+
+jobs:
+  db:
+    name: DB — ${{ inputs.operation }}
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 420
+    concurrency:
+      group: laplace-database-lifecycle
+      cancel-in-progress: false
+    env:
+      LAPLACE_DB_OPERATION: ${{ inputs.operation }}
+      LAPLACE_DB_SEED_SOURCE: ${{ inputs.seed_source }}
+      LAPLACE_DB_SEED_LIMIT: ${{ inputs.seed_limit }}
+    steps:
+      - name: Checkout exact requested revision
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Run database operation
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          exec 9>/build/laplace/work/host-resource.lock
+          flock 9
+          exec bash scripts/product-ci.sh "$LAPLACE_DB_OPERATION"
