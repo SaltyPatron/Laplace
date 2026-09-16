@@ -116,6 +116,7 @@ struct Selected {
     Geometry physicality;
     size_t body_index = SIZE_MAX; // SIZE_MAX means an actual native atomic basis.
     bool byte_basis = false;
+    bool terminal_body_verified = false;
 };
 
 struct OutputNode {
@@ -498,6 +499,7 @@ physicality_descriptor_status_t materialize(
         for (size_t next = 0; next < reachable.size(); ++next) {
             checkpoint();
             const size_t body_index = reachable[next];
+            bool terminal_body = true;
             const auto* body_trajectory = trajectory_for_input(body_index);
             for (size_t vertex = 0; vertex < inputs[body_index].trajectory_vertices; ++vertex) {
                 checkpoint();
@@ -509,11 +511,26 @@ physicality_descriptor_status_t materialize(
                 if (chosen == selected.end()) {
                     require(unavailable.find(carrier_fields[1]) != unavailable.end());
                     missing_for_view.insert(carrier_fields[1]);
+                    terminal_body = false;
                     continue;
                 }
                 const size_t selected_index = chosen->second.body_index;
-                if (selected_index != SIZE_MAX && reached_descriptors.insert(descriptors[selected_index]).second)
-                    reachable.push_back(selected_index);
+                if (selected_index != SIZE_MAX) {
+                    terminal_body = false;
+                    // Scope membership is positive-length reachability, even
+                    // when this exact selected body has no outgoing body edge.
+                    if (reached_descriptors.insert(descriptors[selected_index]).second &&
+                        !chosen->second.terminal_body_verified)
+                        reachable.push_back(selected_index);
+                }
+            }
+            if (terminal_body) {
+                // An original form can share an entity with a different
+                // selected provider body. Only memoize the exact winner.
+                const auto winner = selected.find(inputs[body_index].entity_id);
+                if (winner != selected.end() && winner->second.body_index != SIZE_MAX &&
+                    hash128_equals(&descriptors[winner->second.body_index], &descriptors[body_index]))
+                    winner->second.terminal_body_verified = true;
             }
         }
         if (!missing_for_view.empty()) {
