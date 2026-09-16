@@ -52,7 +52,6 @@ run_db_tests() {
 }
 
 run_publish() {
-  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}" 60
   bash scripts/publish-applications.sh deploy
 }
 
