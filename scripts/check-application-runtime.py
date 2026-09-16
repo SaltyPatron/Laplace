@@ -184,8 +184,6 @@ def snapshot(root, prefix, database, *, purpose="publication"):
         raise ValueError("application runtime guard requires the deployed PostgreSQL 18 contract")
     if type(database["running_ingests"]) is not int or database["running_ingests"] < 0:
         raise ValueError("invalid ingest journal observation")
-    if purpose == "publication" and database["running_ingests"] != 0:
-        raise ValueError("running/unresolved ingest journal entries; application publish postponed")
     if not database["extension_functions"]:
         raise ValueError("live extension function contract is missing")
     migrations = {p.name for p in (root / "db/migrations").glob("*.sql")}
@@ -234,21 +232,21 @@ def snapshot(root, prefix, database, *, purpose="publication"):
 
 
 def compatible(before, after, *, purpose="publication"):
-    """Compare every native/database contract; journal progress is an observation.
+    """Compare runtime contracts while retaining journal progress as an observation.
 
-    Recording admission remains serialized by the ordinary writer transaction.
-    A global journal row can describe an interrupted unrelated ingest and is not
-    an active-process or transaction lock. Preserve its count in each receipt.
+    A journal row may describe either a live or an interrupted ingest. Its count
+    does not change the native artifacts, SQL contract or application compatibility.
+    Publication and recording preserve that count in their original receipts.
     """
     if purpose not in ("publication", "recording"):
         raise ValueError("unknown runtime guard purpose")
-    if purpose == "publication":
-        return before == after
     before = copy.deepcopy(before)
     after = copy.deepcopy(after)
     for state in (before, after):
-        if state.get("purpose") != "recording":
+        if purpose == "recording" and state.get("purpose") != "recording":
             raise ValueError("recording comparison requires recording snapshots")
+        if purpose == "publication" and state.get("purpose") is not None:
+            return False
         count = state["database"].pop("running_ingests")
         if type(count) is not int or count < 0:
             raise ValueError("invalid ingest journal observation")

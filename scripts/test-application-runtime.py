@@ -250,27 +250,21 @@ class RuntimeGuardTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "migrations"):
                     self.snapshot()
 
-    def test_running_ingest_fails(self):
-        self.database["running_ingests"] = 1
-        with self.assertRaisesRegex(ValueError, "ingest"):
-            self.snapshot()
+    def test_publication_and_recording_retain_journal_progress_without_a_global_gate(self):
+        for purpose in ("publication", "recording"):
+            with self.subTest(purpose=purpose):
+                self.database["running_ingests"] = 3
+                before = self.snapshot(purpose=purpose)
+                self.assertEqual(3, before["database"]["running_ingests"])
+                for count in (0, 1, 4):
+                    self.database["running_ingests"] = count
+                    after = self.snapshot(purpose=purpose)
+                    self.assertEqual(count, after["database"]["running_ingests"])
+                    self.assertTrue(guard.compatible(before, after, purpose=purpose))
+                    self.assertEqual(3, before["database"]["running_ingests"])
+                    self.assertEqual(count, after["database"]["running_ingests"])
 
-
-    def test_recording_retains_unresolved_journal_without_treating_it_as_a_lock(self):
-        self.database["running_ingests"] = 3
-        before = self.snapshot(purpose="recording")
-        self.assertEqual(3, before["database"]["running_ingests"])
-        self.database["running_ingests"] = 4
-        after = self.snapshot(purpose="recording")
-        self.assertEqual(4, after["database"]["running_ingests"])
-        self.assertTrue(guard.compatible(before, after, purpose="recording"))
-        self.assertFalse(guard.compatible(before, after))
-        self.assertEqual(3, before["database"]["running_ingests"])
-        with self.assertRaisesRegex(ValueError, "ingest"):
-            self.snapshot()
-
-    def test_recording_comparison_preserves_every_other_runtime_field(self):
-        before = self.snapshot(purpose="recording")
+    def test_each_scope_preserves_every_other_runtime_field(self):
         paths = [
             ("build", "cacheSha256"), ("artifacts", self.execution_artifact),
             ("database", "database"), ("database", "server_version"),
@@ -278,29 +272,43 @@ class RuntimeGuardTests(unittest.TestCase):
             ("database", "extensions"), ("database", "migrations"),
             ("database", "roms"),
         ]
-        for path in paths:
-            with self.subTest(path=path):
-                after = json.loads(json.dumps(before))
-                target = after
-                for key in path[:-1]:
-                    target = target[key]
-                target[path[-1]] = "changed"
-                self.assertFalse(guard.compatible(before, after, purpose="recording"))
+        for purpose in ("publication", "recording"):
+            before = self.snapshot(purpose=purpose)
+            for path in paths:
+                with self.subTest(purpose=purpose, path=path):
+                    after = json.loads(json.dumps(before))
+                    target = after
+                    for key in path[:-1]:
+                        target = target[key]
+                    target[path[-1]] = "changed"
+                    self.assertFalse(guard.compatible(before, after, purpose=purpose))
+        publication = self.snapshot()
+        recording = self.snapshot(purpose="recording")
         with self.assertRaisesRegex(ValueError, "recording snapshots"):
-            guard.compatible(self.snapshot(), before, purpose="recording")
+            guard.compatible(publication, recording, purpose="recording")
+        self.assertFalse(guard.compatible(recording, recording))
 
-    def test_recording_still_rejects_actual_native_drift_and_invalid_journal_observation(self):
+    def test_each_scope_rejects_native_drift_and_invalid_journal_observation(self):
         self.database["running_ingests"] = 2
         path = self.prefix / self.execution_artifact
         original = path.read_bytes()
-        path.write_bytes(b"changed execution module")
-        with self.assertRaisesRegex(ValueError, "tested installed form"):
-            self.snapshot(purpose="recording")
-        path.write_bytes(original)
-        for invalid in (True, -1, None, "2"):
-            self.database["running_ingests"] = invalid
-            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "journal observation"):
-                self.snapshot(purpose="recording")
+        for purpose in ("publication", "recording"):
+            with self.subTest(purpose=purpose):
+                path.write_bytes(b"changed execution module")
+                with self.assertRaisesRegex(ValueError, "tested installed form"):
+                    self.snapshot(purpose=purpose)
+                path.write_bytes(original)
+                baseline = self.snapshot(purpose=purpose)
+                for invalid in (True, -1, None, "2"):
+                    self.database["running_ingests"] = invalid
+                    with self.subTest(invalid=invalid):
+                        with self.assertRaisesRegex(ValueError, "journal observation"):
+                            self.snapshot(purpose=purpose)
+                        changed = json.loads(json.dumps(baseline))
+                        changed["database"]["running_ingests"] = invalid
+                        with self.assertRaisesRegex(ValueError, "journal observation"):
+                            guard.compatible(baseline, changed, purpose=purpose)
+                self.database["running_ingests"] = 2
         with self.assertRaisesRegex(ValueError, "purpose"):
             self.snapshot(purpose="unknown")
 
