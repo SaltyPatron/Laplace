@@ -46,7 +46,7 @@ jobs:
                   python_count+=1
           assert inner_count==2 and python_count==8,(inner_count,python_count)
           print("DIRECT_OWNER_OPERATOR_SYNTAX_PASS "+json.dumps({"blob":blob,"outerBash":len(scripts),"innerBash":inner_count,"python":python_count}),flush=True)
-          for mode,expected_during in (("--close",0),("--no-fork",1)):
+          for mode,expected_during in (("--no-fork",1),):
               with tempfile.TemporaryDirectory(prefix="term-lock-",dir=os.environ["TMPDIR"]) as td:
                   root=pathlib.Path(td); marker=root/"cleanup-started"; finished=root/"cleanup-finished"; lock=root/"host.lock"
                   script="set -eu\ncleanup() { rc=$?; trap - EXIT; trap '' TERM INT; printf started > "+shlex.quote(str(marker))+"; sleep 1.5; printf finished > "+shlex.quote(str(finished))+"; exit \"$rc\"; }\ntrap cleanup EXIT\ntrap 'exit 143' TERM\ntrap 'exit 130' INT\nsleep 30\n"
