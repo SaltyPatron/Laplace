@@ -295,10 +295,13 @@ scan_rank_index(Relation relation, AttrNumber endpoint, AttrNumber object,
     return selected;
 }
 
+#include "consensus_plane_scan.h"
+
 static void
 scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
           const ScanSet *types, LaplaceConsensusConsumer consume, void *context,
-          LaplaceConsensusScanStats *stats, LaplaceConsensusCutoff cutoff)
+          LaplaceConsensusScanStats *stats, LaplaceConsensusCutoff cutoff,
+          bool plane_local)
 {
     AttrNumber subject = scan_attribute(relation, "subject_id", BYTEAOID);
     AttrNumber object = scan_attribute(relation, "object_id", BYTEAOID);
@@ -308,8 +311,21 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
     AttrNumber witnesses = scan_attribute(relation, "witness_count", INT8OID);
     const ScanSet *probe = subjects->array != NULL ? subjects : objects;
     AttrNumber endpoint = subjects->array != NULL ? subject : object;
-    Relation index = cutoff != NULL ? scan_rank_index(relation, endpoint, object, rating, rd) : NULL;
-    bool ranked = index != NULL;
+    Relation index = plane_local
+        ? scan_plane_index(relation, endpoint, type, object, rating, rd)
+        : cutoff != NULL ? scan_rank_index(relation, endpoint, object, rating, rd) : NULL;
+    if (plane_local && index != NULL)
+    {
+        scan_plane_ranges(relation, index, subject, object, type, rating, rd,
+                          witnesses, subjects, objects, types, consume, cutoff,
+                          context, stats);
+        index_close(index, AccessShareLock);
+        return;
+    }
+    /* A type-local cutoff is not valid on an endpoint-wide rank index. When
+     * the typed index is absent, retain every matching plane through the
+     * complete keyed batch read. Cache/index availability cannot hide facts. */
+    bool ranked = !plane_local && index != NULL;
     if (index == NULL) index = scan_index(relation, endpoint,
                                object, objects->array != NULL,
                                type, types->array != NULL);
@@ -389,7 +405,7 @@ consensus_scan_impl(ArrayType *subject_ids, ArrayType *object_ids,
                     ArrayType *type_ids, bool default_only,
                     LaplaceConsensusConsumer consume,
                     void *context, LaplaceConsensusScanStats *stats,
-                    LaplaceConsensusCutoff cutoff)
+                    LaplaceConsensusCutoff cutoff, bool plane_local)
 {
     ScanSet subjects, objects, types;
     LaplaceConsensusScanStats local_stats = {0};
@@ -443,7 +459,8 @@ consensus_scan_impl(ArrayType *subject_ids, ArrayType *object_ids,
         if (relation->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
             pending = list_concat(pending, scan_children(relation, &subjects, &types));
         else
-            scan_leaf(relation, &subjects, &objects, &types, consume, context, stats, cutoff);
+            scan_leaf(relation, &subjects, &objects, &types, consume, context,
+                      stats, cutoff, plane_local);
         /* Retain relation locks through the transaction, as an ordinary SELECT
          * does, so partition topology cannot change beneath this snapshot. */
         table_close(relation, NoLock);
@@ -459,7 +476,7 @@ laplace_consensus_scan(ArrayType *subjects, ArrayType *objects, ArrayType *types
                        LaplaceConsensusConsumer consume, void *context,
                        LaplaceConsensusScanStats *stats)
 {
-    consensus_scan_impl(subjects, objects, types, false, consume, context, stats, NULL);
+    consensus_scan_impl(subjects, objects, types, false, consume, context, stats, NULL, false);
 }
 
 void
@@ -467,7 +484,7 @@ laplace_consensus_scan_default(ArrayType *subjects, ArrayType *objects,
                                LaplaceConsensusConsumer consume, void *context,
                                LaplaceConsensusScanStats *stats)
 {
-    consensus_scan_impl(subjects, objects, NULL, true, consume, context, stats, NULL);
+    consensus_scan_impl(subjects, objects, NULL, true, consume, context, stats, NULL, false);
 }
 
 void
@@ -475,5 +492,15 @@ laplace_consensus_scan_ranked(ArrayType *subjects, ArrayType *objects, ArrayType
     bool default_only, LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff,
     void *context, LaplaceConsensusScanStats *stats)
 {
-    consensus_scan_impl(subjects, objects, types, default_only, consume, context, stats, cutoff);
+    consensus_scan_impl(subjects, objects, types, default_only, consume, context,
+                        stats, cutoff, false);
+}
+
+void
+laplace_consensus_scan_ranked_planes(ArrayType *subjects, ArrayType *objects, ArrayType *types,
+    bool default_only, LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff,
+    void *context, LaplaceConsensusScanStats *stats)
+{
+    consensus_scan_impl(subjects, objects, types, default_only, consume, context,
+                        stats, cutoff, true);
 }

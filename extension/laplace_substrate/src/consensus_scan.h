@@ -24,8 +24,9 @@ typedef struct LaplaceConsensusScanStats
 } LaplaceConsensusScanStats;
 
 typedef void (*LaplaceConsensusConsumer)(const LaplaceConsensusRow *, void *);
-/* Called only inside one endpoint's descending effective-mu range. Return true
- * only when this row and every lower score cannot change the selected result. */
+/* Called inside the ordered range promised by the selected scan operation.
+ * Return true only when this row and every lower score in that same range
+ * cannot change the result. Endpoint-wide and exact-type ranges differ. */
 typedef bool (*LaplaceConsensusCutoff)(const LaplaceConsensusRow *, void *);
 
 /* NULL means unconstrained; an empty array means the empty set. At least one
@@ -45,8 +46,19 @@ extern void laplace_consensus_scan_default(
 
 /* Binary-neighbor projection: the consumer must discard unary cells. This
  * permits using a canonical object-IS-NOT-NULL partial index. Without an exact
- * endpoint/effective-mu index, storage falls back to the complete batch scan. */
+ * endpoint/effective-mu index, storage falls back to the complete batch scan.
+ * Its cutoff covers the entire endpoint range, across relation types. */
 extern void laplace_consensus_scan_ranked(
+    ArrayType *subjects, ArrayType *objects, ArrayType *types, bool default_only,
+    LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff, void *context,
+    LaplaceConsensusScanStats *stats);
+
+/* Independently ordered response planes for every eligible exact relation.
+ * Cutoff ends only the current endpoint/type range; later types still respond.
+ * Types are discovered by indexed seeks, never a source-specific roster or a
+ * mask whose absence could erase evidence. Missing typed rank indexes select
+ * the complete endpoint-indexed read without cutoff. No SQL per candidate. */
+extern void laplace_consensus_scan_ranked_planes(
     ArrayType *subjects, ArrayType *objects, ArrayType *types, bool default_only,
     LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff, void *context,
     LaplaceConsensusScanStats *stats);
