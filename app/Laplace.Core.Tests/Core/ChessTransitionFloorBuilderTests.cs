@@ -284,6 +284,41 @@ public sealed class ChessTransitionFloorBuilderTests
     }
 
     [Fact]
+    public void ImportedMappedBodyMutationDuringVisitCannotBeAccepted()
+    {
+        if (OperatingSystem.IsWindows()) return; // Windows denies the in-place writer sharing this map.
+        using var files = new Files();
+        string source = files.PathFor("source.bin"), serving = files.PathFor("serving.bin");
+        var records = Sorted(1, 2);
+        var retained = Pair(99);
+        ChessTransitionFloor.WriteBlob(source, records);
+        ChessTransitionFloor.WriteBlob(serving, [retained]);
+        ChessTransitionFloor.Load(serving);
+        int visited = 0;
+        Hash128 lastObserved = default;
+        var failure = Assert.Throws<InvalidDataException>(() =>
+            ChessTransitionFloor.VisitEntries(source, (_, to) =>
+            {
+                lastObserved = to;
+                if (++visited != 1) return;
+                // Alter only the future record's result after initial checksum/order
+                // validation. Length and key order remain valid; the mapped visit
+                // sees the write, but must refuse before its caller can complete.
+                using var mutation = new FileStream(source, FileMode.Open, FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete);
+                mutation.Position = ChessTransitionFloor.HeaderSize + ChessTransitionFloor.RecordSize + 16;
+                mutation.WriteByte((byte)(records[1].To.ToBytes()[0] ^ 1));
+                mutation.Flush(flushToDisk: true);
+            }));
+        Assert.Contains("changed during", failure.Message);
+        Assert.Equal(2, visited);
+        Assert.NotEqual(records[1].To, lastObserved);
+        Assert.True(ChessTransitionFloor.TryLookup(retained.Key, out var actual, out var kind));
+        Assert.Equal(retained.To, actual);
+        Assert.Equal(ChessTransitionFloor.LookupSource.Persistent, kind);
+    }
+
+    [Fact]
     public void EmptyBuildIsAValidV1FloorAndPrecancelledBuildCannotPublish()
     {
         using var files = new Files();

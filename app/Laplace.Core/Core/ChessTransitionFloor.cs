@@ -45,6 +45,8 @@ public static unsafe class ChessTransitionFloor
         public readonly byte* Base;
         public readonly long Count;
         public readonly string Path;
+        private readonly long _bodyBytes;
+        private readonly Hash128 _validatedBodyHash;
 
         public MappedFloor(string path, CancellationToken ct = default)
         {
@@ -72,8 +74,10 @@ public static unsafe class ChessTransitionFloor
                     if (recordBytes % RecordSize != 0 || count != (ulong)(recordBytes / RecordSize))
                         throw new InvalidOperationException("chess transition floor record layout mismatch");
                     long body = length - TrailerBytes;
+                    _bodyBytes = body;
                     ct.ThrowIfCancellationRequested();
-                    if (BodyHash(Base, body) != *(Hash128*)(Base + body))
+                    _validatedBodyHash = BodyHash(Base, body);
+                    if (_validatedBodyHash != *(Hash128*)(Base + body))
                         throw new InvalidOperationException("chess transition floor body CRC mismatch");
                     ct.ThrowIfCancellationRequested();
                     Count = checked((long)count);
@@ -93,6 +97,17 @@ public static unsafe class ChessTransitionFloor
                 }
             }
             catch { _view?.Dispose(); _file.Dispose(); throw; }
+        }
+
+        public void VerifyUnchanged(CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            // Retain the checksum accepted before visitation; a changed body must
+            // not acquire a new identity merely by rewriting its trailer as well.
+            if (*(Hash128*)(Base + _bodyBytes) != _validatedBodyHash
+                || BodyHash(Base, _bodyBytes) != _validatedBodyHash)
+                throw new InvalidDataException("Chess transition floor changed during its visit.");
+            ct.ThrowIfCancellationRequested();
         }
 
         public bool TryAcquire()
@@ -316,7 +331,9 @@ public static unsafe class ChessTransitionFloor
             var record = (TransitionRec*)(map.Base + HeaderSize + i * RecordSize);
             visitor(record->Key, record->To);
         }
-        ct.ThrowIfCancellationRequested();
+        // This detects ordinary in-place changes during the visit. Callers still
+        // own immutable input selection: mutate-and-restore races are not a snapshot.
+        map.VerifyUnchanged(ct);
     }
 
     public static void WriteBlob(string path, IReadOnlyList<(Hash128 Key, Hash128 To)> sortedUnique)
