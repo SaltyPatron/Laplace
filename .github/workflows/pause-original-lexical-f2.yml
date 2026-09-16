@@ -1,0 +1,98 @@
+name: Interrupt exact bounded Original lexical lifecycle and retain evidence
+on:
+  push:
+    branches: ['diag/pause-original-lexical-f2-*']
+permissions:
+  contents: read
+  actions: write
+jobs:
+  pause:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Normally cancel only the observed lexical lifecycle and preserve its retention steps
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, signal, time, urllib.request
+          API = "https://api.github.com/repos/SaltyPatron/Laplace"
+          RUN, JOB, SHA = 35104196613, 104821026094, "f2cbb5fc7305dfd20d9fa3a19003b60a06b457c0"
+          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "laplace-exact-pilot-interruption"}
+          def deadline(signum, frame):
+              raise TimeoutError("bounded interruption observer deadline")
+          signal.signal(signal.SIGALRM, deadline)
+          signal.alarm(420)
+          def api(path, method="GET"):
+              request = urllib.request.Request(API + path, headers=headers, method=method,
+                  data=b"{}" if method == "POST" else None)
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  raw = response.read(2097153)
+                  if len(raw) > 2097152:
+                      raise ValueError("GitHub metadata exceeds bound")
+                  return response.status, json.loads(raw) if raw else None
+          _, ref = api("/git/ref/heads/main")
+          _, run = api(f"/actions/runs/{RUN}")
+          _, listing = api(f"/actions/runs/{RUN}/jobs?filter=latest&per_page=100")
+          expected = {"id": RUN, "run_attempt": 1, "head_sha": SHA,
+              "head_branch": "main",
+              "path": ".github/workflows/laplace.yml",
+              "event": "push", "status": "in_progress"}
+          reason = None
+          if ref["object"]["sha"] != SHA or any(run.get(k) != v for k, v in expected.items()):
+              reason = "exact source or run state changed"
+          jobs = listing.get("jobs", [])
+          if listing.get("total_count") != 1 or len(jobs) != 1 or jobs[0].get("id") != JOB:
+              reason = "exact job set changed"
+          job = jobs[0] if len(jobs) == 1 else {}
+          if any(job.get(k) != v for k, v in {"run_id": RUN, "head_sha": SHA, "run_attempt": 1,
+                  "status": "in_progress", "name": "Product — prove, activate and verify"}.items()):
+              reason = "target job identity changed"
+          steps = job.get("steps", [])
+          active = [s for s in steps if s.get("status") == "in_progress"]
+          if len(active) != 1 or active[0].get("number") != 22 or active[0].get("name") != "Admit required lexical foundation":
+              reason = "lifecycle left guarded lexical step"
+          if not all(any(s.get("number") == n and s.get("conclusion") == "success" for s in steps) for n in (1, 2, 3, 4, 7, 8, 11, 12, 13, 14, 15, 16, 17, 19, 20)):
+              reason = "prior exact source, native, managed, browser, install or database proof state changed"
+          if any(s.get("status") != "pending" or s.get("started_at") is not None for s in steps if s["number"] > 22):
+              reason = "retention already started"
+          if reason:
+              print("LEXICAL_INTERRUPT_GUARD " + json.dumps({"cancel_requested": False, "reason": reason}), flush=True)
+          else:
+              print("LEXICAL_INTERRUPT_GUARD " + json.dumps({"run": RUN, "job": JOB, "source": SHA,
+                  "attempt": 1, "active_step": active[0], "evidence_run": 35108597750,
+                  "observed_backend_pid": 4123046, "observed_backend_start": "2026-09-16T13:56:55.74258+00:00",
+                  "reason": "Interrupt the observed Unicode physicality-provider-admission boundary after retained phase and fixed-backend evidence; continue unchanged chess measurement only after cleanup readback.",
+                  "scope": "Normal Actions cancellation only; preserve lifecycle phase and diagnostic uploads. No force cancellation or database process termination; backend cleanup must be observed independently."}), flush=True)
+              code, _ = api(f"/actions/runs/{RUN}/cancel", "POST")
+              if code != 202:
+                  raise RuntimeError("normal cancellation was not accepted")
+              print("LEXICAL_INTERRUPT_ACCEPTED " + json.dumps({"http_status": code, "requests": 1}), flush=True)
+              until = time.monotonic() + 360
+              previous = None
+              while time.monotonic() < until:
+                  _, current = api(f"/actions/runs/{RUN}/jobs?filter=latest&per_page=100")
+                  selected = [j for j in current.get("jobs", []) if j.get("id") == JOB]
+                  if len(selected) != 1 or selected[0].get("head_sha") != SHA:
+                      raise RuntimeError("interrupted job identity changed")
+                  state = selected[0]
+                  observed = {"status": state.get("status"), "conclusion": state.get("conclusion"),
+                      "steps": [{k: s.get(k) for k in ("number", "name", "status", "conclusion")} for s in state.get("steps", [])]}
+                  if observed != previous:
+                      print("LEXICAL_INTERRUPT_RETENTION " + json.dumps(observed), flush=True)
+                      previous = observed
+                  if state.get("status") == "completed" and not any(s.get("status") == "in_progress" for s in state.get("steps", [])):
+                      _, artifacts = api(f"/actions/runs/{RUN}/artifacts?per_page=100")
+                      print("LEXICAL_INTERRUPT_ARTIFACTS " + json.dumps([{
+                          k: a.get(k) for k in ("id", "name", "size_in_bytes", "digest", "expired")}
+                          for a in artifacts.get("artifacts", [])]), flush=True)
+                      break
+                  time.sleep(5)
+              else:
+                  print("LEXICAL_INTERRUPT_RETENTION " + json.dumps({"status": "still_pending_after_observation_bound",
+                      "force_cancel_requested": False}), flush=True)
+          signal.alarm(0)
+          PY
