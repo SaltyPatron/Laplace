@@ -382,5 +382,31 @@ class AcceptanceTests(unittest.TestCase):
             self.assertNotIn("secret", output.getvalue())
 
 
+    def test_early_complete_retained_control_does_not_suppress_independent_rate_sweep(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            proof = owner.Acceptance(Path(temporary) / "proof")
+            calls = []
+            def run(argv, log, timeout):
+                args = list(map(str, argv))
+                calls.append((args, timeout))
+                if "scripts/benchmark-retained-chess-ingestion.py" in args:
+                    raise RuntimeError("complete-game readback failed")
+            with patch.object(owner, "command", side_effect=run):
+                owner.recording_checks(proof, sys.executable, allowed=True)
+            self.assertEqual(2, len(calls))
+            retained, recorded = calls
+            self.assertIn("scripts/benchmark-retained-chess-ingestion.py", retained[0])
+            self.assertEqual("16", retained[0][retained[0].index("--games") + 1])
+            self.assertEqual("2", retained[0][retained[0].index("--replays") + 1])
+            self.assertEqual(930, retained[1])
+            self.assertEqual("24", recorded[0][recorded[0].index("--recorded-games") + 1])
+            self.assertEqual("1,2,4", recorded[0][recorded[0].index("--recorded-concurrency") + 1])
+            self.assertEqual("3", recorded[0][recorded[0].index("--repeats") + 1])
+            self.assertEqual(7230, recorded[1])
+            self.assertEqual([("retained", "failed"), ("recorded", "passed")],
+                             [(row["name"], row["status"]) for row in proof.receipt["phases"]])
+            self.assertEqual(1, proof.finish())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

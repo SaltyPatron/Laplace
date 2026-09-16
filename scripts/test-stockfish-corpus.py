@@ -22,12 +22,17 @@ class CorpusAcceptanceTests(unittest.TestCase):
         first = {'schema': 'laplace.verified-git-corpus-admission.v1', 'status': 'verified',
                  'run_id': 'first-fixture-run', 'repository_id': 'fixture-repo', 'provenance_witnesses': 1, 'source': 'RepoDecomposer', 'source_root': '/fixture/source',
                  'provenance_content_id': 'fixture-content', 'provenance_sha256': 'fixture-hash',
-                 'provenance': {'commit': 'fixture-commit'}, 'laplace_runtime': {'CoreSha256': 'fixture-core'},
+                 'provenance': {'commit': 'fixture-commit', 'artifacts': [
+                     {'Path': 'src/a.cpp', 'Disposition': 'admitted', 'Sha256': 'a' * 64,
+                      'Bytes': 7, 'Modality': 'cpp', 'Representation': 'native-cst'},
+                     {'Path': 'fixture.bin', 'Disposition': 'unsupported-with-why-not',
+                      'Sha256': 'b' * 64, 'Bytes': 3, 'Modality': None,
+                      'Representation': 'unadmitted', 'Reason': 'No native representation'}]}, 'laplace_runtime': {'CoreSha256': 'fixture-core'},
                  'grammar_linkage': 'fixture linkage', 'selected_files': 1, 'tracked_entries': 2,
                  'coverage': {'native_cpp_files': 1, 'native_grammar_files': 1, 'native_partial_cst_files': 0,
                               'native_complete_cst_files': 1, 'raw_only_files': 0,
                               'unadmitted_entries': 1, 'all_tracked_bytes_roundtripped': False},
-                 'readbacks': [{'path': 'src/a.cpp', 'sha256': 'fixture-file-hash', 'journal_status': 'ok',
+                 'readbacks': [{'path': 'src/a.cpp', 'sha256': 'a' * 64, 'bytes': 7, 'journal_status': 'ok',
                                 'representation': 'native-cst', 'modality': 'cpp', 'syntax_complete': True,
                                 'native_ast_nodes': 5, 'native_syntax_nodes': 7, 'native_error_nodes': 0,
                                 'native_missing_nodes': 0, 'native_root_has_error': False}],
@@ -49,7 +54,10 @@ class CorpusAcceptanceTests(unittest.TestCase):
             receipt['selected_files'] = 2
             receipt['readbacks'][0].update(syntax_complete=False, native_root_has_error=True,
                                           native_error_nodes=1, native_missing_nodes=2)
+            receipt['provenance']['artifacts'][1] = {'Path': 'README.md', 'Disposition': 'admitted',
+                'Sha256': 'c' * 64, 'Bytes': 4, 'Modality': 'text', 'Representation': 'raw-text'}
             receipt['readbacks'].append({'path': 'README.md', 'representation': 'raw-text',
+                                        'sha256': 'c' * 64, 'bytes': 4,
                                         'modality': 'text', 'syntax_complete': None,
                                         'journal_status': receipt['readbacks'][0]['journal_status']})
             receipt['coverage'].update(native_partial_cst_files=1, native_complete_cst_files=0,
@@ -165,6 +173,144 @@ class CorpusAcceptanceTests(unittest.TestCase):
                     CORPUS.execute(Path('/fixture/prefix'), source / 'sidecar', Path('/fixture/cli'))
                 run.assert_not_called()
                 self.assertFalse((source / 'sidecar').exists())
+
+
+    def execute_fixture(self, temporary, *, full=False, coverage='all-tracked'):
+        root = Path(temporary)
+        source = root / 'source'
+        source.mkdir()
+        first, repeated = self.receipts()
+        for receipt in (first, repeated):
+            receipt['laplace_runtime']['CorePath'] = '/fixture/liblaplace_core.so'
+            if full:
+                receipt['tracked_entries'] = receipt['selected_files']
+                receipt['provenance']['artifacts'] = receipt['provenance']['artifacts'][:1]
+                receipt['coverage'].update(unadmitted_entries=0, all_tracked_bytes_roundtripped=True)
+        output = root / 'proof'
+        pending = iter((first, repeated))
+        def ingest(argv, **kwargs):
+            path = Path(argv[argv.index('--git-corpus-receipt') + 1])
+            path.write_text(json.dumps(next(pending)))
+            return SimpleNamespace(returncode=0)
+        selected = {'Upstream': 'https://github.com/official-stockfish/Stockfish', 'Commit': 'fixture-commit'}
+        with patch.object(CORPUS, 'selection', return_value=(source, selected)), \
+             patch.object(CORPUS.subprocess, 'run', side_effect=ingest), \
+             patch.object(CORPUS.chess_corpus_inventory, 'observe',
+                          return_value={'loaded_core': {'matches_receipt_bytes': True}}):
+            CORPUS.execute(Path('/fixture/prefix'), output, Path('/fixture/cli'), coverage)
+        return output
+
+    def test_default_full_corpus_refuses_partial_selection_and_retains_exact_partial_receipts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, 'verified only 1 of 2'):
+                self.execute_fixture(temporary)
+            output = Path(temporary) / 'proof'
+            retained = json.loads((output / 'receipt.json').read_text())
+            self.assertEqual('verified-partial', retained['status'])
+            self.assertEqual('selected-files', retained['coverage_scope'])
+            self.assertEqual('all-tracked', retained['requested_coverage'])
+            self.assertFalse(retained['full_tracked_corpus'])
+            self.assertEqual((1, 2), (retained['selected_files'], retained['tracked_entries']))
+            self.assertTrue(retained['native_exact_readback'])
+            self.assertTrue(retained['repeat_without_amplification'])
+            self.assertTrue((output / 'admission.json').is_file())
+            self.assertTrue((output / 'repeat.json').is_file())
+            self.assertTrue((output / 'runtime-inventory.json').is_file())
+
+    def test_explicit_selected_mode_preserves_legitimate_partial_proof_without_full_claim(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = self.execute_fixture(temporary, coverage='selected')
+            retained = json.loads((output / 'receipt.json').read_text())
+            self.assertEqual('verified-partial', retained['status'])
+            self.assertEqual('selected', retained['requested_coverage'])
+            self.assertFalse(retained['full_tracked_corpus'])
+            self.assertEqual(1, retained['coverage']['unadmitted_entries'])
+
+    def test_full_tracked_selection_qualifies_after_exact_admission_and_repeat(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = self.execute_fixture(temporary, full=True)
+            retained = json.loads((output / 'receipt.json').read_text())
+            self.assertEqual('verified', retained['status'])
+            self.assertEqual('all-tracked', retained['coverage_scope'])
+            self.assertTrue(retained['full_tracked_corpus'])
+            self.assertEqual(retained['selected_files'], retained['tracked_entries'])
+            self.assertEqual(0, retained['coverage']['unadmitted_entries'])
+
+    def test_manifest_and_selection_counts_must_be_actual_integers(self):
+        for field in ('selected_files', 'tracked_entries'):
+            for invalid in (True, 1.0, '1', None):
+                with self.subTest(field=field, invalid=invalid):
+                    receipt, _ = self.receipts()
+                    receipt[field] = invalid
+                    with self.assertRaises(ValueError):
+                        CORPUS.verify_coverage(receipt)
+
+
+    def test_full_arithmetic_cannot_hide_a_changed_or_duplicated_manifest_selection(self):
+        for mutation in (
+            lambda r: r['provenance'].pop('artifacts'),
+            lambda r: r['provenance']['artifacts'].__setitem__(1, copy.deepcopy(r['provenance']['artifacts'][0])),
+            lambda r: r['provenance']['artifacts'][0].update(Path='src/other.cpp'),
+            lambda r: r['provenance']['artifacts'][0].update(Disposition='unsupported-with-why-not'),
+            lambda r: r['readbacks'][0].update(bytes=8),
+            lambda r: r['readbacks'][0].update(sha256='changed-bytes'),
+        ):
+            receipt, _ = self.receipts()
+            mutation(receipt)
+            with self.assertRaises(ValueError):
+                CORPUS.verify_coverage(receipt)
+
+    def test_duplicate_readback_cannot_replace_another_tracked_file(self):
+        receipt, _ = self.receipts()
+        artifact = copy.deepcopy(receipt['provenance']['artifacts'][0])
+        artifact['Path'] = 'src/b.cpp'
+        receipt['provenance']['artifacts'][1] = artifact
+        receipt['readbacks'].append(copy.deepcopy(receipt['readbacks'][0]))
+        receipt['selected_files'] = 2
+        receipt['coverage'].update(native_cpp_files=2, native_grammar_files=2,
+            native_complete_cst_files=2, unadmitted_entries=0, all_tracked_bytes_roundtripped=True)
+        with self.assertRaisesRegex(ValueError, 'exact selected manifest'):
+            CORPUS.verify_coverage(receipt)
+
+    def test_selected_body_evidence_cannot_pass_when_both_sides_are_missing_or_invalid(self):
+        for field, source, invalid_values in (
+            ('sha256', 'Sha256', (None, True, 1, '', 'a' * 63, 'a' * 65, 'A' * 64, 'g' * 64)),
+            ('bytes', 'Bytes', (None, True, False, 0, -1, 7.0, '7')),
+        ):
+            for value in invalid_values:
+                with self.subTest(field=field, value=value):
+                    receipt, _ = self.receipts()
+                    receipt['readbacks'][0][field] = value
+                    receipt['provenance']['artifacts'][0][source] = value
+                    with self.assertRaisesRegex(ValueError, 'Selected source'):
+                        CORPUS.verify_coverage(receipt)
+            with self.subTest(field=field, absent=True):
+                receipt, _ = self.receipts()
+                del receipt['readbacks'][0][field]
+                del receipt['provenance']['artifacts'][0][source]
+                with self.assertRaisesRegex(ValueError, 'Selected source'):
+                    CORPUS.verify_coverage(receipt)
+
+    def test_equal_numeric_value_does_not_hide_invalid_manifest_or_readback_byte_type(self):
+        for manifest_side in (False, True):
+            with self.subTest(manifest_side=manifest_side):
+                receipt, _ = self.receipts()
+                if manifest_side:
+                    receipt['provenance']['artifacts'][0]['Bytes'] = 7.0
+                else:
+                    receipt['readbacks'][0]['bytes'] = 7.0
+                with self.assertRaisesRegex(ValueError, 'Selected source byte count'):
+                    CORPUS.verify_coverage(receipt)
+
+    def test_empty_unadmitted_tracked_file_remains_explicit_partial_inventory(self):
+        first, repeated = self.receipts()
+        for receipt in (first, repeated):
+            receipt['provenance']['artifacts'][1].update(Bytes=0,
+                Sha256=hashlib.sha256(b'').hexdigest(),
+                Reason='Empty source has no native grammar composition; bytes and Git identity are retained.')
+        CORPUS.verify_repeat(first, repeated)
+        self.assertEqual(1, first['coverage']['unadmitted_entries'])
+        self.assertFalse(first['coverage']['all_tracked_bytes_roundtripped'])
 
 
 inventory = CORPUS.chess_corpus_inventory

@@ -65,9 +65,16 @@ public sealed class ChessRecordedCompletionTests
     [Fact]
     public void NormalMeasurementRefusesPlyCountThatDiffersFromSerializedGame()
     {
-        var game = Assert.IsType<ChessGameRecord>(ChessPgnDecomposer.TryParseGame(
-            Pgn(Mate, "0-1", "[PlyCount \"12\"]\n"), requireNormalCompletion: true));
-        Assert.Throws<InvalidDataException>(() => Measurement("0-1 (Black mates)").ObserveParsed(game));
+        string malformed = Pgn(Mate, "0-1", "[PlyCount \"12\"]\n");
+        Assert.Throws<InvalidDataException>(() =>
+            ChessPgnDecomposer.TryParseGame(malformed, requireNormalCompletion: true));
+
+        // The parser now rejects this mismatch first. Retain an independent
+        // counterexample for the measurement boundary if a caller alters its text.
+        var verified = Assert.IsType<ChessGameRecord>(ChessPgnDecomposer.TryParseGame(
+            Pgn(Mate, "0-1", "[PlyCount \"4\"]\n"), requireNormalCompletion: true));
+        var altered = verified with { GameText = malformed };
+        Assert.Throws<InvalidDataException>(() => Measurement("0-1 (Black mates)").ObserveParsed(altered));
     }
 
     [Fact]
