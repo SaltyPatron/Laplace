@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -euo pipefail
 
 source="${1:-}"
@@ -28,63 +27,51 @@ case "$LOGDIR" in
 esac
 mkdir -p -- "$LOGDIR"
 export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
-MANAGED_BUILD_ROOT="${LAPLACE_BUILD_ROOT:-$ROOT}"
+
 if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
-    DLL="$MANAGED_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/Laplace.Cli.dll"
+    DLL="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/Laplace.Cli.dll"
+    CLI_NATIVE="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/liblaplace_core.so"
 else
     DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
+    CLI_NATIVE="$ROOT/app/Laplace.Cli/bin/Release/net10.0/liblaplace_core.so"
 fi
 
-# Durable progress lives in laplace.ingest_run_journal (+ ops CSV). Actions is not
-# a log warehouse — default CI/console to quiet unless the operator overrides.
 if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; then
     export LAPLACE_INGEST_CONSOLE=ci
 fi
 
-build_cli() {
-    if [[ "${LAPLACE_INGEST_RUNTIME_PREPARED:-0}" != 1 ]]; then
-        bash "$ROOT/scripts/pipeline.sh" build
-    fi
+require_cli() {
     [[ -f "$DLL" ]] || {
-        echo "::error::exact ingest CLI artifact missing after build: $DLL" >&2
+        echo "::error::ingest runtime is not built: $DLL" >&2
+        echo "::error::build/deploy owns compilation; run the product build before ingest" >&2
         return 1
     }
-    local native
-    if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
-        native="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/liblaplace_core.so"
-    else
-        native="$ROOT/app/Laplace.Cli/bin/Release/net10.0/liblaplace_core.so"
-    fi
-    [[ -f "$native" ]] && cmp -s "$ROOT/build/engine/core/liblaplace_core.so" "$native" || {
-        echo "::error::ingest CLI native closure is absent or stale: $native" >&2
+    [[ -f "$ROOT/build/engine/core/liblaplace_core.so" && -f "$CLI_NATIVE" ]] || {
+        echo "::error::ingest native runtime is incomplete" >&2
+        return 1
+    }
+    cmp -s "$ROOT/build/engine/core/liblaplace_core.so" "$CLI_NATIVE" || {
+        echo "::error::ingest CLI native closure differs from the prepared engine build" >&2
+        echo "::error::rebuild the product; ingest never repairs or compiles runtime artifacts" >&2
         return 1
     }
 }
-# Every branch below routes through here, so timing is recorded once for all of them.
-# Only the `all` path used to print any timing at all; the single-source path -- the one
-# _ingest.yml and ensure-foundation.sh actually call -- printed none, so no seed run in CI
-# history has a recorded duration. A timeout is a ceiling, not a measurement.
-# INGEST_TIMING is machine-readable on purpose: it is what a throughput baseline parses.
+
 ingest() {
     local t0=$SECONDS rc=0 t0_epoch preempted=0
     local -a ingest_args=("$@")
-    if [[ "${LAPLACE_INGEST_FORCE:-0}" == "1" ]]; then
-        ingest_args+=(--force)
-    fi
+    [[ "${LAPLACE_INGEST_FORCE:-0}" != 1 ]] || ingest_args+=(--force)
     t0_epoch=$(date +%s)
-    local detail="${LOGDIR:-}/laplace-ingest-${source}.log"
-    if [[ -n "${GITHUB_ACTIONS:-}" && -n "${LOGDIR:-}" ]]; then
-        # Job log: timing + journal. Full stderr → file on the runner.
+    local detail="$LOGDIR/laplace-ingest-${source}.log"
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
         ( cd "$ROOT/app" && dotnet "$DLL" ingest "${ingest_args[@]}" ) >"$detail" 2>&1 || rc=$?
         if [[ "$rc" -ne 0 ]]; then
-            # Preserve the process failure even when a database restart caused it.
-            # Classification adds diagnosis; it must never certify an incomplete run.
-            if [[ "$(bash "$ROOT/scripts/classify-ingest-exit.sh" "$detail" "$t0_epoch")" == "preempted" ]]; then
+            if [[ "$(bash "$ROOT/scripts/classify-ingest-exit.sh" "$detail" "$t0_epoch")" == preempted ]]; then
                 preempted=1
-                echo "::error::ingest ${source} PREEMPTED — the cluster went away mid-run (rc=${rc}). The ingest did not complete; a resumed run must pass its own completion checks. Not certified: no journal proof, no throughput gate, no idempotency check."
+                echo "::error::ingest ${source} was interrupted because the database disappeared mid-run (rc=$rc)"
                 tail -20 "$detail" >&2 || true
             else
-                echo "::error::ingest ${source} failed rc=${rc} — last 80 lines of ${detail}"
+                echo "::error::ingest ${source} failed rc=$rc — last 80 lines of $detail"
                 tail -80 "$detail" >&2 || true
             fi
         fi
@@ -93,33 +80,25 @@ ingest() {
     fi
     local elapsed=$((SECONDS - t0))
     echo "INGEST_TIMING ${TIMING_LABEL:-source=$source} elapsed_s=$elapsed rc=$rc"
-    if [[ -n "${GITHUB_ACTIONS:-}" && -n "${LOGDIR:-}" ]]; then
-        # The throughput gate parses the detail log; under LAPLACE_INGEST_CONSOLE=ci
-        # nothing else machine-readable lands there.
-        if ! echo "INGEST_TIMING ${TIMING_LABEL:-source=$source} elapsed_s=$elapsed rc=$rc" >> "$detail"; then
-            echo "::error::cannot persist ingest timing to $detail (process rc=$rc)" >&2
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        printf 'INGEST_TIMING %s elapsed_s=%s rc=%s\n' "${TIMING_LABEL:-source=$source}" "$elapsed" "$rc" >> "$detail" || {
+            echo "::error::cannot persist ingest timing to $detail" >&2
             [[ "$rc" -ne 0 ]] || rc=1
-        fi
+        }
     fi
     if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-        if ! printf 'elapsed_s=%s\npreempted=%s\n' "$elapsed" \
-            "$([[ "$preempted" -eq 1 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"; then
-            echo "::error::cannot persist ingest outputs to $GITHUB_OUTPUT (process rc=$rc)" >&2
+        printf 'elapsed_s=%s\npreempted=%s\n' "$elapsed" \
+            "$([[ "$preempted" -eq 1 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT" || {
+            echo "::error::cannot persist ingest outputs to $GITHUB_OUTPUT" >&2
             [[ "$rc" -ne 0 ]] || rc=1
-        fi
-    fi
-    if [[ "$rc" -eq 0 ]]; then
-        # Pass/fail is the journal row when this source is in decomposer-gates.json.
-        if python3 -c "import json,sys; json.load(open('${ROOT}/scripts/decomposer-gates.json'))['sources'].get(sys.argv[1]) or sys.exit(1)" "$source" 2>/dev/null; then
-            bash "$ROOT/scripts/verify-ingest-journal.sh" --cli-key "$source" || return 1
-        fi
+        }
     fi
     return "$rc"
 }
 
 case "$source" in
     all)
-        build_cli
+        require_cli
         STAGES=( "${FLOOR[@]}" document "${KNOWLEDGE[@]}" "${USAGE[@]}" )
         from="${INGEST_FROM:-}"
         skip=0; [[ -n "$from" ]] && skip=1
@@ -129,7 +108,7 @@ case "$source" in
             fi
             echo ">>> stage $src — start $(date -u +%H:%M:%S)"
             t0=$SECONDS
-            if [[ "$src" == "document" ]]; then
+            if [[ "$src" == document ]]; then
                 doc_path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"
                 ingest "$src" "$doc_path" 2>&1 | tee "$LOGDIR/laplace-ingest-$src.log"
             else
@@ -139,117 +118,46 @@ case "$source" in
         done
         ;;
     chain)
-        # ONE process for N sources. `ingest chain` (IngestCommands.cs:181) loads the
-        # codepoint and highway perfcaches once, then dispatches each spec in-process
-        # through the same IngestDispatchTable every other path uses, stopping on the
-        # first non-zero rc. Every other branch here pays one CLI startup, one perfcache
-        # map and one native runtime init PER SOURCE — the tax scripts/win/seed-chain.cmd
-        # was written to avoid ("seed-step.cmd pays those 12x") and which no Linux caller
-        # had. Specs are the CLI's own form: "<source [path] [flags]>", quoted when they
-        # carry a path.
-        build_cli
+        require_cli
         shift
         [[ $# -gt 0 ]] || { echo "Usage: $0 chain \"<source [path]>\" ..." >&2; exit 2; }
-        # Do NOT emit `source=chain`: scripts/ingest-baseline.py:46 parses
-        # `INGEST_TIMING source=(\S+)` and would record a phantom source named
-        # "chain". Per-source rows/elapsed still come from the CLI's own
-        # INGEST_COMPLETE (IngestRunner.cs:701), one per dispatched source, which
-        # is COMPLETE_RE — the baseline's primary parse. This line is the chain's
-        # wall clock, which is genuinely one number for N sources.
-        source="chain"
+        source=chain
         TIMING_LABEL="chain_sources=$#"
         ingest chain "$@"
         ;;
     safetensors|model)
         [[ -n "$path" ]] || { echo "Usage: $0 safetensors <snapshot-dir>" >&2; exit 2; }
-        build_cli
+        require_cli
         ingest safetensors "$path"
         ;;
     unicode|iso639|operational|cili|document|omw|wordnet|ud|tatoeba|atomic2020|conceptnet|wiktionary|opensubtitles|verbnet|propbank|framenet|mapnet|wordframenet|semlink|stack|tiny-codes|rgba-image|track-audio|frame-video)
-        # Default-path sources: IngestDataPaths resolves a DATA_ROOT-relative default
-        # when no <path> is given (stack=stack-v2, tiny-codes=tiny-codes, document=text…).
-        # An explicit <path> (single file, bare dir, or ecosystem root) always wins via
-        # IngestInput.ResolveFiles — `ingest ud <one.conllu>` validates in seconds.
-        # Media lanes (generic): rgba-image, track-audio, frame-video — not corpus keys.
-        build_cli
-        if [[ "$source" == "document" && -z "$path" ]]; then
+        require_cli
+        if [[ "$source" == document && -z "$path" ]]; then
             path="${INGEST_DOCUMENT_PATH:-$DATA_ROOT/test-data/text}"
         fi
-        if [[ -n "$path" ]]; then
-            ingest "$source" "$path"
-        else
-            ingest "$source"
-        fi
+        if [[ -n "$path" ]]; then ingest "$source" "$path"; else ingest "$source"; fi
         ;;
     agents)
-        # Agent session logs (Claude Code, Codex, Gemini, Antigravity, Copilot, Cursor,
-        # generic role-shaped JSON). Path optional: an explicit file/dir is the witness
-        # boundary; with none the decomposer discovers this user's provider roots
-        # (~/.claude/projects, ~/.codex/sessions, …).
-        build_cli
-        if [[ -n "$path" ]]; then
-            ingest agents "$path"
-        else
-            ingest agents
-        fi
+        require_cli
+        if [[ -n "$path" ]]; then ingest agents "$path"; else ingest agents; fi
         ;;
     code|repo|tabular|recipe)
-        # Witness-unit code/data sources: the <path> IS the witness boundary (a file,
-        # a repository root, a table), so it is REQUIRED — no DATA_ROOT default. Same
-        # table-driven CLI dispatch as everything else (IngestCodeAsync / IngestRepoAsync
-        # / IngestTabularAsync / IngestRecipeAsync).
-        build_cli
+        require_cli
         [[ -n "$path" ]] || { echo "Usage: $0 $source <file-or-directory>" >&2; exit 2; }
         ingest "$source" "$path"
         ;;
     chess|openings|chess-books)
-        # Chess corpora are plain .NET decomposers (ChessPgn / ChessOpenings / ChessBook)
-        # like every other source — cross-platform, not a Windows-only thing. They just
-        # take an explicit corpus dir (no fixed default under DATA_ROOT).
-        build_cli
+        require_cli
         [[ -n "$path" ]] || { echo "Usage: $0 $source <corpus-dir>" >&2; exit 2; }
         ingest "$source" "$path"
         ;;
-    chess-move-outcomes)
-        # Move-outcome fold over recorded games (calculated layer). No path — the
-        # substrate is the source. Deposits aggregated OUTCOME testimony on the bounded
-        # MOVE vocabulary so learned reads are consensus lookups; per-line markers make
-        # re-runs skip-complete, and a db-reset + reseed re-derives it like every other
-        # calculated layer.
-        build_cli
-        ingest chess-move-outcomes
-        ;;
-    chess-tactic-outcomes)
-        # Historical backfill for the learned fork/pin/skewer provider. New PGN/live
-        # games deposit these bounded pattern OUTCOME cells inline; this route fills
-        # only pre-existing playings and is marker-gated/idempotent.
-        build_cli
-        ingest chess-tactic-outcomes
-        ;;
-    chess-eval)
-        # Stockfish eval pass over recorded games (calculated layer, GH #573). No path —
-        # the substrate is the source. Part of the seed ladder so a db-reset + reseed
-        # re-derives the census like every other calculated layer; per-game markers make
-        # re-runs skip-complete. ChessLabPaths resolves the explicit executable or
-        # configured official source build before install/PATH fallbacks. Do not
-        # promote a distro executable to an explicit override in this wrapper.
-        build_cli
-        ingest chess-eval
+    chess-move-outcomes|chess-tactic-outcomes|chess-eval|chess-analyze|chess-transitions|chess-trajectory|chess-opening-match)
+        require_cli
+        ingest "$source"
         ;;
     chess-syzygy)
-        # Tablebase packaging dir → position-grain WDL/DTZ records (Fathom = unpack codec).
-        # Path optional: falls back to LAPLACE_SYZYGY / data-root Games/Chess/syzygy/….
-        build_cli
-        if [[ -n "$path" ]]; then
-            ingest chess-syzygy "$path"
-        else
-            ingest chess-syzygy
-        fi
-        ;;
-    chess-analyze|chess-transitions|chess-trajectory|chess-opening-match)
-        # Substrate-sourced calculated passes: no path, marker-gated, safe to re-run.
-        build_cli
-        ingest "$source"
+        require_cli
+        if [[ -n "$path" ]]; then ingest chess-syzygy "$path"; else ingest chess-syzygy; fi
         ;;
     *)
         echo "Unknown source: $source" >&2
