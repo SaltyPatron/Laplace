@@ -1,79 +1,56 @@
-name: Qualify retained OAuth provider configuration
+name: Read failed installed substrate regression evidence
 on:
   push:
     branches: [verify/postgresql-activation-20260916]
 permissions:
   contents: read
 jobs:
-  source:
-    runs-on: ubuntu-24.04
+  observation:
+    runs-on: [self-hosted, laplace]
     timeout-minutes: 5
-    env:
-      PYTHONDONTWRITEBYTECODE: '1'
-      EVIDENCE: /build/laplace/work/identity-owner/evidence
-      TMPDIR: /build/laplace/work/identity-owner/tmp
-      TMP: /build/laplace/work/identity-owner/tmp
-      TEMP: /build/laplace/work/identity-owner/tmp
     steps:
-      - name: Prepare permanent qualification directory
+      - name: Preserve actual completed native regression results
+        shell: bash
         run: |
           set -euo pipefail
-          sudo mkdir -p /build/laplace
-          sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$EVIDENCE/scripts" "$TMPDIR"
-      - name: Test exact canonical identity update and pipeline caller
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/qualification.log"
-          import ast,base64,hashlib,json,os,re,subprocess,sys,tempfile,urllib.request
-          from pathlib import Path
-          root=Path(os.environ["EVIDENCE"])
-          selections={
-              "update-identity-secrets.py":"7e4d654b6f7d436ffa19da09a502213e01edf85c",
-              "test-update-identity-secrets.py":"650221ec6450af40103118f936d6b9f017c34130",
-              "pipeline.sh":"3445a5f8b0e2a7a9cbbacfd24893ad7f8877ace9",
-          }
-          for name,sha in selections.items():
-              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
-                  headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
-              with urllib.request.urlopen(request,timeout=30) as response:encoded=response.read((2<<20)+1)
-              assert len(encoded)<=2<<20
-              item=json.loads(encoded);raw=base64.b64decode(item["content"])
-              assert item["sha"]==sha and len(raw)==item["size"] and len(raw)<1<<20
-              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
-              (root/"scripts"/name).write_bytes(raw)
-              if name.endswith(".py"):ast.parse(raw)
-          subprocess.run(["bash","-n",root/"scripts/pipeline.sh"],check=True)
-          subprocess.run([sys.executable,root/"scripts/test-update-identity-secrets.py","-v"],check=True)
-          pipeline=(root/"scripts/pipeline.sh").read_text()
-          function=pipeline[pipeline.index("phase_runtime_secrets() {"):pipeline.index("\nphase_publish() {")]
-          with tempfile.TemporaryDirectory(prefix="pipeline-identity-") as directory:
-              prefix=Path(directory)
-              secrets=prefix/"secrets";secrets.mkdir()
-              identity=secrets/"identity.env"
-              original=b"LAPLACE_AUTH_MICROSOFT_CLIENT_ID=existing-id\nLAPLACE_AUTH_MICROSOFT_CLIENT_SECRET=existing-secret\n"
-              identity.write_bytes(original)
-              env=dict(os.environ,ROOT=str(root),LAPLACE_INSTALL_PREFIX=str(prefix),
-                       GITHUB_ACTIONS="true",LAPLACE_MCP_TOKEN="m"*40,LAPLACE_OPERATOR_TOKEN="o"*40,
-                       LICHESS_API="test-only-lichess-token",STRIPE_API_SECRET="test-only-stripe-token")
-              for provider in ("MICROSOFT","GOOGLE"):
-                  for suffix in ("CLIENT_ID","CLIENT_SECRET"):
-                      env["LAPLACE_AUTH_"+provider+"_"+suffix]=""
-              subprocess.run(["bash","-eu"],input=function+"\nphase_runtime_secrets\n",
-                             text=True,env=env,check=True)
-              assert identity.read_bytes()==original
-          receipt={"selections":selections,"filesystemControls":7,"actualPipelineCallerControls":1,
-                   "status":"passed","scope":"Real temporary-file update and extracted canonical caller; no host services or real credentials"}
-          (root/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
-          print(json.dumps(receipt))
+          umask 0077
+          evidence="/build/laplace/recovery/installed-regression-observation/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$evidence"
+          echo "OBSERVATION_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          export OBSERVATION_EVIDENCE="$evidence"
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,stat,subprocess
+          evidence=pathlib.Path(os.environ["OBSERVATION_EVIDENCE"])
+          native=pathlib.Path("/build/laplace/recovery/native-install/35159665378-1")
+          selected=json.loads((native/"selection.json").read_text())
+          assert selected["source"]=="241b4550ed16d0e729e16823dcafdf28dd4dcd76"
+          checkout=pathlib.Path(selected["checkout"])
+          assert subprocess.check_output(["git","-C",str(checkout),"rev-parse","HEAD"],text=True).strip()==selected["source"]
+          build=(checkout/"build").resolve(strict=True)
+          assert build.is_relative_to("/build/laplace/build")
+          results=build/"extension/laplace_substrate/tests/regress_output"
+          report={"nativeRun":35159665378,"source":selected["source"],"build":str(build),"files":[]}
+          for name in ("regression.diffs","regression.out","results/bootstrap.out","results/physicality_descriptor_admission.out"):
+              source=results/name
+              info=source.stat()
+              assert stat.S_ISREG(info.st_mode) and info.st_size <= 64<<20
+              raw=source.read_bytes()
+              target=evidence/name
+              target.parent.mkdir(parents=True,exist_ok=True)
+              target.write_bytes(raw)
+              row={"path":str(source),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),"modifiedNs":info.st_mtime_ns}
+              report["files"].append(row)
+              print(json.dumps(row),flush=True)
+              if name != "regression.out":
+                  print(raw[:49152].decode("utf-8",errors="replace"),flush=True)
+          (evidence/"observation.json").write_text(json.dumps(report,indent=2)+"\n")
+          print(json.dumps(report),flush=True)
           PY
-      - name: Retain actual OAuth preservation controls
+      - name: Retain actual regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: canonical-identity-preservation-controls
-          path: /build/laplace/work/identity-owner/evidence/
+          name: installed-regression-observation
+          path: ${{ env.OBSERVATION_EVIDENCE }}/
           if-no-files-found: error
           retention-days: 30
