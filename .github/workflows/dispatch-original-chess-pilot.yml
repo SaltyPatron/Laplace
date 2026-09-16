@@ -1,0 +1,101 @@
+name: Dispatch exact installed Original 2000-game pilot
+
+on:
+  push:
+    branches: ['diag/dispatch-original-chess-pilot-*']
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  operation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch exact installed Original 2000-game pilot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          REPOSITORY = "SaltyPatron/Laplace"
+          EXPECTED_INSTALLED_SHA = "f40078c50e6936fda9e74951ba3905b56e396407"
+          INSTALLED_LIFECYCLE_RUN_ID = 35079925199
+          TARGET_REF = "verify/chess-corpus-pilot-20260916-f40078c"
+          OBSERVED_PGN = "/vault/Data/Games/Chess/Lumbras/otb/LumbrasGigaBase_OTB_2025.pgn"
+          if not re.fullmatch(r"[0-9a-f]{40}", EXPECTED_INSTALLED_SHA) or INSTALLED_LIFECYCLE_RUN_ID <= 0:
+              raise ValueError("successful exact main installation identity must be supplied")
+          if not re.fullmatch(r"verify/chess-corpus-pilot-[a-z0-9-]+", TARGET_REF):
+              raise ValueError("pilot reference must use the dedicated non-triggering prefix")
+          if not OBSERVED_PGN.startswith("/") or not OBSERVED_PGN.lower().endswith(".pgn") or "OBSERVED" in OBSERVED_PGN:
+              raise ValueError("an actual observed absolute plain PGN must be selected")
+          base = "https://api.github.com/repos/" + REPOSITORY
+          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2026-03-10"}
+          def api(path):
+              with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=30) as response:
+                  raw = response.read(2 * 1024 * 1024 + 1)
+              if len(raw) > 2 * 1024 * 1024:
+                  raise ValueError("API metadata exceeded its bounded envelope")
+              return json.loads(raw)
+          run = api("/actions/runs/" + str(INSTALLED_LIFECYCLE_RUN_ID))
+          if (run["head_sha"] != EXPECTED_INSTALLED_SHA or run["status"] != "completed"
+                  or run["conclusion"] != "failure" or run["head_branch"] != "main"
+                  or run["path"] != ".github/workflows/laplace.yml" or run["run_attempt"] != 1):
+              raise ValueError("lifecycle differs from the specifically reviewed failed f400 installation run")
+          jobs = api("/actions/runs/" + str(INSTALLED_LIFECYCLE_RUN_ID) + "/jobs?filter=latest&per_page=100")
+          selected = [job for job in jobs["jobs"] if job["id"] == 104741206486]
+          if jobs["total_count"] != 1 or len(selected) != 1:
+              raise ValueError("reviewed installation job is absent or ambiguous")
+          job = selected[0]
+          if job["status"] != "completed" or job["conclusion"] != "failure":
+              raise ValueError("installation job differs from its reviewed terminal state")
+          steps = job["steps"]
+          required = (
+              "Check source and policy", "Resolve build dependencies", "Build native and managed artifacts",
+              "Test native engine", "Test managed code", "Test UCI runtime", "Test browser product",
+              "Install native artifacts", "Migrate and reconcile installed database", "Admit operational memory",
+              "Publish applications", "Verify the installed direct build uses the selected Stockfish checkout",
+              "Release product host reservation",
+          )
+          for name in required:
+              matches = [step for step in steps if step["name"] == name]
+              if len(matches) != 1 or matches[0]["status"] != "completed" or matches[0]["conclusion"] != "success":
+                  raise ValueError("required observed installation phase did not succeed: " + name)
+          failed = [step["name"] for step in steps if step["conclusion"] == "failure"]
+          if failed != ["Verify ordinary operational execution"]:
+              raise ValueError("lifecycle has another failure outside the reviewed WordNet stage")
+          lifecycle_evidence = {
+              "runId": INSTALLED_LIFECYCLE_RUN_ID, "jobId": job["id"], "headSha": EXPECTED_INSTALLED_SHA,
+              "lifecycleStatus": "failed", "failedStep": failed[0],
+              "observedFailure": "WordNet operand does not have one complete, unopposed definition chain",
+              "successfulRequiredSteps": list(required),
+              "skippedSteps": [step["name"] for step in steps if step["conclusion"] == "skipped"],
+              "standalonePilotScope": "Native/DB binding must independently pass inside the existing corpus owner before admission; no full lifecycle or live API success is claimed",
+          }
+          print("RETAINED_INSTALLATION_STAGE_EVIDENCE " + json.dumps(lifecycle_evidence), flush=True)
+          if api("/git/ref/heads/main")["object"]["sha"] != EXPECTED_INSTALLED_SHA:
+              raise ValueError("main advanced after the selected installation")
+          if api("/git/ref/heads/" + TARGET_REF)["object"]["sha"] != EXPECTED_INSTALLED_SHA:
+              raise ValueError("pilot reference is not pinned to the installed main revision")
+          request_body = {"ref": TARGET_REF, "inputs": {"mode": "measure", "pgn": OBSERVED_PGN,
+                                                   "family": "otb-2025", "games": "2000"}}
+          request = urllib.request.Request(base + "/actions/workflows/chess-corpus-evidence.yml/dispatches",
+              data=json.dumps(request_body).encode(), headers={**headers, "Content-Type": "application/json"}, method="POST")
+          # One fixed dispatch, with no automatic retry after an ambiguous transport result.
+          with urllib.request.urlopen(request, timeout=30) as response:
+              code = response.status
+              raw = response.read(65537)
+          if code not in (200, 204) or len(raw) > 65536:
+              raise ValueError("workflow dispatch returned an unexpected bounded response")
+          result = json.loads(raw) if raw else {}
+          if api("/git/ref/heads/" + TARGET_REF)["object"]["sha"] != EXPECTED_INSTALLED_SHA:
+              raise ValueError("pilot reference moved during dispatch; inspect the created run before claiming its identity")
+          print("CHESS_CORPUS_PILOT_DISPATCH " + json.dumps({"status": "requested", "expectedHead": EXPECTED_INSTALLED_SHA,
+              "installationRun": INSTALLED_LIFECYCLE_RUN_ID, "lifecycleStatus": "failed", "failedStep": failed[0],
+              "ref": TARGET_REF, "inputs": request_body["inputs"],
+              "workflowRunId": result.get("workflow_run_id"), "runUrl": result.get("html_url")}), flush=True)
+          PY
