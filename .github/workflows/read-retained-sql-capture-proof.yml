@@ -1,0 +1,151 @@
+name: Read retained SQL capture helper execution proof
+on:
+  push:
+    branches: [diag/physicality-capture-proof-20260916]
+permissions:
+  actions: read
+jobs:
+  retained-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Authenticate retained execution and write corrected report
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          evidence_root="/build/laplace/work/physicality-capture-proof/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$(dirname "$evidence_root")"
+          test ! -e "$evidence_root"
+          export EVIDENCE_ROOT="$evidence_root"
+          printf 'EVIDENCE_ROOT=%s\n' "$evidence_root" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import hashlib,json,os,re,resource,stat,subprocess,zipfile
+          from pathlib import Path
+          root=Path(os.environ["EVIDENCE_ROOT"]);root.mkdir(mode=0o700)
+          repo="SaltyPatron/Laplace";repo_id=1246058537
+          run_id=35117377505;job_id=104866127872;artifact_id=10455429607
+          head="b8ebf8522320405378c98c0f0e218dc08e956f06"
+          zip_size=98134445;zip_sha="6dbbe5e233bca7859a1449e1c08568bac59f888127725abb378fd98f541354d8"
+          def fetch(endpoint,name,maximum,timeout=45):
+              path=root/name
+              def limit(): resource.setrlimit(resource.RLIMIT_FSIZE,(maximum,maximum))
+              with path.open("xb") as output:
+                  done=subprocess.run(["gh","api",endpoint],stdout=output,stderr=subprocess.PIPE,
+                      timeout=timeout,preexec_fn=limit)
+              if done.returncode or path.stat().st_size>maximum:
+                  raise RuntimeError("authenticated fixed-endpoint read failed: "+name)
+              return path
+          def document(endpoint,name):
+              path=fetch(endpoint,name,1<<20)
+              return json.loads(path.read_text())
+          def require(condition,message):
+              if not condition:raise RuntimeError(message)
+          artifact=document(f"repos/{repo}/actions/artifacts/{artifact_id}","artifact.json")
+          require(artifact["id"]==artifact_id and artifact["size_in_bytes"]==zip_size
+              and artifact["digest"]=="sha256:"+zip_sha and artifact["expired"] is False,"artifact metadata mismatch")
+          binding=artifact["workflow_run"]
+          require(binding["id"]==run_id and binding["head_sha"]==head
+              and binding["repository_id"]==repo_id and binding["head_repository_id"]==repo_id,"artifact source mismatch")
+          run=document(f"repos/{repo}/actions/runs/{run_id}","run.json")
+          require(run["id"]==run_id and run["head_sha"]==head and run["status"]=="completed"
+              and run["conclusion"]=="failure" and run["repository"]["full_name"]==repo,"original run mismatch")
+          job=document(f"repos/{repo}/actions/jobs/{job_id}","job.json")
+          require(job["id"]==job_id and job["run_id"]==run_id and job["status"]=="completed"
+              and job["conclusion"]=="failure","original job mismatch")
+          steps={s["name"]:s for s in job["steps"]}
+          require(steps["Build unchanged ordinary native dependencies for the SQL helper probe"]["conclusion"]=="success"
+              and steps["Execute existing SQL transport probe with actual PostgreSQL 18 headers"]["conclusion"]=="failure"
+              and steps["Retain native controls, actual Unicode floor and source bindings"]["conclusion"]=="success",
+              "original step outcomes mismatch")
+          archive=fetch(f"repos/{repo}/actions/artifacts/{artifact_id}/zip","retained.zip",zip_size+1,90)
+          require(archive.stat().st_size==zip_size,"ZIP length mismatch")
+          with archive.open("rb") as stream:require(hashlib.file_digest(stream,"sha256").hexdigest()==zip_sha,"ZIP digest mismatch")
+          with zipfile.ZipFile(archive) as retained:
+              infos=retained.infolist()
+              require(1<=len(infos)<=64 and len({x.filename for x in infos})==len(infos),"ZIP count/duplicate bound")
+              require(sum(x.file_size for x in infos)<=256<<20,"ZIP expanded-size bound")
+              for entry in infos:
+                  require(not entry.is_dir() and not entry.flag_bits&1
+                      and not stat.S_ISLNK(entry.external_attr>>16),"unexpected ZIP member type")
+                  require(not entry.filename.startswith("/") and ".." not in Path(entry.filename).parts,
+                      "unexpected ZIP path")
+              entries={x.filename:x for x in infos}
+              def member(name,maximum):
+                  require(name in entries and entries[name].file_size<=maximum,"missing/oversized allowed member: "+name)
+                  with retained.open(entries[name]) as stream:
+                      value=stream.read(maximum+1)
+                  require(len(value)==entries[name].file_size and len(value)<=maximum,"member size mismatch")
+                  return value
+              def identity(name,maximum):
+                  entry=entries.get(name)
+                  require(entry is not None and entry.file_size<=maximum,"missing/oversized binary")
+                  with retained.open(entry) as stream:digest=hashlib.file_digest(stream,"sha256").hexdigest()
+                  return {"member":name,"bytes":entry.file_size,"sha256":digest}
+              inputs=json.loads(member("evidence/inputs.json",1<<20))
+              require(inputs["schema"]=="laplace.hosted-native-qualification-inputs/v1","input schema mismatch")
+              pg=[x for x in inputs["dependencies"] if x["name"]=="postgresql"]
+              require(len(pg)==1 and pg[0]["revision"]=="724edf9bde9d356724ad384a2e196edc3c9f80f7"
+                  and pg[0]["archive_sha256"]=="ff0acd10a039d391454f4ea6941184f56a8564e2e5010099f93f438082c900cc"
+                  and pg[0]["url"]=="https://git.postgresql.org/git/postgresql.git","PG input provenance mismatch")
+              output=member("evidence/pg-probe.log",1<<20).decode()
+              matches=re.findall(r"^physicality PG native helpers: ([0-9]+) checks; fake SPI calls=([0-9]+); backend/PostGIS executions=0$",output,re.M)
+              require(matches==[("393","12")],"executed probe receipt mismatch")
+              failure=member("evidence/pg-probe-result.log",1<<20).decode()
+              require("FileNotFoundError" in failure and "pg_config_ext.h" in failure,
+                  "original post-test reporting failure mismatch")
+              build=member("evidence/pg-probe-build.log",1<<20).decode()
+              require("Linking C executable probe/physicality_descriptor_pg_native_probe" in build,
+                  "probe link completion missing")
+              cmake=member("probe-cmake/CMakeLists.txt",1<<20).decode()
+              prefix=f"/build/laplace/work/physicality-capture-sql-helpers/{run_id}-1"
+              require(f'set(LAPLACE_PG_INCLUDEDIR_SERVER "{prefix}/external/postgresql/src/include")' in cmake
+                  and f'IMPORTED_LOCATION "{prefix}/build/core/liblaplace_core.so"' in cmake,
+                  "probe header/library selection mismatch")
+              header_log=member("evidence/pg-headers.log",4<<20).decode()
+              require("config.status: creating src/include/pg_config.h" in header_log
+                  and "generated-header-symlinks" in header_log and "configure: error:" not in header_log,
+                  "actual header generation completion missing")
+              binaries=[identity("build/core/liblaplace_core.so",80<<20),
+                        identity("probe-build/probe/physicality_descriptor_pg_native_probe",4<<20)]
+              logs=[identity(name,4<<20) for name in (
+                  "evidence/inputs.json","evidence/pg-probe.log","evidence/pg-probe-build.log",
+                  "evidence/pg-headers.log","evidence/pg-probe-result.log","probe-cmake/CMakeLists.txt")]
+              require(not any(x.filename.endswith("/pg_config.h") for x in infos),"unexpected retained generated header")
+          report={"schema":"laplace.retained-sql-helper-proof/v1",
+              "status":"passed-controls-with-original-post-test-reporting-failure",
+              "original":{"repository":repo,"run_id":run_id,"job_id":job_id,"head_sha":head,
+                  "workflow_conclusion":"failure","product_candidate":"6cef77a55870103657f9494dd83e84d87e7f3ab6",
+                  "native_candidate":"2630f20eef44e8ad78cfefada02df9677bdc59e9"},
+              "artifact":{"id":artifact_id,"bytes":zip_size,"zip_sha256":zip_sha},
+              "executed":{"checks":393,"fake_spi_calls":12,"backend_executions":0,"postgis_executions":0},
+              "binaries":binaries,"retained_input_log_identities":logs,
+              "postgres_provenance":{"source":pg[0],"actual_generated_header_hashes":None,
+                  "scope":"Exact upstream acquisition and original configure/generated-header logs retained. Generated header bytes were not retained; no regenerated bytes are presented as historical execution inputs."},
+              "original_reporting_error":"Post-test serializer requested absent pg_config_ext.h after the compiled probe returned success.",
+              "scope":"Authenticated historical execution of the existing SQL transport-helper probe with controlled PostgreSQL/SPI services. No test rerun, PostgreSQL backend execution, installed admission, or throughput claim."}
+          (root/"corrected-proof.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(report,sort_keys=True))
+          
+          PY
+      - name: Retain corrected report and authenticated source metadata
+        id: artifact
+        if: always() && env.EVIDENCE_ROOT != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: retained-sql-helper-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.EVIDENCE_ROOT }}/corrected-proof.json
+            ${{ env.EVIDENCE_ROOT }}/artifact.json
+            ${{ env.EVIDENCE_ROOT }}/run.json
+            ${{ env.EVIDENCE_ROOT }}/job.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Print retained report identity
+        if: always()
+        env:
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
+          ARTIFACT_SHA256: ${{ steps.artifact.outputs.artifact-digest }}
+        run: |
+          printf 'artifact_id=%s\nartifact_sha256=%s\n' "$ARTIFACT_ID" "$ARTIFACT_SHA256"
