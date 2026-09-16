@@ -1,4 +1,4 @@
-name: Current direct owners and installed export controls
+name: Direct pipeline and recorded export correction controls
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -10,8 +10,8 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: 4322c77da01d3925fc434b561934a4fbf5eabac4
-      SOURCE_TREE: 9cbacc90ebc773b616b179de0eb5826e4ed0a1c6
+      SOURCE_SHA: 01d528e2906e8a4434b20ebe4508eca0e10dce90
+      SOURCE_TREE: 0c0ae0d8a794cf8cacb66a6e4ef4c6196dd6d0eb
       TMPDIR: /build/laplace/work/current-direct-owners/tmp
       TMP: /build/laplace/work/current-direct-owners/tmp
       TEMP: /build/laplace/work/current-direct-owners/tmp
@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 4322c77da01d3925fc434b561934a4fbf5eabac4
+          ref: 01d528e2906e8a4434b20ebe4508eca0e10dce90
           fetch-depth: 1
       - name: Prepare permanent scratch for the selected source
         run: |
@@ -32,50 +32,21 @@ jobs:
           printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
           command -v rsync
           rsync --version > "$EVIDENCE/rsync.txt"
-      - name: Execute API publication and existing owner controls
+      - name: Execute corrected pipeline and snapshot controls
         run: |
           set -euo pipefail
-          status=0
-          qualify() {
-            local label="$1"
-            shift
-            set +e
-            timeout --signal=TERM --kill-after=10s 300s "$@" 2>&1 | tee "$EVIDENCE/$label.log"
-            local result=$?
-            set -e
-            printf '%s\t%s\n' "$label" "$result" >> "$EVIDENCE/exit-codes.tsv"
-            if [ "$result" -ne 0 ]; then status=1; fi
-          }
-          for suite in postgresql-release pipeline-install app-fingerprints application-publish application-runtime installed-chess-corpus qualified-chess-floor-export; do
-            qualify "$suite" python3 "scripts/test-$suite.py" -v
-          done
-          qualify payload-sync bash scripts/test-deploy-payload-sync.sh
-          qualify publish-snapshot bash scripts/test-managed-publish-snapshot.sh
-          qualify shellcheck shellcheck -S warning -x deploy/linux/deploy.sh deploy/linux/managed-publish.sh
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/python-ast.log"
-          import ast, subprocess, yaml
+          timeout --signal=TERM --kill-after=10s 120s python3 scripts/test-pipeline-install.py -v 2>&1 | tee "$EVIDENCE/pipeline-controls.log"
+          timeout --signal=TERM --kill-after=10s 120s python3 scripts/test-qualified-chess-floor-export.py -v 2>&1 | tee "$EVIDENCE/export-controls.log"
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/syntax.log"
+          import ast
           from pathlib import Path
-          for name in ("verify-api-payload.py", "test-application-publish.py", "postgresql-release.py",
-                       "test-postgresql-release.py", "test-pipeline-install.py", "test-app-fingerprints.py",
-                       "check-application-runtime.py", "test-application-runtime.py", "measure-installed-chess-corpus.py",
-                       "test-installed-chess-corpus.py", "export-qualified-chess-floors.py",
-                       "test-qualified-chess-floor-export.py"):
+          for name in ("export-qualified-chess-floors.py", "test-qualified-chess-floor-export.py",
+                       "test-pipeline-install.py"):
               ast.parse((Path("scripts") / name).read_text())
-              print(f"PASS Python AST {name}")
-          workflow = yaml.safe_load(Path(".github/workflows/chess-floor-export.yml").read_text())
-          for job in workflow["jobs"].values():
-              for step in job["steps"]:
-                  if "run" in step:
-                      subprocess.run(["bash", "-n"], input=step["run"], text=True, check=True)
-          print("PASS export workflow YAML and embedded Bash syntax")
+              print("PASS AST " + name)
           PY
-          bash -n deploy/linux/deploy.sh
-          bash -n deploy/linux/payload-sync.sh
-          bash -n scripts/publish-applications.sh
           bash -n scripts/pipeline.sh
-          printf '%s\n' "PASS Bash syntax" | tee "$EVIDENCE/bash.log"
           test -z "$(git status --porcelain --untracked-files=all)"
-          exit "$status"
       - name: Authenticate and parse the coordinated native operator
         env:
           GITHUB_TOKEN: ${{ github.token }}

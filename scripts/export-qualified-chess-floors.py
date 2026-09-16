@@ -323,6 +323,10 @@ def qualification(plan, root):
 
 def recording_compatible(guard, before, after):
     """Retain all runtime identities; only observed journal occupancy may differ."""
+    for state in (before, after):
+        if (not isinstance(state, dict) or type(state.get("format")) is not int
+                or state["format"] != 2):
+            raise ValueError("pilot installed runtime has an unsupported format")
     if not guard.compatible(before, after, purpose="recording"):
         raise ValueError("installed native/database selection differs from the recording baseline")
 
@@ -439,8 +443,6 @@ def execute(plan, root, prefix, pg, output):
             if artifact.sha256(pilot / "native-before.json") != plan["pilot_native_snapshot_sha256"]:
                 raise ValueError("selected pilot native snapshot changed")
             baseline = load(pilot / "native-before.json")
-            if baseline.get("format") != 1:
-                raise ValueError("pilot installed runtime has an unsupported format")
             recording_compatible(guard, baseline, load(pilot / "native-after.json"))
             if os.environ.get("LAPLACE_CHESS_CORPUS_EXPORT"):
                 raise ValueError("explicit export override would hide the persisted selection")
