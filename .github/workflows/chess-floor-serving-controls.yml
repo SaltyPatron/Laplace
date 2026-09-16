@@ -1,55 +1,32 @@
-name: Qualify service repair and observe exact bootstrap capabilities
+name: Qualify current managed service storage policy
 on:
   push:
     branches: [verify/chess-floor-serving-controls-20260916]
 permissions:
   contents: read
 jobs:
-  exact-capability:
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 2
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      TMPDIR: /build/laplace/work/service-policy-controls/tmp
+      TMP: /build/laplace/work/service-policy-controls/tmp
+      TEMP: /build/laplace/work/service-policy-controls/tmp
     steps:
-      - name: Read exact command permissions and public owner identities
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 33d84e249c7e3ca131959c6263f9066dd20f455a
+          persist-credentials: false
+      - name: Execute service and host controls with real isolated filesystem operations
         shell: bash
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=5s 45s python3 - <<'PY'
-          import hashlib, json, os, pathlib, pwd, stat, subprocess, time
-          root = pathlib.Path("/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace")
-          env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"}
-          started = time.monotonic()
-          uid = os.getuid()
-          result = {"schema": "laplace.exact-bootstrap-capability/v1", "uid": uid, "user": pwd.getpwuid(uid).pw_name, "gid": os.getgid(), "groups": os.getgroups(), "commands_executed": False, "files": [], "permissions": []}
-          paths = [root / "scripts/bootstrap-laplace-runner.sh", root / "scripts/setup-host.sh", pathlib.Path("/usr/local/libexec/laplace-managed-deploy"), pathlib.Path("/usr/local/libexec/laplace-service-control")]
-          for path in paths:
-              item = {"path": str(path)}
-              try:
-                  fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-                  with os.fdopen(fd, "rb") as stream:
-                      st = os.fstat(stream.fileno())
-                      if not stat.S_ISREG(st.st_mode) or st.st_size > 1024 * 1024:
-                          raise ValueError("outside bounded regular helper")
-                      data = stream.read(1024 * 1024 + 1)
-                      after = os.fstat(stream.fileno())
-                  if len(data) != st.st_size or (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
-                      raise ValueError("helper changed during read")
-                  item.update(uid=st.st_uid, gid=st.st_gid, mode=oct(stat.S_IMODE(st.st_mode)), bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
-              except (OSError, ValueError) as exc:
-                  item.update(status="unavailable", error_type=type(exc).__name__)
-              result["files"].append(item)
-          commands = [
-              ("dependency-prefix", ["timeout", "--signal=TERM", "--kill-after=10s", "600s", "env", "LAPLACE_EXTERNAL=/build/external", "TMPDIR=/build/laplace/work", "TMP=/build/laplace/work", "TEMP=/build/laplace/work", "bash", str(root / "scripts/bootstrap-laplace-runner.sh"), "prefix"]),
-              ("managed-policy-setup", ["bash", str(root / "scripts/setup-host.sh"), "managed-services"]),
-          ]
-          for name, command in commands:
-              item = {"owner": name, "command": command, "inspection_only": True}
-              try:
-                  p = subprocess.run(["sudo", "-n", "-l", "--", *command], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-                  combined = (p.stdout + p.stderr)[:16384].lower()
-                  item.update(returncode=p.returncode, permitted=p.returncode == 0, output_bytes=len(p.stdout)+len(p.stderr), output_truncated=len(p.stdout)+len(p.stderr)>16384, password_required=b"password is required" in combined, not_allowed=b"not allowed" in combined or b"not permitted" in combined, tty_required=b"terminal is required" in combined)
-              except (OSError, subprocess.TimeoutExpired) as exc:
-                  item.update(status="unavailable", error_type=type(exc).__name__, permitted=None)
-              result["permissions"].append(item)
-          result["elapsed_seconds"] = time.monotonic() - started
-          print("EXACT_BOOTSTRAP_CAPABILITY " + json.dumps(result, sort_keys=True), flush=True)
-          PY
+          sudo mkdir -p /build/laplace
+          sudo chown "$(id -u):$(id -g)" /build/laplace
+          mkdir -p "$TMPDIR"
+          test "$(git rev-parse HEAD)" = 33d84e249c7e3ca131959c6263f9066dd20f455a
+          test "$(git rev-parse HEAD^{tree})" = d1ab2271bd3ba5b269c2c9c94c52f01128ce2117
+          timeout --signal=TERM --kill-after=5s 120s python3 scripts/test-managed-services.py
+          timeout --signal=TERM --kill-after=5s 120s python3 scripts/test-managed-host.py
+          test -z "$(git status --porcelain --untracked-files=all)"
