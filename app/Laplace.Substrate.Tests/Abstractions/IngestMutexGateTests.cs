@@ -244,6 +244,27 @@ public sealed class IngestMutexGateTests
         return outBuf.ToString();
     }
 
+    // Python protocol controls use the repository's scripts/test-*.py convention,
+    // just as managed controls live in .Tests projects. Their deliberate lock
+    // fixtures are not production acquisition owners.
+    private static bool IsTestSource(string relative)
+        => relative.Contains(".Tests", StringComparison.OrdinalIgnoreCase)
+            || (Path.GetDirectoryName(relative) == "scripts"
+                && Path.GetFileName(relative).StartsWith("test-", StringComparison.Ordinal)
+                && Path.GetExtension(relative) == ".py");
+
+    [Fact]
+    public void ProductionScan_SeparatesTestFixturesFromRuntimeOwners()
+    {
+        Assert.True(IsTestSource("app/Laplace.Substrate.Tests/Abstractions/MeasurementLaneGateTests.cs"));
+        Assert.True(IsTestSource("scripts/test-bootstrap-ingest-liveness.py"));
+        Assert.False(IsTestSource("scripts/bootstrap-ingest-liveness.py"));
+        Assert.False(IsTestSource("scripts/wait-for-quiet-substrate.sh"));
+        Assert.False(IsTestSource("scripts/test-bootstrap-ingest-liveness.sh"));
+        Assert.False(IsTestSource("scripts/test-tools/runtime.py"));
+        Assert.False(IsTestSource("app/Laplace.Substrate/Crud/Npgsql/NpgsqlIngestObservability.cs"));
+    }
+
     private static IEnumerable<(string Relative, string Text)> ScannedFiles(string repoRoot)
     {
         var sep = Path.DirectorySeparatorChar;
@@ -258,8 +279,8 @@ public sealed class IngestMutexGateTests
                 if (!suffixes.Any(file.EndsWith)) continue;
                 if (file.Contains($"{sep}bin{sep}") || file.Contains($"{sep}obj{sep}")) continue;
                 if (file.Contains($"{sep}node_modules{sep}")) continue;
-                if (file.Contains(".Tests", StringComparison.OrdinalIgnoreCase)) continue;
                 var relative = Path.GetRelativePath(repoRoot, file).Replace('\\', '/');
+                if (IsTestSource(relative)) continue;
                 yield return (relative, Strip(Path.GetFileName(file), File.ReadAllText(file)));
             }
         }

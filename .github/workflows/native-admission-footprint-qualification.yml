@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: c691059e050335f23d0df4048db6937bcfa98eb7
+          ref: d0525974b6616a91ce6a3696b82e808026a83ef1
           fetch-depth: 1
           persist-credentials: false
       - name: Prepare exact source and permanent test workspace
@@ -33,8 +33,8 @@ jobs:
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$EVIDENCE" "$TMPDIR" "$DOTNET_CLI_HOME" "$DOTNET_INSTALL_DIR" "$NUGET_PACKAGES"
-          test "$(git rev-parse HEAD)" = c691059e050335f23d0df4048db6937bcfa98eb7
-          test "$(git rev-parse HEAD^{tree})" = b2121534f75ef351b411138d8a8e10b12696b319
+          test "$(git rev-parse HEAD)" = d0525974b6616a91ce6a3696b82e808026a83ef1
+          test "$(git rev-parse HEAD^{tree})" = 465bd71d64a90b85a54ea3eee1ecc888304e1d4f
           git rev-parse HEAD HEAD^{tree} > "$EVIDENCE/source.txt"
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
@@ -71,7 +71,7 @@ jobs:
           assert methods.endswith("}\n") and methods.count("FindRepoRootPublic()")==1
           helper="namespace Laplace.Decomposers.Abstractions.Tests;\npublic class TypeIdLawTests\n{\n"+methods
           (work/"RootLocator.cs").write_text(helper)
-          report={"source":"c691059e050335f23d0df4048db6937bcfa98eb7","scope":"Actual linked source-contract classes only; not native-backed product assembly execution",
+          report={"source":"d0525974b6616a91ce6a3696b82e808026a83ef1","scope":"Actual linked source-contract classes only; not native-backed product assembly execution",
                   "files":{path:hashlib.sha256((root/path).read_bytes()).hexdigest() for path in files},
                   "rootLocatorSha256":hashlib.sha256(helper.encode()).hexdigest(),"packages":{n:packages[n] for n in ("Microsoft.NET.Test.Sdk","xunit","xunit.runner.visualstudio")}}
           (Path(os.environ["EVIDENCE"])/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
@@ -83,12 +83,12 @@ jobs:
           python3 - <<'PY' 2>&1 | tee "$EVIDENCE/result.json"
           import json,os,xml.etree.ElementTree as ET
           from pathlib import Path
-          expected=set(["LaneIdentity_IsDefinedExactlyOnce","MeasurementLane_DoesNotShareAClassWithRunLiveness","RunLivenessClass_AgreesBetweenCsharpAndCanonicalSql","QuietGate_PreSchemaBootstrapIsProvenWithoutFailingOpen","Ingest_TakesTheLaneShared","Measurement_ObservesBeforeAndAfterChildWithoutBlockingIngest","Lane_IsSessionScoped","Wrapper_DoesNotTakeTheLockItself","IngestMutex_NoNewProcessLevelCopy","IngestMutex_NoNewDatabaseLevelImplementation","NamedAdvisoryLockOwner_RemainsAvailable","HighwayMaskDeposit_CallerMatchesInstalledSurface","EvidenceVerify_NoNewHandRolledImplementation","EvidenceVerify_SanctionedSurfaceExists","G10_AllowlistsOnlyShrink","ContentAddressedApply_DoesNotAcquireGlobalAdvisoryLock"])
+          expected=set(["ProductionScan_SeparatesTestFixturesFromRuntimeOwners","LaneIdentity_IsDefinedExactlyOnce","MeasurementLane_DoesNotShareAClassWithRunLiveness","RunLivenessClass_AgreesBetweenCsharpAndCanonicalSql","QuietGate_PreSchemaBootstrapIsProvenWithoutFailingOpen","Ingest_TakesTheLaneShared","Measurement_ObservesBeforeAndAfterChildWithoutBlockingIngest","Lane_IsSessionScoped","Wrapper_DoesNotTakeTheLockItself","IngestMutex_NoNewProcessLevelCopy","IngestMutex_NoNewDatabaseLevelImplementation","NamedAdvisoryLockOwner_RemainsAvailable","HighwayMaskDeposit_CallerMatchesInstalledSurface","EvidenceVerify_NoNewHandRolledImplementation","EvidenceVerify_SanctionedSurfaceExists","G10_AllowlistsOnlyShrink","ContentAddressedApply_DoesNotAcquireGlobalAdvisoryLock"])
           results=ET.parse(Path(os.environ["EVIDENCE"])/"contracts.trx").getroot().findall(".//{*}UnitTestResult")
           names=[x.attrib["testName"].rsplit(".",1)[-1] for x in results]
           assert len(names)==len(expected) and set(names)==expected
           assert all(x.attrib["outcome"]=="Passed" for x in results)
-          print(json.dumps({"source":"c691059e050335f23d0df4048db6937bcfa98eb7","passed":len(names),"failed":0,"skipped":0,"tests":names,
+          print(json.dumps({"source":"d0525974b6616a91ce6a3696b82e808026a83ef1","passed":len(names),"failed":0,"skipped":0,"tests":names,
               "scope":"Actual source-reading assertions; no native initialization, native code or PostgreSQL execution"}))
           PY
           test -z "$(git status --porcelain --untracked-files=all)"
