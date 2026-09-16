@@ -46,7 +46,6 @@ export PGDATABASE="${PGDATABASE:-laplace}"
 FRESH_DB=0
 FORCE_FOUNDATION=0
 FORCE_CODEGEN=0
-SKIP_CODEGEN=0
 CLEAN_FIRST=0
 FORCE_REBUILD=0
 SERIAL_TESTS=0
@@ -68,8 +67,7 @@ Usage: pipeline.sh <phase> [<phase> ...] [options]
 Phases: clean codegen build install migrate sync-extension tune-pg tune-laplace
         perfcache-guc api-env publish foundation test
 Options:
-  --fresh-db --force --force-codegen --skip-codegen --clean-first
-  --force-rebuild --serial-tests
+  --fresh-db --force --force-codegen --clean-first --force-rebuild --serial-tests
 EOF
   exit 2
 }
@@ -191,7 +189,6 @@ phase_clean() {
 
 phase_codegen() {
   echo "===== PHASE — CODEGEN ====="
-  [[ "$SKIP_CODEGEN" != 1 ]] || { echo "codegen skipped by explicit request"; return 0; }
   "$PYTHON" "$ROOT/scripts/codegen-attestation-law.py"
 }
 
@@ -202,7 +199,7 @@ phase_build_app() {
 
 phase_build() {
   [[ "$FORCE_REBUILD" != 1 ]] || phase_clean
-  [[ "$SKIP_CODEGEN" == 1 ]] || phase_codegen
+  [[ "$FORCE_CODEGEN" != 1 ]] || phase_codegen
   echo "===== PHASE — BUILD ENGINE + EXTENSIONS ====="
   local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
   local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
@@ -255,7 +252,6 @@ phase_install() (
   [[ -f "$LAPLACE_BUILD_DIRECTORY/build.ninja" ]] || {
     echo "::error::native build tree missing; run pipeline.sh build first" >&2; exit 1;
   }
-  cmake --build "$LAPLACE_BUILD_DIRECTORY"
 
   local library_path_changed=0 server_release_changed=0 path_rc server_rc
   if postgresql_restart_required; then server_release_changed=1; else server_rc=$?; [[ "$server_rc" == 1 ]] || exit "$server_rc"; fi
@@ -518,19 +514,17 @@ phase_runtime_secrets() {
 }
 
 phase_publish() {
-  echo "===== PHASE — PUBLISH ====="
+  echo "===== PHASE — PUBLISH PAYLOAD ====="
   local app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
   # shellcheck source=deploy/linux/app-dir-contract.sh
   source "$ROOT/deploy/linux/app-dir-contract.sh"
   laplace_reconcile_app_dir_contract "$app_dir"
-  bash "$ROOT/deploy/linux/managed-publish.sh" begin
   phase_chess_lab
   phase_runtime_secrets
   local deploy_args=()
   [[ "${LAPLACE_FORCE_NPM:-0}" != 1 ]] || deploy_args+=(--force-npm)
   [[ "${LAPLACE_PUBLISH_SERIAL:-0}" != 1 ]] || deploy_args+=(--serial)
   LAPLACE_MANAGED_TRANSACTION=1 bash "$ROOT/deploy/linux/deploy.sh" "${deploy_args[@]}"
-  bash "$ROOT/deploy/linux/managed-publish.sh" reconcile
 }
 
 phase_foundation() {
@@ -546,7 +540,6 @@ while [[ $# -gt 0 ]]; do
     --fresh-db) FRESH_DB=1; shift ;;
     --force) FORCE_FOUNDATION=1; shift ;;
     --force-codegen) FORCE_CODEGEN=1; shift ;;
-    --skip-codegen) SKIP_CODEGEN=1; shift ;;
     --clean-first) CLEAN_FIRST=1; shift ;;
     --force-rebuild) FORCE_REBUILD=1; shift ;;
     --serial-tests) SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;

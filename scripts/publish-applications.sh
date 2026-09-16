@@ -24,10 +24,12 @@ main() {
       ;;
     deploy)
       managed preflight
+      managed begin
       trap 'rc=$?; trap - EXIT; recover || rc=1; exit "$rc"' EXIT INT TERM HUP
       bash "$ROOT/scripts/pipeline.sh" publish
-      sudo -n systemctl restart laplace-api
+      managed reconcile
       managed activate
+      sudo -n systemctl restart laplace-api
       for _ in $(seq 1 60); do
         if curl -fsS http://127.0.0.1:5187/health/ready | grep -q '"ready":true'; then
           managed commit

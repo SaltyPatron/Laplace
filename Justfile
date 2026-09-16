@@ -206,7 +206,7 @@ test-app:
     bash scripts/test-parallel.sh --app
 
 publish:
-    bash scripts/pipeline.sh publish
+    bash scripts/publish-applications.sh deploy
 
 publish-force-npm:
-    LAPLACE_FORCE_NPM=1 bash scripts/pipeline.sh publish
+    LAPLACE_FORCE_NPM=1 bash scripts/publish-applications.sh deploy
