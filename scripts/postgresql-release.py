@@ -192,6 +192,8 @@ def main(argv: list[str] | None = None) -> int:
                 if not re.fullmatch(r"[1-9][0-9]{4,7}", observed):
                     raise ValueError("invalid running server_version_num observation")
                 major, minor = (int(part) for part in selected["version"].split("."))
+                if int(observed) // 10000 != major:
+                    raise ValueError("running PostgreSQL major differs; a minor-release restart cannot upgrade this cluster")
                 expected = major * 10000 + minor
                 result.update(running_server_version_num=int(observed),
                               selected_server_version_num=expected,

@@ -330,7 +330,8 @@ psql() {
 }
 if postgresql_restart_required; then exit 0; else exit $?; fi
 '''
-        for version, expected in (("180003", 0), ("180006", 1), ("", 2), ("invalid", 2)):
+        for version, expected in (("180003", 0), ("180006", 1), ("170013", 2),
+                                  ("190001", 2), ("", 2), ("invalid", 2)):
             with self.subTest(version=version):
                 result = self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
                                         RUNNING_VERSION=version)
