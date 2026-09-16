@@ -1,0 +1,256 @@
+name: Observe pinned intent-stage buffer growth
+on:
+  push:
+    branches: [diag/intent-stage-growth-20260916]
+permissions:
+  contents: read
+jobs:
+  observe-growth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Read the immutable native source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: f2cbb5fc7305dfd20d9fa3a19003b60a06b457c0
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Compile actual public serializer with libc observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f2cbb5fc7305dfd20d9fa3a19003b60a06b457c0
+          test "$(git hash-object engine/core/src/intent_stage.c)" = 342d92f0fc2faae39d75cdc2e64f54bddaea02a5
+          diagnostic_dir="/build/laplace/work/intent-stage-growth/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test ! -e "$diagnostic_dir"
+          sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$diagnostic_dir"
+          cc --version | tee "$diagnostic_dir/compiler.txt"
+          printf 'source_commit=%s\nsource_blob=%s\n' f2cbb5fc7305dfd20d9fa3a19003b60a06b457c0 342d92f0fc2faae39d75cdc2e64f54bddaea02a5 | tee "$diagnostic_dir/source-identity.txt"
+          cat > "$diagnostic_dir/observe.c" <<'C'
+          #include "laplace/core/intent_stage.h"
+          #include <inttypes.h>
+          #include <stdint.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          
+          static void check(int condition, const char *message) {
+              if (!condition) {
+                  fprintf(stderr, "intent-stage diagnostic failed: %s\n", message);
+                  exit(2);
+              }
+          }
+          
+          /* Linker observation only: every allocation and memcpy still calls libc.
+           * These counters cover requested stage payload, not allocator metadata/RSS. */
+          void *__real_malloc(size_t);
+          void *__real_calloc(size_t, size_t);
+          void *__real_realloc(void *, size_t);
+          void __real_free(void *);
+          void *__real_memcpy(void *, const void *, size_t);
+          
+          struct allocation { void *pointer; size_t size; };
+          static struct allocation tracked[8];
+          static int track_allocations, track_copies;
+          static size_t live_bytes, live_peak, allocation_calls;
+          static uint64_t copy_calls, copy_bytes, growth_calls, growth_bytes;
+          
+          static void track(void *pointer, size_t size) {
+              check(pointer != NULL, "libc allocation failed");
+              for (size_t i = 0; i < sizeof(tracked) / sizeof(tracked[0]); ++i) {
+                  if (tracked[i].pointer == NULL) {
+                      tracked[i].pointer = pointer;
+                      tracked[i].size = size;
+                      check(size <= SIZE_MAX - live_bytes, "allocation counter overflow");
+                      live_bytes += size;
+                      if (live_bytes > live_peak) live_peak = live_bytes;
+                      ++allocation_calls;
+                      return;
+                  }
+              }
+              check(0, "unexpected concurrent allocation count");
+          }
+          
+          void *__wrap_malloc(size_t size) {
+              void *pointer = __real_malloc(size);
+              if (track_allocations) track(pointer, size);
+              return pointer;
+          }
+          
+          void *__wrap_calloc(size_t count, size_t width) {
+              check(width == 0 || count <= SIZE_MAX / width, "calloc size overflow");
+              void *pointer = __real_calloc(count, width);
+              if (track_allocations) track(pointer, count * width);
+              return pointer;
+          }
+          
+          void *__wrap_realloc(void *pointer, size_t size) {
+              check(!track_allocations, "pinned bounded implementation unexpectedly called realloc");
+              return __real_realloc(pointer, size);
+          }
+          
+          void __wrap_free(void *pointer) {
+              if (track_allocations && pointer != NULL) {
+                  size_t i;
+                  for (i = 0; i < sizeof(tracked) / sizeof(tracked[0]); ++i) {
+                      if (tracked[i].pointer == pointer) {
+                          check(live_bytes >= tracked[i].size, "free counter underflow");
+                          live_bytes -= tracked[i].size;
+                          tracked[i].pointer = NULL;
+                          tracked[i].size = 0;
+                          break;
+                      }
+                  }
+                  check(i < sizeof(tracked) / sizeof(tracked[0]), "untracked stage allocation freed");
+              }
+              __real_free(pointer);
+          }
+          
+          void *__wrap_memcpy(void *destination, const void *source, size_t size) {
+              if (track_copies) {
+                  ++copy_calls;
+                  copy_bytes += size;
+                  /* During entity append every field copy is <=16 bytes. On the pinned
+                   * owner, larger copies are the entire previous growth buffer. */
+                  if (size > 16) {
+                      ++growth_calls;
+                      growth_bytes += size;
+                  }
+              }
+              return __real_memcpy(destination, source, size);
+          }
+          
+          static int append_entity(intent_stage_t *stage, size_t ordinal) {
+              const hash128_t id = {UINT64_C(0x1111222233334444), (uint64_t)ordinal + 1};
+              const hash128_t type = {UINT64_C(0x5555666677778888), UINT64_C(17)};
+              return intent_stage_add_entity(stage, &id, (int16_t)(ordinal % 256), &type, NULL);
+          }
+          
+          static uint8_t *emit(const intent_stage_t *stage, size_t *size) {
+              *size = intent_stage_emit_copy_binary(stage, INTENT_STAGE_TABLE_ENTITIES, NULL, 0);
+              uint8_t *bytes = malloc(*size);
+              check(bytes != NULL, "COPY comparison allocation failed");
+              check(intent_stage_emit_copy_binary(stage, INTENT_STAGE_TABLE_ENTITIES, bytes, *size) == *size,
+                    "public COPY serializer size changed");
+              return bytes;
+          }
+          
+          static uint64_t run_case(size_t capacity) {
+              intent_stage_t *reference = intent_stage_new(0);
+              check(reference != NULL, "unbounded reference stage creation failed");
+              const size_t overhead = intent_stage_memory_bytes(reference);
+              const size_t payload_grant = 5 * capacity / 2;
+              const size_t grant = overhead + payload_grant;
+              const size_t rows = (5 * capacity / 4) / 52;
+              for (size_t i = 0; i < rows; ++i)
+                  check(append_entity(reference, i) == 0, "unbounded public append failed");
+              size_t reference_size;
+              uint8_t *reference_copy = emit(reference, &reference_size);
+          
+              live_bytes = live_peak = allocation_calls = 0;
+              copy_calls = copy_bytes = growth_calls = growth_bytes = 0;
+              track_allocations = track_copies = 1;
+              intent_stage_t *bounded = intent_stage_new_bounded(0, grant);
+              check(bounded != NULL, "bounded public stage creation failed");
+              for (size_t i = 0; i < rows; ++i) {
+                  check(append_entity(bounded, i) == 0, "valid append unexpectedly refused");
+                  check(intent_stage_memory_bytes(bounded) == live_bytes, "live allocation accounting differs");
+                  check(intent_stage_memory_peak_bytes(bounded) == live_peak, "coexisting allocation peak differs");
+                  check(live_peak <= grant, "actual requested allocation exceeded fixed grant");
+              }
+              const size_t measured_live = live_bytes, measured_peak = live_peak;
+              const size_t measured_allocations = allocation_calls;
+              const uint64_t measured_growth_calls = growth_calls, measured_growth_bytes = growth_bytes;
+              const uint64_t measured_copy_calls = copy_calls, measured_copy_bytes = copy_bytes;
+              track_copies = track_allocations = 0;
+              check(intent_stage_entity_count(bounded) == rows, "public row count differs");
+              check(!intent_stage_allocation_failed(bounded), "successful stage reports failure");
+              check(measured_copy_calls - measured_growth_calls == 8 * rows, "field-copy call accounting differs");
+              check(measured_copy_bytes - measured_growth_bytes == 52 * rows, "field-copy byte accounting differs");
+          
+              size_t bounded_size;
+              uint8_t *bounded_copy = emit(bounded, &bounded_size);
+              check(bounded_size == reference_size && bounded_size == 21 + 52 * rows,
+                    "public COPY byte length differs");
+              check(memcmp(bounded_copy, reference_copy, bounded_size) == 0,
+                    "bounded and unbounded public COPY bytes differ");
+              check(measured_growth_calls > rows / 2, "expected repeated fallback growth was not observed");
+              check(measured_growth_bytes > (uint64_t)(52 * rows) * 256,
+                    "expected copy amplification was not observed");
+          
+              /* Continue only to the nearby grant refusal. The failed stage can contain
+               * a partial final row; it is discarded, never represented as valid output. */
+              track_allocations = 1;
+              size_t attempted = rows;
+              int status = 0;
+              while (status == 0 && attempted < rows + 8) status = append_entity(bounded, attempted++);
+              check(status != 0 && intent_stage_allocation_failed(bounded), "grant boundary did not refuse");
+              check(live_bytes == intent_stage_memory_bytes(bounded), "failed-stage live accounting differs");
+              check(live_peak == intent_stage_memory_peak_bytes(bounded) && live_peak <= grant,
+                    "failure path violated peak accounting");
+              const size_t refusal_peak = live_peak;
+              intent_stage_free(bounded);
+              check(live_bytes == 0, "bounded stage allocations leaked");
+              track_allocations = 0;
+              free(bounded_copy);
+              free(reference_copy);
+              intent_stage_free(reference);
+          
+              printf("{\"capacity_anchor_bytes\":%zu,\"fixed_grant_bytes\":%zu,"
+                     "\"stage_overhead_bytes\":%zu,\"rows\":%zu,\"tuple_bytes\":%zu,"
+                     "\"copy_bytes\":%zu,\"growth_copy_calls\":%" PRIu64 ","
+                     "\"growth_copy_bytes\":%" PRIu64 ",\"allocation_calls\":%zu,"
+                     "\"retained_payload_bytes\":%zu,\"observed_peak_payload_bytes\":%zu,"
+                     "\"refusal_peak_payload_bytes\":%zu,\"copy_equal\":true,"
+                     "\"grant_refusal_observed\":true,\"stage_freed\":true}\n",
+                     capacity, grant, overhead, rows, 52 * rows, bounded_size,
+                     measured_growth_calls, measured_growth_bytes, measured_allocations,
+                     measured_live, measured_peak, refusal_peak);
+              return measured_growth_bytes;
+          }
+          
+          int main(void) {
+              const size_t capacities[] = {32768, 65536, 131072};
+              uint64_t previous = 0;
+              for (size_t i = 0; i < sizeof(capacities) / sizeof(capacities[0]); ++i) {
+                  const uint64_t current = run_case(capacities[i]);
+                  if (previous != 0)
+                      check(current * 10 > previous * 38 && current * 10 < previous * 43,
+                            "doubling output did not exhibit the predicted quadratic copy scaling");
+                  previous = current;
+              }
+              puts("{\"schema\":\"laplace.intent-stage-growth-diagnostic/v1\",\"status\":\"passed\","
+                   "\"source_commit\":\"f2cbb5fc7305dfd20d9fa3a19003b60a06b457c0\","
+                   "\"source_blob\":\"342d92f0fc2faae39d75cdc2e64f54bddaea02a5\","
+                   "\"scope\":\"public native entity serializer only\","
+                   "\"postgres_ingestion_measured\":false,\"chess_throughput_measured\":false}");
+              return 0;
+          }
+          C
+          cc -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -fno-builtin -fno-lto \
+            -ffunction-sections -fdata-sections -I engine/core/include \
+            -c engine/core/src/intent_stage.c -o "$diagnostic_dir/intent_stage.o" 2>&1 | tee "$diagnostic_dir/compile-source.log"
+          cc -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror -fno-builtin -fno-lto \
+            -ffunction-sections -fdata-sections -I engine/core/include \
+            "$diagnostic_dir/observe.c" "$diagnostic_dir/intent_stage.o" \
+            -Wl,--gc-sections -Wl,--wrap=memcpy -Wl,--wrap=malloc -Wl,--wrap=calloc \
+            -Wl,--wrap=realloc -Wl,--wrap=free -o "$diagnostic_dir/observe" 2>&1 | tee "$diagnostic_dir/compile-diagnostic.log"
+          timeout 30s "$diagnostic_dir/observe" | tee "$diagnostic_dir/result.jsonl"
+          sha256sum engine/core/src/intent_stage.c "$diagnostic_dir/observe.c" "$diagnostic_dir/observe" "$diagnostic_dir/result.jsonl" | tee "$diagnostic_dir/sha256.txt"
+          git diff --exit-code
+      - name: Retain diagnostic source and observations
+        id: artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: intent-stage-growth-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/intent-stage-growth/${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 90
+      - name: Print immutable retained artifact identity
+        if: always()
+        env:
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
+          ARTIFACT_SHA256: ${{ steps.artifact.outputs.artifact-digest }}
+        run: |
+          printf 'artifact_id=%s\nartifact_sha256=%s\n' "$ARTIFACT_ID" "$ARTIFACT_SHA256"
