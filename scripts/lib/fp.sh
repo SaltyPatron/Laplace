@@ -22,6 +22,8 @@ FP_NATIVE_PATHS=(
   extension
   cmake
   CMakeLists.txt
+  # A PostgreSQL release changes the headers and server used by native extensions.
+  deploy/postgresql-release.json
   scripts/codegen-attestation-law.py
   scripts/chess-floor-artifacts.py
   # engine/core invokes ChessCatalogSurfaces to produce two installed ROMs.

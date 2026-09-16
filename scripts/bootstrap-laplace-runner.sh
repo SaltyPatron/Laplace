@@ -1508,6 +1508,12 @@ HINT
         return
     fi
 
+    # PostgreSQL's release selection is tracked with the application. Preserve
+    # every other host pin; the existing loop below still owns Git acquisition.
+    local release_owner
+    release_owner="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/postgresql-release.py"
+    python3 "$release_owner" select-pin --external "$LAPLACE_EXTERNAL" || return 1
+
     local total=0 synced=0 nooped=0 failed=0
     while IFS=$'\t' read -r path url pin; do
         case "$path" in ''|'#'*) continue;; esac
@@ -1545,6 +1551,7 @@ HINT
         red "✗ external: total=$total synced=$synced nooped=$nooped failed=$failed"
         return 1
     fi
+    python3 "$release_owner" source --external "$LAPLACE_EXTERNAL" || return 1
     green "✓ external: total=$total synced=$synced nooped=$nooped (already current)"
 }
 
