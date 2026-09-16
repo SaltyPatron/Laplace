@@ -60,7 +60,7 @@ jobs:
               if isinstance(value, dict):
                   for key, item in value.items():
                       child = path + "." + key
-                      if key == "coverage":
+                      if key in {"coverage", "inserted", "consensus_observations", "consensus_cells", "native_exact_readback", "repeat_without_amplification", "playing_strength_proved"}:
                           encoded = json.dumps(item, sort_keys=True)
                           assert len(encoded) <= 65536
                           print("COVERAGE " + child + " " + encoded)
