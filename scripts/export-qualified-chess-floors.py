@@ -30,7 +30,7 @@ NATIVE_WORKFLOW = ".github/workflows/chess-floor-serving-controls.yml"
 NATIVE_PHASES = [
     "pg-pin", "pg-checkout", "pg-source", "dependency-build",
     "dependency-identity", "native-managed-build", "native-tests",
-    "managed-tests", "uci-tests", "quiet-native-owner", "native-install",
+    "managed-tests", "uci-tests", "native-install",
     "extension-sql", "installed-native-database", "database-health",
     "postgres-activation",
 ]

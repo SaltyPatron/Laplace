@@ -88,7 +88,7 @@ public static class LaplaceInstall
         var dir = AppContext.BaseDirectory;
         while (dir is not null)
         {
-            if (Directory.Exists(Path.Combine(dir, "app")) && Directory.Exists(Path.Combine(dir, "engine")))
+            if (IsSourceRoot(dir))
             {
                 root = Path.GetFullPath(dir);
                 return true;
@@ -98,9 +98,7 @@ public static class LaplaceInstall
         }
 
         var stamped = TryStampedRepoRoot();
-        if (!string.IsNullOrEmpty(stamped)
-            && Directory.Exists(Path.Combine(stamped, "app"))
-            && Directory.Exists(Path.Combine(stamped, "engine")))
+        if (!string.IsNullOrEmpty(stamped) && IsSourceRoot(stamped))
         {
             root = Path.GetFullPath(stamped);
             return true;
@@ -109,6 +107,12 @@ public static class LaplaceInstall
         root = "";
         return false;
     }
+
+    // Relocated build output also contains app/ and engine/. Only source markers
+    // distinguish that output from the checkout whose path is stamped at build time.
+    private static bool IsSourceRoot(string directory) =>
+        File.Exists(Path.Combine(directory, "app", "Laplace.slnx"))
+        && File.Exists(Path.Combine(directory, "engine", "CMakeLists.txt"));
 
     public static string PostgresConnectionString(string database = "laplace")
     {

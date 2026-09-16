@@ -76,7 +76,7 @@ public sealed class ExtensionManifestSeparationTests
             "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIndexCycle.cs");
         var program = Read("app", "Laplace.Cli", "Program.cs");
         var ingestWorkflow = Read(".github", "workflows", "_ingest.yml");
-        var foundationWorkflow = Read(".github", "workflows", "seed-foundation.yml");
+        var foundationWorkflow = Read(".github", "workflows", "seed.yml");
 
         Assert.DoesNotContain("DropSecondariesAsync", recovery);
         Assert.DoesNotContain("JournalAndDropAsync", recovery);
