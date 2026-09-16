@@ -995,7 +995,7 @@ phase_chess_lab() {
   local gui="${LAPLACE_CUTECHESS_GUI:-${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess}"
   local gui_receipt="${LAPLACE_CUTECHESS_GUI_RECEIPT:-${LAPLACE_CUTECHESS_BUILD:-/build/cutechess}/laplace-cutechess-gui-build.json}"
   sf="$(python3 "$ROOT/scripts/install-stockfish.py" --print-path)" || return 1
-  fp=$(fp_compute scripts/bootstrap-chess-lab.sh scripts/provision-chess-qt.py scripts/provision-cutechess.py deploy/cutechess-release.json scripts/install-stockfish.py deploy/linux/stockfish-release.json scripts/install-zstd.py scripts/check-zstd-runtime.py deploy/zstd-release.json)
+  fp=$(fp_compute scripts/bootstrap-chess-lab.sh scripts/provision-chess-qt.py scripts/provision-cutechess.py scripts/cutechess-user-engines.py deploy/cutechess-release.json scripts/install-stockfish.py deploy/linux/stockfish-release.json scripts/install-zstd.py scripts/check-zstd-runtime.py deploy/zstd-release.json)
   # A different selected source/installation is a different publish input even
   # when source files are unchanged; refresh the service's actual launch paths.
   fp=$(printf '%s\0' "$fp" "${LAPLACE_EXTERNAL:-/build/external}" "$sf" \
@@ -1008,7 +1008,7 @@ phase_chess_lab() {
     python3 "$ROOT/scripts/provision-cutechess.py" --source-dir "${LAPLACE_EXTERNAL:-/build/external}/cutechess" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$bin}" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --gui --binary "$gui" --verify-receipt "$gui_receipt" \
-      --install-desktop "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" || return 1
+      --install-desktop "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --desktop-stockfish "${LAPLACE_STOCKFISH:-$sf}" || return 1
     python3 "$ROOT/scripts/install-stockfish.py" --check-binary "${LAPLACE_STOCKFISH:-$sf}" || return 1
     python3 "$ROOT/scripts/install-zstd.py" --print-path >/dev/null || return 1
     zstd_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/deploy/zstd-release.json")"

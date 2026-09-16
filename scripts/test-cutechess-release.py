@@ -699,7 +699,7 @@ main "$@"
         program = program[:offset] + (
             "if sys.argv[1:] != ['-platform', 'offscreen', '--version']:\n"
             "    names = ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', "
-            "'XDG_CONFIG_HOME', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'LD_LIBRARY_PATH']\n"
+            "'XDG_CONFIG_HOME', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'LD_LIBRARY_PATH', 'LAPLACE_PERFCACHE_BIN', 'LAPLACE_CHESS_PERFCACHE_BIN', 'LAPLACE_CHESS_TRANSITION_BIN', 'LAPLACE_UCI_SUBSTRATE']\n"
             "    Path(" + repr(str(observed)) + ").write_text(json.dumps({'argv': sys.argv, "
             "'environment': {key: os.environ.get(key) for key in names}}))\n"
             "    raise SystemExit(0)\n"
@@ -712,6 +712,23 @@ main "$@"
         installed = prefix / "bin/cutechess"
         installed.parent.mkdir(parents=True)
         shutil.copy2(binary, installed)
+        # Transport/configuration fixtures only, never actual engine or floor proof.
+        app = prefix / "app"
+        app.mkdir()
+        uci = app / "laplace-uci"
+        uci.write_text("#!/bin/sh\nexit 0\n")
+        uci.chmod(0o755)
+        share = prefix / "share/laplace"
+        share.mkdir(parents=True)
+        (share / "laplace_t0_perfcache_fixture.bin").write_bytes(b"configuration-path fixture")
+        generation = share / "chess-floor/generations/fixture"
+        generation.mkdir(parents=True)
+        for name in ("laplace_chess_position_perfcache.bin", "laplace_chess_transition_perfcache.bin"):
+            (generation / name).write_bytes(b"configuration-path fixture")
+        (share / "chess-floor/current").symlink_to("generations/fixture", target_is_directory=True)
+        selected_perfcache = patch.dict(os.environ, {"LAPLACE_PERFCACHE_BIN": str(share / "laplace_t0_perfcache_fixture.bin")})
+        selected_perfcache.start()
+        self.addCleanup(selected_perfcache.stop)
         return installed, sdk, receipt, work, prefix, observed
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux desktop subprocess contract")
@@ -720,7 +737,7 @@ main "$@"
         with patch.dict(os.environ, {"LD_LIBRARY_PATH": "/private-provisioning-path",
                                      "LICHESS_API": "do-not-publish-fixture-secret"}):
             verified = cutechess.verify_gui_install(installed, receipt, self.lock, work)
-            result = cutechess.install_desktop(prefix, verified)
+            result = cutechess.install_desktop(prefix, verified, installed, work)
         launcher = Path(result["launcher"]["path"])
         manifest = prefix / "share/laplace/cutechess-desktop.json"
         for path in (launcher, Path(result["desktop"]["path"]), manifest):
@@ -733,9 +750,9 @@ main "$@"
         arguments = ["a b", "$literal", ";no-shell", "unicode-\u03a9", ""]
         environment = dict(os.environ, DISPLAY=":73", XAUTHORITY="/operator/auth",
                            WAYLAND_DISPLAY="wayland-7", XDG_RUNTIME_DIR="/operator/run",
-                           XDG_CONFIG_HOME="/operator/settings", QT_PLUGIN_PATH="/wrong/plugin",
+                           XDG_CONFIG_HOME=str(self.root / "operator-settings"), QT_PLUGIN_PATH="/wrong/plugin",
                            QT_QPA_PLATFORM_PLUGIN_PATH="/wrong/platform",
-                           LD_LIBRARY_PATH="/operator/lib:" + str(sdk / "lib"))
+                           LD_LIBRARY_PATH="/operator/lib:" + str(sdk / "lib"), LAPLACE_UCI_SUBSTRATE="off")
         run = subprocess.run([str(launcher), *arguments], env=environment, capture_output=True, text=True, timeout=10)
         self.assertEqual(0, run.returncode, run.stderr)
         child = json.loads(observed.read_text())
@@ -745,6 +762,16 @@ main "$@"
         self.assertEqual(str(sdk / "plugins"), child["environment"]["QT_PLUGIN_PATH"])
         self.assertEqual(str(sdk / "plugins/platforms"), child["environment"]["QT_QPA_PLATFORM_PLUGIN_PATH"])
         self.assertEqual(str(sdk / "lib") + ":/operator/lib", child["environment"]["LD_LIBRARY_PATH"])
+        self.assertEqual("substrate", child["environment"]["LAPLACE_UCI_SUBSTRATE"])
+        engine_config = Path(environment["XDG_CONFIG_HOME"]) / "cutechess/engines.json"
+        engines = json.loads(engine_config.read_text())
+        self.assertEqual(["Stockfish (official)", "Laplace (substrate)"], [engine["name"] for engine in engines])
+        self.assertEqual([str(prefix / "bin/laplace-cutechess-stockfish"), str(prefix / "app/laplace-uci")],
+                         [engine["command"] for engine in engines])
+        self.assertEqual(str(prefix / "share/laplace/laplace_t0_perfcache_fixture.bin"),
+                         child["environment"]["LAPLACE_PERFCACHE_BIN"])
+        self.assertEqual(str(prefix / "share/laplace/chess-floor/generations/fixture/laplace_chess_position_perfcache.bin"),
+                         child["environment"]["LAPLACE_CHESS_PERFCACHE_BIN"])
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux installed launcher provenance")
     def test_desktop_cli_install_and_changed_binary_refusal_preserve_prior_launcher(self):
@@ -753,7 +780,7 @@ main "$@"
         lock.write_text(json.dumps(self.lock))
         argv = [sys.executable, cutechess.__file__, "--lock", str(lock), "--gui",
                 "--binary", str(installed), "--verify-receipt", str(receipt),
-                "--work", str(work), "--install-desktop", str(prefix)]
+                "--work", str(work), "--install-desktop", str(prefix), "--desktop-stockfish", str(installed)]
         run = subprocess.run(argv, capture_output=True, text=True, timeout=60)
         self.assertEqual(0, run.returncode, run.stderr)
         result = json.loads(run.stdout)["desktop_install"]
@@ -772,7 +799,7 @@ main "$@"
     def test_system_desktop_registration_reuses_prefix_owner_and_preserves_foreign_entry(self):
         installed, _, receipt, work, prefix, observed = self.desktop_fixture()
         verified = cutechess.verify_gui_install(installed, receipt, self.lock, work)
-        result = cutechess.install_desktop(prefix, verified)
+        result = cutechess.install_desktop(prefix, verified, installed, work)
         directory = self.root / "system-applications"
         registered = cutechess.register_desktop(prefix, directory)
         entry = directory / "laplace-cutechess.desktop"
@@ -782,7 +809,7 @@ main "$@"
         owner_before = (prefix / "share/laplace/cutechess-desktop.json").stat().st_uid
         self.assertEqual(registered, cutechess.register_desktop(prefix, directory))
         self.assertEqual(owner_before, (prefix / "share/laplace/cutechess-desktop.json").stat().st_uid)
-        cutechess.install_desktop(prefix, verified)
+        cutechess.install_desktop(prefix, verified, installed, work)
         self.assertEqual(Path(result["desktop"]["path"]), entry.resolve())
         entry.unlink()
         entry.write_text("operator's existing desktop entry")
@@ -795,8 +822,9 @@ main "$@"
         # GIO parses the generated Desktop Entry; no mirrored Exec parser.
         prefix_name = 'prefix with "quote" $dollar %percent \\slash ' + chr(96) + 'tick' + chr(96)
         installed, _, receipt, work, prefix, observed = self.desktop_fixture(prefix_name)
-        result = cutechess.install_desktop(prefix, cutechess.verify_gui_install(installed, receipt, self.lock, work))
+        result = cutechess.install_desktop(prefix, cutechess.verify_gui_install(installed, receipt, self.lock, work), installed, work)
         launched = subprocess.run(["gio", "launch", result["desktop"]["path"]],
+                                  env=dict(os.environ, XDG_CONFIG_HOME=str(self.root / "gio-settings")),
                                   capture_output=True, text=True, timeout=10)
         self.assertEqual(0, launched.returncode, launched.stderr)
         import time
@@ -843,7 +871,7 @@ verify
                 gui = [line for line in observed if " --gui " in line]
                 self.assertEqual(2, len(gui), observed)
                 self.assertTrue(gui[0].startswith("runner "))
-                self.assertTrue(all("--install-desktop" in line for line in gui))
+                self.assertTrue(all("--install-desktop" in line and "--desktop-stockfish /fixture/stockfish" in line for line in gui))
                 registration = [line for line in observed if "--register-desktop" in line]
                 self.assertEqual(1 if uid == "0" and failure == "0" else 0, len(registration), observed)
 
@@ -879,6 +907,183 @@ ensure_dirs
             self.assertEqual(0o2775, observed.st_mode & 0o7777)
             self.assertEqual(gid, observed.st_gid)
             self.assertEqual(owners[path], observed.st_uid)
+
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux official CuteChess user configuration")
+class CuteChessUserEngineTests(unittest.TestCase):
+    """Real files/processes; engine executables here are configuration fixtures."""
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location(
+            "cutechess_user_engines", Path(__file__).with_name("cutechess-user-engines.py"))
+        self.owner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.owner)
+        parent = Path(os.environ.get("LAPLACE_WORK_ROOT", "/build/laplace/work")) / "tmp"
+        parent.mkdir(parents=True, exist_ok=True)
+        temporary = tempfile.TemporaryDirectory(prefix="cutechess-user-config-", dir=parent)
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.config = self.root / "settings with Ω"
+        self.environment = patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.config)})
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+        self.work = self.root / "work"
+        self.work.mkdir()
+        self.gui = self.root / "gui"
+        self.gui.write_text("configuration identity fixture")
+        self.catalog = self.root / "engines.json"
+        self.selected = []
+        for name in ("Stockfish (official)", "Laplace (substrate)"):
+            command = self.root / ("command " + name)
+            command.write_text("#!/bin/sh\nexit 0\n")
+            command.chmod(0o755)
+            self.selected.append({"name": name, "command": str(command), "protocol": "uci"})
+        self.catalog.write_text(json.dumps(self.selected))
+        self.path = self.config / "cutechess/engines.json"
+
+    def prepare(self):
+        return self.owner.prepare(self.catalog, self.gui, self.work)
+
+    def test_merge_preserves_all_user_options_and_exact_backup_with_collision_free_names(self):
+        self.path.parent.mkdir(parents=True)
+        original = [{"name": "Stockfish (official)", "command": "/user/engine", "protocol": "uci",
+                     "options": [{"name": "Hash", "value": 321}], "custom": {"unicode": "Ω", "nested": [1, False]}},
+                    {"name": "Another", "command": "/user/other", "protocol": "xboard"}]
+        raw = ("  " + json.dumps(original, ensure_ascii=False) + "\n").encode()
+        self.path.write_bytes(raw)
+        lock, env, receipt = self.prepare()
+        os.close(lock)
+        merged = json.loads(self.path.read_bytes())
+        self.assertEqual(original, merged[:2])
+        self.assertEqual(["Stockfish (official) (2)", "Laplace (substrate)"], receipt["added_names"])
+        self.assertEqual(raw, Path(receipt["backup"]).read_bytes())
+        self.assertEqual([item["command"] for item in self.selected], [item["command"] for item in merged[2:]])
+        self.assertTrue(all(item["workingDirectory"] == env["TMPDIR"] for item in merged[2:]))
+        before = self.path.read_bytes(), self.path.stat().st_mtime_ns
+        lock, _, again = self.prepare()
+        os.close(lock)
+        self.assertEqual(before, (self.path.read_bytes(), self.path.stat().st_mtime_ns))
+        self.assertEqual([], again["added_names"])
+
+    def test_existing_selected_engine_user_edits_survive_and_wrong_protocol_is_not_a_match(self):
+        self.path.parent.mkdir(parents=True)
+        existing = [{**self.selected[0], "name": "My Stockfish", "options": [{"name": "Threads", "value": 7}]},
+                    {**self.selected[1], "protocol": "xboard", "name": "User experiment"}]
+        self.path.write_text(json.dumps(existing))
+        lock, _, receipt = self.prepare()
+        os.close(lock)
+        merged = json.loads(self.path.read_bytes())
+        self.assertEqual(existing, merged[:2])
+        self.assertEqual([self.selected[1]["name"]], receipt["added_names"])
+        self.assertEqual("uci", merged[-1]["protocol"])
+
+    def test_malformed_duplicate_key_and_symlink_configs_are_preserved(self):
+        self.path.parent.mkdir(parents=True)
+        for raw in (b"{broken", b'{"name":"not-an-array"}',
+                    b'[{"name":"A","name":"B","command":"/a","protocol":"uci"}]',
+                    b'[{"name":"A","command":"/a","protocol":"uci","value":NaN}]'):
+            with self.subTest(raw=raw):
+                self.path.write_bytes(raw)
+                with self.assertRaises((ValueError, UnicodeError)):
+                    self.prepare()
+                self.assertEqual(raw, self.path.read_bytes())
+                self.assertEqual([], list(self.path.parent.glob("engines.json.laplace-backup-*")))
+        self.path.unlink()
+        target = self.root / "foreign-settings"
+        target.write_text("[]")
+        self.path.symlink_to(target)
+        with self.assertRaises(OSError):
+            self.prepare()
+        self.assertTrue(self.path.is_symlink())
+        self.assertEqual("[]", target.read_text())
+
+    def test_existing_backup_is_never_overwritten_and_concurrent_config_change_is_preserved(self):
+        self.path.parent.mkdir(parents=True)
+        raw = b"[]\n"
+        self.path.write_bytes(raw)
+        preserved = self.path.with_name(self.path.name + ".laplace-backup-" + self.owner.digest(raw))
+        preserved.write_bytes(b"operator-owned conflicting backup")
+        with self.assertRaisesRegex(ValueError, "backup differs"):
+            self.prepare()
+        self.assertEqual(raw, self.path.read_bytes())
+        self.assertEqual(b"operator-owned conflicting backup", preserved.read_bytes())
+        preserved.unlink()
+        real_backup = self.owner.backup
+        concurrent = b'[{"name":"Concurrent","command":"/new","protocol":"uci"}]\n'
+        def changed(path, original):
+            result = real_backup(path, original)
+            path.write_bytes(concurrent)
+            return result
+        with patch.object(self.owner, "backup", side_effect=changed):
+            with self.assertRaisesRegex(ValueError, "changed concurrently"):
+                self.prepare()
+        self.assertEqual(concurrent, self.path.read_bytes())
+        self.assertEqual(raw, preserved.read_bytes())
+
+    def test_real_session_lock_survives_exec_until_child_exit(self):
+        lock, _, _ = self.prepare()
+        child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read(1)"],
+                                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.PIPE, pass_fds=(lock,))
+        os.close(lock)
+        before = self.path.read_bytes()
+        try:
+            with self.assertRaisesRegex(ValueError, "already running"):
+                self.prepare()
+            self.assertEqual(before, self.path.read_bytes())
+        finally:
+            child.communicate(b"x", timeout=10)
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+        self.assertEqual(0, child.returncode)
+        lock, _, receipt = self.prepare()
+        os.close(lock)
+        self.assertEqual([], receipt["added_names"])
+
+    def test_old_running_executable_replaced_in_place_still_prevents_config_merge(self):
+        # Actual native executable lifetime; this is not a chess/Qt game fixture.
+        shutil.copy2(shutil.which("sleep"), self.gui)
+        child = subprocess.Popen([str(self.gui), "30"])
+        try:
+            replacement = self.root / "new-gui"
+            replacement.write_text("replacement inode")
+            os.replace(replacement, self.gui)
+            with self.assertRaisesRegex(ValueError, "running CuteChess"):
+                self.prepare()
+            self.assertFalse(self.path.exists())
+        finally:
+            child.terminate()
+            child.wait(timeout=5)
+
+    def test_per_user_work_logs_are_private_without_changing_existing_config_directory_mode(self):
+        self.path.parent.mkdir(parents=True, mode=0o755)
+        self.path.parent.chmod(0o755)
+        private = self.work / ("cutechess-user-" + str(os.geteuid()))
+        (private / "logs").mkdir(parents=True)
+        private.chmod(0o777)
+        (private / "logs").chmod(0o755)
+        lock, env, receipt = self.prepare()
+        os.close(lock)
+        self.assertEqual(0o700, private.stat().st_mode & 0o777)
+        self.assertEqual(0o700, Path(env["LAPLACE_OPS_LOG_DIR"]).stat().st_mode & 0o777)
+        self.assertEqual(0o755, self.path.parent.stat().st_mode & 0o777)
+        self.assertFalse(receipt["engine_execution_verified"])
+        self.assertFalse(receipt["substrate_access_verified"])
+
+    def test_missing_engine_and_bounded_config_refuse_without_partial_engine_list(self):
+        Path(self.selected[1]["command"]).unlink()
+        with self.assertRaisesRegex(ValueError, "unavailable"):
+            self.prepare()
+        self.assertFalse(self.path.exists())
+        Path(self.selected[1]["command"]).write_text("#!/bin/sh\nexit 0\n")
+        Path(self.selected[1]["command"]).chmod(0o755)
+        self.path.parent.mkdir(parents=True)
+        raw = b"[" + b" " * self.owner.MAXIMUM_CONFIG_BYTES + b"]"
+        self.path.write_bytes(raw)
+        with self.assertRaisesRegex(ValueError, "byte envelope"):
+            self.prepare()
+        self.assertEqual(raw, self.path.read_bytes())
 
 
 if __name__ == '__main__':
