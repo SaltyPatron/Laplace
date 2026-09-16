@@ -37,8 +37,21 @@ typedef struct QueryChannelIndex
     int heap_index;
 } QueryChannelIndex;
 
+/* One response plane per exact occurrence, relation identity and direction.
+ * A populous lexical/frame/source plane cannot evict a different plane before
+ * the complete observation has coupled. Dynamic relation IDs participate by
+ * the same rule; no source roster or static highway bit is required. */
+typedef struct QueryPlaneKey
+{
+    int32 ordinal;
+    uint8 outbound;
+    uint8 reserved[3];
+    hash128_t relation;
+} QueryPlaneKey;
+
 typedef struct QueryBucket
 {
+    QueryPlaneKey key;
     LaplaceQueryChannel *heap;
     int count;
     int capacity;
@@ -48,7 +61,7 @@ typedef struct QueryScanState
 {
     HTAB *operands;
     int *next;
-    QueryBucket *buckets;
+    HTAB *buckets;
     HTAB *channels;
     int fanout;
     bool reverse;
@@ -127,9 +140,20 @@ channel_key(const LaplaceQueryChannel *channel)
     return key;
 }
 
-/* Negative means a is the stronger retained channel. Candidate generation is
- * bounded by pooled conservative standing only; relation identity/direction
- * remain explicit operands for the later query-relative operator. */
+static QueryPlaneKey
+query_plane_key(int ordinal, const hash128_t *relation, bool outbound)
+{
+    QueryPlaneKey key;
+    MemSet(&key, 0, sizeof(key));
+    key.ordinal = ordinal;
+    key.outbound = outbound ? 1 : 0;
+    key.relation = *relation;
+    return key;
+}
+
+/* Negative means a is the stronger retained channel within its typed plane.
+ * This does not compare the authority of grammar, meaning or source families;
+ * their separately retained responses reach the query-relative operator. */
 static int
 query_channel_rank(const LaplaceQueryChannel *a, const LaplaceQueryChannel *b)
 {
@@ -194,10 +218,18 @@ static void
 query_channel_insert(QueryScanState *state, int ordinal,
                      const LaplaceQueryChannel *channel)
 {
-    QueryBucket *bucket = &state->buckets[ordinal - 1];
+    QueryPlaneKey plane = query_plane_key(ordinal, &channel->relation, channel->outbound);
+    bool found;
+    QueryBucket *bucket = (QueryBucket *)
+        hash_search(state->buckets, &plane, HASH_ENTER, &found);
     QueryChannelKey key = channel_key(channel);
     QueryChannelIndex *entry = (QueryChannelIndex *)
         hash_search(state->channels, &key, HASH_FIND, NULL);
+    if (!found)
+    {
+        bucket->heap = NULL;
+        bucket->count = bucket->capacity = 0;
+    }
 
     if (entry != NULL)
     {
@@ -224,7 +256,7 @@ query_channel_insert(QueryScanState *state, int ordinal,
 
         if ((uint64) capacity > MaxAllocSize / sizeof(LaplaceQueryChannel))
             ereport(ERROR,
-                    (errmsg("query evidence: per-occurrence fanout exceeds allocation capacity")));
+                    (errmsg("query evidence: per-plane fanout exceeds allocation capacity")));
         previous = MemoryContextSwitchTo(state->owner);
         bucket->heap = bucket->heap
             ? (LaplaceQueryChannel *) repalloc(bucket->heap,
@@ -285,12 +317,10 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
     }
 }
 
-/* laplace_consensus_scan_ranked walks each endpoint range in descending
- * (rating - 2*rd) order. Stop one endpoint/partition only after every duplicate
- * occurrence of that exact operand has filled its own bounded typed heap and
- * the current score is STRICTLY below every retained worst score. Equal-score
- * rows must still run so deterministic candidate/relation tie election remains
- * exact across partitions. */
+/* The plane-ranked scanner invokes this only inside one exact endpoint/type
+ * range. Stop after every duplicate occurrence has filled that plane, strictly
+ * below its retained worst score. Equal scores still reach the deterministic
+ * identity tie-breaker. A different type or direction starts its own range. */
 static bool
 query_consensus_cutoff(const LaplaceConsensusRow *row, void *opaque)
 {
@@ -309,10 +339,12 @@ query_consensus_cutoff(const LaplaceConsensusRow *row, void *opaque)
 
     for (int index = operand->first; index >= 0; index = state->next[index])
     {
-        QueryBucket *bucket = &state->buckets[index];
+        QueryPlaneKey plane = query_plane_key(index + 1, &row->type, !state->reverse);
+        QueryBucket *bucket = (QueryBucket *)
+            hash_search(state->buckets, &plane, HASH_FIND, NULL);
         __int128 worst;
 
-        if (bucket->count < state->fanout)
+        if (bucket == NULL || bucket->count < state->fanout)
             return false;
         worst = (__int128) bucket->heap[0].rating -
                 2 * (__int128) bucket->heap[0].rd;
@@ -510,14 +542,12 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
         return NULL;
     }
     if ((Size) operand_count > MaxAllocSize / sizeof(hash128_t) ||
-        (Size) operand_count > MaxAllocSize / sizeof(int) ||
-        (Size) operand_count > MaxAllocSize / sizeof(QueryBucket))
+        (Size) operand_count > MaxAllocSize / sizeof(int))
         ereport(ERROR, (errmsg("query evidence: operand set exceeds allocation capacity")));
 
     unique = (hash128_t *) palloc(sizeof(hash128_t) * operand_count);
     MemSet(&scan, 0, sizeof(scan));
     scan.next = (int *) palloc(sizeof(int) * operand_count);
-    scan.buckets = (QueryBucket *) palloc0(sizeof(QueryBucket) * operand_count);
     scan.fanout = fanout;
     scan.owner = work;
 
@@ -527,6 +557,13 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
     ctl.hcxt = work;
     scan.operands = hash_create("query evidence operands", operand_count,
                                 &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(QueryPlaneKey);
+    ctl.entrysize = sizeof(QueryBucket);
+    ctl.hcxt = work;
+    scan.buckets = hash_create("query evidence typed planes", Max(operand_count, 16),
+                               &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
     MemSet(&ctl, 0, sizeof(ctl));
     ctl.keysize = sizeof(QueryChannelKey);
@@ -561,19 +598,22 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
 
     unique_operands = hash128_array_from_ids(unique, unique_count);
     scan.reverse = false;
-    laplace_consensus_scan_ranked(unique_operands, NULL, types, false,
+    laplace_consensus_scan_ranked_planes(unique_operands, NULL, types, false,
         query_consensus_cell, query_consensus_cutoff, &scan,
         stats ? &stats->forward : NULL);
     scan.reverse = true;
-    laplace_consensus_scan_ranked(NULL, unique_operands, types, false,
+    laplace_consensus_scan_ranked_planes(NULL, unique_operands, types, false,
         query_consensus_cell, query_consensus_cutoff, &scan,
         stats ? &stats->reverse : NULL);
 
     {
         int64 retained = 0;
-        for (int i = 0; i < operand_count; ++i)
+        HASH_SEQ_STATUS sequence;
+        QueryBucket *bucket;
+        hash_seq_init(&sequence, scan.buckets);
+        while ((bucket = hash_seq_search(&sequence)) != NULL)
         {
-            retained += scan.buckets[i].count;
+            retained += bucket->count;
             if (retained > INT_MAX)
                 ereport(ERROR, (errmsg("query evidence: retained channel count exceeds int capacity")));
         }
@@ -593,13 +633,16 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
     MemoryContextSwitchTo(work);
     {
         int at = 0;
-        for (int i = 0; i < operand_count; ++i)
+        HASH_SEQ_STATUS sequence;
+        QueryBucket *bucket;
+        hash_seq_init(&sequence, scan.buckets);
+        while ((bucket = hash_seq_search(&sequence)) != NULL)
         {
-            if (scan.buckets[i].count > 0)
+            if (bucket->count > 0)
             {
-                memcpy(result + at, scan.buckets[i].heap,
-                       sizeof(LaplaceQueryChannel) * scan.buckets[i].count);
-                at += scan.buckets[i].count;
+                memcpy(result + at, bucket->heap,
+                       sizeof(LaplaceQueryChannel) * bucket->count);
+                at += bucket->count;
             }
         }
     }

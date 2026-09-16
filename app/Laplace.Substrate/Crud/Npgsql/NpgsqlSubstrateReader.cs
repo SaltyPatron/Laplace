@@ -12,18 +12,33 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     private readonly PresenceProbeBatcher<byte> _entityProbes;
     private readonly PresenceProbeBatcher<short> _tierProbes;
     private readonly IngestSizing.ApplyIoPlan _cachePlan;
+    private readonly Func<Hash128, IReadOnlyList<Hash128>?, IReadOnlyList<Hash128>?,
+        CancellationToken, Task> _evictSource;
 
     public NpgsqlDataSource DataSource => _ds;
 
     public NpgsqlSubstrateReader(NpgsqlDataSource dataSource)
+        : this(dataSource, null, null)
+    {
+    }
+
+    // Keep transport replaceable for deterministic cache-lifetime controls.
+    // Production always uses the same PostgreSQL implementations below.
+    internal NpgsqlSubstrateReader(NpgsqlDataSource dataSource,
+        Func<IReadOnlyList<Hash128>, CancellationToken, Task<byte[]>>? entityProbe,
+        Func<Hash128, IReadOnlyList<Hash128>?, IReadOnlyList<Hash128>?,
+            CancellationToken, Task>? evictSource,
+        Func<IReadOnlyList<Hash128>, short, CancellationToken, Task<byte[]>>? tierProbe = null)
     {
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _cachePlan = IngestSizing.ResolveApplyIo(IngestTopology.Current.ApplyPartitions);
+        var probe = entityProbe ?? EntitiesExistBitmapDirectAsync;
         _entityProbes = new PresenceProbeBatcher<byte>(
-            (ids, _, ct) => EntitiesExistBitmapDirectAsync(ids, ct),
+            (ids, _, ct) => probe(ids, ct),
             _cachePlan.ProbeChunkIds);
         _tierProbes = new PresenceProbeBatcher<short>(
-            TierBatchExistenceProbeDirectAsync, _cachePlan.ProbeChunkIds);
+            tierProbe ?? TierBatchExistenceProbeDirectAsync, _cachePlan.ProbeChunkIds);
+        _evictSource = evictSource ?? EvictSourceDirectAsync;
     }
 
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
@@ -200,16 +215,21 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     /// Capacity comes from the shared cache byte envelope. Once full, misses fall
     /// through to the DB; the useful hot prefix is not periodically erased.
     /// </summary>
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> _proven = new();
-    private int _provenApprox;
-
-    private void AddProven(Hash128 id)
+    private sealed class ProvenPresence
     {
-        if (Volatile.Read(ref _provenApprox) >= _cachePlan.ReaderProvenCacheIds) return;
-        if (!_proven.TryAdd(id, 1)) return;
-        int after = Interlocked.Increment(ref _provenApprox);
+        public readonly System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte> Ids = new();
+        public int Count;
+    }
+
+    private ProvenPresence _proven = new();
+
+    private void AddProven(ProvenPresence proven, Hash128 id)
+    {
+        if (Volatile.Read(ref proven.Count) >= _cachePlan.ReaderProvenCacheIds) return;
+        if (!proven.Ids.TryAdd(id, 1)) return;
+        int after = Interlocked.Increment(ref proven.Count);
         if (after <= _cachePlan.ReaderProvenCacheIds) return;
-        if (_proven.TryRemove(id, out _)) Interlocked.Decrement(ref _provenApprox);
+        if (proven.Ids.TryRemove(id, out _)) Interlocked.Decrement(ref proven.Count);
     }
 
     public async Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
@@ -219,11 +239,15 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         ct.ThrowIfCancellationRequested();
         var bm = new byte[BitmapBits.ByteLength(n)];
         if (n == 0) return bm;
+        // A probe owns the cache generation it began with. Source eviction can
+        // detach it while native/database work is in flight; late results must
+        // never repopulate the replacement generation with deleted markers.
+        var proven = Volatile.Read(ref _proven);
         var unresolved = new List<Hash128>();
         var positions = new List<int>();
         for (int i = 0; i < n; i++)
         {
-            if (_proven.ContainsKey(candidates[i])) BitmapBits.Set(bm, i);
+            if (proven.Ids.ContainsKey(candidates[i])) BitmapBits.Set(bm, i);
             else { unresolved.Add(candidates[i]); positions.Add(i); }
         }
         if (unresolved.Count == 0) return bm;
@@ -252,7 +276,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             {
                 int i = dbUnknownIdx[u];
                 BitmapBits.Set(bm, i);
-                AddProven(candidates[i]);
+                AddProven(proven, candidates[i]);
             }
         }
         return bm;
@@ -274,13 +298,18 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             ?? new byte[BitmapBits.ByteLength(ids.Count)];
     }
 
-    public void MarkProven(IReadOnlyList<Hash128> ids)
+    public PresenceCacheScope CapturePresenceScope() => new(Volatile.Read(ref _proven));
+
+    public void MarkProven(IReadOnlyList<Hash128> ids, PresenceCacheScope scope)
     {
-        if (ids is null) return;
-        for (int i = 0; i < ids.Count; i++) AddProven(ids[i]);
+        if (ids is null || scope.State is not ProvenPresence proven
+            || !ReferenceEquals(proven, Volatile.Read(ref _proven))) return;
+        // If eviction races this loop, the captured object becomes detached;
+        // neither these hints nor a late probe can enter its replacement.
+        for (int i = 0; i < ids.Count; i++) AddProven(proven, ids[i]);
     }
 
-    public bool IsProvenPresent(Hash128 id) => _proven.ContainsKey(id);
+    public bool IsProvenPresent(Hash128 id) => Volatile.Read(ref _proven).Ids.ContainsKey(id);
 
 
 
@@ -310,12 +339,13 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         if (ids.Count == 0) return Array.Empty<byte>();
 
         ct.ThrowIfCancellationRequested();
+        var proven = Volatile.Read(ref _proven);
         var floor = CodepointPerfcache.KnownIdsBitmap(ids);
         bool allProven = true;
         for (int i = 0; i < ids.Count; i++)
         {
             if (BitmapBits.IsSet(floor, i)) continue;
-            if (_proven.ContainsKey(ids[i])) BitmapBits.Set(floor, i);
+            if (proven.Ids.ContainsKey(ids[i])) BitmapBits.Set(floor, i);
             else allProven = false;
         }
         if (allProven) return floor;
@@ -581,6 +611,24 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
     public async Task EvictSourceAsync(
         Hash128 sourceId, IReadOnlyList<Hash128>? relationIds,
         IReadOnlyList<Hash128>? markerTypeIds, CancellationToken ct = default)
+    {
+        try
+        {
+            await _evictSource(sourceId, relationIds, markerTypeIds, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            // The procedure commits in batches, so even a failed/cancelled call
+            // can have deleted marker entities. No pre-eviction presence claim
+            // may gate the next derivation. Swapping the generation also keeps
+            // delayed probes from restoring stale positives after invalidation.
+            Interlocked.Exchange(ref _proven, new ProvenPresence());
+        }
+    }
+
+    private async Task EvictSourceDirectAsync(
+        Hash128 sourceId, IReadOnlyList<Hash128>? relationIds,
+        IReadOnlyList<Hash128>? markerTypeIds, CancellationToken ct)
     {
         await using var cmd = _ds.CreateCommand("CALL ops.evict_source($1, $2, $3)");
         cmd.CommandTimeout = 0;

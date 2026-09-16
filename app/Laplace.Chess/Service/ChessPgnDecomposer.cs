@@ -168,12 +168,13 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             int n = Math.Min(chunk, ids.Length - i);
             var slice = new Hash128[n];
             Array.Copy(ids, i, slice, 0, n);
+            var presenceScope = reader.CapturePresenceScope();
             byte[] bm = await reader.TierBatchExistenceProbeAsync(
                 slice, ChessCompose.PositionTier, ct).ConfigureAwait(false);
             var proven = new List<Hash128>(n);
             for (int j = 0; j < n; j++)
                 if (BitmapBits.IsSet(bm, j)) proven.Add(slice[j]);
-            if (proven.Count > 0) reader.MarkProven(proven);
+            if (proven.Count > 0) reader.MarkProven(proven, presenceScope);
         }
     }
 
@@ -200,6 +201,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         {
             var ids = new Hash128[toProbe.Count];
             for (int k = 0; k < toProbe.Count; k++) ids[k] = peeks[toProbe[k]].PlayingId;
+            var presenceScope = reader.CapturePresenceScope();
             byte[] bm = await reader.TierBatchExistenceProbeAsync(
                 ids, (short)EntityTier.Document, ct).ConfigureAwait(false);
             var proven = new List<Hash128>(toProbe.Count);
@@ -209,7 +211,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 present[toProbe[k]] = true;
                 proven.Add(ids[k]);
             }
-            if (proven.Count > 0) reader.MarkProven(proven);
+            if (proven.Count > 0) reader.MarkProven(proven, presenceScope);
         }
 
         for (int i = 0; i < peeks.Count; i++)
@@ -312,6 +314,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         {
             var ids = new Hash128[toProbe.Count];
             for (int k = 0; k < toProbe.Count; k++) ids[k] = chunk[toProbe[k]].PlayingId;
+            var presenceScope = reader.CapturePresenceScope();
             byte[] bm = await reader.TierBatchExistenceProbeAsync(
                 ids, (short)EntityTier.Document, ct).ConfigureAwait(false);
             var proven = new List<Hash128>(toProbe.Count);
@@ -321,7 +324,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
                 present[toProbe[k]] = true;
                 proven.Add(ids[k]);
             }
-            if (proven.Count > 0) reader.MarkProven(proven);
+            if (proven.Count > 0) reader.MarkProven(proven, presenceScope);
         }
 
         for (int i = 0; i < chunk.Count; i++)

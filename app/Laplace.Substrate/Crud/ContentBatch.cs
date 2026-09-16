@@ -82,6 +82,7 @@ public sealed class ContentBatch : IDisposable
         for (int i = 0; i < entries.Count; i++)
             roots.Add(entries[i].RootId);
 
+        var presenceScope = _reader.CapturePresenceScope();
         byte[] rootBm = roots.Count > 0
             ? await _reader.EntitiesExistBitmapAsync(roots, ct).ConfigureAwait(false)
             : [];
@@ -98,7 +99,7 @@ public sealed class ContentBatch : IDisposable
                 throw new InvalidOperationException("previously resolved content could not produce its native tree");
             if (BitmapBits.IsSet(rootBm, i))
             {
-                _reader.MarkProven([e.RootId]);
+                _reader.MarkProven([e.RootId], presenceScope);
                 _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);
                 // Keep the real root proof for native entity filtering; its
                 // physicality observations still belong to this source unit.

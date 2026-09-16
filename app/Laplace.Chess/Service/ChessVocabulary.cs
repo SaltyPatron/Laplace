@@ -263,6 +263,7 @@ public static class ChessVocabulary
 
             if (probeIds.Count > 0)
             {
+                var presenceScope = reader.CapturePresenceScope();
                 byte[] bitmap = await reader.EntitiesExistBitmapAsync(probeIds, ct)
                     .ConfigureAwait(false);
                 var confirmed = new List<Hash128>(probeIds.Count);
@@ -272,7 +273,7 @@ public static class ChessVocabulary
                         present[probeSlots[p]] = true;
                         confirmed.Add(probeIds[p]);
                     }
-                if (confirmed.Count > 0) reader.MarkProven(confirmed);
+                if (confirmed.Count > 0) reader.MarkProven(confirmed, presenceScope);
             }
         }
 
@@ -287,8 +288,9 @@ public static class ChessVocabulary
 
         if (changes.Count > 0)
         {
+            var presenceScope = reader?.CapturePresenceScope() ?? default;
             await writer.ApplyManyAsync(changes, ct).ConfigureAwait(false);
-            reader?.MarkProven(deposited);
+            reader?.MarkProven(deposited, presenceScope);
         }
         return names;
     }

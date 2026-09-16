@@ -316,6 +316,7 @@ public static class StructuredGrammarIngest
         if (utf8.Length == 0) return null;
 
         using var ast = GrammarDecomposer.Parse(utf8, recipe);
+        var presenceScope = containmentReader?.CapturePresenceScope() ?? default;
         if (containmentReader is not null
             && GrammarRowComposer.TryProbeRowRoot(utf8, ast, modalityId, out var rootId, out _)
             && (containmentReader.IsProvenPresent(rootId)
@@ -328,7 +329,7 @@ public static class StructuredGrammarIngest
             witness.WalkRow(
                 new GrammarComposeContext(utf8, ast, rootId, null),
                 new RowContext(0, 1), b);
-            containmentReader.MarkProven([rootId]);
+            containmentReader.MarkProven([rootId], presenceScope);
             return await b.SetInputUnitsConsumed(1).BuildAsync(ct);
         }
 
