@@ -655,6 +655,22 @@ class NativeQualificationTests(unittest.TestCase):
                 if count != 2:
                     self.assertFalse(guard.compatible(baseline, observed))
 
+    def test_actual_pilot_comparison_requires_current_integer_snapshot_format(self):
+        baseline = self.baseline()
+        guard = self.runtime_guard(baseline)
+        driver.recording_compatible(guard, baseline, copy.deepcopy(baseline))
+        for value in (1, True, "2", 3, None):
+            with self.subTest(format=value):
+                changed = copy.deepcopy(baseline)
+                if value is None:
+                    del changed["format"]
+                else:
+                    changed["format"] = value
+                # Equal legacy snapshots must still refuse at the same boundary
+                # used immediately after loading the actual pilot documents.
+                with self.assertRaisesRegex(ValueError, "unsupported format"):
+                    driver.recording_compatible(guard, changed, copy.deepcopy(changed))
+
     def test_recording_comparison_rejects_other_changes_and_wrong_purpose(self):
         baseline = self.baseline()
         guard = self.runtime_guard(baseline)

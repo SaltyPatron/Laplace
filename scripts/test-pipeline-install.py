@@ -328,6 +328,7 @@ if postgresql_restart_required; then exit 0; else exit $?; fi
         result = self.phase(source=broken, PATH_RC="2")
         self.assertEqual(0, result.returncode)
         self.assertIn("install", self.calls())  # the no-install regression would fail
+        (self.base / "installed").unlink()
         (self.base / "calls").write_text("")
         self.assertEqual(2, self.phase(PATH_RC="2").returncode)
         self.assertEqual("", self.calls())
