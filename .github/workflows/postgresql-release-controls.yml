@@ -1,0 +1,54 @@
+name: PostgreSQL and chess floor union controls
+on:
+  push:
+    branches: [verify/postgresql-cache-union-20260916]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SOURCE_SHA: ce5210e3171e903a9c1120093cc33ef06694388e
+      SOURCE_TREE: a7480ec50da86b840cd7181952ffb6ab336cde2b
+      TMPDIR: /build/laplace/work/postgresql-release/tmp
+      TMP: /build/laplace/work/postgresql-release/tmp
+      TEMP: /build/laplace/work/postgresql-release/tmp
+      EVIDENCE: /build/laplace/recovery/postgresql-release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+      - name: Prepare permanent isolated source and scratch
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /build/laplace
+          sudo chown "$(id -u):$(id -g)" /build/laplace
+          mkdir -p "$TMPDIR" "$EVIDENCE" /build/laplace/worktrees
+          test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
+          git worktree add --detach /build/laplace/worktrees/postgresql-release "$SOURCE_SHA"
+          printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
+      - name: Execute dependency and existing owner controls
+        run: |
+          set -euo pipefail
+          cd /build/laplace/worktrees/postgresql-release
+          status=0
+          for test in test-postgresql-release.py test-test-profile-registry.py test-managed-host.py test-pipeline-install.py test-chess-floor-artifacts.py test-chess-floor-serving.py test-cutechess-release.py; do
+            set +e
+            timeout --signal=TERM --kill-after=10s 180s python3 "scripts/$test" 2>&1 | tee "$EVIDENCE/$test.log"
+            result=$?
+            set -e
+            printf '%s\t%s\n' "$test" "$result" >> "$EVIDENCE/exit-codes.tsv"
+            if [ "$result" -ne 0 ]; then status=1; fi
+          done
+          test -z "$(git status --porcelain --untracked-files=all)"
+          exit "$status"
+      - name: Retain bounded source qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: postgresql-release-source-controls
+          path: /build/laplace/recovery/postgresql-release/
+          if-no-files-found: error
+          retention-days: 30
