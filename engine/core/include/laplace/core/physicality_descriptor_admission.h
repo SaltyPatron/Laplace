@@ -74,6 +74,12 @@ physicality_descriptor_status_t physicality_descriptor_stages_preflight(
     size_t maximum_logical_occurrences, size_t* out_body_count,
     size_t* out_stored_vertices, size_t* out_logical_occurrences);
 
+physicality_descriptor_status_t physicality_descriptor_stages_preflight_cancelable(
+    const intent_stage_t* const* stages, size_t stage_count,
+    size_t maximum_logical_occurrences,
+    const physicality_descriptor_cancel_t* cancellation, size_t* out_body_count,
+    size_t* out_stored_vertices, size_t* out_logical_occurrences);
+
 /* NEEDS_PROVIDER publishes only a pending frontier, with no generated stage. */
 
 enum {
@@ -123,6 +129,18 @@ physicality_descriptor_status_t physicality_descriptor_materialize(
     size_t observation_source_count,
     const hash128_t* source_id, int64_t observed_at_unix_us,
     size_t maximum_bytes,
+    physicality_descriptor_materialization_t** out_materialization);
+physicality_descriptor_status_t physicality_descriptor_materialize_cancelable(
+    const physicality_descriptor_capture_t* captured_source,
+    const physicality_descriptor_vocabulary_t* vocabulary,
+    const intent_stage_t* const* current_content_stages, size_t current_stage_count,
+    const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
+    const hash128_t* explicitly_missing_ids, size_t missing_count,
+    const physicality_descriptor_source_observation_t* observation_sources,
+    size_t observation_source_count,
+    const hash128_t* source_id, int64_t observed_at_unix_us,
+    size_t maximum_bytes,
+    const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_materialization_t** out_materialization);
 void physicality_descriptor_materialization_free(
     physicality_descriptor_materialization_t* materialization);

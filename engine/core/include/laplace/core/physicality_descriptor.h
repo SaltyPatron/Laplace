@@ -108,8 +108,34 @@ typedef enum {
     PHYSICALITY_DESCRIPTOR_INVALID_BODY = -3,
     PHYSICALITY_DESCRIPTOR_IDENTITY_CONFLICT = -4,
     PHYSICALITY_DESCRIPTOR_MISSING_FLOOR = -5,
-    PHYSICALITY_DESCRIPTOR_MISSING_REFERENCE = -6
+    PHYSICALITY_DESCRIPTOR_MISSING_REFERENCE = -6,
+    PHYSICALITY_DESCRIPTOR_CANCELLED = -7
 } physicality_descriptor_status_t;
+
+/* Optional, caller-owned cancellation for synchronous native operations. The
+ * callback runs only on the calling thread, must return normally without
+ * throwing/longjmp, and must remain nonzero once cancellation is requested.
+ * Core owners unwind normally and return CANCELLED with no published output.
+ * Checkpoints occur between rows/nodes/closure steps; individual allocator,
+ * hash and geometry calls are not forcibly interruptible. NULL preserves the
+ * existing operation. No callback or context is retained by a returned object. */
+typedef struct {
+    int (*requested)(void* context);
+    void* context;
+} physicality_descriptor_cancel_t;
+
+static inline int physicality_descriptor_cancel_requested(
+    const physicality_descriptor_cancel_t* cancellation) {
+    return cancellation != NULL && cancellation->requested != NULL &&
+        cancellation->requested(cancellation->context) != 0;
+}
+
+physicality_descriptor_status_t physicality_descriptor_plan_build_cancelable(
+    const physicality_descriptor_input_t* inputs, size_t input_count,
+    const physicality_descriptor_basis_t* basis,
+    const physicality_descriptor_limits_t* limits,
+    const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_plan_t** out_plan);
 
 physicality_descriptor_status_t physicality_descriptor_plan_build(
     const physicality_descriptor_input_t* inputs, size_t input_count,
@@ -161,6 +187,13 @@ physicality_descriptor_status_t physicality_descriptor_capture_stages(
     const physicality_descriptor_basis_t* basis,
     const physicality_descriptor_limits_t* plan_limits,
     size_t maximum_capture_bytes,
+    physicality_descriptor_capture_t** out_capture);
+physicality_descriptor_status_t physicality_descriptor_capture_stages_cancelable(
+    const intent_stage_t* const* stages, size_t stage_count,
+    const physicality_descriptor_basis_t* basis,
+    const physicality_descriptor_limits_t* plan_limits,
+    size_t maximum_capture_bytes,
+    const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_capture_t** out_capture);
 void physicality_descriptor_capture_free(physicality_descriptor_capture_t* capture);
 /* Exclusive-owner lifetime operation after capture_stages has fully validated

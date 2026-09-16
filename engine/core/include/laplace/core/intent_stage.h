@@ -38,7 +38,8 @@ size_t intent_stage_memory_bytes(const intent_stage_t* stage);
 /* Conservative high-water reservation of requested payload. Bounded growth
  * includes old plus requested new buffers even if realloc grows in place;
  * this is an upper bound, not measured simultaneous allocations or process RSS.
- * Unbounded stages retain the historical retained-capacity accounting. */
+ * Unbounded buffer growth retains its historical retained-capacity accounting;
+ * witness rehash keeps its existing old-plus-new accounting. */
 size_t intent_stage_memory_peak_bytes(const intent_stage_t* stage);
 int intent_stage_allocation_failed(const intent_stage_t* stage);
 
