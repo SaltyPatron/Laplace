@@ -704,7 +704,8 @@ class ProductMaintenanceOrderTests(unittest.TestCase):
             (scripts / "product-ci.sh").write_bytes((ROOT / "scripts/product-ci.sh").read_bytes())
             for relative,label in (("scripts/ci-policy.sh","policy"),("scripts/ci-deps.sh","deps"),
                 ("scripts/pipeline.sh","pipeline"),("scripts/test-parallel.sh","tests"),
-                ("scripts/wait-for-quiet-substrate.sh","quiet")):
+                ("scripts/wait-for-quiet-substrate.sh","quiet"),
+                ("scripts/ensure-foundation.sh","foundation")):
                 (root / relative).write_text('printf "%s\\n" "'+label+':$*" >> "$TRACE"\n')
             (deploy / "managed-publish.sh").write_text(
                 'printf "%s\\n" "managed:$*" >> "$TRACE"\n'
@@ -713,6 +714,12 @@ class ProductMaintenanceOrderTests(unittest.TestCase):
                 'import os,sys\n'
                 'with open(os.environ["TRACE"],"a") as f:f.write("quiesce:"+" ".join(sys.argv[1:])+"\\n")\n'
                 'sys.exit(int(os.environ.get("RESUME_FAILURE","0")) if "--resume-if-needed" in sys.argv else 0)\n')
+            (scripts / "verify-operational-seed.py").write_text(
+                'import json,os,sys\nfrom pathlib import Path\n'
+                'assert len(sys.argv)==4 and sys.argv[1:3]==["--ingest","--report"]\n'
+                'report=Path(sys.argv[3]);assert report.name=="seed.json"\n'
+                'report.write_text(json.dumps({"fixture":"operational-seed"}))\n'
+                'with open(os.environ["TRACE"],"a") as f:f.write("operational-seed\\n")\n')
             for fail,resume_fail in ((False,False),(True,False),(False,True)):
                 trace=root / (f"trace-{fail}-{resume_fail}.log")
                 result=subprocess.run(["bash",str(scripts / "product-ci.sh"),"deploy"],capture_output=True,text=True,
@@ -730,17 +737,25 @@ class ProductMaintenanceOrderTests(unittest.TestCase):
                     self.assertEqual(resume,events[-1])
                     self.assertNotIn("managed:preflight",events)
                     self.assertNotIn("pipeline:install",events)
+                    self.assertNotIn("foundation:--required-lexical",events)
+                    self.assertNotIn("operational-seed",events)
                 elif fail:
                     self.assertEqual(37,result.returncode,result.stderr)
                     self.assertEqual("managed:preflight",events[-1])
                     self.assertNotIn("pipeline:install",events)
                     self.assertEqual([resume],[event for event in events if event.startswith("quiesce:")])
+                    self.assertNotIn("foundation:--required-lexical",events)
+                    self.assertNotIn("operational-seed",events)
                 else:
                     self.assertEqual(0,result.returncode,result.stderr)
                     self.assertLess(events.index(resume),events.index("managed:preflight"))
                     self.assertEqual(["managed:preflight","pipeline:install","managed:preflight",resume,
-                        "quiesce:--database laplace -- bash scripts/maintain-installed-database.sh"],
+                        "quiesce:--database laplace -- bash scripts/maintain-installed-database.sh",
+                        "foundation:--required-lexical","quiet:laplace","operational-seed"],
                         events[events.index("managed:preflight"):])
+                    reports=list((root / "operational-proof").glob("invocation-*/seed.json"))
+                    self.assertEqual(1,len(reports))
+                    self.assertEqual({"fixture":"operational-seed"},json.loads(reports[0].read_text()))
 
 
 if __name__ == "__main__":unittest.main()
