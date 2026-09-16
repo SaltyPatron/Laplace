@@ -113,6 +113,82 @@ public sealed class UciEngineTests
     }
 
     [Fact]
+    public void CompletedDepthInfo_ReportsWorkInOrderBeforeBestMove()
+    {
+        var output = Run("position startpos", "go depth 3");
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var progress = lines.Where(line => line.StartsWith("info depth ") && line.Contains(" nps "))
+            .Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToArray();
+
+        Assert.Equal(new[] { 1, 2, 3 }, progress.Select(tokens => int.Parse(tokens[2])));
+        long previousNodes = 0, previousTime = 0;
+        foreach (var tokens in progress)
+        {
+            long nodes = long.Parse(tokens[Array.IndexOf(tokens, "nodes") + 1]);
+            long time = long.Parse(tokens[Array.IndexOf(tokens, "time") + 1]);
+            long nps = long.Parse(tokens[Array.IndexOf(tokens, "nps") + 1]);
+            Assert.True(nodes > previousNodes);
+            Assert.True(time >= previousTime);
+            Assert.True(nps > 0);
+            previousNodes = nodes;
+            previousTime = time;
+        }
+        Assert.Contains("info string providers depth 1 ", output);
+        Assert.Contains("info string providers depth 3 ", output);
+        Assert.StartsWith("bestmove ", lines[^1]);
+        Assert.Equal(BestMove(output), progress[^1][^1]);
+    }
+
+    [Fact]
+    public async Task CompletedDepthInfo_IsFlushedWhileLongSearchIsStillRunning()
+    {
+        var engine = new UciEngine();
+        using var output = new ProgressWriter();
+        engine.Handle("setoption name Substrate value off", output);
+        engine.Handle("position startpos", output);
+        try
+        {
+            engine.Handle("go depth 64", output);
+            string atFlush = await output.FirstProgressFlush.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Contains("info depth 1 ", atFlush);
+            Assert.DoesNotContain("bestmove ", atFlush);
+        }
+        finally
+        {
+            engine.Handle("stop", output);
+            engine.WaitForIdle();
+        }
+        Assert.Contains(BestMove(output.ToString()),
+            MoveGen.Legal(Board.FromFen(ChessModality.StartFen)).Select(move => move.ToUci()));
+        Assert.DoesNotContain("search failed", output.ToString());
+    }
+
+    private sealed class ProgressWriter : TextWriter
+    {
+        private readonly StringWriter _text = new();
+        private readonly object _gate = new();
+        public TaskCompletionSource<string> FirstProgressFlush { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
+        public override void WriteLine(string? value)
+        {
+            lock (_gate) _text.WriteLine(value);
+        }
+        public override void Flush()
+        {
+            lock (_gate)
+            {
+                string text = _text.ToString();
+                if (text.Contains("info depth 1 ")) FirstProgressFlush.TrySetResult(text);
+            }
+        }
+        public override string ToString()
+        {
+            lock (_gate) return _text.ToString();
+        }
+    }
+
+    [Fact]
     public void MalformedFen_DoesNotThrow_AndKeepsPriorPosition()
     {
         var engine = new UciEngine();

@@ -6,32 +6,31 @@ graph. The full modality reference — identity law, the three lanes, the
 census, and the closed loop — is [chess.md](chess.md). Verify
 commands against `api('chess')` and `/chess/lab/catalog` if this drifts.
 
-## How to measure Laplace (read this before cutechess)
+## Measuring guided search, recorded throughput and external play
 
-**Primary protocol — does the SoR help?** In-process guided vs pure at matched
-depth, on positions the corpus actually covers:
+The in-process guided-versus-classical experiment measures the effect of the
+selected substrate providers at matched search depth:
 
 ```sh
-laplace chess substrate-test --mode fold --openings --learned --games 200 --depth 4
+laplace chess substrate-test --mode transition --openings --games 200 --depth 4
 ```
 
-- `fold` = substructure OUTCOME generalization (default UCI `Substrate`); `edge`
-  = raw MOVE-edge μ (poisoned at startpos — Na3 can outrank e4; see #447 / #834).
-- `--openings` seeds from ECO TSV under the chess games dir (this host:
-  `/vault/Data/Games/Chess/openings/`).
-- `--learned` blends corpus PST (UCI always does this; CLI does not unless flagged).
-- Tune STEER straw: `--cp-per-point` / `--cap` (UCI hardcodes 8 / 150 today).
+- `transition` selects transition and position evidence; legacy `fold` and
+  `edge` spellings resolve to that same provider configuration.
+- `--openings` selects replayed ECO positions from the configured opening
+  directory. Terminal positions are rejected before a game starts.
+- The selected position evaluator includes constituent outcomes, the learned
+  PST residual and available tactical evidence. Syzygy probes participate when
+  the current position fits the installed tablebase coverage.
+- This experiment's move ceiling can produce adjudicated games. Its game count
+  alone does not establish complete-game recorded throughput.
 
-**Preflight the eyes:** `POST /chess/explore` with the FEN (and optional
-`player`) before trusting any Elo number — you are reading SCAN/WEIGHT, not
-guessing. Syzygy / shape / motifs / think-class are queryable (`api('chess')`)
-but **not yet wired into UCI STEER** (#833).
-
-**cutechess vs Stockfish** (`st=1`, `UCI_Elo=2000`) is a **watchable external
-demo**, not the scientific floor. It does not pass an openings book, does not
-expose cp/cap, and is easy to misread as “Laplace is weak” when the recipe never
-took advantage of fold+openings+explore. Tracked: #834. Framing:
-`.scratchpad/44` §8.
+Use the recorded-chess measurement for complete-game admission, acknowledged
+commits and exact witness readback. Use CuteChess for external engine play,
+retaining the actual engine configuration, colors, openings, transcript and PGN.
+Strength conclusions require their own sufficient matched experiment; two
+calibration games or a capped-Elo demonstration cannot establish playing strength.
+`POST /chess/explore` exposes the selected FEN's available substrate evidence.
 
 ## The UCI engine (`laplace-uci`)
 
@@ -43,19 +42,20 @@ with `laplace-uci.dll` missing. CI and publish execute the copied runtime's
 apphost-only copy must fail that check. This proves packaging/search, not
 substrate learning or playing strength.
 
-`app/Laplace.Chess.Uci` builds a standalone UCI engine. Truncated Chess Forward
-Pass: classical alpha-beta (`PROPOSE`) with root consensus STEER (`Substrate`
-fold/edge/off) and learned PST overlay. Any UCI GUI (cutechess, Arena,
+`app/Laplace.Chess.Uci` builds a standalone UCI engine. Its conventional search
+uses the selected root and position evidence providers plus available Syzygy
+results. Any UCI GUI (cutechess, Arena,
 BanksiaGUI) or `cutechess-cli` can drive it — point the GUI at the binary, no
 arguments needed.
 
 - Resolution order when the lab launches it: deployed install → build output
   (`build/app/bin/Laplace.Chess.Uci/Release/net10.0/laplace-uci`) → `PATH`.
-- Substrate mode: UCI option `Substrate` = `fold` (default; substructure
-  OUTCOME folds), `edge` (raw MOVE-edge consensus), `off` (pure search). Env
-  override: `LAPLACE_UCI_SUBSTRATE`.
-- The engine connects to Postgres on `isready`, never on the move clock, and
-  degrades to pure search with an `info string` if the DB is unreachable.
+- Substrate mode: UCI option `Substrate` advertises `substrate` (default) and
+  `off` (classical control). `fold` and `edge` remain accepted aliases for
+  `substrate`. Environment override: `LAPLACE_UCI_SUBSTRATE`.
+- The engine initializes PostgreSQL providers on `isready`, before the move
+  clock. Initialization errors are emitted explicitly. A later `go` without
+  the required provider state fails; it does not silently change the player.
 
 Manual cutechess-cli invocation (every `key=value` is its own token, and
 `proto=uci` is required — cutechess defaults to xboard):

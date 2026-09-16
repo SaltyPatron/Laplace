@@ -241,7 +241,20 @@ public sealed class UciEngine
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var result = search.Think(state, limits, cts.Token);
+                var result = search.Think(state, limits, cts.Token, iteration =>
+                {
+                    var providers = configured?.Receipt() ?? ChessSearchProviderReceipt.Classical;
+                    lock (_outputLock)
+                    {
+                        output.WriteLine(
+                            $"info depth {iteration.Depth} score {ScoreStr(iteration.Score)} " +
+                            $"nodes {iteration.Nodes} time {iteration.ElapsedMilliseconds} " +
+                            $"nps {(long)(iteration.Nodes * 1000.0 / Math.Max(1, iteration.ElapsedMilliseconds))} " +
+                            $"pv {iteration.BestMove.ToUci()}");
+                        output.WriteLine($"info string providers depth {iteration.Depth} {providers.Summary}");
+                        output.Flush();
+                    }
+                });
                 sw.Stop();
                 string best = result.BestMove?.ToUci() ?? "0000";
                 var receipt = configured?.Receipt() ?? ChessSearchProviderReceipt.Classical;

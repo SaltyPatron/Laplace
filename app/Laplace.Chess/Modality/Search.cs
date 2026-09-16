@@ -30,6 +30,10 @@ public sealed class Search
 {
     public readonly record struct Result(ChessMove? BestMove, int Score, int Depth, long Nodes);
 
+    /// <summary>A completed iterative-deepening result, with cumulative search work and time.</summary>
+    public readonly record struct Iteration(
+        ChessMove BestMove, int Score, int Depth, long Nodes, long ElapsedMilliseconds);
+
     public sealed record Limits(int MaxDepth = 6, long MaxNodes = long.MaxValue, int MaxTimeMs = int.MaxValue);
 
     private const int Inf = 1_000_000;
@@ -100,6 +104,7 @@ public sealed class Search
     private int[][]? _mgPst;
     private int[][]? _egPst;
     private Dictionary<string, int>? _rootBonusByUci;
+    private bool _rootBiasPrepared;
 
     // Root bonuses are added AFTER the child search, so sibling comparisons are only sound if
     // every move that could still win post-bonus comes back with an EXACT score. Fail-hard
@@ -177,27 +182,30 @@ public sealed class Search
     /// Snapshot-only entry point. With no played trajectory available the current canonical
     /// position is the whole repetition segment. Live/connected callers should pass ChessState.
     /// </summary>
-    public Result Think(Board board, Limits limits, CancellationToken ct = default)
+    public Result Think(Board board, Limits limits, CancellationToken ct = default,
+        Action<Iteration>? onIterationCompleted = null)
     {
         var current = ChessPositionIdentity.PositionId(board);
-        return ThinkCore(board, limits, [current], ct);
+        return ThinkCore(board, limits, [current], ct, onIterationCompleted);
     }
 
     /// <summary>
     /// History-bearing entry point. Search consumes the exact repetition segment already carried
     /// by ChessState and extends it under the same pawn/capture reset law for every descendant.
     /// </summary>
-    public Result Think(ChessState state, Limits limits, CancellationToken ct = default)
+    public Result Think(ChessState state, Limits limits, CancellationToken ct = default,
+        Action<Iteration>? onIterationCompleted = null)
     {
         ArgumentNullException.ThrowIfNull(state);
-        return ThinkCore(state.Board, limits, state.RepetitionHistory, ct);
+        return ThinkCore(state.Board, limits, state.RepetitionHistory, ct, onIterationCompleted);
     }
 
     private Result ThinkCore(
         Board board,
         Limits limits,
         IReadOnlyList<Hash128> rootHistory,
-        CancellationToken ct)
+        CancellationToken ct,
+        Action<Iteration>? onIterationCompleted)
     {
         // One immutable substrate generation for the entire tree. A completed live game can
         // advance the persistent evidence between moves, but must never change scores halfway
@@ -275,6 +283,7 @@ public sealed class Search
         int bestScore = 0, reached = 0;
 
         _rootBonusByUci = null;
+        _rootBiasPrepared = false;
 
         for (int depth = 1; depth <= limits.MaxDepth; depth++)
         {
@@ -283,13 +292,20 @@ public sealed class Search
                 b, depth, -Inf, Inf, 0, repetitionStart, repetitionSignature);
             if (_aborted)
             {
-                best = _rootBestMove;
-                bestScore = score;
+                // A partial deeper iteration must not overwrite the move/score belonging to
+                // the completed depth. With no completed iteration, retain the legal seed.
+                if (reached == 0)
+                {
+                    best = _rootBestMove;
+                    bestScore = score;
+                }
                 break;
             }
             best = _rootBestMove;
             bestScore = score;
             reached = depth;
+            onIterationCompleted?.Invoke(new Iteration(
+                _rootBestMove, score, depth, _nodes, _sw.ElapsedMilliseconds));
             if (Math.Abs(score) >= MateThreshold) break;
             if (_sw.ElapsedMilliseconds * 2 >= _deadlineMs) break;
         }
@@ -430,12 +446,18 @@ public sealed class Search
         if (moves.Count == 0)
             return MoveGen.InCheck(b, b.WhiteToMove) ? -(Mate - ply) : DrawScoreAtPly(ply);
 
-        if (ply == 0 && _rootBias is not null && _rootBonusByUci is null)
+        if (ply == 0 && _rootBias is not null && !_rootBiasPrepared)
         {
             var bonus = _rootBias.Bonus(b, moves);
-            _rootBonusByUci = new Dictionary<string, int>(moves.Count);
+            _rootBiasPrepared = true;
             for (int i = 0; i < moves.Count; i++)
-                if (bonus[i] != 0) _rootBonusByUci[moves[i].ToUci()] = bonus[i];
+            {
+                if (bonus[i] == 0) continue;
+                // An observed all-zero provider is a no-op: no widened root window, root
+                // steering TT flag, or UCI-key allocation in the move-ordering comparator.
+                _rootBonusByUci ??= new Dictionary<string, int>(moves.Count);
+                _rootBonusByUci[moves[i].ToUci()] = bonus[i];
+            }
         }
         Order(b, moves, ttMove, ply);
 

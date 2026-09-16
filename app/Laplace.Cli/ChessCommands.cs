@@ -192,7 +192,7 @@ internal static class ChessCommands
                 positionEvaluator: boardEvaluator,
                 tablebase: ChessTablebaseRuntime.ProbeSearch);
             return (state, rng) => search.Think(
-                state.Board, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
+                state, new Search.Limits(MaxDepth: depth)).BestMove!.Value;
         }
         Func<MoveChooser> guided = mode switch
         {
