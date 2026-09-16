@@ -18,9 +18,9 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 /// returns the lane to that state, and every number taken afterwards looks exactly as
 /// trustworthy as a real one.</para>
 ///
-/// <para>The liveness assertion covers a claim that was written down and never enforced:
-/// NpgsqlIngestObservability's header says the gate script "carries the same constant, and
-/// they must agree", and until this gate nothing checked it.</para>
+/// <para>Run liveness is read through the canonical SQL predicate. Its advisory
+/// beacon must agree with the C# writer, while the quiet shell delegates to that
+/// predicate rather than maintaining another lock/heartbeat interpretation.</para>
 ///
 /// If one of these fails, fix the divergence, never the fixture.
 /// </summary>
@@ -55,12 +55,20 @@ public class MeasurementLaneGateTests
         return Convert.ToInt32(m.Groups[1].Value, 16);
     }
 
-    private static int ShellHexConst(string source, string name)
+    private static string RunLiveness() =>
+        Read("extension", "laplace_substrate", "sql", "functions", "ops", "ingest_runs.sql.in");
+
+    private static int SqlRunLivenessClass(string source)
     {
-        var m = Regex.Match(source, @"^\s*" + Regex.Escape(name) + @"=\$\(\(\s*0x([0-9A-Fa-f]+)\s*\)\)",
-            RegexOptions.Multiline);
-        Assert.True(m.Success, $"shell constant {name} not found as $(( 0x... ))");
-        return Convert.ToInt32(m.Groups[1].Value, 16);
+        var predicate = Regex.Match(source,
+            @"CREATE OR REPLACE FUNCTION ops\.ingest_run_live\([\s\S]*?BEGIN ATOMIC(?<body>[\s\S]*?)END;");
+        Assert.True(predicate.Success, "canonical ingest-run liveness predicate is missing");
+        var identity = Regex.Match(predicate.Groups["body"].Value, @"\bl\.classid\s*=\s*([0-9]+)::oid");
+        Assert.True(identity.Success, "canonical liveness advisory class is missing");
+        Assert.Contains("l.objsubid = 2", predicate.Groups["body"].Value);
+        Assert.Contains("hashtext(j.run_id::text)", predicate.Groups["body"].Value);
+        Assert.Contains("current_database()", predicate.Groups["body"].Value);
+        return int.Parse(identity.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -114,11 +122,16 @@ public class MeasurementLaneGateTests
     }
 
     [Fact]
-    public void RunLivenessClass_AgreesBetweenCsharpAndQuietGate()
+    public void RunLivenessClass_AgreesBetweenCsharpAndCanonicalSql()
     {
         Assert.Equal(
             CsharpHexConst(Observability(), "RunLivenessLockClass"),
-            ShellHexConst(QuietGate(), "LOCK_CLASS"));
+            SqlRunLivenessClass(RunLiveness()));
+        var gate = QuietGate();
+        Assert.Contains("FROM ops.ingest_reconcile_orphans(", gate);
+        Assert.Contains("AND ops.ingest_run_live(j.run_id,", gate);
+        Assert.DoesNotContain("pg_locks", gate);
+        Assert.DoesNotMatch(@"\bLOCK_CLASS\s*=", gate);
     }
 
     /// <summary>
@@ -132,13 +145,19 @@ public class MeasurementLaneGateTests
     {
         var gate = QuietGate();
         var probe = gate.IndexOf("to_regclass('laplace.ingest_run_journal')", StringComparison.Ordinal);
-        var provenMissing = gate.IndexOf("[ \"$journal_rc\" -eq 0 ] && [ \"$journal_state\" = \"missing\" ]", StringComparison.Ordinal);
-        var journalRead = gate.IndexOf("FROM laplace.ingest_run_journal j WHERE j.status = 'running'", StringComparison.Ordinal);
+        var provenMissing = gate.IndexOf("[ \"$probe_rc\" -eq 0 ] && [ \"$probe\" = \"missing\" ]", StringComparison.Ordinal);
+        var journalRead = gate.IndexOf("FROM laplace.ingest_run_journal;", StringComparison.Ordinal);
 
         Assert.True(probe >= 0, "quiet gate no longer proves whether the exact ingest journal exists");
         Assert.True(provenMissing > probe, "missing journal may be accepted without a successful PostgreSQL probe");
+        Assert.Contains("2>&1) || probe_rc=$?", gate[..provenMissing]);
         Assert.True(journalRead > provenMissing, "quiet gate dereferences the ingest journal before handling pre-schema bootstrap");
-        Assert.Contains("unreachable or misconfigured database is not proof of quiet", gate);
+        Assert.Contains("[ \"$probe_rc\" -eq 0 ] && [ \"$probe\" = \"present\" ]", gate);
+        Assert.Contains("[ \"$capability_rc\" -eq 0 ] && [[ \"$capability\" =~ ^([0-9]+)\\ (present|missing)$ ]]", gate);
+        Assert.Contains("[ \"$canonical_ready\" -eq 1 ]", gate);
+        Assert.Contains("[ \"$state_rc\" -eq 0 ]", gate);
+        Assert.Contains("if [[ \"$live\" =~ ^[0-9]+$ ]]; then", gate);
+        Assert.Contains("substrate not proven quiet after", gate);
         Assert.DoesNotContain("*relation*does not exist*", gate);
     }
 
