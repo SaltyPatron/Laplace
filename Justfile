@@ -1,12 +1,9 @@
-# NOTE: Linux dev convenience layer only. Build/lifecycle authority is scripts/pipeline.sh;
-# test authority is scripts/test-profile-registry.py via scripts/test-parallel.sh aliases.
-# scripts/validate-pipeline.py is the cross-toolchain policy gate.
+# Linux developer convenience. scripts/pipeline.sh owns build/install/runtime
+# sequencing; scripts/test-parallel.sh executes tests directly.
 
 set shell := ["bash", "-uc"]
 
 export LAPLACE_DATA_ROOT := env_var_or_default("LAPLACE_DATA_ROOT", "/vault/Data")
-
-# Parallelism defaults (override with env, or LAPLACE_TEST_SERIAL=1 for serial tests).
 export CMAKE_BUILD_PARALLEL_LEVEL := env_var_or_default("CMAKE_BUILD_PARALLEL_LEVEL", `nproc 2>/dev/null || echo 1`)
 export CTEST_PARALLEL_LEVEL := env_var_or_default("CTEST_PARALLEL_LEVEL", `nproc 2>/dev/null || echo 1`)
 
@@ -18,7 +15,6 @@ check-prereqs:
 
 bootstrap:
     @echo "Use: sudo bash scripts/setup-host.sh"
-    @echo "(just bootstrap is not a parallel entry — setup-host is the only human path)"
     @exit 2
 
 bootstrap-status:
@@ -36,8 +32,6 @@ setup-host-status:
 setup-host-reset:
     sudo bash scripts/setup-host.sh reset
 
-# Fingerprinted vendor deps (proj/geos/gdal/pg/postgis/…). No-op unless pins change.
-# Force: LAPLACE_FORCE_DEPS=1 just build-deps
 build-deps:
     bash scripts/build-system-deps.sh
 
@@ -45,19 +39,15 @@ verify-deps:
     @chmod +x scripts/verify-pg-postgis.sh
     @scripts/verify-pg-postgis.sh
 
-# Incremental build (stamp-skips codegen when manifests unchanged).
 build:
     bash scripts/pipeline.sh build
 
-# Wipe build/ then full rebuild (force codegen + clean tree).
 rebuild:
     bash scripts/pipeline.sh --force-rebuild --force-codegen build
 
-# Keep configure, rebuild all objects.
 build-clean-first:
     bash scripts/pipeline.sh --clean-first --force-codegen build
 
-# Force codegen even when stamp is fresh.
 build-force-codegen:
     bash scripts/pipeline.sh --force-codegen build
 
@@ -85,20 +75,18 @@ clean-all: clean
 launch-db:
     sudo systemctl start laplace-postgresql.service
 
-db-up: install
+db-up: build-migrations
     cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up
 
-db-status:
+db-status: build-migrations
     cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- status
 
-db-reset:
+db-reset: build-migrations
     cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- reset
 
-db-nuke:
+db-nuke: build-migrations
     cd app && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke
 
-# Shebang so nested indent inside the if/fi is legal (just 1.x rejects extra
-# leading whitespace on ordinary recipe lines — GH #422).
 migrate-new name:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -110,90 +98,75 @@ migrate-new name:
     file="db/migrations/${stamp}_{{name}}.sql"
     : > "$file"
     echo "Created $file"
-    echo "Layer-1 only — substrate objects belong in extension/laplace_substrate/sql/ (see its README.md)"
 
-seed-t0: build-perfcache build-app
-    cd app && dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
+seed-t0: build
+    scripts/ingest-source.sh unicode
 
-db-fresh: build-perfcache build-app
+db-fresh: build install
     set -euo pipefail
-    rm -f "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/lib/postgresql/*/laplace_substrate.so \
-          "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"/share/postgresql/*/extension/laplace_substrate* \
-          build/.stamps/install-native
-    umask 0002
-    cmake --install build/extension/laplace_substrate >/dev/null
     cd app
     dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- nuke --yes
     dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -c Release -- up
-    dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- ingest unicode
-    echo "db-fresh: empty substrate + current extension + T0 seeded (consensus folded, layer-0 marker set)"
+    cd ..
+    bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc
+    scripts/ingest-source.sh unicode
+    echo "db-fresh: current runtime, fresh database, Unicode admitted"
 
 setup: launch-db db-up seed-t0
     @echo "Laplace ready. Try: just query 'SELECT laplace_version();'"
 
-ingest source path="": build-app
+ingest source path="": build
     scripts/ingest-source.sh {{source}} {{path}}
 
-e2e *models: build-app
+ingest-all: build
+    scripts/ingest-source.sh all
+
+e2e *models: build
     scripts/e2e-substrate.sh {{models}}
 
-# W5 / GH #755 — election-first quality harness. Test selection belongs to the
-# executable live profile registry; this convenience target must not invoke it directly.
 eval:
     bash scripts/test-parallel.sh --app-live
 
-ingest-all: build-app
-    scripts/ingest-source.sh all
-
-decomposer-test source: build-app
-    @chmod +x scripts/decomposer-test.sh scripts/decomposer-isolate.sh scripts/decomposer-ensure-floor.sh
+decomposer-test source: build
     scripts/decomposer-test.sh {{source}}
 
-decomposer-promote source: build-app
-    @chmod +x scripts/decomposer-promote.sh
+decomposer-promote source: build
     scripts/decomposer-promote.sh {{source}}
 
-decomposer-matrix *flags: build-app
-    @chmod +x scripts/decomposer-matrix.sh scripts/decomposer-test.sh scripts/decomposer-promote.sh
+decomposer-matrix *flags: build
     scripts/decomposer-matrix.sh {{flags}}
 
 decomposer-isolate dbname:
-    @chmod +x scripts/decomposer-isolate.sh
     scripts/decomposer-isolate.sh {{dbname}}
 
-ingest-tinyllama: build-app
-    scripts/ingest-source.sh safetensors "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR to the HF snapshot dir (config+tokenizer+weights)}"
+ingest-tinyllama: build
+    scripts/ingest-source.sh safetensors "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR to the HF snapshot dir}"
 
-audit-decomposers *args: build-app
-    @chmod +x scripts/audit-decomposers.sh
+audit-decomposers *args: build
     scripts/audit-decomposers.sh {{args}}
 
 audit-source-fidelity:
-    @chmod +x scripts/audit-semantic-source-fidelity.sh
     scripts/audit-semantic-source-fidelity.sh
 
 query sql:
-    psql -h /var/run/postgresql -U laplace_admin -d "${LAPLACE_QUERY_DB:-laplace-dev}" -c "{{sql}}"
+    psql -h /var/run/postgresql -U laplace_admin -d "${LAPLACE_QUERY_DB:-laplace}" -c "{{sql}}"
 
-cascade prompt:
-    app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli cascade --prompt "{{prompt}}"
+cascade prompt: build
+    scripts/laplace cascade --prompt "{{prompt}}"
 
-synthesize subcommand *args: build-app
-    cd app && LD_LIBRARY_PATH="$(pwd)/../build/engine/synthesis:$(pwd)/../build/engine/dynamics:$(pwd)/../build/engine/core:${LD_LIBRARY_PATH:-}" \
-        dotnet run --project Laplace.Cli/Laplace.Cli.csproj -c Release -- synthesize {{subcommand}} {{args}}
+synthesize subcommand *args: build
+    scripts/laplace synthesize {{subcommand}} {{args}}
 
-synthesize-tinyllama output="/tmp/tinyllama-substrate.gguf": build-app
-    just synthesize substrate "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR}/config.json" {{output}}
+synthesize-tinyllama output="/build/laplace/work/model-outputs/tinyllama-substrate.gguf": build
+    mkdir -p "$(dirname '{{output}}')"
+    scripts/laplace synthesize substrate "${LAPLACE_TINYLLAMA_DIR:?set LAPLACE_TINYLLAMA_DIR}/config.json" {{output}}
 
 model-synthesize model_path:
     scripts/model-synthesize-ci.sh {{model_path}}
 
-model-synthesize-ci: build build-app
-    @chmod +x scripts/model-synthesize-ci.sh
+model-synthesize-ci: build
     scripts/model-synthesize-ci.sh
 
-# Verification recipes are compatibility aliases to the same executable profiles used
-# by CI; they do not own independent project/class/CTest selectors.
 verify:
     bash scripts/test-parallel.sh --engine
 
@@ -215,27 +188,21 @@ anchor issue="":
 issue n:
     @scripts/agent-anchor.sh {{n}}
 
-# Thin aliases to the one executable test-profile authority.
 test:
-    @chmod +x scripts/test-parallel.sh
     bash scripts/test-parallel.sh
 
 test-serial:
-    @chmod +x scripts/test-parallel.sh
     bash scripts/test-parallel.sh --serial
 
 test-no-docker: test-engine regress
 
 test-engine:
-    @chmod +x scripts/test-parallel.sh
     bash scripts/test-parallel.sh --engine
 
 regress:
-    @chmod +x scripts/test-parallel.sh
     bash scripts/test-parallel.sh --regress
 
 test-app:
-    @chmod +x scripts/test-parallel.sh
     bash scripts/test-parallel.sh --app
 
 publish:
