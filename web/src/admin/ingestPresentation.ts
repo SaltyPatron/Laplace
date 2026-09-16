@@ -19,3 +19,14 @@ export function ingestDuration(started: string | null, ended: string | null): st
 export function countText(value: number | null | undefined): string {
   return value == null ? 'Not recorded' : value.toLocaleString();
 }
+
+/**
+ * Ingest inventories are allowed to discover totals while streaming. A persisted zero
+ * total with positive completed work therefore means "not known yet", not a literal
+ * zero-sized workload. Never render impossible progress such as 34,359 / 0.
+ */
+export function progressText(done: number | null | undefined, total: number | null | undefined): string {
+  const doneText = countText(done);
+  if (total == null || ((total ?? 0) <= 0 && (done ?? 0) > 0)) return `${doneText} / total pending discovery`;
+  return `${doneText} / ${countText(total)}`;
+}

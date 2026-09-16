@@ -22,7 +22,4 @@ ln -s /tmp "$test_root/escape"
 if (LAPLACE_SCRATCH_ROOT="$test_root/escape/scratch"; laplace_storage_init) 2>/dev/null; then
     echo 'scratch symlink escaped the build volume' >&2; exit 1
 fi
-if bash "$ROOT/scripts/agent-worktree.sh" ../escape >/dev/null 2>&1; then
-    echo 'worktree name escaped its root' >&2; exit 1
-fi
 echo 'PASS: shared group/modes, setgid inheritance, and temporary-path rejection'

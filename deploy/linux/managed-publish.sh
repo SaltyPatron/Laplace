@@ -133,6 +133,10 @@ case "${1:-}" in
   prepare-policy) prepare_policy ;;
   preflight) ensure_host ;;
   begin)
+    [[ ! -e "$ROOT/build/.api-publish-backup" && ! -e "$ROOT/build/.application-publish-owner" && ! -e "$ROOT/build/.uci-publish-pending" ]] || {
+      echo "::error::application publication recovery is unresolved; no managed deployment changes made" >&2
+      exit 1
+    }
     ensure_host
     [[ ! -f "$RECEIPT" ]] || { echo "unresolved publish receipt" >&2; exit 1; }
     # Reclaim transaction backups and only mechanically-dead immutable releases

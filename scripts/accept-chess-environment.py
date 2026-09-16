@@ -69,14 +69,14 @@ def module(name, filename):
     return result
 
 
-def stop_group(process):
+def stop_group(process, cleanup_seconds=5):
     """Reap the owner and kill its remaining group even if the leader exited."""
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
     try:
-        process.wait(timeout=5)
+        process.wait(timeout=cleanup_seconds)
     except subprocess.TimeoutExpired:
         pass
     # A resistant descendant can outlive a leader that honored SIGTERM.
@@ -88,7 +88,7 @@ def stop_group(process):
     process.wait(timeout=5)
 
 
-def command(argv, log, timeout, env=None):
+def command(argv, log, timeout, env=None, *, cleanup_seconds=5):
     """Every exit path, including cancellation, cleans this command's group."""
     with log.open("xb") as stream:
         process = subprocess.Popen([str(x) for x in argv], cwd=ROOT,
@@ -100,7 +100,7 @@ def command(argv, log, timeout, env=None):
             except subprocess.TimeoutExpired:
                 raise TimeoutError("phase deadline exceeded") from None
         finally:
-            stop_group(process)
+            stop_group(process, cleanup_seconds)
     if code:
         raise RuntimeError(f"command exited {code}; inspect {log.name}")
 

@@ -11,6 +11,8 @@ import type { ExploreEntityResponse } from '../../types';
 import type { NeighborMode } from './types';
 import styles from './GlomeTab.module.css';
 
+const identityLabel = (idHex: string) => `Entity · ${idHex.slice(0, 12)}`;
+
 export function GlomeTab({
   entity,
   neighborMode,
@@ -77,7 +79,7 @@ export function GlomeTab({
   const packedNodes = useMemo((): GlomeNode[] => {
     return packed.map((v) => ({
       id: `packed-${v.ordinal}-${v.child_id_hex}`,
-      label: constituentLabels.get(v.child_id_hex) ?? 'Unrealized entity',
+      label: constituentLabels.get(v.child_id_hex) ?? identityLabel(v.child_id_hex),
       x: v.x,
       y: v.y,
       z: v.z,
@@ -98,7 +100,7 @@ export function GlomeTab({
   const placementConstituents = useMemo((): GlomeNode[] => {
     return realized.map((v) => ({
       id: `real-${v.ordinal}-${v.child_id_hex}`,
-      label: v.child_label || 'Unrealized entity',
+      label: v.child_label || identityLabel(v.child_id_hex),
       x: v.x,
       y: v.y,
       z: v.z,
@@ -122,14 +124,15 @@ export function GlomeTab({
       const end = v.ordinal + Math.max(v.run_length, 1) - 1;
       return selectedOrdinal >= start && selectedOrdinal <= end;
     });
+    const selectedId = r?.child_id_hex ?? p?.child_id_hex ?? entity.id_hex;
     return {
       label: r?.child_label
         ?? (p ? constituentLabels.get(p.child_id_hex) : null)
-        ?? 'Unrealized entity',
+        ?? identityLabel(selectedId),
       ordinal: selectedOrdinal,
       runLength: p?.run_length ?? 1,
     };
-  }, [selectedOrdinal, realized, packed, constituentLabels]);
+  }, [selectedOrdinal, realized, packed, constituentLabels, entity.id_hex]);
 
   // Packed highlight: RLE vertex covering the expanded ordinal.
   const packedHighlightOrdinal = useMemo(() => {

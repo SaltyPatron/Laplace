@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Banner, SegmentedControl } from '@ui';
 import { Activity } from './Activity';
 import { Agents } from './Agents';
+import { IngestControl } from './IngestControl';
 import { IngestJournal } from './IngestJournal';
 import { OpConsole } from './OpConsole';
 import { Repair } from './Repair';
@@ -24,7 +25,7 @@ export function AdminView() {
       header tenancy is for trusted local development. Signing in is not an operator-role
       check. Host service controls separately require the operator credential.
     </Banner>
-    {section === 'ingest' ? <IngestJournal /> : section === 'activity' ? <Activity />
+    {section === 'ingest' ? <><IngestControl /><IngestJournal /></> : section === 'activity' ? <Activity />
       : section === 'ops' ? <OpConsole /> : section === 'repair' ? <Repair /> : <Agents />}
   </div>;
 }

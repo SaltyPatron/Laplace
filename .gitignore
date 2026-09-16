@@ -327,6 +327,7 @@ FodyWeavers.xsd
 *.msp
 
 engine/build/
+/build
 build/
 **/CMakeCache.txt
 **/CMakeFiles/

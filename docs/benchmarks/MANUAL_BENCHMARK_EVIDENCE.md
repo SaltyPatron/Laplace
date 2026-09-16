@@ -2,9 +2,9 @@
 
 Tracking: `#1432`, `#1436`, `#1451`, `#1561`.
 
-`.github/workflows/benchmark-evidence.yml` accepts explicit `workflow_dispatch` and `workflow_call` invocations. Its complete chess acceptance job also accepts a push to a deliberately named `verify/chess-acceptance-*` operator branch, created at the exact deployed main commit. Ordinary main pushes and pull requests do not select these domain measurements or depend on them.
+Run the named suites through `scripts/benchmark_suite.py` on the selected machine and runtime. The former `benchmark-evidence.yml` dispatcher has been removed. Reuse an existing host operator when execution must go through Actions; do not create another branch or checkout for each measurement. The current product workflow selects build, installation, database maintenance, application publication and tests explicitly. A completed build is not a completed benchmark.
 
-The workflow is only the dispatcher. Benchmark meaning lives in versioned source:
+Benchmark meaning and receipts live in versioned source:
 
 - `scripts/benchmark-profiles.json` — named profiles and suites;
 - `scripts/benchmark_suite.py` — registry validator, suite runner and suite receipt;
@@ -30,7 +30,7 @@ The workflow is only the dispatcher. Benchmark meaning lives in versioned source
 | `chess` | `chess-environment` | official engine and complete-game configuration calibration |
 | `geometry` | `postgres-geometry` | exact existing GeometryZM payloads through logged storage and committed binary readback |
 | `recorded` | `recorded-chess` | complete generated and recorded games through a duration-qualified readback window |
-| `acceptance` (workflow selection) | separate acceptance owner | exact installed runtime, dependencies/GUI/service startup, full Stockfish corpus, recorded/retained/storage measurements |
+| complete installed acceptance | separate acceptance owner | exact installed runtime, dependencies/GUI/service startup, full Stockfish corpus, recorded/retained/storage measurements |
 
 `query` is intentionally explicit rather than silently included in `all`. The source/core profiles can benchmark an arbitrary selected ref without installing it. A database-backed cognition measurement is valid only when the installed extension/execution module is the exact content-versioned runtime built from the selected source. The query harness refuses a mismatch rather than measuring stale production code and labeling it with the checked-out SHA.
 
@@ -131,7 +131,7 @@ See `docs/benchmarks/SCALING_MODES.md` for the distinction.
 
 The self-hosted runner is a managed machine, not a disposable benchmark appliance. PostgreSQL, Actions, product services and control/monitoring processes require headroom.
 
-The workflow therefore resolves a scale plan before either scaling harness. Defaults are:
+Resolve the scale plan through `scripts/benchmark_scale_plan.py` before either scaling harness. Its defaults are:
 
 ```text
 allow_saturation = false
@@ -351,7 +351,7 @@ Artifact upload uses `if: always()`. A host made unavailable by destructive satu
 
 ## Isolation law
 
-The workflow shares `laplace-shared-workspace` with delivery, so benchmark and deployment jobs cannot overlap on the persistent measured checkout.
+The invoking host operator must coordinate the selected persistent checkout and installed runtime with delivery. The retained native/recording operator holds `/build/laplace/work/host-resource.lock` across its build, installation and recording observation. A workflow name or a selected Git revision alone does not provide that coordination.
 
 Source/core profiles build the exact selected revision without installing/deploying/migrating/seeding it. `query` likewise does not install anything: it succeeds only when the currently installed content-versioned runtime already matches the exact selected build. This preserves the manual evidence lane's non-mutating contract.
 

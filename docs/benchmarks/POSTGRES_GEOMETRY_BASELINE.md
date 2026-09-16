@@ -21,7 +21,7 @@ python3 scripts/benchmark_suite.py run \
 
 The new output directory must not already exist. `PGHOST`, `PGPORT`, `PGUSER`, and other normal libpq variables select the connection. Defaults match the existing query benchmark: `/var/run/postgresql`, port 5432, and `laplace_admin`. Credentials stay in the environment. The harness needs `psql`, the existing PostGIS functions, read access to `laplace.physicalities`, and permission to create its own schema. It requires server `fsync=on` and requests `synchronous_commit=on` for its sessions; it does not change database-wide settings.
 
-The existing `benchmark-evidence.yml` workflow also exposes the explicit `geometry` suite, under its existing shared host lock. It does not build or install a replacement Laplace core. Geometry is excluded from the default `all` suite because it creates logged benchmark tables.
+Run the explicit `geometry` suite through the command above under the existing host measurement owner. The former `benchmark-evidence.yml` dispatcher has been removed. This suite does not build or install a replacement Laplace core. Geometry is excluded from the default `all` suite because it creates logged benchmark tables.
 
 ## Exact input and two storage cases
 
@@ -54,7 +54,7 @@ Creation and its random schema ownership comment share one transaction. Even aft
 
 ## Compare with the normal writer and recorded games
 
-The normal writer does more than store a geometry. `NpgsqlWorkingSetApply.cs` owns native COPY-blob collection, managed tuple parsing and deduplication, presence verification, the cross-process advisory apply lock, write epochs, replay journals, staged COPY, and the evidence/consensus transaction boundary. Its `WS_APPLY` lines report preparation, verification and COPY phases. `ApplyResult.RoundTrips` is a legacy logical phase counter; it is not a complete count of physical PostgreSQL protocol crossings. Actual COPY-transaction counters and commit acknowledgement receipts should be used when present.
+The normal writer does more than store a geometry. `NpgsqlWorkingSetApply.cs` owns native COPY-blob collection, managed tuple parsing and deduplication, presence verification, write epochs, replay journals, staged COPY, and the evidence/consensus transaction boundary. Ordinary apply transactions no longer acquire a global advisory apply lock. Concurrent conflicts retry the complete apply operation and invalidate cached absence claims while retaining known positive identities. Its `WS_APPLY` lines report preparation, verification and COPY phases. `ApplyResult.RoundTrips` is a legacy logical phase counter; it is not a complete count of physical PostgreSQL protocol crossings. Actual COPY-transaction counters and commit acknowledgement receipts should be used when present.
 
 The existing physicality throughput gate in `WriterThroughputTests.cs` stages coordinate-only rows with an empty trajectory. Its timed apply excludes preparation and the subsequent `CompleteBulkRunAsync` GIN drain. A threshold in that test is a requirement, not a measured claim about complete recorded games or long trajectories.
 

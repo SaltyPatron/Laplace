@@ -45,6 +45,13 @@
 -- physicalities_direction_gist supplies the exact angular order directly. No
 -- guessed candidate pool or second ranking pass remains.
 --
+-- HIGHWAY MASK LAW. The stored entity highway_mask is a rebuildable accelerator,
+-- not authority over whether a relation exists. A positive mask overlap is a valid
+-- fast admission, but a miss must fall through to current consensus. This matters
+-- during registry changes, queued/contended mask maintenance, and any historical
+-- partial population: the same canonical query must return the same answer with or
+-- without a populated mask.
+--
 -- Rule #4 / L2: the comparison point must reach the planner as a bound parameter
 -- or the GiST KNN silently degrades to a scan. A caller passing a
 -- correlated LATERAL reference does NOT satisfy that — EXPLAIN before trusting
@@ -59,17 +66,37 @@ RETURNS TABLE(entity_id bytea, distance float8)
 LANGUAGE sql STABLE PARALLEL RESTRICTED
 BEGIN ATOMIC
 
-    WITH nearest AS (
+    WITH band_scope AS MATERIALIZED (
+        SELECT CASE
+                 WHEN p_band_mask IS NULL THEN NULL::bytea[]
+                 ELSE consensus.relation_mask_types(p_band_mask)
+               END AS type_ids
+    ), nearest AS (
         SELECT w.id, w.coord,
                public.laplace_direction_4d(w.coord) <<->>
                public.laplace_direction_4d(public.ST_SetSRID(
                    public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)) AS chord
         FROM laplace.v_word_points w
+        CROSS JOIN band_scope b
         WHERE public.laplace_direction_4d(w.coord) IS NOT NULL
           AND public.laplace_direction_4d(public.ST_SetSRID(
                   public.ST_MakePoint(p_cx, p_cy, p_cz, p_cm), 0)) IS NOT NULL
-          AND (p_band_mask IS NULL
-               OR consensus.highway_match(w.highway_mask, p_band_mask))
+          AND (
+              p_band_mask IS NULL
+              OR consensus.highway_match(w.highway_mask, p_band_mask)
+              OR EXISTS (
+                  SELECT 1
+                  FROM laplace.consensus c
+                  WHERE c.subject_id = w.id
+                    AND c.type_id = ANY (b.type_ids)
+              )
+              OR EXISTS (
+                  SELECT 1
+                  FROM laplace.consensus c
+                  WHERE c.object_id = w.id
+                    AND c.type_id = ANY (b.type_ids)
+              )
+          )
           AND (p_tiers IS NULL OR w.tier = ANY (p_tiers))
         ORDER BY public.laplace_direction_4d(w.coord)
                  <<->> public.laplace_direction_4d(public.ST_SetSRID(

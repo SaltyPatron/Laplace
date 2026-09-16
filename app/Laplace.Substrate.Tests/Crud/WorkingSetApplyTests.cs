@@ -178,6 +178,79 @@ public class WorkingSetApplyTests
     }
 
     [Fact]
+    public async Task WorkingSetApply_RetryReprobesAbsenceAfterForeignLanding()
+    {
+        var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
+        var concurrent = new NpgsqlSubstrateWriter(_pg.DataSource);
+        string scope = $"preload-race/{Guid.NewGuid():N}";
+        var source = H($"source/{scope}");
+        var known = Entity($"{scope}/known");
+        var raced = Entity($"{scope}/raced");
+        var novel = Entity($"{scope}/novel");
+        var witness = Att(scope, 4, IntentStage.PgEpochUnixUs);
+
+        await concurrent.ApplyAsync(new SubstrateChangeBuilder(source, $"{scope}/known")
+            .AddEntity(known).Build());
+
+        string? priorPreload = Environment.GetEnvironmentVariable("LAPLACE_PRESENCE_PRELOAD");
+        try
+        {
+            try
+            {
+                Environment.SetEnvironmentVariable("LAPLACE_PRESENCE_PRELOAD", "1");
+                await writer.BeginBulkRunAsync();
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("LAPLACE_PRESENCE_PRELOAD", priorPreload);
+            }
+
+            // Deterministically land another writer's row AFTER the complete
+            // preload. The first apply therefore loses the real COPY race.
+            await concurrent.ApplyAsync(new SubstrateChangeBuilder(source, $"{scope}/foreign")
+                .AddEntity(raced).Build());
+            var change = new SubstrateChangeBuilder(source, $"{scope}/retry")
+                .AddEntity(known)
+                .AddEntity(raced)
+                .AddEntity(novel)
+                .AddAttestation(witness)
+                .Build();
+
+            var failure = await Assert.ThrowsAsync<global::Npgsql.PostgresException>(
+                () => writer.ApplyWorkingSetAsync(change));
+            Assert.Equal("23505", failure.SqlState);
+            Assert.True(Laplace.Ingestion.TransientErrorRetryPolicy.ConcurrencyRetry
+                .IsTransient(failure));
+            await using (var journal = _pg.DataSource.CreateCommand(
+                "SELECT count(*) FROM laplace.ingest_flush_journal WHERE source_id = $1"))
+            {
+                journal.Parameters.AddWithValue(source.ToBytes());
+                Assert.Equal(0L, (long)(await journal.ExecuteScalarAsync())!);
+            }
+
+            // Retry the complete, unchanged working set on the SAME bulk writer.
+            // Retaining the stale absence claim would raise 23505 again here.
+            var retry = await writer.ApplyWorkingSetAsync(change);
+            Assert.False(retry.JournalReplayHit);
+            Assert.Equal(1L, await CountEntityAsync(known.Id));
+            Assert.Equal(1L, await CountEntityAsync(raced.Id));
+            Assert.Equal(1L, await CountEntityAsync(novel.Id));
+            Assert.Equal(4L, (await AttStateAsync(witness.Id)).Games);
+
+            Assert.True((await writer.ApplyWorkingSetAsync(change)).JournalReplayHit);
+            Assert.Equal(4L, (await AttStateAsync(witness.Id)).Games);
+            await using var committed = _pg.DataSource.CreateCommand(
+                "SELECT count(*) FROM laplace.ingest_flush_journal WHERE source_id = $1");
+            committed.Parameters.AddWithValue(source.ToBytes());
+            Assert.Equal(1L, (long)(await committed.ExecuteScalarAsync())!);
+        }
+        finally
+        {
+            await writer.CompleteBulkRunAsync();
+        }
+    }
+
+    [Fact]
     public async Task AttestationsEmbeddingNovelEntities_InsertThenRemainUnchanged()
     {
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);

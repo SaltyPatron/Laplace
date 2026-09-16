@@ -24,14 +24,16 @@ class RuntimeGuardTests(unittest.TestCase):
         self.root = base / "repo"
         self.prefix = base / "install"
         self.staged = base / "staged-install"
-        self.fingerprint = "f" * 64
         self.database = {"server_version": "180000", "running_ingests": 0,
                          "extension_functions": "fixture-functions", "database": "fixture",
                          "postmaster_started": "fixture-start", "migrations": ["001.sql"],
                          "extensions": {"laplace_geom": "fixture", "laplace_substrate": "fixture"},
                          "roms": {}}
-        for stamp in ("build-native", "install-native"):
-            self.write(self.root / "build/.stamps" / stamp, self.fingerprint)
+        self.write(self.root / "build/CMakeCache.txt",
+                   "CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.root) + "\n"
+                   "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.root / "build") + "\n"
+                   "CMAKE_INSTALL_PREFIX:PATH=" + str(self.prefix) + "\n")
+        self.write(self.root / "build/cmake_install.cmake", "# explicit install protocol fixture\n")
         self.write(self.root / "db/migrations/001.sql", "SELECT 1;")
         for built, installed in guard.MODULES.items():
             # Build and installed bytes are deliberately different. CMake rewrites ELF
@@ -70,7 +72,7 @@ class RuntimeGuardTests(unittest.TestCase):
 
     def snapshot(self, *, purpose="publication"):
         with patch.object(guard, "staged_install", self.staged_install):
-            return guard.snapshot(self.root, self.prefix, self.database, self.fingerprint, purpose=purpose)
+            return guard.snapshot(self.root, self.prefix, self.database, purpose=purpose)
 
     def test_exact_installed_runtime_passes_even_when_build_elf_bytes_differ(self):
         self.assertNotEqual(
@@ -79,7 +81,10 @@ class RuntimeGuardTests(unittest.TestCase):
         )
         state = self.snapshot()
         self.assertEqual(12, len(state["artifacts"]))
-        self.assertEqual(self.fingerprint, state["native_fingerprint"])
+        self.assertEqual(2, state["format"])
+        self.assertEqual(guard.build_identity(self.root, self.prefix), state["build"])
+        self.assertNotIn("native_fingerprint", state)
+        self.assertFalse((self.root / "build/.stamps").exists())
 
     def install_pair_receipt(self):
         files = {}
@@ -116,18 +121,50 @@ class RuntimeGuardTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.snapshot()
 
-    def test_each_stale_or_missing_stamp_fails(self):
+    def test_build_identity_uses_real_configuration_without_obsolete_stamps(self):
+        baseline = self.snapshot()
         for name in ("build-native", "install-native"):
-            path = self.root / "build/.stamps" / name
-            for value in ("stale", None):
-                with self.subTest(name=name, value=value):
-                    if value is None:
-                        path.unlink()
-                    else:
-                        path.write_text(value)
-                    with self.assertRaisesRegex(ValueError, name):
+            self.write(self.root / "build/.stamps" / name, "obsolete unrelated value")
+        self.assertEqual(baseline, self.snapshot())
+        cache = self.root / "build/CMakeCache.txt"
+        original = cache.read_text()
+        cache.write_text(original + "# observed configuration changed\n")
+        changed = self.snapshot()
+        self.assertFalse(guard.compatible(baseline, changed))
+        cache.write_text(original)
+        program = self.root / "build/cmake_install.cmake"
+        program.write_text(program.read_text() + "# actual install program changed\n")
+        self.assertFalse(guard.compatible(baseline, self.snapshot()))
+
+    def test_build_identity_rejects_missing_wrong_or_ambiguous_configured_directories(self):
+        cache = self.root / "build/CMakeCache.txt"
+        original = cache.read_text()
+        for key in ("CMAKE_HOME_DIRECTORY", "CMAKE_CACHEFILE_DIR", "CMAKE_INSTALL_PREFIX"):
+            line = next(line for line in original.splitlines() if line.startswith(key + ":"))
+            for value in ("missing", "wrong", "duplicate", "relative"):
+                with self.subTest(key=key, defect=value):
+                    replacement = {"missing": "", "wrong": line.split("=", 1)[0] + "=" + str(self.prefix),
+                                   "duplicate": line + "\n" + line,
+                                   "relative": line.split("=", 1)[0] + "=relative"}[value]
+                    if value == "wrong" and key == "CMAKE_INSTALL_PREFIX":
+                        replacement = line.split("=", 1)[0] + "=" + str(self.root)
+                    cache.write_text(original.replace(line, replacement))
+                    with self.assertRaisesRegex(ValueError, "configured CMake directory"):
                         self.snapshot()
-                    path.write_text(self.fingerprint)
+        cache.write_text(original)
+        (self.root / "build/cmake_install.cmake").unlink()
+        with self.assertRaisesRegex(ValueError, "install program missing"):
+            self.snapshot()
+
+    def test_build_configuration_change_during_materialization_is_detected(self):
+        @contextmanager
+        def changed_install(_root, _prefix):
+            yield self.staged
+            cache = self.root / "build/CMakeCache.txt"
+            cache.write_text(cache.read_text() + "# changed during installed-form comparison\n")
+        with patch.object(guard, "staged_install", changed_install):
+            with self.assertRaisesRegex(ValueError, "build changed during"):
+                guard.snapshot(self.root, self.prefix, self.database)
 
     def test_each_native_artifact_drift_is_detected_against_staged_install(self):
         for _built, installed in guard.MODULES.items():
@@ -213,57 +250,65 @@ class RuntimeGuardTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "migrations"):
                     self.snapshot()
 
-    def test_running_ingest_fails(self):
-        self.database["running_ingests"] = 1
-        with self.assertRaisesRegex(ValueError, "ingest"):
-            self.snapshot()
+    def test_publication_and_recording_retain_journal_progress_without_a_global_gate(self):
+        for purpose in ("publication", "recording"):
+            with self.subTest(purpose=purpose):
+                self.database["running_ingests"] = 3
+                before = self.snapshot(purpose=purpose)
+                self.assertEqual(3, before["database"]["running_ingests"])
+                for count in (0, 1, 4):
+                    self.database["running_ingests"] = count
+                    after = self.snapshot(purpose=purpose)
+                    self.assertEqual(count, after["database"]["running_ingests"])
+                    self.assertTrue(guard.compatible(before, after, purpose=purpose))
+                    self.assertEqual(3, before["database"]["running_ingests"])
+                    self.assertEqual(count, after["database"]["running_ingests"])
 
-
-    def test_recording_retains_unresolved_journal_without_treating_it_as_a_lock(self):
-        self.database["running_ingests"] = 3
-        before = self.snapshot(purpose="recording")
-        self.assertEqual(3, before["database"]["running_ingests"])
-        self.database["running_ingests"] = 4
-        after = self.snapshot(purpose="recording")
-        self.assertEqual(4, after["database"]["running_ingests"])
-        self.assertTrue(guard.compatible(before, after, purpose="recording"))
-        self.assertFalse(guard.compatible(before, after))
-        self.assertEqual(3, before["database"]["running_ingests"])
-        with self.assertRaisesRegex(ValueError, "ingest"):
-            self.snapshot()
-
-    def test_recording_comparison_preserves_every_other_runtime_field(self):
-        before = self.snapshot(purpose="recording")
+    def test_each_scope_preserves_every_other_runtime_field(self):
         paths = [
-            ("native_fingerprint",), ("artifacts", self.execution_artifact),
+            ("build", "cacheSha256"), ("artifacts", self.execution_artifact),
             ("database", "database"), ("database", "server_version"),
             ("database", "postmaster_started"), ("database", "extension_functions"),
             ("database", "extensions"), ("database", "migrations"),
             ("database", "roms"),
         ]
-        for path in paths:
-            with self.subTest(path=path):
-                after = json.loads(json.dumps(before))
-                target = after
-                for key in path[:-1]:
-                    target = target[key]
-                target[path[-1]] = "changed"
-                self.assertFalse(guard.compatible(before, after, purpose="recording"))
+        for purpose in ("publication", "recording"):
+            before = self.snapshot(purpose=purpose)
+            for path in paths:
+                with self.subTest(purpose=purpose, path=path):
+                    after = json.loads(json.dumps(before))
+                    target = after
+                    for key in path[:-1]:
+                        target = target[key]
+                    target[path[-1]] = "changed"
+                    self.assertFalse(guard.compatible(before, after, purpose=purpose))
+        publication = self.snapshot()
+        recording = self.snapshot(purpose="recording")
         with self.assertRaisesRegex(ValueError, "recording snapshots"):
-            guard.compatible(self.snapshot(), before, purpose="recording")
+            guard.compatible(publication, recording, purpose="recording")
+        self.assertFalse(guard.compatible(recording, recording))
 
-    def test_recording_still_rejects_actual_native_drift_and_invalid_journal_observation(self):
+    def test_each_scope_rejects_native_drift_and_invalid_journal_observation(self):
         self.database["running_ingests"] = 2
         path = self.prefix / self.execution_artifact
         original = path.read_bytes()
-        path.write_bytes(b"changed execution module")
-        with self.assertRaisesRegex(ValueError, "tested installed form"):
-            self.snapshot(purpose="recording")
-        path.write_bytes(original)
-        for invalid in (True, -1, None, "2"):
-            self.database["running_ingests"] = invalid
-            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "journal observation"):
-                self.snapshot(purpose="recording")
+        for purpose in ("publication", "recording"):
+            with self.subTest(purpose=purpose):
+                path.write_bytes(b"changed execution module")
+                with self.assertRaisesRegex(ValueError, "tested installed form"):
+                    self.snapshot(purpose=purpose)
+                path.write_bytes(original)
+                baseline = self.snapshot(purpose=purpose)
+                for invalid in (True, -1, None, "2"):
+                    self.database["running_ingests"] = invalid
+                    with self.subTest(invalid=invalid):
+                        with self.assertRaisesRegex(ValueError, "journal observation"):
+                            self.snapshot(purpose=purpose)
+                        changed = json.loads(json.dumps(baseline))
+                        changed["database"]["running_ingests"] = invalid
+                        with self.assertRaisesRegex(ValueError, "journal observation"):
+                            guard.compatible(baseline, changed, purpose=purpose)
+                self.database["running_ingests"] = 2
         with self.assertRaisesRegex(ValueError, "purpose"):
             self.snapshot(purpose="unknown")
 
