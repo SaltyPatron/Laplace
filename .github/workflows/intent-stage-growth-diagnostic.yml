@@ -54,6 +54,7 @@ jobs:
           static int track_allocations, track_copies;
           static size_t live_bytes, live_peak, allocation_calls;
           static uint64_t copy_calls, copy_bytes, growth_calls, growth_bytes;
+          static uint64_t small_copy_sizes[17];
           
           static void track(void *pointer, size_t size) {
               check(pointer != NULL, "libc allocation failed");
@@ -112,6 +113,7 @@ jobs:
                   copy_bytes += size;
                   /* During entity append every field copy is <=16 bytes. On the pinned
                    * owner, larger copies are the entire previous growth buffer. */
+                  if (size <= 16) ++small_copy_sizes[size];
                   if (size > 16) {
                       ++growth_calls;
                       growth_bytes += size;
@@ -149,9 +151,11 @@ jobs:
           
               live_bytes = live_peak = allocation_calls = 0;
               copy_calls = copy_bytes = growth_calls = growth_bytes = 0;
-              track_allocations = track_copies = 1;
+              for (size_t i = 0; i < 17; ++i) small_copy_sizes[i] = 0;
+              track_allocations = 1;
               intent_stage_t *bounded = intent_stage_new_bounded(0, grant);
               check(bounded != NULL, "bounded public stage creation failed");
+              track_copies = 1;
               for (size_t i = 0; i < rows; ++i) {
                   check(append_entity(bounded, i) == 0, "valid append unexpectedly refused");
                   check(intent_stage_memory_bytes(bounded) == live_bytes, "live allocation accounting differs");
@@ -165,6 +169,13 @@ jobs:
               track_copies = track_allocations = 0;
               check(intent_stage_entity_count(bounded) == rows, "public row count differs");
               check(!intent_stage_allocation_failed(bounded), "successful stage reports failure");
+              printf("{\"copy_observation_rows\":%zu,\"total_calls\":%" PRIu64
+                     ",\"total_bytes\":%" PRIu64 ",\"large_calls\":%" PRIu64
+                     ",\"large_bytes\":%" PRIu64 ",\"small_sizes\":[",
+                     rows, measured_copy_calls, measured_copy_bytes, measured_growth_calls, measured_growth_bytes);
+              for (size_t i = 0; i < 17; ++i)
+                  printf("%s%" PRIu64, i ? "," : "", small_copy_sizes[i]);
+              puts("]}");
               check(measured_copy_calls - measured_growth_calls == 8 * rows, "field-copy call accounting differs");
               check(measured_copy_bytes - measured_growth_bytes == 52 * rows, "field-copy byte accounting differs");
           
