@@ -1,267 +1,336 @@
-name: Observe active Original corpus progress without shared-host work
+name: Read exact Original corpus pilot evidence
+
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
+
 permissions:
   contents: read
+  actions: read
+
 jobs:
-  observe:
-    runs-on: [self-hosted, Linux, X64, laplace-refactor]
-    timeout-minutes: 2
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Read two bounded diagnostic snapshots from the exact active pilot
+      - name: Verify exact artifact and recover retained pilot documents
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=5s 40s python3 - <<'PY'
-          import datetime, hashlib, json, math, os, re, signal, stat, time
-          from pathlib import Path
-          
-          RUN, ATTEMPT = int("35143136205"), int("1")
-          SHA = "baba1ccea538c5f7380692cd7432b94d6f4bf46b"
-          assert RUN > 0 and ATTEMPT > 0 and len(SHA) == 40 and all(c in "0123456789abcdef" for c in SHA)
-          ROOT = Path(f"/build/laplace/work/chess-corpus-evidence/{RUN}-{ATTEMPT}/corpus")
-          STARTED = time.monotonic()
-          
-          def deadline(signum, frame):
-              raise TimeoutError("bounded read-only pilot observation deadline")
-          signal.signal(signal.SIGALRM, deadline)
-          signal.alarm(30)
-          
-          def text(value):
-              return value[:160] if isinstance(value, str) else None
-          
-          def scalar(value):
-              return value if type(value) is int or type(value) is bool or value is None or (
-                  type(value) is float and math.isfinite(value)) else None
-          
-          def projection(data, names):
-              if not isinstance(data, dict):
-                  raise ValueError("expected an object")
-              return {key: text(data[key]) if isinstance(data[key], str) else scalar(data[key])
-                      for key in names if key in data}
-          
-          def metadata(relative):
-              try:
-                  path = ROOT / relative
-                  item = path.lstat()
-                  return {"present": True, "regular": stat.S_ISREG(item.st_mode), "bytes": item.st_size,
-                          "modifiedUtc": datetime.datetime.fromtimestamp(item.st_mtime, datetime.timezone.utc).isoformat()}
-              except OSError as error:
-                  return {"present": False, "errorType": type(error).__name__, "errno": error.errno}
-          
-          def read_json(relative, schema):
-              path = ROOT / relative
-              if path.parent.resolve(strict=True) != path.parent:
-                  raise ValueError("fixed evidence parent resolves through a symlink")
-              fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-              with os.fdopen(fd, "rb") as stream:
-                  before = os.fstat(stream.fileno())
-                  if not stat.S_ISREG(before.st_mode) or before.st_size > 262144:
-                      raise ValueError("evidence is not a bounded regular file")
-                  raw = stream.read(262145)
-                  after = os.fstat(stream.fileno())
-              if len(raw) > 262144 or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-                  raise ValueError("evidence changed or exceeded the observation budget")
-              data = json.loads(raw)
-              if not isinstance(data, dict) or data.get("schema") != schema:
-                  raise ValueError("unexpected evidence schema")
-              return data, {"path": str(path), "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
-          
-          PREVIOUS_PROCESSES = {}
-          
-          def bounded_proc(path, budget):
-              descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-              with os.fdopen(descriptor, "rb") as stream:
-                  if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                      raise ValueError("process evidence is not regular")
-                  raw = stream.read(budget + 1)
-              if len(raw) > budget:
-                  raise ValueError("process evidence exceeded budget")
-              return raw.decode("ascii", errors="strict")
-          
-          def process_stat(pid):
-              raw = bounded_proc(f"/proc/{pid}/stat", 4096)
-              end = raw.rfind(")")
-              if end < 0 or raw.split(" ", 1)[0] != str(pid):
-                  raise ValueError("unexpected process stat identity")
-              fields = raw[end + 2:].split()
-              if len(fields) < 22:
-                  raise ValueError("incomplete process stat")
-              return {"processId": pid, "userTicks": int(fields[11]), "systemTicks": int(fields[12]),
-                      "threads": int(fields[17]), "startTicks": int(fields[19]),
-                      "virtualBytes": int(fields[20]), "residentPages": int(fields[21])}
-          
-          def process_snapshot(sample, source_bound):
-              result = {"observed": False, "scope": "Read-only process counters; no command line or environment."}
-              if not source_bound:
-                  return dict(result, unavailableReason="wrapper_source_unbound")
-              try:
-                  pid = sample.get("processId")
-                  if type(pid) is not int or not 0 < pid < 2147483648:
-                      raise ValueError("invalid progress process identity")
-                  started = sample.get("processStartedAt")
-                  if not isinstance(started, str):
-                      raise ValueError("progress process start time unavailable")
-                  parsed_start = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})", started)
-                  if parsed_start is None:
-                      raise ValueError("progress process start time is not bounded ISO8601")
-                  fraction = ((parsed_start.group(2) or "") + "000000")[:6]
-                  expected = datetime.datetime.strptime(parsed_start.group(1) + "." + fraction + parsed_start.group(3).replace("Z", "+00:00"), "%Y-%m-%dT%H:%M:%S.%f%z")
-                  if expected.tzinfo is None:
-                      raise ValueError("progress process start time has no offset")
-                  tick_hz = os.sysconf("SC_CLK_TCK")
-                  page_bytes = os.sysconf("SC_PAGE_SIZE")
-                  before = process_stat(pid)
-                  boot_lines = bounded_proc("/proc/stat", 262144).splitlines()
-                  boot_values = [int(line.split()[1]) for line in boot_lines if line.startswith("btime ")]
-                  if len(boot_values) != 1 or tick_hz <= 0 or page_bytes <= 0:
-                      raise ValueError("kernel process clock unavailable")
-                  kernel_start = boot_values[0] + before["startTicks"] / tick_hz
-                  difference = abs(expected.timestamp() - kernel_start)
-                  if difference > 2:
-                      raise ValueError("kernel start time differs from recorded process")
-                  optional = {}
-                  try:
-                      status = bounded_proc(f"/proc/{pid}/status", 65536)
-                      wanted = {"VmRSS": "residentKiB", "VmHWM": "peakResidentKiB", "Threads": "threads",
-                                "voluntary_ctxt_switches": "voluntaryContextSwitches",
-                                "nonvoluntary_ctxt_switches": "involuntaryContextSwitches"}
-                      status_metrics = {}
-                      for line in status.splitlines():
-                          key, sep, value = line.partition(":")
-                          if sep and key in wanted:
-                              parts = value.split()
-                              if not parts or not parts[0].isdigit():
-                                  raise ValueError("invalid process status metric")
-                              if key in ("VmRSS", "VmHWM") and parts[1:] != ["kB"]:
-                                  raise ValueError("unexpected process memory unit")
-                              status_metrics[wanted[key]] = int(parts[0])
-                      optional["statusMetrics"] = status_metrics
-                  except (OSError, ValueError, UnicodeError) as error:
-                      optional["statusUnavailableErrorType"] = type(error).__name__
-                  try:
-                      io_text = bounded_proc(f"/proc/{pid}/io", 4096)
-                      wanted = {"read_bytes": "readBytes", "write_bytes": "writeBytes",
-                                "rchar": "readCharacters", "wchar": "writeCharacters",
-                                "syscr": "readSyscalls", "syscw": "writeSyscalls"}
-                      io_metrics = {}
-                      for line in io_text.splitlines():
-                          key, sep, value = line.partition(":")
-                          if sep and key in wanted:
-                              if not value.strip().isdigit():
-                                  raise ValueError("invalid process I/O metric")
-                              io_metrics[wanted[key]] = int(value)
-                      optional["ioMetrics"] = io_metrics
-                  except (OSError, ValueError, UnicodeError) as error:
-                      optional["ioUnavailableErrorType"] = type(error).__name__
-                  after = process_stat(pid)
-                  if (before["processId"], before["startTicks"]) != (after["processId"], after["startTicks"]):
-                      raise ValueError("process identity changed during observation")
-                  return dict(result, observed=True, processId=pid, startTicks=after["startTicks"],
-                              startTimeDifferenceSeconds=difference, startTimeToleranceSeconds=2,
-                              ticksPerSecond=tick_hz, userCpuSeconds=after["userTicks"] / tick_hz,
-                              systemCpuSeconds=after["systemTicks"] / tick_hz,
-                              residentBytes=after["residentPages"] * page_bytes,
-                              virtualBytes=after["virtualBytes"], threads=after["threads"],
-                              sampleMonotonicSeconds=time.monotonic(), **optional)
-              except (OSError, ValueError, TypeError, KeyError, UnicodeError) as error:
-                  return dict(result, unavailableErrorType=type(error).__name__)
-          
-          def process_delta(phase, current):
-              previous = PREVIOUS_PROCESSES.pop(phase, None)
-              if not current.get("observed"):
-                  return
-              PREVIOUS_PROCESSES[phase] = current.copy()
-              if previous is None:
-                  current["deltaUnavailableReason"] = "no_verified_prior_sample"
-                  return
-              if (current["processId"], current["startTicks"]) != (previous["processId"], previous["startTicks"]):
-                  current["deltaUnavailableReason"] = "process_identity_changed"
-                  return
-              elapsed = current["sampleMonotonicSeconds"] - previous["sampleMonotonicSeconds"]
-              user = current["userCpuSeconds"] - previous["userCpuSeconds"]
-              system = current["systemCpuSeconds"] - previous["systemCpuSeconds"]
-              if elapsed <= 0 or user < 0 or system < 0:
-                  current["deltaUnavailableReason"] = "non_monotonic_process_sample"
-                  return
-              current["delta"] = {"sampleSeconds": elapsed, "userCpuSeconds": user, "systemCpuSeconds": system,
-                                  "cpuCoreEquivalents": (user + system) / elapsed}
-              for key in ("readBytes", "writeBytes"):
-                  prior_value = previous.get("ioMetrics", {}).get(key)
-                  current_value = current.get("ioMetrics", {}).get(key)
-                  if type(prior_value) is int and type(current_value) is int and current_value >= prior_value:
-                      current["delta"][key] = current_value - prior_value
-          
-          def observe():
-              result = {"schema": "laplace.chess-pilot-live-observation/v3", "runId": RUN, "attempt": ATTEMPT,
-                        "expectedSourceSha": SHA, "observedUtc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "scope": "Read-only fixed evidence paths; no checkout, host lock, database or process mutation. Diagnostic samples are not a throughput or completed-recording result. Heartbeats do not establish forward admission progress."}
-              bound = False
-              try:
-                  data, identity = read_json("receipt.json", "laplace.installed-native-corpus-measurement/v1")
-                  if data.get("sourceSha") != SHA:
-                      raise ValueError("wrapper source identity is absent or differs from the selected pilot")
-                  bound = True
-                  phases = data.get("phases")
-                  if not isinstance(phases, list) or len(phases) > 64:
-                      raise ValueError("unexpected phase list")
-                  result["wrapper"] = projection(data, ("schema", "status", "mode", "sourceSha", "observedUtc", "finishedUtc",
-                                                        "errorType", "postflightErrorType", "sourcePostflightErrorType",
-                                                        "nativePostflightErrorType"))
-                  result["wrapper"]["errorPresent"] = bool(data.get("error"))
-                  result["wrapper"]["phases"] = [projection(row, ("name", "status", "wallSeconds", "errorType")) for row in phases]
-                  result["wrapperIdentity"] = identity
-              except (OSError, ValueError, TypeError, KeyError) as error:
-                  result["wrapperReadErrorType"] = type(error).__name__
-                  if isinstance(error, OSError):
-                      result["wrapperReadErrno"] = error.errno
-              result["sourceBoundByWrapper"] = bound
-              result["progress"] = {}
-              for phase in ("fresh", "replay-01"):
-                  relative = f"measurement/{phase}/progress.json"
-                  item = {"file": metadata(relative), "sourceBoundByWrapper": bound}
-                  try:
-                      data, identity = read_json(relative, "laplace.chess-recording-progress/v1")
-                      item["identity"] = identity
-                      item["sample"] = projection(data, ("schema", "processId", "processStartedAt", "heartbeatAt",
-                                                          "heartbeatElapsedSeconds"))
-                      checkpoint = data.get("checkpoint")
-                      item["sample"]["checkpoint"] = projection(checkpoint, (
-                          "sequence", "observedElapsedSeconds", "phaseEnteredElapsedSeconds", "phase", "boundary", "admissionStatus"))
-                      counters = checkpoint.get("counters")
-                      item["sample"]["checkpoint"]["counters"] = projection(counters, (
-                          "requestedGames", "parsedGames", "parseAttempts", "parseRejected", "parsedPlies",
-                          "chunksStarted", "chunksSealed", "currentChunkGames", "novelGamesComposed", "novelPliesComposed",
-                          "positionOccurrencesComposed", "repairGamesComposed", "builtChanges", "builtManagedEntityRows",
-                          "builtManagedPhysicalityRows", "builtManagedPhysicalityObservationRows", "builtManagedAttestationRows",
-                          "builtNativeStages", "writerApplyAttempts", "writerCallsAcknowledged", "copyTransactionsAcknowledged",
-                          "gamesEnteredReadback", "exactReadbackGames", "gamesWithSealedChunkEvidence",
-                          "newlyRecordedGamesWithSealedChunkEvidence"))
-                      writer = checkpoint.get("lastWriterBoundary")
-                      if writer is not None:
-                          item["sample"]["checkpoint"]["lastWriterBoundary"] = projection(writer, (
-                              "ownerPhase", "phase", "boundary", "observedElapsedSeconds", "elapsedMilliseconds", "returned"))
-                      item["sample"]["diagnostics"] = projection(data.get("diagnostics"), (
-                          "successfulWrites", "writeFailures", "logFailures", "observationFailures", "heartbeatIntervalSeconds",
-                          "loopCheckpointIntervalSeconds", "lastDiagnosticErrorType"))
-                  except (OSError, ValueError, TypeError, KeyError) as error:
-                      item["readErrorType"] = type(error).__name__
-                      if isinstance(error, OSError):
-                          item["readErrno"] = error.errno
-                  if "sample" in item:
-                      item["processObservation"] = process_snapshot(item["sample"], bound)
-                      process_delta(phase, item["processObservation"])
-                  result["progress"][phase] = item
-              result["fileMetadata"] = {relative: metadata(relative) for relative in (
-                  "native-before.log", "cli-build.log", "cli-native-sync.log", "measurement.log", "native-after.log",
-                  "measurement/selection.jsonl", "measurement/preparation.json", "measurement/corpus-recording.json",
-                  "measurement/fresh/chunks.jsonl", "measurement/replay-01/chunks.jsonl")}
-              result["observerElapsedSeconds"] = time.monotonic() - STARTED
-              print("PILOT_LIVE_CHECKPOINT " + json.dumps(result, sort_keys=True, allow_nan=False), flush=True)
-          
-          observe()
-          time.sleep(10)
-          observe()
-          signal.alarm(0)
+          python3 - <<'PY'
+          import hashlib, json, os, re, shutil, tempfile, urllib.error, urllib.request, zipfile
+          EXPECTED_SHA = "baba1ccea538c5f7380692cd7432b94d6f4bf46b"
+          MEASUREMENT_RUN_ID = 35143136205
+          EXPECTED_CONCLUSION = "failure"
+          ARTIFACT_ID = 10466407079
+          EXPECTED_ZIP_BYTES = 5672
+          EXPECTED_ZIP_SHA256 = "06caa11ae4c9ed229e81b284895ae48db358680acaa2b68a600d94830fe05800"
+          REPOSITORY = "SaltyPatron/Laplace"
+          if not re.fullmatch(r"[0-9a-f]{40}", EXPECTED_SHA) or not re.fullmatch(r"[0-9a-f]{64}", EXPECTED_ZIP_SHA256):
+              raise ValueError("exact observed source and artifact identities must be supplied")
+          if min(MEASUREMENT_RUN_ID, ARTIFACT_ID, EXPECTED_ZIP_BYTES) <= 0:
+              raise ValueError("invalid bounded artifact identity")
+          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2026-03-10"}
+          base = "https://api.github.com/repos/" + REPOSITORY
+          def api(path):
+              with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=30) as response:
+                  raw = response.read(2 * 1024 * 1024 + 1)
+              if len(raw) > 2 * 1024 * 1024:
+                  raise ValueError("API metadata exceeded the bounded envelope")
+              return json.loads(raw)
+          run = api("/actions/runs/" + str(MEASUREMENT_RUN_ID))
+          if (run["head_sha"] != EXPECTED_SHA or run["status"] != "completed" or run["conclusion"] != EXPECTED_CONCLUSION
+                  or run["path"] != ".github/workflows/chess-corpus-evidence.yml"):
+              raise ValueError("measurement run does not match the observed terminal source and result")
+          artifact = api("/actions/artifacts/" + str(ARTIFACT_ID))
+          if (artifact.get("expired") or artifact["workflow_run"]["id"] != MEASUREMENT_RUN_ID
+                  or artifact["workflow_run"]["head_sha"] != EXPECTED_SHA
+                  or artifact["name"] != "laplace-chess-corpus-" + str(MEASUREMENT_RUN_ID) + "-" + str(run["run_attempt"])
+                  or artifact["size_in_bytes"] != EXPECTED_ZIP_BYTES
+                  or artifact.get("digest") != "sha256:" + EXPECTED_ZIP_SHA256):
+              raise ValueError("artifact metadata differs from the observed measurement artifact")
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, response_headers, new_url):
+                  return None
+          try:
+              urllib.request.build_opener(NoRedirect).open(
+                  urllib.request.Request(base + "/actions/artifacts/" + str(ARTIFACT_ID) + "/zip", headers=headers), timeout=30)
+              raise ValueError("artifact download did not supply the expected authenticated redirect")
+          except urllib.error.HTTPError as redirect:
+              if redirect.code != 302:
+                  raise
+              location = redirect.headers["Location"]
+          if not location.startswith("https://"):
+              raise ValueError("artifact download redirect is not HTTPS")
+          # The presigned URL is used without the GitHub bearer header.
+          # Bind all ZIP bytes while streaming to disk; exact scope manifests can
+          # legitimately exceed the size of the selected aggregate documents.
+          if shutil.disk_usage(tempfile.gettempdir()).free < EXPECTED_ZIP_BYTES + 512 * 1024 * 1024:
+              raise ValueError("hosted reader has insufficient disk for the observed exact ZIP")
+          with tempfile.TemporaryFile(prefix="laplace-pilot-artifact-") as zip_handle:
+              zip_digest = hashlib.sha256()
+              zip_bytes = 0
+              with urllib.request.urlopen(location, timeout=60) as response:
+                  while True:
+                      block = response.read(min(1 << 20, EXPECTED_ZIP_BYTES + 1 - zip_bytes))
+                      if not block:
+                          break
+                      zip_bytes += len(block)
+                      if zip_bytes > EXPECTED_ZIP_BYTES:
+                          raise ValueError("artifact download exceeded observed byte count")
+                      zip_digest.update(block)
+                      zip_handle.write(block)
+              if zip_bytes != EXPECTED_ZIP_BYTES or zip_digest.hexdigest() != EXPECTED_ZIP_SHA256:
+                  raise ValueError("downloaded ZIP bytes differ from the observed artifact")
+              print("VERIFIED_PILOT_ARTIFACT " + json.dumps({"run": MEASUREMENT_RUN_ID, "head": EXPECTED_SHA,
+                  "artifact": ARTIFACT_ID, "bytes": zip_bytes, "sha256": EXPECTED_ZIP_SHA256}), flush=True)
+              zip_handle.seek(0)
+              with zipfile.ZipFile(zip_handle) as archive:
+                  entries = archive.infolist()
+                  if len(entries) > 10000:
+                      raise ValueError("pilot archive exceeded its bounded entry count")
+                  print("PILOT_ARCHIVE_SUMMARY " + json.dumps({
+                      "entries": len(entries), "declared_uncompressed_bytes": sum(entry.file_size for entry in entries),
+                      "inventory_entries_reported": min(len(entries), 256), "inventory_truncated": len(entries) > 256,
+                      "scope": "Only the explicitly selected bounded receipt/log/selection documents are decompressed."
+                  }), flush=True)
+                  print("PILOT_ARCHIVE_INVENTORY " + json.dumps([{"path": entry.filename, "bytes": entry.file_size}
+                                                              for entry in entries[:256]]), flush=True)
+                  reader_limits = []
+                  documents = {}
+                  def exact_member(name):
+                      selected = [entry for entry in entries if entry.filename == name]
+                      if len(selected) > 1:
+                          raise ValueError("selected archive member is ambiguous: " + name)
+                      return selected[0] if selected else None
+                  def stream_member(entry, capture_limit=0, log_edges=0):
+                      digest = hashlib.sha256()
+                      total = 0
+                      body = bytearray()
+                      first = bytearray()
+                      last = bytearray()
+                      with archive.open(entry) as handle:
+                          while True:
+                              block = handle.read(1 << 20)
+                              if not block:
+                                  break
+                              total += len(block)
+                              if total > entry.file_size:
+                                  raise ValueError("member exceeds its declared byte count")
+                              digest.update(block)
+                              if capture_limit and entry.file_size <= capture_limit:
+                                  body.extend(block)
+                              if log_edges:
+                                  if len(first) < log_edges:
+                                      first.extend(block[:log_edges - len(first)])
+                                  last = (last + block)[-log_edges:]
+                      if total != entry.file_size:
+                          raise ValueError("member byte count differs from ZIP metadata")
+                      return {"bytes": total, "sha256": digest.hexdigest()}, bytes(body), bytes(first), bytes(last)
+                  for suffix in (
+                      "corpus/receipt.json", "corpus/source-file.json", "corpus/measurement.log",
+                      "corpus/native-before.log", "corpus/native-after.log",
+                      "corpus/native-before.json", "corpus/native-after.json",
+                      "corpus/cli-before.json", "corpus/cli-after.json",
+                      "corpus/measurement/corpus-recording.json", "corpus/measurement/preparation.json",
+                      "corpus/measurement/preparation-partial.json",
+                      "corpus/measurement/fresh/recording.json", "corpus/measurement/replay-01/recording.json",
+                      "corpus/measurement/fresh/progress.json", "corpus/measurement/replay-01/progress.json",
+                  ):
+                      entry = exact_member(suffix)
+                      if entry is None:
+                          print("PILOT_RETAINED_DOCUMENT " + json.dumps({"path": suffix, "present": False}), flush=True)
+                          continue
+                      identity, raw_body, head, tail = stream_member(entry, capture_limit=2 * 1024 * 1024,
+                                                                    log_edges=65536 if suffix.endswith(".log") else 0)
+                      result = {"path": suffix, "present": True, **identity}
+                      if entry.file_size <= 2 * 1024 * 1024:
+                          body = raw_body.decode("utf-8")
+                          if suffix.endswith(".json"):
+                              body = json.loads(body)
+                              documents[suffix] = body
+                          result.update({"reader_status": "read", "body": body})
+                      elif suffix.endswith(".log"):
+                          result.update({"reader_status": "bounded_head_tail", "truncated": True,
+                              "omitted_bytes": max(0, entry.file_size - len(head) - len(tail)),
+                              "head": head.decode("utf-8", errors="replace"), "tail": tail.decode("utf-8", errors="replace")})
+                      else:
+                          reader_limits.append(suffix)
+                          result.update({"reader_status": "reader_budget_exceeded", "document_budget_bytes": 2 * 1024 * 1024,
+                              "scope": "Archive/member bytes verified; this reader did not parse the oversized document. Benchmark status is unchanged."})
+                      print("PILOT_RETAINED_DOCUMENT " + json.dumps(result, allow_nan=False), flush=True)
+                  def count_field(value, name):
+                      if type(value) is not int or value < 0:
+                          raise ValueError("invalid nonnegative retained counter: " + name)
+                      return value
+                  def verify_jsonl(phase_name, phase, kind):
+                      evidence = phase.get("corpusEvidence") or {}
+                      evidence_completed = evidence.get("completed") is True
+                      seal = evidence.get("chunkManifest") if kind == "chunks" else evidence.get("exactScopeState")
+                      identity = seal if kind == "chunks" else (seal.get("file") if isinstance(seal, dict) else None)
+                      member = "corpus/measurement/" + phase_name + ("/chunks.jsonl" if kind == "chunks" else "/scope-fold/state.jsonl")
+                      if not isinstance(identity, dict):
+                          return {"path": member, "status": "unavailable_unsealed", "kind": kind,
+                                  "evidence_completed": evidence_completed, "phase_status": phase.get("status")}
+                      entry = exact_member(member)
+                      if entry is None:
+                          raise ValueError("sealed retained member is absent: " + member)
+                      expected_bytes = count_field(identity.get("bytes"), "sealed bytes")
+                      expected_hash = identity.get("sha256")
+                      if not isinstance(expected_hash, str) or re.fullmatch("[0-9a-f]{64}", expected_hash) is None:
+                          raise ValueError("sealed member has invalid SHA256: " + member)
+                      digest = hashlib.sha256()
+                      total = rows = games = novel = plies = 0
+                      with archive.open(entry) as handle:
+                          while True:
+                              line = handle.readline(1 << 20)
+                              if not line:
+                                  break
+                              if len(line) == 1 << 20 and not line.endswith(b"\n"):
+                                  reader_limits.append(member)
+                                  return {"path": member, "status": "reader_budget_exceeded", "line_budget_bytes": 1 << 20}
+                              total += len(line)
+                              digest.update(line)
+                              rows += 1
+                              if kind == "chunks":
+                                  row = json.loads(line)
+                                  if count_field(row.get("index"), "chunk index") != rows or count_field(row.get("firstSelectedGame"), "first selected game") != games:
+                                      raise ValueError("retained chunk ordering differs: " + member)
+                                  chunk_games = count_field(row.get("games"), "chunk games")
+                                  chunk_novel = count_field(row.get("novelGames"), "chunk novelGames")
+                                  if chunk_games == 0 or chunk_novel > chunk_games:
+                                      raise ValueError("invalid retained chunk game count")
+                                  games += chunk_games
+                                  novel += chunk_novel
+                                  plies += count_field(row.get("plies"), "chunk plies")
+                      if total != expected_bytes or total != entry.file_size or digest.hexdigest() != expected_hash:
+                          raise ValueError("sealed retained member identity differs: " + member)
+                      result = {"path": member, "status": "stream_verified", "kind": kind, "bytes": total,
+                                "sha256": digest.hexdigest(), "rows": rows,
+                                "complete_body_and_scope_semantic_revalidation": False,
+                                "evidence_completed": evidence_completed, "phase_status": phase.get("status"),
+                                "identity_scope": "completed_evidence_seal" if evidence_completed else "partial_phase_identity"}
+                      if kind == "chunks":
+                          if (rows != count_field(evidence.get("chunks"), "completed chunks")
+                                  or games != count_field(evidence.get("readbackGames"), "chunk readback games")
+                                  or novel != count_field(evidence.get("newlyRecordedGames"), "chunk novel games")):
+                              raise ValueError("retained chunk sums differ from phase evidence")
+                          if evidence.get("completed") is True and plies != count_field(phase.get("readbackPlies"), "phase plies"):
+                              raise ValueError("retained complete chunk plies differ")
+                          result.update({"games": games, "novelGames": novel, "plies": plies})
+                      elif rows != count_field(seal.get("rows"), "state rows"):
+                          raise ValueError("retained scope state row count differs")
+                      return result
+                  for phase_name in ("fresh", "replay-01"):
+                      phase = documents.get("corpus/measurement/" + phase_name + "/recording.json")
+                      if phase is not None:
+                          for kind in ("chunks", "state"):
+                              print("PILOT_RETAINED_MANIFEST " + json.dumps(verify_jsonl(phase_name, phase, kind)), flush=True)
+                      else:
+                          member = "corpus/measurement/" + phase_name + "/chunks.jsonl"
+                          entry = exact_member(member)
+                          if entry is not None:
+                              identity, _, _, _ = stream_member(entry)
+                              print("PILOT_UNSEALED_CHUNK_MANIFEST " + json.dumps({
+                                  "path": member, **identity, "evidence_completed": False,
+                                  "observed_complete_chunk_records": 0 if identity["bytes"] == 0 else None,
+                                  "scope": "Exact retained unsealed member bytes; no aggregate, commit-count or throughput claim."
+                              }), flush=True)
+                  receipt = documents.get("corpus/measurement/corpus-recording.json")
+                  preparation = documents.get("corpus/measurement/preparation.json")
+                  if receipt is not None or preparation is not None:
+                      source = (receipt.get("source") or {}) if receipt is not None else preparation
+                      selection_identity_scope = "aggregate-receipt" if receipt is not None else "preparation-only"
+                      measurement_status = receipt.get("status") if receipt is not None else "aggregate-unavailable"
+                      manifest = source.get("selectionManifest")
+                      selection_member = "corpus/measurement/selection.jsonl"
+                      if manifest is not None:
+                          selected_entry = exact_member(selection_member)
+                          if selected_entry is None:
+                              raise ValueError("declared selection manifest is absent")
+                          expected_selection_bytes = count_field(manifest.get("bytes"), "selection bytes")
+                          expected_selection_hash = manifest.get("sha256")
+                          if not isinstance(expected_selection_hash, str) or re.fullmatch("[0-9a-f]{64}", expected_selection_hash) is None:
+                              raise ValueError("selection manifest has an invalid SHA256")
+                          # Bind all selection bytes without retaining the document in RAM.
+                          # A separate bounded line reader can then report partial diagnostics.
+                          selected_identity, _, _, _ = stream_member(selected_entry)
+                          if (selected_identity["bytes"] != expected_selection_bytes
+                                  or selected_identity["sha256"] != expected_selection_hash):
+                              raise ValueError("selection bytes differ from the corpus receipt")
+                          requested = count_field((receipt.get("options") or {}).get("games"), "requested games") if receipt is not None else 2000
+                          records = standard_white_records = omitted_start_records = 0
+                          first_ordinal = last_ordinal = None
+                          starts = {}
+                          selection_read_complete = True
+                          with archive.open(selected_entry) as handle:
+                              while True:
+                                  line = handle.readline(1 << 20)
+                                  if not line:
+                                      break
+                                  if len(line) == 1 << 20 and not line.endswith(b"\n"):
+                                      reader_limits.append(selection_member)
+                                      selection_read_complete = False
+                                      break
+                                  if not line.rstrip(b"\r\n"):
+                                      continue
+                                  record = json.loads(line)
+                                  ordinal = count_field(record.get("sourceOrdinal"), "source ordinal")
+                                  if ordinal == 0 or (last_ordinal is not None and ordinal <= last_ordinal):
+                                      raise ValueError("selection source ordinals are not strictly increasing")
+                                  start_id = record.get("startPositionId")
+                                  if not isinstance(start_id, str) or re.fullmatch("[0-9a-f]{32}", start_id) is None:
+                                      raise ValueError("selection has an invalid canonical start identity")
+                                  records += 1
+                                  if first_ordinal is None:
+                                      first_ordinal = ordinal
+                                  last_ordinal = ordinal
+                                  standard_white_records += start_id == "6e209f78d66f64f1405d9184f65065bb"
+                                  if start_id in starts or len(starts) < 256:
+                                      starts[start_id] = starts.get(start_id, 0) + 1
+                                  else:
+                                      omitted_start_records += 1
+                          cohort_complete = selection_read_complete and requested == 2000 and records == 2000
+                          selection_status = ("reader_budget_exceeded" if not selection_read_complete
+                              else "complete_intended_cohort" if cohort_complete
+                              else "partial_selection" if records < requested
+                              else "different_selection_count")
+                          print("PILOT_SELECTION_START_OBSERVATION " + json.dumps({
+                              "measurement_status": measurement_status, "selection_identity_scope": selection_identity_scope, "selection_status": selection_status,
+                              "reader_status": "read" if selection_read_complete else "reader_budget_exceeded",
+                              "line_budget_bytes": 1 << 20, "selection_read_complete": selection_read_complete,
+                              "records": records, "requested_games": requested,
+                              "intended_2000_game_cohort_certified": cohort_complete,
+                              "selection_bytes": selected_identity["bytes"], "selection_sha256": selected_identity["sha256"],
+                              "selection_identity_verified": True,
+                              "start_position_counts": starts,
+                              "start_position_counts_truncated": omitted_start_records > 0,
+                              "start_position_counts_omitted_records": omitted_start_records,
+                              "standard_white_records": standard_white_records,
+                              "all_selected_standard_white": (standard_white_records == records) if cohort_complete else None,
+                              "standard_white_identity_evidence": {
+                                  "run": 35091710818, "job": 104779326909,
+                                  "source_sha256": "9eafc83ed9a97f9dcfc82135448d45653d325a742e497e8d08c3085a6a48b0ea",
+                                  "first_frame_sha256": "474bc75575390aa71474bd618e8b26beeffac1f3f78a96bcf9695039b23c24ac",
+                                  "retained_manifest_reader_run": 35090617570
+                              },
+                              "first_source_ordinal": first_ordinal, "last_source_ordinal": last_ordinal,
+                              "scope": "Streamed exact selection identities; bounded displayed start inventory. Only a complete 2000-game selection certifies the intended cohort. Partial selection or reader limits do not change workload status. Different start IDs remain unclassified; this does not prove outcome recording."
+                          }, sort_keys=True, allow_nan=False), flush=True)
+                      else:
+                          print("PILOT_SELECTION_START_OBSERVATION " + json.dumps({
+                              "measurement_status": measurement_status, "selection_identity_scope": selection_identity_scope, "available": False,
+                              "reason": "Measurement receipt has no completed selection manifest."
+                          }), flush=True)
+                  print("PILOT_READER_COMPLETION " + json.dumps({
+                      "status": "partial_reader_budget" if reader_limits else "selected_evidence_read",
+                      "reader_budget_exceeded": reader_limits,
+                      "zip_integrity_verified": True, "full_body_and_scope_semantic_revalidation": False,
+                      "aggregate_receipt_read": "corpus/measurement/corpus-recording.json" in documents,
+                      "retained_phase_receipts_read": [name for name in ("fresh", "replay-01") if "corpus/measurement/" + name + "/recording.json" in documents],
+                      "scope": "Reader verification is independent of the reported workload outcome."
+                  }), flush=True)
           PY
