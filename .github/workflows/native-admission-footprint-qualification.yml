@@ -1,4 +1,4 @@
-name: Qualify repaired fresh extension native operator
+name: Qualify current lifecycle runtime and native operator
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -29,7 +29,7 @@ jobs:
           python3 - <<'PY' 2>&1 | tee "$EVIDENCE/operator-syntax.log"
           import ast, base64, hashlib, json, os, re, subprocess, textwrap, urllib.request, yaml
           from pathlib import Path
-          sha = "75e5e07a49120c0922dce5786fb6d0d8e1eb770e"
+          sha = "76a9fd627495a9de2032d5b3a74ad1467e568f8d"
           request = urllib.request.Request(
               "https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/" + sha,
               headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
@@ -92,3 +92,61 @@ jobs:
           path: /build/laplace/work/final-operator-syntax/evidence/
           if-no-files-found: error
           retention-days: 30
+
+  runtime_export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Prepare selected source and permanent evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="/build/laplace/work/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          evidence="/build/laplace/recovery/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work" "$evidence"
+          mkdir -p "$work/tmp" "$work/source"
+          echo "QUALIFY_WORK=$work" >> "$GITHUB_ENV"
+          echo "QUALIFY_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "TMPDIR=$work/tmp" >> "$GITHUB_ENV"
+          echo "TMP=$work/tmp" >> "$GITHUB_ENV"
+          echo "TEMP=$work/tmp" >> "$GITHUB_ENV"
+          cd "$work/source"
+          git init -q
+          git remote add origin https://github.com/SaltyPatron/Laplace.git
+          timeout 120s git fetch --no-tags --depth=1 origin 777549b20e91e1f087929a7875fe8edc444904c3
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 777549b20e91e1f087929a7875fe8edc444904c3
+          test "$(git rev-parse HEAD^{tree})" = ca0d1c090441c47b4daf64710c4ae827ad175738
+          git rev-parse HEAD HEAD^{tree} > "$evidence/source.txt"
+      - name: Execute affected export controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$QUALIFY_WORK/source"
+          python3 -B - <<'PY'
+          import ast, json, os, pathlib, subprocess
+          evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
+          for name in ("scripts/export-qualified-chess-floors.py","scripts/test-qualified-chess-floor-export.py"):
+              ast.parse(pathlib.Path(name).read_text(), filename=name)
+          (evidence/"ast.txt").write_text("PASS: current exporter and changed test Python sources\n")
+          command=["python3","-B","scripts/test-qualified-chess-floor-export.py","-v"]
+          with (evidence/"export-controls.log").open("w") as stream:
+              result=subprocess.run(["timeout","--kill-after=10s","180s",*command],stdout=stream,stderr=subprocess.STDOUT)
+          (evidence/"results.json").write_text(json.dumps({"command":command,"exit_code":result.returncode},indent=2)+"\n")
+          print((evidence/"export-controls.log").read_text(),flush=True)
+          if result.returncode:
+              raise SystemExit(result.returncode)
+          dirty=subprocess.check_output(["git","status","--porcelain","--untracked-files=all"],text=True)
+          (evidence/"source-clean.txt").write_text(dirty or "PASS: clean source checkout\n")
+          if dirty:
+              raise SystemExit("qualification modified source checkout")
+          PY
+      - name: Retain affected control evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: current-floor-export-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.QUALIFY_EVIDENCE }}
+          if-no-files-found: error
