@@ -152,14 +152,27 @@ public sealed class ChessPositionPlayingObservationTests
     private static void AssertChangesEqual(SubstrateChange expected, SubstrateChange actual)
     {
         Assert.Equal(expected.Metadata with { BuiltAt = default }, actual.Metadata with { BuiltAt = default });
-        Assert.Equal(expected.Entities, actual.Entities);
+        // ImmutableArray<T>.Equals compares its backing array identity. Require
+        // every ordered record value, with a specific index on a real mismatch.
+        Assert.Equal(expected.Entities.Length, actual.Entities.Length);
+        for (int i = 0; i < expected.Entities.Length; i++)
+            Assert.True(expected.Entities[i] == actual.Entities[i],
+                $"Entity index {i}: expected {expected.Entities[i]}, actual {actual.Entities[i]}");
         Assert.Equal(expected.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }),
             actual.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }));
         Assert.Equal(expected.PhysicalitySourcePriors.OrderBy(row => row.Key.ToString()),
             actual.PhysicalitySourcePriors.OrderBy(row => row.Key.ToString()));
         AssertPhysicalitiesEqual(expected.Physicalities, actual.Physicalities);
         AssertPhysicalitiesEqual(expected.PhysicalityObservations, actual.PhysicalityObservations);
-        Assert.Equal(expected.CanonicalNames, actual.CanonicalNames);
+        Assert.Equal(expected.CanonicalNames.IsDefault, actual.CanonicalNames.IsDefault);
+        if (!expected.CanonicalNames.IsDefault)
+        {
+            Assert.Equal(expected.CanonicalNames.Length, actual.CanonicalNames.Length);
+            for (int i = 0; i < expected.CanonicalNames.Length; i++)
+                Assert.True(string.Equals(expected.CanonicalNames[i], actual.CanonicalNames[i],
+                    StringComparison.Ordinal),
+                    $"Canonical name index {i}: expected '{expected.CanonicalNames[i]}', actual '{actual.CanonicalNames[i]}'");
+        }
     }
 
     private static void AssertPhysicalitiesEqual(
