@@ -35,10 +35,12 @@ main() {
         return 1
       }
       managed preflight
+      managed begin
       trap 'rc=$?; trap - EXIT; recover || rc=1; exit "$rc"' EXIT INT TERM HUP
       bash "$ROOT/scripts/pipeline.sh" publish
-      sudo -n systemctl restart laplace-api
+      managed reconcile
       managed activate
+      sudo -n systemctl restart laplace-api
       for _ in $(seq 1 60); do
         if curl -fsS http://127.0.0.1:5187/health/ready | grep -q '"ready":true'; then
           managed commit
@@ -180,8 +182,8 @@ application_api_main() (
   cp "$backup/next.json" "$ROOT/build/.api-publish-payload.json"
   cp "$backup/verified.json" "$ROOT/build/.api-publish-verified.json"
   cp "$backup/runtime-before.json" "$ROOT/build/.api-publish-native.json"
-  # This commits only the verified API scope. The normal full application
-  # fingerprint and managed-service transaction stamps remain untouched.
+  # This commits only the verified API scope. The full managed-service
+  # transaction owner remains unchanged.
   rm "$ROOT/build/.api-publish-backup"
   rm "$ROOT/build/.application-publish-owner"
   attempted=0

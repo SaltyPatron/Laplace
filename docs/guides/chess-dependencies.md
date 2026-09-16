@@ -370,8 +370,10 @@ Ordinary main pushes do not select this work.
 
 The acceptance receipt records the requested and executed revision, fixed profile,
 individual phase status and duration, and every retained artifact's SHA-256.
-The installed-form native guard verifies the source fingerprints, tested CMake
-install bytes, installed extension SQL, migrations and all required chess ROMs.
+The build/install owner records the selected source and executed build. The
+installed-form native guard compares the configured CMake install bytes, installed
+extension SQL, migrations and all required chess ROMs; it does not depend on
+removed fingerprint stamps.
 Fresh managed publications must match the current API, UCI, MCP and Lichess DLL
 and runtime configuration bytes. A mismatched runtime blocks corpus admission
 and game recording; it is never attributed to the requested revision.

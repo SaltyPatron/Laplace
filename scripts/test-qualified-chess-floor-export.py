@@ -212,19 +212,25 @@ class RetainedBuildTests(unittest.TestCase):
         self.checkout.mkdir()
         self.build_root = self.root / "build"
         self.build = self.build_root / ("laplace-" + hashlib.sha256(os.fsencode(self.checkout)).hexdigest()[:16])
-        (self.build / ".stamps").mkdir(parents=True)
+        self.build.mkdir(parents=True)
+        self.prefix = self.root / "installed-fixture"
+        self.prefix.mkdir()
+        (self.checkout / "scripts").mkdir()
+        (self.checkout / "scripts/check-application-runtime.py").write_bytes(
+            (ROOT / "scripts/check-application-runtime.py").read_bytes())
         (self.checkout / "build").symlink_to(self.build, target_is_directory=True)
         (self.build / "CMakeCache.txt").write_text(
             "CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.checkout) + "\n"
-            "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build) + "\n")
-        for name in ("build-native", "install-native"):
-            (self.build / ".stamps" / name).write_text("a" * 64 + "\n")
+            "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build) + "\n"
+            "CMAKE_INSTALL_PREFIX:PATH=" + str(self.prefix) + "\n")
+        (self.build / "cmake_install.cmake").write_text("# prepared install program fixture\n")
         self.plan = {"proof_run_id": 123, "proof_run_attempt": 1,
                      "candidate_commit": "1" * 40, "candidate_tree": "2" * 40,
                      "installed_source": "1" * 40}
-        patcher = mock.patch.object(driver, "BUILD_ROOT", self.build_root)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, value in (("BUILD_ROOT", self.build_root), ("NATIVE_PREFIX", self.prefix)):
+            patcher = mock.patch.object(driver, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def qualify(self):
         return driver.retained_build(self.checkout)
@@ -256,7 +262,7 @@ class RetainedBuildTests(unittest.TestCase):
         # The operator is another commit in this SAME repository; execution must
         # materialize its two files without checking it out over the candidate.
         operator_driver = self.checkout / "scripts/export-qualified-chess-floors.py"
-        operator_driver.parent.mkdir()
+        operator_driver.parent.mkdir(exist_ok=True)
         driver_bytes = Path(driver.__file__).read_bytes()
         operator_driver.write_bytes(driver_bytes)
         operator_selection = self.checkout / ".github/chess-floor-export-selection.json"
@@ -346,9 +352,10 @@ class RetainedBuildTests(unittest.TestCase):
         # A leftover historical directory must not replace the actual placed build.
         (legacy / "CMakeCache.txt").write_text("obsolete unrelated build\n")
         link_before = os.readlink(self.checkout / "build")
-        build, fingerprint = self.qualify()
+        build, identity = self.qualify()
         self.assertEqual(self.build, build)
-        self.assertEqual("a" * 64, fingerprint)
+        self.assertEqual(str(self.build), identity["directory"])
+        self.assertEqual(str(self.checkout), identity["sourceDirectory"])
         self.assertEqual(link_before, os.readlink(self.checkout / "build"))
         self.assertEqual("obsolete unrelated build\n", (legacy / "CMakeCache.txt").read_text())
 
@@ -370,25 +377,28 @@ class RetainedBuildTests(unittest.TestCase):
         other.mkdir()
         cache.write_text(original.replace("CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build),
                                           "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(other)))
-        with self.assertRaisesRegex(ValueError, "another build directory"):
+        with self.assertRaisesRegex(ValueError, "CMAKE_CACHEFILE_DIR"):
             self.qualify()
         cache.write_text(original.replace("CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build),
                                           "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.checkout / "build")))
         self.assertEqual(self.build, self.qualify()[0])
 
-    def test_retained_build_requires_selected_checkout_and_matching_install_stamp(self):
-        self.qualify()
+    def test_retained_build_requires_exact_configuration_and_install_program(self):
+        _, initial = self.qualify()
         cache = self.build / "CMakeCache.txt"
         original = cache.read_text()
-        cache.write_text("CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.root / "other") + "\n")
-        with self.assertRaisesRegex(ValueError, "another checkout"):
+        other = self.root / "other"
+        other.mkdir()
+        cache.write_text(original.replace(str(self.checkout), str(other)))
+        with self.assertRaisesRegex(ValueError, "CMAKE_HOME_DIRECTORY"):
             self.qualify()
         cache.write_text(original)
-        stamp = self.build / ".stamps/install-native"
-        stamp.write_text("b" * 64 + "\n")
-        with self.assertRaisesRegex(ValueError, "stamps"):
+        program = self.build / "cmake_install.cmake"
+        program.write_text(program.read_text() + "# changed install instruction\n")
+        self.assertNotEqual(initial, self.qualify()[1])
+        program.unlink()
+        with self.assertRaisesRegex(ValueError, "install program missing"):
             self.qualify()
-        stamp.write_text("a" * 64 + "\n")
 
 
 class NativeQualificationTests(unittest.TestCase):
@@ -422,7 +432,8 @@ class NativeQualificationTests(unittest.TestCase):
         self.state = {**common, "status": "completed", "completedPhases": list(driver.NATIVE_PHASES),
                       "identities": self.identities, "serverVersionNum": 180006,
                       "executionRoute": "direct-installed-regression",
-                      "regressionDatabaseStem": "laplace_pr_123_1"}
+                      "regressionDatabaseStem": "laplace_pr_123_1",
+                      "buildIdentity": self.layout.qualify()[1]}
         self.selection = {**common, "status": "running", "operatorSource": self.plan["proof_operator_commit"],
                           "uid": os.getuid(), "postgresqlSelection": driver.load(
                               ROOT / "deploy/postgresql-release.json")}
@@ -499,7 +510,7 @@ class NativeQualificationTests(unittest.TestCase):
                 self.assertEqual("direct-installed-regression", receipt["execution_route"])
                 self.assertEqual("laplace_pr_123_1", receipt["regression_database_stem"])
                 self.assertEqual(self.identities, receipt["installed_identities"])
-                self.assertEqual("a" * 64, receipt["native_fingerprint"])
+                self.assertEqual(self.state["buildIdentity"], receipt["build_identity"])
                 self.assertNotIn("session_receipt", receipt)
                 self.assertIn("current", receipt["checkout_build_observation"])
                 self.assertEqual(4, len(receipt["evidence_receipts"]))
@@ -534,6 +545,7 @@ class NativeQualificationTests(unittest.TestCase):
                     {"managedPublication": "completed"}, {"fullLifecyclePassed": True},
                     {"databaseRecreation": True}, {"foundationIngestion": True},
                     {"executionRoute": None}, {"executionRoute": "private-postmaster"},
+                    {"buildIdentity": None}, {"buildIdentity": {}},
                     {"regressionDatabaseStem": "laplace"},
                     {"regressionDatabaseStem": "laplace_pr_124_1"},
                     {"completedPhases": driver.NATIVE_PHASES[:6] + ["isolated-native-database"]
@@ -568,7 +580,7 @@ class NativeQualificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "file identity changed"):
             self.qualify()
 
-    def test_native_current_checkout_build_and_fingerprint_are_not_inferred(self):
+    def test_native_current_checkout_and_recorded_build_are_not_inferred(self):
         for key, value in ((("rev-parse", "HEAD"), "6" * 40),
                            (("rev-parse", "HEAD^{tree}"), "6" * 40),
                            (("status", "--porcelain", "--untracked-files=no"), " M real-source")):
@@ -577,10 +589,12 @@ class NativeQualificationTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "current checkout"):
                 self.qualify()
             self.git_values[key] = original
-        (self.build / ".stamps/install-native").write_text("b" * 64)
-        with self.assertRaisesRegex(ValueError, "stamps"):
+        program = self.build / "cmake_install.cmake"
+        original = program.read_bytes()
+        program.write_bytes(original + b"# mutated prepared program\n")
+        with self.assertRaisesRegex(ValueError, "recorded build identity"):
             self.qualify()
-        (self.build / ".stamps/install-native").write_text("a" * 64)
+        program.write_bytes(original)
         (self.checkout / "build").unlink()
         with self.assertRaisesRegex(ValueError, "build link"):
             self.qualify()
@@ -596,11 +610,10 @@ class NativeQualificationTests(unittest.TestCase):
             driver.verify_qualification_receipts(receipt)
 
     def baseline(self):
-        return {"format": 1, "purpose": "recording", "native_fingerprint": "a" * 64,
+        return {"format": 2, "purpose": "recording", "build": copy.deepcopy(self.state["buildIdentity"]),
                 "database": {"server_version": "180006", "running_ingests": 2,
                              "system_identifier": "fixture-database", "extensions": {"real-owner": "1"}},
-                "artifacts": {"lib/liblaplace_core.so": {"sha256": "b" * 64}},
-                "stamps": {"build-native": "a" * 64, "install-native": "a" * 64}}
+                "artifacts": {"lib/liblaplace_core.so": {"sha256": "b" * 64}}}
 
     def runtime_guard(self, observed):
         guard = mock.Mock()
@@ -636,8 +649,7 @@ class NativeQualificationTests(unittest.TestCase):
                 self.assertIs(observed, driver.installed_state(
                     guard, self.prefix, self.prefix / "pgsql-18", baseline, receipt))
                 guard.snapshot.assert_called_once_with(
-                    self.checkout, self.prefix, observed["database"], "a" * 64,
-                    purpose="recording")
+                    self.checkout, self.prefix, observed["database"], purpose="recording")
                 driver.recording_compatible(guard, baseline, observed)
                 self.assertEqual(original, baseline)
                 if count != 2:
@@ -651,12 +663,12 @@ class NativeQualificationTests(unittest.TestCase):
                 ("database", "system_identifier", "other"),
                 ("database", "extensions", {"real-owner": "2"}),
                 ("artifacts", "lib/liblaplace_core.so", {"sha256": "c" * 64}),
-                ("stamps", "install-native", "c" * 64)):
+                ("build", "installProgramSha256", "c" * 64)):
             changed = copy.deepcopy(baseline)
             changed[section][key] = value
             changed["database"]["running_ingests"] = 0
             variants.append(changed)
-        variants += [{**baseline, "native_fingerprint": "c" * 64},
+        variants += [{**baseline, "build": {}},
                      {**baseline, "purpose": "publication"},
                      {key: value for key, value in baseline.items() if key != "purpose"}]
         for count in (-1, True, "2"):
@@ -668,8 +680,7 @@ class NativeQualificationTests(unittest.TestCase):
                 driver.recording_compatible(guard, baseline, value)
 
     def test_recorded_native_placement_is_bound_when_present(self):
-        placement = {"checkout": str(self.checkout), "buildDirectory": str(self.build),
-                     "buildNativeStamp": "a" * 64, "installNativeStamp": "a" * 64}
+        placement = {"checkout": str(self.checkout), "buildDirectory": str(self.build)}
         self.state.update(placement)
         self.selection["checkout"] = str(self.checkout)
         self.seal()
@@ -677,7 +688,7 @@ class NativeQualificationTests(unittest.TestCase):
         self.assertEqual(placement, receipt["recorded_placement"])
         for key in placement:
             original = self.state[key]
-            self.state[key] = str(self.root / "other") if key.endswith("Directory") or key == "checkout" else "b" * 64
+            self.state[key] = str(self.root / "other")
             self.seal()
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "placement"):
                 self.qualify()

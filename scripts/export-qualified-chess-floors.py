@@ -249,9 +249,10 @@ def native_qualification(plan, root):
         raise ValueError("native installation retained workflow outcome differs")
     # Observe the existing checkout; never create a worktree or move its HEAD.
     checkout = candidate_checkout(plan)
-    build, fingerprint = retained_build(checkout)
-    placement = {"checkout": str(checkout), "buildDirectory": str(build),
-                 "buildNativeStamp": fingerprint, "installNativeStamp": fingerprint}
+    build, build_identity = retained_build(checkout)
+    if state.get("buildIdentity") != build_identity:
+        raise ValueError("native installation recorded build identity differs")
+    placement = {"checkout": str(checkout), "buildDirectory": str(build)}
     for key, expected in placement.items():
         if key in state and state[key] != expected:
             raise ValueError("native installation retained placement differs: " + key)
@@ -270,8 +271,8 @@ def native_qualification(plan, root):
         "regression_database_stem": regression_stem,
         "phases": [{"phase": phase, "exit_code": 0} for phase in phases],
         "native_build": str(build), "lifecycle_checkout": str(checkout),
-        "native_fingerprint": fingerprint,
-        "checkout_build_observation": "current source/cache/stamps verification; historical placement fields checked when recorded",
+        "build_identity": build_identity,
+        "checkout_build_observation": "current configured build and install program match the authenticated installation receipt",
         "recorded_placement": {key: state[key] for key in placement if key in state},
         "server_version_num": state["serverVersionNum"], "installed_identities": state["identities"],
         "evidence_receipts": list(receipts.values()),
@@ -304,19 +305,11 @@ def retained_build(checkout):
     build = build_link.resolve(strict=True)
     if not build.is_dir() or build.parent != BUILD_ROOT.resolve(strict=True):
         raise ValueError("retained native build is outside the canonical build root")
-    cache = (build / "CMakeCache.txt").read_text()
-    match = re.search(r"^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$", cache, re.MULTILINE)
-    if not match or Path(match.group(1)) != checkout:
-        raise ValueError("retained native build belongs to another checkout")
-    directory = re.search(r"^CMAKE_CACHEFILE_DIR:INTERNAL=(.*)$", cache, re.MULTILINE)
-    if not directory or Path(directory.group(1)).resolve(strict=True) != build:
-        raise ValueError("retained CMake cache belongs to another build directory")
-    stamps = {name: (build / ".stamps" / name).read_text().strip()
-              for name in ("build-native", "install-native")}
-    if (any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in stamps.values())
-            or len(set(stamps.values())) != 1):
-        raise ValueError("qualified native build/install stamps are absent or disagree")
-    return build, stamps["build-native"]
+    guard = module(checkout, "export_retained_build_guard", "check-application-runtime.py")
+    identity = guard.build_identity(checkout, NATIVE_PREFIX)
+    if identity["directory"] != str(build):
+        raise ValueError("retained native build differs from the configured build")
+    return build, identity
 
 
 def qualification(plan, root):
@@ -335,19 +328,19 @@ def recording_compatible(guard, before, after):
 
 
 def installed_state(guard, prefix, pg, baseline, qualification):
-    if qualification["native_fingerprint"] != baseline["native_fingerprint"]:
-        raise ValueError("retained native generation differs from the exact installed pilot")
+    if qualification["build_identity"] != baseline.get("build"):
+        raise ValueError("retained configured build differs from the exact installed pilot")
     database = guard.read_database(pg)
     if qualification.get("proof_kind") == "native-only-install":
         native_files(qualification["installed_identities"])
         if int(database["server_version"]) != qualification["server_version_num"]:
             raise ValueError("native installation running PostgreSQL release changed")
     verify_qualification_receipts(qualification)
-    # The actual source, stamps, installed native/SQL bytes, ROMs and floor pair
+    # The actual source/configuration, installed native/SQL bytes, ROMs and floor pair
     # remain authoritative. Journal occupancy is recorded without reinterpreting
     # unrelated historical entries as an admission lock.
     observed = guard.snapshot(Path(qualification["lifecycle_checkout"]), prefix, database,
-                              baseline["native_fingerprint"], purpose="recording")
+                              purpose="recording")
     recording_compatible(guard, baseline, observed)
     return observed
 
@@ -411,7 +404,7 @@ def execute(plan, root, prefix, pg, output):
              "installed_source": source["commit"], "installed_payload_mutated": False,
              "database_write_requested": False, "selection_attempted": False, "selection_completed": False,
              "managed_provenance": "rebuilt from qualified source and checked in this invocation",
-             "native_provenance": "selected retained build/source/stamps; current bytes installed-form verified against the completed pilot and focused-tested now",
+             "native_provenance": "selected retained build configuration/source; current bytes installed-form verified against the completed pilot and focused-tested now",
              "native_historical_byte_comparison": False,
              "claim": "completed observed-read-interval export; no snapshot, historical coverage or throughput claim"}
     evidence = output / "evidence"

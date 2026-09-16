@@ -66,8 +66,8 @@ class ApplicationTransactionTests(unittest.TestCase):
         result = self.run_release()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual([
-            "managed preflight", "pipeline publish", "systemctl restart laplace-api",
-            "managed activate", "readiness", "managed commit"], self.events())
+            "managed preflight", "managed begin", "pipeline publish", "managed reconcile",
+            "managed activate", "systemctl restart laplace-api", "readiness", "managed commit"], self.events())
         self.assertFalse((self.root / "build/.applications-verified.json").exists())
 
     def test_preflight_failure_does_not_publish_or_recover(self):
@@ -75,9 +75,14 @@ class ApplicationTransactionTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(["managed preflight"], self.events())
 
+    def test_begin_failure_does_not_publish_or_rollback_an_unowned_transaction(self):
+        result = self.run_release(fail="managed begin")
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(["managed preflight", "managed begin"], self.events())
+
     def test_precommit_failures_use_existing_rollback_and_api_restore(self):
-        for fail in ("pipeline publish", "systemctl restart laplace-api",
-                     "managed activate", "managed commit"):
+        for fail in ("pipeline publish", "managed reconcile", "managed activate",
+                     "systemctl restart laplace-api", "managed commit"):
             with self.subTest(fail=fail):
                 result = self.run_release(fail=fail)
                 self.assertNotEqual(0, result.returncode)

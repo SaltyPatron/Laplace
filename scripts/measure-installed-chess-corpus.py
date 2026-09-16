@@ -190,7 +190,7 @@ def run(args, owner=None):
     args.output_dir.mkdir(parents=True, exist_ok=False)
     proof = {"schema": SCHEMA, "status": "failed", "mode": args.mode, "phases": [],
              "observedUtc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-             "executionScope": "Source-built CLI using existing installed PostgreSQL/native runtime",
+             "executionScope": "Prepared source-built CLI using existing installed PostgreSQL/native runtime",
              "targetGamesPerSecond": 2500, "targetMet": False}
     def checkpoint():
         owner.save(args.output_dir / "receipt.json", proof)
@@ -238,9 +238,6 @@ def run(args, owner=None):
                                   "--purpose", "recording",
                                   "--snapshot", args.output_dir / "native-before.json"], 240)
         native_bound = True
-        command("cli-build", ["dotnet", "build", ROOT / "app/Laplace.Cli/Laplace.Cli.csproj",
-                             "-c", "Release", "--nologo", "-v", "minimal"], 900)
-        command("cli-native-sync", ["bash", ROOT / "scripts/sync-managed-native-artifacts.sh"], 120)
         before_cli = phase("cli-identity", lambda: cli_identity(owner))
         owner.save(args.output_dir / "cli-before.json", before_cli)
         command("measurement", measure_arguments(source, args.output_dir, args.games, args.deadline_seconds),

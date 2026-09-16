@@ -16,15 +16,11 @@ on:
         type: boolean
         default: false
       force_codegen:
-        description: "ignore attestation-law stamp"
+        description: "regenerate attestation-law source before building"
         type: boolean
         default: false
       serial_tests:
         description: "force serial ctest"
-        type: boolean
-        default: false
-      force_all:
-        description: "ignore content-fingerprint stamps"
         type: boolean
         default: false
       generation_benchmark:
@@ -77,7 +73,7 @@ jobs:
       cancel-in-progress: false
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}
-      LAPLACE_FORCE_ALL: ${{ inputs.force_all && '1' || '' }}
+      LAPLACE_PROVISION_TOOLS: "1"
       LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
@@ -101,6 +97,8 @@ jobs:
           git checkout --force "$TARGET_SHA"
 
       - uses: ./.github/actions/setup-laplace-env
+        with:
+          provision_tools: true
 
       - name: Run requested lifecycle under one host reservation
         run: |

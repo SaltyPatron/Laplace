@@ -1,4 +1,4 @@
-name: Recorded floor exporter checkout controls
+name: Current direct owners and installed export controls
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -7,19 +7,19 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: ce1aaa116b5b99622e945325b0fd785959864a16
-      SOURCE_TREE: 15bf25172b1f2a465c5d7c902ff6141f9e6ee91a
-      TMPDIR: /build/laplace/work/export-checkout-controls/tmp
-      TMP: /build/laplace/work/export-checkout-controls/tmp
-      TEMP: /build/laplace/work/export-checkout-controls/tmp
-      EVIDENCE: /build/laplace/recovery/export-checkout-controls
+      SOURCE_SHA: 4322c77da01d3925fc434b561934a4fbf5eabac4
+      SOURCE_TREE: 9cbacc90ebc773b616b179de0eb5826e4ed0a1c6
+      TMPDIR: /build/laplace/work/current-direct-owners/tmp
+      TMP: /build/laplace/work/current-direct-owners/tmp
+      TEMP: /build/laplace/work/current-direct-owners/tmp
+      EVIDENCE: /build/laplace/recovery/current-direct-owners
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ce1aaa116b5b99622e945325b0fd785959864a16
+          ref: 4322c77da01d3925fc434b561934a4fbf5eabac4
           fetch-depth: 1
       - name: Prepare permanent scratch for the selected source
         run: |
@@ -30,14 +30,36 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
           printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
-      - name: Execute actual export source and same-checkout controls
+          command -v rsync
+          rsync --version > "$EVIDENCE/rsync.txt"
+      - name: Execute API publication and existing owner controls
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=10s 120s python3 scripts/test-qualified-chess-floor-export.py -v 2>&1 | tee "$EVIDENCE/export-controls.log"
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/syntax.log"
+          status=0
+          qualify() {
+            local label="$1"
+            shift
+            set +e
+            timeout --signal=TERM --kill-after=10s 300s "$@" 2>&1 | tee "$EVIDENCE/$label.log"
+            local result=$?
+            set -e
+            printf '%s\t%s\n' "$label" "$result" >> "$EVIDENCE/exit-codes.tsv"
+            if [ "$result" -ne 0 ]; then status=1; fi
+          }
+          for suite in postgresql-release pipeline-install app-fingerprints application-publish application-runtime installed-chess-corpus qualified-chess-floor-export; do
+            qualify "$suite" python3 "scripts/test-$suite.py" -v
+          done
+          qualify payload-sync bash scripts/test-deploy-payload-sync.sh
+          qualify publish-snapshot bash scripts/test-managed-publish-snapshot.sh
+          qualify shellcheck shellcheck -S warning -x deploy/linux/deploy.sh deploy/linux/managed-publish.sh
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/python-ast.log"
           import ast, subprocess, yaml
           from pathlib import Path
-          for name in ("export-qualified-chess-floors.py", "test-qualified-chess-floor-export.py"):
+          for name in ("verify-api-payload.py", "test-application-publish.py", "postgresql-release.py",
+                       "test-postgresql-release.py", "test-pipeline-install.py", "test-app-fingerprints.py",
+                       "check-application-runtime.py", "test-application-runtime.py", "measure-installed-chess-corpus.py",
+                       "test-installed-chess-corpus.py", "export-qualified-chess-floors.py",
+                       "test-qualified-chess-floor-export.py"):
               ast.parse((Path("scripts") / name).read_text())
               print(f"PASS Python AST {name}")
           workflow = yaml.safe_load(Path(".github/workflows/chess-floor-export.yml").read_text())
@@ -47,12 +69,69 @@ jobs:
                       subprocess.run(["bash", "-n"], input=step["run"], text=True, check=True)
           print("PASS export workflow YAML and embedded Bash syntax")
           PY
+          bash -n deploy/linux/deploy.sh
+          bash -n deploy/linux/payload-sync.sh
+          bash -n scripts/publish-applications.sh
+          bash -n scripts/pipeline.sh
+          printf '%s\n' "PASS Bash syntax" | tee "$EVIDENCE/bash.log"
           test -z "$(git status --porcelain --untracked-files=all)"
-      - name: Retain bounded export qualification evidence
+          exit "$status"
+      - name: Authenticate and parse the coordinated native operator
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/operator-syntax.log"
+          import ast, base64, hashlib, json, os, re, subprocess, textwrap, urllib.request, yaml
+          from pathlib import Path
+          sha = "c692dc8f376e15c725a7cc069e986b852c8e6c7d"
+          request = urllib.request.Request(
+              "https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/" + sha,
+              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                       "Accept": "application/vnd.github+json"})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              encoded = response.read(2 * 1024 * 1024 + 1)
+          if len(encoded) > 2 * 1024 * 1024:
+              raise ValueError("operator metadata exceeded bound")
+          item = json.loads(encoded)
+          assert item["sha"] == sha and item["encoding"] == "base64"
+          raw = base64.b64decode(item["content"])
+          assert len(raw) == item["size"] and len(raw) < 1024 * 1024
+          assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == sha
+          (Path(os.environ["EVIDENCE"]) / "native-operator.yml").write_bytes(raw)
+          document = yaml.safe_load(raw)
+          outer = inner = python = 0
+          for job in document["jobs"].values():
+              for step in job["steps"]:
+                  program = step.get("run")
+                  if program is None:
+                      continue
+                  subprocess.run(["bash", "-n"], input=program, text=True, check=True)
+                  outer += 1
+                  lines = program.splitlines()
+                  for index, line in enumerate(lines):
+                      match = re.search(r"<<'([A-Z_]+)'", line)
+                      if not match:
+                          continue
+                      delimiter = match.group(1)
+                      end = next(i for i in range(index + 1, len(lines)) if lines[i].strip() == delimiter)
+                      body = textwrap.dedent("\n".join(lines[index + 1:end])) + "\n"
+                      if delimiter == "PY":
+                          ast.parse(body)
+                          python += 1
+                      elif delimiter in ("NATIVE", "MANAGED_READINESS"):
+                          subprocess.run(["bash", "-n"], input=body, text=True, check=True)
+                          inner += 1
+          assert (outer, inner, python) == (4, 2, 8), (outer, inner, python)
+          print(json.dumps({"operatorBlob": sha, "bytes": len(raw),
+                            "outerBash": outer, "innerBash": inner, "python": python,
+                            "scope": "authenticated source syntax only; no native or host execution"}))
+          PY
+      - name: Retain bounded source qualification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: export-checkout-controls
-          path: /build/laplace/recovery/export-checkout-controls/
+          name: current-main-port-source-controls
+          path: /build/laplace/recovery/current-direct-owners/
           if-no-files-found: error
           retention-days: 30
