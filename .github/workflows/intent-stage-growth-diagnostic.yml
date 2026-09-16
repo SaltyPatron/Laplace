@@ -194,8 +194,9 @@ jobs:
               printf("{\"copy_entry_points\":{\"memcpy\":%" PRIu64
                      ",\"__memcpy_chk\":%" PRIu64 "}}\n", plain_calls, fortified_calls);
               check(plain_calls + fortified_calls == measured_copy_calls, "copy entry point accounting differs");
-              check(measured_copy_calls - measured_growth_calls == 8 * rows, "field-copy call accounting differs");
-              check(measured_copy_bytes - measured_growth_bytes == 52 * rows, "field-copy byte accounting differs");
+              /* GCC's fortified fixed-width field copies are inline stores. Only actual
+               * library calls are counted above; row bytes are checked through the full
+               * public COPY output below, rather than inventing calls for inline stores. */
           
               size_t bounded_size;
               uint8_t *bounded_copy = emit(bounded, &bounded_size);
@@ -267,6 +268,7 @@ jobs:
             -Wl,--wrap=realloc -Wl,--wrap=free -o "$diagnostic_dir/observe" 2>&1 | tee "$diagnostic_dir/compile-diagnostic.log"
           nm -u "$diagnostic_dir/intent_stage.o" | tee "$diagnostic_dir/undefined-symbols.txt"
           objdump -dr --disassemble=buf_reserve "$diagnostic_dir/intent_stage.o" | tee "$diagnostic_dir/buf-reserve-assembly.txt"
+          objdump -dr --disassemble=intent_stage_add_entity "$diagnostic_dir/intent_stage.o" | tee "$diagnostic_dir/add-entity-assembly.txt"
           timeout 30s "$diagnostic_dir/observe" | tee "$diagnostic_dir/result.jsonl"
           sha256sum engine/core/src/intent_stage.c "$diagnostic_dir/observe.c" "$diagnostic_dir/observe" "$diagnostic_dir/result.jsonl" | tee "$diagnostic_dir/sha256.txt"
           git diff --exit-code
