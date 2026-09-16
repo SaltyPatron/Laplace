@@ -73,15 +73,74 @@ forced mate can establish the winner; an ongoing terminal source occurrence
 requires its actual resignation/time/agreement evidence. Do not invent a winner
 for an ambiguous historical observation.
 
-Before any retraction, produce a bounded inventory using the existing
-`FetchRecordedPlayingIdPageAsync` continuation cursor with `includeLive: true`
-and `HydratePositionOutcomeInputsAsync` under an explicit materialization byte
-grant. Record the playing/line/start ids, source ownership, exact initial side,
-result, ply count and existing projection evidence/markers. Recover the board
-through the same native owner and verify its start id. Classify missing or
-unreadable source evidence explicitly; do not assume a missing FEN means a
-validated standard board. Retain the inventory and selected existing evidence,
-and prevent concurrent writes to the affected source during replacement.
+Before any retraction, retain a starting-side inventory through the existing
+`ChessCatalogSurfaces` executable's explicit `inventory-starting-sides` mode.
+After the normal build has produced this checkout's matching managed/native
+artifacts, run from the repository root with the ordinary installed database
+environment. Resolve the actual Release target through the project's existing
+MSBuild output contract; this respects `LAPLACE_BUILD_ROOT` when configured.
+
+```bash
+catalog_dll="$(dotnet msbuild app/ChessCatalogSurfaces/ChessCatalogSurfaces.csproj \
+  -property:Configuration=Release -getProperty:TargetPath)"
+test -f "$catalog_dll"
+inventory_dir="/build/laplace/recovery/chess-starting-sides/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+dotnet "$catalog_dll" inventory-starting-sides \
+  --output-dir "$inventory_dir" \
+  --page-size 64 \
+  --maximum-materialized-mib 128 \
+  --maximum-retained-mib 512 \
+  --deadline-seconds 300
+```
+
+The output directory must be new. The ordinary perfcache-generation arguments
+retain their existing behavior. This mode uses the existing connection resolver
+(`LAPLACE_DB` remains authoritative), applies the bounded Serving transport
+policy, and appends PostgreSQL's `default_transaction_read_only=on` startup
+setting. It does not run bootstrap, migration, ingestion, eviction or repair.
+Its identity probe uses the existing `maintenance.database_identity` read:
+the selected role must already be allowed to read `pg_control_system()` as
+well as the selected substrate. A refused read produces partial evidence, not
+a permission change or a claim that the database is empty.
+
+The command pages `FetchRecordedPlayingIdPageAsync` with `includeLive: true`
+through all selected `ChessPgn`, `ChessBook` and `ChessSelfPlay` playings.
+Singleton-source calls through the existing bounded witness reader retain every
+matching `PLAYS_LINE` owner. Ownership reads and
+`HydratePositionOutcomeInputsAsync` share each page's explicit materialization
+allowance. The hydrator reconstructs the admitted native line and initial
+position; classification verifies the reconstructed board's canonical start id
+before reading its side to move. Missing FEN is accepted as standard only when
+that identity matches the actual native first constituent.
+
+`hydrated-playings.jsonl` contains only completely verified records: exact
+playing/line/start ids, source/line bindings, initial FEN and side, result, moves
+and typed move ids, players and retained annotation lanes. Move-array length is
+the ply count. `summary.json` retains database name/OID/system identifier
+before and after, UTC observation interval, selected/retained/White/Black counts,
+byte allowance and actual retained bytes, input SHA256, page cursors and any
+selected but unclassified ids. It records the failure stage and type on a
+refused read, incomplete replay, deadline or retained-byte limit. The current
+strict hydrator has a 1024-ply replay window; longer unreconstructed lines remain
+unclassified and make the report partial. A cancelled record write is truncated
+back to the last complete JSONL record.
+
+Exit 0 means enumeration reached its end, every selected playing was retained,
+and before/after identities and counts reconciled. Exit 1 reports partial
+coverage or failed retention; exit 2 reports invalid options. Read the summary
+and command status together. Independent reads are an observation interval,
+not an MVCC snapshot; matching counts do not prove absence of concurrent
+replacements. The report does not establish prior database contents or turn
+missing retained migration inputs into evidence that historical data was
+unaffected. A partial report's cursors and pending ids identify the observed
+boundary; unread pages have unknown starting sides.
+
+This inventory classifies retained witnessed starts. It does not export existing
+projection cells/markers or decide whether every stored result is historically
+correct. Before replacement, retain those existing projection/evidence inputs
+through their owning read APIs as well, and prevent concurrent writes to the
+affected source. The inventory's source bindings alone do not establish every
+contributor to a merged null-context outcome cell.
 
 For isolated `ChessTransitions`, use its existing complete-source retraction and
 re-derivation only after the inventory establishes that all required witnessed
