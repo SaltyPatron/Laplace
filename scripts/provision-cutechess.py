@@ -2,6 +2,7 @@
 """Provision the locked CuteChess source and verify the executable's Qt closure."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -411,7 +412,27 @@ def _desktop_exec(path):
     return '"' + quoted.replace("\\", "\\\\") + '"'
 
 
-def install_desktop(prefix, verified):
+def desktop_perfcache(prefix):
+    # This provisioning-time whitelist reuses the installed configuration owner.
+    # Desktop users never read the app environment or its adjacent secret files.
+    spec = importlib.util.spec_from_file_location(
+        "cutechess_runtime_configuration", Path(__file__).with_name("check-chess-dependencies.py"))
+    owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owner)
+    configured = owner.configuration(prefix, keys={"LAPLACE_PERFCACHE_BIN"})
+    if configured.get("LAPLACE_PERFCACHE_BIN"):
+        selected = Path(configured["LAPLACE_PERFCACHE_BIN"]).resolve(strict=True)
+    else:
+        candidates = list((prefix / "share/laplace").glob("laplace_t0_perfcache_*.bin"))
+        if len(candidates) != 1:
+            raise RuntimeError("select the installed T0 perfcache before provisioning desktop engines")
+        selected = candidates[0].resolve(strict=True)
+    if not selected.is_file() or selected.parent != (prefix / "share/laplace").resolve(strict=True):
+        raise RuntimeError("desktop T0 perfcache must be the selected installed public file")
+    return selected
+
+
+def install_desktop(prefix, verified, stockfish, work_root=None):
     """Install public user-session launch files from the installed GUI verifier."""
     if not sys.platform.startswith("linux"):
         raise RuntimeError("desktop launcher installation requires Linux")
@@ -434,13 +455,52 @@ def install_desktop(prefix, verified):
     launcher = prefix / "bin/laplace-cutechess"
     desktop = prefix / "share/applications/laplace-cutechess.desktop"
     manifest = prefix / "share/laplace/cutechess-desktop.json"
+    stockfish = Path(stockfish).resolve(strict=True)
+    if not stockfish.is_file() or not os.access(stockfish, os.X_OK):
+        raise RuntimeError("selected installed Stockfish executable is unavailable")
+    perfcache = desktop_perfcache(prefix)
+    work_root = Path(work_root or os.environ.get("LAPLACE_WORK_ROOT", "/build/laplace/work")).absolute()
+    if not work_root.is_dir():
+        raise RuntimeError("existing permanent desktop work root is unavailable")
+    engine_launcher = prefix / "bin/laplace-cutechess-stockfish"
+    engine_catalog = prefix / "share/laplace/cutechess-engines.json"
+    session_helper = prefix / "share/laplace/cutechess-user-engines.py"
+    helper_source = Path(__file__).with_name("cutechess-user-engines.py").read_text(encoding="utf-8")
+    stockfish_selection = {"binary": str(stockfish), "sha256": digest(stockfish)}
+    stockfish_program = '''#!/usr/bin/env python3
+"""Launch the selected official Stockfish build; keep the UCI pipes unchanged."""
+import hashlib
+import os
+from pathlib import Path
+import sys
+
+SELECTION = ''' + repr(stockfish_selection) + '''
+binary = Path(SELECTION["binary"])
+digest = hashlib.sha256()
+with binary.open("rb") as stream:
+    for block in iter(lambda: stream.read(1 << 20), b""):
+        digest.update(block)
+if digest.hexdigest() != SELECTION["sha256"]:
+    raise SystemExit("Stockfish changed; rerun chess provisioning")
+os.execve(str(binary), [str(binary), *sys.argv[1:]], dict(os.environ))
+'''
+    catalog = [{"name": "Stockfish (official)", "command": str(engine_launcher), "protocol": "uci"},
+               {"name": "Laplace (substrate)", "command": str(prefix / "app/laplace-uci"), "protocol": "uci"}]
+    _publish_desktop_text(engine_launcher, stockfish_program, 0o755)
+    _publish_desktop_text(engine_catalog, json.dumps(catalog, indent=2) + "\n", 0o644)
+    _publish_desktop_text(session_helper, helper_source, 0o644)
     selection = {"argv": [str(binary)], "binary_sha256": runtime["binary_sha256"],
-                 "environment": expected, "qt_library_path": library}
+                 "environment": expected, "qt_library_path": library,
+                 "session_helper": str(session_helper), "session_helper_sha256": digest(session_helper),
+                 "engine_catalog": str(engine_catalog), "engine_catalog_sha256": digest(engine_catalog),
+                 "work_root": str(work_root), "t0_perfcache": str(perfcache),
+                 "chess_floor_root": str(prefix / "share/laplace/chess-floor")}
     # Preserve the invoking user's display, settings and extra search paths.
     # Do not publish provisioning-process environment or read the API's secrets.
     program = '''#!/usr/bin/env python3
 """Launch the installed CuteChess GUI in the invoking user's desktop session."""
 import hashlib
+import importlib.util
 import os
 from pathlib import Path
 import sys
@@ -457,8 +517,31 @@ def main():
             digest.update(block)
     if digest.hexdigest() != SELECTION["binary_sha256"]:
         raise RuntimeError("installed CuteChess changed; rerun chess provisioning")
+    for role in ("session_helper", "engine_catalog"):
+        path = Path(SELECTION[role])
+        if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != SELECTION[role + "_sha256"]:
+            raise RuntimeError("installed CuteChess engine configuration changed; rerun chess provisioning")
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("laplace_cutechess_user_engines", SELECTION["session_helper"])
+    session = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(session)
+    # The inheritable lock remains held by the GUI for its whole lifetime.
+    session_lock, session_environment, _ = session.prepare(
+        SELECTION["engine_catalog"], binary, SELECTION["work_root"])
     environment = dict(os.environ)
+    environment.update(session_environment)
     environment.update(SELECTION["environment"])
+    floor_root = Path(SELECTION["chess_floor_root"])
+    generation = (floor_root / "current").resolve(strict=True)
+    if generation.parent != (floor_root / "generations").resolve(strict=True):
+        raise RuntimeError("installed chess floor selection is not an owned generation")
+    environment["LAPLACE_PERFCACHE_BIN"] = SELECTION["t0_perfcache"]
+    for key, filename in (("LAPLACE_CHESS_PERFCACHE_BIN", "laplace_chess_position_perfcache.bin"),
+                          ("LAPLACE_CHESS_TRANSITION_BIN", "laplace_chess_transition_perfcache.bin")):
+        path = generation / filename
+        if not path.is_file():
+            raise RuntimeError("installed chess floor is unavailable")
+        environment[key] = str(path)
     selected = SELECTION["qt_library_path"]
     inherited = [item for item in environment.get("LD_LIBRARY_PATH", "").split(os.pathsep)
                  if item and item != selected]
@@ -468,7 +551,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, RuntimeError) as error:
+    except (OSError, ValueError, RuntimeError) as error:
         print("CuteChess: " + str(error), file=sys.stderr)
         raise SystemExit(1)
 '''
@@ -484,6 +567,12 @@ if __name__ == "__main__":
               "qt_prefix": str(sdk), "build_receipt_sha256": verified["build_receipt_sha256"],
               "launcher": {"path": str(launcher), "sha256": digest(launcher)},
               "desktop": {"path": str(desktop), "sha256": digest(desktop)},
+              "stockfish_launcher": {"path": str(engine_launcher), "sha256": digest(engine_launcher)},
+              "engine_catalog": {"path": str(engine_catalog), "sha256": digest(engine_catalog)},
+              "session_helper": {"path": str(session_helper), "sha256": digest(session_helper)},
+              "stockfish": stockfish_selection, "session_work_root": str(work_root),
+              "t0_perfcache": str(perfcache),
+              "engine_execution_verified": False, "desktop_substrate_access_verified": False,
               "system_desktop_file": str(system) if system.is_symlink() and
                                      os.readlink(system) == str(desktop) else None,
               "operator_desktop_tested": False, "autostart_installed": False}
@@ -499,7 +588,10 @@ def register_desktop(prefix, directory=Path("/usr/local/share/applications")):
     if receipt.get("schema") != "laplace.cutechess-desktop-install/v1":
         raise RuntimeError("desktop installation receipt is unavailable")
     for role, relative in (("launcher", "bin/laplace-cutechess"),
-                           ("desktop", "share/applications/laplace-cutechess.desktop")):
+                           ("desktop", "share/applications/laplace-cutechess.desktop"),
+                           ("stockfish_launcher", "bin/laplace-cutechess-stockfish"),
+                           ("engine_catalog", "share/laplace/cutechess-engines.json"),
+                           ("session_helper", "share/laplace/cutechess-user-engines.py")):
         path = prefix / relative
         if (receipt[role]["path"] != str(path) or path.is_symlink() or
                 not path.is_file() or digest(path) != receipt[role]["sha256"]):
@@ -534,6 +626,7 @@ def main():
     parser.add_argument("--work", type=Path, help="Build-volume directory for isolated GUI probe settings")
     parser.add_argument("--check-latest", action="store_true")
     parser.add_argument("--install-desktop", type=Path, help="Install a public desktop launcher under this prefix after GUI installed verification")
+    parser.add_argument("--desktop-stockfish", type=Path, help="Selected direct official Stockfish executable for the public GUI catalog")
     parser.add_argument("--register-desktop", type=Path, help="Register an existing prefix desktop installation in the system application menu; no GUI execution")
     args = parser.parse_args()
     lock = json.loads(args.lock.read_text())
@@ -541,7 +634,7 @@ def main():
         parser.error("release lock must contain a complete source commit")
     if args.register_desktop:
         if any((args.source_dir, args.verify_source, args.binary, args.check_latest, args.gui,
-                args.qt_prefix, args.receipt, args.verify_receipt, args.install_desktop, args.reset_build_cache, args.work)):
+                args.qt_prefix, args.receipt, args.verify_receipt, args.install_desktop, args.desktop_stockfish, args.reset_build_cache, args.work)):
             parser.error("--register-desktop is a separate metadata-only operation")
         try:
             print(json.dumps(register_desktop(args.register_desktop)))
@@ -549,8 +642,10 @@ def main():
         except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
             print(f"CuteChess: {error}", file=sys.stderr)
             return 1
-    if args.install_desktop and not (args.gui and args.verify_receipt):
-        parser.error("--install-desktop requires --gui installed verification")
+    if args.install_desktop and not (args.gui and args.verify_receipt and args.desktop_stockfish):
+        parser.error("--install-desktop requires --gui installed verification and --desktop-stockfish")
+    if args.desktop_stockfish and not args.install_desktop:
+        parser.error("--desktop-stockfish requires --install-desktop")
     if not (args.source_dir or args.verify_source or args.binary or args.check_latest):
         parser.error("choose --source-dir, --verify-source, --binary or --check-latest")
     if args.reset_build_cache and (not args.verify_source or args.binary or args.receipt or args.source_dir or args.check_latest):
@@ -573,7 +668,7 @@ def main():
         elif args.gui and args.verify_receipt:
             verified = verify_gui_install(args.binary, args.verify_receipt, lock, args.work)
             if args.install_desktop:
-                verified["desktop_install"] = install_desktop(args.install_desktop, verified)
+                verified["desktop_install"] = install_desktop(args.install_desktop, verified, args.desktop_stockfish, args.work)
             print(json.dumps(verified))
         elif args.gui and args.verify_source:
             print(json.dumps(verify_gui_build(args.verify_source, args.binary, lock, args.qt_prefix, args.receipt, args.work)))

@@ -199,7 +199,7 @@ verify() {
   python3 "$SCRIPT_DIR/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}" || { red "✗ cutechess-cli / Qt runtime"; fail=1; }
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
     if run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --gui --binary "${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}" \
-      --verify-receipt "$CC_BUILD/laplace-cutechess-gui-build.json" --work "$WORK" --install-desktop "$PREFIX"; then
+      --verify-receipt "$CC_BUILD/laplace-cutechess-gui-build.json" --work "$WORK" --install-desktop "$PREFIX" --desktop-stockfish "$sf"; then
       if [[ "$(id -u)" -eq 0 ]]; then
         python3 "$SCRIPT_DIR/provision-cutechess.py" --register-desktop "$PREFIX" || { red "✗ CuteChess system desktop registration"; fail=1; }
       fi

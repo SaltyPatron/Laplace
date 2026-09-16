@@ -108,6 +108,7 @@ phase_chess_lab
         self.assertIn("--binary " + str(self.base / "install/bin/cutechess"), checks[0])
         self.assertIn("--verify-receipt " + str(self.base / "cutechess-gui-build.json"), checks[0])
         self.assertIn("--install-desktop " + str(self.base / "install"), checks[0])
+        self.assertIn("--desktop-stockfish " + str(sources[0] / "src/stockfish"), checks[0])
 
     def test_chess_unchanged_stamp_requires_gui_artifacts_and_successful_reverification(self):
         _, script = self.chess_publication_fixture()
