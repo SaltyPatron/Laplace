@@ -217,7 +217,6 @@ jobs:
           phase dependency-identity python3 scripts/postgresql-release.py installed --prefix /opt/laplace/pgsql-18
           build_and_register() {
             bash scripts/product-ci.sh build
-            cmake -S "$PWD" -B "$PWD/build"
             ctest --test-dir build --show-only=json-v1 -L regress > "$NATIVE_EVIDENCE/regression-registration.json"
             python3 - <<'PY'
           import json, os, pathlib, re
