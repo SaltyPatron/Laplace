@@ -1,28 +1,14 @@
 name: Seed — chess books
 
-# ONE COMPONENT, ONE WORKFLOW. annotated chess books (ChessBook) — a SECOND witness over the document corpus, extracting the games it can replay
-#
-# There is exactly one corpus for this source, so there is no corpus dropdown
-# and no way to hand it the wrong format. That is the point of splitting these
-# out of seed-chess.yml: run 30751844265 fed a PGN to the openings TSV reader
-# because one shared input set drove four different decomposers.
-#
-# The Gutenberg mini-collection moved out of test-data on 2026-09-03. The
-# authoritative plain-text collection is /vault/Data/ProjectGutenberg/text;
-# test-data/text now contains only fixtures and is not a chess-book corpus.
-#
-# seed-chess.yml remains for batch/ladder runs. This is the explicit one.
-
 on:
   workflow_dispatch:
     inputs:
       path:
-        description: "override the default corpus ($LAPLACE_DATA_ROOT/ProjectGutenberg/text)"
+        description: "override $LAPLACE_DATA_ROOT/ProjectGutenberg/text"
         type: string
-        required: false
         default: ""
       database:
-        description: "target DB (one database: laplace)"
+        description: "target database"
         type: choice
         options: [laplace]
         default: laplace
@@ -39,11 +25,10 @@ jobs:
     steps:
       - id: pick
         run: |
-          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
-          p="${{ inputs.path }}"
-          [ -n "$p" ] || p="$root/ProjectGutenberg/text"
-          [ -e "$p" ] || { echo "::error::$p does not exist on this runner"; exit 1; }
-          echo "resolved -> $p"
+          set -euo pipefail
+          p='${{ inputs.path }}'
+          [[ -n "$p" ]] || p="${LAPLACE_DATA_ROOT:-/vault/Data}/ProjectGutenberg/text"
+          [[ -e "$p" ]] || { echo "::error::$p does not exist"; exit 1; }
           echo "path=$p" >> "$GITHUB_OUTPUT"
 
   seed:
@@ -54,7 +39,3 @@ jobs:
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 720
-      # Independent gates prove expected consensus cells; the idempotency pass proves
-      # the source marker prevents duplicate testimony.
-      run_gate: true
-      run_idempotency: true

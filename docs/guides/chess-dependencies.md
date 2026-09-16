@@ -39,6 +39,11 @@ executable is used directly from its build output under `stockfish/src`.
 `LAPLACE_STOCKFISH_SOURCE` may explicitly select another existing source checkout.
 A manually staged folder is not assumed to be Laplace's configured external
 root. The existing `LAPLACE_STOCKFISH` executable override still takes precedence.
+On hart-server, the verified official Git checkout is `/build/external/stockfish`.
+The observed `/vault/External/Stockfish/SF_19` directory contains staged source and
+executables, but no Git checkout was found there. Its name does not select the
+runtime. The installer updates the configured official checkout, builds it with
+upstream's Makefile and matching NNUE, and uses that checkout's `src/stockfish`.
 
 Run the installed dependency report from the repository:
 
@@ -94,11 +99,12 @@ PrintSupport and Core5Compat. SDK module configuration hashes do not claim
 complete runtime shared-library identity.
 
 Launch the installed GUI from a working desktop session with
-`/opt/laplace/bin/cutechess`. The doctor receipt supplies the actual configured
-direct executable and selected Qt runtime/plugin environment when paths differ.
-On Linux this prepends the selected SDK library directory ahead of inherited
-library search paths. Qt is
-the GUI runtime; it is not another server to boot.
+`/opt/laplace/bin/laplace-cutechess` or the **Cute Chess (Laplace)** desktop entry.
+The launcher selects the verified direct executable, Qt library/plugin environment
+and installed engine catalog. The underlying GUI binary is
+`/opt/laplace/bin/cutechess` by default. The doctor receipt supplies its actual path
+when configuration differs. On Linux, the selected SDK library directory precedes
+inherited library search paths. Qt supplies the GUI runtime.
 
 Bare chess bootstrap calls may opt in with `--cutechess-gui` or
 `LAPLACE_CUTECHESS_GUI_BUILD=1`. Once a GUI executable or build receipt exists,
@@ -264,7 +270,7 @@ Run the same proof against an already built, matching CLI, holding the existing
 host reservation while the admission runs:
 
 ```sh
-LAPLACE_STOCKFISH_SOURCE=/vault/External/Stockfish/SF_19 \
+LAPLACE_STOCKFISH_SOURCE=/build/external/stockfish \
 flock --exclusive --close /build/laplace/work/host-resource.lock \
   python3 scripts/ingest-stockfish-corpus.py \
     --prefix /opt/laplace \
@@ -356,11 +362,11 @@ startup output. Use the managed service's existing server-side token configurati
 
 The benchmark evidence workflow also offers suite `acceptance`.
 It runs independently of product deployment. After the selected main revision
-has completed deployment, create an explicitly named
-`verify/chess-acceptance-<invocation>` branch at that **exact commit**, without
-an extra branch-only commit. That narrowly scoped push invokes the same acceptance
-job and provides an execution path when workflow dispatch is unavailable. Ordinary
-main pushes do not select this work.
+has completed deployment, dispatch the existing workflow with that suite and exact
+revision. When dispatch is unavailable, reuse an existing operator workflow and
+its existing branch, preserving its previous tip and verifying the selected
+revision. Do not create another acceptance branch or checkout for each run.
+Ordinary main pushes do not select this work.
 
 The acceptance receipt records the requested and executed revision, fixed profile,
 individual phase status and duration, and every retained artifact's SHA-256.

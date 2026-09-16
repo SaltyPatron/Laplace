@@ -1,36 +1,21 @@
 # shellcheck shell=bash
-# Content fingerprints for change-aware phase skipping (sourced, not executed).
-#
-# A fingerprint is a sha256 over git's index blob ids for a pathspec plus live
-# hashes of any dirty/untracked files under it — pure content, no mtimes, so
-# touch(1) and checkout churn never invalidate anything. Stamps live under
-# build/.stamps/<name> and are written ONLY after the guarded action succeeds:
-# a failed or cancelled run leaves the stamp behind the content, so the work
-# re-runs. `pipeline.sh clean` wipes build/ and with it every stamp.
-#
-# Escape hatch: LAPLACE_FORCE_ALL=1 makes every fp_check miss (CI: the
-# force_all workflow_dispatch input).
-#
-# Contract: caller defines ROOT (repo root) before sourcing.
+# Build identity helpers only. Execution is never skipped here: CMake/Ninja and
+# MSBuild own incremental work. The identity is retained solely so a standalone
+# install can refuse artifacts that were built from a different source state.
 
 FP_STAMP_DIR="$ROOT/build/.stamps"
 
-# The one definition of the native input domain: everything whose change means
-# the engine/extension must rebuild, reinstall, and re-prove (ctest/regress).
 FP_NATIVE_PATHS=(
   engine
   extension
   cmake
   CMakeLists.txt
-  # A PostgreSQL release changes the headers and server used by native extensions.
   deploy/postgresql-release.json
+  scripts/postgresql-release.py
   scripts/codegen-attestation-law.py
   deploy/cmake-release.json
   scripts/provision-cmake.py
   scripts/chess-floor-artifacts.py
-  # engine/core invokes ChessCatalogSurfaces to produce two installed ROMs.
-  # Without these inputs the outer pipeline skips CMake entirely, so even a
-  # perfect DEPENDS graph inside CMake never gets a chance to invalidate them.
   app/ChessCatalogSurfaces
   app/Laplace.Chess
   app/Laplace.Core
@@ -38,14 +23,8 @@ FP_NATIVE_PATHS=(
 )
 
 fp_compute() {
-  # sha256 of the content state of the given pathspecs (repo-relative).
-  # Index blobs cover tracked+staged state; unstaged edits and untracked
-  # (non-ignored) files are hashed live; deletions leave a marker. Gitignored
-  # files (build output, generated codegen) never enter the fingerprint.
   local f h
   {
-    # Tooling self-hash: a bug fix here must bust every stamp it guards.
-    sha256sum "$ROOT/scripts/lib/fp.sh" 2>/dev/null || echo "fp-lib-missing"
     git -C "$ROOT" ls-files -s -- "$@" 2>/dev/null || echo "no-git"
     while IFS= read -r f; do
       [[ -z "$f" ]] && continue
@@ -64,14 +43,11 @@ fp_compute() {
   } | LC_ALL=C sort | sha256sum | cut -d' ' -f1
 }
 
-fp_native() {
-  local corpus_inputs
-  corpus_inputs=$(fp_chess_corpus_inputs) || return
-  {
-    fp_compute "${FP_NATIVE_PATHS[@]}"
-    fp_chess_openings_inputs
-    printf '%s\n' "$corpus_inputs"
-  } | sha256sum | cut -d' ' -f1
+# Bind build/install identity to the tools and headers actually consumed.
+# This adds input identity; CMake/MSBuild remain the only skip authorities.
+fp_postgresql_inputs() {
+  python3 "$ROOT/scripts/postgresql-release.py" build-inputs \
+    --prefix "${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 }
 
 fp_chess_corpus_inputs() {
@@ -85,7 +61,6 @@ fp_chess_openings_path() {
     return
   fi
   local chess_root="${LAPLACE_DATA_ROOT:-/vault/Data}/Games/Chess" candidate
-  # Same populated-corpus preference as OpeningSeed, including older installations.
   for candidate in "$chess_root/lichess-openings" "$chess_root/openings"; do
     if [[ -d "$candidate" ]] && [[ -n "$(find -H "$candidate" -type f -name '*.tsv' -print -quit)" ]]; then
       printf '%s\n' "$candidate"
@@ -110,28 +85,37 @@ fp_chess_openings_inputs() {
   fi
 }
 
-fp_runtime() {
-  local corpus_inputs
+fp_native() {
+  local corpus_inputs postgresql_inputs
   corpus_inputs=$(fp_chess_corpus_inputs) || return
-  # Salt for dotnet test staleness: app tests exercise the native .so, the
-  # installed extension, and the migrated schema — any of those moving must
-  # re-run tests even when no C# changed.
+  postgresql_inputs=$(fp_postgresql_inputs) || return
+  {
+    fp_compute "${FP_NATIVE_PATHS[@]}"
+    fp_chess_openings_inputs
+    printf '%s\n' "$corpus_inputs"
+    printf '%s\n' "$postgresql_inputs"
+  } | sha256sum | cut -d' ' -f1
+}
+
+fp_runtime() {
+  local corpus_inputs postgresql_inputs
+  corpus_inputs=$(fp_chess_corpus_inputs) || return
+  postgresql_inputs=$(fp_postgresql_inputs) || return
   {
     fp_compute "${FP_NATIVE_PATHS[@]}" app/Laplace.Migrations
     fp_chess_openings_inputs
     printf '%s\n' "$corpus_inputs"
+    printf '%s\n' "$postgresql_inputs"
   } | sha256sum | cut -d' ' -f1
 }
 
+# Deliberately never authorize a skip. Native build systems already implement
+# dependency-aware incremental execution and are the only skip authority.
 fp_check() {
-  # fp_check <stamp-name> <fp> — 0 (skip is safe) iff stamp matches and no force.
-  [[ "${LAPLACE_FORCE_ALL:-}" == "1" ]] && return 1
-  local f="$FP_STAMP_DIR/$1"
-  [[ -f "$f" && "$(cat "$f" 2>/dev/null)" == "$2" ]]
+  return 1
 }
 
 fp_record() {
-  # fp_record <stamp-name> <fp> — call only after the guarded action succeeded.
   mkdir -p "$FP_STAMP_DIR"
   printf '%s' "$2" >"$FP_STAMP_DIR/$1"
 }

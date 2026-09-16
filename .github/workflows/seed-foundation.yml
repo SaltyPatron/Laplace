@@ -1,55 +1,24 @@
 name: Seed — foundation
 
-# The floor + core-lexical sources, each an individually-triggerable source
-# (one per run) — the dropdown IS the per-source selector, exactly like
-# seed-knowledge.yml:
-#   unicode · iso639 · cili · wordnet · verbnet · propbank
-#   · framenet · mapnet · wordframenet · semlink
-# All carry an IngestDataPaths default and a decomposer-gates.json entry, so
-# the consensus gate runs. Single-source runs delegate to _ingest.yml and are
-# marker-gated (IngestRunner short-circuits on HasLayerCompleted for the
-# source), so a re-dispatch of a completed source is a fast no-op.
-#
-# `ladder` is the ordered full-foundation campaign: unicode → iso639 → cili →
-# wordnet → verbnet → propbank → framenet → mapnet → wordframenet → semlink in
-# one serialized pass via ensure-foundation.sh. Production indexes remain online
-# for the entire campaign.
-
 on:
   workflow_dispatch:
     inputs:
       source:
-        description: "foundation source (one per run) — or 'ladder' for the full ordered fresh-build campaign"
+        description: "foundation source, or ladder for the ordered foundation campaign"
         type: choice
         required: true
-        options:
-          - unicode
-          - iso639
-          - operational
-          - cili
-          - wordnet
-          - verbnet
-          - propbank
-          - framenet
-          - mapnet
-          - wordframenet
-          - semlink
-          - ladder
+        options: [unicode, iso639, operational, cili, wordnet, verbnet, propbank, framenet, mapnet, wordframenet, semlink, ladder]
       path:
-        description: "single-source only: optional <path> — single file, bare dir, or corpus root (blank = DATA_ROOT default)"
+        description: "single-source optional path"
         type: string
         default: ""
       database:
-        description: "target DB (one database: laplace)"
+        description: "target database"
         type: choice
         options: [laplace]
         default: laplace
-      run_idempotency:
-        description: "single-source only: re-ingest and prove no double-count"
-        type: boolean
-        default: false
       force:
-        description: "ladder only: re-ingest every rung even if its layer is already complete"
+        description: "ladder only: re-ingest every rung"
         type: boolean
         default: false
 
@@ -57,9 +26,7 @@ permissions:
   contents: read
 
 jobs:
-
   seed:
-    # One foundation source, same contract as every other seed-*.yml phase.
     if: inputs.source != 'ladder'
     uses: ./.github/workflows/_ingest.yml
     with:
@@ -67,31 +34,35 @@ jobs:
       path: ${{ inputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 720
-      run_gate: true
-      run_idempotency: ${{ inputs.run_idempotency }}
 
   ladder:
-    # The fresh-full-build campaign — the ordered multi-source pass.
     name: "foundation ladder → ${{ inputs.database }}"
     if: inputs.source == 'ladder'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 480
     concurrency:
-      group: laplace-ingest-${{ inputs.database }}
+      group: laplace-ingest-foundation-${{ inputs.database }}
       cancel-in-progress: false
     env:
       LAPLACE_DATA_ROOT: /vault/Data
       PGDATABASE: ${{ inputs.database }}
       LAPLACE_DBNAME: ${{ inputs.database }}
-      # Durable surface = ingest_run_journal; do not flood Actions with WS_APPLY/file lines.
       LAPLACE_INGEST_CONSOLE: ci
+      INGEST_LOGDIR: /build/laplace/work/ingest-logs
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with: { submodules: false, clean: false }
+      - name: Checkout exact revision
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Ensure foundation
+      - name: Ingest foundation
         run: |
+          set -euo pipefail
+          mkdir -p "$INGEST_LOGDIR"
           args=()
-          [ "${{ inputs.force }}" = "true" ] && args+=(--force)
+          [[ "${{ inputs.force }}" != true ]] || args+=(--force)
           bash scripts/ensure-foundation.sh "${args[@]}"
