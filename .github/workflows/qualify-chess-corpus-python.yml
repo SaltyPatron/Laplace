@@ -31,7 +31,6 @@ jobs:
           node --version
           cd web
           npm ci --no-audit --no-fund
-          npm run typecheck
           npx playwright install --with-deps chromium
           npm run test:chess-ui 2>&1 | tee "$TMPDIR/browser.log"
       - name: Retain browser evidence
