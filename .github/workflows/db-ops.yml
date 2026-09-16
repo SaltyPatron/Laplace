@@ -1,30 +1,21 @@
 name: DB — lifecycle ops
 
-# Explicit operator surface for database lifecycle only. It consumes the installed
-# runtime and never builds, installs, publishes, or ingests repository source.
-
 on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "database structure operation"
+        description: "database operation"
         type: choice
         required: true
         default: status
-        options:
-          - status      # READ-ONLY. Migration state + extension version + substrate counts.
-          - migrate     # `up` only. Idempotent; applies pending migrations.
-          - repair      # Explicit runtime repair/tuning. NO DATA LOSS.
-          - reindex     # Rebuild INVALID indexes. NO DATA LOSS.
-          - remigrate   # `reset` + `up`: re-apply migrations. Keeps substrate data.
-          - recreate    # DESTRUCTIVE. Recreate from the already-installed runtime.
+        options: [status, migrate, repair, reindex, remigrate, recreate]
       confirm:
         description: "type the database name to authorize recreate"
         type: string
         required: false
         default: ""
       database:
-        description: "target DB (one database: laplace)"
+        description: "target database"
         type: choice
         options: [laplace]
         default: laplace
@@ -40,124 +31,88 @@ jobs:
   db:
     name: "DB — ${{ inputs.operation }}"
     runs-on: [self-hosted, laplace]
-    timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || (inputs.operation == 'recreate' && 480) || 30 }}
+    timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || 60 }}
     env:
-      # Database operations consume artifacts produced by the deployment owner.
-      # They fail closed instead of compiling a different runtime implicitly.
       LAPLACE_REQUIRE_PREBUILT_MIGRATIONS: "1"
+      PGHOST: /var/run/postgresql
+      PGPORT: 5432
+      PGUSER: laplace_admin
+      PGDATABASE: ${{ inputs.database }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with: { submodules: false, clean: false }
+      - name: Checkout exact revision
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
+          git checkout --force "$TARGET_SHA"
+
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Authorize
+      - name: Run requested database operation
         run: |
-          op="${{ inputs.operation }}"
+          set -euo pipefail
+          op='${{ inputs.operation }}'
+          db='${{ inputs.database }}'
+
+          if [[ "$op" == recreate && '${{ inputs.confirm }}' != "$db" ]]; then
+            echo "::error::recreate is destructive; type '$db' in confirm"
+            exit 1
+          fi
+
           case "$op" in
-            recreate)
-              if [ "${{ inputs.confirm }}" != "${{ inputs.database }}" ]; then
-                echo "::error::'$op' is destructive — type '${{ inputs.database }}' in the confirm field to authorize."
+            recreate|remigrate|reindex)
+              busy=$(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active' AND query ILIKE 'COPY laplace.%'" || echo 0)
+              if [[ "${busy:-0}" != 0 ]]; then
+                echo "::error::$busy active ingest COPY session(s); refusing structural mutation instead of waiting for hours"
                 exit 1
               fi
-              echo "::warning::'$op' authorized: dropping ${{ inputs.database }}. Existing substrate/corpus data is lost."
-              echo "::notice::recreate uses the already-installed database runtime; it does not build or ingest repository source."
-              ;;
-            remigrate)
-              echo "::notice::'$op' re-applies all migrations; substrate data is preserved."
-              ;;
-            *)
-              echo "'$op' is non-destructive."
               ;;
           esac
 
-      - name: Guard — wait for the current ingest owner
-        if: inputs.operation == 'recreate' || inputs.operation == 'remigrate' || inputs.operation == 'reindex'
-        timeout-minutes: 305
-        run: bash scripts/wait-for-quiet-substrate.sh "${{ inputs.database }}"
+          migration=""
+          for candidate in \
+            "${LAPLACE_BUILD_ROOT:-}/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll" \
+            "$PWD/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"; do
+            [[ "$candidate" == /* && -f "$candidate" ]] || continue
+            migration="$candidate"
+            break
+          done
 
-      - name: Status (read-only)
-        if: inputs.operation == 'status'
-        run: |
-          set +e
-          rc=0
-          if [ -n "${LAPLACE_BUILD_ROOT:-}" ]; then
-            migration="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll"
-          else
-            migration="$PWD/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
-          fi
-          test -f "$migration" || rc=1
-          dotnet "$migration" status || rc=1
-          echo "----- extension -----"
-          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
-            "SELECT extname, extversion FROM pg_extension WHERE extname LIKE 'laplace%'" || rc=1
-          echo "----- substrate -----"
-          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
-            "SET search_path=laplace,public; SELECT * FROM substrate_health()" || rc=1
-          echo "----- index health -----"
-          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
-            "SELECT t.relname AS table, count(*) FILTER (WHERE NOT i.indisvalid) AS invalid, count(*) AS total
-             FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_class t ON t.oid=i.indrelid
-             JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='laplace'
-             GROUP BY 1 HAVING count(*) FILTER (WHERE NOT i.indisvalid) > 0 ORDER BY 2 DESC" || rc=1
-          echo "----- ingest journal -----"
-          psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
-            "SET search_path=laplace,public; SELECT source_name, status, attestations, ended_at FROM ingest_run_journal ORDER BY started_at DESC LIMIT 20" || rc=1
-          exit $rc
-
-      - name: Migrate
-        if: inputs.operation == 'migrate'
-        run: bash scripts/pipeline.sh migrate
-
-      - name: Repair database runtime
-        if: inputs.operation == 'repair'
-        run: bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc
-
-      - name: Reindex — rebuild INVALID indexes
-        if: inputs.operation == 'reindex'
-        run: |
-          P(){ psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -v ON_ERROR_STOP=1 -tAc "$1"; }
-          list(){ P "SELECT n.nspname || '.' || c.relname || E'\t' || pg_get_indexdef(i.indexrelid)
-                     FROM pg_index i
-                     JOIN pg_class c ON c.oid=i.indexrelid
-                     JOIN pg_class t ON t.oid=i.indrelid
-                     JOIN pg_namespace n ON n.oid=c.relnamespace
-                     WHERE NOT i.indisvalid
-                     ORDER BY CASE t.relname WHEN 'consensus' THEN 0 WHEN 'entities' THEN 1
-                              WHEN 'physicalities' THEN 2 ELSE 3 END, c.relname"; }
-          invalid=$(list)
-          [ -z "$invalid" ] && { echo "::notice::no invalid indexes — nothing to do"; exit 0; }
-          echo "rebuilding $(echo "$invalid" | wc -l) invalid index(es):"
-          rc=0
-          while IFS=$'\t' read -r idx def; do
-            def_recursive=${def/ ON ONLY / ON }
-            echo "--- $idx"
-            P "DROP INDEX IF EXISTS $idx" || { rc=1; continue; }
-            P "$def_recursive" || rc=1
-          done <<< "$invalid"
-          remaining=$(P "SELECT count(*) FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid
-                         JOIN pg_namespace n ON n.oid=t.relnamespace
-                         WHERE n.nspname='laplace' AND NOT i.indisvalid")
-          echo "invalid indexes remaining: $remaining"
-          [ "$rc" -eq 0 ] && [ "$remaining" = "0" ] || { echo "::error::reindex incomplete — $remaining invalid remain"; exit 1; }
-
-      - name: Remigrate (reset + up)
-        if: inputs.operation == 'remigrate'
-        run: |
-          if [ -n "${LAPLACE_BUILD_ROOT:-}" ]; then
-            migration="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll"
-          else
-            migration="$PWD/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
-          fi
-          test -f "$migration"
-          dotnet "$migration" reset --yes
-          bash scripts/pipeline.sh migrate
-
-      - name: Recreate database structure from installed runtime
-        if: inputs.operation == 'recreate'
-        run: |
-          bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc
-          bash scripts/check-database-health.sh "${{ inputs.database }}"
-
-      - name: Verify structural database health
-        if: inputs.operation != 'status'
-        run: bash scripts/check-database-health.sh "${{ inputs.database }}"
+          case "$op" in
+            status)
+              [[ -n "$migration" ]] || { echo "::error::prebuilt migration runtime not found"; exit 1; }
+              dotnet "$migration" status
+              bash scripts/check-database-health.sh "$db"
+              ;;
+            migrate)
+              bash scripts/pipeline.sh migrate
+              bash scripts/check-database-health.sh "$db"
+              ;;
+            repair)
+              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc
+              bash scripts/check-database-health.sh "$db"
+              ;;
+            remigrate)
+              [[ -n "$migration" ]] || { echo "::error::prebuilt migration runtime not found"; exit 1; }
+              dotnet "$migration" reset --yes
+              bash scripts/pipeline.sh migrate
+              bash scripts/check-database-health.sh "$db"
+              ;;
+            recreate)
+              bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc
+              bash scripts/check-database-health.sh "$db"
+              ;;
+            reindex)
+              P(){ psql -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
+              while IFS=$'\t' read -r idx def; do
+                [[ -n "$idx" ]] || continue
+                def=${def/ ON ONLY / ON }
+                echo "rebuilding $idx"
+                P "DROP INDEX IF EXISTS $idx"
+                P "$def"
+              done < <(P "SELECT n.nspname || '.' || c.relname || E'\\t' || pg_get_indexdef(i.indexrelid) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='laplace' AND NOT i.indisvalid ORDER BY c.relname")
+              remaining=$(P "SELECT count(*) FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='laplace' AND NOT i.indisvalid")
+              [[ "$remaining" == 0 ]] || { echo "::error::$remaining invalid indexes remain"; exit 1; }
+              bash scripts/check-database-health.sh "$db"
+              ;;
+          esac
