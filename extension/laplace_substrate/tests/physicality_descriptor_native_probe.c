@@ -19,6 +19,7 @@ static unsigned checks;
 static jmp_buf expected_error;
 static bool expecting_error;
 static char error_text[512];
+static char error_detail[512];
 static int error_code;
 static unsigned spi_calls;
 static unsigned spi_prepare_calls;
@@ -49,7 +50,7 @@ SPITupleTable *SPI_tuptable;
 #define CHECK(expression) do { ++checks; if (!(expression)) { \
     fprintf(stderr, "check failed at %s:%d: %s\n", __FILE__, __LINE__, #expression); exit(1); } } while (0)
 #define REFUSES(expression, fragment) do { \
-    expecting_error = true; error_text[0] = 0; \
+    expecting_error = true; error_text[0] = 0; error_detail[0] = 0; \
     if (setjmp(expected_error) == 0) { expression; CHECK(false); } \
     expecting_error = false; CHECK(strstr(error_text, fragment) != NULL); \
 } while (0)
@@ -59,6 +60,9 @@ bool errstart_cold(int level, const char *domain) { return errstart(level, domai
 int errcode(int code) { error_code = code; return 0; }
 int errmsg(const char *format, ...) {
     va_list args; va_start(args, format); vsnprintf(error_text, sizeof(error_text), format, args); va_end(args); return 0;
+}
+int errdetail(const char *format, ...) {
+    va_list args; va_start(args, format); vsnprintf(error_detail, sizeof(error_detail), format, args); va_end(args); return 0;
 }
 int set_errcontext_domain(const char *domain) { (void)domain; return 0; }
 int errcontext_msg(const char *format, ...) { (void)format; return 0; }
@@ -502,6 +506,7 @@ int main(void) {
         memcpy(tuples + coordinate_x, saved, sizeof(saved));
         REFUSES(admission_capture_source(invalid, &basis, 2), "original-form capture");
         CHECK(error_code == ERRCODE_INVALID_PARAMETER_VALUE);
+        CHECK(strstr(error_detail, "phase=original-form descriptor validation ") != NULL);
         CHECK(invalid->source.count == 0 && invalid->source.items == NULL);
         CHECK(invalid->capture != NULL && invalid->source_validation == NULL);
         admission_cleanup(invalid);
