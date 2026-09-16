@@ -1,389 +1,127 @@
-name: Build install and record exact source in the authoritative checkout
+name: Observe and preserve the actual authoritative checkout state
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
 permissions:
   contents: read
 jobs:
-  native:
+  inventory:
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 200
-    env:
-      TARGET_SHA: 3dc7739712f3da1cc24da318b0312a00e2aa8752
-      TARGET_TREE: f00c038775dce77e64d97cc6476cf31166ae17ba
-      LAPLACE_EXTERNAL: /build/external
-      LAPLACE_INSTALL_PREFIX: /opt/laplace
-      LAPLACE_PG_PREFIX: /opt/laplace/pgsql-18
-      PGHOST: /var/run/postgresql
-      PGPORT: '5432'
-      PGUSER: laplace_admin
-      PGDATABASE: laplace
-      LAPLACE_DATA_ROOT: /vault/Data
-      MSBUILDDISABLENODEREUSE: '1'
-      UseSharedCompilation: 'false'
+    timeout-minutes: 4
     steps:
-      - name: Prepare retained native execution paths
+      - name: Inventory exact dirty paths and preserve tracked bytes
         shell: bash
         run: |
           set -euo pipefail
-          evidence="/build/laplace/recovery/native-install/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          mkdir -p "$evidence"
-          chmod 0700 "$evidence"
-          echo "NATIVE_EVIDENCE=$evidence" >> "$GITHUB_ENV"
-      - name: Execute existing native dependency build proof and install owners
-        id: native
-        shell: bash
-        run: |
-          set -euo pipefail
-          timeout --signal=TERM --kill-after=300s 10500s \
-            flock --exclusive --no-fork --timeout 1800 /build/laplace/work/host-resource.lock \
-            timeout --signal=TERM --kill-after=300s 8700s bash -s <<'NATIVE' 2>&1 | tee "$NATIVE_EVIDENCE/execution.log"
-          set -euo pipefail
-          umask 0002
-          export TMPDIR="$NATIVE_EVIDENCE/tmp" TMP="$NATIVE_EVIDENCE/tmp" TEMP="$NATIVE_EVIDENCE/tmp"
-          mkdir -p "$TMPDIR"
-          cd "$GITHUB_WORKSPACE"
-          timeout 120s git fetch --no-tags origin "$TARGET_SHA"
-          [[ ! -L "$GITHUB_WORKSPACE" && "$(pwd -P)" == "$GITHUB_WORKSPACE" ]]
-          [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || { echo "existing authoritative checkout changes preserved; native execution refused"; exit 1; }
-          export NATIVE_PREVIOUS_CHECKOUT_SHA="$(git rev-parse HEAD)"
-          git checkout --detach "$TARGET_SHA"
-          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" && "$(git rev-parse HEAD^{tree})" == "$TARGET_TREE" ]]
-          [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || { echo "selected authoritative checkout is not clean; native execution refused"; exit 1; }
-          export NATIVE_SOURCE_ROOT="$PWD"
-          unset LAPLACE_BUILD_ROOT
-          export LAPLACE_ENGINE_BUILD="$PWD/build/engine"
-          export LAPLACE_CORPUS_EVIDENCE="$NATIVE_EVIDENCE"
-          python3 scripts/place-build-directory.py "$PWD"
-          export LAPLACE_BUILD_ROOT="$(realpath "$PWD/build")"
-          mkdir -p "$TMPDIR" "$NATIVE_EVIDENCE/private"
-          chmod 0700 "$TMPDIR" "$NATIVE_EVIDENCE/private"
-          export LAPLACE_CI_SESSION_DIRECTORY="$NATIVE_EVIDENCE/private"
-          export LAPLACE_REGRESS_DB="laplace_pr_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
-          set +u
-          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
-          set -u
-          cmake_bin="$(python3 scripts/provision-cmake.py --root /opt/laplace/tools/cmake --work /build/laplace/work/cmake --ensure)"
-          export PATH="$cmake_bin:/opt/laplace/pgsql-18/bin:$PATH"
-          export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
-          export LAPLACE_DB='Host=/var/run/postgresql;Username=laplace_admin;Database=laplace'
-          export LAPLACE_QUERY_DB=laplace
-          export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
-          export CTEST_PARALLEL_LEVEL="${CTEST_PARALLEL_LEVEL:-$(nproc)}"
-          phase() {
-            local name="$1"; shift
-            echo "NATIVE_PHASE $name running $(date -u +%FT%TZ)"
-            "$@"
-            printf '%s\n' "$name" >> "$NATIVE_EVIDENCE/completed-phases.txt"
-            echo "NATIVE_PHASE $name passed $(date -u +%FT%TZ)"
-          }
-          python3 - <<'PY'
-          import json, os, pathlib, stat, subprocess
-          paths=["/build/external/PINS.tsv","/build/external/postgresql","/build/external/postgresql/.git","/opt/laplace/pgsql-18"]
-          for name in paths:
-              p=pathlib.Path(name); s=p.lstat()
-              if p.is_symlink() or s.st_uid != os.getuid() or not os.access(p,os.W_OK):
-                  raise SystemExit("native owner access changed: "+name)
-          repo="/build/external/postgresql"
-          tracked=subprocess.check_output(["git","-c","safe.directory="+repo,"-C",repo,"status","--porcelain","--untracked-files=no"],text=True)
-          if tracked: raise SystemExit("PostgreSQL tracked user changes preserved; source update refused")
-          selected=json.loads(pathlib.Path("deploy/postgresql-release.json").read_text())
-          if selected["commit"]!="724edf9bde9d356724ad384a2e196edc3c9f80f7" or selected["version"]!="18.6":
-              raise SystemExit("selected release differs from reviewed official PostgreSQL18.6")
-          output={"schema":"laplace.native-only-install/v1","status":"running","source":os.environ["TARGET_SHA"],
-                  "tree":os.environ["TARGET_TREE"],"operatorSource":os.environ["GITHUB_SHA"],
-                  "runId":os.environ["GITHUB_RUN_ID"],"attempt":os.environ["GITHUB_RUN_ATTEMPT"],
-                  "uid":os.getuid(),"checkout":str(pathlib.Path.cwd().resolve()),
-                  "managedPublication":"not_attempted","fullLifecyclePassed":False,
-                  "databaseRecreation":False,"foundationIngestion":False,"postgresqlSelection":selected}
-          pathlib.Path(os.environ["NATIVE_EVIDENCE"],"selection.json").write_text(json.dumps(output,indent=2)+"\n")
-          PY
-          API_WAS_ACTIVE=0
-          NATIVE_INSTALL_STARTED=0
-          REGRESSION_STARTED=0
-          REGRESSION_CLEANED=0
-          native_cleanup() {
-            original_status=$?
-            trap - EXIT
-            trap '' TERM INT
-            set +e
-            regression_cleanup_status=0
-            api_recovery_status=0
-            if [[ "$REGRESSION_STARTED" == 1 && "$REGRESSION_CLEANED" != 1 ]]; then
-              timeout --signal=TERM --kill-after=10s 60s ctest --test-dir build --output-on-failure -j 1 -R '^regress_teardown_laplace_(geom|substrate)$' > "$NATIVE_EVIDENCE/regression-cleanup.log" 2>&1
-              regression_cleanup_status=$?
-            fi
-            if [[ "$NATIVE_INSTALL_STARTED" == 1 && "$API_WAS_ACTIVE" == 1 ]] && ! /usr/bin/systemctl is-active --quiet laplace-api.service; then
-              timeout --signal=TERM --kill-after=10s 120s sudo -n /usr/bin/systemctl start laplace-api.service > "$NATIVE_EVIDENCE/api-state-recovery.log" 2>&1
-              api_recovery_status=$?
-              if [[ "$api_recovery_status" == 0 ]]; then
-                timeout --signal=TERM --kill-after=10s 70s python3 scripts/verify-application-release.py --base http://127.0.0.1:5187 --readiness-only --state-file "$NATIVE_EVIDENCE/api-recovered-readiness.json" --timeout-seconds 60 >> "$NATIVE_EVIDENCE/api-state-recovery.log" 2>&1
-                api_recovery_status=$?
-              fi
-            fi
-            printf '{"originalExit":%s,"apiInitiallyActive":%s,"regressionCleanupExit":%s,"apiRecoveryExit":%s}\n' "$original_status" "$API_WAS_ACTIVE" "$regression_cleanup_status" "$api_recovery_status" > "$NATIVE_EVIDENCE/cleanup.json"
-            if [[ "$original_status" == 0 && "$regression_cleanup_status" != 0 ]]; then original_status="$regression_cleanup_status"; fi
-            if [[ "$original_status" == 0 && "$api_recovery_status" != 0 ]]; then original_status="$api_recovery_status"; fi
-            exit "$original_status"
-          }
-          trap native_cleanup EXIT
-          trap 'exit 143' TERM
-          trap 'exit 130' INT
-          phase pg-pin python3 scripts/postgresql-release.py select-pin --external /build/external
-          if ! git -c safe.directory=/build/external/postgresql -C /build/external/postgresql cat-file -e 724edf9bde9d356724ad384a2e196edc3c9f80f7^{commit}; then
-            phase pg-fetch timeout 180s git -c safe.directory=/build/external/postgresql -C /build/external/postgresql fetch --no-tags https://git.postgresql.org/git/postgresql.git 724edf9bde9d356724ad384a2e196edc3c9f80f7
-          fi
-          phase pg-checkout git -c safe.directory=/build/external/postgresql -C /build/external/postgresql checkout --detach 724edf9bde9d356724ad384a2e196edc3c9f80f7
-          phase pg-source python3 scripts/postgresql-release.py source --external /build/external
-          phase dependency-build bash scripts/build-system-deps.sh
-          phase dependency-identity python3 scripts/postgresql-release.py installed --prefix /opt/laplace/pgsql-18
-          build_and_register() {
-            bash scripts/pipeline.sh build --force-all
-            cmake -S "$PWD" -B "$PWD/build"
-            ctest --test-dir build --show-only=json-v1 -L regress > "$NATIVE_EVIDENCE/regression-registration.json"
-            python3 - <<'PY'
-          import json, os, pathlib, re
-          stem=os.environ["LAPLACE_REGRESS_DB"]
-          assert re.fullmatch(r"laplace_pr_[0-9]+_[0-9]+",stem)
-          document=json.loads(pathlib.Path(os.environ["NATIVE_EVIDENCE"],"regression-registration.json").read_text())
-          tests=document["tests"]
-          expected={prefix+"laplace_"+kind for prefix in ("regress_","regress_setup_","regress_teardown_") for kind in ("geom","substrate")}
-          assert len(tests)==6 and {test["name"] for test in tests}==expected
-          for test in tests:
-              kind="substrate" if test["name"].endswith("_substrate") else "geom"
-              database=stem+"_"+kind
-              command=test["command"]
-              found=re.findall(r"laplace_(?:pr_[0-9]+_[0-9]+|regress)_(?:geom|substrate)"," ".join(command))
-              assert found and set(found)=={database},test["name"]
-              assert "/opt/laplace/pgsql-18/" in " ".join(command),test["name"]
-              if test["name"]=="regress_laplace_"+kind:
-                  assert "--dbname="+database in command and "--use-existing" in command
-          print("CURRENT_NATIVE_REGRESSION_REGISTRATION "+json.dumps({"databaseStem":stem,"tests":sorted(expected)}),flush=True)
-          PY
-          }
-          phase native-managed-build build_and_register
-          phase native-tests bash scripts/test-parallel.sh --profile dev-native --suite native-dev
-          phase managed-tests bash scripts/test-parallel.sh --profile dev-managed --suite managed-dev
-          phase uci-tests bash scripts/test-parallel.sh --profile dev-managed --suite uci-dev
-          phase quiet-native-owner bash scripts/wait-for-quiet-substrate.sh laplace 300
-          if /usr/bin/systemctl is-active --quiet laplace-api.service; then API_WAS_ACTIVE=1; fi
-          NATIVE_INSTALL_STARTED=1
-          phase native-install bash scripts/pipeline.sh install
-          phase extension-sql bash scripts/pipeline.sh sync-extension
-          REGRESSION_STARTED=1
-          phase installed-native-database bash scripts/test-parallel.sh --profile db --suite native-db --serial
-          REGRESSION_CLEANED=1
-          phase database-health bash scripts/check-database-health.sh laplace
-          running="$(psql -X -d postgres -U laplace_admin -Atqc 'SHOW server_version_num')"
-          [[ "$running" == 180006 ]]
-          phase postgres-activation python3 scripts/postgresql-release.py restart-needed --prefix /opt/laplace/pgsql-18 --server-version-num "$running"
-          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
-          python3 - <<'PY'
-          import hashlib,importlib.util,json,os,pathlib,subprocess,sys
-          selected_root=pathlib.Path.cwd().resolve()
-          guard_spec=importlib.util.spec_from_file_location("selected_native_install_guard",selected_root/"scripts/check-application-runtime.py")
-          guard=importlib.util.module_from_spec(guard_spec)
-          sys.modules[guard_spec.name]=guard
-          guard_spec.loader.exec_module(guard)
-          selected_build_identity=guard.build_identity(selected_root,pathlib.Path(os.environ["LAPLACE_INSTALL_PREFIX"]))
-          root=pathlib.Path(os.environ["NATIVE_EVIDENCE"])
-          files=["/opt/laplace/lib/liblaplace_core.so","/opt/laplace/pgsql-18/bin/postgres",
-                 "/opt/laplace/pgsql-18/bin/pg_config"]
-          identities={}
-          for name in files:
-              p=pathlib.Path(name); h=hashlib.sha256()
-              with p.open("rb") as stream:
-                  for chunk in iter(lambda:stream.read(1048576),b""):h.update(chunk)
-              identities[name]={"path":str(p.resolve()),"bytes":p.stat().st_size,"sha256":h.hexdigest()}
-          outcome={"schema":"laplace.native-only-install/v1","status":"completed","source":os.environ["TARGET_SHA"],
-                   "tree":os.environ["TARGET_TREE"],"runId":os.environ["GITHUB_RUN_ID"],"attempt":os.environ["GITHUB_RUN_ATTEMPT"],
-                   "completedPhases":(root/"completed-phases.txt").read_text().splitlines(),"identities":identities,
-                   "executionRoute":"direct-installed-regression","regressionDatabaseStem":os.environ["LAPLACE_REGRESS_DB"],
-                   "checkout":str(pathlib.Path.cwd().resolve()),"buildDirectory":str(pathlib.Path("build").resolve(strict=True)),
-                   "buildIdentity":selected_build_identity,
-                   "serverVersionNum":180006,"managedPublication":"not_attempted","fullLifecyclePassed":False,
-                   "databaseRecreation":False,"foundationIngestion":False}
-          (root/"receipt.json").write_text(json.dumps(outcome,indent=2)+"\n")
-          print("NATIVE_INSTALL_RESULT "+json.dumps(outcome),flush=True)
-          PY
-          python3 - <<'PY'
-          import json, os, subprocess
-          # Read-only context is diagnostic; the writer owns admission serialization.
-          import base64, pathlib
-          journal_sql = base64.b64decode("QkVHSU4gUkVBRCBPTkxZOwpTRVQgTE9DQUwgc3RhdGVtZW50X3RpbWVvdXQ9JzVzJzsgU0VUIExPQ0FMIGxvY2tfdGltZW91dD0nMXMnOwpXSVRIIGpvdXJuYWwgQVMgKAogU0VMRUNUIENBU0Ugc291cmNlX25hbWUgV0hFTiAnVW5pY29kZURlY29tcG9zZXInIFRIRU4gJ3VuaWNvZGUnIFdIRU4gJ0NoZXNzUGduRGVjb21wb3NlcicgVEhFTiAnY2hlc3MtcGduJyBXSEVOICdXb3JkTmV0RGVjb21wb3NlcicgVEhFTiAnd29yZG5ldCcgRUxTRSAnb3RoZXInIEVORCBzb3VyY2VfZmFtaWx5LAogQ0FTRSBXSEVOIHN0YXR1cyBJTiAoJ3J1bm5pbmcnLCdvaycsJ2ZhaWxlZCcsJ2VtcHR5LW5vb3AnLCdjYXBwZWQnLCdjYW5jZWxsZWQnLCdza2lwcGVkLWNvbXBsZXRlJywnYWxyZWFkeS1wcmVzZW50JywnYWxyZWFkeS1jb21wbGV0ZScsJ2RlcGVuZGVuY3ktdW5zZXQnKSBUSEVOIHN0YXR1cyBFTFNFICdvdGhlcicgRU5EIHN0YXR1cywKIGNvdW50KCopIHJ1bnMsbWluKHN0YXJ0ZWRfYXQpIG9sZGVzdF9zdGFydGVkLG1heChzdGFydGVkX2F0KSBuZXdlc3Rfc3RhcnRlZCwKIHN1bSh1bml0c19hdHRlbXB0ZWQpIHVuaXRzX2F0dGVtcHRlZCxzdW0odW5pdHNfYXBwbGllZCkgdW5pdHNfYXBwbGllZCxzdW0odW5pdHNfZmFpbGVkKSB1bml0c19mYWlsZWQsCiBzdW0oZW50aXRpZXMpIGVudGl0aWVzLHN1bShwaHlzaWNhbGl0aWVzKSBwaHlzaWNhbGl0aWVzLHN1bShhdHRlc3RhdGlvbnMpIGF0dGVzdGF0aW9ucyxzdW0oZmlsZXNfZG9uZSkgZmlsZXNfZG9uZSxzdW0oZmlsZXNfdG90YWwpIGZpbGVzX3RvdGFsCiBGUk9NIGxhcGxhY2UuaW5nZXN0X3J1bl9qb3VybmFsIEdST1VQIEJZIDEsIDIKKSwgYWN0aXZpdHkgQVMgTUFURVJJQUxJWkVEICgKIFNFTEVDVCBwaWQsYmFja2VuZF9zdGFydCxzdGF0ZSx4YWN0X3N0YXJ0LHF1ZXJ5X3N0YXJ0LHdhaXRfZXZlbnRfdHlwZSx3YWl0X2V2ZW50LAogQ0FTRSBXSEVOIHF1ZXJ5IElTIE5VTEwgT1IgcXVlcnk9JzxpbnN1ZmZpY2llbnQgcHJpdmlsZWdlPicgVEhFTiAnbm90LXZpc2libGUnCiBXSEVOIHN0YXRlIElTIE5VTEwgVEhFTiAndW5rbm93bi1zdGF0ZScgV0hFTiBzdGF0ZT0naWRsZScgVEhFTiAnaWRsZS1sYXN0LXF1ZXJ5LW5vdC1jbGFzc2lmaWVkJwogV0hFTiBwb3NpdGlvbignb3BzLnBoeXNpY2FsaXR5X2Rlc2NyaXB0b3JfbWF0ZXJpYWxpemUnIGluIHF1ZXJ5KT4wIFRIRU4gJ3BoeXNpY2FsaXR5LWRlc2NyaXB0b3ItbWF0ZXJpYWxpemUnCiBXSEVOIHF1ZXJ5IH4qICdeW1s6c3BhY2U6XV0qQ09QWVtbOnNwYWNlOl1dJyBUSEVOICdjb3B5JwogV0hFTiBwb3NpdGlvbigncGdfYWR2aXNvcnlfeGFjdF9sb2NrJyBpbiBxdWVyeSk+MCBUSEVOICdhZHZpc29yeS10cmFuc2FjdGlvbi1sb2NrJyBFTFNFICdvdGhlcicgRU5EIHF1ZXJ5X2NsYXNzCiBGUk9NIHBnX3N0YXRfYWN0aXZpdHkgV0hFUkUgZGF0bmFtZT1jdXJyZW50X2RhdGFiYXNlKCkgQU5EIGJhY2tlbmRfdHlwZT0nY2xpZW50IGJhY2tlbmQnIEFORCBwaWQ8PnBnX2JhY2tlbmRfcGlkKCkKKSwgYm91bmRlZCBBUyAoU0VMRUNUICogRlJPTSBhY3Rpdml0eSBPUkRFUiBCWSBiYWNrZW5kX3N0YXJ0LCBwaWQgTElNSVQgNjQpClNFTEVDVCBqc29uYl9idWlsZF9vYmplY3QoJ3NjaGVtYScsJ2xhcGxhY2UucmVjb3JkaW5nLWluZ2VzdC1vYnNlcnZhdGlvbi92MScsJ29ic2VydmVkX2F0JyxjbG9ja190aW1lc3RhbXAoKSwnZGF0YWJhc2UnLGN1cnJlbnRfZGF0YWJhc2UoKSwncG9zdG1hc3Rlcl9zdGFydGVkJyxwZ19wb3N0bWFzdGVyX3N0YXJ0X3RpbWUoKSwKICdydW5uaW5nX2luZ2VzdHMnLChTRUxFQ1QgY291bnQoKikgRlJPTSBsYXBsYWNlLmluZ2VzdF9ydW5fam91cm5hbCBXSEVSRSBzdGF0dXM9J3J1bm5pbmcnKSwKICdqb3VybmFsX2dyb3VwcycsQ09BTEVTQ0UoKFNFTEVDVCBqc29uYl9hZ2coanNvbmJfYnVpbGRfb2JqZWN0KCdzb3VyY2VfZmFtaWx5Jyxzb3VyY2VfZmFtaWx5LCdzdGF0dXMnLHN0YXR1cywncnVucycscnVucywnb2xkZXN0X2FnZV9zZWNvbmRzJyxHUkVBVEVTVCgwLEVYVFJBQ1QoRVBPQ0ggRlJPTSBzdGF0ZW1lbnRfdGltZXN0YW1wKCktb2xkZXN0X3N0YXJ0ZWQpKSwnbmV3ZXN0X2FnZV9zZWNvbmRzJyxHUkVBVEVTVCgwLEVYVFJBQ1QoRVBPQ0ggRlJPTSBzdGF0ZW1lbnRfdGltZXN0YW1wKCktbmV3ZXN0X3N0YXJ0ZWQpKSwndW5pdHNfYXR0ZW1wdGVkJyx1bml0c19hdHRlbXB0ZWQsJ3VuaXRzX2FwcGxpZWQnLHVuaXRzX2FwcGxpZWQsJ3VuaXRzX2ZhaWxlZCcsdW5pdHNfZmFpbGVkLCdlbnRpdGllcycsZW50aXRpZXMsJ3BoeXNpY2FsaXRpZXMnLHBoeXNpY2FsaXRpZXMsJ2F0dGVzdGF0aW9ucycsYXR0ZXN0YXRpb25zLCdmaWxlc19kb25lJyxmaWxlc19kb25lLCdmaWxlc190b3RhbCcsZmlsZXNfdG90YWwpIE9SREVSIEJZIHNvdXJjZV9mYW1pbHksc3RhdHVzKSBGUk9NIGpvdXJuYWwpLCdbXSc6Ompzb25iKSwKICdjbGllbnRfYmFja2VuZHNfdG90YWwnLChTRUxFQ1QgY291bnQoKikgRlJPTSBhY3Rpdml0eSksJ2NsaWVudF9iYWNrZW5kc190cnVuY2F0ZWQnLChTRUxFQ1QgY291bnQoKik+NjQgRlJPTSBhY3Rpdml0eSksCiAnY2xpZW50X2JhY2tlbmRzJyxDT0FMRVNDRSgoU0VMRUNUIGpzb25iX2FnZyhqc29uYl9idWlsZF9vYmplY3QoJ3BpZCcscGlkLCdiYWNrZW5kX3N0YXJ0JyxiYWNrZW5kX3N0YXJ0LCdzdGF0ZScsc3RhdGUsJ3RyYW5zYWN0aW9uX2FnZV9zZWNvbmRzJyxDQVNFIFdIRU4geGFjdF9zdGFydCBJUyBOVUxMIFRIRU4gTlVMTCBFTFNFIEdSRUFURVNUKDAsRVhUUkFDVChFUE9DSCBGUk9NIHN0YXRlbWVudF90aW1lc3RhbXAoKS14YWN0X3N0YXJ0KSkgRU5ELCdxdWVyeV9hZ2Vfc2Vjb25kcycsQ0FTRSBXSEVOIHN0YXRlPSdpZGxlJyBPUiBxdWVyeV9zdGFydCBJUyBOVUxMIFRIRU4gTlVMTCBFTFNFIEdSRUFURVNUKDAsRVhUUkFDVChFUE9DSCBGUk9NIHN0YXRlbWVudF90aW1lc3RhbXAoKS1xdWVyeV9zdGFydCkpIEVORCwnd2FpdF9ldmVudF90eXBlJyx3YWl0X2V2ZW50X3R5cGUsJ3dhaXRfZXZlbnQnLHdhaXRfZXZlbnQsJ3F1ZXJ5X2NsYXNzJyxxdWVyeV9jbGFzcykgT1JERVIgQlkgYmFja2VuZF9zdGFydCxwaWQpIEZST00gYm91bmRlZCksJ1tdJzo6anNvbmIpKTsKUk9MTEJBQ0s7Cg==").decode("ascii")
-          observation_root = pathlib.Path(os.environ["LAPLACE_CORPUS_EVIDENCE"])
-          (observation_root / "ingest-observation.sql").write_text(journal_sql)
-          journal_environment = {k: v for k, v in os.environ.items() if not k.startswith("PG")}
-          journal_environment["PGOPTIONS"] = "-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=1000"
-          try:
-              observed = subprocess.run([os.environ["LAPLACE_PG_PREFIX"] + "/bin/psql",
-                  "-X", "-w", "-qAt", "-h", "/var/run/postgresql", "-p", "5432",
-                  "-U", "laplace_admin", "-d", "laplace", "-v", "ON_ERROR_STOP=1",
-                  "-c", journal_sql], env=journal_environment, stdin=subprocess.DEVNULL,
-                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=20, check=True)
-              if len(observed.stdout) > 131072:
-                  raise ValueError("ingest observation output bound exceeded")
-              observation = {"status": "observed", "scope": "Global operational journal and same-database clients; no process ownership or recorded-game attribution.",
-                             "value": json.loads(observed.stdout)}
-          except (OSError, ValueError, subprocess.SubprocessError) as error:
-              observation = {"status": "unavailable", "errorType": type(error).__name__}
-          (observation_root / "ingest-observation.json").write_text(json.dumps(observation, sort_keys=True) + "\n")
-          print("CORPUS_INGEST_OBSERVATION " + json.dumps(observation, sort_keys=True), flush=True)
-          PY
-          phase authentic-corpus-recording python3 scripts/chess-runtime-env.py --prefix "$LAPLACE_INSTALL_PREFIX" -- \
-            python3 scripts/measure-installed-chess-corpus.py --mode measure --expected-source "$TARGET_SHA" \
-            --output-dir "$NATIVE_EVIDENCE/corpus" --family otb-2025 --games 2000 --deadline-seconds 3600 \
-            --pgn /vault/Data/Games/Chess/Lumbras/otb/LumbrasGigaBase_OTB_2025.pgn
-          NATIVE
-      - name: Observe fixed public managed service state
-        if: always()
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json,pathlib,subprocess,os
-          rows=[]
-          for service in ("mcp","lichess"):
+          export SOURCE_EVIDENCE="/build/laplace/recovery/source-inventory/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$SOURCE_EVIDENCE"
+          chmod 0700 "$SOURCE_EVIDENCE"
+          echo "SOURCE_EVIDENCE=$SOURCE_EVIDENCE" >> "$GITHUB_ENV"
+          timeout --signal=TERM --kill-after=5s 150s python3 -B - <<'PY'
+          import hashlib,json,os,pathlib,shutil,stat,subprocess,time
+          root=pathlib.Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          out=pathlib.Path(os.environ["SOURCE_EVIDENCE"])
+          private=out/"private"
+          private.mkdir(mode=0o700)
+          def git(*args):
+              result=subprocess.run(["git",*args],cwd=root,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+              if result.returncode:
+                  raise RuntimeError("git command failed: "+args[0]+" rc="+str(result.returncode))
+              if len(result.stdout)>8*1024*1024: raise RuntimeError("git metadata budget exceeded")
+              return result.stdout
+          def tree(revision):
+              rows={}
+              for entry in git("ls-tree","-r","-z",revision).split(b"\0"):
+                  if not entry: continue
+                  meta,path=entry.split(b"\t",1)
+                  mode,kind,sha=meta.decode().split()
+                  rows[os.fsdecode(path)]={"mode":mode,"type":kind,"blob":sha}
+              return rows
+          initial=git("rev-parse","HEAD").decode().strip()
+          git("fetch","--no-tags","origin","main")
+          target=git("rev-parse","--verify","FETCH_HEAD^{commit}").decode().strip()
+          headtree=tree(initial)
+          targettree=tree(target)
+          tracked=set(os.fsdecode(x) for x in git("diff","--name-only","-z","HEAD").split(b"\0") if x)
+          tracked.update(os.fsdecode(x) for x in git("diff","--cached","--name-only","-z","HEAD").split(b"\0") if x)
+          untracked=set(os.fsdecode(x) for x in git("ls-files","--others","--exclude-standard","-z").split(b"\0") if x)
+          selected=sorted(tracked|untracked)
+          proof={"schema":"laplace.checkout-inventory/v1","observedUtc":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),
+                 "checkout":str(root),"head":initial,"latestMain":target,"latestTree":git("rev-parse",target+"^{tree}").decode().strip(),
+                 "trackedCount":len(tracked),"untrackedCount":len(untracked),"rows":[],"reconciliation":"not_attempted"}
+          if len(selected)>256:
+              proof["truncated"]=True
+              selected=selected[:256]
+          total_backup=0
+          for name in selected:
+              path=root/name
+              if pathlib.PurePosixPath(name).is_absolute() or ".." in pathlib.PurePosixPath(name).parts:
+                  raise RuntimeError("non-relative Git path")
+              row={"path":name,"trackedDirty":name in tracked,"untracked":name in untracked,
+                   "headEntry":headtree.get(name),"latestMainEntry":targettree.get(name)}
               try:
-                  p=subprocess.run(["sudo","-n","/usr/local/libexec/laplace-service-control",service,"status"],
-                      stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=15)
-                  row={"service":service,"exitCode":p.returncode,"stderrBytes":len(p.stderr.encode())}
-                  if p.returncode==0:
-                      value=json.loads(p.stdout)
-                      row["status"]={key:value[key] for key in ("unit","load","active","sub","main_pid","enabled","operator_stopped") if key in value}
-                  rows.append(row)
-              except (OSError,ValueError,subprocess.TimeoutExpired) as exc:rows.append({"service":service,"errorType":type(exc).__name__})
-          for unit in ("laplace-api.service","laplace-mcp.service","laplace-lichess.service"):
-              try:
-                  p=subprocess.run(["systemctl","show",unit,"--property=Id,LoadState,ActiveState,SubState,UnitFileState,MainPID,User,Group,FragmentPath"],
-                      stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=10)
-                  rows.append({"unit":unit,"exitCode":p.returncode,"properties":dict(line.split("=",1) for line in p.stdout.splitlines() if "=" in line)})
-              except (OSError,ValueError,subprocess.TimeoutExpired) as exc:rows.append({"unit":unit,"errorType":type(exc).__name__})
-          root=pathlib.Path(os.environ["NATIVE_EVIDENCE"]); (root/"service-status.json").write_text(json.dumps(rows,indent=2)+"\n")
-          print(json.dumps(rows),flush=True)
+                  info=path.lstat()
+              except FileNotFoundError:
+                  row.update(kind="missing",equalsLatestMain=targettree.get(name) is None)
+                  proof["rows"].append(row)
+                  continue
+              row.update(uid=info.st_uid,gid=info.st_gid,mode=oct(stat.S_IMODE(info.st_mode)),bytes=info.st_size)
+              if path.is_symlink():
+                  payload=os.fsencode(os.readlink(path))
+                  row.update(kind="symlink",gitMode="120000")
+              elif stat.S_ISREG(info.st_mode):
+                  row.update(kind="file",gitMode="100755" if info.st_mode&0o111 else "100644")
+                  if info.st_size>16*1024*1024:
+                      row.update(hashUnavailable="file exceeds 16MiB inventory budget",equalsLatestMain=False)
+                      proof["rows"].append(row)
+                      continue
+                  payload=path.read_bytes()
+                  if len(payload)!=info.st_size: raise RuntimeError("file changed while inventorying: "+name)
+              else:
+                  row.update(kind="other",equalsLatestMain=False)
+                  proof["rows"].append(row)
+                  continue
+              row["sha256"]=hashlib.sha256(payload).hexdigest()
+              row["gitBlob"]=hashlib.sha1(b"blob "+str(len(payload)).encode()+b"\0"+payload).hexdigest()
+              expected=targettree.get(name)
+              row["equalsLatestMain"]=bool(expected and expected["blob"]==row["gitBlob"] and expected["mode"]==row["gitMode"])
+              if name in tracked:
+                  total_backup+=len(payload)
+                  if total_backup>64*1024*1024: raise RuntimeError("tracked backup budget exceeded")
+                  backup=private/("tracked-"+str(len(proof["rows"]))+".bytes")
+                  backup.write_bytes(payload)
+                  backup.chmod(0o600)
+                  row["preservedBytes"]=str(backup.relative_to(out))
+              proof["rows"].append(row)
+          proof["sourceStable"]=git("rev-parse","HEAD").decode().strip()==initial
+          (out/"inventory.json").write_text(json.dumps(proof,indent=2)+"\n")
+          print("CHECKOUT_INVENTORY "+json.dumps(proof),flush=True)
+          # Only exact bytes already committed to selected main may be reconciled. A
+          # normal checkout (never force/reset/clean/stash) retains Git's collision checks.
+          if (proof["sourceStable"] and not proof.get("truncated") and not untracked
+                  and all(row.get("equalsLatestMain") for row in proof["rows"])):
+              for row in proof["rows"]:
+                  path=root/row["path"]
+                  if row.get("kind")=="missing":
+                      if path.exists() or path.is_symlink(): raise RuntimeError("missing path changed")
+                  elif row.get("kind")=="symlink":
+                      if hashlib.sha256(os.fsencode(os.readlink(path))).hexdigest()!=row["sha256"]: raise RuntimeError("link changed")
+                  elif hashlib.sha256(path.read_bytes()).hexdigest()!=row["sha256"]: raise RuntimeError("source changed")
+              git("checkout","--detach",target)
+              proof["reconciliation"]="normal_checkout_of_byte_identical_committed_main"
+              proof["afterHead"]=git("rev-parse","HEAD").decode().strip()
+              proof["afterStatus"]=git("status","--porcelain","--untracked-files=normal").decode(errors="replace")
+              (out/"inventory.json").write_text(json.dumps(proof,indent=2)+"\n")
+              print("CHECKOUT_RECONCILIATION "+json.dumps({"head":proof["afterHead"],"status":proof["afterStatus"],"method":proof["reconciliation"]}),flush=True)
+          else:
+              print("CHECKOUT_PRESERVED unique or untracked state requires exact owner diagnosis",flush=True)
+          
           PY
-          set +e
-          export ROOT="$GITHUB_WORKSPACE"
-          export EVIDENCE="$NATIVE_EVIDENCE"
-          export TMPDIR="$NATIVE_EVIDENCE/tmp" TMP="$NATIVE_EVIDENCE/tmp" TEMP="$NATIVE_EVIDENCE/tmp"
-          mkdir -p "$TMPDIR"
-          timeout --signal=TERM --kill-after=10s 600s bash -s <<'MANAGED_READINESS'
-          # Observe the existing services after the owned native/recording operation.
-          # ROOT/EVIDENCE are exact retained paths; no service start/restart/setup occurs.
-          python3 - "$ROOT" "$EVIDENCE" <<'PY'
-          import importlib.util, json, pathlib, sys, time, urllib.error
-          root, output = map(pathlib.Path, sys.argv[1:])
-          spec = importlib.util.spec_from_file_location("service_acceptance", root / "scripts/accept-chess-environment.py")
-          owner = importlib.util.module_from_spec(spec)
-          sys.modules[spec.name] = owner
-          spec.loader.exec_module(owner)
-          output = output / "managed-readiness"
-          output.mkdir(parents=True, exist_ok=False)
-          proof = {"scope": "Existing managed services; current readiness/protocol observation",
-                   "coldBootMeasured": False, "startedUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                   "status": "failed", "observations": {}}
-          owner.save(output / "managed-readiness.json", proof)
-          try:
-              proof["bootId"] = owner.boot_id()
-              proof["unitsBefore"] = owner.unit_states()
-              controls = {}
-              for service in ("mcp", "lichess"):
-                  log = output / (service + "-control-before.json")
-                  owner.command(["sudo", "-n", "--", "/usr/local/libexec/laplace-service-control",
-                                 service, "status"], log, 20)
-                  controls[service] = json.loads(log.read_text())
-              proof["controlsBefore"] = controls
-              for name, port, route in (
-                      ("mcpLive", 5188, "/health/live"), ("mcpReady", 5188, "/health/ready"),
-                      ("lichessLive", 5189, "/health/live"), ("lichessReady", 5189, "/health/ready"),
-                      ("lichessStatus", 5189, "/status")):
-                  try:
-                      raw, transport = owner.response("http://127.0.0.1:" + str(port), route, 65536)
-                      value = json.loads(raw)
-                      projection = (owner.lichess_status(value) if name == "lichessStatus" else
-                                    {key: value[key] for key in ("service", "live", "ready", "connected")
-                                     if key in value and isinstance(value[key], (str, bool))})
-                      proof["observations"][name] = {"http": transport, "value": projection}
-                  except Exception as error:
-                      proof["observations"][name] = {"errorType": type(error).__name__,
-                          "httpStatus": error.code if isinstance(error, urllib.error.HTTPError) else None}
-                  owner.save(output / "managed-readiness.json", proof)
-              # The installed constrained owner reads its own bearer privately and closes
-              # the temporary MCP protocol session. It does not refresh host policy.
-              try:
-                  owner.command(["sudo", "-n", "--", "/usr/local/libexec/laplace-managed-deploy", "verify"],
-                                output / "installed-managed-verify.log", 240)
-                  proof["installedManagedVerifier"] = {"exitCode": 0}
-              except Exception as error:
-                  proof["installedManagedVerifier"] = {"errorType": type(error).__name__}
-              controls = {}
-              for service in ("mcp", "lichess"):
-                  log = output / (service + "-control-after.json")
-                  owner.command(["sudo", "-n", "--", "/usr/local/libexec/laplace-service-control",
-                                 service, "status"], log, 20)
-                  controls[service] = json.loads(log.read_text())
-              proof["controlsAfter"] = controls
-              try:
-                  raw, transport = owner.response("http://127.0.0.1:5189", "/status", 65536)
-                  proof["observations"]["lichessStatusAfter"] = {
-                      "http": transport, "value": owner.lichess_status(json.loads(raw))}
-              except Exception as error:
-                  proof["observations"]["lichessStatusAfter"] = {"errorType": type(error).__name__,
-                      "httpStatus": error.code if isinstance(error, urllib.error.HTTPError) else None}
-              proof["unitsAfter"] = owner.unit_states()
-              proof["sameBoot"] = proof["bootId"] == owner.boot_id()
-              proof["sameServiceInstances"] = proof["unitsBefore"] == proof["unitsAfter"]
-              proof["servicesRunning"] = all(
-                  row.get("pid", 0) > 0 and row.get("activeState") == "active"
-                  and row.get("subState") == "running" for row in proof["unitsAfter"].values())
-              proof["operatorStopsAbsent"] = all(
-                  row.get("operator_stopped") is False
-                  for group in (proof["controlsBefore"], proof["controlsAfter"]) for row in group.values())
-              observed = proof["observations"]
-              proof["mcpReady"] = observed.get("mcpReady", {}).get("value", {}).get("ready") is True
-              proof["lichessAccountStreamReady"] = observed.get("lichessStatusAfter", {}).get("value", {}).get("ready") is True
-              if (proof["sameBoot"] and proof["sameServiceInstances"] and proof["servicesRunning"] and proof["operatorStopsAbsent"]
-                      and proof["mcpReady"] and proof["lichessAccountStreamReady"]
-                      and proof["installedManagedVerifier"].get("exitCode") == 0):
-                  proof["status"] = "passed"
-          except Exception as error:
-              proof["errorType"] = type(error).__name__
-          finally:
-              proof["finishedUtc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-              owner.save(output / "managed-readiness.json", proof)
-              print(json.dumps(proof, sort_keys=True))
-          raise SystemExit(0 if proof["status"] == "passed" else 1)
-          PY
-          MANAGED_READINESS
-          readiness_rc="$?"
-          READINESS_RC="$readiness_rc" python3 - <<'PY'
-          import json, os, pathlib
-          result={"scope":"Read-only installed managed-service readiness observation",
-                  "exitCode":int(os.environ["READINESS_RC"]),
-                  "status":"passed" if os.environ["READINESS_RC"]=="0" else "failed_or_unavailable",
-                  "applicationPublication":"not_attempted"}
-          pathlib.Path(os.environ["NATIVE_EVIDENCE"],"managed-readiness-outcome.json").write_text(json.dumps(result,sort_keys=True)+"\n")
-          print("MANAGED_READINESS_OUTCOME "+json.dumps(result,sort_keys=True))
-          PY
-          # Keep this observation independent of native installation and recording.
-          exit 0
-      - name: Retain native operator outcome
-        if: always()
-        env:
-          NATIVE_OUTCOME: ${{ steps.native.outcome }}
-        run: |
-          python3 - <<'PY'
-          import json,os,pathlib
-          root=pathlib.Path(os.environ["NATIVE_EVIDENCE"])
-          result={"workflowOutcome":os.environ["NATIVE_OUTCOME"],"source":os.environ["TARGET_SHA"],
-                  "applicationPublication":"not_attempted","fullLifecyclePassed":False}
-          (root/"workflow-outcome.json").write_text(json.dumps(result,indent=2)+"\n")
-          print(json.dumps(result))
-          PY
-      - name: Retain native execution evidence
+      - name: Retain source inventory and preserved bytes
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: original-native-install-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.NATIVE_EVIDENCE }}/
+          name: original-source-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.SOURCE_EVIDENCE }}/
           if-no-files-found: error
           retention-days: 30
