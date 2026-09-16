@@ -5,6 +5,9 @@ import importlib.util
 import io
 import json
 import os
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 import tarfile
 import tempfile
@@ -33,11 +36,26 @@ class CMakeProvisionTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def archive(self, invalid=False, executable_failure=False):
+    def archive(self, invalid=False, executable_failure=False, command_fixture=False):
         output = io.BytesIO()
         with tarfile.open(fileobj=output, mode="w:gz") as archive:
             rows = [(f"bin/{tool}", f"#!/bin/sh\n{'exit 8' if executable_failure else 'echo '+tool+' version '+self.lock['version']}\n".encode(), 0o755)
                     for tool in owner.TOOLS]
+            if command_fixture:
+                rows = []
+                for tool in owner.TOOLS:
+                    program = (
+                        f"#!{sys.executable}\n"
+                        "import json, os, sys\n"
+                        f"tool = {tool!r}\n"
+                        "if sys.argv[1:] == ['--version']:\n"
+                        f"    print(tool + ' version {self.lock['version']}')\n"
+                        "    raise SystemExit(0)\n"
+                        "print(json.dumps({'tool': tool, 'argv': sys.argv[1:], "
+                        "'cwd': os.getcwd(), 'selected': sys.argv[0]}))\n"
+                        "raise SystemExit(23)\n"
+                    )
+                    rows.append((f"bin/{tool}", program.encode(), 0o755))
             rows.append(("share/cmake/module.cmake", b"# fixture module\n", 0o644))
             if invalid:
                 rows.append(("../outside", b"refuse", 0o644))
@@ -150,6 +168,126 @@ class CMakeProvisionTests(unittest.TestCase):
                 owner.select(self.root, self.work, self.lock, ensure=True)
         self.assertFalse((self.root / self.lock["version"]).exists())
         self.assertEqual([], list(self.work.iterdir()))
+
+
+    def execution_fixture(self):
+        self.root = self.base / "prefix/tools/cmake"
+        selected = self.select(self.archive(command_fixture=True))
+        repository = self.base / "repository"
+        (repository / "scripts").mkdir(parents=True)
+        (repository / "deploy").mkdir()
+        script = repository / "scripts/provision-cmake.py"
+        script.write_bytes((ROOT / "scripts/provision-cmake.py").read_bytes())
+        (repository / "deploy/cmake-release.json").write_text(json.dumps(self.lock))
+        poison = self.base / "poison"
+        poison.mkdir()
+        marker = self.base / "ambient-tool-was-used"
+        for tool in owner.TOOLS:
+            path = poison / tool
+            path.write_text(
+                "#!/bin/sh\n"
+                'printf "%s\\n" "$0" >> "$AMBIENT_TOOL_MARKER"\nexit 91\n')
+            path.chmod(0o755)
+        environment = dict(os.environ,
+                           PATH=str(poison) + os.pathsep + os.environ.get("PATH", ""),
+                           AMBIENT_TOOL_MARKER=str(marker), PYTHONDONTWRITEBYTECODE="1",
+                           LAPLACE_INSTALL_PREFIX=str(self.base / "prefix"),
+                           LAPLACE_WORK_ROOT=str(self.work.parent))
+        return selected, repository, script, environment, marker
+
+    def run_tool(self, script, environment, tool, arguments):
+        return subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root),
+             "--work", str(self.work), "--exec-tool", tool, "--", *arguments],
+            cwd=self.base, env=environment, text=True, capture_output=True, timeout=30)
+
+    def test_exec_tool_preserves_selected_executable_argv_stdout_and_status(self):
+        selected, _repository, script, environment, marker = self.execution_fixture()
+        arguments = ["--test-dir", "a path with spaces", "--", "-L", "α\nβ"]
+        for tool in owner.TOOLS:
+            with self.subTest(tool=tool):
+                completed = self.run_tool(script, environment, tool, arguments)
+                self.assertEqual(23, completed.returncode, completed.stderr)
+                output = json.loads(completed.stdout)
+                self.assertEqual({"tool": tool, "argv": arguments, "cwd": str(self.base),
+                                  "selected": str(selected / tool)}, output)
+                self.assertIn(str(selected / tool), completed.stderr)
+                self.assertFalse(marker.exists())
+        # The original selection-only CLI still returns only the bin path.
+        completed = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--work", str(self.work)],
+            cwd=self.base, env=environment, text=True, capture_output=True, timeout=30)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(str(selected) + "\n", completed.stdout)
+
+    def test_exec_tool_missing_or_corrupt_generation_never_uses_ambient_tool(self):
+        selected, _repository, script, environment, marker = self.execution_fixture()
+        generation = selected.parent
+        retained = self.base / "retained-generation"
+        generation.rename(retained)
+        try:
+            completed = self.run_tool(script, environment, "ctest", ["-N"])
+            self.assertEqual(1, completed.returncode)
+            self.assertIn("not installed", completed.stderr)
+            self.assertEqual("", completed.stdout)
+            self.assertFalse(generation.exists())
+            self.assertFalse(marker.exists())
+        finally:
+            retained.rename(generation)
+        module = generation / "share/cmake/module.cmake"
+        module.write_text("# altered selected generation\n")
+        completed = self.run_tool(script, environment, "ctest", ["-N"])
+        self.assertEqual(1, completed.returncode)
+        self.assertIn("bytes or links", completed.stderr)
+        self.assertEqual("", completed.stdout)
+        self.assertFalse(marker.exists())
+        self.assertEqual("# altered selected generation\n", module.read_text())
+
+    def test_private_database_and_registry_call_the_verified_companion_tools(self):
+        selected, repository, _script, environment, marker = self.execution_fixture()
+        # Run the exact shell helper used by private install/discovery/execution
+        # against a private retained package; never start a database.
+        source = (ROOT / "scripts/pr-db-proof.sh").read_text()
+        start = source.index("cmake_tool() {\n")
+        end = source.index("\n}\n", start) + len("\n}\n")
+        function = source[start:end]
+        shell = (f"ROOT={shlex.quote(str(repository))}\n"
+                 f"INSTALL_PREFIX={shlex.quote(str(self.base / 'prefix'))}\n"
+                 + function + '\ncmake_tool "$@"\n')
+        for tool, arguments in (
+                ("cmake", ["--install", "selected build"]),
+                ("ctest", ["--test-dir", "selected build", "--show-only=json-v1", "-L", "regress"])):
+            completed = subprocess.run(
+                ["bash", "-c", shell, "fixture", tool, "--", *arguments],
+                cwd=self.base, env=environment, text=True, capture_output=True, timeout=30)
+            self.assertEqual(23, completed.returncode, completed.stderr)
+            output = json.loads(completed.stdout)
+            self.assertEqual(str(selected / tool), output["selected"])
+            self.assertEqual(arguments, output["argv"])
+
+        registry_spec = importlib.util.spec_from_file_location(
+            "cmake_test_profile_fixture", ROOT / "scripts/test-profile-registry.py")
+        registry = importlib.util.module_from_spec(registry_spec)
+        registry_spec.loader.exec_module(registry)
+        suite = {"runner": "ctest", "selector": {"include_label": "regress"}}
+        with mock.patch.object(registry, "ROOT", repository), \
+             mock.patch.object(registry.sys, "platform", "linux"), \
+             mock.patch.dict(os.environ, environment, clear=True):
+            for list_only in (True, False):
+                command = registry.command_for_suite(suite, list_only=list_only)
+                completed = subprocess.run(
+                    command, cwd=self.base, env=environment, text=True,
+                    capture_output=True, timeout=30)
+                self.assertEqual(23, completed.returncode, completed.stderr)
+                output = json.loads(completed.stdout)
+                self.assertEqual(str(selected / "ctest"), output["selected"])
+                self.assertEqual(["--test-dir", "build"], output["argv"][:2])
+                self.assertEqual(["-L", "regress"], output["argv"][-2:])
+                self.assertEqual(list_only, "-N" in output["argv"])
+            with mock.patch.object(registry.sys, "platform", "win32"):
+                self.assertEqual(["ctest"], registry.ctest_command_prefix())
+        self.assertFalse(marker.exists())
+
 
 
 if __name__ == "__main__":
