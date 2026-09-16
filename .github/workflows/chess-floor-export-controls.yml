@@ -1,0 +1,133 @@
+name: Hosted reusable recorded-floor export controls
+on:
+  push:
+    branches: [qualify/floor-export-successor-20260916]
+permissions:
+  contents: read
+jobs:
+  protocol-controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TMPDIR: /build/laplace/work/floor-export-successor/tmp
+      TMP: /build/laplace/work/floor-export-successor/tmp
+      TEMP: /build/laplace/work/floor-export-successor/tmp
+      PYTHONDONTWRITEBYTECODE: '1'
+      CANDIDATE_SHA: 70673434265307ed1331de4a78c1d52b06f9ff0b
+      CANDIDATE_TREE: d0e568263755dc2dabdbc85190e75c268dfea367
+    steps:
+      - name: Prepare permanent work and evidence directories
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /build/laplace
+          sudo chown "$(id -u):$(id -g)" /build/laplace
+          mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/floor-export-successor
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 70673434265307ed1331de4a78c1d52b06f9ff0b
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Bind the exact candidate in the permanent worktree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          git worktree add --detach /build/laplace/worktrees/floor-export-successor "$CANDIDATE_SHA"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          Path("/build/laplace/recovery/floor-export-successor/source.json").write_text(json.dumps({
+              "candidate_commit":os.environ["CANDIDATE_SHA"],
+              "candidate_tree":os.environ["CANDIDATE_TREE"],
+              "workflow_commit":os.environ["GITHUB_SHA"],
+              "claim":"python-successor-main-export-publication-and-cancellation-controls",
+              "installed_acceptance_executed":False,
+              "native_chess_runtime_executed":False
+          },indent=2)+"\n")
+          PY
+      - name: Parse Python, YAML and exact export shell bodies
+        working-directory: /build/laplace/worktrees/floor-export-successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee /build/laplace/recovery/floor-export-successor/syntax.log
+          import ast, json, re, subprocess
+          from pathlib import Path
+          import yaml
+          root = Path.cwd()
+          for name in ("export-qualified-chess-floors.py", "test-qualified-chess-floor-export.py"):
+              ast.parse((root / "scripts" / name).read_text(), filename=name)
+              print("PASS Python syntax " + name)
+          path = root / ".github/workflows/chess-floor-export.yml"
+          document = yaml.safe_load(path.read_text())
+          steps = document["jobs"]["export"]["steps"]
+          blocks = [step["run"] for step in steps if "run" in step]
+          if len(blocks) != 3:
+              raise AssertionError("actual export workflow run-block coverage changed")
+          embedded_python = 0
+          for number, block in enumerate(blocks, 1):
+              subprocess.run(["bash", "-n"], input=block, text=True, check=True, timeout=10)
+              print("PASS actual export workflow shell block " + str(number))
+              if "bash -c '" in block:
+                  marker = "bash -c '\n"
+                  start = block.index(marker) + len(marker)
+                  end = block.rindex("\n' 2>&1")
+                  inner = block[start:end] + "\n"
+                  subprocess.run(["bash", "-n"], input=inner, text=True, check=True, timeout=10)
+                  print("PASS exact quoted export shell body")
+                  body = inner
+              else:
+                  body = block
+              for match in re.finditer(r"<<\s*(['\"]?)(PY(?:_SOURCE)?)\1\s*$", body, re.MULTILINE):
+                  rest = body[match.end():].lstrip("\n")
+                  end = re.search(r"^" + re.escape(match.group(2)) + r"\s*$", rest, re.MULTILINE)
+                  if end is None:
+                      raise AssertionError("embedded Python delimiter missing")
+                  ast.parse(rest[:end.start()], filename=str(path) + ":embedded-" + str(embedded_python + 1))
+                  embedded_python += 1
+                  print("PASS actual embedded Python " + str(embedded_python))
+          if embedded_python != 3:
+              raise AssertionError("expected selection, toolchain and retained-result Python blocks")
+          summary = {"yaml":"passed", "python_files":2, "outer_shell_blocks":3,
+                     "inner_export_shell_blocks":1, "embedded_python_blocks":embedded_python,
+                     "host_export_executed":False}
+          Path("/build/laplace/recovery/floor-export-successor/syntax.json").write_text(
+              json.dumps(summary, sort_keys=True) + "\n")
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - name: Execute all ten actual protocol controls
+        working-directory: /build/laplace/worktrees/floor-export-successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence=/build/laplace/recovery/floor-export-successor
+          python3 --version 2>&1 | tee "$evidence/python-version.log"
+          timeout --signal=TERM --kill-after=10s 90s \
+            python3 - <<'PY' 2>&1 | tee "$evidence/protocol-controls.log"
+          import json, runpy, sys, unittest
+          from pathlib import Path
+          namespace = runpy.run_path("scripts/test-qualified-chess-floor-export.py", run_name="qualified_export_controls")
+          suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(namespace[name])
+                                     for name in ("ExportLifecycleTests", "MainQualificationTests"))
+          if suite.countTestCases() != 10:
+              raise AssertionError("expected exactly ten protocol controls")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          receipt = {"tests":result.testsRun, "failures":len(result.failures), "errors":len(result.errors),
+                     "skipped":len(result.skipped), "scope":"protocol, real filesystem and process controls; no host export",
+                     "candidate_commit":"70673434265307ed1331de4a78c1d52b06f9ff0b",
+                     "candidate_tree":"d0e568263755dc2dabdbc85190e75c268dfea367"}
+          Path("/build/laplace/recovery/floor-export-successor/controls.json").write_text(
+              json.dumps(receipt, sort_keys=True) + "\n")
+          print(json.dumps(receipt, sort_keys=True))
+          if not result.wasSuccessful() or result.skipped:
+              raise SystemExit(1)
+          PY
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Retain exact protocol evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chess-floor-export-successor-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/recovery/floor-export-successor/
+          if-no-files-found: error
+          retention-days: 30
