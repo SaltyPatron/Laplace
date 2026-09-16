@@ -48,10 +48,10 @@ def module(root, name, filename):
     return value
 
 
-def run_json(run_id):
+def run_json(run_id, suffix=""):
     token = os.environ.get("GITHUB_TOKEN", "")
     request = urllib.request.Request(
-        "https://api.github.com/repos/" + REPOSITORY + "/actions/runs/" + str(run_id),
+        "https://api.github.com/repos/" + REPOSITORY + "/actions/runs/" + str(run_id) + suffix,
         headers={"Accept": "application/vnd.github+json", "Authorization": "Bearer " + token,
                  "X-GitHub-Api-Version": "2022-11-28"})
     class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -78,6 +78,74 @@ def selection_identity(plan):
     return {"commit": values[0], "tree": values[1]}
 
 
+def lexical_failure_evidence(run_id, attempt, expected, state):
+    """Authenticate the one supported failed lifecycle without changing its status."""
+    prerequisites = ["policy", "dependencies", "build", "native-dev", "managed-dev",
+                     "uci-dev", "browser-dev", "native-install", "database-maintenance"]
+    failed_phase = "lexical-foundation"
+    if expected.count(failed_phase) != 1:
+        raise ValueError("canonical product phase list has no unique lexical boundary")
+    boundary = expected.index(failed_phase)
+    results = state.get("results")
+    if (expected[:boundary] != prerequisites or state.get("status") != "failed"
+            or state.get("next") != boundary + 1 or not isinstance(results, list)
+            or len(results) != boundary + 1
+            or results[:-1] != [{"phase": p, "exit_code": 0} for p in prerequisites]
+            or not isinstance(results[-1], dict) or set(results[-1]) != {"phase", "exit_code"}
+            or results[-1]["phase"] != failed_phase
+            or type(results[-1]["exit_code"]) is not int or results[-1]["exit_code"] <= 0):
+        raise ValueError("retained canonical product phases do not establish lexical-only failure")
+
+    jobs = run_json(run_id, "/attempts/" + str(attempt) + "/jobs?per_page=100")
+    rows = jobs.get("jobs") if isinstance(jobs, dict) else None
+    if (not isinstance(rows, list) or jobs.get("total_count") != 1 or len(rows) != 1
+            or not isinstance(rows[0], dict)):
+        raise ValueError("failed exact-main lifecycle job is absent or ambiguous")
+    job = rows[0]
+    if (type(job.get("id")) is not int or job["id"] <= 0 or job.get("run_id") != run_id
+            or job.get("head_sha") != state["source"]["commit"]
+            or job.get("status") != "completed" or job.get("conclusion") != "failure"):
+        raise ValueError("failed exact-main lifecycle job identity differs")
+    steps = job.get("steps")
+    if (not isinstance(steps, list) or any(not isinstance(step, dict)
+            or not all(isinstance(step.get(key), str) for key in ("name", "status", "conclusion"))
+            for step in steps)):
+        raise ValueError("failed exact-main lifecycle steps are incomplete")
+    installed = (
+        "Resolve the Stockfish checkout for application publication", "Start ordered development phases",
+        "Check source and policy", "Resolve build dependencies", "Build native and managed artifacts",
+        "Test native engine", "Test managed code", "Test UCI runtime", "Test browser product",
+        "Install native artifacts", "Migrate and reconcile installed database",
+    )
+    downstream = (
+        "Admit operational memory", "Publish applications",
+        "Verify the installed direct build uses the selected Stockfish checkout",
+        "Verify ordinary operational execution", "Verify database health",
+        "Test native PostgreSQL extensions", "Test managed database integration",
+        "Prove live recursive substrate", "Verify live API endpoints", "Test live product behavior",
+        "Evaluate witnessed generation",
+    )
+    sequence = [(name, "success") for name in installed]
+    sequence += [("Admit required lexical foundation", "failure")]
+    sequence += [(name, "skipped") for name in downstream]
+    sequence += [("Release product host reservation", "success")]
+    observed = []
+    for name, conclusion in sequence:
+        matches = [(index, step) for index, step in enumerate(steps) if step["name"] == name]
+        if (len(matches) != 1 or matches[0][1]["status"] != "completed"
+                or matches[0][1]["conclusion"] != conclusion):
+            raise ValueError("failed exact-main lifecycle lacks required phase outcome: " + name)
+        observed.append(matches[0][0])
+    if observed != sorted(observed) or [step["name"] for step in steps
+            if step["conclusion"] == "failure"] != ["Admit required lexical foundation"]:
+        raise ValueError("failed exact-main lifecycle differs from ordered lexical-only failure")
+    return {"job_id": job["id"], "failed_phase": failed_phase,
+            "failed_exit_code": results[-1]["exit_code"],
+            "not_executed_phases": expected[boundary + 1:],
+            "workflow_steps": [{key: step[key] for key in ("name", "status", "conclusion")}
+                               for step in steps]}
+
+
 def qualification(plan, root):
     source = selection_identity(plan)
     run_id, attempt = plan["proof_run_id"], plan["proof_run_attempt"]
@@ -85,49 +153,71 @@ def qualification(plan, root):
         raise ValueError("an explicit positive proof run and attempt are required")
     remote = run_json(run_id)
     if (remote.get("id") != run_id or remote.get("status") != "completed"
-            or remote.get("conclusion") != "success" or remote.get("event") != "push"
+            or remote.get("conclusion") not in ("success", "failure")
+            or remote.get("event") not in ("push", "workflow_dispatch")
             or remote.get("head_branch") != "main"
             or remote.get("path") != ".github/workflows/laplace.yml"
             or remote.get("run_attempt") != attempt or remote.get("head_sha") != source["commit"]):
-        raise ValueError("selected run is not the successful exact-main product lifecycle")
+        raise ValueError("selected run is not a supported terminal exact-main product lifecycle")
     path = SESSION_ROOT / (str(run_id) + "-" + str(attempt) + "-product/session.json")
     if (path.is_symlink() or path.parent.is_symlink()
             or path.parent.stat().st_uid != os.getuid()
             or path.parent.stat().st_mode & 0o077):
         raise ValueError("retained lifecycle session must remain private and owned by this runner")
     state = load(path, 65536)
-    # A normal main push selects the full default product lifecycle. Environment
-    # inherited by this later export must not omit its live acceptance phases.
-    environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
+    # Resolve the full activation contract independently of the operator event.
+    # Current push/all is development-only; a real dispatch/all still selects all
+    # phases. Authenticate the actual remote event and retained outcomes separately.
+    # A lexical-only failure retains the unexecuted suffix explicitly.
+    environment = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch",
+                       LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
                        LAPLACE_GENERATION_BENCHMARK="")
     expected = subprocess.check_output(
         ["bash", str(root / "scripts/product-ci.sh"), "all", "--list-phases"],
         cwd=root, text=True, timeout=10, env=environment).splitlines()
     if (not expected or state.get("schema") != "laplace.ci-session.v1"
             or state.get("kind") != "product" or state.get("stage") != "all"
-            or state.get("status") != "stopped" or state.get("cleanup_exit_code") != 0
-            or state.get("active") is not None or state.get("next") != len(expected)
-            or state.get("source") != source
-            or state.get("phases") != expected
-            or state.get("results") != [{"phase": p, "exit_code": 0} for p in expected]):
-        raise ValueError("retained main session does not establish every completed canonical product phase")
+            or type(state.get("cleanup_exit_code")) is not int or state["cleanup_exit_code"] != 0
+            or "active" not in state or state["active"] is not None
+            or state.get("source") != source or state.get("phases") != expected):
+        raise ValueError("retained main session does not establish canonical product phase identity and cleanup")
+    failed = None
+    if remote["conclusion"] == "success":
+        if (state.get("status") != "stopped" or state.get("next") != len(expected)
+                or state.get("results") != [{"phase": p, "exit_code": 0} for p in expected]):
+            raise ValueError("retained main session does not establish every completed canonical product phase")
+    else:
+        failed = lexical_failure_evidence(run_id, attempt, expected, state)
     checkout = Path(state["checkout"])
     if (not checkout.is_absolute() or checkout.resolve(strict=True) != checkout
             or str(checkout).startswith(("/tmp/", "/var/tmp/", "/dev/shm/"))):
         raise ValueError("qualified checkout identity was not permanent")
-    # Existing place-build-directory.py addresses the persistent main checkout.
-    # Never substitute a disposable PR build or whichever build is most recent.
-    build = BUILD_ROOT / ("legacy-" + hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16])
+    # Follow the placement owner's actual link, including any completed migration.
+    # Never reconstruct an obsolete directory name or select the newest build.
+    build_link = checkout / "build"
+    if not build_link.is_symlink():
+        raise ValueError("retained checkout has no placed native build link")
+    build = build_link.resolve(strict=True)
+    if not build.is_dir() or build.parent != BUILD_ROOT.resolve(strict=True):
+        raise ValueError("retained native build is outside the canonical build root")
     cache = (build / "CMakeCache.txt").read_text()
     match = re.search(r"^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$", cache, re.MULTILINE)
     if not match or Path(match.group(1)) != checkout:
         raise ValueError("retained native build belongs to another checkout")
+    directory = re.search(r"^CMAKE_CACHEFILE_DIR:INTERNAL=(.*)$", cache, re.MULTILINE)
+    if not directory or Path(directory.group(1)).resolve(strict=True) != build:
+        raise ValueError("retained CMake cache belongs to another build directory")
     stamps = {name: (build / ".stamps" / name).read_text().strip()
               for name in ("build-native", "install-native")}
     if (any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in stamps.values())
             or len(set(stamps.values())) != 1):
         raise ValueError("qualified native build/install stamps are absent or disagree")
     return build, {"run_id": run_id, "run_attempt": attempt, "source": state["source"],
+                   "lifecycle_event": remote["event"],
+                   "lifecycle_conclusion": remote["conclusion"],
+                   "full_lifecycle_passed": remote["conclusion"] == "success",
+                   "session_status": state["status"], "cleanup_exit_code": state["cleanup_exit_code"],
+                   "lexical_failure": failed,
                    "phases": state["results"], "native_build": str(build),
                    "lifecycle_checkout": str(checkout), "native_fingerprint": stamps["build-native"],
                    "session_receipt": str(path),

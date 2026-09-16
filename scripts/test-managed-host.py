@@ -59,6 +59,7 @@ class HostTests(unittest.TestCase):
         self.nginx_active = True
         self.fail_pg = self.fail_nginx = self.fail_timer_start = False
         self.host.run = self.run_command
+        self.host.reconcile_scratch_directory = self.reconcile_scratch_directory
         self.pwd_patch = patch.object(self.host.pwd, "getpwnam", side_effect=self.account)
         self.grp_patch = patch.object(self.host.grp, "getgrnam", side_effect=lambda name:
             types.SimpleNamespace(gr_gid=self.account(name).pw_gid))
@@ -71,6 +72,15 @@ class HostTests(unittest.TestCase):
         if name not in self.accounts:
             raise KeyError(name)
         return self.accounts[name]
+
+    def reconcile_scratch_directory(self, path, account):
+        # Privileged directory operations stay isolated in this host fixture;
+        # test-managed-services exercises the real FD-based repair separately.
+        self.assertIn(path.name, ("mcp", "lichess"))
+        self.assertEqual(Path("/build/laplace/work") / path.name, path)
+        self.assertEqual("laplace-" + path.name, account)
+        self.assertIn(account, self.accounts)
+        (self.base / "scratch" / path.name).mkdir(parents=True, exist_ok=True)
 
     def run_command(self, *argv):
         self.calls.append(argv)
@@ -85,10 +95,6 @@ class HostTests(unittest.TestCase):
             self.assertEqual(("-q", "/build"), argv[1:])
         elif argv[0] == "/usr/bin/install":
             destination = Path(argv[-1])
-            if destination.parent == Path("/build/laplace/work") and destination.name in ("mcp", "lichess"):
-                self.assertIn("laplace-runner", argv)
-                self.assertIn("2770", argv)
-                destination = self.base / "scratch" / destination.name
             destination.mkdir(parents=True, exist_ok=True)
         elif argv[0] == "/usr/sbin/runuser":
             self.assertIn("/var/run/postgresql", argv)
@@ -374,12 +380,13 @@ class EntryPointTests(unittest.TestCase):
             step["name"]: step.get("run", "")
             for step in steps if "name" in step
         }
-        command = commands["Fast source/tooling proof and installed-product reconciliation"]
+        command = commands["Check source-only changes without touching the installed host"]
         self.assertIn("set -euo pipefail", command)
-        # Fast reconciliation owns the lock in one command. Full delivery keeps
-        # the same host reservation across its separate canonical phases.
-        self.assertRegex(command, r"flock --exclusive --close /build/laplace/work/host-resource\.lock\s+\\\s+"
-                         + re.escape("bash scripts/product-ci.sh reconcile"))
+        self.assertIn("bash scripts/product-ci.sh check", command)
+        # Source checks neither reserve nor reconcile the installed host.
+        # Physical phases retain the session's continuous reservation.
+        for forbidden in ("flock", "product-ci.sh reconcile", "systemctl", "pg_ctl"):
+            self.assertNotIn(forbidden, command)
         session = next(step for step in steps if step.get("id") == "product_session")
         native_install = next(step for step in steps if step.get("id") == "product_native_install")
         self.assertIn("set -euo pipefail", session["run"])

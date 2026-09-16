@@ -201,12 +201,16 @@ class MainQualificationTests(unittest.TestCase):
         self.session.parent.mkdir(parents=True, mode=0o700)
         self.session.parent.chmod(0o700)
         self.build_root = self.root / "build"
-        self.build = self.build_root / ("legacy-" + hashlib.sha256(os.fsencode(self.checkout)).hexdigest()[:16])
+        self.build = self.build_root / ("laplace-" + hashlib.sha256(os.fsencode(self.checkout)).hexdigest()[:16])
         (self.build / ".stamps").mkdir(parents=True)
-        (self.build / "CMakeCache.txt").write_text("CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.checkout) + "\n")
+        (self.checkout / "build").symlink_to(self.build, target_is_directory=True)
+        (self.build / "CMakeCache.txt").write_text(
+            "CMAKE_HOME_DIRECTORY:INTERNAL=" + str(self.checkout) + "\n"
+            "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build) + "\n")
         for name in ("build-native", "install-native"):
             (self.build / ".stamps" / name).write_text("a" * 64 + "\n")
-        environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
+        environment = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch",
+                           LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
                            LAPLACE_GENERATION_BENCHMARK="")
         self.phases = subprocess.check_output(
             ["bash", str(ROOT / "scripts/product-ci.sh"), "all", "--list-phases"],
@@ -214,6 +218,24 @@ class MainQualificationTests(unittest.TestCase):
         self.assertIn("native-install", self.phases)
         self.assertIn("publish", self.phases)
         self.assertIn("live-api", self.phases)
+        # Historical lexical-failure protocol, explicitly separate from the
+        # current product owner (which may no longer schedule lexical admission).
+        self.historical_phases = [
+            "policy", "dependencies", "build", "native-dev", "managed-dev",
+            "uci-dev", "browser-dev", "native-install", "database-maintenance",
+            "lexical-foundation", "operational-seed", "publish",
+            "operational-execution", "db-health", "native-db", "managed-db",
+            "live-floor", "live-api", "managed-live", "generation-eval",
+        ]
+        self.historical_root = self.root / "historical-plan-protocol"
+        (self.historical_root / "scripts").mkdir(parents=True)
+        (self.historical_root / "scripts/product-ci.sh").write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            'test "$#" -eq 2\ntest "$1" = all\ntest "$2" = --list-phases\n'
+            'test "$GITHUB_EVENT_NAME" = workflow_dispatch\n'
+            'test -z "$LAPLACE_FRESH_DB$LAPLACE_RESTORE_FOUNDATION$LAPLACE_GENERATION_BENCHMARK"\n'
+            "cat <<'HISTORICAL_PROTOCOL_PLAN'\n"
+            + "\n".join(self.historical_phases) + "\nHISTORICAL_PROTOCOL_PLAN\n")
         self.plan = {"proof_run_id": 123, "proof_run_attempt": 1,
                      "candidate_commit": "1" * 40, "candidate_tree": "2" * 40,
                      "installed_source": "1" * 40}
@@ -232,10 +254,21 @@ class MainQualificationTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def qualify(self, state=None, remote=None):
+    def qualify(self, state=None, remote=None, jobs=None):
         self.session.write_text(json.dumps(self.state if state is None else state))
-        with mock.patch.object(driver, "run_json", return_value=self.remote if remote is None else remote):
-            return driver.qualification(self.plan, ROOT)
+        def response(run_id, suffix=""):
+            self.assertEqual(123, run_id)
+            if suffix:
+                self.assertEqual("/attempts/1/jobs?per_page=100", suffix)
+                if jobs is None:
+                    self.fail("failed lifecycle needs explicitly supplied job evidence")
+                return jobs
+            return self.remote if remote is None else remote
+        with mock.patch.object(driver, "run_json", side_effect=response):
+            # Only historical failure controls supply remote job fixtures.
+            # Current full-success and build-placement controls use real source.
+            root = self.historical_root if jobs is not None else ROOT
+            return driver.qualification(self.plan, root)
 
     def test_exact_main_requires_real_canonical_all_phase_list_independent_of_export_environment(self):
         with mock.patch.dict(os.environ, {"LAPLACE_FRESH_DB": "1",
@@ -249,11 +282,14 @@ class MainQualificationTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(self.session.read_bytes()).hexdigest(), receipt["session_sha256"])
         self.assertNotIn(self.state["token"], json.dumps(receipt))
         self.assertNotIn("pr_checkout", receipt)
+        self.assertTrue(receipt["full_lifecycle_passed"])
+        self.assertEqual("success", receipt["lifecycle_conclusion"])
+        self.assertIsNone(receipt["lexical_failure"])
 
     def test_cancelled_pr_other_source_branch_attempt_or_incomplete_main_cannot_qualify(self):
         mutations = (
             {"event": "pull_request", "path": ".github/workflows/pr-validation.yml"},
-            {"conclusion": "cancelled"}, {"conclusion": "failure"}, {"status": "in_progress"},
+            {"conclusion": "cancelled"}, {"conclusion": "timed_out"}, {"status": "in_progress"},
             {"head_branch": "verify/operator"}, {"head_sha": "0" * 40},
             {"run_attempt": 2}, {"id": 124}, {"path": ".github/workflows/other.yml"},
         )
@@ -279,6 +315,194 @@ class MainQualificationTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, "canonical product phase"):
                 self.qualify(state={**self.state, **mutation})
 
+    def lexical_fixture(self):
+        # Explicit historical protocol only; no current lexical phase is claimed.
+        state = copy.deepcopy(self.state)
+        state["phases"] = list(self.historical_phases)
+        boundary = self.historical_phases.index("lexical-foundation")
+        state.update(status="failed", next=boundary + 1,
+                     results=[{"phase": p, "exit_code": 0} for p in self.historical_phases[:boundary]]
+                             + [{"phase": "lexical-foundation", "exit_code": 1}],
+                     failure="phase lexical-foundation failed")
+        remote = {**self.remote, "conclusion": "failure"}
+        installed = [
+            "Resolve the Stockfish checkout for application publication", "Start ordered development phases",
+            "Check source and policy", "Resolve build dependencies", "Build native and managed artifacts",
+            "Test native engine", "Test managed code", "Test UCI runtime", "Test browser product",
+            "Install native artifacts", "Migrate and reconcile installed database",
+        ]
+        downstream = [
+            "Admit operational memory", "Publish applications",
+            "Verify the installed direct build uses the selected Stockfish checkout",
+            "Verify ordinary operational execution", "Verify database health",
+            "Test native PostgreSQL extensions", "Test managed database integration",
+            "Prove live recursive substrate", "Verify live API endpoints", "Test live product behavior",
+            "Evaluate witnessed generation",
+        ]
+        steps = [{"name": name, "status": "completed", "conclusion": "success"} for name in installed]
+        steps += [{"name": "Admit required lexical foundation", "status": "completed", "conclusion": "failure"}]
+        steps += [{"name": name, "status": "completed", "conclusion": "skipped"} for name in downstream]
+        steps += [{"name": "Release product host reservation", "status": "completed", "conclusion": "success"}]
+        jobs = {"total_count": 1, "jobs": [{
+            "id": 456, "run_id": 123, "head_sha": self.plan["candidate_commit"],
+            "status": "completed", "conclusion": "failure", "steps": steps,
+        }]}
+        return state, remote, jobs
+
+    def test_lexical_only_failure_keeps_exact_failed_skipped_and_cleanup_evidence(self):
+        state, remote, jobs = self.lexical_fixture()
+        build, receipt = self.qualify(state, remote, jobs)
+        self.assertEqual(self.build, build)
+        self.assertFalse(receipt["full_lifecycle_passed"])
+        self.assertEqual("failure", receipt["lifecycle_conclusion"])
+        self.assertEqual("failed", receipt["session_status"])
+        self.assertEqual(0, receipt["cleanup_exit_code"])
+        self.assertEqual(state["results"], receipt["phases"])
+        observed = receipt["lexical_failure"]
+        self.assertEqual(456, observed["job_id"])
+        self.assertEqual("lexical-foundation", observed["failed_phase"])
+        self.assertEqual(1, observed["failed_exit_code"])
+        self.assertEqual(state["phases"][state["next"]:], observed["not_executed_phases"])
+        self.assertEqual(jobs["jobs"][0]["steps"], observed["workflow_steps"])
+        self.assertNotIn(state["token"], json.dumps(receipt))
+
+    def test_dispatch_activation_resolves_full_plan_under_operator_push_environment(self):
+        for lexical in (False, True):
+            state, remote, jobs = self.lexical_fixture() if lexical else (
+                self.state, self.remote, None)
+            remote = {**remote, "event": "workflow_dispatch"}
+            with (self.subTest(lexical=lexical),
+                  mock.patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push",
+                      "LAPLACE_FRESH_DB": "1", "LAPLACE_RESTORE_FOUNDATION": "1",
+                      "LAPLACE_GENERATION_BENCHMARK": "1"})):
+                _, receipt = self.qualify(state, remote, jobs)
+            self.assertEqual("workflow_dispatch", receipt["lifecycle_event"])
+            self.assertEqual(state["results"], receipt["phases"])
+            self.assertEqual(not lexical, receipt["full_lifecycle_passed"])
+
+    def test_development_push_receipt_cannot_qualify_as_installed_activation(self):
+        # Actual current product owner maps push/all to only development phases.
+        environment = dict(os.environ, GITHUB_EVENT_NAME="push",
+                           LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
+                           LAPLACE_GENERATION_BENCHMARK="")
+        phases = subprocess.check_output(
+            ["bash", str(ROOT / "scripts/product-ci.sh"), "all", "--list-phases"],
+            cwd=ROOT, env=environment, text=True, timeout=10).splitlines()
+        self.assertTrue(phases)
+        self.assertEqual(len(phases), len(set(phases)))
+        self.assertIn("build", phases)
+        self.assertIn("native-dev", phases)
+        self.assertIn("managed-dev", phases)
+        self.assertEqual(phases, [phase for phase in self.phases if phase in phases])
+        self.assertLess(len(phases), len(self.phases))
+        self.assertTrue({"native-install", "database-maintenance", "publish", "live-api"}.isdisjoint(phases))
+        state = {**self.state, "phases": phases, "next": len(phases),
+                 "results": [{"phase": phase, "exit_code": 0} for phase in phases]}
+        with self.assertRaisesRegex(ValueError, "canonical product phase"):
+            self.qualify(state, {**self.remote, "event": "push"})
+        # Also refuse a full-plan declaration with only the development prefix executed.
+        state["phases"] = self.phases
+        with self.assertRaisesRegex(ValueError, "canonical product phase"):
+            self.qualify(state, {**self.remote, "event": "push"})
+
+    def test_lexical_route_rejects_missing_prerequisite_wrong_phase_or_reordered_receipts(self):
+        state, remote, jobs = self.lexical_fixture()
+        mutations = []
+        for name in ("policy", "dependencies", "build", "native-dev", "managed-dev",
+                     "uci-dev", "browser-dev", "native-install", "database-maintenance"):
+            changed = copy.deepcopy(state)
+            changed["results"] = [row for row in changed["results"] if row["phase"] != name]
+            mutations.append(changed)
+        for replacement in ("database-maintenance", "operational-seed"):
+            changed = copy.deepcopy(state)
+            changed["results"][-1]["phase"] = replacement
+            mutations.append(changed)
+        for exit_code in (0, -1, True, "1"):
+            changed = copy.deepcopy(state)
+            changed["results"][-1]["exit_code"] = exit_code
+            mutations.append(changed)
+        changed = copy.deepcopy(state)
+        changed["results"][0], changed["results"][1] = changed["results"][1], changed["results"][0]
+        mutations.append(changed)
+        mutations.append({**state, "next": state["next"] - 1})
+        mutations.append({**state, "status": "stopped"})
+        mutations.append(self.state)  # A failed remote run cannot borrow a complete-success session.
+        for changed in mutations:
+            with self.subTest(changed=changed["results"]), self.assertRaisesRegex(ValueError, "canonical product phase"):
+                self.qualify(changed, remote, jobs)
+
+    def test_lexical_route_rejects_cleanup_active_source_and_phase_plan_mismatches(self):
+        state, remote, jobs = self.lexical_fixture()
+        mutations = [
+            {"cleanup_exit_code": 1}, {"cleanup_exit_code": None},
+            {"active": {"phase": "lexical-foundation"}}, {"kind": "pr"},
+            {"source": {"commit": "0" * 40, "tree": self.plan["candidate_tree"]}},
+            {"source": {"commit": self.plan["candidate_commit"], "tree": "0" * 40}},
+            {"phases": list(reversed(state["phases"]))},
+        ]
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, "canonical product phase"):
+                self.qualify({**state, **mutation}, remote, jobs)
+        for absent in ("cleanup_exit_code", "active"):
+            changed = copy.deepcopy(state)
+            del changed[absent]
+            with self.subTest(absent=absent), self.assertRaisesRegex(ValueError, "canonical product phase"):
+                self.qualify(changed, remote, jobs)
+        with self.assertRaisesRegex(ValueError, "exact-main"):
+            self.qualify(state, {**remote, "head_sha": "f" * 40}, jobs)
+
+    def test_lexical_route_requires_remote_prerequisites_skips_release_and_sole_failure(self):
+        state, remote, jobs = self.lexical_fixture()
+        mutations = []
+        for index, step in enumerate(jobs["jobs"][0]["steps"]):
+            changed = copy.deepcopy(jobs)
+            changed["jobs"][0]["steps"].pop(index)
+            mutations.append(changed)
+            changed = copy.deepcopy(jobs)
+            changed["jobs"][0]["steps"][index]["conclusion"] = (
+                "success" if step["conclusion"] != "success" else "skipped")
+            mutations.append(changed)
+        changed = copy.deepcopy(jobs)
+        changed["jobs"][0]["steps"][:2] = reversed(changed["jobs"][0]["steps"][:2])
+        mutations.append(changed)
+        changed = copy.deepcopy(jobs)
+        changed["jobs"][0]["steps"].append(
+            {"name": "Other failure", "status": "completed", "conclusion": "failure"})
+        mutations.append(changed)
+        for changed in mutations:
+            with self.subTest(steps=changed["jobs"][0]["steps"]), self.assertRaisesRegex(ValueError, "exact-main"):
+                self.qualify(state, remote, changed)
+
+    def test_lexical_route_rejects_ambiguous_or_mismatched_remote_job(self):
+        state, remote, jobs = self.lexical_fixture()
+        mutations = [{"total_count": 0, "jobs": []},
+                     {"total_count": 2, "jobs": jobs["jobs"] * 2}]
+        for change in ({"id": 0}, {"run_id": 124}, {"head_sha": "0" * 40},
+                       {"status": "in_progress"}, {"conclusion": "success"}, {"steps": None}):
+            changed = copy.deepcopy(jobs)
+            changed["jobs"][0].update(change)
+            mutations.append(changed)
+        for changed in mutations:
+            with self.subTest(jobs=changed), self.assertRaisesRegex(ValueError, "exact-main"):
+                self.qualify(state, remote, changed)
+
+    def test_lexical_route_preserves_build_placement_and_installed_stamp_refusals(self):
+        state, remote, jobs = self.lexical_fixture()
+        link = self.checkout / "build"
+        link.unlink()
+        with self.assertRaisesRegex(ValueError, "build link"):
+            self.qualify(state, remote, jobs)
+        outside = self.root / "outside-build"
+        outside.mkdir()
+        link.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "canonical build root"):
+            self.qualify(state, remote, jobs)
+        link.unlink()
+        link.symlink_to(self.build, target_is_directory=True)
+        (self.build / ".stamps/install-native").write_text("b" * 64 + "\n")
+        with self.assertRaisesRegex(ValueError, "stamps"):
+            self.qualify(state, remote, jobs)
+
     def test_successor_source_requires_its_own_matching_remote_and_retained_source(self):
         original = copy.deepcopy(self.state)
         self.plan.update(candidate_commit="3" * 40, candidate_tree="4" * 40,
@@ -303,6 +527,42 @@ class MainQualificationTests(unittest.TestCase):
         for plan in invalid:
             with self.subTest(plan=plan), self.assertRaises(ValueError):
                 driver.selection_identity(plan)
+
+    def test_retained_build_follows_placement_link_despite_obsolete_directory(self):
+        legacy = self.build_root / ("legacy-" + hashlib.sha256(os.fsencode(self.checkout)).hexdigest()[:16])
+        legacy.mkdir()
+        # A leftover historical directory must not replace the actual placed build.
+        (legacy / "CMakeCache.txt").write_text("obsolete unrelated build\n")
+        link_before = os.readlink(self.checkout / "build")
+        build, receipt = self.qualify()
+        self.assertEqual(self.build, build)
+        self.assertEqual(str(self.build), receipt["native_build"])
+        self.assertEqual(link_before, os.readlink(self.checkout / "build"))
+        self.assertEqual("obsolete unrelated build\n", (legacy / "CMakeCache.txt").read_text())
+
+    def test_retained_build_requires_placement_link_inside_canonical_root(self):
+        link = self.checkout / "build"
+        link.unlink()
+        with self.assertRaisesRegex(ValueError, "build link"):
+            self.qualify()
+        outside = self.root / "unrelated-build"
+        outside.mkdir()
+        link.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "canonical build root"):
+            self.qualify()
+
+    def test_retained_cache_directory_must_resolve_to_selected_build(self):
+        cache = self.build / "CMakeCache.txt"
+        original = cache.read_text()
+        other = self.build_root / "other-build"
+        other.mkdir()
+        cache.write_text(original.replace("CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build),
+                                          "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(other)))
+        with self.assertRaisesRegex(ValueError, "another build directory"):
+            self.qualify()
+        cache.write_text(original.replace("CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build),
+                                          "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.checkout / "build")))
+        self.assertEqual(self.build, self.qualify()[0])
 
     def test_retained_build_requires_selected_checkout_and_matching_install_stamp(self):
         self.qualify()

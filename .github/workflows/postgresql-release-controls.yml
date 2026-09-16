@@ -1,4 +1,4 @@
-name: CI session host-wait cancellation controls
+name: Explicit activation export lifecycle controls
 on:
   push:
     branches: [verify/postgresql-activation-20260916]
@@ -10,8 +10,8 @@ jobs:
     timeout-minutes: 12
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: d48509640a0844caf095c0da18520ddaca4846ec
-      SOURCE_TREE: def7ecea9377684de236fc16e80c6e45ab13b4ac
+      SOURCE_SHA: 07831041c545a13bd4f9da78e03130455ca02f79
+      SOURCE_TREE: f7093029cc78f65d6b145a238021238494904a2e
       TMPDIR: /build/laplace/work/postgresql-release/tmp
       TMP: /build/laplace/work/postgresql-release/tmp
       TEMP: /build/laplace/work/postgresql-release/tmp
@@ -29,12 +29,12 @@ jobs:
           test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
           git worktree add --detach /build/laplace/worktrees/postgresql-release "$SOURCE_SHA"
           printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
-      - name: Execute exact session lifecycle controls
+      - name: Execute exact activation export lifecycle controls
         run: |
           set -euo pipefail
           cd /build/laplace/worktrees/postgresql-release
           status=0
-          for test in test-ci-session.py; do
+          for test in test-qualified-chess-floor-export.py; do
             set +e
             timeout --signal=TERM --kill-after=10s 300s python3 "scripts/$test" -v 2>&1 | tee "$EVIDENCE/$test.log"
             result=$?
@@ -45,9 +45,21 @@ jobs:
           python3 - <<'PY' 2>&1 | tee "$EVIDENCE/python-ast.log"
           import ast
           from pathlib import Path
-          for name in ("ci-session.py", "test-ci-session.py"):
+          for name in ("export-qualified-chess-floors.py", "test-qualified-chess-floor-export.py"):
               ast.parse((Path("scripts") / name).read_text())
               print(f"PASS Python AST {name}")
+          PY
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/gui-operator-ast.log"
+          import ast
+          import hashlib
+          import os
+          from pathlib import Path
+          path = Path(os.environ["GITHUB_WORKSPACE"]) / ".github/diagnostics/gui-operator-source.py"
+          data = path.read_bytes()
+          blob = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+          assert blob == "36d6f74783f905efec4434ffc0a4ece3373b0461", blob
+          ast.parse(data)
+          print("PASS exact GUI operator AST", blob, hashlib.sha256(data).hexdigest())
           PY
           test -z "$(git status --porcelain --untracked-files=all)"
           exit "$status"

@@ -4,6 +4,9 @@ on:
   pull_request:
   push:
     branches: [main]
+    paths:
+      - .github/workflows/repo-hygiene.yml
+      - scripts/repo-hygiene-gate.py
   workflow_dispatch:
 
 permissions:
@@ -19,9 +22,10 @@ jobs:
         with:
           fetch-depth: 1
       - run: python3 scripts/repo-hygiene-gate.py
+
   integrated-branches:
     name: Preserve all history and consolidate branches
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -41,11 +45,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: python3 .github/scripts/consolidate-branches.py
-      - name: Retain full recovery bundle and unresolved implementation diffs
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: branch-consolidation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/branch-consolidation/
-          if-no-files-found: error
-          retention-days: 90
