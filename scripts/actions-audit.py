@@ -125,6 +125,37 @@ def visible_phases(job: dict, kind: str) -> tuple[list[str], int, int]:
 
 def result_authority(name: str, workflow: dict) -> None:
     """Optional diagnostics never acquire proof authority; readiness is deferred."""
+    if name == "chess-corpus-evidence.yml":
+        jobs = workflow.get("jobs") or {}
+        if set(jobs) != {"corpus"}:
+            fail("chess-corpus-evidence.yml: only one explicit corpus observation/measurement job is allowed")
+        if (workflow.get("on") or {}).get("push") != {
+                "branches": ["verify/chess-corpus-inventory-*", "verify/chess-corpus-measure-*"]}:
+            fail("chess-corpus-evidence.yml: corpus work must use explicit operator branches")
+        if workflow.get("concurrency") != {"group": "laplace-shared-workspace", "cancel-in-progress": "false"}:
+            fail("chess-corpus-evidence.yml: corpus work must retain shared workspace serialization")
+        corpus = jobs.get("corpus", {})
+        if "needs" in corpus or corpus.get("timeout-minutes") != "180":
+            fail("chess-corpus-evidence.yml: corpus work must remain independent and finitely bounded")
+        steps = corpus.get("steps") or []
+        execute = unique_step(steps, "id", "corpus_measurement", "chess-corpus-evidence.yml:corpus")
+        upload = unique_step(steps, "name", "Upload complete corpus evidence", "chess-corpus-evidence.yml:corpus")
+        if execute:
+            run = execute[1].get("run", "")
+            for token in ("set -euo pipefail",
+                          "flock --exclusive --close --timeout 1800 /build/laplace/work/host-resource.lock",
+                          'git checkout --force "$TARGET_SHA"', "scripts/measure-installed-chess-corpus.py",
+                          '--expected-source "$TARGET_SHA"', '--deadline-seconds 3600'):
+                if token not in run:
+                    fail(f"chess-corpus-evidence.yml: corpus owner lost {token}")
+        if upload and (upload[1].get("if") != "always()"
+                       or not upload[1].get("uses", "").startswith("actions/upload-artifact@")
+                       or (upload[1].get("with") or {}).get("if-no-files-found") != "error"):
+            fail("chess-corpus-evidence.yml: complete evidence must upload after failure")
+        for token in ("product-ci.sh", "ci-session.py", "pipeline.sh install", "pipeline.sh migrate",
+                      "publish-applications.sh", "systemctl ", "sudo "):
+            if token in runs(corpus):
+                fail(f"chess-corpus-evidence.yml: corpus observation cannot activate product changes: {token}")
     if name == "benchmark-evidence.yml":
         jobs = workflow.get("jobs") or {}
         if set(jobs) != {"benchmark", "acceptance"}:
@@ -470,7 +501,7 @@ for name, workflow in workflows.items():
             fail(f"{name}: seed mutation lacks explicit invocation")
 
 push = {name for name, workflow in workflows.items() if "push" in triggers(workflow)}
-if push != {"laplace.yml", "repo-hygiene.yml", "benchmark-evidence.yml"}:
+if push != {"laplace.yml", "repo-hygiene.yml", "benchmark-evidence.yml", "chess-corpus-evidence.yml"}:
     fail(f"automatic push workflows drifted: {sorted(push)}")
 
 runner = (ROOT / "scripts" / "bootstrap-laplace-runner.sh").read_text(encoding="utf-8")

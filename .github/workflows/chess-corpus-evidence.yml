@@ -1,0 +1,154 @@
+name: Chess corpus — authentic recorded capacity
+
+# Explicit operator branches or dispatch only. The source-built CLI uses the
+# installed database/native runtime; this workflow never activates a deployment.
+on:
+  push:
+    branches: [verify/chess-corpus-inventory-*, verify/chess-corpus-measure-*]
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [inventory, measure]
+        default: inventory
+        required: true
+      pgn:
+        description: "Observed absolute plain PGN; blank selects exactly one observed family file"
+        type: string
+        required: false
+        default: ""
+      family:
+        type: choice
+        options: [otb-2025, elite]
+        default: otb-2025
+        required: true
+      games:
+        description: "Requested authentic fresh PLAYING occurrences"
+        type: string
+        required: true
+        default: "75000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+
+env:
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+  LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
+  LAPLACE_DATA_ROOT: /vault/Data
+  PGHOST: /var/run/postgresql
+  PGUSER: laplace_admin
+  PGDATABASE: laplace
+  LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace"
+
+jobs:
+  corpus:
+    name: Observed corpus — complete fresh admission and replay
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 180
+    steps:
+      - name: Create corpus evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/laplace-chess-corpus-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir "$receipt"
+          printf 'LAPLACE_CORPUS_EVIDENCE=%s\n' "$receipt" >> "$GITHUB_ENV"
+
+      - name: Observe or measure the exact source under shared host ownership
+        id: corpus_measurement
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_PGN: ${{ inputs.pgn }}
+          REQUESTED_FAMILY: ${{ inputs.family }}
+          REQUESTED_GAMES: ${{ inputs.games }}
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
+          # Checkout also belongs to the lock: the persistent workspace is shared.
+          flock --exclusive --close --timeout 1800 /build/laplace/work/host-resource.lock bash -c '
+            set -euo pipefail
+            git fetch --no-tags --prune origin "$TARGET_SHA"
+            git checkout --force "$TARGET_SHA"
+            [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+            mode="${REQUESTED_MODE:-inventory}"
+            if [[ "$GITHUB_REF_NAME" == verify/chess-corpus-measure-* ]]; then mode=measure; fi
+            if [[ "$GITHUB_REF_NAME" == verify/chess-corpus-inventory-* ]]; then mode=inventory; fi
+            family="${REQUESTED_FAMILY:-otb-2025}"
+            games="${REQUESTED_GAMES:-75000}"
+            export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
+            export MSBUILDDISABLENODEREUSE=1 UseSharedCompilation=false
+            if [[ "$mode" == measure ]]; then
+              set +u
+              source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+              set -u
+              export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+              export LAPLACE_ENGINE_BUILD="$PWD/build/engine"
+            fi
+            args=(--mode "$mode" --expected-source "$TARGET_SHA"
+                  --output-dir "$LAPLACE_CORPUS_EVIDENCE/corpus"
+                  --family "$family" --games "$games" --deadline-seconds 3600)
+            [[ -z "${REQUESTED_PGN:-}" ]] || args+=(--pgn "$REQUESTED_PGN")
+            if [[ "$mode" == inventory ]]; then
+              python3 scripts/measure-installed-chess-corpus.py "${args[@]}"
+            else
+              python3 scripts/chess-runtime-env.py --prefix "$LAPLACE_INSTALL_PREFIX" -- \
+                python3 scripts/measure-installed-chess-corpus.py "${args[@]}"
+            fi
+          ' 2>&1 | tee "$LAPLACE_CORPUS_EVIDENCE/execution.log"
+
+      - name: Retain corpus result summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path(os.environ["LAPLACE_CORPUS_EVIDENCE"])
+          path = root / "corpus/receipt.json"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## Authentic existing-corpus measurement\n\n")
+              summary.write("Exact source: " + os.environ["GITHUB_SHA"] + "\n\n")
+              if path.is_file():
+                  receipt = json.loads(path.read_text())
+                  summary.write("Status: " + receipt["status"] + "\n\n")
+                  for row in receipt.get("phases", []):
+                      summary.write("- " + row["name"] + ": " + row["status"] + "\n")
+                  measured = receipt.get("measurement")
+                  if measured:
+                      summary.write("\nRecorded measurement: " + json.dumps(measured, allow_nan=False) + "\n")
+                  summary.write("\nSource-built CLI; existing installed PostgreSQL/native binding. "
+                                "Observed local file identity does not authenticate remote acquisition. "
+                                "Replays are never counted as new PLAYING occurrences.\n")
+              else:
+                  summary.write("No completed wrapper receipt; inspect execution logs.\n")
+          manifest = []
+          for item in sorted(root.rglob("*")):
+              if not item.is_file() or item.name == "artifact-sha256.json":
+                  continue
+              digest = hashlib.sha256()
+              with item.open("rb") as handle:
+                  for block in iter(lambda: handle.read(1 << 20), b""):
+                      digest.update(block)
+              manifest.append({"path": str(item.relative_to(root)), "bytes": item.stat().st_size,
+                               "sha256": digest.hexdigest()})
+          (root / "artifact-sha256.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
+
+      - name: Upload complete corpus evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-chess-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/laplace-chess-corpus-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 90

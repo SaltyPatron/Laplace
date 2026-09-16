@@ -763,6 +763,20 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
         job = next(iter(workflows[filename]["jobs"].values()))
         return next(step for step in job["steps"] if step.get(key) == value)
 
+    def test_corpus_measurement_remains_explicit_and_preserves_host_ownership(self):
+        self.check_audit(lambda ws: ws["chess-corpus-evidence.yml"]["on"]["push"].update(
+            {"branches": ["main"]}), "corpus work must use explicit operator branches")
+        self.check_audit(lambda ws: ws["chess-corpus-evidence.yml"]["concurrency"].update(
+            {"cancel-in-progress": "true"}), "shared workspace serialization")
+        self.check_audit(lambda ws: ws["chess-corpus-evidence.yml"]["jobs"]["corpus"].update(
+            {"timeout-minutes": "0"}), "independent and finitely bounded")
+        def remove_lock(ws):
+            step = self.step(ws, "chess-corpus-evidence.yml", "id", "corpus_measurement")
+            step["run"] = step["run"].replace("flock --exclusive --close --timeout 1800", "bash")
+        self.check_audit(remove_lock, "corpus owner lost flock")
+        self.check_audit(lambda ws: self.step(ws, "chess-corpus-evidence.yml", "name",
+            "Upload complete corpus evidence").update({"if": "success()"}), "complete evidence must upload after failure")
+
     def test_explicit_chess_acceptance_cannot_become_main_push_work(self):
         self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["on"]["push"].update(
             {"branches": ["main"]}), "explicitly named operator branch")

@@ -1,0 +1,25 @@
+name: Qualify corpus Python controls
+
+on:
+  push:
+    branches: [qualify/chess-corpus-python-*]
+
+permissions:
+  contents: read
+
+jobs:
+  controls:
+    name: Pure corpus wrapper controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Execute actual standard-library controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 scripts/test-installed-chess-corpus.py -v
