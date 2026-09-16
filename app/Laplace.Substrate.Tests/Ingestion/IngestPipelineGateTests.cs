@@ -163,7 +163,8 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
     {
         var reader = new NpgsqlSubstrateReader(_pg.DataSource);
         var id = Hash128.Blake3(Encoding.UTF8.GetBytes("proven-trunk-gate"));
-        reader.MarkProven([id]);
+        var presenceScope = reader.CapturePresenceScope();
+        reader.MarkProven([id], presenceScope);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var bm = await reader.ContentDescentBitmapAsync([id], [-1]);
