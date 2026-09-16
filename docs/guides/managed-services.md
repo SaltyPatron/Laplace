@@ -260,6 +260,45 @@ launch. It contains only public launch data from the installed-binary verifier;
 it never reads the API environment or executes the build-tree receipt path.
 Root registration does not execute the GUI.
 
+On launch, the same public installation adds **Stockfish (official)** and
+**Laplace (substrate)** to the user's official CuteChess engine list, ready for
+selection in **New Game** and engine settings. Stockfish launches the selected
+source-built executable through `/opt/laplace/bin/laplace-cutechess-stockfish`;
+Laplace uses the published `/opt/laplace/app/laplace-uci` runtime. The catalog is
+`/opt/laplace/share/laplace/cutechess-engines.json`. It uses the upstream
+[1.5.1 EngineConfiguration format](https://github.com/cutechess/cutechess/blob/45e923949e43570886c0ad3392f514e743839c6b/projects/lib/src/engineconfiguration.cpp)
+loaded by the [official GUI EngineManager](https://github.com/cutechess/cutechess/blob/45e923949e43570886c0ad3392f514e743839c6b/projects/gui/src/cutechessapp.cpp).
+
+The user configuration is `$XDG_CONFIG_HOME/cutechess/engines.json`, or
+`~/.config/cutechess/engines.json` when XDG_CONFIG_HOME is unset. Existing entries,
+names, options and application settings remain intact. Only missing UCI commands
+are appended; a conflicting display name receives a numeric suffix. Before an
+existing engine file changes, its exact bytes are retained in a nonoverwriting
+`engines.json.laplace-backup-<SHA256>` beside it. Malformed configuration is
+preserved and reported. An inherited session lock prevents concurrent managed
+launchers from rewriting the list, and a running direct CuteChess process must
+close before new entries are merged. The adjacent `laplace-engines.json`
+records configuration hashes and additions; it does not claim an engine ran.
+
+Laplace's default desktop engine mode uses the substrate. The normal configured
+operator connects through the existing PostgreSQL Unix socket and exact
+operator-to-`laplace_admin` peer mapping established by setup-host. The GUI
+launcher does not read application environment/secret files, use sudo for UCI,
+or switch silently to classical play. Public installed T0 and paired chess-floor
+paths are selected explicitly; native libraries load from the published UCI
+directory. Engine work and logs use a private mode-0700 per-UID directory under
+the existing permanent work root; the GUI retains the user's display, XDG
+settings and working directory.
+
+A different desktop account needs the existing host/operator provisioning route,
+not a shared service password or broad PostgreSQL trust rule. Actual acceptance
+must run as the configured desktop identity, enumerate both engines through the
+official EngineManager, and require a prepared substrate provider stack plus a
+legal completed UCI search. `readyok` alone and the existing substrate-off
+packaging check do not establish that access. A real GUI engine game is a
+separate acceptance from configuration installation or CLI enumeration.
+
+
 The virtual-X11 acceptance separately owns a temporary display, exercises the
 real window and dialog, then exits both GUI and display. Neither provisioning
 nor that acceptance installs a persistent GUI session, remote desktop listener,

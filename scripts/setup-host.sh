@@ -172,7 +172,7 @@ runner_dotnet() {
         PATH="$PATH" \
         DOTNET_NOLOGO=1 \
         DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-        TMPDIR=/build/laplace/work/legacy-scratch TMP=/build/laplace/work/legacy-scratch TEMP=/build/laplace/work/legacy-scratch \
+        TMPDIR=/build/laplace/work/scratch TMP=/build/laplace/work/scratch TEMP=/build/laplace/work/scratch \
         bash -c "umask 0002; cd '$REPO_DIR/app' && dotnet $*"
 }
 
@@ -218,7 +218,7 @@ layer1_build_install_extensions() {
     sudo python3 "$REPO_DIR/scripts/place-build-directory.py" "$REPO_DIR" >/dev/null
     sudo -u "$RUNNER_USER" -H env \
         GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$REPO_DIR" \
-        TMPDIR=/build/laplace/work/legacy-scratch TMP=/build/laplace/work/legacy-scratch TEMP=/build/laplace/work/legacy-scratch \
+        TMPDIR=/build/laplace/work/scratch TMP=/build/laplace/work/scratch TEMP=/build/laplace/work/scratch \
         bash -c '
             set -e
             source "$2" --force >/dev/null

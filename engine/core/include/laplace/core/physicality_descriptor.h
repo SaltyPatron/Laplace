@@ -143,6 +143,14 @@ typedef struct {
 physicality_descriptor_status_t physicality_descriptor_stages_shape(
     const intent_stage_t* const* stages, size_t stage_count,
     physicality_descriptor_shape_t* out_shape);
+/* Constant-time producer bound from existing physicality row count and tuple
+ * payload length. Treats every complete 32 bytes (including tuple framing) as
+ * a possible XYZM vertex and assigns that total to the widest possible row.
+ * This deliberately overcounts; it does not scan/authenticate tuple contents.
+ * Use stages_shape for exact finalized dimensions and ordinary capture for
+ * validation. No retained stage metadata, layout or allocation changes. */
+physicality_descriptor_status_t physicality_descriptor_stage_shape_bound(
+    const intent_stage_t* stage, physicality_descriptor_shape_t* out_shape);
 /* Exact decoded capture payload (opaque capture + input/observation arrays +
  * copied XYZM vertices), excluding a descriptor plan and borrowed stages. */
 physicality_descriptor_status_t physicality_descriptor_capture_payload_bound(

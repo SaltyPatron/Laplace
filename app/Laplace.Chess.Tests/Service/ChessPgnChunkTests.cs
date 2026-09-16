@@ -91,13 +91,13 @@ public sealed class ChessPgnChunkTests
     }
 
     [Fact]
-    public void ActualStagedBytesCloseAfterTheCrossingGameWithoutANewGameCountCap()
+    public void SharedByteEstimatesCloseAfterTheCrossingGameWithoutANewGameCountCap()
     {
         var games = Games();
         var novel = games.Select(game => game.PlayingId).ToHashSet();
         int firstOffset = 0;
         using var first = ChessPgnChunk.ComposeNext(games, novel, ref firstOffset, 1);
-        long firstBytes = first.StagedBytes;
+        long firstBytes = Math.Max(first.StagedBytes, first.ModeledSourceAdmissionBytes);
         Dispose(Build(first));
         int offset = 0;
         using var combined = ChessPgnChunk.ComposeNext(games, novel, ref offset, checked(firstBytes + 1));
@@ -105,10 +105,72 @@ public sealed class ChessPgnChunkTests
         {
             Assert.Equal(2, combined.Games.Count);
             Assert.True(combined.StagedBytesBeforeLastGame < firstBytes + 1);
-            Assert.True(combined.StagedBytes >= firstBytes + 1);
+            Assert.True(combined.ModeledSourceAdmissionBytesBeforeLastGame < firstBytes + 1);
+            Assert.True(Math.Max(combined.StagedBytes, combined.ModeledSourceAdmissionBytes) >= firstBytes + 1);
             Assert.Equal(2, offset);
         }
         finally { Dispose(Build(combined)); }
+    }
+
+    [Fact]
+    public void SourceLocalAdmissionModelClosesWholeGamesBeforeSerializedBytesAndReplayKeepsTheSchedule()
+    {
+        var games = Games();
+        var novel = games.Select(game => game.PlayingId).ToHashSet();
+        int probeOffset = 0;
+        using var probe = ChessPgnChunk.ComposeNext(games, novel, ref probeOffset, 1);
+        long budget = checked(probe.StagedBytes + 1);
+        Assert.True(probe.ModeledSourceAdmissionBytes >= budget);
+        Dispose(Build(probe));
+
+        int wholeOffset = 0;
+        using var whole = ChessPgnChunk.ComposeNext(games, novel, ref wholeOffset, long.MaxValue);
+        var expected = Build(whole);
+        var split = new List<SubstrateChange>();
+        var schedule = new List<int>();
+        var observed = new List<ChessGameRecord>();
+        try
+        {
+            int offset = 0;
+            while (offset < games.Length)
+            {
+                using var chunk = ChessPgnChunk.ComposeNext(games, novel, ref offset, budget);
+                if (schedule.Count == 0)
+                {
+                    Assert.Single(chunk.Games);
+                    Assert.True(chunk.StagedBytes < budget);
+                    Assert.True(chunk.ModeledSourceAdmissionBytes >= budget);
+                    Assert.Equal(0L, chunk.ModeledSourceAdmissionBytesBeforeLastGame);
+                }
+                schedule.Add(chunk.Games.Count);
+                observed.AddRange(chunk.Games);
+                split.AddRange(Build(chunk));
+            }
+            Assert.Equal<ChessGameRecord>(games, observed);
+            Assert.Equal(games.Sum(game => game.MoveIds.Length), observed.Sum(game => game.MoveIds.Length));
+            Assert.Equal(Observations(expected), Observations(split));
+            Assert.Equal(Attestations(expected), Attestations(split));
+            Assert.Equal(EvidenceFacts(expected), EvidenceFacts(split));
+            Assert.Equal(expected.SelectMany(c => c.Entities).Select(row => row.Id).Distinct().OrderBy(id => id.ToString()),
+                split.SelectMany(c => c.Entities).Select(row => row.Id).Distinct().OrderBy(id => id.ToString()));
+            Assert.Equal(expected.SelectMany(c => c.IntentStages).Sum(stage => stage.PhysicalityCount),
+                split.SelectMany(c => c.IntentStages).Sum(stage => stage.PhysicalityCount));
+
+            int replayOffset = 0;
+            var replayed = new List<ChessGameRecord>();
+            foreach (int count in schedule)
+            {
+                // A larger runtime byte share must not merge the sealed fresh chunks.
+                using var replay = ChessPgnChunk.ComposeNext(games, novel, ref replayOffset,
+                    long.MaxValue, exactGameCount: count);
+                Assert.Equal(count, replay.Games.Count);
+                replayed.AddRange(replay.Games);
+                Dispose(Build(replay));
+            }
+            Assert.Equal<ChessGameRecord>(games, replayed);
+            Assert.Equal(games.Length, replayOffset);
+        }
+        finally { Dispose(expected); Dispose(split); }
     }
 
     [Fact]

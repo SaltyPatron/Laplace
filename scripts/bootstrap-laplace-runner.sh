@@ -175,6 +175,8 @@ Modes:
   bootstrap   Full Layer 0: runner, PG cluster, API unit, chess-lab, secrets
   chess-gui-runtime
               Install host X11 libraries and virtual-display acceptance tools only
+  chess-gui-acceptance-tools
+              Install optional AT-SPI/DBus operator-test tools only; no engine requirement
   status      Print current state (no changes)
   stripe      Stripe sandbox block into runner .env
   pg-bounce-sudoers
@@ -238,6 +240,12 @@ bootstrap_chess_gui_runtime() {
         libxcb-shape0 libxcb-xfixes0 libxcb-sync1 libxcb-shm0
         libxcb-render0 libxcb-util1 libxcb1 libx11-xcb1 fonts-dejavu-core
     )
+    # This opt-in selection supports actual named-widget GUI acceptance. It is
+    # separate from the normal runtime package list and does not alter engine setup.
+    if [ "${1:-runtime}" = accessibility ]; then
+        packages=(dbus-daemon at-spi2-core gir1.2-atspi-2.0 python3-gi)
+        say "Optional GUI acceptance tools: isolated DBus and typed AT-SPI"
+    fi
     local -a missing=() installer=(apt-get)
     for attempt in 1 2; do
         missing=()
@@ -309,6 +317,11 @@ bootstrap_build_environment() {
     chgrp "$RUNNER_GROUP" /opt/laplace
     chmod 2775 /opt/laplace
     green "✓ /opt/laplace: shared group $RUNNER_GROUP mode 2775 (setgid, owner preserved)"
+    local cmake_bin
+    cmake_bin=$(python3 "$(dirname "${BASH_SOURCE[0]}")/provision-cmake.py" \
+        --root /opt/laplace/tools/cmake \
+        --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+    green "✓ Pinned CMake selected: $cmake_bin"
 }
 
 bootstrap_migrate_runner_home() {
@@ -447,13 +460,13 @@ bootstrap_runner_register() {
         exit 1
     fi
 
-    install -d -g "$RUNNER_GROUP" -m 2770 /build/laplace/work/legacy-runner
+    install -d -g "$RUNNER_GROUP" -m 2770 /build/laplace/work/runner
     (cd "$RUNNER_DIR" && sudo -u "$RUNNER_USER" -H ./config.sh \
         --url "$REPO_URL" \
         --token "$token" \
         --name hart-server \
         --labels laplace,oneapi,postgres-18,dotnet-10,avx2 \
-        --work /build/laplace/work/legacy-runner \
+        --work /build/laplace/work/runner \
         --unattended \
         --replace)
     green "✓ Registered runner as 'hart-server'"
@@ -467,9 +480,9 @@ bootstrap_runner_oom_guard() {
 [Service]
 OOMScoreAdjust=-800
 UMask=0002
-Environment=TMPDIR=/build/laplace/work/legacy-scratch
-Environment=TMP=/build/laplace/work/legacy-scratch
-Environment=TEMP=/build/laplace/work/legacy-scratch
+Environment=TMPDIR=/build/laplace/work/scratch
+Environment=TMP=/build/laplace/work/scratch
+Environment=TEMP=/build/laplace/work/scratch
 Restart=always
 RestartSec=10
 EOF
@@ -1508,6 +1521,12 @@ HINT
         return
     fi
 
+    # PostgreSQL's release selection is tracked with the application. Preserve
+    # every other host pin; the existing loop below still owns Git acquisition.
+    local release_owner
+    release_owner="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/postgresql-release.py"
+    python3 "$release_owner" select-pin --external "$LAPLACE_EXTERNAL" || return 1
+
     local total=0 synced=0 nooped=0 failed=0
     while IFS=$'\t' read -r path url pin; do
         case "$path" in ''|'#'*) continue;; esac
@@ -1545,6 +1564,7 @@ HINT
         red "✗ external: total=$total synced=$synced nooped=$nooped failed=$failed"
         return 1
     fi
+    python3 "$release_owner" source --external "$LAPLACE_EXTERNAL" || return 1
     green "✓ external: total=$total synced=$synced nooped=$nooped (already current)"
 }
 
@@ -1995,6 +2015,9 @@ case "$MODE" in
         ;;
     chess-gui-runtime)
         bootstrap_chess_gui_runtime
+        ;;
+    chess-gui-acceptance-tools)
+        bootstrap_chess_gui_runtime accessibility
         ;;
     status)
         do_status

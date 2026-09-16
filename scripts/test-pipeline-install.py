@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Execute actual pipeline functions with isolated artifacts and fake OS/SQL calls."""
 import os
+import json
+import shlex
 from pathlib import Path
 import re
 import subprocess
+import shutil
+import sys
 import tempfile
 import unittest
 
@@ -108,6 +112,7 @@ phase_chess_lab
         self.assertIn("--binary " + str(self.base / "install/bin/cutechess"), checks[0])
         self.assertIn("--verify-receipt " + str(self.base / "cutechess-gui-build.json"), checks[0])
         self.assertIn("--install-desktop " + str(self.base / "install"), checks[0])
+        self.assertIn("--desktop-stockfish " + str(sources[0] / "src/stockfish"), checks[0])
 
     def test_chess_unchanged_stamp_requires_gui_artifacts_and_successful_reverification(self):
         _, script = self.chess_publication_fixture()
@@ -276,12 +281,100 @@ sudo() {
   echo "$*" >> "$CALLS"
   if [[ "$*" == *"start laplace-api"* ]]; then return "${START_RC:-0}"; fi
 }
-preloaded_so_digest() { if [[ -f installed ]]; then echo new; else echo old; fi; }
+postgresql_restart_required() {
+  if [[ -f pg-restarted ]]; then return "${PG_AFTER_RC:-1}"; fi
+  return "${PG_RESTART_RC:-1}"
+}
+preloaded_so_digest() {
+  if [[ "${SAME_PRELOAD:-0}" == 1 ]]; then echo same;
+  elif [[ -f installed ]]; then echo new; else echo old; fi
+}
 cmake() { echo install >> "$CALLS"; touch installed; return "${COPY_RC:-0}"; }
 psql() { echo probe >> "$CALLS"; return "${PROBE_RC:-0}"; }
-restart_postgres() { echo bounce >> "$CALLS"; }
+restart_postgres() { echo bounce >> "$CALLS"; touch pg-restarted; return "${BOUNCE_RC:-0}"; }
 phase_install
 ''', **env)
+
+
+    def test_server_release_mismatch_cannot_skip_and_restarts_unchanged_preloads(self):
+        result = self.phase(NATIVE_MATCH_RC="0", ARTIFACT_MATCH_RC="0",
+                            PG_RESTART_RC="0", SAME_PRELOAD="1")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        calls = self.calls().splitlines()
+        self.assertEqual(1, calls.count("install"))
+        self.assertEqual(1, calls.count("bounce"))
+        self.assertLess(calls.index("install"), calls.index("bounce"))
+        self.assertLess(calls.index("bounce"), calls.index("stamp"))
+
+    def test_server_release_read_failure_refuses_install_and_service_actions(self):
+        result = self.phase(PG_RESTART_RC="2")
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("", self.calls())
+
+    def test_failed_restart_or_stale_readback_never_stamps_activation(self):
+        for error in ({"BOUNCE_RC": "27"}, {"PG_AFTER_RC": "0"}, {"PG_AFTER_RC": "2"}):
+            with self.subTest(error=error):
+                (self.base / "calls").write_text("")
+                (self.base / "installed").unlink(missing_ok=True)
+                (self.base / "pg-restarted").unlink(missing_ok=True)
+                result = self.phase(PG_RESTART_RC="0", SAME_PRELOAD="1", **error)
+                self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertIn("bounce", self.calls())
+                self.assertIn("start laplace-api", self.calls())
+                self.assertNotIn("stamp", self.calls())
+
+    def test_running_release_comparison_uses_actual_helper_and_refuses_bad_observation(self):
+        binary_root = self.base / "pg/bin"
+        binary_root.mkdir(parents=True)
+        for name, label in (("postgres", "postgres (PostgreSQL)"), ("pg_config", "PostgreSQL")):
+            executable = binary_root / name
+            executable.write_text("#!/bin/sh\nprintf '%s\\n' '" + label + " 18.6'\n")
+            executable.chmod(0o755)
+        script = function("postgresql_restart_required") + r'''
+psql() {
+  [[ "$*" == "-d postgres -U laplace_admin -tAc SHOW server_version_num" ]] || return 98
+  [[ "${READ_FAIL:-0}" == 0 ]] || return 29
+  printf '%s\n' "$RUNNING_VERSION"
+}
+if postgresql_restart_required; then exit 0; else exit $?; fi
+'''
+        for version, expected in (("180003", 0), ("180006", 1), ("170013", 2),
+                                  ("190001", 2), ("", 2), ("invalid", 2)):
+            with self.subTest(version=version):
+                result = self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
+                                        RUNNING_VERSION=version)
+                self.assertEqual(expected, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(2, self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
+                                          RUNNING_VERSION="180006", READ_FAIL="1").returncode)
+        executable = binary_root / "postgres"
+        executable.write_text(executable.read_text().replace("18.6", "18.3"))
+        self.assertEqual(2, self.run_shell(script, ROOT=str(ROOT), PYTHON=sys.executable,
+                                          RUNNING_VERSION="180003").returncode)
+
+    def test_native_and_runtime_fingerprints_change_with_tracked_postgresql_release(self):
+        source = self.base / "fingerprint-source"
+        (source / "scripts/lib").mkdir(parents=True)
+        (source / "deploy").mkdir()
+        shutil.copy2(ROOT / "scripts/lib/fp.sh", source / "scripts/lib/fp.sh")
+        shutil.copy2(ROOT / "scripts/chess-floor-artifacts.py", source / "scripts/chess-floor-artifacts.py")
+        release = source / "deploy/postgresql-release.json"
+        release.write_bytes((ROOT / "deploy/postgresql-release.json").read_bytes())
+        subprocess.run(["git", "init", "--quiet", str(source)], check=True, timeout=10)
+        subprocess.run(["git", "-C", str(source), "add", "."], check=True, timeout=10)
+        body = 'source "$ROOT/scripts/lib/fp.sh"\nfp_native\nfp_runtime\n'
+        env = {"ROOT": str(source), "LAPLACE_CHESS_OPENINGS": str(source / "absent-openings"),
+               "LAPLACE_CHESS_CORPUS_EXPORT": ""}
+        before = self.run_shell(body, **env)
+        self.assertEqual(0, before.returncode, before.stderr)
+        self.assertEqual(before.stdout, self.run_shell(body, **env).stdout)
+        release.write_text(release.read_text().replace('"18.6"', '"18.7"'))
+        after = self.run_shell(body, **env)
+        self.assertEqual(0, after.returncode, after.stderr)
+        old_hashes, new_hashes = before.stdout.splitlines(), after.stdout.splitlines()
+        self.assertEqual(2, len(old_hashes))
+        self.assertEqual(2, len(new_hashes))
+        for old, new in zip(old_hashes, new_hashes):
+            self.assertNotEqual(old, new)
 
     def test_matching_source_with_changed_install_reinstalls(self):
         result = self.phase(NATIVE_MATCH_RC="0", ARTIFACT_MATCH_RC="1")
@@ -357,6 +450,171 @@ phase_install
         self.assertEqual("build\ninstall\n", self.calls())
 
 
+
+
+class ManagedPolicyPreparationTests(unittest.TestCase):
+    """Actual shell/file checks; only privileged setup is a child-process double."""
+    def setUp(self):
+        scratch = Path(os.environ.get("TMPDIR", ""))
+        if not scratch.is_absolute() or not scratch.is_dir():
+            raise RuntimeError("policy preparation controls require an existing absolute TMPDIR")
+        self.temporary = tempfile.TemporaryDirectory(prefix="managed-policy-prepare-", dir=scratch)
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name)
+        self.project = self.base / "project"
+        self.source = self.project / "deploy/linux"
+        self.scripts = self.project / "scripts"
+        self.installed = self.base / "installed"
+        self.tools = self.base / "tools"
+        for directory in (self.source, self.scripts, self.installed, self.tools):
+            directory.mkdir(parents=True)
+        for name in ("managed-publish.sh", "payload-sync.sh"):
+            shutil.copy2(ROOT / "deploy/linux" / name, self.source / name)
+        self.names = ("laplace-managed-deploy", "laplace-service-control")
+        for name in self.names:
+            (self.source / name).write_text("selected " + name + "\n")
+        self.calls = self.base / "setup.jsonl"
+        self.sudo_calls = self.base / "sudo.jsonl"
+        driver = self.scripts / "fixture-setup.py"
+        driver.write_text(
+            "import json,os,sys\nfrom pathlib import Path\n"
+            "assert sys.argv[1:] == ['managed-services'], sys.argv\n"
+            "source=Path(__file__).resolve().parents[1]/'deploy/linux'\n"
+            "destination=Path(os.environ['POLICY_FIXTURE_INSTALLED'])\n"
+            "with Path(os.environ['POLICY_FIXTURE_CALLS']).open('a') as out:\n"
+            " out.write(json.dumps({'argv':sys.argv[1:],'tmp':os.environ.get('TMPDIR')})+'\\n')\n"
+            "mode=os.environ.get('POLICY_FIXTURE_MODE','update')\n"
+            "if mode=='fail':\n"
+            " print('fixture policy setup refused',file=sys.stderr); raise SystemExit(27)\n"
+            "if mode=='unchanged': raise SystemExit(0)\n"
+            "for name in ['laplace-managed-deploy','laplace-service-control']:\n"
+            " if mode=='partial' and name=='laplace-service-control': continue\n"
+            " path=destination/name\n"
+            " path.write_bytes((source/name).read_bytes())\n"
+            " path.chmod(0o775 if mode=='bad-mode' else 0o755)\n"
+            "if mode=='updated-then-fail':\n"
+            " print('fixture post-install refusal',file=sys.stderr); raise SystemExit(27)\n")
+        (self.scripts / "setup-host.sh").write_text(
+            "#!/bin/bash\nexec " + shlex.quote(sys.executable) + " "
+            + shlex.quote(str(driver)) + ' "$@"\n')
+        sudo = self.tools / "sudo"
+        sudo.write_text(
+            "#!" + sys.executable + "\n"
+            "import json,os,sys\nfrom pathlib import Path\n"
+            "assert sys.argv[1:3]==['-n','--'],sys.argv\n"
+            "assert sys.argv[3:7]==['timeout','--signal=TERM','--kill-after=10s','600s'],sys.argv\n"
+            "with Path(os.environ['POLICY_FIXTURE_SUDO']).open('a') as out:\n"
+            " out.write(json.dumps(sys.argv[1:])+'\\n')\n"
+            "os.execvp(sys.argv[3],sys.argv[3:])\n")
+        sudo.chmod(0o755)
+        self.environment = dict(
+            os.environ, PATH=str(self.tools) + os.pathsep + os.environ["PATH"],
+            POLICY_FIXTURE_INSTALLED=str(self.installed),
+            POLICY_FIXTURE_CALLS=str(self.calls), POLICY_FIXTURE_SUDO=str(self.sudo_calls))
+        self.install_matching()
+
+    def install_matching(self):
+        for name in self.names:
+            target = self.installed / name
+            if target.is_symlink():
+                target.unlink()
+            target.write_bytes((self.source / name).read_bytes())
+            target.chmod(0o755)
+
+    def invoke(self, operation, mode="update", uid=None):
+        environment = dict(self.environment, POLICY_FIXTURE_MODE=mode)
+        # Production execution sets TRUSTED_POLICY_UID=0 unconditionally. Source
+        # the same functions with a private current-UID fixture, as root policy
+        # tests do, without touching /usr/local or requiring real sudo.
+        return subprocess.run([
+            "bash", "-c",
+            'source "$1"; HELPER="$2"; TRUSTED_POLICY_UID="$3"; "$4"',
+            "policy-fixture", str(self.source / "managed-publish.sh"),
+            str(self.installed / "laplace-managed-deploy"),
+            str(os.getuid() if uid is None else uid), operation],
+            env=environment, capture_output=True, text=True, timeout=15)
+
+    def setup_rows(self):
+        return [json.loads(line) for line in self.calls.read_text().splitlines()] \
+            if self.calls.exists() else []
+
+    def test_matching_policy_is_read_only_and_does_not_invoke_setup(self):
+        before = {name: ((self.installed / name).stat().st_ino,
+                         (self.installed / name).read_bytes()) for name in self.names}
+        for operation in ("installed_policy", "prepare_policy"):
+            result = self.invoke(operation, mode="fail")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual([], self.setup_rows())
+        self.assertFalse(self.sudo_calls.exists())
+        self.assertEqual(before, {name: ((self.installed / name).stat().st_ino,
+                                        (self.installed / name).read_bytes()) for name in self.names})
+
+    def test_stale_and_missing_policy_delegate_once_then_reverify_both_files(self):
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                self.install_matching()
+                self.calls.unlink(missing_ok=True)
+                target = self.installed / "laplace-service-control"
+                if missing:
+                    target.unlink()
+                else:
+                    target.write_text("old policy\n")
+                result = self.invoke("prepare_policy")
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual([{"argv": ["managed-services"], "tmp": os.environ["TMPDIR"]}],
+                                 self.setup_rows())
+                self.assertEqual(0, self.invoke("installed_policy").returncode)
+                self.assertEqual(0, self.invoke("prepare_policy", mode="fail").returncode)
+                self.assertEqual(1, len(self.setup_rows()))
+                if os.geteuid() != 0:
+                    self.assertTrue(self.sudo_calls.is_file())
+
+    def test_read_only_check_refuses_identity_owner_mode_and_symlink_without_setup(self):
+        for defect in ("bytes", "mode", "symlink", "owner"):
+            with self.subTest(defect=defect):
+                self.install_matching()
+                target = self.installed / "laplace-managed-deploy"
+                uid = None
+                if defect == "bytes":
+                    target.write_text("wrong generation\n")
+                elif defect == "mode":
+                    target.chmod(0o775)
+                elif defect == "symlink":
+                    target.unlink()
+                    target.symlink_to(self.source / "laplace-managed-deploy")
+                else:
+                    uid = os.getuid() + 1
+                before = (target.lstat().st_ino, target.lstat().st_mode,
+                          target.read_bytes(), target.is_symlink())
+                result = self.invoke("installed_policy", uid=uid)
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(before, (target.lstat().st_ino, target.lstat().st_mode,
+                                          target.read_bytes(), target.is_symlink()))
+                self.assertEqual([], self.setup_rows())
+
+    def test_setup_failure_is_not_swallowed_even_after_publishing_matching_bytes(self):
+        for mode in ("fail", "updated-then-fail"):
+            with self.subTest(mode=mode):
+                self.install_matching()
+                (self.installed / "laplace-managed-deploy").write_text("old generation\n")
+                self.calls.unlink(missing_ok=True)
+                result = self.invoke("prepare_policy", mode=mode)
+                self.assertEqual(27, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(1, len(self.setup_rows()))
+                self.assertIn("refusal" if mode == "updated-then-fail" else "refused", result.stderr)
+                if mode == "updated-then-fail":
+                    self.assertEqual(0, self.invoke("installed_policy").returncode)
+
+    def test_successful_setup_exit_cannot_cover_incomplete_or_untrusted_result(self):
+        for mode in ("unchanged", "partial", "bad-mode"):
+            with self.subTest(mode=mode):
+                for name in self.names:
+                    (self.installed / name).write_text("old generation\n")
+                self.calls.unlink(missing_ok=True)
+                result = self.invoke("prepare_policy", mode=mode)
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(1, len(self.setup_rows()))
+                self.assertNotEqual(0, self.invoke("installed_policy").returncode)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

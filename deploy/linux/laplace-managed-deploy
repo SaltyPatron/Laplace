@@ -38,7 +38,7 @@ NGINX_CONFIG = Path("/etc/nginx/sites-available/laplace-managed")
 NGINX_ENABLED = Path("/etc/nginx/sites-enabled/laplace-managed")
 TRUSTED_UID = 0
 ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C",
-       **{key: "/build/laplace/work/legacy-scratch" for key in ("TMPDIR", "TMP", "TEMP")}}
+       **{key: "/build/laplace/work/scratch" for key in ("TMPDIR", "TMP", "TEMP")}}
 
 
 def run(*args):
@@ -63,10 +63,10 @@ def validate_unit(text, name):
             ("Restart", "on-failure"), ("RestartSec", "10" if name == "mcp" else "30"),
             ("TimeoutStopSec", "45"), ("StateDirectory", account), ("LogsDirectory", account),
             ("Environment", "LAPLACE_OPS_LOG_DIR=/var/log/" + account), ("UMask", "0002"),
-            ("Environment", "TMPDIR=/build/laplace/work/legacy-" + name),
-            ("Environment", "TMP=/build/laplace/work/legacy-" + name),
-            ("Environment", "TEMP=/build/laplace/work/legacy-" + name),
-            ("ReadWritePaths", "/build/laplace/work/legacy-" + name),
+            ("Environment", "TMPDIR=/build/laplace/work/" + name),
+            ("Environment", "TMP=/build/laplace/work/" + name),
+            ("Environment", "TEMP=/build/laplace/work/" + name),
+            ("ReadWritePaths", "/build/laplace/work/" + name),
             ("NoNewPrivileges", "true"), ("ProtectSystem", "strict"), ("ProtectHome", "true"),
             ("PrivateTmp", "false"), ("PrivateDevices", "true"), ("ProtectProc", "invisible"),
             ("RestrictSUIDSGID", "true"), ("CapabilityBoundingSet", ""),
@@ -186,9 +186,9 @@ StartLimitBurst=3
 [Service]
 Type=oneshot
 User=root
-Environment=TMPDIR=/build/laplace/work/legacy-scratch
-Environment=TMP=/build/laplace/work/legacy-scratch
-Environment=TEMP=/build/laplace/work/legacy-scratch
+Environment=TMPDIR=/build/laplace/work/scratch
+Environment=TMP=/build/laplace/work/scratch
+Environment=TEMP=/build/laplace/work/scratch
 ExecStart={LIBEXEC}/laplace-managed-deploy reconcile-host
 TimeoutStartSec=180
 SuccessExitStatus=75
@@ -228,6 +228,26 @@ def account_valid(name):
         and account.pw_dir == "/var/lib/" + name and account.pw_shell == "/usr/sbin/nologin"
 
 
+def reconcile_scratch_directory(path, account):
+    # Existing shared outputs keep their user owner. Only a newly created
+    # service directory gets the service UID; group access is reconciled on the
+    # opened directory itself so a symlink cannot redirect a privileged chmod.
+    created = False
+    try:
+        path.mkdir(mode=0o2770)
+        created = True
+    except FileExistsError:
+        pass
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        metadata = os.fstat(descriptor)
+        owner = pwd.getpwnam(account).pw_uid if created else -1
+        os.fchown(descriptor, owner, grp.getgrnam("laplace-runner").gr_gid)
+        os.fchmod(descriptor, stat.S_IMODE(metadata.st_mode) | stat.S_ISGID | stat.S_IRWXG)
+    finally:
+        os.close(descriptor)
+
+
 def reconcile_accounts():
     for name in UNITS:
         account = "laplace-" + name
@@ -239,8 +259,7 @@ def reconcile_accounts():
         if not account_valid(account):
             raise ValueError("managed service account collision or drift; no existing account was modified")
         run("/usr/bin/mountpoint", "-q", "/build")
-        run("/usr/bin/install", "-d", "-m", "2770", "-o", account, "-g", "laplace-runner",
-            "/build/laplace/work/legacy-" + name)
+        reconcile_scratch_directory(Path("/build/laplace/work") / name, account)
 
 
 def peer_mappings_present(text):

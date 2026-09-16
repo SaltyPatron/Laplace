@@ -34,7 +34,20 @@ ucd="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan
 [[ -f "$ucd" ]] || { echo "::error::UCD zip missing: $ucd"; exit 1; }
 endsection
 
+section "Managed host policy"
+if [[ "$CHECK_ONLY" -eq 1 ]]; then
+  bash deploy/linux/managed-publish.sh check-policy
+else
+  bash deploy/linux/managed-publish.sh prepare-policy
+fi
+endsection
+
 section "Pinned external cache"
+# Normal dependencies converge the tracked release through the existing source
+# owner before validating the mutable host pins. Read-only checks never provision.
+if [[ "$CHECK_ONLY" -eq 0 ]]; then
+  python3 scripts/postgresql-release.py prepare-source --external "$CACHE"
+fi
 if [[ "$CHECK_ONLY" -eq 0 ]]; then
   for directory in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
     mkdir -p "$PREFIX/$directory"
@@ -67,8 +80,12 @@ for file in \
   [[ -e "$file" ]] || { echo "::error::unbuilt: $file"; miss=$((miss + 1)); }
 done
 [[ "$miss" -eq 0 && "$stale" -eq 0 ]] || exit 1
+python3 scripts/postgresql-release.py source --external "$CACHE"
 cfg=$("$PG_PREFIX/bin/pg_config" --configure 2>/dev/null || true)
 need_rebuild=0
+if ! python3 scripts/postgresql-release.py installed --prefix "$PG_PREFIX"; then
+  need_rebuild=1
+fi
 for flag in --with-lz4 --with-zstd --with-liburing; do
   case "$cfg" in
     *"$flag"*) ;;
@@ -97,6 +114,7 @@ bash scripts/build-system-deps.sh
 endsection
 
 section "Installed dependency provenance"
+python3 scripts/postgresql-release.py installed --prefix "$PG_PREFIX"
 miss=0
 cfg=$("$PG_PREFIX/bin/pg_config" --configure 2>/dev/null || true)
 for flag in --with-lz4 --with-zstd --with-liburing; do

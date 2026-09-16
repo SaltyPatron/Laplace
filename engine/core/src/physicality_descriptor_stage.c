@@ -259,6 +259,19 @@ physicality_descriptor_status_t physicality_descriptor_stages_shape(
     return stages_shape_cancelable(stages, stage_count, NULL, out_shape);
 }
 
+physicality_descriptor_status_t physicality_descriptor_stage_shape_bound(
+    const intent_stage_t* stage, physicality_descriptor_shape_t* out_shape) {
+    size_t bytes = 0u;
+    if (stage == NULL || out_shape == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
+    const size_t forms = intent_stage_physicality_count(stage);
+    (void)intent_stage_tuple_ptr(stage, INTENT_STAGE_TABLE_PHYSICALITIES, &bytes);
+    if (forms == 0u && bytes != 0u) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
+    const size_t vertices = forms == 0u ? 0u : bytes / (4u * sizeof(double));
+    const physicality_descriptor_shape_t shape = {forms, vertices, vertices};
+    *out_shape = shape;
+    return PHYSICALITY_DESCRIPTOR_OK;
+}
+
 physicality_descriptor_status_t physicality_descriptor_capture_payload_bound(
     size_t forms, size_t stored_vertices, size_t* out_retained_bytes) {
     size_t bytes = sizeof(physicality_descriptor_capture_t);

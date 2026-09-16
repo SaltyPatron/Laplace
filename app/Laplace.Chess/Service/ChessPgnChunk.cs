@@ -29,6 +29,9 @@ internal sealed class ChessPgnChunk : IDisposable
     internal HashSet<Hash128> ObservedMoves { get; } = [];
     internal int NovelGames { get; private set; }
     internal long StagedBytesBeforeLastGame { get; private set; }
+    internal long ModeledSourceAdmissionBytesBeforeLastGame { get; private set; }
+    internal long ModeledSourceAdmissionBytes =>
+        SubstrateChangeBuilder.ModeledSourceAdmissionPayloadBytes(Record, Analyze, Repair);
     internal long StagedBytes => checked(
         Record.StagedBytesEstimate + Analyze.StagedBytesEstimate + Repair.StagedBytesEstimate);
 
@@ -52,15 +55,20 @@ internal sealed class ChessPgnChunk : IDisposable
                 ct.ThrowIfCancellationRequested();
                 var game = games[offset];
                 chunk.StagedBytesBeforeLastGame = chunk.StagedBytes;
+                chunk.ModeledSourceAdmissionBytesBeforeLastGame = chunk.ModeledSourceAdmissionBytes;
                 chunk.Add(game, novelIds.Contains(game.PlayingId), measurement);
                 offset++;
                 // The source game is atomic. Never truncate moves or observations to fit
-                // this estimate; close immediately after the game crosses the shared share.
+                // either estimate; close after the game crosses the existing shared
+                // byte share. The source-local model includes known capture/plan
+                // coexistence but cannot predict provider expansion. An oversized
+                // single game still reaches the actual runtime grant intact.
                 // Exact replay follows the fresh evidence schedule, whose per-game contents
                 // and no-write scope are independently checked by ChessCorpusEvidence.
                 if (exactGameCount is { } count
                     ? chunk.Games.Count == count
-                    : chunk.StagedBytes >= stagedByteBudget)
+                    : chunk.StagedBytes >= stagedByteBudget
+                        || chunk.ModeledSourceAdmissionBytes >= stagedByteBudget)
                     break;
             }
             while (offset < games.Count);

@@ -76,19 +76,23 @@ ensure_dirs() {
 
 build_cutechess() {
   say "update and build CuteChess from $EXTERNAL/cutechess"
-  local src qt
+  local src qt CMAKE_BIN
+  # Tool acquisition belongs to building, not option parsing or read-only verification.
+  CMAKE_BIN=$(python3 "$REPO_ROOT/scripts/provision-cmake.py" \
+    --root "$PREFIX/tools/cmake" \
+    --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)/cmake
   src="$(run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --source-dir "$EXTERNAL/cutechess")"
   qt="$(run_as_owner python3 "$SCRIPT_DIR/provision-chess-qt.py" --root "$QT_ROOT" --work "$WORK")"
   # Reset only generated configure metadata through the shared source owner.
   # This also works with CMake launchers that do not recognize --fresh, while
   # preserving build outputs/receipts and admitting a changed source path or Qt.
   run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" --reset-build-cache "$CC_BUILD"
-  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 cmake -S "$src" -B "$CC_BUILD" -G Ninja \
+  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 "$CMAKE_BIN" -S "$src" -B "$CC_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF -DCMAKE_PREFIX_PATH="$qt" \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH="$qt/lib"
   local -a targets=(cli)
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then targets+=(gui); fi
-  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 cmake --build "$CC_BUILD" --clean-first --target "${targets[@]}"
+  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 "$CMAKE_BIN" --build "$CC_BUILD" --clean-first --target "${targets[@]}"
   run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" \
     --binary "$CC_BUILD/cutechess-cli" --receipt "$CC_BUILD/laplace-cutechess-build.json"
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
@@ -199,7 +203,7 @@ verify() {
   python3 "$SCRIPT_DIR/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$CC_BIN_DIR/cutechess-cli}" || { red "✗ cutechess-cli / Qt runtime"; fail=1; }
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then
     if run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --gui --binary "${LAPLACE_CUTECHESS_GUI:-$CC_BIN_DIR/cutechess}" \
-      --verify-receipt "$CC_BUILD/laplace-cutechess-gui-build.json" --work "$WORK" --install-desktop "$PREFIX"; then
+      --verify-receipt "$CC_BUILD/laplace-cutechess-gui-build.json" --work "$WORK" --install-desktop "$PREFIX" --desktop-stockfish "$sf"; then
       if [[ "$(id -u)" -eq 0 ]]; then
         python3 "$SCRIPT_DIR/provision-cutechess.py" --register-desktop "$PREFIX" || { red "✗ CuteChess system desktop registration"; fail=1; }
       fi

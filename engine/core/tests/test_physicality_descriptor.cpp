@@ -1241,4 +1241,49 @@ TEST(PhysicalityDescriptorStage, ShapeAndPayloadBoundsUseActualOrdinaryTupleFram
     mutable_bytes[1] = saved;
 }
 
+
+TEST(PhysicalityDescriptorStage, ConstantTimeProducerShapeBoundsExactRowsWithoutChangingStage) {
+    Stage stage(intent_stage_new(0), intent_stage_free);
+    ASSERT_NE(stage, nullptr);
+    physicality_descriptor_shape_t upper{901u, 902u, 903u}, exact{};
+    ASSERT_EQ(physicality_descriptor_stage_shape_bound(stage.get(), &upper), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(upper.forms, 0u);
+    EXPECT_EQ(upper.stored_vertices, 0u);
+    EXPECT_EQ(upper.maximum_vertices, 0u);
+    const std::array<hash128_t, 3> operands{{{51, 61}, {52, 62}, {51, 61}}};
+    std::array<double, 12> trajectory{};
+    ASSERT_EQ(trajectory_build(operands.data(), operands.size(), trajectory.data()), 0);
+    const intent_stage_t* stages[]{stage.get()};
+    for (size_t i = 0u; i < 32u; ++i) {
+        auto input = body();
+        input.trajectory_xyzm = i % 2u == 0u ? nullptr : trajectory.data();
+        input.trajectory_vertices = i % 2u == 0u ? 0u : operands.size();
+        input.n_constituents = static_cast<int32_t>(input.trajectory_vertices);
+        stage_body(stage.get(), input, INTENT_STAGE_PG_EPOCH_UNIX_US + static_cast<int64_t>(i));
+        size_t before_bytes = 0u, after_bytes = 0u;
+        const auto* before = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &before_bytes);
+        const std::vector<uint8_t> saved(before, before + before_bytes);
+        ASSERT_EQ(physicality_descriptor_stage_shape_bound(stage.get(), &upper), PHYSICALITY_DESCRIPTOR_OK);
+        ASSERT_EQ(physicality_descriptor_stages_shape(stages, 1u, &exact), PHYSICALITY_DESCRIPTOR_OK);
+        EXPECT_EQ(upper.forms, exact.forms);
+        EXPECT_GE(upper.stored_vertices, exact.stored_vertices);
+        EXPECT_GE(upper.maximum_vertices, exact.maximum_vertices);
+        EXPECT_EQ(upper.stored_vertices, before_bytes / 32u);
+        const auto* after = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &after_bytes);
+        ASSERT_EQ(after_bytes, before_bytes);
+        EXPECT_EQ(std::memcmp(saved.data(), after, after_bytes), 0);
+        size_t upper_plan = 0u, exact_plan = 0u;
+        ASSERT_EQ(physicality_descriptor_plan_payload_bound(upper.forms, upper.stored_vertices,
+            upper.maximum_vertices, &upper_plan), PHYSICALITY_DESCRIPTOR_OK);
+        ASSERT_EQ(physicality_descriptor_plan_payload_bound(exact.forms, exact.stored_vertices,
+            exact.maximum_vertices, &exact_plan), PHYSICALITY_DESCRIPTOR_OK);
+        EXPECT_GE(upper_plan, exact_plan);
+    }
+    upper = {901u, 902u, 903u};
+    EXPECT_EQ(physicality_descriptor_stage_shape_bound(nullptr, &upper), PHYSICALITY_DESCRIPTOR_INVALID);
+    EXPECT_EQ(upper.forms, 901u);
+    EXPECT_EQ(upper.stored_vertices, 902u);
+    EXPECT_EQ(upper.maximum_vertices, 903u);
+}
+
 } // namespace

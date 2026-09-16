@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <string>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -1084,6 +1088,561 @@ TEST_F(PhysicalityDescriptorAdmission, DiagnosedRefusalsRetainExactOwnerAndRetry
     }
     // Both refusals left the caller's borrowed source intact.
     EXPECT_EQ(intent_stage_physicality_count(original.get()), bodies.size());
+}
+
+
+struct ObservationPhaseProbe {
+    physicality_descriptor_materialization_diagnostics_t* diagnostics = nullptr;
+    size_t observations_checkpoints = 0;
+    size_t stop = std::numeric_limits<size_t>::max();
+    std::chrono::steady_clock::time_point entered{}, serialized{};
+    bool finished = false;
+    static int requested(void* opaque) {
+        auto& self = *static_cast<ObservationPhaseProbe*>(opaque);
+        if (self.diagnostics->phase == PHYSICALITY_MATERIALIZATION_OBSERVATIONS) {
+            if (self.observations_checkpoints++ == 0) self.entered = std::chrono::steady_clock::now();
+            return self.observations_checkpoints >= self.stop;
+        }
+        if (self.diagnostics->phase == PHYSICALITY_MATERIALIZATION_SERIALIZATION &&
+            self.observations_checkpoints != 0 && !self.finished) {
+            self.serialized = std::chrono::steady_clock::now();
+            self.finished = true;
+        }
+        return 0;
+    }
+};
+
+TEST_F(PhysicalityDescriptorAdmission, SourceContextRunsMatchScalarOwnersAcrossBothIdentifiersAndTimes) {
+    const auto body = composition({atom('a'), atom('b')});
+    const hash128_t other_source{kSource.lo + 1u, kSource.hi};
+    const hash128_t other_unit{kUnit.lo, kUnit.hi + 1u};
+    const std::array<physicality_descriptor_source_observation_t, 4> pairs{{
+        {kSource, kUnit, 0.8}, {kSource, other_unit, 0.8},
+        {other_source, other_unit, 0.6}, {other_source, kUnit, 0.6}}};
+    const std::array<size_t, 12> order{{0, 0, 1, 1, 2, 2, 3, 3, 0, 1, 2, 3}};
+    const std::vector<int64_t> times{3, 9, -5, 2, 0, 17,
+        INTENT_STAGE_PG_EPOCH_UNIX_US + 33, INTENT_STAGE_PG_EPOCH_UNIX_US + 20,
+        5, -1, 11, INTENT_STAGE_PG_EPOCH_UNIX_US + 5};
+    std::vector<physicality_descriptor_source_observation_t> sources;
+    std::array<int64_t, 4> latest;
+    latest.fill(std::numeric_limits<int64_t>::min());
+    for (size_t i = 0; i < order.size(); ++i) {
+        sources.push_back(pairs[order[i]]);
+        latest[order[i]] = std::max(latest[order[i]], times[i]);
+    }
+    auto original = stage(std::vector<Body>(order.size(), body), times);
+    auto captured = capture(original.get());
+    Materialization batch(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {}, {}, {}, sources, batch), PHYSICALITY_DESCRIPTOR_OK);
+    size_t count = 0;
+    const auto* forms = physicality_descriptor_materialization_forms(batch.get(), &count);
+    ASSERT_EQ(count, order.size());
+    for (size_t i = 1; i < count; ++i) {
+        EXPECT_TRUE(hash128_equals(&forms[0].descriptor_id, &forms[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&forms[0].view_id, &forms[i].view_id));
+    }
+    Stage generated(physicality_descriptor_materialization_take_stage(batch.get()), intent_stage_free);
+    ASSERT_NE(generated, nullptr);
+    ASSERT_EQ(intent_stage_attestation_count(generated.get()), pairs.size());
+
+    // Each independent one-observation call must compose its source context.
+    // Union its exact ordinary tuple rows in first-seen order, retaining each
+    // source/unit's latest real timestamp. No second identity recipe is used.
+    std::array<std::vector<std::vector<uint8_t>>, 3> expected_rows;
+    std::array<std::vector<hash128_t>, 3> expected_ids;
+    for (size_t pair = 0; pair < pairs.size(); ++pair) {
+        auto scalar_source = stage({body}, {latest[pair]});
+        auto scalar_capture = capture(scalar_source.get());
+        Materialization scalar(nullptr, physicality_descriptor_materialization_free);
+        ASSERT_EQ(run(scalar_capture, {}, {}, {}, {pairs[pair]}, scalar), PHYSICALITY_DESCRIPTOR_OK);
+        const auto scalar_form = form(scalar);
+        EXPECT_TRUE(hash128_equals(&forms[0].descriptor_id, &scalar_form.descriptor_id));
+        Stage scalar_stage(physicality_descriptor_materialization_take_stage(scalar.get()), intent_stage_free);
+        ASSERT_NE(scalar_stage, nullptr);
+        for (int table = 1; table <= 3; ++table) {
+            const size_t slot = static_cast<size_t>(table - 1);
+            size_t bytes = 0, at = 0;
+            const auto* data = intent_stage_tuple_ptr(scalar_stage.get(),
+                static_cast<intent_stage_table_t>(table), &bytes);
+            std::vector<Field> fields;
+            while (at < bytes) {
+                const size_t first = at;
+                ASSERT_TRUE(next_row(data, bytes, at, fields));
+                ASSERT_FALSE(fields.empty());
+                ASSERT_EQ(fields[0].size, sizeof(hash128_t));
+                hash128_t id;
+                std::memcpy(&id, fields[0].bytes, sizeof(id));
+                std::vector<uint8_t> row(data + first, data + at);
+                auto found = std::find_if(expected_ids[slot].begin(), expected_ids[slot].end(),
+                    [&](const hash128_t& prior) { return hash128_equals(&id, &prior); });
+                if (found == expected_ids[slot].end()) {
+                    expected_ids[slot].push_back(id);
+                    expected_rows[slot].push_back(std::move(row));
+                } else {
+                    EXPECT_EQ(row, expected_rows[slot][static_cast<size_t>(found - expected_ids[slot].begin())]);
+                }
+            }
+        }
+    }
+    for (int table = 1; table <= 3; ++table) {
+        std::vector<uint8_t> expected;
+        for (const auto& row : expected_rows[static_cast<size_t>(table - 1)])
+            expected.insert(expected.end(), row.begin(), row.end());
+        size_t bytes = 0;
+        const auto* data = intent_stage_tuple_ptr(generated.get(), static_cast<intent_stage_table_t>(table), &bytes);
+        ASSERT_EQ(bytes, expected.size());
+        ASSERT_GT(bytes, 0u);
+        EXPECT_EQ(std::memcmp(data, expected.data(), bytes), 0);
+    }
+}
+
+TEST_F(PhysicalityDescriptorAdmission, CachedObservationContextsKeepCancellationAndPriorConflictChecks) {
+    const auto body = composition({atom('a'), atom('b')});
+    auto original = stage(std::vector<Body>(128, body));
+    auto captured = capture(original.get());
+    auto sources = witnesses(128);
+    Materialization complete(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {}, {}, {}, sources, complete), PHYSICALITY_DESCRIPTOR_OK);
+    for (size_t stop : {size_t{1}, size_t{39}, size_t{100}}) {
+        physicality_descriptor_materialization_diagnostics_t diagnostics{};
+        ObservationPhaseProbe probe{&diagnostics, 0, stop};
+        physicality_descriptor_cancel_t cancellation{ObservationPhaseProbe::requested, &probe};
+        physicality_descriptor_materialization_t* raw = nullptr;
+        EXPECT_EQ(physicality_descriptor_materialize_diagnosed_cancelable(captured.get(), vocabulary.get(),
+            nullptr, 0, nullptr, 0, nullptr, 0, sources.data(), sources.size(),
+            &kSource, 200, kBudget, &cancellation, &diagnostics, &raw), PHYSICALITY_DESCRIPTOR_CANCELLED);
+        EXPECT_EQ(raw, nullptr);
+        EXPECT_EQ(diagnostics.phase, PHYSICALITY_MATERIALIZATION_OBSERVATIONS);
+        EXPECT_EQ(probe.observations_checkpoints, stop);
+    }
+    auto conflicting = sources;
+    conflicting[64].source_trust = 0.2;
+    Materialization refused(nullptr, physicality_descriptor_materialization_free);
+    EXPECT_EQ(run(captured, {}, {}, {}, conflicting, refused), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+    EXPECT_EQ(refused, nullptr);
+    Materialization retry(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {}, {}, {}, sources, retry), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(intent_stage_physicality_count(original.get()), sources.size());
+    Stage expected(physicality_descriptor_materialization_take_stage(complete.get()), intent_stage_free);
+    Stage actual(physicality_descriptor_materialization_take_stage(retry.get()), intent_stage_free);
+    for (int table = 1; table <= 3; ++table) {
+        size_t want_bytes = 0, got_bytes = 0;
+        const auto* want = intent_stage_tuple_ptr(expected.get(), static_cast<intent_stage_table_t>(table), &want_bytes);
+        const auto* got = intent_stage_tuple_ptr(actual.get(), static_cast<intent_stage_table_t>(table), &got_bytes);
+        ASSERT_EQ(got_bytes, want_bytes);
+        ASSERT_GT(got_bytes, 0u);
+        EXPECT_EQ(std::memcmp(got, want, got_bytes), 0);
+    }
+}
+
+TEST_F(PhysicalityDescriptorAdmission, SourceContextObservationWorkload) {
+    // Finite genuine native materialization fixture, also compiled unchanged
+    // against the pre-optimization library by the hosted comparison. Timings
+    // are observations, never a speed threshold or recorded-game benchmark.
+    // The instrumented interval starts at the first observation checkpoint and
+    // ends at the first serialization checkpoint: it includes owner retirement
+    // and serializer entry setup. Whole-call timing below has no callback.
+    constexpr size_t rows = 16384;
+    constexpr size_t samples = 5;
+    const auto body = composition({atom('a'), atom('b')});
+    auto original = stage(std::vector<Body>(rows, body));
+    auto captured = capture(original.get());
+    ASSERT_NE(captured, nullptr);
+    const std::array<const char*, 3> labels{{"contiguous", "blocks64", "alternating"}};
+    RecordProperty("observation_rows", std::to_string(rows));
+    RecordProperty("finite_grant_bytes", std::to_string(kBudget));
+    const auto fingerprint = [](const uint8_t* data, size_t bytes) {
+        hash128_t digest{};
+        hash128_blake3(data, bytes, &digest);
+        const auto* octets = reinterpret_cast<const uint8_t*>(&digest);
+        const char hex[] = "0123456789abcdef";
+        std::string value;
+        for (size_t i = 0; i < sizeof(digest); ++i) {
+            value.push_back(hex[octets[i] >> 4u]);
+            value.push_back(hex[octets[i] & 15u]);
+        }
+        return value;
+    };
+    for (size_t pattern = 0; pattern < labels.size(); ++pattern) {
+        auto sources = witnesses(rows);
+        for (size_t i = 0; i < rows; ++i) {
+            const size_t pair = pattern == 0 ? 0 : (pattern == 1 ? (i / 64u) % 4u : i % 4u);
+            sources[i].source_id.lo += pair / 2u;
+            sources[i].source_unit_id.hi += pair % 2u;
+            sources[i].source_trust = pair / 2u == 0 ? 0.8 : 0.6;
+        }
+        std::array<std::string, 3> expected_hash;
+        std::array<size_t, 3> expected_bytes{};
+        size_t expected_peak = 0, expected_retained = 0;
+        for (size_t sample = 0; sample <= samples; ++sample) {
+            physicality_descriptor_materialization_diagnostics_t diagnostics{};
+            ObservationPhaseProbe probe{&diagnostics};
+            physicality_descriptor_cancel_t cancellation{ObservationPhaseProbe::requested, &probe};
+            physicality_descriptor_materialization_t* raw = nullptr;
+            ASSERT_EQ(physicality_descriptor_materialize_diagnosed_cancelable(captured.get(), vocabulary.get(),
+                nullptr, 0, nullptr, 0, nullptr, 0, sources.data(), sources.size(),
+                &kSource, 200, kBudget, &cancellation, &diagnostics, &raw), PHYSICALITY_DESCRIPTOR_OK);
+            Materialization phased(raw, physicality_descriptor_materialization_free);
+            ASSERT_TRUE(probe.finished);
+            ASSERT_GT(probe.observations_checkpoints, rows);
+            const auto phase_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                probe.serialized - probe.entered).count();
+            ASSERT_GT(phase_ns, 0);
+            const size_t peak = physicality_descriptor_materialization_peak_bytes(phased.get());
+            const size_t retained = physicality_descriptor_materialization_bytes(phased.get());
+            ASSERT_LE(peak, kBudget);
+            if (sample == 0) { expected_peak = peak; expected_retained = retained; }
+            EXPECT_EQ(peak, expected_peak);
+            EXPECT_EQ(retained, expected_retained);
+            Stage phased_stage(physicality_descriptor_materialization_take_stage(phased.get()), intent_stage_free);
+            ASSERT_NE(phased_stage, nullptr);
+            // Whole-call timing is a separate uninstrumented materialization,
+            // excluding capture, fixture construction and output hashing.
+            const auto start = std::chrono::steady_clock::now();
+            Materialization plain(nullptr, physicality_descriptor_materialization_free);
+            ASSERT_EQ(run(captured, {}, {}, {}, sources, plain), PHYSICALITY_DESCRIPTOR_OK);
+            const auto whole_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            EXPECT_EQ(physicality_descriptor_materialization_peak_bytes(plain.get()), expected_peak);
+            Stage plain_stage(physicality_descriptor_materialization_take_stage(plain.get()), intent_stage_free);
+            ASSERT_NE(plain_stage, nullptr);
+            size_t form_count = 0;
+            const auto* forms = physicality_descriptor_materialization_forms(plain.get(), &form_count);
+            ASSERT_NE(forms, nullptr);
+            ASSERT_EQ(form_count, rows);
+            for (int table = 1; table <= 3; ++table) {
+                const size_t slot = static_cast<size_t>(table - 1);
+                size_t bytes = 0, plain_bytes = 0;
+                const auto* data = intent_stage_tuple_ptr(phased_stage.get(),
+                    static_cast<intent_stage_table_t>(table), &bytes);
+                const auto* plain_data = intent_stage_tuple_ptr(plain_stage.get(),
+                    static_cast<intent_stage_table_t>(table), &plain_bytes);
+                ASSERT_GT(bytes, 0u);
+                ASSERT_EQ(plain_bytes, bytes);
+                EXPECT_EQ(std::memcmp(plain_data, data, bytes), 0);
+                const auto hash = fingerprint(data, bytes);
+                if (sample == 0) {
+                    expected_hash[slot] = hash;
+                    expected_bytes[slot] = bytes;
+                    RecordProperty(std::string(labels[pattern]) + "_table" + std::to_string(table) + "_hash128", hash);
+                    RecordProperty(std::string(labels[pattern]) + "_table" + std::to_string(table) + "_bytes", std::to_string(bytes));
+                }
+                EXPECT_EQ(hash, expected_hash[slot]);
+                EXPECT_EQ(bytes, expected_bytes[slot]);
+            }
+            if (sample != 0) {
+                const std::string key = std::string(labels[pattern]) + "_sample" + std::to_string(sample);
+                RecordProperty(key + "_observations_to_serialization_checkpoint_ns", std::to_string(phase_ns));
+                RecordProperty(key + "_uninstrumented_materialization_ns", std::to_string(whole_ns));
+            }
+        }
+        RecordProperty(std::string(labels[pattern]) + "_peak_bytes", std::to_string(expected_peak));
+        RecordProperty(std::string(labels[pattern]) + "_retained_bytes", std::to_string(expected_retained));
+    }
+}
+
+
+struct ViewPhaseProbe {
+    physicality_descriptor_materialization_diagnostics_t* diagnostics = nullptr;
+    size_t checkpoints = 0;
+    size_t stop = std::numeric_limits<size_t>::max();
+    std::chrono::steady_clock::time_point entered{}, observations{};
+    bool finished = false;
+    static int requested(void* opaque) {
+        auto& self = *static_cast<ViewPhaseProbe*>(opaque);
+        if (self.diagnostics->phase == PHYSICALITY_MATERIALIZATION_VIEWS) {
+            if (self.checkpoints++ == 0) self.entered = std::chrono::steady_clock::now();
+            return self.checkpoints >= self.stop;
+        }
+        if (self.diagnostics->phase == PHYSICALITY_MATERIALIZATION_OBSERVATIONS &&
+            self.checkpoints != 0 && !self.finished) {
+            self.observations = std::chrono::steady_clock::now();
+            self.finished = true;
+        }
+        return 0;
+    }
+};
+
+using AdmissionTupleBytes = std::array<std::vector<uint8_t>, 3>;
+
+AdmissionTupleBytes take_tuple_bytes(Materialization& result) {
+    Stage output(physicality_descriptor_materialization_take_stage(result.get()), intent_stage_free);
+    EXPECT_NE(output, nullptr);
+    AdmissionTupleBytes bytes;
+    if (!output) return bytes;
+    for (int table = 1; table <= 3; ++table) {
+        size_t count = 0;
+        const auto* data = intent_stage_tuple_ptr(output.get(), static_cast<intent_stage_table_t>(table), &count);
+        if (count) bytes[static_cast<size_t>(table - 1)].assign(data, data + count);
+    }
+    return bytes;
+}
+
+std::string admission_byte_fingerprint(const uint8_t* data, size_t bytes) {
+    hash128_t digest{};
+    hash128_blake3(data, bytes, &digest);
+    const auto* octets = reinterpret_cast<const uint8_t*>(&digest);
+    const char hex[] = "0123456789abcdef";
+    std::string value;
+    for (size_t i = 0; i < sizeof(digest); ++i) {
+        value.push_back(hex[octets[i] >> 4u]);
+        value.push_back(hex[octets[i] & 15u]);
+    }
+    return value;
+}
+
+void record_admission_tuple_bytes(const std::string& prefix, const AdmissionTupleBytes& bytes) {
+    for (size_t table = 0; table < bytes.size(); ++table) {
+        const std::string key = prefix + "_table" + std::to_string(table + 1);
+        ::testing::Test::RecordProperty(key + "_bytes", std::to_string(bytes[table].size()));
+        ::testing::Test::RecordProperty(key + "_hash128",
+            admission_byte_fingerprint(bytes[table].data(), bytes[table].size()));
+        // The coordinated old/new harness supplies a permanent output
+        // directory and compares these complete ordered bytes directly.
+        // Normal controls require no filesystem output or OS-temp fallback.
+        if (const char* directory = std::getenv("LAPLACE_TERMINAL_BODY_EVIDENCE_DIR")) {
+            ASSERT_EQ(directory[0], '/');
+            std::ofstream output(std::string(directory) + "/" + key + ".bin",
+                std::ios::binary | std::ios::trunc);
+            ASSERT_TRUE(output.is_open());
+            if (!bytes[table].empty())
+                output.write(reinterpret_cast<const char*>(bytes[table].data()),
+                    static_cast<std::streamsize>(bytes[table].size()));
+            output.close();
+            ASSERT_TRUE(output.good());
+        }
+    }
+}
+
+TEST_F(PhysicalityDescriptorAdmission, TerminalBodyMemoPreservesScopesAndExactSelectedWinner) {
+    const auto leaf = composition({atom('a'), atom('b'), atom('c')});
+    const auto branch = composition({leaf, atom('x')});
+    const auto root = composition({branch, atom('y')});
+    const auto other = composition({leaf, atom('z')});
+    // This valid Projection has the chosen branch's entity, but no outgoing
+    // references. Its descriptor must never mark that Content winner terminal.
+    auto projection = branch;
+    projection.value.type = 3;
+    projection.value.n_constituents = 0;
+    projection.value.trajectory_vertices = 0;
+    projection.trajectory.clear();
+    auto original = stage({projection, root, other, root}, {10, 20, 30, 40});
+    auto captured = capture(original.get());
+    ASSERT_NE(captured, nullptr);
+    auto providers = stage({branch, leaf});
+    auto changed_leaf = leaf;
+    changed_leaf.value.coord[0] += 0.125;
+    hilbert4d_encode(changed_leaf.value.coord, &changed_leaf.value.hilbert_index);
+    auto changed_providers = stage({branch, changed_leaf});
+    auto only_branch = stage({branch});
+    const std::array<std::vector<const intent_stage_t*>, 3> current{{
+        {providers.get()}, {changed_providers.get()}, {only_branch.get()}}};
+    std::array<hash128_t, 2> first_views{};
+    for (size_t selection = 0; selection < current.size(); ++selection) {
+        SCOPED_TRACE(selection);
+        const std::vector<hash128_t> missing = selection == 2 ?
+            std::vector<hash128_t>{leaf.value.entity_id} : std::vector<hash128_t>{};
+        Materialization batch(nullptr, physicality_descriptor_materialization_free);
+        ASSERT_EQ(run(captured, current[selection], {}, missing, witnesses(4), batch), PHYSICALITY_DESCRIPTOR_OK);
+        EXPECT_EQ(form(batch, 0).view_state, PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE);
+        const auto root_form = form(batch, 1), other_form = form(batch, 2), repeated = form(batch, 3);
+        EXPECT_TRUE(hash128_equals(&root_form.descriptor_id, &repeated.descriptor_id));
+        EXPECT_TRUE(hash128_equals(&root_form.view_id, &repeated.view_id));
+        for (size_t which = 0; which < 2; ++which) {
+            auto scalar_stage = stage({which == 0 ? root : other}, {which == 0 ? 40 : 30});
+            auto scalar_capture = capture(scalar_stage.get());
+            Materialization scalar(nullptr, physicality_descriptor_materialization_free);
+            ASSERT_EQ(run(scalar_capture, current[selection], {}, missing, witnesses(1), scalar),
+                PHYSICALITY_DESCRIPTOR_OK);
+            const auto wanted = form(scalar), actual = form(batch, which + 1);
+            EXPECT_TRUE(hash128_equals(&wanted.descriptor_id, &actual.descriptor_id));
+            EXPECT_TRUE(hash128_equals(&wanted.view_id, &actual.view_id));
+            EXPECT_EQ(wanted.view_state, actual.view_state);
+            EXPECT_EQ(wanted.missing_count, actual.missing_count);
+            if (selection == 0) first_views[which] = actual.view_id;
+            if (selection == 1) EXPECT_FALSE(hash128_equals(&first_views[which], &actual.view_id));
+            if (selection == 2) {
+                EXPECT_EQ(actual.view_state, PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE);
+                ASSERT_EQ(actual.missing_count, 1u);
+                size_t count = 0;
+                const auto* ids = physicality_descriptor_materialization_missing(batch.get(), &count);
+                ASSERT_LT(actual.missing_first, count);
+                EXPECT_TRUE(hash128_equals(&ids[actual.missing_first], &leaf.value.entity_id));
+            }
+        }
+        const auto bytes = take_tuple_bytes(batch);
+        record_admission_tuple_bytes("selection" + std::to_string(selection), bytes);
+    }
+
+    // Current and admitted selection of the same complete bodies have exactly
+    // the same ordered COPY bytes, including observation timestamps.
+    Materialization current_result(nullptr, physicality_descriptor_materialization_free);
+    Materialization admitted_result(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {providers.get()}, {}, {}, witnesses(4), current_result), PHYSICALITY_DESCRIPTOR_OK);
+    ASSERT_EQ(run(captured, {}, {providers.get()}, {branch.value.entity_id, leaf.value.entity_id},
+        witnesses(4), admitted_result), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(take_tuple_bytes(current_result), take_tuple_bytes(admitted_result));
+}
+
+TEST_F(PhysicalityDescriptorAdmission, TerminalBodyMemoKeepsCancellationAndFiniteGrantCleanup) {
+    const auto leaf = composition({atom('a'), atom('b'), atom('c'), atom('d')});
+    std::vector<Body> roots;
+    for (size_t i = 0; i < 32; ++i) roots.push_back(composition({leaf, atom(0x100u + static_cast<uint32_t>(i))}));
+    auto original = stage(roots);
+    auto captured = capture(original.get());
+    auto provider = stage({leaf});
+    const intent_stage_t* current = provider.get();
+    auto sources = witnesses(roots.size());
+    physicality_descriptor_materialization_diagnostics_t diagnostics{};
+    ViewPhaseProbe complete_probe{&diagnostics};
+    physicality_descriptor_cancel_t complete_callback{ViewPhaseProbe::requested, &complete_probe};
+    physicality_descriptor_materialization_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_materialize_diagnosed_cancelable(captured.get(), vocabulary.get(),
+        &current, 1, nullptr, 0, nullptr, 0, sources.data(), sources.size(), &kSource, 200,
+        kBudget, &complete_callback, &diagnostics, &raw), PHYSICALITY_DESCRIPTOR_OK);
+    Materialization complete(raw, physicality_descriptor_materialization_free);
+    ASSERT_TRUE(complete_probe.finished);
+    ASSERT_GT(complete_probe.checkpoints, 4u);
+    const size_t peak = physicality_descriptor_materialization_peak_bytes(complete.get());
+    ASSERT_LE(peak, kBudget);
+    const auto expected = take_tuple_bytes(complete);
+    // The middle stop exercises VIEWS work; the last occurs after earlier
+    // distinct roots and their leaf scans. Neither may publish a partial result.
+    for (size_t stop : {size_t{1}, complete_probe.checkpoints / 2, complete_probe.checkpoints}) {
+        diagnostics = {};
+        ViewPhaseProbe probe{&diagnostics, 0, stop};
+        physicality_descriptor_cancel_t cancellation{ViewPhaseProbe::requested, &probe};
+        raw = nullptr;
+        EXPECT_EQ(physicality_descriptor_materialize_diagnosed_cancelable(captured.get(), vocabulary.get(),
+            &current, 1, nullptr, 0, nullptr, 0, sources.data(), sources.size(), &kSource, 200,
+            kBudget, &cancellation, &diagnostics, &raw), PHYSICALITY_DESCRIPTOR_CANCELLED);
+        EXPECT_EQ(raw, nullptr);
+        EXPECT_EQ(diagnostics.phase, PHYSICALITY_MATERIALIZATION_VIEWS);
+        EXPECT_EQ(probe.checkpoints, stop);
+    }
+    bool observed_owner_refusal = false;
+    // A tighter grant may reduce adaptive allocation slack. Do not assume
+    // peak-minus-one must fail; every accepted result must retain exact bytes.
+    for (size_t grant : {peak - 1u, peak / 2u, peak / 4u, peak / 8u}) {
+        diagnostics = {};
+        raw = nullptr;
+        const auto status = physicality_descriptor_materialize_diagnosed_cancelable(
+            captured.get(), vocabulary.get(), &current, 1, nullptr, 0, nullptr, 0,
+            sources.data(), sources.size(), &kSource, 200, grant, nullptr, &diagnostics, &raw);
+        Materialization bounded(raw, physicality_descriptor_materialization_free);
+        if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED) {
+            EXPECT_EQ(bounded, nullptr);
+            EXPECT_NE(diagnostics.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_NONE);
+            observed_owner_refusal |= diagnostics.phase != PHYSICALITY_MATERIALIZATION_ENTRY;
+        } else {
+            ASSERT_EQ(status, PHYSICALITY_DESCRIPTOR_OK);
+            ASSERT_NE(bounded, nullptr);
+            EXPECT_LE(physicality_descriptor_materialization_peak_bytes(bounded.get()), grant);
+            EXPECT_EQ(take_tuple_bytes(bounded), expected);
+        }
+    }
+    EXPECT_TRUE(observed_owner_refusal);
+    Materialization retry(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {current}, {}, {}, sources, retry, peak), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_LE(physicality_descriptor_materialization_peak_bytes(retry.get()), peak);
+    EXPECT_EQ(take_tuple_bytes(retry), expected);
+    record_admission_tuple_bytes("retry", expected);
+}
+
+TEST_F(PhysicalityDescriptorAdmission, TerminalSelectedBodyViewsWorkload) {
+    // The same source is compiled against the baseline and candidate libraries
+    // by the comparison owner. All output bytes and fixed observation times
+    // are compared; elapsed times are observations, never a speed threshold.
+    constexpr size_t roots_count = 128, leaves_count = 12, leaf_vertices = 24, samples = 5;
+    std::vector<Body> leaves;
+    for (size_t leaf = 0; leaf < leaves_count; ++leaf) {
+        std::vector<Body> atoms;
+        for (size_t vertex = 0; vertex < leaf_vertices; ++vertex)
+            atoms.push_back(atom(0x100u + static_cast<uint32_t>(leaf * leaf_vertices + vertex)));
+        leaves.push_back(composition(atoms));
+    }
+    auto providers = stage(leaves);
+    const intent_stage_t* current = providers.get();
+    const std::array<const char*, 2> labels{{"shared_terminal_bodies", "native_floor_only"}};
+    RecordProperty("root_forms", std::to_string(roots_count));
+    RecordProperty("selected_leaf_bodies", std::to_string(leaves_count));
+    RecordProperty("leaf_vertices", std::to_string(leaf_vertices));
+    RecordProperty("finite_grant_bytes", std::to_string(kBudget));
+    for (size_t pattern = 0; pattern < labels.size(); ++pattern) {
+        std::vector<Body> roots;
+        for (size_t root = 0; root < roots_count; ++root) {
+            std::vector<Body> children = pattern == 0 ? leaves : std::vector<Body>{atom('a'), atom('b')};
+            children.push_back(atom(0x400u + static_cast<uint32_t>(root)));
+            roots.push_back(composition(children));
+        }
+        auto original = stage(roots);
+        auto captured = capture(original.get());
+        auto sources = witnesses(roots_count);
+        const std::vector<const intent_stage_t*> selected = pattern == 0 ?
+            std::vector<const intent_stage_t*>{current} : std::vector<const intent_stage_t*>{};
+        AdmissionTupleBytes expected;
+        std::vector<physicality_descriptor_admitted_form_t> expected_forms;
+        size_t expected_peak = 0, expected_checkpoints = 0;
+        for (size_t sample = 0; sample <= samples; ++sample) {
+            physicality_descriptor_materialization_diagnostics_t diagnostics{};
+            ViewPhaseProbe probe{&diagnostics};
+            physicality_descriptor_cancel_t cancellation{ViewPhaseProbe::requested, &probe};
+            physicality_descriptor_materialization_t* raw = nullptr;
+            ASSERT_EQ(physicality_descriptor_materialize_diagnosed_cancelable(captured.get(), vocabulary.get(),
+                selected.data(), selected.size(), nullptr, 0, nullptr, 0, sources.data(), sources.size(),
+                &kSource, 200, kBudget, &cancellation, &diagnostics, &raw), PHYSICALITY_DESCRIPTOR_OK);
+            Materialization phased(raw, physicality_descriptor_materialization_free);
+            ASSERT_TRUE(probe.finished);
+            const auto phase_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                probe.observations - probe.entered).count();
+            // Interval includes the VIEWS indexing setup, ordered scope/view
+            // construction and form publication before OBSERVATIONS begins.
+            ASSERT_GT(phase_ns, 0);
+            const size_t peak = physicality_descriptor_materialization_peak_bytes(phased.get());
+            ASSERT_LE(peak, kBudget);
+            const auto phased_bytes = take_tuple_bytes(phased);
+            const auto start = std::chrono::steady_clock::now();
+            Materialization plain(nullptr, physicality_descriptor_materialization_free);
+            ASSERT_EQ(run(captured, selected, {}, {}, sources, plain), PHYSICALITY_DESCRIPTOR_OK);
+            const auto whole_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            size_t count = 0, phased_count = 0;
+            const auto* forms = physicality_descriptor_materialization_forms(plain.get(), &count);
+            const auto* phased_forms = physicality_descriptor_materialization_forms(phased.get(), &phased_count);
+            ASSERT_EQ(count, roots_count);
+            ASSERT_EQ(phased_count, count);
+            if (sample == 0) expected_forms.assign(forms, forms + count);
+            for (size_t i = 0; i < count; ++i) {
+                EXPECT_TRUE(hash128_equals(&forms[i].descriptor_id, &expected_forms[i].descriptor_id));
+                EXPECT_TRUE(hash128_equals(&forms[i].view_id, &expected_forms[i].view_id));
+                EXPECT_TRUE(hash128_equals(&forms[i].descriptor_id, &phased_forms[i].descriptor_id));
+                EXPECT_TRUE(hash128_equals(&forms[i].view_id, &phased_forms[i].view_id));
+                EXPECT_EQ(forms[i].view_state, PHYSICALITY_DESCRIPTOR_VIEW_AVAILABLE);
+                EXPECT_EQ(phased_forms[i].view_state, forms[i].view_state);
+                EXPECT_EQ(forms[i].missing_first, 0u);
+                EXPECT_EQ(forms[i].missing_count, 0u);
+                EXPECT_EQ(phased_forms[i].missing_first, forms[i].missing_first);
+                EXPECT_EQ(phased_forms[i].missing_count, forms[i].missing_count);
+            }
+            EXPECT_EQ(take_tuple_bytes(plain), phased_bytes);
+            if (sample == 0) {
+                expected = phased_bytes;
+                expected_peak = peak;
+                expected_checkpoints = probe.checkpoints;
+                record_admission_tuple_bytes(labels[pattern], expected);
+            }
+            EXPECT_EQ(phased_bytes, expected);
+            EXPECT_EQ(peak, expected_peak);
+            EXPECT_EQ(probe.checkpoints, expected_checkpoints);
+            if (sample != 0) {
+                const std::string key = std::string(labels[pattern]) + "_sample" + std::to_string(sample);
+                RecordProperty(key + "_views_to_observations_checkpoint_ns", std::to_string(phase_ns));
+                RecordProperty(key + "_uninstrumented_materialization_ns", std::to_string(whole_ns));
+            }
+        }
+        RecordProperty(std::string(labels[pattern]) + "_peak_bytes", std::to_string(expected_peak));
+        RecordProperty(std::string(labels[pattern]) + "_views_checkpoints", std::to_string(expected_checkpoints));
+    }
 }
 
 } // namespace

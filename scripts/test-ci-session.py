@@ -115,6 +115,116 @@ echo cleanup >> "$CI_FIXTURE_ROOT/cleaned"
         self.await_condition(lambda: (self.root / "grandchild").exists())
         return child, int((self.root / "grandchild").read_text())
 
+    def policy_plan(self, fail=False, wait=False):
+        script = self.script.read_text().replace("first second third", "policy second third")
+        if fail:
+            script = script.replace('"$phase" == second', '"$phase" == policy')
+            (self.root / "fail").touch()
+        if wait:
+            script = script.replace('"$phase" == first', '"$phase" == policy')
+            (self.root / "wait").touch()
+        self.script.write_text(script)
+        self.git("add", ".")
+        self.git("-c", "user.name=CI Fixture", "-c", "user.email=fixture@example.invalid",
+                 "commit", "-qm", "source-policy plan")
+
+    def test_source_policy_finishes_while_another_job_owns_host(self):
+        self.policy_plan()
+        with self.lock.open("a") as owner:
+            fcntl.flock(owner, fcntl.LOCK_EX)
+            self.start()
+            result = self.invoke("run", "--phase", "policy")
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertFalse(self.state()["host_lock_acquired"])
+            self.stop()
+            self.assertFalse((self.root / "cleaned").exists())
+        self.assert_lock(False)
+
+    def test_failed_source_policy_never_acquires_or_cleans_shared_host(self):
+        self.policy_plan(fail=True)
+        with self.lock.open("a") as owner:
+            fcntl.flock(owner, fcntl.LOCK_EX)
+            self.start()
+            result = self.invoke("run", "--phase", "policy")
+            self.assertEqual(17, result.returncode, result.stderr)
+            self.assertEqual(2, self.invoke("run", "--phase", "second").returncode)
+            self.await_condition(lambda: not self.live(self.state()["supervisor"]["pid"]))
+            self.assertFalse(self.state()["host_lock_acquired"])
+            self.assertFalse((self.root / "cleaned").exists())
+
+    def test_mutable_phase_waits_then_keeps_host_reserved(self):
+        self.policy_plan()
+        with self.lock.open("a") as owner:
+            fcntl.flock(owner, fcntl.LOCK_EX)
+            self.start()
+            self.assertEqual(0, self.invoke("run", "--phase", "policy").returncode)
+            client = subprocess.Popen([sys.executable, str(HELPER), "run", "--directory",
+                str(self.directory), "--phase", "second"], env=self.env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.addCleanup(lambda: client.poll() is None and client.kill())
+            time.sleep(.25)
+            self.assertIsNone(client.poll())
+            self.assertNotIn("second:", (self.root / "executed").read_text())
+            fcntl.flock(owner, fcntl.LOCK_UN)
+            output, error = client.communicate(timeout=20)
+            self.assertEqual(0, client.returncode, error)
+            self.assertIn("Waiting for shared host", output)
+            self.assertTrue(self.state()["host_lock_acquired"])
+            self.assert_lock(True)
+            self.assertEqual(0, self.invoke("run", "--phase", "third").returncode)
+            self.assert_lock(True)
+        self.stop()
+        self.assert_lock(False)
+        self.assertEqual("cleanup\n", (self.root / "cleaned").read_text())
+
+    def test_stop_cancels_deferred_host_wait_without_touching_foreign_owner(self):
+        self.policy_plan()
+        with self.lock.open("a") as owner:
+            fcntl.flock(owner, fcntl.LOCK_EX)
+            self.start()
+            self.assertEqual(0, self.invoke("run", "--phase", "policy").returncode)
+            client = subprocess.Popen([sys.executable, str(HELPER), "run", "--directory",
+                str(self.directory), "--phase", "second"], env=self.env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.addCleanup(lambda: client.poll() is None and client.kill())
+            self.await_condition(lambda: self.state().get("waiting_for_host") is True)
+            self.assertIsNone(self.state()["active"])
+            self.assertFalse(self.state()["host_lock_acquired"])
+            stopped = self.invoke("stop", timeout=5)
+            self.assertEqual(0, stopped.returncode, stopped.stderr)
+            output, error = client.communicate(timeout=5)
+            self.assertNotEqual(0, client.returncode, error)
+            self.assertIn("Waiting for shared host", output)
+            final = self.state()
+            self.assertEqual("failed", final["status"])
+            self.assertFalse(final["waiting_for_host"])
+            self.assertFalse(final["host_lock_acquired"])
+            self.assertIsNone(final["active"])
+            self.assertEqual([{"phase": "policy", "exit_code": 0}], final["results"])
+            self.assertEqual(1, final["next"])
+            self.assertEqual(0, final["cleanup_exit_code"])
+            self.assertFalse(self.live(final["supervisor"]["pid"]))
+            self.assertNotIn("second:", (self.root / "executed").read_text())
+            self.assertFalse((self.root / "cleaned").exists())
+            self.assert_lock(True)
+        self.assert_lock(False)
+
+    def test_source_policy_supervisor_loss_kills_children_without_host_cleanup(self):
+        self.policy_plan(wait=True)
+        self.start()
+        client = subprocess.Popen([sys.executable, str(HELPER), "run", "--directory",
+            str(self.directory), "--phase", "policy"], env=self.env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: client.poll() is None and client.kill())
+        self.await_condition(lambda: (self.root / "grandchild").exists())
+        grandchild = int((self.root / "grandchild").read_text())
+        os.kill(self.state()["supervisor"]["pid"], signal.SIGKILL)
+        client.communicate(timeout=20)
+        self.await_condition(lambda: not self.live(grandchild))
+        self.await_condition(lambda: self.state()["status"] == "failed")
+        self.assertFalse((self.root / "cleaned").exists())
+        self.assert_lock(False)
+
     def test_order_source_identity_logs_environment_and_continuous_lock(self):
         self.start()
         self.assert_lock(True)

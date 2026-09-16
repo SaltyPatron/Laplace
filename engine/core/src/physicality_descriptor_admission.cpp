@@ -116,6 +116,7 @@ struct Selected {
     Geometry physicality;
     size_t body_index = SIZE_MAX; // SIZE_MAX means an actual native atomic basis.
     bool byte_basis = false;
+    bool terminal_body_verified = false;
 };
 
 struct OutputNode {
@@ -498,6 +499,7 @@ physicality_descriptor_status_t materialize(
         for (size_t next = 0; next < reachable.size(); ++next) {
             checkpoint();
             const size_t body_index = reachable[next];
+            bool terminal_body = true;
             const auto* body_trajectory = trajectory_for_input(body_index);
             for (size_t vertex = 0; vertex < inputs[body_index].trajectory_vertices; ++vertex) {
                 checkpoint();
@@ -509,11 +511,26 @@ physicality_descriptor_status_t materialize(
                 if (chosen == selected.end()) {
                     require(unavailable.find(carrier_fields[1]) != unavailable.end());
                     missing_for_view.insert(carrier_fields[1]);
+                    terminal_body = false;
                     continue;
                 }
                 const size_t selected_index = chosen->second.body_index;
-                if (selected_index != SIZE_MAX && reached_descriptors.insert(descriptors[selected_index]).second)
-                    reachable.push_back(selected_index);
+                if (selected_index != SIZE_MAX) {
+                    terminal_body = false;
+                    // Scope membership is positive-length reachability, even
+                    // when this exact selected body has no outgoing body edge.
+                    if (reached_descriptors.insert(descriptors[selected_index]).second &&
+                        !chosen->second.terminal_body_verified)
+                        reachable.push_back(selected_index);
+                }
+            }
+            if (terminal_body) {
+                // An original form can share an entity with a different
+                // selected provider body. Only memoize the exact winner.
+                const auto winner = selected.find(inputs[body_index].entity_id);
+                if (winner != selected.end() && winner->second.body_index != SIZE_MAX &&
+                    hash128_equals(&descriptors[winner->second.body_index], &descriptors[body_index]))
+                    winner->second.terminal_body_verified = true;
             }
         }
         if (!missing_for_view.empty()) {
@@ -577,19 +594,28 @@ physicality_descriptor_status_t materialize(
     hash128_t relation;
     require(laplace_relation_resolve("HAS_PHYSICALITY", &relation) == 0);
     IdMap<size_t> observation_index(&memory);
+    hash128_t context_id{};
     for (size_t i = 0; i < original_count; ++i) {
         checkpoint();
         /* A source-unit receipt is a typed identifier, not automatically an E.
          * Its ordinary context binds the registered source id and exact unit
          * receipt bytes while the attestation retains the real source owner. */
-        const auto source_identifier = identifier(vocabulary.source_schema.id, sources[i].source_id);
-        const auto unit_identifier = identifier(vocabulary.unit_schema.id, sources[i].source_unit_id);
-        const std::array<hash128_t,3> context_fields{vocabulary.context_schema.id,
-            source_identifier.id, unit_identifier.id};
-        const auto context = compose(context_fields.data(), context_fields.size(), nullptr, SIZE_MAX);
+        // The context recipe depends only on these exact identifiers. Reuse
+        // the immediately preceding result while that pair is unchanged;
+        // alternating source/unit rows still take the ordinary compose path.
+        // Trust, timestamp and descriptor remain per-observation inputs below.
+        if (i == 0u ||
+            !hash128_equals(&sources[i].source_id, &sources[i - 1u].source_id) ||
+            !hash128_equals(&sources[i].source_unit_id, &sources[i - 1u].source_unit_id)) {
+            const auto source_identifier = identifier(vocabulary.source_schema.id, sources[i].source_id);
+            const auto unit_identifier = identifier(vocabulary.unit_schema.id, sources[i].source_unit_id);
+            const std::array<hash128_t,3> context_fields{vocabulary.context_schema.id,
+                source_identifier.id, unit_identifier.id};
+            context_id = compose(context_fields.data(), context_fields.size(), nullptr, SIZE_MAX).id;
+        }
         laplace_attestation_staged_t observation{};
         require(laplace_attestation_resolved_build(&inputs[i].entity_id, &relation,
-            &descriptors[i], 0, &sources[i].source_id, &context.id, 0,
+            &descriptors[i], 0, &sources[i].source_id, &context_id, 0,
             sources[i].source_trust, 1, 1, observations[i].observed_at_unix_us, &observation) == 0);
         observation.last_observed_at_unix_us = observations[i].observed_at_unix_us;
         /* The ordinary writer's source-unit journal owns replay exclusion.
