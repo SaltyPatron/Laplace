@@ -1,4 +1,4 @@
-name: Qualify current coherent recording owners and bound operation
+name: Qualify scoped UCI publication owners
 on:
   push:
     branches: ['verify/postgresql-activation-20260916']
@@ -6,60 +6,83 @@ permissions:
   contents: read
 jobs:
   qualification:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Verify exact current source and bounded operation syntax
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Prepare exact source and permanent evidence
         shell: bash
         run: |
           set -euo pipefail
-          work="/build/laplace/work/coherent-final-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work"
-          export TMPDIR="$work/tmp" TMP="$work/tmp" TEMP="$work/tmp"
-          unset LAPLACE_BUILD_ROOT
-          mkdir -p "$TMPDIR" "$work/source"
+          work="/build/laplace/work/uci-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          evidence="/build/laplace/recovery/uci-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work" "$evidence"
+          mkdir -p "$work/tmp" "$work/source"
+          echo "QUALIFY_WORK=$work" >> "$GITHUB_ENV"
+          echo "QUALIFY_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "TMPDIR=$work/tmp" >> "$GITHUB_ENV"
+          echo "TMP=$work/tmp" >> "$GITHUB_ENV"
+          echo "TEMP=$work/tmp" >> "$GITHUB_ENV"
+          missing=()
+          command -v rsync >/dev/null || missing+=(rsync)
+          command -v shellcheck >/dev/null || missing+=(shellcheck)
+          if (( ${#missing[@]} )); then
+            sudo -n timeout 120s apt-get update
+            sudo -n timeout 180s apt-get install -y --no-install-recommends "${missing[@]}"
+          fi
+          command -v flock
           cd "$work/source"
           git init -q
           git remote add origin https://github.com/SaltyPatron/Laplace.git
-          git fetch --no-tags --depth=1 origin 6ee90d9e805eeb4cca126067c5a41e7a5f3698df
+          timeout 120s git fetch --no-tags --depth=1 origin 9f9a39c9e5e0d825df99fb5dc2c2841ea4d7ecb4
           git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = '6ee90d9e805eeb4cca126067c5a41e7a5f3698df'
-          test "$(git rev-parse HEAD^{tree})" = '0847ccbc8340f1eb629355243913c0a306d9aa3e'
+          test "$(git rev-parse HEAD)" = 9f9a39c9e5e0d825df99fb5dc2c2841ea4d7ecb4
+          test "$(git rev-parse HEAD^{tree})" = 1d4b7ab451b8bdf4c4943f312f5bfd2f452d21da
+          git rev-parse HEAD HEAD^{tree} > "$evidence/source.txt"
+      - name: Execute bounded real file and child protocol controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$QUALIFY_WORK/source"
           python3 -B - <<'PY'
-          import ast,base64,hashlib,json,os,pathlib,re,subprocess,urllib.request,yaml
-          blob="3a0ca203d5d51976edcf201b7cd727fd0ef1e1c0"
-          request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+blob,
-              headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
-          with urllib.request.urlopen(request,timeout=30) as response: payload=response.read(131073)
-          assert len(payload)<=131072
-          metadata=json.loads(payload)
-          raw=base64.b64decode(metadata["content"])
-          assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\x00"+raw).hexdigest()==blob
-          workflow=yaml.load(raw,Loader=yaml.BaseLoader)
-          assert workflow["jobs"]["native"]["env"]["TARGET_SHA"]=="6ee90d9e805eeb4cca126067c5a41e7a5f3698df"
-          assert workflow["jobs"]["native"]["env"]["TARGET_TREE"]=="0847ccbc8340f1eb629355243913c0a306d9aa3e"
-          assert workflow["jobs"]["native"]["timeout-minutes"]=="200"
-          scripts=[step["run"] for step in workflow["jobs"]["native"]["steps"] if "run" in step]
-          python_count=inner_count=0
-          for script in scripts:
-              subprocess.run(["bash","-n"],input=script,text=True,check=True,timeout=10)
-              for delimiter in ("NATIVE","MANAGED_READINESS"):
-                  for inner in re.findall(r"(?ms)^[^\n]*<<'"+delimiter+r"'[^\n]*\n(.*?)^"+delimiter+r"$",script):
-                      subprocess.run(["bash","-n"],input=inner,text=True,check=True,timeout=10)
-                      inner_count+=1
-              for module in re.findall(r"(?ms)^[^\n]*<<'PY'[^\n]*\n(.*?)^PY$",script):
-                  ast.parse(module)
-                  python_count+=1
-          assert inner_count==2 and python_count==7,(inner_count,python_count)
-          pathlib.Path(os.environ["TMPDIR"],"bound-operation.yml").write_bytes(raw)
-          print("BOUND_OPERATION_SYNTAX_PASS "+json.dumps({"blob":blob,"source":"6ee90d9e805eeb4cca126067c5a41e7a5f3698df","outerBash":len(scripts),"innerBash":inner_count,"python":python_count}))
+          import ast, json, os, pathlib, subprocess, sys
+          evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
+          for name in ("scripts/verify-api-payload.py","scripts/test-application-publish.py"):
+              ast.parse(pathlib.Path(name).read_text(), filename=name)
+          (evidence/"ast.txt").write_text("PASS: two Python source files\n")
+          commands=[
+              ("application-publish",["python3","-B","scripts/test-application-publish.py","-v"]),
+              ("payload-sync",["bash","scripts/test-deploy-payload-sync.sh"]),
+              ("managed-snapshot",["bash","scripts/test-managed-publish-snapshot.sh"]),
+              ("bash-syntax",["bash","-c","for path in deploy/linux/deploy.sh deploy/linux/payload-sync.sh deploy/linux/managed-publish.sh scripts/publish-applications.sh scripts/test-deploy-payload-sync.sh scripts/test-managed-publish-snapshot.sh; do bash -n \"$path\" || exit; done"]),
+              ("shellcheck",["shellcheck","-S","warning","-x","deploy/linux/deploy.sh","deploy/linux/payload-sync.sh","deploy/linux/managed-publish.sh","scripts/publish-applications.sh"]),
+          ]
+          results=[]
+          for name,argv in commands:
+              path=evidence/(name+".log")
+              with path.open("w") as log:
+                  completed=subprocess.run(["timeout","--kill-after=10s","240s",*argv],stdout=log,stderr=subprocess.STDOUT)
+              results.append({"name":name,"argv":argv,"exit_code":completed.returncode})
+              print("CONTROL "+name+" exit="+str(completed.returncode),flush=True)
+              print(path.read_text(),flush=True)
+          (evidence/"results.json").write_text(json.dumps(results,indent=2)+"\n")
+          sys.exit(0 if all(item["exit_code"]==0 for item in results) else 1)
           PY
-          timeout 180s python3 -B scripts/test-app-fingerprints.py -v
-          timeout 180s python3 -B scripts/test-installed-chess-corpus.py -v
-          timeout 180s python3 -B scripts/test-application-runtime.py -v
-          timeout 240s python3 -B scripts/test-pipeline-install.py -v
-          timeout 180s python3 -B scripts/test-qualified-chess-floor-export.py -v
-          test -z "$(git status --porcelain --untracked-files=no)"
-          echo CURRENT_COHERENT_SOURCE_QUALIFIED
+      - name: Verify clean source
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${QUALIFY_WORK:-}"
+          cd "$QUALIFY_WORK/source"
+          git status --porcelain > "$QUALIFY_EVIDENCE/source-status.txt"
+          test ! -s "$QUALIFY_EVIDENCE/source-status.txt"
+          echo CLEAN_SOURCE_PASS
+      - name: Retain hosted qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: scoped-uci-publication-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/recovery/uci-publication-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
