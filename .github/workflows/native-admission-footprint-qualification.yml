@@ -1,4 +1,4 @@
-name: Qualify current lifecycle runtime and native operator
+name: Qualify GUI cache and foundation operator
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -7,150 +7,144 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
-      PYTHONDONTWRITEBYTECODE: "1"
-      EVIDENCE: /build/laplace/work/final-operator-syntax/evidence
-      TMPDIR: /build/laplace/work/final-operator-syntax/tmp
-      TMP: /build/laplace/work/final-operator-syntax/tmp
-      TEMP: /build/laplace/work/final-operator-syntax/tmp
+      PYTHONDONTWRITEBYTECODE: '1'
+      EVIDENCE: /build/laplace/work/gui-cache-source/evidence
+      TMPDIR: /build/laplace/work/gui-cache-source/tmp
+      TMP: /build/laplace/work/gui-cache-source/tmp
+      TEMP: /build/laplace/work/gui-cache-source/tmp
     steps:
-      - name: Prepare permanent syntax workspace
+      - name: Prepare permanent qualification workspace
         run: |
           set -euo pipefail
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$EVIDENCE" "$TMPDIR"
-      - name: Authenticate and parse the coordinated native operator
+      - name: Authenticate parse and exercise owned cancellation
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/operator-syntax.log"
-          import ast, base64, hashlib, json, os, re, subprocess, textwrap, urllib.request, yaml
+          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/qualification.log"
+          import ast,base64,fcntl,hashlib,json,os,re,signal,subprocess,sys,textwrap,time,urllib.request,yaml
           from pathlib import Path
-          sha = "0b6b59b30b6938a76d8277a5f48d1cafbbccb279"
-          request = urllib.request.Request(
-              "https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/" + sha,
-              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
-                       "Accept": "application/vnd.github+json"})
-          with urllib.request.urlopen(request, timeout=30) as response:
-              encoded = response.read(2 * 1024 * 1024 + 1)
-          if len(encoded) > 2 * 1024 * 1024:
-              raise ValueError("operator metadata exceeded bound")
-          item = json.loads(encoded)
-          assert item["sha"] == sha and item["encoding"] == "base64"
-          raw = base64.b64decode(item["content"])
-          assert len(raw) == item["size"] and len(raw) < 1024 * 1024
-          assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == sha
-          (Path(os.environ["EVIDENCE"]) / "native-operator.yml").write_bytes(raw)
-          document = yaml.safe_load(raw)
-          environment = document["jobs"]["native"]["env"]
-          assert environment["TARGET_SHA"] == environment["TARGET_TREE"] == ""
-          assert environment["REQUIRED_ANCESTOR"] == "c490651eee906f44f944ae2c2b0d0783516f9e0c"
-          native_program = document["jobs"]["native"]["steps"][1]["run"]
-          pins = re.search(r"done <<'SOURCE_OWNERS'\n(.*?)\nSOURCE_OWNERS", native_program, re.S).group(1).splitlines()
-          assert len(pins) == 12, pins
-          assert all(re.fullmatch(r"100(?:644|755) [0-9a-f]{40} .+", pin) for pin in pins)
-          assert not any("physicality_descriptor.c" in pin or "physicality_descriptor_admission.cpp" in pin for pin in pins)
-          assert "--exclusive --no-fork" in native_program
-          assert native_program.index("flock --exclusive") < native_program.index("git fetch")
-          outer = inner = python = 0
+          evidence=Path(os.environ["EVIDENCE"])
+          selections={
+              "workflow":"6b3cbeaf899e4caf9b25076345cfecd16d7ac10c",
+              "gui":"fb28c4110db6a718d77a09980f831b5c10f9fb3a",
+              "bootstrap":"0f6086674477ecdc8f7591cf367af23791dfcadd",
+              "cache":"d24926a046a336b37e78a037d19a67c1938c06ce",
+              "follow":"791a070a1647a0e62d7481141fad6abe8ad28bd4",
+          }
+          sources={}
+          for name,sha in selections.items():
+              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
+                  headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
+              with urllib.request.urlopen(request,timeout=30) as response:encoded=response.read((2<<20)+1)
+              assert len(encoded)<=2<<20
+              item=json.loads(encoded)
+              assert item["sha"]==sha and item["encoding"]=="base64"
+              raw=base64.b64decode(item["content"])
+              assert len(raw)==item["size"] and len(raw)<1<<20
+              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
+              sources[name]=raw.decode()
+              (evidence/(name+(".yml" if name=="workflow" else ".py"))).write_bytes(raw)
+              if name!="workflow":ast.parse(raw,filename=name+".py")
+          document=yaml.safe_load(sources["workflow"])
+          counts={"outerBash":0,"innerBash":0,"pythonHeredocs":0,"pythonBlocks":4}
           for job in document["jobs"].values():
               for step in job["steps"]:
-                  program = step.get("run")
-                  if program is None:
-                      continue
-                  subprocess.run(["bash", "-n"], input=program, text=True, check=True)
-                  outer += 1
-                  lines = program.splitlines()
-                  for index, line in enumerate(lines):
-                      match = re.search(r"<<'([A-Z_]+)'", line)
-                      if not match:
-                          continue
-                      delimiter = match.group(1)
-                      end = next(i for i in range(index + 1, len(lines)) if lines[i].strip() == delimiter)
-                      body = textwrap.dedent("\n".join(lines[index + 1:end])) + "\n"
-                      if delimiter == "PY":
+                  program=step.get("run")
+                  if program is None:continue
+                  subprocess.run(["bash","-n"],input=program,text=True,check=True)
+                  counts["outerBash"]+=1
+                  lines=program.splitlines()
+                  for i,line in enumerate(lines):
+                      match=re.search(r"<<'([A-Z_]+)'",line)
+                      if not match:continue
+                      delimiter=match.group(1)
+                      end=next(j for j in range(i+1,len(lines)) if lines[j].strip()==delimiter)
+                      body=textwrap.dedent("\n".join(lines[i+1:end]))+"\n"
+                      if delimiter=="PY":
                           ast.parse(body)
-                          python += 1
-                      elif delimiter in ("NATIVE", "MANAGED_READINESS"):
-                          subprocess.run(["bash", "-n"], input=body, text=True, check=True)
-                          inner += 1
-          assert (outer, inner, python) == (4, 2, 9), (outer, inner, python)
-          print(json.dumps({"operatorBlob": sha, "bytes": len(raw),
-                            "outerBash": outer, "innerBash": inner, "python": python,
-                            "scope": "authenticated source syntax only; no native or host execution"}))
+                          counts["pythonHeredocs"]+=1
+                      elif delimiter=="FOLLOW":
+                          subprocess.run(["bash","-n"],input=body,text=True,check=True)
+                          counts["innerBash"]+=1
+          assert counts=={"outerBash":6,"innerBash":1,"pythonHeredocs":6,"pythonBlocks":4},counts
+          assert document["env"]["EXPECTED_EXPORT_BLOB"]=="008ce36f55246452e738436dbe3b33682a64db8a"
+          assert document["jobs"]["foundation"]["if"]=="always()"
+          # Execute the actual extracted wait/cleanup function with real owned
+          # processes and a real flock descriptor; fixtures perform no host action.
+          parsed=ast.parse(sources["follow"])
+          selected=[node for node in parsed.body if isinstance(node,ast.FunctionDef)
+                    and node.name in ("run_child","interrupted")]
+          assert len(selected)==2
+          functions=ast.unparse(ast.Module(body=selected,type_ignores=[]))
+          child=evidence/"cleanup-child.py"
+          child.write_text("import os,signal,sys,time\nfrom pathlib import Path\n"
+              "root=Path(sys.argv[1])\n"
+              "def stop(signum,frame):\n"
+              " signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+              " signal.signal(signal.SIGINT,signal.SIG_IGN)\n"
+              " (root/'cleanup-started').write_text('yes')\n"
+              " time.sleep(0.6)\n"
+              " (root/'cleanup-completed').write_text('yes')\n"
+              " raise SystemExit(0)\n"
+              "signal.signal(signal.SIGTERM,stop)\n"
+              "(root/'child-ready').write_text('yes')\n"
+              "while True:time.sleep(0.05)\n")
+          driver=evidence/"cleanup-driver.py"
+          driver.write_text("import fcntl,os,signal,subprocess,sys\nfrom pathlib import Path\n"+functions+"\n"
+              "root=Path(sys.argv[1])\n"
+              "fd=os.open(root/'host.lock',os.O_CREAT|os.O_RDWR,0o600)\n"
+              "fcntl.flock(fd,fcntl.LOCK_EX)\n"
+              "os.environ['FOLLOW_LOCK_FD']=str(fd)\n"
+              "signal.signal(signal.SIGTERM,interrupted)\n"
+              "signal.signal(signal.SIGINT,interrupted)\n"
+              "try:run_child([sys.executable,sys.argv[2],str(root)])\n"
+              "except KeyboardInterrupt:raise SystemExit(143)\n"
+              "finally:os.close(fd)\n")
+          results=[]
+          def wait_file(path,process):
+              end=time.monotonic()+10
+              while not path.exists():
+                  assert process.poll() is None,"owned driver exited early"
+                  if time.monotonic()>end:raise TimeoutError(str(path))
+                  time.sleep(0.02)
+          for first,second in ((signal.SIGTERM,signal.SIGTERM),(signal.SIGINT,signal.SIGTERM)):
+              case=evidence/("signals-"+str(first)+"-"+str(second));case.mkdir()
+              process=subprocess.Popen([sys.executable,driver,case,child],start_new_session=True)
+              try:
+                  wait_file(case/"child-ready",process)
+                  os.kill(process.pid,first)
+                  wait_file(case/"cleanup-started",process)
+                  os.kill(process.pid,second)
+                  with (case/"host.lock").open("r+") as contender:
+                      try:fcntl.flock(contender,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                      except BlockingIOError:pass
+                      else:raise AssertionError("host reservation released during child cleanup")
+                  assert process.wait(timeout=10)==143
+                  assert (case/"cleanup-completed").read_text()=="yes"
+                  with (case/"host.lock").open("r+") as contender:
+                      fcntl.flock(contender,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                  results.append({"first":first,"second":second,"cleanupCompleted":True,
+                                  "lockHeldUntilCleanup":True,"lockReleasedAfterward":True})
+              finally:
+                  try:os.killpg(process.pid,signal.SIGKILL)
+                  except ProcessLookupError:pass
+                  process.wait(timeout=5)
+          receipt={"selections":selections,"syntax":counts,"actualCancellationControls":results,
+                   "scope":"Authenticated operational syntax and local process-lock controls; no GUI/cache/database execution"}
+          (evidence/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
+          print(json.dumps(receipt))
           PY
-      - name: Retain authenticated operator syntax
+      - name: Retain qualification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: final-native-operator-syntax
-          path: /build/laplace/work/final-operator-syntax/evidence/
+          name: gui-cache-foundation-source-controls
+          path: /build/laplace/work/gui-cache-source/evidence/
           if-no-files-found: error
           retention-days: 30
-
-  runtime_export:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      PYTHONDONTWRITEBYTECODE: '1'
-    steps:
-      - name: Prepare selected source and permanent evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          work="/build/laplace/work/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          evidence="/build/laplace/recovery/export-controls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work" "$evidence"
-          mkdir -p "$work/tmp" "$work/source"
-          echo "QUALIFY_WORK=$work" >> "$GITHUB_ENV"
-          echo "QUALIFY_EVIDENCE=$evidence" >> "$GITHUB_ENV"
-          echo "TMPDIR=$work/tmp" >> "$GITHUB_ENV"
-          echo "TMP=$work/tmp" >> "$GITHUB_ENV"
-          echo "TEMP=$work/tmp" >> "$GITHUB_ENV"
-          cd "$work/source"
-          git init -q
-          git remote add origin https://github.com/SaltyPatron/Laplace.git
-          timeout 120s git fetch --no-tags --depth=1 origin 241b4550ed16d0e729e16823dcafdf28dd4dcd76
-          git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = 241b4550ed16d0e729e16823dcafdf28dd4dcd76
-          test "$(git rev-parse HEAD^{tree})" = fd31112e0dc4ea285b5fe4c1fe211ae081a9ae4b
-          git rev-parse HEAD HEAD^{tree} > "$evidence/source.txt"
-      - name: Execute affected export controls
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$QUALIFY_WORK/source"
-          python3 -B - <<'PY'
-          import ast, json, os, pathlib, subprocess
-          evidence=pathlib.Path(os.environ["QUALIFY_EVIDENCE"])
-          for name in ("scripts/export-qualified-chess-floors.py","scripts/test-qualified-chess-floor-export.py"):
-              ast.parse(pathlib.Path(name).read_text(), filename=name)
-          (evidence/"ast.txt").write_text("PASS: current exporter and changed test Python sources\n")
-          command=["python3","-B","scripts/test-qualified-chess-floor-export.py","-v"]
-          with (evidence/"export-controls.log").open("w") as stream:
-              result=subprocess.run(["timeout","--kill-after=10s","180s",*command],stdout=stream,stderr=subprocess.STDOUT)
-          (evidence/"results.json").write_text(json.dumps({"command":command,"exit_code":result.returncode},indent=2)+"\n")
-          print((evidence/"export-controls.log").read_text(),flush=True)
-          if result.returncode:
-              raise SystemExit(result.returncode)
-          dirty=subprocess.check_output(["git","status","--porcelain","--untracked-files=all"],text=True)
-          (evidence/"source-clean.txt").write_text(dirty or "PASS: clean source checkout\n")
-          if dirty:
-              raise SystemExit("qualification modified source checkout")
-          PY
-      - name: Execute application runtime contracts
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$QUALIFY_WORK/source"
-          python3 -B scripts/test-application-runtime.py -v 2>&1 | tee "$QUALIFY_EVIDENCE/runtime-controls.log"
-      - name: Retain affected control evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: current-floor-export-controls-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.QUALIFY_EVIDENCE }}
-          if-no-files-found: error
