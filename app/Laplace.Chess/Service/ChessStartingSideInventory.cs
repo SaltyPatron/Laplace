@@ -283,7 +283,7 @@ internal static class ChessStartingSideInventory
             budget.Reserve(checked(65536L + ids.Count * 1024L));
             var selected = ids.ToHashSet();
             byte[][] subjects = ids.Select(id => id.ToBytes()).ToArray();
-            var relation = RelationTypeRegistry.RelationTypeId("PLAYS_LINE");
+            var relation = ChessVocabulary.PlaysLineType;
             var bindings = ids.ToDictionary(id => id, _ => new List<SourceBinding>());
             foreach (var (name, source) in new[]
             {
