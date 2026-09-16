@@ -31,6 +31,23 @@
     background: var(--color-bg-panel-2);
   }
 
+  .sessions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+
+  .sessions select {
+    max-width: 16rem;
+    color: var(--color-text-primary);
+    background: var(--color-bg-panel);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.5rem;
+  }
+
   .transcript {
     flex: 1;
     overflow-y: auto;

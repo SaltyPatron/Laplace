@@ -1,5 +1,5 @@
 #requires -Version 7
-# Inject deploy/windows/laplace-api.env + deploy/secrets/{chess-lab,lichess,stripe}.env
+# Inject deploy/windows/laplace-api.env + deploy/secrets/{chess-lab,lichess,stripe,identity}.env
 # into a published web.config. Called by scripts/win/publish.cmd.
 [CmdletBinding()]
 param(
@@ -28,10 +28,11 @@ $envVars = [ordered]@{}
 $chessLabEnv = Join-Path $RepoRoot "deploy\secrets\chess-lab.env"
 $lichessEnv = Join-Path $RepoRoot "deploy\secrets\lichess.env"
 $stripeEnv = Join-Path $RepoRoot "deploy\secrets\stripe.env"
+$identityEnv = Join-Path $RepoRoot "deploy\secrets\identity.env"
 $skip = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 [void]$skip.Add('LAPLACE_UCI')
 
-foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv, $stripeEnv)) {
+foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv, $stripeEnv, $identityEnv)) {
   if (-not (Test-Path -LiteralPath $file)) {
     if ($file -eq $chessLabEnv) {
       Write-Verbose "No custom chess-lab.env; using the managed chess runtime"
@@ -41,6 +42,9 @@ foreach ($file in @($EnvFile, $chessLabEnv, $lichessEnv, $stripeEnv)) {
     }
     if ($file -eq $stripeEnv) {
       Write-Warning "No $stripeEnv — put STRIPE_API_SECRET in repo .env (publish-deploy syncs it)"
+    }
+    if ($file -eq $identityEnv) {
+      Write-Verbose "No $identityEnv — Microsoft and Google sign-in stay disabled"
     }
     continue
   }

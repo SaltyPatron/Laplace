@@ -14,7 +14,7 @@ internal static class InferenceEndpoints
 
     public static void MapOpenAiCompatEndpoints(this WebApplication app)
     {
-        app.MapPost("/v1/chat/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, IConversationWitness turnWitness, ITenantResolver tenantResolver, CancellationToken ct) =>
+        app.MapPost("/v1/chat/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, IConversationWitness turnWitness, ITenantResolver tenantResolver, IIdentityStore identityStore, CancellationToken ct) =>
         {
             var totalClock = Stopwatch.StartNew();
             var payload = await EndpointJson.ReadJsonAsync<ChatCompletionsRequest>(request, ct);
@@ -72,7 +72,8 @@ internal static class InferenceEndpoints
             if (hasBands && !string.IsNullOrWhiteSpace(payload.Shape))
                 return EndpointJson.BadRequest("invalid_request_error",
                     "Fields 'shape' and 'bands' select different read paths and cannot be combined.");
-            var (scope, scopeError) = await ResolveTurnScopeAsync(request, tenantResolver, payload.Session, payload.User, ct);
+            var (scope, scopeError) = await ResolveTurnScopeAsync(
+                request, tenantResolver, payload.Session, payload.User, ct);
             if (scopeError is not null) return scopeError;
 
             if (!OperatorLanguage.TryResolve(request, payload.Language,
@@ -107,6 +108,8 @@ internal static class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
+
+            await CatalogConversationAsync(identityStore, scope, prompt, ct);
 
             // The session key travels back on every response shape so the client can
             // continue the conversation without resending history.
@@ -245,7 +248,7 @@ internal static class InferenceEndpoints
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapPost("/v1/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, IConversationWitness turnWitness, ITenantResolver tenantResolver, CancellationToken ct) =>
+        app.MapPost("/v1/completions", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, IConversationWitness turnWitness, ITenantResolver tenantResolver, IIdentityStore identityStore, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<CompletionsRequest>(request, ct);
             if (payload is null)
@@ -258,7 +261,8 @@ internal static class InferenceEndpoints
             if (string.IsNullOrWhiteSpace(payload.Prompt))
                 return EndpointJson.BadRequest("invalid_request_error", "Field 'prompt' is required.");
 
-            var (scope, scopeError) = await ResolveTurnScopeAsync(request, tenantResolver, payload.Session, payload.User, ct);
+            var (scope, scopeError) = await ResolveTurnScopeAsync(
+                request, tenantResolver, payload.Session, payload.User, ct);
             if (scopeError is not null) return scopeError;
 
             if (RequireTurnWitness(turnWitness) is { } witnessErr) return witnessErr;
@@ -286,6 +290,8 @@ internal static class InferenceEndpoints
                     : (object)new QuotePendingDetail(gate.Quote.QuoteId, gate.Quote.Status, gate.Quote.StripeCheckoutUrl));
 
             if (gate.Quote is not null) await billing.MarkConsumedAndRecordAsync(gate.Quote, ct);
+
+            await CatalogConversationAsync(identityStore, scope, payload.Prompt, ct);
 
             string occurrenceKey = await turnWitness.RecordPromptAsync(
                 scope.Tenant, scope.UserKey, scope.SessionId, payload.Prompt, ct);
@@ -433,13 +439,14 @@ internal static class InferenceEndpoints
     /// Absent a client key the server mints a fresh one and returns it.
     /// </summary>
     internal readonly record struct TurnScope(
-        string Tenant, string? UserKey, string SessionKey, Hash128 SessionId);
+        string Tenant, string? UserKey, Guid? UserId, string SessionKey, Hash128 SessionId);
 
     private static async ValueTask<(TurnScope Scope, IResult? Error)> ResolveTurnScopeAsync(
         HttpRequest request, ITenantResolver tenantResolver,
         string? bodySessionKey, string? userKey, CancellationToken ct)
     {
-        var tenant = (await tenantResolver.ResolveAsync(request.HttpContext, ct)).TenantId;
+        var tenantContext = await tenantResolver.ResolveAsync(request.HttpContext, ct);
+        var tenant = tenantContext.TenantId;
         if (!ConversationContent.IsValidIdentifier(tenant))
             return (default, EndpointJson.BadRequest("invalid_tenant",
                 "Tenant id must match [A-Za-z0-9._@-]{1,128}."));
@@ -453,12 +460,29 @@ internal static class InferenceEndpoints
             return (default, EndpointJson.BadRequest("invalid_session",
                 "Session key must match [A-Za-z0-9._@-]{1,128}."));
 
-        if (userKey is not null && !ConversationContent.IsValidIdentifier(userKey))
+        Guid? authenticatedUser = tenantContext.Claims.TryGetValue("user_id", out var claimedUser)
+            && Guid.TryParse(claimedUser, out var parsedUser)
+                ? parsedUser
+                : null;
+        if (authenticatedUser is not null)
+            userKey = authenticatedUser.Value.ToString("D");
+        else if (userKey is not null && !ConversationContent.IsValidIdentifier(userKey))
             return (default, EndpointJson.BadRequest("invalid_user",
                 "Field 'user' must match [A-Za-z0-9._@-]{1,128}."));
 
-        return (new TurnScope(tenant, userKey, sessionKey,
+        return (new TurnScope(tenant, userKey, authenticatedUser, sessionKey,
             ConversationContent.SessionId(tenant, sessionKey)), null);
+    }
+
+    private static Task CatalogConversationAsync(
+        IIdentityStore identityStore, TurnScope scope, string title, CancellationToken ct)
+    {
+        if (scope.UserId is null) return Task.CompletedTask;
+        var compactTitle = string.Join(' ', title.Split(
+            (char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (compactTitle.Length > 160) compactTitle = compactTitle[..160];
+        return identityStore.UpsertConversationAsync(
+            scope.Tenant, scope.UserId.Value, scope.SessionKey, compactTitle, ct);
     }
 
     private static List<string> ReadEmbeddingInputs(JsonElement? input)

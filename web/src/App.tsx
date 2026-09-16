@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Link as RouterLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppHeader, NavTabs, Panel, TenantField } from '@ui';
 import { ChatView } from './chat/ChatView';
@@ -14,6 +15,9 @@ import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import { AmbientFamiliar } from './layout/AmbientFamiliar';
 import { ViewErrorBoundary } from './layout/ViewErrorBoundary';
+import { AccountControls } from './auth/AccountControls';
+import { apiGet } from './api/client';
+import type { AuthProvider, AuthUser } from './store';
 import styles from './App.module.css';
 
 const TABS: { id: string; label: string; path: string }[] = [
@@ -33,9 +37,22 @@ function isActive(pathname: string, tabPath: string): boolean {
 }
 
 function Shell() {
-  const { tenant, setTenant } = useAppStore();
+  const { tenant, setTenant, authReady, authUser, authProviders, setAuth } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    let live = true;
+    void apiGet<{ authenticated: boolean; user: AuthUser | null; providers: AuthProvider[] }>('/v1/auth/me')
+      .then((result) => {
+        if (live) setAuth(result.authenticated ? result.user : null, result.providers ?? []);
+      })
+      .catch(() => {
+        if (live) setAuth(null, []);
+      });
+    return () => { live = false; };
+  }, [setAuth]);
+
   return <div className={styles.shell}>
     <a className={styles.skipLink} href="#main-content">Skip to workspace</a>
     <AppHeader
@@ -45,7 +62,11 @@ function Shell() {
         id: tab.id, label: tab.label, href: tab.path,
         active: isActive(location.pathname, tab.path), onClick: () => navigate(tab.path),
       }))} />}
-      tenant={<TenantField value={tenant} onChange={setTenant} />}
+      tenant={
+        authReady && (authUser || authProviders.length > 0)
+          ? <AccountControls user={authUser} providers={authProviders} returnUrl={`${location.pathname}${location.search}${location.hash}`} />
+          : <TenantField value={tenant} onChange={setTenant} />
+      }
     />
     <SubstrateStatusBanner />
     <main id="main-content" tabIndex={-1} className={styles.main}>
