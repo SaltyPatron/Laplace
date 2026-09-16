@@ -22,8 +22,6 @@
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/glicko2.h"
-#include "laplace/core/highway_table.h"
-#include "laplace/core/relation_law.h"
 #include "spi_common.h"
 #include "spi_nested.h"
 #include "consensus_neighbors.h"
@@ -93,81 +91,6 @@ emit_edge(const EdgeOut *e, void *context)
 	tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 }
 
-/* Resolve the union of the frontier's deposited relation bits entirely in
- * memory after one indexed entity-array lookup.  A missing mask means the
- * projection cannot prove a complete relation set, so the caller uses the
- * unmasked correctness path. */
-static ArrayType *
-frontier_relation_types(SPIPlanPtr mask_plan, ArrayType *frontier_array,
-						int expected_rows, bool *complete)
-{
-	Datum		args[1];
-	laplace_mask256_t union_mask;
-	Datum		type_datums[256];
-	int			n_types = 0;
-	int			rc;
-
-	*complete = false;
-	memset(&union_mask, 0, sizeof(union_mask));
-	args[0] = PointerGetDatum(frontier_array);
-	rc = SPI_execute_plan(mask_plan, args, NULL, true, 0);
-	if (rc != SPI_OK_SELECT)
-		elog(ERROR, "explore_web: frontier mask probe failed: %s",
-			 SPI_result_code_string(rc));
-
-	if (SPI_processed != (uint64) expected_rows)
-	{
-		SPI_freetuptable(SPI_tuptable);
-		return NULL;
-	}
-
-	for (uint64 r = 0; r < SPI_processed; r++)
-	{
-		HeapTuple	tup = SPI_tuptable->vals[r];
-		TupleDesc	td = SPI_tuptable->tupdesc;
-		bool		isnull;
-		Datum		d = SPI_getbinval(tup, td, 2, &isnull);
-		bytea	   *mask;
-		laplace_mask256_t one;
-
-		if (isnull)
-		{
-			SPI_freetuptable(SPI_tuptable);
-			return NULL;
-		}
-		mask = DatumGetByteaPP(d);
-		if (VARSIZE_ANY_EXHDR(mask) != sizeof(one))
-			elog(ERROR, "explore_web: entity highway mask is not 32 bytes");
-		memcpy(&one, VARDATA_ANY(mask), sizeof(one));
-		union_mask = highway_table_mask_or(union_mask, one);
-	}
-	SPI_freetuptable(SPI_tuptable);
-
-	if (!highway_table_is_loaded())
-		return NULL;
-	for (int bit = 0; bit < 256; bit++)
-	{
-		const char *canonical = NULL;
-		float		rank;
-		uint8_t		band;
-		hash128_t	type_id;
-
-		if (!highway_table_mask_test(&union_mask, (uint8_t) bit))
-			continue;
-		if (highway_table_relation_by_bit((uint8_t) bit, &canonical,
-									   &rank, &band) != 0)
-			continue;
-		if (laplace_relation_type_id(canonical, &type_id) != 0)
-			continue;
-		type_datums[n_types++] = hash128_to_datum(&type_id);
-	}
-	if (n_types == 0)
-		return NULL;
-
-	*complete = true;
-	return construct_array(type_datums, n_types, BYTEAOID, -1, false, 'i');
-}
-
 void
 laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
                    bool respect_direction, LaplaceWebVisitor visit, void *context)
@@ -181,7 +104,6 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 	hash128_t  *next_frontier;
 	int			n_front = 0;
 	int			n_seen = 0;
-	SPIPlanPtr	mask_plan;
 	EdgeCand   *cands;
 	Datum	   *frontier_datums;
 	int			cand_cap;
@@ -229,17 +151,6 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 
 	if (laplace_spi_connect(&spi_top) != SPI_OK_CONNECT)
 		elog(ERROR, "explore_web: SPI_connect failed");
-
-	{
-		Oid			pargs[1] = {BYTEAARRAYOID};
-
-		mask_plan = SPI_prepare_cursor(
-			"SELECT DISTINCT e.id, e.highway_mask FROM laplace.entities e "
-			"WHERE e.id = ANY($1) AND e.highway_mask IS NOT NULL",
-			1, pargs, CURSOR_OPT_PARALLEL_OK);
-		if (mask_plan == NULL)
-			elog(ERROR, "explore_web: frontier mask SPI_prepare failed");
-	}
 
 	memset(&ctl, 0, sizeof(ctl));
 	ctl.keysize = 16;
@@ -301,22 +212,25 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 				: (EdgeCand *) repalloc(cands, sizeof(EdgeCand) * cand_cap);
 		}
 
-		Datum		args[3];
 		ArrayType  *frontier_array;
-		ArrayType  *type_array;
-		bool		masked;
-		int			rc;
 
 		for (int fi = 0; fi < n_front; fi++)
 			frontier_datums[fi] = hash128_to_datum(&frontier[fi]);
 		frontier_array = construct_array(frontier_datums, n_front,
 									 BYTEAOID, -1, false, 'i');
-		type_array = frontier_relation_types(mask_plan, frontier_array,
-									 n_front, &masked);
+
+		/* Highway masks are rebuildable accelerator projections. A non-NULL mask
+		 * cannot prove that every current consensus relation bit is present: mask
+		 * maintenance may be queued, unavailable, or deliberately skipped under
+		 * write contention. Deriving a hard type filter here therefore turned an
+		 * accelerator miss into missing knowledge. Explore the canonical consensus
+		 * set instead. Explicit caller-supplied type scope remains available through
+		 * the typed consensus-neighbor operation; this unconstrained crawl does not
+		 * manufacture that scope from cached mask state. */
 		int neighbor_count;
 		LaplaceNeighbor *neighbors = laplace_consensus_neighbors(
-			frontier_array, masked ? type_array : NULL, probe_limit,
-			masked, respect_direction, false, &neighbor_count, NULL);
+			frontier_array, NULL, probe_limit,
+			false, respect_direction, false, &neighbor_count, NULL);
 
 		for (int r = 0; r < neighbor_count; r++)
 		{
@@ -371,7 +285,6 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 		}
 		pfree(neighbors);
 		pfree(frontier_array);
-		if (type_array != NULL) pfree(type_array);
 		for (int fi = 0; fi < n_front; ++fi)
 			pfree(DatumGetPointer(frontier_datums[fi]));
 
@@ -446,7 +359,6 @@ laplace_explore_web(ArrayType *seeds_a, int hops, int fanout, int max_nodes,
 		}
 	}
 
-	SPI_freeplan(mask_plan);
 	laplace_spi_finish(spi_top);
 	return;
 }
