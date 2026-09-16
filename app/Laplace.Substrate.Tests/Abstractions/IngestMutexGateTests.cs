@@ -5,38 +5,10 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// ISA gate G10 — one mutex, one verify
-/// (<c>docs/specs/37_Substrate_Operation_ISA.md</c> §7: <i>"more than one implementation
-/// of the ingest mutex or the evidence_count verify exists"</i>; plan
-/// <c>docs/plan/W6_Architecture_Gates.md</c> §3).
-///
-/// <para><b>W6 recorded the mutex as UNVERIFIED</b> — <i>"the ingest mutex may not exist
-/// under the names spec 37 assumes."</i> It does. Measured 2026-08-05, and the counts
-/// spec 37 §5 asserts (<c>:328</c>, <i>"6 ingest-mutex + 11 verify implementations"</i>)
-/// are exactly right:</para>
-/// <list type="bullet">
-///   <item><b>6 ingest mutexes</b> = 5 copies of the process-level probe
-///     (<c>Get-CimInstance Win32_Process | ... Laplace\.Cli</c>) + 1 database-level
-///     implementation (<see cref="ProcessMutexAllowlist"/>,
-///     <see cref="DatabaseMutexSanctionedHome"/>).</item>
-///   <item><b>11 verify implementations</b> = 11 files hand-rolling
-///     <c>ops.evidence_count(…) &gt; 0</c> as "is this source/layer ingested?"
-///     (<see cref="EvidenceVerifyAllowlist"/>, 13 call sites).</item>
-/// </list>
-///
-/// <para><b>The database half is already one implementation</b> and W6 does not record
-/// that: every ingest transaction takes its lock through
-/// <c>AdvisoryTxLock.BeginWithLockAsync</c>, called from exactly one place
-/// (<c>NpgsqlWorkingSetApply</c>). The gate keeps it that way rather than reporting a
-/// violation.</para>
-///
-/// <para><b>Where the verify belongs.</b> <c>ops/source_status.sql.in</c>'s own header is
-/// the argument, and it names this gate's defect precisely: <i>"There was no standardized
-/// answer to the most basic operational question in the system, so every caller assembled
-/// one, and every assembly was wrong in a different way … ops.evidence_count(source_id('X'))
-/// &gt; 0 says DOCUMENTS ARE NOT INGESTED … This exact false negative has been reached
-/// three times."</i> The 11 files below are those callers. They are enumerated, not
-/// deleted, because a gate that goes red on merge-day teaches people to ignore it.</para>
+/// Ratchet historical process-mutex and evidence-verify copies while keeping named
+/// advisory locks in their shared owner. Content-addressed apply uses bulk presence
+/// verification and concurrent landing retries; the historical mutex inventory must
+/// not require restoring a global apply lock.
 /// </summary>
 public sealed class IngestMutexGateTests
 {
@@ -335,22 +307,21 @@ public sealed class IngestMutexGateTests
     [Fact]
     public void IngestMutex_NoNewDatabaseLevelImplementation()
         => AssertRatchet(DatabaseAdvisoryLock, DatabaseMutexAllowlist, nameof(DatabaseMutexAllowlist),
-            "New advisory lock outside AdvisoryTxLock. The ingest mutex has exactly one "
-            + "database implementation (AdvisoryTxLock.BeginWithLockAsync, which also names "
-            + "the blocking backend instead of hanging silently). A second one is a second "
-            + "mutex. Instead of here:",
+            "New advisory lock outside the shared named-lock owner. Content-addressed apply "
+            + "must remain free of global serialization; other named locks require explicit "
+            + "classification. Instead of here:",
             sanctionedHome: DatabaseMutexSanctionedHome);
 
     /// <summary>
-    /// The single database implementation must actually be there. Without this the
-    /// exclusion above could pass by virtue of the file having been deleted.
+    /// The shared named-lock owner remains available for operations that need it.
+    /// This does not require content-addressed apply to acquire a global lock.
     /// </summary>
     [Fact]
-    public void IngestMutex_DatabaseImplementationExists()
+    public void NamedAdvisoryLockOwner_RemainsAvailable()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var home = Path.Combine(repoRoot, DatabaseMutexSanctionedHome.Replace('/', Path.DirectorySeparatorChar));
-        Assert.True(File.Exists(home), $"{DatabaseMutexSanctionedHome} is the one ingest mutex; it is missing.");
+        Assert.True(File.Exists(home), $"{DatabaseMutexSanctionedHome} is the shared named-lock owner; it is missing.");
         Assert.Matches(DatabaseAdvisoryLock, Strip(Path.GetFileName(home), File.ReadAllText(home)));
     }
 
@@ -440,14 +411,31 @@ public sealed class IngestMutexGateTests
     }
 
     /// <summary>
-    /// Spec 37 §5 (<c>:328</c>) claims "6 ingest-mutex + 11 verify implementations". W6 §3
-    /// recorded that as unverified. Pinning the arithmetic here means the spec's own
-    /// number stops being prose: 5 process copies + 1 database implementation = 6.
+    /// The historical mutex census must not force a global apply lock back into the
+    /// current bulk presence/re-probe writer. Named serialization remains available
+    /// only after the content-addressed apply branch has returned its transaction.
     /// </summary>
     [Fact]
-    public void G10_MatchesSpec37Arithmetic()
+    public void ContentAddressedApply_DoesNotAcquireGlobalAdvisoryLock()
     {
-        Assert.Equal(6, ProcessMutexAllowlist.Count + 1);
-        Assert.Equal(11, EvidenceVerifyAllowlist.Count);
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var home = Path.Combine(repoRoot, DatabaseMutexSanctionedHome);
+        var source = Strip(Path.GetFileName(home), File.ReadAllText(home));
+        var apply = source.IndexOf(
+            "if (string.Equals(lockName, \"laplace_apply_batch\", StringComparison.Ordinal))",
+            StringComparison.Ordinal);
+        Assert.True(apply >= 0, "apply must retain its explicit nonlocking transaction route");
+        var named = source.IndexOf("for (int attempt = 1;", apply, StringComparison.Ordinal);
+        Assert.True(named > apply, "named-lock acquisition must follow the nonlocking apply route");
+        var body = source[apply..named];
+        Assert.Contains("conn.BeginTransactionAsync(ct)", body);
+        Assert.Contains("guc.Transaction = tx;", body);
+        Assert.Contains("SET LOCAL lock_timeout = 0", body);
+        Assert.Contains("return tx;", body);
+        Assert.Contains("tx.RollbackAsync(CancellationToken.None)", body);
+        Assert.Contains("tx.DisposeAsync()", body);
+        Assert.DoesNotMatch(DatabaseAdvisoryLock, body);
+        Assert.DoesNotContain("HoldMeasurementLaneAsync(", body);
+        Assert.Matches(DatabaseAdvisoryLock, source[named..]);
     }
 }
