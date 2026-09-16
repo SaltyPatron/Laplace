@@ -135,24 +135,33 @@ AS $$
       FROM dead d;
 $$;
 
--- Ingest run history, newest first. Reading the journal first reconciles rows
--- that can no longer be live by the same heartbeat+beacon law used by deployment.
--- This makes the Operator portal show execution reality rather than a stale
--- persisted word left behind by a dead process.
+-- Ingest run history, newest first. This is a read surface and must stay valid
+-- inside the Operator API's read-only transaction. A stale persisted `running`
+-- row is projected as cancelled from the same heartbeat+beacon predicate used by
+-- the explicit mutating reconciler; displaying history never writes the journal.
 DROP FUNCTION IF EXISTS laplace.ingest_runs(int);
 CREATE OR REPLACE FUNCTION ops.ingest_runs(p_limit int DEFAULT 20)
 RETURNS SETOF laplace.ingest_run_journal
-LANGUAGE plpgsql
-VOLATILE
+LANGUAGE sql
+STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, laplace, ops
 AS $$
-BEGIN
-    PERFORM 1 FROM ops.ingest_reconcile_orphans(interval '90 seconds');
-    RETURN QUERY
-        SELECT j.*
-          FROM laplace.ingest_run_journal j
-         ORDER BY j.started_at DESC
-         LIMIT greatest(p_limit, 0);
-END
+    SELECT jsonb_populate_record(
+               j,
+               CASE
+                   WHEN j.status = 'running'
+                    AND NOT ops.ingest_run_live(j.run_id, interval '90 seconds')
+                   THEN jsonb_build_object(
+                       'status', 'cancelled',
+                       'phase', 'cancelled',
+                       'ended_at', COALESCE(j.ended_at, now()),
+                       'error', COALESCE(
+                           j.error,
+                           'run did not reach completion: heartbeat stale and liveness lock absent'))
+                   ELSE '{}'::jsonb
+               END)
+      FROM laplace.ingest_run_journal j
+     ORDER BY j.started_at DESC
+     LIMIT greatest(p_limit, 0);
 $$;
