@@ -1,0 +1,88 @@
+name: Hosted recorded chess floor compilation
+on:
+  push:
+    branches: [verify/chess-floor-managed-compile-20260916]
+permissions:
+  contents: read
+jobs:
+  managed-compilation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      LAPLACE_BUILD_ROOT: /build/laplace/build/floor-managed-compile
+      LAPLACE_ENGINE_BUILD: /build/laplace/build/floor-managed-compile/engine
+      TMPDIR: /build/laplace/work/floor-managed-compile/tmp
+      TMP: /build/laplace/work/floor-managed-compile/tmp
+      TEMP: /build/laplace/work/floor-managed-compile/tmp
+      DOTNET_CLI_HOME: /build/laplace/work/floor-managed-compile/dotnet-home
+      DOTNET_INSTALL_DIR: /build/laplace/work/floor-managed-compile/dotnet
+      NUGET_PACKAGES: /build/laplace/work/floor-managed-compile/nuget
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      MSBUILDDISABLENODEREUSE: '1'
+      CANDIDATE_SHA: 8f905dced5573aab48baf544852eb106286a60ab
+      CANDIDATE_TREE: 8c88c1f61f7b60eb2f9c47af1c90451d15be9379
+    steps:
+      - name: Prepare permanent build and evidence directories
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /build/laplace
+          sudo chown "$(id -u):$(id -g)" /build/laplace
+          mkdir -p "$LAPLACE_BUILD_ROOT" "$TMPDIR" "$DOTNET_CLI_HOME" "$DOTNET_INSTALL_DIR" "$NUGET_PACKAGES" /build/laplace/worktrees /build/laplace/recovery/floor-managed-compile
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 8f905dced5573aab48baf544852eb106286a60ab
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Bind the exact candidate in the permanent worktree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          git worktree add --detach /build/laplace/worktrees/floor-managed-compile "$CANDIDATE_SHA"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          Path("/build/laplace/recovery/floor-managed-compile/source.json").write_text(json.dumps({
+              "candidate_commit":os.environ["CANDIDATE_SHA"],
+              "candidate_tree":os.environ["CANDIDATE_TREE"],
+              "workflow_commit":os.environ["GITHUB_SHA"],
+              "claim":"managed-compilation-only",
+              "native_runtime_executed":False
+          },indent=2)+"\n")
+          PY
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compile the catalog and both test projects through their existing owners
+        working-directory: /build/laplace/worktrees/floor-managed-compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence=/build/laplace/recovery/floor-managed-compile
+          dotnet --info 2>&1 | tee "$evidence/dotnet-info.log"
+          printf 'project\texit_code\n' > "$evidence/build-summary.tsv"
+          failed=0
+          for project in ChessCatalogSurfaces Laplace.Core.Tests Laplace.Chess.Tests; do
+            set +e
+            timeout --signal=TERM --kill-after=15s 360s \
+              dotnet build "app/$project/$project.csproj" --configuration Release \
+              --disable-build-servers --nologo --verbosity normal \
+              -p:UseSharedCompilation=false \
+              "-bl:$evidence/$project.binlog" \
+              2>&1 | tee "$evidence/$project.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            printf '%s\t%s\n' "$project" "$status" >> "$evidence/build-summary.tsv"
+            if [[ "$status" != 0 ]]; then failed=1; fi
+          done
+          test -z "$(git status --porcelain --untracked-files=all)"
+          exit "$failed"
+      - name: Retain exact compilation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chess-floor-managed-compilation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/recovery/floor-managed-compile/
+          if-no-files-found: error
+          retention-days: 30
