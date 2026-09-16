@@ -113,6 +113,7 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionEnvelopeMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.ApiKeyEnforcementMiddleware>();
+app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.BillingAccountBoundaryMiddleware>();
 
 app.MapPrometheusScrapingEndpoint();
 app.MapOpenApi();
