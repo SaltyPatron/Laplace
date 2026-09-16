@@ -703,7 +703,7 @@ jobs:
     name: Installed chess — complete explicit acceptance
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/verify/chess-acceptance-')) || inputs.suite == 'acceptance'
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 360
+    timeout-minutes: 600
     steps:
       - name: Create acceptance evidence directory
         shell: bash
@@ -778,7 +778,7 @@ jobs:
                       summary.write("- " + phase["name"] + ": " + phase["status"] + "\n")
               else:
                   summary.write("No completed acceptance receipt; inspect failure logs.\n")
-              summary.write("\nGame rates require the complete recorded collector receipt. "
+              summary.write("\nComplete workflow rates and prepared-corpus admission rates use separate receipts. "
                             "Geometry rows and retained replay rates remain separate. "
                             "Current service response latency is not cold boot time.\n")
           PY

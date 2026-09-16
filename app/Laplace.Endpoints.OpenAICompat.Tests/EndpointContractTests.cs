@@ -310,6 +310,8 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         {
             id = $"evt_{Guid.NewGuid():N}",
             @object = "event",
+            api_version = Stripe.StripeConfiguration.ApiVersion,
+            request = (object?)null,
             created = created + 1,
             type = "invoice.paid",
             data = new { @object = new { @object = "invoice", id = "in_test_lifecycle", subscription } }
@@ -407,8 +409,12 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         var payload = JsonSerializer.Serialize(new
         {
             id = $"evt_{Guid.NewGuid():N}",
+            @object = "event",
+            api_version = Stripe.StripeConfiguration.ApiVersion,
+            request = (object?)null,
+            created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             type = "checkout.session.completed",
-            data = new { @object = new { id = "cs_x", metadata = new { tenant = "attacker", service_id = "plan.studio" } } }
+            data = new { @object = new { @object = "checkout.session", id = "cs_x", metadata = new { tenant = "attacker", service_id = "plan.studio" } } }
         });
         var request = new HttpRequestMessage(HttpMethod.Post, "/v1/billing/webhooks/stripe")
         {
@@ -434,8 +440,12 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         var payload = JsonSerializer.Serialize(new
         {
             id = $"evt_{Guid.NewGuid():N}",
+            @object = "event",
+            api_version = Stripe.StripeConfiguration.ApiVersion,
+            request = (object?)null,
+            created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             type = "checkout.session.completed",
-            data = new { @object = new { id = "cs_x", metadata = new { tenant = "attacker", service_id = "plan.studio" } } }
+            data = new { @object = new { @object = "checkout.session", id = "cs_x", metadata = new { tenant = "attacker", service_id = "plan.studio" } } }
         });
         var request = new HttpRequestMessage(HttpMethod.Post, "/v1/billing/webhooks/stripe")
         {

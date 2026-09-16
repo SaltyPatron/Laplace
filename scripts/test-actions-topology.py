@@ -785,6 +785,10 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
             {"if": "github.event_name == 'push' || inputs.suite == 'acceptance'"}),
             "acceptance must remain explicitly selected")
 
+    def test_explicit_acceptance_retains_whole_job_deadline(self):
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["acceptance"].update(
+            {"timeout-minutes": "0"}), "finite whole-job envelope")
+
     def test_explicit_acceptance_retains_lock_owner_and_failed_evidence(self):
         def edit_execution(ws):
             steps = ws["benchmark-evidence.yml"]["jobs"]["acceptance"]["steps"]

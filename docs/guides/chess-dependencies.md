@@ -360,16 +360,28 @@ The fixed acceptance profile then retains:
   and a separate duration-qualified window of at least 30 seconds.
 - Retained source admission: 16 complete games and two exact zero-writer replays,
   with generation, admission and replay rates kept separate.
+- Prepared-corpus admission capacity: two authentic 24-game matches are completed
+  and retained before one sequential admission window. Every fresh playing is
+  committed and read back; each source job then has one exact zero-writer replay.
+  Preparation and measurement have separate 3,600-second deadlines and receipts.
+  A sample shorter than 30 seconds remains unqualified for sustained capacity.
 - GeometryZM storage: 100,000 existing unique rows, 10,000 rows per transaction,
   concurrency 1/2/4, three repetitions and exact committed binary readback.
 - Stockfish/CuteChess configuration calibration with three repetitions and two
   reserved logical CPUs, followed by another installed-native and service check.
 
-One shared host lock covers this sequence. Independent measurements retain their
+One shared host lock covers this sequence, including adjacent preparation and
+admission without an API restart between them. The self-hosted acceptance job has
+a finite 600-minute outer deadline to accommodate the independent per-phase
+envelopes; that deadline is not a claimed runtime. Independent measurements retain their
 own failures; a failed match does not erase the separate geometry result.
 Complete games have no move cap or adjudicated early stop. Geometry rows and
 retained replays are never counted as newly recorded games. The 2,500-games/s
-target is reported only against the complete recorded collector's actual receipt.
+target has separate verdicts for the complete recorded workflow and prepared-corpus
+admission. A 48-game prepared pool cannot establish 2,500 games/s over 30 seconds;
+that would require at least 75,000 authentic fresh occurrences. See
+[retained capacity](../benchmarks/RETAINED_CHESS_CAPACITY.md) for the exact timing
+scope, content inventory and qualification rules.
 
 The job preserves failure evidence and excludes the private corpus selection file
 from its uploaded artifact. Service response times are labeled as response latency;

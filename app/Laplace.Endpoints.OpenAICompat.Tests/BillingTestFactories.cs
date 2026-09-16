@@ -108,6 +108,8 @@ internal static class WebhookTestEvents
         {
             id = eventId,
             @object = "event",
+            api_version = StripeConfiguration.ApiVersion,
+            request = (object?)null,
             created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             type = "checkout.session.completed",
             data = new
@@ -129,6 +131,8 @@ internal static class WebhookTestEvents
         {
             id = eventId,
             @object = "event",
+            api_version = StripeConfiguration.ApiVersion,
+            request = (object?)null,
             created,
             type = eventType,
             data = new { @object = new { @object = "subscription", id = subscriptionId } }

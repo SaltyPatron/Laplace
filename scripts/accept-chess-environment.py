@@ -31,6 +31,9 @@ PROFILE = {
                  "durationSeconds": 30, "totalTimeoutSeconds": 7200},
     "retained": {"games": 16, "depth": 4, "concurrency": 1,
                  "replays": 2, "timeoutSeconds": 900},
+    "retainedCapacity": {"jobs": 2, "gamesPerJob": 24, "depth": 4, "concurrency": 1,
+                         "prepareTimeoutSeconds": 3600, "measureTimeoutSeconds": 3600,
+                         "minimumAdmissionSeconds": 30, "replays": 1},
     "geometry": {"rows": 100000, "transactionRows": 10000,
                  "concurrency": [1, 2, 4], "repeats": 3, "timeoutSeconds": 900},
     "calibration": {"repeats": 3, "reserveCpus": 2, "maxSeconds": 1800, "caseTimeoutSeconds": 600},
@@ -109,7 +112,7 @@ class Acceptance:
                         "observedUtc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                         "collectorSha256": sha256(Path(__file__)), "phases": [],
                         "targetGamesPerSecond": 2500,
-                        "rateClaim": "Only the complete recorded collector may establish a game rate.",
+                        "rateClaim": "Complete generation-plus-recording and prepared-corpus admission have separate validated rates; replay is never fresh admission.",
                         "coldServiceBootMeasured": False, "serviceRestartStartupMeasured": False,
                         "serviceTimingScope": "Explicit service restart through full readiness before game timing; existing OS caches, not a machine cold reboot."}
         self.flush()
@@ -358,7 +361,10 @@ def public_summary(name, output):
         "requested-source-directory": "requested-stockfish-directory.json",
         "stockfish-corpus": "stockfish-corpus/receipt.json",
         "recorded": "recorded/recorded-chess/receipt.json",
-        "retained": "retained/receipt.json", "geometry": "geometry/postgres-geometry/receipt.json",
+        "retained": "retained/receipt.json",
+        "retained-capacity-prepare": "retained-capacity-corpus/corpus.json",
+        "retained-capacity-measure": "retained-capacity-measurement/receipt.json",
+        "geometry": "geometry/postgres-geometry/receipt.json",
         "calibration": "calibration/chess-environment/report.json",
         "gui-session": "gui-session/receipt.json", "service-startup": "service-startup/receipt.json",
     }
@@ -403,6 +409,27 @@ def public_summary(name, output):
              "processedGamesPerSecondService", "processedGamesPerSecondCollector"))}
              for item in value.get("attempts", [])[:3]]
         summary.update(fields(value, ("minimumAdmissionDurationReached", "sustainedAdmissionCapacityEstablished")))
+    elif name == "retained-capacity-prepare":
+        summary.update(fields(value, ("requestedGames", "retainedBytes", "commandSecondsIncludingCleanup")))
+        summary["preparedJobs"] = len(value.get("jobs", []))
+    elif name == "retained-capacity-measure":
+        summary["scope"] = "Prepared authentic full games, sequential fresh admission; engine generation excluded"
+        summary.update(fields(value, ("requestedGames", "admissionConcurrency", "admissionWindowSeconds")))
+        measured = value.get("measurement") or {}
+        summary["measurement"] = fields(measured,
+            ("newlyRecordedPlayings", "newlyRecordedCompleteGames", "endToEndAdmissionSeconds",
+             "observedNewPlayingsPerSecond", "minimumAdmissionSeconds", "minimumDurationReached",
+             "variedOrderedLineCorpus", "exactReplayControlsPassed",
+             "sustainedIngestionCapacityEstablished", "targetGamesPerSecond", "pliesReadback"))
+        summary["measurement"]["targetVerdict"] = measured.get("targetVerdict")
+        summary["measurement"]["contentInventory"] = fields(measured.get("contentInventory") or {},
+            ("playings", "distinctOrderedLines", "distinctStartPositions", "distinctLines",
+             "repeatedLinePlayings", "repeatedOrderedLinePlayings", "maximumPlayingsSharingLine",
+             "multipleStartPositionsAndLines"))
+        summary["measurement"]["writer"] = fields(measured.get("writer") or {},
+            ("applyCalls", "entitiesAttempted", "entitiesInserted", "physicalitiesAttempted",
+             "physicalitiesInserted", "attestationsAttempted", "attestationsInserted",
+             "copyTransactionsStarted", "copyTransactionsCommitted"))
     elif name == "geometry":
         summary["scope"] = "Storage rows and vertices; not recorded games"
         summary["cases"] = [{"mode": item.get("mode"), "status": item.get("status"), **fields(item,
@@ -483,6 +510,24 @@ def source_directory_inventory(path):
     return result
 
 
+def retained_capacity(owner, python, *, allowed):
+    """Prepare the authentic pool completely before any measured admission."""
+    corpus = owner.output / "retained-capacity-corpus"
+    measured = owner.output / "retained-capacity-measurement"
+    prepared = owner.run("retained-capacity-prepare",
+        [python, "scripts/benchmark-retained-chess-capacity.py", "prepare",
+         "--output-dir", corpus, "--jobs", "2", "--games-per-job", "24",
+         "--depth", "4", "--concurrency", "1", "--timeout-seconds", "3600"],
+        3630, allowed=allowed)
+    # No restart or new match job may occur between these adjacent operations.
+    return owner.run("retained-capacity-measure",
+        [python, "scripts/benchmark-retained-chess-capacity.py", "measure",
+         "--corpus-dir", corpus, "--output-dir", measured,
+         "--minimum-seconds", "30", "--replays", "1",
+         "--target-games-per-second", "2500", "--timeout-seconds", "3600"],
+        3630, allowed=allowed and prepared)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -557,6 +602,7 @@ def main():
               "--output-dir", args.output_dir / "retained", "--games", "16", "--depth", "4",
               "--concurrency", "1", "--replays", "2", "--timeout-seconds", "900"], 930,
               allowed=binding)
+    retained_capacity(owner, python, allowed=binding)
     owner.run("geometry", [python, "scripts/benchmark_suite.py", "run", "--suite", "geometry",
               "--database", os.environ.get("PGDATABASE", "laplace"), "--repeats", "3",
               "--receipt-dir", args.output_dir / "geometry", "--geometry-rows", "100000",

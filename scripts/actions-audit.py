@@ -138,7 +138,7 @@ def result_authority(name: str, workflow: dict) -> None:
             fail("benchmark-evidence.yml: acceptance must remain explicitly selected")
         if "needs" in acceptance:
             fail("benchmark-evidence.yml: acceptance must remain independent from deployment")
-        if acceptance.get("timeout-minutes") != "360":
+        if acceptance.get("timeout-minutes") != "600":
             fail("benchmark-evidence.yml: acceptance must retain its finite whole-job envelope")
         acceptance_steps = acceptance.get("steps") or []
         execution = unique_step(acceptance_steps, "id", "chess_acceptance", "benchmark-evidence.yml:acceptance")

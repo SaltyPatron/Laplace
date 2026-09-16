@@ -284,5 +284,76 @@ class AcceptanceTests(unittest.TestCase):
             self.assertLessEqual(result["directoriesScanned"], 128)
 
 
+    def test_capacity_preparation_finishes_before_measured_admission(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as temporary:
+            proof = owner.Acceptance(Path(temporary) / "proof")
+            def run(argv, log, timeout):
+                calls.append((list(map(str, argv)), timeout))
+                mode = argv[2]
+                output = Path(argv[argv.index("--output-dir") + 1])
+                output.mkdir()
+                if mode == "prepare":
+                    owner.save(output / "corpus.json", {"status": "prepared", "jobs": [], "requestedGames": 48})
+                else:
+                    corpus = Path(argv[argv.index("--corpus-dir") + 1])
+                    self.assertEqual("prepared", json.loads((corpus / "corpus.json").read_text())["status"])
+                    owner.save(output / "receipt.json", {"status": "passed", "measurement": {
+                        "newlyRecordedPlayings": 48, "observedNewPlayingsPerSecond": 16,
+                        "sustainedIngestionCapacityEstablished": False, "targetVerdict": "unqualified"}})
+            with patch.object(owner, "command", side_effect=run):
+                self.assertTrue(owner.retained_capacity(proof, sys.executable, allowed=True))
+            self.assertEqual(["prepare", "measure"], [argv[2] for argv, _ in calls])
+            self.assertEqual([3630, 3630], [timeout for _, timeout in calls])
+            self.assertEqual(["passed", "passed"], [row["status"] for row in proof.receipt["phases"]])
+            self.assertNotIn("--games-per-job", calls[1][0])
+            self.assertEqual(0, proof.finish())
+
+    def test_failed_or_blocked_capacity_preparation_never_admits_a_partial_pool(self):
+        for allowed in (True, False):
+            with self.subTest(allowed=allowed), tempfile.TemporaryDirectory() as temporary:
+                proof = owner.Acceptance(Path(temporary) / "proof")
+                def fail(argv, log, timeout):
+                    self.assertEqual("prepare", argv[2])
+                    output = Path(argv[argv.index("--output-dir") + 1])
+                    output.mkdir()
+                    owner.save(output / "corpus.json", {"status": "failed", "jobs": []})
+                    raise RuntimeError("generation failed")
+                with patch.object(owner, "command", side_effect=fail) as call:
+                    self.assertFalse(owner.retained_capacity(proof, sys.executable, allowed=allowed))
+                self.assertEqual(1 if allowed else 0, call.call_count)
+                self.assertEqual(["failed" if allowed else "blocked", "blocked"],
+                                 [row["status"] for row in proof.receipt["phases"]])
+                self.assertEqual(1, proof.finish())
+                if allowed:
+                    self.assertTrue((proof.output / "retained-capacity-corpus/corpus.json").is_file())
+
+    def test_capacity_summary_keeps_admission_scope_and_unqualified_result(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            out = root / "retained-capacity-measurement"
+            out.mkdir()
+            owner.save(out / "receipt.json", {"status": "passed", "requestedGames": 48,
+                "admissionConcurrency": 1, "error": "secret", "measurement": {
+                    "newlyRecordedPlayings": 48, "observedNewPlayingsPerSecond": 16,
+                    "minimumDurationReached": False, "exactReplayControlsPassed": True,
+                    "sustainedIngestionCapacityEstablished": False, "targetVerdict": "unqualified",
+                    "contentInventory": {"playings": 48, "distinctOrderedLines": 2},
+                    "writer": {"entitiesInserted": 5, "physicalitiesInserted": 7}}})
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                owner.public_summary("retained-capacity-measure", root)
+            result = json.loads(output.getvalue().split(" ", 1)[1])
+            self.assertIn("generation excluded", result["scope"])
+            self.assertEqual("unqualified", result["measurement"]["targetVerdict"])
+            self.assertFalse(result["measurement"]["sustainedIngestionCapacityEstablished"])
+            self.assertEqual(16, result["measurement"]["observedNewPlayingsPerSecond"])
+            self.assertEqual(5, result["measurement"]["writer"]["entitiesInserted"])
+            self.assertEqual(7, result["measurement"]["writer"]["physicalitiesInserted"])
+            self.assertNotIn("secret", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
