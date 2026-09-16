@@ -1,77 +1,55 @@
-name: Hosted chess floor serving controls
+name: Qualify service repair and observe exact bootstrap capabilities
 on:
   push:
     branches: [verify/chess-floor-serving-controls-20260916]
 permissions:
   contents: read
 jobs:
-  protocol-controls:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      TMPDIR: /build/laplace/work/floor-serving-controls/tmp
-      TMP: /build/laplace/work/floor-serving-controls/tmp
-      TEMP: /build/laplace/work/floor-serving-controls/tmp
-      PYTHONDONTWRITEBYTECODE: '1'
-      CANDIDATE_SHA: 15567b18cc47a99092bd91c3103825b72f87c50f
-      CANDIDATE_TREE: 6992c950536fd0e917b61ac612effee41358a0a5
+  exact-capability:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
     steps:
-      - name: Prepare permanent work and evidence directories
-        run: |
-          set -euo pipefail
-          sudo mkdir -p /build/laplace
-          sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/floor-serving-controls
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: 15567b18cc47a99092bd91c3103825b72f87c50f
-          fetch-depth: 1
-          persist-credentials: false
-      - name: Bind the exact candidate in the permanent worktree
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-          test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
-          git worktree add --detach /build/laplace/worktrees/floor-serving-controls "$CANDIDATE_SHA"
-          python3 - <<'PY'
-          import json,os
-          from pathlib import Path
-          Path("/build/laplace/recovery/floor-serving-controls/source.json").write_text(json.dumps({
-              "candidate_commit":os.environ["CANDIDATE_SHA"],
-              "candidate_tree":os.environ["CANDIDATE_TREE"],
-              "workflow_commit":os.environ["GITHUB_SHA"],
-              "claim":"python-protocol-and-registry-controls",
-              "installed_acceptance_executed":False,
-              "native_chess_runtime_executed":False
-          },indent=2)+"\n")
-          PY
-      - name: Execute real protocol and required profile controls
-        working-directory: /build/laplace/worktrees/floor-serving-controls
+      - name: Read exact command permissions and public owner identities
         shell: bash
         run: |
           set -euo pipefail
-          evidence=/build/laplace/recovery/floor-serving-controls
-          python3 --version 2>&1 | tee "$evidence/python-version.log"
-          printf 'suite\texit_code\n' > "$evidence/test-summary.tsv"
-          failed=0
-          for suite in test-chess-floor-serving.py test-test-profile-registry.py; do
-            set +e
-            timeout --signal=TERM --kill-after=10s 60s \
-              python3 "scripts/$suite" \
-              2>&1 | tee "$evidence/$suite.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            printf '%s\t%s\n' "$suite" "$status" >> "$evidence/test-summary.tsv"
-            if [[ "$status" != 0 ]]; then failed=1; fi
-          done
-          cat "$evidence/test-summary.tsv"
-          test -z "$(git status --porcelain --untracked-files=all)"
-          exit "$failed"
-      - name: Retain exact protocol evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: chess-floor-serving-controls-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /build/laplace/recovery/floor-serving-controls/
-          if-no-files-found: error
-          retention-days: 30
+          timeout --signal=TERM --kill-after=5s 45s python3 - <<'PY'
+          import hashlib, json, os, pathlib, pwd, stat, subprocess, time
+          root = pathlib.Path("/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace")
+          env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C"}
+          started = time.monotonic()
+          uid = os.getuid()
+          result = {"schema": "laplace.exact-bootstrap-capability/v1", "uid": uid, "user": pwd.getpwuid(uid).pw_name, "gid": os.getgid(), "groups": os.getgroups(), "commands_executed": False, "files": [], "permissions": []}
+          paths = [root / "scripts/bootstrap-laplace-runner.sh", root / "scripts/setup-host.sh", pathlib.Path("/usr/local/libexec/laplace-managed-deploy"), pathlib.Path("/usr/local/libexec/laplace-service-control")]
+          for path in paths:
+              item = {"path": str(path)}
+              try:
+                  fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                  with os.fdopen(fd, "rb") as stream:
+                      st = os.fstat(stream.fileno())
+                      if not stat.S_ISREG(st.st_mode) or st.st_size > 1024 * 1024:
+                          raise ValueError("outside bounded regular helper")
+                      data = stream.read(1024 * 1024 + 1)
+                      after = os.fstat(stream.fileno())
+                  if len(data) != st.st_size or (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+                      raise ValueError("helper changed during read")
+                  item.update(uid=st.st_uid, gid=st.st_gid, mode=oct(stat.S_IMODE(st.st_mode)), bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+              except (OSError, ValueError) as exc:
+                  item.update(status="unavailable", error_type=type(exc).__name__)
+              result["files"].append(item)
+          commands = [
+              ("dependency-prefix", ["timeout", "--signal=TERM", "--kill-after=10s", "600s", "env", "LAPLACE_EXTERNAL=/build/external", "TMPDIR=/build/laplace/work", "TMP=/build/laplace/work", "TEMP=/build/laplace/work", "bash", str(root / "scripts/bootstrap-laplace-runner.sh"), "prefix"]),
+              ("managed-policy-setup", ["bash", str(root / "scripts/setup-host.sh"), "managed-services"]),
+          ]
+          for name, command in commands:
+              item = {"owner": name, "command": command, "inspection_only": True}
+              try:
+                  p = subprocess.run(["sudo", "-n", "-l", "--", *command], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+                  combined = (p.stdout + p.stderr)[:16384].lower()
+                  item.update(returncode=p.returncode, permitted=p.returncode == 0, output_bytes=len(p.stdout)+len(p.stderr), output_truncated=len(p.stdout)+len(p.stderr)>16384, password_required=b"password is required" in combined, not_allowed=b"not allowed" in combined or b"not permitted" in combined, tty_required=b"terminal is required" in combined)
+              except (OSError, subprocess.TimeoutExpired) as exc:
+                  item.update(status="unavailable", error_type=type(exc).__name__, permitted=None)
+              result["permissions"].append(item)
+          result["elapsed_seconds"] = time.monotonic() - started
+          print("EXACT_BOOTSTRAP_CAPABILITY " + json.dumps(result, sort_keys=True), flush=True)
+          PY
