@@ -13,6 +13,27 @@ typedef struct LaplaceContinuation
     int stride;
 } LaplaceContinuation;
 
+/* Physicality is more than a next-token stream. One packed manifest witnesses
+ * containment, membership, predecessor/successor order and co-occurrence in the
+ * same exact observation. These flags stay separate from semantic testimony:
+ * they are structural facts derived from a stored trajectory, not relation cells. */
+enum LaplaceStructuralRelation
+{
+    LAPLACE_STRUCTURAL_CONTAINER   = 1u << 0,
+    LAPLACE_STRUCTURAL_CONSTITUENT = 1u << 1,
+    LAPLACE_STRUCTURAL_PREDECESSOR = 1u << 2,
+    LAPLACE_STRUCTURAL_SUCCESSOR   = 1u << 3,
+    LAPLACE_STRUCTURAL_COOCCUR     = 1u << 4,
+};
+
+typedef struct LaplaceStructuralCandidate
+{
+    hash128_t id;
+    uint32 relation_mask;
+    int64 occurrences;
+    uint64 nearest_gap;
+} LaplaceStructuralCandidate;
+
 /* A request-snapshot projection of observed operands and their witnessed
  * context roots. This is candidate support, never a claim that sharing
  * a context (which may be a language) proves co-occurrence or agreement. */
@@ -33,6 +54,14 @@ void laplace_trajectory_scope_select(LaplaceTrajectoryScope *scope, Datum select
                                     bool ordered);
 LaplaceContinuation *laplace_trajectory_continuations_scoped(
     ArrayType *context, bool suffix_backoff, LaplaceTrajectoryScope *scope, int *count);
+
+/* Enumerate exact structural crossings for active source identities over the
+ * trajectories already retained in the request scope. RLE multiplicity and
+ * logical ordinals are decoded natively; no SQL relation synthesis and no
+ * trajectory-as-geometry shortcut. Results are deduplicated by target identity
+ * while preserving which structural families responded and how often. */
+LaplaceStructuralCandidate *laplace_trajectory_structural_candidates(
+    LaplaceTrajectoryScope *scope, ArrayType *sources, uint32 relation_mask, int *count);
 
 /* Complete successor set, allocated in the caller's memory context. Exact
  * reads and longest-suffix proposal share this indexed native operation. */
