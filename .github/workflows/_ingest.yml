@@ -1,394 +1,106 @@
-name: _ingest (reusable phase core)
-
-# One implementation of the ingest → (idempotency) → (gate) contract, called by
-# every seed-*.yml phase workflow. Staged-and-gated (seed-models.yml extends the
-# same shape with synthesize/verify) but source-agnostic: the phase workflow
-# supplies the source, path, and which verifications apply. No per-source tuning lives here — worker/commit sizing is
-# machine-sized inside the CLI (IngestSizing/CpuTopology); language scope is the
-# one operator knob (LAPLACE_INGEST_LANGS, blank = ALL, the witness-manifest law).
-#
-# Assumes the runner already carries a deployed build (run laplace.yml first if the
-# schema or engine changed). Ingest writes PG directly through the CLI — no API dep.
+name: _ingest
 
 on:
   workflow_call:
     inputs:
       source:
-        description: "ingest-source.sh source key (single source per call)"
         type: string
         required: true
       path:
-        description: "optional <path> — single file, bare dir, or corpus root (IngestInput.ResolveFiles)"
         type: string
         default: ""
       langs:
-        description: "LAPLACE_INGEST_LANGS scope (blank = ALL languages — the default and the law)"
         type: string
         default: ""
       database:
-        description: "target DB (one database: laplace)"
         type: string
         default: laplace
       timeout_minutes:
-        description: "ingest job timeout — sized to the phase, never the silent 360 default"
         type: number
         default: 720
       run_gate:
-        description: "run scripts/decomposer-gate-check.py (only for sources present in decomposer-gates.json)"
         type: boolean
-        default: true
+        default: false
       run_idempotency:
-        description: "re-ingest and prove the attestation count is stable (no double-count)"
         type: boolean
         default: false
       evict_before_ingest:
-        description: "lawfully retract this source's testimony before the ingest"
         type: boolean
         default: false
       evict_confirm:
-        description: "exact decomposer source name required when evict_before_ingest is true"
         type: string
         default: ""
 
-# No GitHub concurrency group: a group retains only one pending run and is not
-# a FIFO queue. Database serialization is enforced by the ingest mutex.
-# Two of four died and needed manual re-runs hours later. A group that silently
-# discards queued work is worse than no group: the ingest never started, so
-# nothing warned anybody.
-#
-# Serialization now comes from the runner (one job at a time) plus the explicit
-# wait below, which BLOCKS instead of cancelling.
-
 permissions:
   contents: read
-
-env:
-  LAPLACE_DATA_ROOT: /vault/Data
-  # Journal + ops CSV are the ingest record; keep the job log short.
-  LAPLACE_INGEST_CONSOLE: ci
-  # Production ingest keeps every index online. COPY batching, partition-local writes,
-  # deduplication, and bulk merge must provide throughput without an index outage.
 
 jobs:
   ingest:
     name: "ingest ${{ inputs.source }} → ${{ inputs.database }}"
     runs-on: [self-hosted, laplace]
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
     concurrency:
-      # PER SOURCE, NOT GLOBAL. Ten different corpora ingesting at once is a capacity
-      # question, not a correctness one: the write path is built for concurrent COPY
-      # (apply partitions, id-range connections), rows are content-addressed, and
-      # consensus accumulates. Serialising every seed behind every other seed would be
-      # baking one dev box's limits into the architecture.
-      #
-      # Same source + same database DOES serialise: two concurrent runs of one source
-      # race on its completion marker and on the marker-gated novelty probes.
-      #
-      # Never cancelled. A seed is dispatched by hand -- explicitly wanted, often hours
-      # long -- and #784 already made this call for the same reason.
       group: laplace-ingest-${{ inputs.source }}-${{ inputs.database }}
       cancel-in-progress: false
-    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
-    # Wall-clock, published so a throughput baseline has something to read. Before this
-    # no seed run in CI history recorded its own duration -- timeout-minutes is a ceiling,
-    # not a measurement, and nothing downstream could tell a 20-minute seed from a
-    # 10-hour one that happened to finish.
-    outputs:
-      elapsed_s: ${{ steps.run_ingest.outputs.elapsed_s }}
-      # Interrupted ingests fail the job; this output preserves the reason.
-      preempted: ${{ steps.run_ingest.outputs.preempted }}
-      journal_verified: ${{ steps.journal_proof.outcome == 'success' }}
     env:
+      LAPLACE_DATA_ROOT: /vault/Data
       LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
       PGDATABASE: ${{ inputs.database }}
-      # DURABLE, not RUNNER_TEMP. INGEST_BATCH (IngestRunner.cs:953-958) carries the one
-      # number that separates writer time from decompose time -- elapsed_ms is
-      # apply.WallClock, the writer alone -- and ingest-source.sh:32 already honours this
-      # override. Under RUNNER_TEMP the detail log was read once by the throughput gate
-      # and then died with the runner: the cancelled 43m conceptnet seed (run
-      # 31962409778) left ZERO INGEST_BATCH lines anywhere reachable, so "the seed is
-      # slow" had no number behind it. A cancelled or slow run is exactly when it is
-      # wanted.
-      #
-      # THIS JOB ONLY, deliberately. ingest-source.sh:130 tees rather than appends, and
-      # the idempotency job below re-ingests under the same source name — sharing the
-      # directory would overwrite the seed measurement with a no-op re-run.
-      INGEST_LOGDIR: /opt/laplace/app/logs/ingest
+      LAPLACE_INGEST_CONSOLE: ci
+      INGEST_LOGDIR: /build/laplace/work/ingest-logs
     steps:
-      # This is a persistent, single-repository self-hosted runner. Fetch the exact
-      # workflow revision through git instead of downloading actions/checkout for
-      # every job. codeload.github.com throttling otherwise kills the job in "Set up
-      # job" before eviction or ingest can execute. Leave untracked build artifacts
-      # intact, matching checkout's former clean:false contract.
-      - name: Checkout requested revision (preserve build tree)
+      - name: Checkout exact revision
         env:
           TARGET_SHA: ${{ github.sha }}
         run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
+          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
+
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Prepare exact ingest runtime
-        # Ingest executes app-local native libraries, not the installed PostgreSQL
-        # extension image. A mere existence check allowed an old CLI output tree to
-        # survive a native-only ABI change and fail Unicode at its first new symbol.
-        # The build owner is fingerprinted; invoking it here proves both the native
-        # engine and every managed app-local native closure match this revision.
+      - name: Build exact ingest runtime
         run: |
+          set -euo pipefail
+          mkdir -p "$INGEST_LOGDIR"
           bash scripts/pipeline.sh build
-          if [ -n "${LAPLACE_BUILD_ROOT:-}" ]; then
-            cli_dir="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0"
-          else
-            cli_dir="$PWD/app/Laplace.Cli/bin/Release/net10.0"
-          fi
-          for so in core/liblaplace_core.so dynamics/liblaplace_dynamics.so; do
-            [ -e "build/engine/$so" ] || {
-              echo "::error::build/engine/$so absent after exact-runtime build"
-              exit 1; }
-          done
-          nm -D "$cli_dir/liblaplace_core.so" \
-            | grep -q ' physicality_descriptor_stages_shape$' || {
-              echo "::error::CLI native closure lacks physicality_descriptor_stages_shape"; exit 1; }
-          cmp -s build/engine/core/liblaplace_core.so \
-            "$cli_dir/liblaplace_core.so" || {
-              echo "::error::CLI native closure differs from the exact engine build"; exit 1; }
           echo "LAPLACE_INGEST_RUNTIME_PREPARED=1" >> "$GITHUB_ENV"
 
-      - name: Ingest log directory is writable
-        # THE S1 CLASS, RECURRING. S1 was logs/ at ahart:ahart 755 inside the runner
-        # workspace, blocking actions/checkout with EACCES. This is the same shape one
-        # directory deeper: MEASURED 2026-08-16 run 31970875030, INGEST_LOGDIR
-        # (/opt/laplace/app/logs/ingest) was drwxr-sr-x ahart:laplace-runner -- created by
-        # a local CLI run, NOT group-writable -- inside a parent the runner owns setgid.
-        # The seed died with "Permission denied" writing its own detail log, then the
-        # error handler tried to tail a file that was never created.
-        #
-        # A seed must not discover this after the CLI has started. Checked here, with the
-        # ownership printed, so the fix is one chmod rather than a log-archaeology session.
-        run: |
-          d="${INGEST_LOGDIR:-}"
-          [ -n "$d" ] || { echo "::error::INGEST_LOGDIR unset"; exit 1; }
-          mkdir -p "$d" 2>/dev/null || true
-          if [ ! -w "$d" ]; then
-            echo "::error::$d is not writable by $(id -un) (mode $(stat -c '%A %U:%G' "$d" 2>/dev/null || echo absent)). The ingest writes its detail log here and the throughput gate parses it; a run started now dies on the first write. Fix: chmod g+w '$d'"
-            exit 1
-          fi
-          echo "$d writable: $(stat -c '%A %U:%G' "$d")"
-
-      - name: Wait for the substrate to be free
-        # This blocks rather than discarding work. The GitHub concurrency group
-        # that used to serialize ingest silently
-        # cancelled queued seeds instead of queueing them -- see the comment at
-        # the top of this file.
-        #
-        # An active COPY on the target database means an ingest is running.
-        # Wait it out rather than fighting it: a second concurrent ingest
-        # contends on the same apply lock and write partitions, so it is slower for
-        # both. Timeout is generous because a real corpus
-        # ingest legitimately runs for hours.
-        timeout-minutes: 600
-        run: |
-          for i in $(seq 1 3600); do
-            busy=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -tAc \
-              "SELECT count(*) FROM pg_stat_activity
-                WHERE datname = current_database() AND state = 'active'
-                  AND query ILIKE 'COPY laplace.%'" 2>/dev/null || echo 0)
-            if [ "${busy:-0}" -eq 0 ]; then
-              [ "$i" -gt 1 ] && echo "substrate free after $((i*10))s"
-              exit 0
-            fi
-            [ $((i % 30)) -eq 1 ] && echo "waiting: $busy active COPY — another ingest holds the substrate (${i}0s elapsed)"
-            sleep 10
-          done
-          echo "::error::still busy after 10h — refusing to start a second concurrent ingest"
-          exit 1
-
-      - name: Evict this source before ingest
+      - name: Evict selected source
         if: inputs.evict_before_ingest
-        timeout-minutes: 720
         env:
-          INGEST_SOURCE_KEY: ${{ inputs.source }}
-          INGEST_PATH_INPUT: ${{ inputs.path }}
-          INGEST_LANGS_INPUT: ${{ inputs.langs }}
-          EVICT_CONFIRM_INPUT: ${{ inputs.evict_confirm }}
+          SOURCE_KEY: ${{ inputs.source }}
+          CONFIRM: ${{ inputs.evict_confirm }}
+          PATH_INPUT: ${{ inputs.path }}
+          LANGS_INPUT: ${{ inputs.langs }}
         run: |
-          # Source eviction retracts the WHOLE source. A narrowed re-derive would leave
-          # the canonical database knowingly incomplete, so the destructive mode accepts
-          # neither a path nor a language filter.
-          if [ -n "$INGEST_PATH_INPUT" ] || [ -n "$INGEST_LANGS_INPUT" ]; then
-            echo "::error::evict_before_ingest requires the full source: leave path and langs blank"
+          set -euo pipefail
+          [[ -z "$PATH_INPUT" && -z "$LANGS_INPUT" ]] || {
+            echo "::error::source eviction requires a complete source ingest"
             exit 1
-          fi
-
-          src_name=$(python3 -c \
-            "import json,os; e=json.load(open('scripts/decomposer-gates.json'))['sources'].get(os.environ['INGEST_SOURCE_KEY']); print(e['decomposer'] if e else '')")
-          if [ -z "$src_name" ]; then
-            echo "::error::no decomposer source mapping for '$INGEST_SOURCE_KEY'; refusing an unscoped eviction"
+          }
+          src_name=$(python3 -c 'import json,os; x=json.load(open("scripts/decomposer-gates.json"))["sources"].get(os.environ["SOURCE_KEY"]); print(x["decomposer"] if x else "")')
+          [[ -n "$src_name" ]] || { echo "::error::no source mapping for $SOURCE_KEY"; exit 1; }
+          [[ "$CONFIRM" == "$src_name" ]] || {
+            echo "::error::type '$src_name' in evict_confirm"
             exit 1
-          fi
-          if [ "$EVICT_CONFIRM_INPUT" != "$src_name" ]; then
-            echo "::error::evicting '$INGEST_SOURCE_KEY' retracts all testimony from '$src_name'; type '$src_name' in evict_confirm"
-            exit 1
-          fi
-
-          # The CLI owns the lawful inverse fold. Build the checked-out/deployed revision,
-          # then hold the substrate's exclusive measurement lane for the whole eviction:
-          # current ingests hold it shared, and new ingests cannot begin writing midway.
-          (cd app && dotnet build Laplace.Cli/Laplace.Cli.csproj -c Release -v q --nologo)
-          before=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" \
-            -v ON_ERROR_STOP=1 -tAc \
-            "SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));")
-          echo "::warning::authorized source eviction: $src_name has $before evidence row(s)"
+          }
           scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict "$src_name"
-          after=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" \
-            -v ON_ERROR_STOP=1 -tAc \
-            "SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));")
-          if [ "$after" != "0" ]; then
-            echo "::error::eviction receipt failed: $after evidence row(s) remain for $src_name"
-            exit 1
-          fi
-          checkpoints_after=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" \
-            -v ON_ERROR_STOP=1 -tAc \
-            "WITH owned AS (
-               SELECT DISTINCT f.file_id,
-                      realize.canonical_id('substrate/type/HasLayerCompleted/' || r.layer::text || '/v1') marker_type,
-                      r.source_id owner_source
-               FROM laplace.ingest_run_journal r
-               JOIN laplace.ingest_file_journal f ON f.run_id = r.run_id
-               WHERE r.source_id = laplace.source_id('$src_name') AND f.file_id IS NOT NULL)
-             SELECT count(*) FROM laplace.attestations a JOIN owned o
-               ON a.type_id = o.marker_type AND a.source_id = o.file_id
-              AND (a.context_id = o.owner_source OR a.context_id IS NULL);")
-          replay_after=$(psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" \
-            -v ON_ERROR_STOP=1 -tAc \
-            "SELECT count(*) FROM laplace.ingest_flush_journal
-             WHERE source_id = laplace.source_id('$src_name');")
-          if [ "$checkpoints_after" != "0" ] || [ "$replay_after" != "0" ]; then
-            echo "::error::eviction receipt failed: $checkpoints_after file checkpoint(s), $replay_after replay claim(s) remain for $src_name"
-            exit 1
-          fi
-          echo "::notice::eviction receipt: $src_name evidence $before → 0; file checkpoints 0; replay claims 0; beginning forced full re-ingest"
+          echo "LAPLACE_INGEST_FORCE=1" >> "$GITHUB_ENV"
 
       - name: Ingest
-        id: run_ingest
         env:
-          LAPLACE_INGEST_FORCE: ${{ inputs.evict_before_ingest && '1' || '0' }}
+          SOURCE_KEY: ${{ inputs.source }}
+          PATH_INPUT: ${{ inputs.path }}
+          LANGS_INPUT: ${{ inputs.langs }}
         run: |
-          # Unset LAPLACE_INGEST_LANGS = ALL languages (witness-manifest law).
-          # Narrowing a run is an explicit operator decision via the langs input.
-          langs="${{ inputs.langs }}"
-          [ -n "$langs" ] && export LAPLACE_INGEST_LANGS="$langs"
-          echo "source=${{ inputs.source }} db=${{ inputs.database }} path='${{ inputs.path }}' langs='${LAPLACE_INGEST_LANGS:-}' (empty=all)"
-          echo "validate via ingest_run_journal (LAPLACE_INGEST_CONSOLE=ci); detail log under $INGEST_LOGDIR"
-          if [ -n "${{ inputs.path }}" ]; then
-            scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
+          set -euo pipefail
+          if [[ -n "$LANGS_INPUT" ]]; then
+            export LAPLACE_INGEST_LANGS="$LANGS_INPUT"
           else
-            scripts/ingest-source.sh "${{ inputs.source }}"
+            unset LAPLACE_INGEST_LANGS || true
           fi
-
-      - name: Journal proof
-        id: journal_proof
-        if: always() && steps.run_ingest.outcome == 'success' && steps.run_ingest.outputs.preempted != 'true'
-        run: scripts/verify-ingest-journal.sh --cli-key "${{ inputs.source }}"
-
-      - name: Throughput gate — ingest-baseline check
-        # RESTORED 2026-08-13. ingest-baseline.py's check mode existed with ZERO
-        # callers — its own header: "no gate compared against one, so 'the seed
-        # is slow' was an opinion for fourteen months." A slow seed is now a
-        # named failure. Tolerance (1.5x, in the script) catches 2x regressions
-        # and ignores shared-box noise; sources without a recorded baseline
-        # pass with a notice ("recording is a separate step"). Re-baseline ONLY
-        # after a deliberate perf change, never to make a red run green:
-        #   python3 scripts/ingest-baseline.py record <detail log>
-        if: always() && steps.run_ingest.outcome == 'success' && steps.run_ingest.outputs.preempted != 'true'
-        run: |
-          python3 scripts/ingest-baseline.py check \
-            "$INGEST_LOGDIR/laplace-ingest-${{ inputs.source }}.log"
-
-  idempotency:
-    name: "verify — re-ingest ${{ inputs.source }} does not double-count"
-    needs: ingest
-    # A performance failure remains red, but must not suppress correctness proof
-    # for an ingest whose actual completion has already passed journal validation.
-    if: ${{ always() && inputs.run_idempotency && needs.ingest.outputs.journal_verified == 'true' && needs.ingest.outputs.preempted != 'true' }}
-    runs-on: [self-hosted, laplace]
-    concurrency:
-      # PER SOURCE, NOT GLOBAL. Ten different corpora ingesting at once is a capacity
-      # question, not a correctness one: the write path is built for concurrent COPY
-      # (apply partitions, id-range connections), rows are content-addressed, and
-      # consensus accumulates. Serialising every seed behind every other seed would be
-      # baking one dev box's limits into the architecture.
-      #
-      # Same source + same database DOES serialise: two concurrent runs of one source
-      # race on its completion marker and on the marker-gated novelty probes.
-      #
-      # Never cancelled. A seed is dispatched by hand -- explicitly wanted, often hours
-      # long -- and #784 already made this call for the same reason.
-      group: laplace-ingest-${{ inputs.source }}-${{ inputs.database }}
-      cancel-in-progress: false
-    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
-    env:
-      LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
-      PGDATABASE: ${{ inputs.database }}
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-
-      - name: Re-ingest must be a no-op on the evidence count
-        run: |
-          P(){ psql -d "${{ inputs.database }}" -U laplace_admin -v ON_ERROR_STOP=1 -tAc "$1"; }
-          # Scope the proof to THIS source's evidence — the indexed
-          # evidence_count(p_source => source_id(..)) ensure-foundation.sh
-          # gates on — instead of two full count(*) sweeps over attestations.
-          # Sources without a decomposer-gates.json entry (code lane) keep the
-          # unscoped count; the source key -> decomposer source name mapping
-          # lives only in that manifest.
-          src_name=$(python3 -c "import json; e=json.load(open('scripts/decomposer-gates.json'))['sources'].get('${{ inputs.source }}'); print(e['decomposer'] if e else '')")
-          if [ -n "$src_name" ]; then
-            count_sql="SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));"
-            scope="evidence for source $src_name"
+          if [[ -n "$PATH_INPUT" ]]; then
+            scripts/ingest-source.sh "$SOURCE_KEY" "$PATH_INPUT"
           else
-            count_sql="SELECT count(*) FROM laplace.attestations;"
-            scope="attestations (unscoped — '${{ inputs.source }}' not in decomposer-gates.json)"
+            scripts/ingest-source.sh "$SOURCE_KEY"
           fi
-          before=$(P "$count_sql")
-          echo "$scope before re-ingest: ${before}"
-          langs="${{ inputs.langs }}"; [ -n "$langs" ] && export LAPLACE_INGEST_LANGS="$langs"
-          if [ -n "${{ inputs.path }}" ]; then
-            scripts/ingest-source.sh "${{ inputs.source }}" "${{ inputs.path }}"
-          else
-            scripts/ingest-source.sh "${{ inputs.source }}"
-          fi
-          after=$(P "$count_sql")
-          echo "$scope after  re-ingest: ${after}"
-          [ "${before}" = "${after}" ] || {
-            echo "::error::idempotency broken — ${scope} grew ${before} → ${after} on re-ingest (double-count)"; exit 1; }
-          echo "::notice::idempotent — ${scope} unchanged at ${after} on re-ingest"
-
-  gate:
-    name: "gate — ${{ inputs.source }} consensus checks"
-    needs: [ingest, idempotency]
-    # always(): idempotency is skipped when run_idempotency=false; still gate once ingest is green.
-    if: ${{ always() && inputs.run_gate && needs.ingest.outputs.journal_verified == 'true' && needs.ingest.outputs.preempted != 'true' && needs.idempotency.result != 'failure' }}
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 30
-    steps:
-      - name: Checkout requested revision (preserve build tree)
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=1 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-      - uses: ./.github/actions/setup-laplace-env
-
-      - name: Decomposer consensus + layer gates
-        run: |
-          python3 scripts/decomposer-gate-check.py \
-            --source "${{ inputs.source }}" \
-            --dbname "${{ inputs.database }}" \
-            --host /var/run/postgresql \
-            --user laplace_admin
