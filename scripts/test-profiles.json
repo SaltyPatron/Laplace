@@ -294,6 +294,19 @@
       "required": true
     },
     {
+      "id": "policy-chess-x11-runtime",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-chess-x11-runtime.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-cutechess-gui-session",
       "profile": "policy",
       "owner": "chess",

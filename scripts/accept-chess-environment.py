@@ -367,6 +367,7 @@ def public_summary(name, output):
         "geometry": "geometry/postgres-geometry/receipt.json",
         "calibration": "calibration/chess-environment/report.json",
         "gui-session": "gui-session/receipt.json", "service-startup": "service-startup/receipt.json",
+        "gui-x11-runtime": "x11-runtime.json",
     }
     if name not in paths:
         return
@@ -441,6 +442,20 @@ def public_summary(name, output):
         summary["stockfishNodesPerSecond"] = [item.get("steady_nodes_per_second") for item in value.get("stockfish_bench", [])[:24]]
         summary["cutechessPliesPerSecond"] = [item.get("steady_plies_per_second") for item in value.get("cutechess_matches", [])[:24]]
         summary["recommendations"] = value.get("recommendations")
+    elif name == "gui-x11-runtime":
+        summary["scope"] = "Authenticated tool and library selection; actual GUI interaction is a separate phase"
+        summary["mode"] = value.get("mode")
+        summary.update(fields(value, ("gui_ready", "host_packages_installed")))
+        summary["selectionSha256"] = value.get("selection_sha256")
+        names = {"xvfb-run", "Xvfb", "xauth", "xdotool", "xprop", "xwininfo", "xkbcomp"}
+        summary["initiallyMissingTools"] = [item for item in value.get("initially_missing_tools", []) if item in names]
+        summary["tools"] = {key: path for key, path in value.get("tools", {}).items()
+                            if key in names and isinstance(path, str) and len(path) <= 4096}
+        private = value.get("private_runtime") or {}
+        summary["privateRuntime"] = {key: private.get(key) for key in ("runtime_id", "manifest_sha256")}
+        summary["privateRuntime"]["packages"] = [
+            {key: item.get(key) for key in ("name", "version", "architecture", "sha256")}
+            for item in private.get("packages", [])[:64]]
     elif name == "gui-session":
         summary.update(fields(value, ("windowObserved", "interactionVerified", "cleanupVerified",
                                       "elapsed_seconds", "interactive_session_verified", "qapplication_event_loop_verified",
@@ -565,8 +580,10 @@ def main():
                           allowed=exact_source)
     owner.phase("services-before", lambda: services(args.output_dir), required=False)
     binding = exact_source and native and managed
-    owner.run("gui-host-packages", ["timeout", "--signal=TERM", "--kill-after=15s", "300s",
-              "bash", "scripts/bootstrap-laplace-runner.sh", "chess-gui-runtime"], 330)
+    x11 = owner.run("gui-x11-runtime", [python, "scripts/chess-x11-runtime.py",
+              "--root", args.prefix / "tools/chess/x11-runtime", "--deadline-seconds", "280",
+              "--output", args.output_dir / "x11-runtime.json",
+              "--evidence-output", args.output_dir / "x11-runtime-evidence"], 330)
     owner.run("provision-chess", ["bash", "scripts/bootstrap-chess-lab.sh", "--cutechess-gui"], 3600)
     runtime = [python, "scripts/chess-runtime-env.py", "--prefix", str(args.prefix), "--"]
     owner.run("dependencies", [*runtime, python, "scripts/check-chess-dependencies.py",
@@ -579,8 +596,9 @@ def main():
                  "--binary", config.get("LAPLACE_CUTECHESS_GUI", str(args.prefix / "bin/cutechess")),
                  "--receipt", config.get("LAPLACE_CUTECHESS_GUI_RECEIPT", "/build/cutechess/laplace-cutechess-gui-build.json"),
                  "--output-dir", args.output_dir / "gui-session", "--work", args.work,
+                 "--x11-runtime-receipt", args.output_dir / "x11-runtime.json",
                  "--timeout-seconds", "60"], args.output_dir / "gui-session.log", 90)
-    owner.phase("gui-session", gui)
+    owner.phase("gui-session", gui, allowed=x11)
     owner.run("runtime", [*runtime, python, "scripts/benchmark-chess-environment.py", "--runtime-only",
               "--output-dir", args.output_dir / "runtime", "--reserve-cpus", "0", "--cpu-budget", "1",
               "--memory-mb", "512", "--max-seconds", "60"], 90)

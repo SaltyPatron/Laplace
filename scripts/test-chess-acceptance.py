@@ -355,5 +355,32 @@ class AcceptanceTests(unittest.TestCase):
             self.assertNotIn("secret", output.getvalue())
 
 
+    def test_x11_dependency_selection_never_claims_gui_interaction(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            owner.save(root / "x11-runtime.json", {
+                "schema": "laplace.x11-runtime-selection/v1", "status": "tools-selected",
+                "mode": "private", "gui_ready": False, "host_packages_installed": False,
+                "initially_missing_tools": ["Xvfb", "xdotool"], "selection_sha256": "a" * 64,
+                "tools": {"Xvfb": "/private/usr/bin/Xvfb", "xdotool": "/private/usr/bin/xdotool"},
+                "private_runtime": {"runtime_id": "b" * 64, "manifest_sha256": "c" * 64,
+                    "packages": [{"name": "xvfb", "version": "fixture-1", "architecture": "amd64",
+                                  "sha256": "d" * 64}]},
+                "error": "secret", "tokenPreview": "secret"})
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                owner.public_summary("gui-x11-runtime", root)
+            result = json.loads(output.getvalue().split(" ", 1)[1])
+            self.assertEqual("tools-selected", result["status"])
+            self.assertFalse(result["gui_ready"])
+            self.assertFalse(result["host_packages_installed"])
+            self.assertEqual(["Xvfb", "xdotool"], result["initiallyMissingTools"])
+            self.assertEqual("xvfb", result["privateRuntime"]["packages"][0]["name"])
+            self.assertNotIn("virtual_x11_interaction_verified", result)
+            self.assertNotIn("secret", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

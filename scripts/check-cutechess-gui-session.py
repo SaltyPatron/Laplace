@@ -187,6 +187,34 @@ class X11Session:
         checkpoint("normal_quit", {"returncode": returncode})
 
 
+def bind_x11(selection_path, environment, deadline, *, qt_prefix=None):
+    spec = importlib.util.spec_from_file_location(
+        "cutechess_x11_selection", ROOT / "scripts/chess-x11-runtime.py")
+    owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owner)
+    selection = owner.load_selection(selection_path)
+    selected = owner.selected_environment(selection, environment, qt_prefix=qt_prefix)
+    observed = owner.snapshot(selected, deadline)
+    owner.check_tool_selection(selection, observed)
+    return selected, {
+        "receipt": str(selection_path), "receipt_sha256": digest(selection_path),
+        "selection_sha256": selection["selection_sha256"], "mode": selection["mode"],
+        "runtime_id": selection.get("private_runtime", {}).get("runtime_id"),
+        "scope": "resolved X11 tools/libraries in this process environment",
+        **observed}
+
+
+def gui_environment(runtime, selection_path, deadline):
+    environment = dict(os.environ)
+    environment.update(runtime["direct_launch"]["environment"])
+    observed = None
+    if selection_path is not None:
+        # Reapply after the GUI owner's overlay. Qt must precede private X11 libs.
+        environment, observed = bind_x11(
+            selection_path, environment, deadline, qt_prefix=Path(runtime["qt"]["prefix"]))
+    return environment, observed
+
+
 def worker(args):
     report = {"schema": SCHEMA, "status": "failed", "scope": "virtual-x11-interactive",
               "operator_desktop_tested": False, "visual_board_correctness_verified": False,
@@ -219,8 +247,9 @@ def worker(args):
                       binary={"path": str(binary), "sha256": runtime["binary_sha256"]},
                       qt={"prefix": str(qt), "version": runtime["qt_version"],
                           "platform_plugin": str(plugin), "platform_plugin_sha256": plugin_hash})
-        environment = dict(os.environ)
-        environment.update(runtime["direct_launch"]["environment"])
+        environment, x11_before = gui_environment(runtime, args.x11_runtime_receipt, deadline)
+        if x11_before is not None:
+            report["x11_runtime"] = x11_before
         for name in ("QT_QPA_PLATFORMTHEME", "QT_STYLE_OVERRIDE", "QT_QPA_GENERIC_PLUGINS",
                      "WAYLAND_DISPLAY", "QT_QPA_PLATFORM", "QT_QPA_PLATFORM_PLUGIN_PATH"):
             environment.pop(name, None)
@@ -258,6 +287,10 @@ def worker(args):
         require(digest(plugin) == plugin_hash and digest(binary) == runtime["binary_sha256"],
                 "GUI executable or X11 plugin changed during interaction")
         checkpoint("selected_xcb_plugin_verified", {"path": str(plugin), "sha256": plugin_hash})
+        if x11_before is not None:
+            _, x11_after = bind_x11(args.x11_runtime_receipt, environment, deadline, qt_prefix=qt)
+            require(x11_after == x11_before, "selected X11 runtime changed during GUI interaction")
+            checkpoint("selected_x11_runtime_verified", x11_after)
         report.update(status="passed", qapplication_event_loop_verified=True,
                       virtual_x11_interaction_verified=True, clean_exit_verified=True,
                       gui_log_sha256=digest(log))
@@ -283,6 +316,8 @@ def main(argv=None):
     parser.add_argument("--receipt", type=Path, required=True, help="Existing GUI source/build receipt")
     parser.add_argument("--lock", type=Path, default=ROOT / "deploy/cutechess-release.json")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--x11-runtime-receipt", type=Path,
+                        help="Authenticated X11 prerequisite selection; never silently ignored")
     parser.add_argument("--work", type=Path, default=Path(os.environ.get("TMPDIR", "/build/laplace/work")))
     parser.add_argument("--timeout-seconds", type=float, default=60)
     parser.add_argument("--internal-worker", action="store_true", help=argparse.SUPPRESS)
@@ -293,6 +328,8 @@ def main(argv=None):
             "timeout must be finite and within 10..120 seconds")
     for name in ("binary", "receipt", "lock", "output_dir", "work"):
         setattr(args, name, getattr(args, name).absolute())
+    if args.x11_runtime_receipt is not None:
+        args.x11_runtime_receipt = args.x11_runtime_receipt.absolute()
     if args.internal_worker:
         require(args.session_root is not None, "internal session directory is missing")
         return worker(args)
@@ -309,21 +346,31 @@ def main(argv=None):
     try:
         require(args.work.is_dir(), "existing owned work directory is required")
         required = ("xvfb-run", "Xvfb", "xauth", "xdotool", "xprop", "xwininfo")
-        missing = [name for name in required if shutil.which(name) is None]
-        require(not missing, "missing virtual X11 tools: " + ", ".join(missing))
-        result["tools"] = {name: shutil.which(name) for name in required}
+        environment = dict(os.environ)
+        if args.x11_runtime_receipt is not None:
+            environment, x11_selected = bind_x11(
+                args.x11_runtime_receipt, environment, started + args.timeout_seconds)
+            selected_tools = x11_selected["tools"]
+            result["x11_runtime"] = x11_selected
+        else:
+            missing = [name for name in required if shutil.which(name) is None]
+            require(not missing, "missing virtual X11 tools: " + ", ".join(missing))
+            selected_tools = {name: shutil.which(name) for name in required}
+        result["tools"] = selected_tools
         save(receipt, result)
         with tempfile.TemporaryDirectory(prefix="cutechess-x11-", dir=args.work) as private:
             private = Path(private)
-            environment = dict(os.environ, TMPDIR=str(private), TMP=str(private), TEMP=str(private))
+            environment.update(TMPDIR=str(private), TMP=str(private), TEMP=str(private))
             for name in ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY"):
                 environment.pop(name, None)
-            command = ["xvfb-run", "--auto-servernum", "--error-file=" + str(args.output_dir / "xvfb.log"),
+            command = [selected_tools["xvfb-run"], "--auto-servernum", "--error-file=" + str(args.output_dir / "xvfb.log"),
                        "--server-args=-screen 0 1280x1024x24 -nolisten tcp -noreset",
                        sys.executable, str(Path(__file__).resolve()), "--internal-worker",
                        "--binary", str(args.binary), "--receipt", str(args.receipt),
                        "--lock", str(args.lock), "--output-dir", str(args.output_dir),
                        "--session-root", str(private), "--timeout-seconds", str(args.timeout_seconds)]
+            if args.x11_runtime_receipt is not None:
+                command.extend(["--x11-runtime-receipt", str(args.x11_runtime_receipt)])
             with (args.output_dir / "session.log").open("w", encoding="utf-8") as stream:
                 process = subprocess.Popen(command, env=environment, stdin=subprocess.DEVNULL,
                                            stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
@@ -335,8 +382,8 @@ def main(argv=None):
             result = json.loads(receipt.read_text(encoding="utf-8"))
             require(returncode == 0 and result.get("status") == "passed",
                     result.get("error", "virtual X11 session failed"))
-            result["tools"] = {name: shutil.which(name) for name in required}
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, KeyboardInterrupt) as error:
+            result["tools"] = selected_tools
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError, KeyboardInterrupt) as error:
         if receipt.is_file():
             try:
                 result = json.loads(receipt.read_text(encoding="utf-8"))
@@ -345,7 +392,7 @@ def main(argv=None):
         result["status"] = "failed"
         result["error"] = ("whole virtual X11 session deadline exceeded"
                            if isinstance(error, subprocess.TimeoutExpired) else
-                           str(error) if isinstance(error, ValueError) else type(error).__name__)
+                           str(error) if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__)
     finally:
         signal.signal(signal.SIGTERM, previous_term)
         try:
