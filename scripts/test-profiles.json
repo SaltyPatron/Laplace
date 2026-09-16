@@ -2,6 +2,19 @@
   "schema_version": 1,
   "suites": [
     {
+      "id": "policy-application-publish",
+      "profile": "policy",
+      "owner": "build",
+      "runner": "script",
+      "command": ["python3", "scripts/test-application-publish.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-qualified-chess-floor-export",
       "profile": "policy",
       "owner": "chess",
