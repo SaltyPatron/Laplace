@@ -1,4 +1,4 @@
-name: Qualify corpus Python controls
+name: Read retained operational task evidence
 
 on:
   push:
@@ -6,41 +6,62 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  controls:
-    name: Exact workspace, data and chess browser qualification
+  evidence:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: dc5c630a8ddca17466018f6485d444d5679af2c8
-          fetch-depth: 1
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-        with:
-          node-version: 24.18.1
-      - name: Execute exact production browser command
+      - name: Read the exact failed operational task artifact
+        env:
+          GH_TOKEN: ${{ github.token }
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$(git write-tree)" == "db61adcb9f2692849d3c4aec9f1d19a7b1aa81fc" ]]
-          export TMPDIR="$RUNNER_TEMP/laplace-browser-evidence"
-          mkdir -p "$TMPDIR"
-          node --version
-          cd web
-          npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
-          npm run test:chess-ui 2>&1 | tee "$TMPDIR/browser.log"
-      - name: Retain browser evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: corpus-browser-qualification
-          path: |
-            ${{ runner.temp }}/laplace-browser-evidence/
-            web/test-results/
-            web/playwright-report/
-          if-no-files-found: warn
-          retention-days: 14
+          python3 - <<'PY'
+          import hashlib, io, json, os, pathlib, urllib.error, urllib.parse, urllib.request, zipfile
+          base = "https://api.github.com/repos/SaltyPatron/Laplace/actions/artifacts/10439928211"
+          expected = "c90a66d4ad2f0ba118a1d81411c3e75874f7809a40a41054e459890855f0eb2e"
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          opener = urllib.request.build_opener(NoRedirect)
+          def request(url):
+              return urllib.request.Request(url, headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+          with opener.open(request(base), timeout=30) as response:
+              meta = json.loads(response.read(65537))
+          assert meta["id"] == 10439928211 and meta["name"] == "laplace-operational-execution-35079925199-1"
+          assert meta["workflow_run"]["id"] == 35079925199
+          assert meta["workflow_run"]["head_sha"] == "f40078c50e6936fda9e74951ba3905b56e396407"
+          assert meta["digest"] == "sha256:" + expected and not meta["expired"]
+          assert meta["size_in_bytes"] == 11260
+          try:
+              opener.open(request(base + "/zip"), timeout=30)
+              raise AssertionError("artifact endpoint did not return the expected signed redirect")
+          except urllib.error.HTTPError as error:
+              assert error.code == 302
+              target = error.headers["Location"]
+          location = urllib.parse.urlsplit(target)
+          assert location.scheme == "https" and location.hostname and not location.username and not location.password
+          # The API bearer token is never forwarded to the signed artifact host.
+          with urllib.request.urlopen(target, timeout=30) as response:
+              payload = response.read(65537)
+          assert len(payload) == 11260 and hashlib.sha256(payload).hexdigest() == expected
+          with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+              entries = archive.infolist()
+              assert len(entries) <= 256 and sum(item.file_size for item in entries) <= 4 << 20
+              names = [item.filename for item in entries]
+              assert len(names) == len(set(names))
+              assert all(not pathlib.PurePosixPath(name).is_absolute() and ".." not in pathlib.PurePosixPath(name).parts for name in names)
+              matches = [item for item in entries if pathlib.PurePosixPath(item.filename).name == "task.json"]
+              assert len(matches) == 1 and matches[0].file_size <= 262144
+              body = archive.read(matches[0])
+              report = json.loads(body)
+              assert report["schema"] == "laplace.operational-task-proof/v1" and report["disposition"] == "failed"
+              print("OPERATIONAL_ARTIFACT_IDENTITY " + json.dumps({"id": meta["id"], "zipSha256": expected,
+                  "files": [{"path": item.filename, "bytes": item.file_size} for item in entries],
+                  "taskPath": matches[0].filename, "taskSha256": hashlib.sha256(body).hexdigest()}))
+              print("OPERATIONAL_RETAINED_TASK " + json.dumps(report, ensure_ascii=False, separators=(",", ":")))
+          PY
