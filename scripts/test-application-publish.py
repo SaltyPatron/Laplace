@@ -638,6 +638,7 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         (repo / "web/openapi").mkdir(parents=True)
         (repo / "web/dist").mkdir()
         (repo / "web/openapi/openapi.json").write_text("{}")
+        (repo / "web/package-lock.json").write_text('{"lockfileVersion":3}')
         (repo / "web/dist/index.html").write_text('<div id="root">fresh web</div>')
         for name in ("deploy.sh", "payload-sync.sh"):
             shutil.copyfile(ROOT / "deploy/linux" / name, repo / "deploy/linux" / name)
