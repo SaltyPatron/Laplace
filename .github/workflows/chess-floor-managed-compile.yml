@@ -1,144 +1,69 @@
-name: Hosted recorded chess floor compilation
+name: Hosted chess service receipt controls
 on:
   push:
     branches: [verify/chess-floor-managed-compile-20260916]
 permissions:
   contents: read
 jobs:
-  managed-compilation:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+  service-receipt-controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
     env:
-      LAPLACE_BUILD_ROOT: /build/laplace/build/floor-managed-compile
-      LAPLACE_ENGINE_BUILD: /build/laplace/build/floor-managed-compile/engine
-      LAPLACE_EXTERNAL: /build/laplace/work/floor-managed-compile/external
-      TMPDIR: /build/laplace/work/floor-managed-compile/tmp
-      TMP: /build/laplace/work/floor-managed-compile/tmp
-      TEMP: /build/laplace/work/floor-managed-compile/tmp
-      DOTNET_CLI_HOME: /build/laplace/work/floor-managed-compile/dotnet-home
-      DOTNET_INSTALL_DIR: /build/laplace/work/floor-managed-compile/dotnet
-      NUGET_PACKAGES: /build/laplace/work/floor-managed-compile/nuget
-      DOTNET_NOLOGO: '1'
-      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
-      MSBUILDDISABLENODEREUSE: '1'
-      CANDIDATE_SHA: adfa239d94c86da117d68212abc9388144253186
-      CANDIDATE_TREE: a835f6a24acdadeaf8982ce8a25a8d14f6567b39
+      TMPDIR: /build/laplace/work/service-receipt-controls/tmp
+      TMP: /build/laplace/work/service-receipt-controls/tmp
+      TEMP: /build/laplace/work/service-receipt-controls/tmp
+      CANDIDATE_SHA: 677bf471fdc63979a1549cf492669623bc0e7dd5
+      CANDIDATE_TREE: 84287b7ed8e8401f525ab36a65cfff09b381c6ba
     steps:
-      - name: Prepare permanent build and evidence directories
+      - name: Prepare permanent work and evidence directories
         run: |
           set -euo pipefail
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$LAPLACE_BUILD_ROOT" "$TMPDIR" "$DOTNET_CLI_HOME" "$DOTNET_INSTALL_DIR" "$NUGET_PACKAGES" /build/laplace/worktrees /build/laplace/recovery/floor-managed-compile
+          mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/service-receipt-controls
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: adfa239d94c86da117d68212abc9388144253186
+          ref: 677bf471fdc63979a1549cf492669623bc0e7dd5
           fetch-depth: 1
           persist-credentials: false
-      - name: Bind the exact candidate in the permanent worktree
+      - name: Bind exact source in permanent worktree
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
-          git worktree add --detach /build/laplace/worktrees/floor-managed-compile "$CANDIDATE_SHA"
+          git worktree add --detach /build/laplace/worktrees/service-receipt-controls "$CANDIDATE_SHA"
           python3 - <<'PY'
           import json,os
           from pathlib import Path
-          Path("/build/laplace/recovery/floor-managed-compile/source.json").write_text(json.dumps({
+          Path("/build/laplace/recovery/service-receipt-controls/source.json").write_text(json.dumps({
               "candidate_commit":os.environ["CANDIDATE_SHA"],
               "candidate_tree":os.environ["CANDIDATE_TREE"],
               "workflow_commit":os.environ["GITHUB_SHA"],
-              "claim":"managed-compilation-and-native-syntax-only",
-              "native_runtime_executed":False
+              "scope":"hosted acceptance orchestrator protocol and process cleanup controls",
+              "installed_service_observation":False,
+              "machine_cold_boot_measured":False
           },indent=2)+"\n")
           PY
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
-        with:
-          dotnet-version: '10.0.x'
-      - name: Provision immutable upstream resources for compilation
-        run: |
-          set -euo pipefail
-          timeout --signal=TERM --kill-after=15s 300s python3 - <<'PY' 2>&1 | tee /build/laplace/recovery/floor-managed-compile/dependency-provision.log
-          import hashlib,json,os,subprocess
-          from pathlib import Path
-          root=Path(os.environ["LAPLACE_EXTERNAL"])
-          root.mkdir(parents=True)
-          selected=[
-              ("tree-sitter-grammars/tree-sitter-c","https://github.com/tree-sitter/tree-sitter-c","b780e47fc780ddc8da13afa35a3f4ed5c157823d","9194799a7a7dcedf020ba2558fc92fc430633d73680243ae1f1d9de78c719528","queries/tags.scm"),
-              ("blake3","https://github.com/BLAKE3-team/BLAKE3.git","f3149ec5bb5449af877ba20377a11008ff499fa2","b8352186f14559127a324333c3378f4208a2de9aea855746bf2fcd1f883efef1","c/blake3.h")
-          ]
-          report={"scope":"diagnostic-compilation-only","pin_source_repository":"SaltyPatron/Laplace-Refactor","pin_source_commit":"e5fb773c3c5758679eb13c3dd228a0ba2aab27af","matches_original_installed_dependencies":False,"status":"running","dependencies":[]}
-          receipt=Path("/build/laplace/recovery/floor-managed-compile/dependencies.json")
-          try:
-              for name,url,revision,archive_sha,required in selected:
-                  path=root/name
-                  path.parent.mkdir(parents=True,exist_ok=True)
-                  def git(*args,capture=False):
-                      result=subprocess.run(["git","-C",str(path),*args],check=True,timeout=90,stdout=subprocess.PIPE if capture else None)
-                      return result.stdout
-                  subprocess.run(["git","init","--quiet",str(path)],check=True,timeout=10)
-                  git("remote","add","origin",url)
-                  git("fetch","--quiet","--no-tags","--depth=1","origin",revision)
-                  git("checkout","--quiet","--detach",revision)
-                  assert git("rev-parse","HEAD",capture=True).decode().strip()==revision
-                  observed_archive=hashlib.sha256(git("archive","--format=tar",revision,capture=True)).hexdigest()
-                  assert observed_archive==archive_sha,(name,observed_archive,archive_sha)
-                  assert not git("status","--porcelain","--untracked-files=all",capture=True)
-                  content=(path/required).read_bytes()
-                  report["dependencies"].append({"path":str(path),"upstream":url,"revision":revision,"git_archive_sha256":observed_archive,"required_file":required,"required_file_sha256":hashlib.sha256(content).hexdigest()})
-              report["status"]="completed"
-          except BaseException as error:
-              report["status"]="failed"
-              report["failure_type"]=type(error).__name__
-              raise
-          finally:
-              receipt.write_text(json.dumps(report,indent=2)+"\n")
-          PY
-      - name: Compile managed owners and check native translation units
-        working-directory: /build/laplace/worktrees/floor-managed-compile
+      - name: Run all existing and new chess acceptance controls
+        working-directory: /build/laplace/worktrees/service-receipt-controls
         shell: bash
         run: |
           set -euo pipefail
-          evidence=/build/laplace/recovery/floor-managed-compile
-          dotnet --info 2>&1 | tee "$evidence/dotnet-info.log"
-          printf 'project\texit_code\n' > "$evidence/build-summary.tsv"
-          failed=0
-          for project in ChessCatalogSurfaces Laplace.Core.Tests Laplace.Chess.Tests; do
-            set +e
-            timeout --signal=TERM --kill-after=15s 360s \
-              dotnet build "app/$project/$project.csproj" --configuration Release \
-              --disable-build-servers --nologo --verbosity normal \
-              -p:UseSharedCompilation=false \
-              "-bl:$evidence/$project.binlog" \
-              2>&1 | tee "$evidence/$project.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            printf '%s\t%s\n' "$project" "$status" >> "$evidence/build-summary.tsv"
-            if [[ "$status" != 0 ]]; then failed=1; fi
-          done
-          g++ --version 2>&1 | tee "$evidence/native-compiler.log"
-          printf 'translation_unit\texit_code\n' > "$evidence/native-syntax-summary.tsv"
-          for unit in main.cpp producer.cpp producer_tests.cpp; do
-            set +e
-            timeout --signal=TERM --kill-after=15s 60s \
-              g++ -std=c++20 -fsyntax-only -Wall -Wextra -Wpedantic \
-              -Iengine/core/include -I"$LAPLACE_EXTERNAL/blake3/c" \
-              "engine/core/tools/chess_position_tables_emit/$unit" \
-              2>&1 | tee "$evidence/native-$unit.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            printf '%s\t%s\n' "$unit" "$status" >> "$evidence/native-syntax-summary.tsv"
-            if [[ "$status" != 0 ]]; then failed=1; fi
-          done
-          cat "$evidence/build-summary.tsv"
-          cat "$evidence/native-syntax-summary.tsv"
+          evidence=/build/laplace/recovery/service-receipt-controls
+          python3 --version 2>&1 | tee "$evidence/python-version.log"
+          set +e
+          timeout --signal=TERM --kill-after=10s 180s \
+            python3 scripts/test-chess-acceptance.py 2>&1 | tee "$evidence/test-chess-acceptance.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          printf 'test\texit_code\ntest-chess-acceptance.py\t%s\n' "$status" > "$evidence/summary.tsv"
           test -z "$(git status --porcelain --untracked-files=all)"
-          exit "$failed"
-      - name: Retain exact compilation evidence
+          exit "$status"
+      - name: Retain complete evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: chess-floor-managed-compilation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /build/laplace/recovery/floor-managed-compile/
+          name: chess-service-receipt-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/recovery/service-receipt-controls/
           if-no-files-found: error
           retention-days: 30
