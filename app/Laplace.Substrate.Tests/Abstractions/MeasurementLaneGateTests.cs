@@ -4,25 +4,11 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// The measurement lane is mutual exclusion between "something is writing to the
-/// substrate" and "something is timing it": ingest holds it SHARED for a run's lifetime,
-/// a measurement holds it EXCLUSIVE for its duration, and Postgres conflicts the two
-/// modes. Four independent facts have to line up — same class, same key, opposite modes,
-/// session scope — and the compiler checks none of them.
-///
-/// <para>MEASURED 2026-08-15, the failure this exists to stop: generation.compose_batch
-/// returned 81,701 ms to 316,998 ms across one session for near-identical code with an
-/// ingest active throughout; quiesced, realize.resolve_name read 36,000 -&gt; 0 ms and
-/// generation.separator_ids 9,450 -&gt; 11 ms with no code change. Both had been recorded
-/// as defects and both were contention. Drift here does not fail loudly — it silently
-/// returns the lane to that state, and every number taken afterwards looks exactly as
-/// trustworthy as a real one.</para>
-///
-/// <para>The liveness assertion covers a claim that was written down and never enforced:
-/// NpgsqlIngestObservability's header says the gate script "carries the same constant, and
-/// they must agree", and until this gate nothing checked it.</para>
-///
-/// If one of these fails, fix the divergence, never the fixture.
+/// Measurements observe product activity before and after their child process; they
+/// must not acquire an exclusive lock that makes ingestion wait. Ingest's remaining
+/// shared session beacon has one identity, distinct from per-run liveness. The
+/// canonical SQL liveness predicate and its quiet-shell caller must agree with
+/// the C# writer without carrying a second shell lock/heartbeat interpretation.
 /// </summary>
 public class MeasurementLaneGateTests
 {
@@ -55,12 +41,20 @@ public class MeasurementLaneGateTests
         return Convert.ToInt32(m.Groups[1].Value, 16);
     }
 
-    private static int ShellHexConst(string source, string name)
+    private static string RunLiveness() =>
+        Read("extension", "laplace_substrate", "sql", "functions", "ops", "ingest_runs.sql.in");
+
+    private static int SqlRunLivenessClass(string source)
     {
-        var m = Regex.Match(source, @"^\s*" + Regex.Escape(name) + @"=\$\(\(\s*0x([0-9A-Fa-f]+)\s*\)\)",
-            RegexOptions.Multiline);
-        Assert.True(m.Success, $"shell constant {name} not found as $(( 0x... ))");
-        return Convert.ToInt32(m.Groups[1].Value, 16);
+        var predicate = Regex.Match(source,
+            @"CREATE OR REPLACE FUNCTION ops\.ingest_run_live\([\s\S]*?BEGIN ATOMIC(?<body>[\s\S]*?)END;");
+        Assert.True(predicate.Success, "canonical ingest-run liveness predicate is missing");
+        var identity = Regex.Match(predicate.Groups["body"].Value, @"\bl\.classid\s*=\s*([0-9]+)::oid");
+        Assert.True(identity.Success, "canonical liveness advisory class is missing");
+        Assert.Contains("l.objsubid = 2", predicate.Groups["body"].Value);
+        Assert.Contains("hashtext(j.run_id::text)", predicate.Groups["body"].Value);
+        Assert.Contains("current_database()", predicate.Groups["body"].Value);
+        return int.Parse(identity.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -114,11 +108,16 @@ public class MeasurementLaneGateTests
     }
 
     [Fact]
-    public void RunLivenessClass_AgreesBetweenCsharpAndQuietGate()
+    public void RunLivenessClass_AgreesBetweenCsharpAndCanonicalSql()
     {
         Assert.Equal(
             CsharpHexConst(Observability(), "RunLivenessLockClass"),
-            ShellHexConst(QuietGate(), "LOCK_CLASS"));
+            SqlRunLivenessClass(RunLiveness()));
+        var gate = QuietGate();
+        Assert.Contains("FROM ops.ingest_reconcile_orphans(", gate);
+        Assert.Contains("AND ops.ingest_run_live(j.run_id,", gate);
+        Assert.DoesNotContain("pg_locks", gate);
+        Assert.DoesNotMatch(@"\bLOCK_CLASS\s*=", gate);
     }
 
     /// <summary>
@@ -132,36 +131,52 @@ public class MeasurementLaneGateTests
     {
         var gate = QuietGate();
         var probe = gate.IndexOf("to_regclass('laplace.ingest_run_journal')", StringComparison.Ordinal);
-        var provenMissing = gate.IndexOf("[ \"$journal_rc\" -eq 0 ] && [ \"$journal_state\" = \"missing\" ]", StringComparison.Ordinal);
-        var journalRead = gate.IndexOf("FROM laplace.ingest_run_journal j WHERE j.status = 'running'", StringComparison.Ordinal);
+        var provenMissing = gate.IndexOf("[ \"$probe_rc\" -eq 0 ] && [ \"$probe\" = \"missing\" ]", StringComparison.Ordinal);
+        var journalRead = gate.IndexOf("FROM laplace.ingest_run_journal;", StringComparison.Ordinal);
 
         Assert.True(probe >= 0, "quiet gate no longer proves whether the exact ingest journal exists");
         Assert.True(provenMissing > probe, "missing journal may be accepted without a successful PostgreSQL probe");
+        Assert.Contains("2>&1) || probe_rc=$?", gate[..provenMissing]);
         Assert.True(journalRead > provenMissing, "quiet gate dereferences the ingest journal before handling pre-schema bootstrap");
-        Assert.Contains("unreachable or misconfigured database is not proof of quiet", gate);
+        Assert.Contains("[ \"$probe_rc\" -eq 0 ] && [ \"$probe\" = \"present\" ]", gate);
+        Assert.Contains("[ \"$capability_rc\" -eq 0 ] && [[ \"$capability\" =~ ^([0-9]+)\\ (present|missing)$ ]]", gate);
+        Assert.Contains("[ \"$canonical_ready\" -eq 1 ]", gate);
+        Assert.Contains("[ \"$state_rc\" -eq 0 ]", gate);
+        Assert.Contains("if [[ \"$live\" =~ ^[0-9]+$ ]]; then", gate);
+        Assert.Contains("substrate not proven quiet after", gate);
         Assert.DoesNotContain("*relation*does not exist*", gate);
     }
 
     /// <summary>
-    /// The modes are the whole mechanism. Ingest SHARED lets any number of ingests run
-    /// together — exclusive there would serialise ingest against ingest, the exact thing
-    /// wait-for-quiet-substrate.sh's header refuses to do. Measurement EXCLUSIVE is what
-    /// actually empties the substrate; shared there would leave the lane looking correct
-    /// while ingests wrote straight through it.
+    /// The retained ingest beacon stays shared so independent ingests do not serialize.
+    /// Measurements must never take its conflicting exclusive mode.
     /// </summary>
     [Fact]
     public void Ingest_TakesTheLaneShared()
         => Assert.Matches(@"HoldMeasurementLaneAsync\(\s*conn,\s*exclusive:\s*false", Observability());
 
     [Fact]
-    public void Measurement_TakesTheLaneExclusive()
-        => Assert.Matches(@"HoldMeasurementLaneAsync\(\s*conn,\s*exclusive:\s*true", Runner());
+    public void Measurement_ObservesBeforeAndAfterChildWithoutBlockingIngest()
+    {
+        var runner = Runner();
+        var probes = Regex.Matches(runner, @"await RefuseIfIngestRunningAsync\(conn, ct\)");
+        Assert.Equal(2, probes.Count);
+        var start = runner.IndexOf("Process.Start(psi)", StringComparison.Ordinal);
+        var wait = runner.IndexOf("await proc.WaitForExitAsync(ct)", StringComparison.Ordinal);
+        var returned = runner.IndexOf("return proc.ExitCode;", StringComparison.Ordinal);
+        Assert.True(probes[0].Index < start && start < wait
+            && wait < probes[1].Index && probes[1].Index < returned,
+            "quiet observation must bracket the actual child, including completion");
+        Assert.DoesNotContain("HoldMeasurementLaneAsync(", runner);
+        Assert.DoesNotMatch(@"pg_advisory\w*lock\w*\s*\(", runner);
+        Assert.Contains("could not establish whether an ingest is running", runner);
+        Assert.Contains("catch (OperationCanceledException) { throw; }", runner);
+    }
 
     /// <summary>
-    /// SESSION scope, not transaction. The runner holds the lane across a child process
-    /// that runs no transaction of its own, and an ingest holds it across thousands; an
-    /// _xact_ variant would release at the first COMMIT and the lane would be empty for
-    /// the whole measurement while still reading as held.
+    /// The retained ingest beacon is session-scoped across its transactions. An
+    /// _xact_ variant would release at the first COMMIT. This checks the lock
+    /// helper's scope, not a claim that the measurement runner acquires it.
     /// </summary>
     [Fact]
     public void Lane_IsSessionScoped()
