@@ -1,11 +1,14 @@
 name: Repository hygiene
+
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   tracked-tree:
     name: Tracked tree contains no local/runtime artifacts
@@ -15,96 +18,259 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 1
-      - run: python3 scripts/repo-hygiene-gate.py
+      - name: Enforce source-tree hygiene and strong secret signatures
+        run: python3 scripts/repo-hygiene-gate.py
+
   integrated-branches:
-    name: Materialize reviewed source consolidation
+    name: Preserve all history and consolidate branches
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     concurrency:
       group: repository-branch-consolidation
       cancel-in-progress: false
     permissions:
       contents: write
+      pull-requests: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: main
           fetch-depth: 0
-      - name: Publish verified source objects with unchanged workflow files
+      - name: Preserve complete histories and consolidate incorporated or diagnostic branches
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          python3 - <<'PYTREE'
-          import hashlib, json, os, pathlib, subprocess, tempfile
-          def git(*args, data=None, env=None):
-              result = subprocess.run(['git', *args], input=data, text=True, capture_output=True, timeout=180, env=env)
-              if result.returncode:
-                  raise RuntimeError(f'{args[0]} failed: {result.stderr[-3000:]}')
-              return result.stdout.strip()
-          git('fetch', 'origin', '+refs/heads/*:refs/remotes/origin/*', '+refs/pull/*/head:refs/recovery/pulls/*')
-          previous = git('show', '79de57897d10d7f5c6da5c829bc624b2cf326091:.github/workflows/repo-hygiene.yml')
-          raw = previous.split("PLAN_JSON = r'''",1)[1].split("'''",1)[0]
-          plan = json.loads(raw)
-          corrected = {
-              'scripts/place-build-directory.py':'2fdc5c47fdec5fdc86e8527f3c5c39e3da204b04',
-              'scripts/postgresql-release.py':'a384a4d476b7cc3a21ff842ed0647b3c16e41684',
-              'scripts/provision-cmake.py':'c54cc2971fc07181e2e2c946ea812c1e3379c140',
-              'scripts/provision-cutechess.py':'7eb283f2200a97bd28fde0b7d5e902406a289b36',
-          }
-          for entry in plan['entries']:
-              if entry['path'] in corrected:
-                  entry['sha'] = corrected[entry['path']]
-              if entry['path'] == 'scripts/test-postgresql-release.py':
-                  wrapped = '+        cmake_spec = importlib.util.spec_from_file_location(\n+            "cmake_fixture_owner", project / "scripts/provision-cmake.py")'
-                  unwrapped = '+        cmake_spec = importlib.util.spec_from_file_location("cmake_fixture_owner", project / "scripts/provision-cmake.py")'
-                  if entry['patch'].count(wrapped) != 1:
-                      raise RuntimeError('Unexpected PostgreSQL transfer patch')
-                  entry['patch'] = entry['patch'].replace(wrapped, unwrapped)
-          canonical = (json.dumps(plan,separators=(',',':'))+'\n').encode()
-          if hashlib.sha256(canonical).hexdigest() != 'b60448db7b7491670487deace27e321a970fb340d5ace82e702b22ac83c9ce3d':
-              raise RuntimeError('Full plan data differs from the locally verified source manifest')
-          current = git('rev-parse','refs/remotes/origin/main')
-          changed = git('diff','--name-only',plan['base'],current).splitlines()
-          if set(changed)-{'.github/workflows/repo-hygiene.yml'}:
-              raise RuntimeError('Concurrent main source changes require reconciliation: '+repr(changed))
-          fd,index=tempfile.mkstemp(prefix='reviewed-tree-',dir=os.environ['RUNNER_TEMP'])
-          os.close(fd);os.unlink(index)
-          env=dict(os.environ,GIT_INDEX_FILE=index)
+          python3 - <<'PYCODE'
+          """Preserve exact Git history, then prune incorporated or workflow-only branches."""
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+          
+          repo = os.environ['GH_REPO']
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'branch-consolidation'
+          out.mkdir(parents=True, exist_ok=True)
+          (out / 'residual').mkdir(exist_ok=True)
+          
+          def command(*args, input=None, check=True):
+              result = subprocess.run(args, input=input, text=True, capture_output=True, timeout=240)
+              if check and result.returncode:
+                  raise RuntimeError(f'{args[0]} {args[1]} failed ({result.returncode}): {result.stderr[-3000:]}')
+              return result
+          
+          def run(*args, input=None):
+              return command(*args, input=input).stdout.strip()
+          
+          def pages(endpoint, key=None):
+              result = json.loads(run('gh', 'api', '--paginate', '--slurp', endpoint))
+              return [item for page in result for item in (page[key] if key else page)]
+          
+          def api(endpoint):
+              return json.loads(run('gh', 'api', endpoint))
+          
+          def active_heads():
+              names = {p['head']['ref'] for p in pages(f'repos/{repo}/pulls?state=open&per_page=100')
+                       if (p['head'].get('repo') or {}).get('full_name') == repo}
+              for status in ('in_progress', 'queued', 'waiting', 'requested', 'pending'):
+                  for item in pages(f'repos/{repo}/actions/runs?status={status}&per_page=100', 'workflow_runs'):
+                      if item.get('head_branch'):
+                          names.add(item['head_branch'])
+              return names
+          
+          def ancestor(a, b):
+              result = command('git', 'merge-base', '--is-ancestor', a, b, check=False)
+              if result.returncode not in (0, 1):
+                  raise RuntimeError(f'Cannot establish ancestry of {a} and {b}')
+              return result.returncode == 0
+          
+          def save(name, value):
+              (out / name).write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
+          
+          report = {'repository': repo, 'removed': [], 'retained': [], 'failures': [],
+                    'archive_verified': False}
           try:
-              git('read-tree',plan['base'],env=env)
-              for entry in plan['entries']:
-                  path,sha,mode=entry['path'],entry['sha'],entry['mode']
-                  if 'patch' in entry:
-                      git('update-index','--add','--cacheinfo',mode,entry['basis'],path,env=env)
-                      git('apply','--cached','--unidiff-zero','--whitespace=nowarn','-',data=entry['patch'],env=env)
-                      if git('rev-parse',':'+path,env=env)!=sha:
-                          raise RuntimeError('Patched blob differs: '+path)
+              default = api(f'repos/{repo}')['default_branch']
+              report['default_branch'] = default
+              run('git', 'config', 'user.name', 'GitHub Actions branch preservation')
+              run('git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+              # Include closed PR heads even when their original working branch was removed.
+              run('git', 'fetch', '--prune', 'origin',
+                  '+refs/heads/*:refs/remotes/origin/*', '+refs/pull/*/head:refs/recovery/pulls/*')
+              base = run('git', 'rev-parse', f'refs/remotes/origin/{default}')
+              base_tree = run('git', 'rev-parse', f'{base}^{{tree}}')
+              report['base_sha'] = base
+              heads = pages(f'repos/{repo}/branches?per_page=100')
+              report['branches_before'] = len(heads)
+              active = active_heads()
+              branches = []
+              for branch in heads:
+                  name, sha = branch['name'], branch['commit']['sha']
+                  run('git', 'check-ref-format', f'refs/heads/{name}')
+                  if command('git', 'cat-file', '-e', f'{sha}^{{commit}}', check=False).returncode:
+                      run('git', 'fetch', 'origin', sha)
+                  branches.append({'branch': name, 'sha': sha,
+                                   'tree': run('git', 'rev-parse', f'{sha}^{{tree}}'),
+                                   'protected': branch['protected']})
+              pulls = []
+              for line in run('git', 'for-each-ref', '--format=%(refname) %(objectname)',
+                              'refs/recovery/pulls/').splitlines():
+                  ref, sha = line.split(' ', 1)
+                  pulls.append({'ref': ref, 'sha': sha})
+              report['preserved_pull_heads'] = len(pulls)
+              inventory = {'repository': repo, 'base_sha': base, 'branches': branches, 'pull_heads': pulls,
+                           'meaning': 'Exact recoverable source history; preservation is not implementation integration.'}
+              save('inventory.json', inventory)
+              digest_input = {'repository': repo, 'branches': [b for b in branches if b['branch'] != default],
+                              'pull_heads': pulls}
+              digest = hashlib.sha256(json.dumps(digest_input, sort_keys=True).encode()).hexdigest()[:20]
+              tag = f'branch-preservation/{digest}'
+              tagref = f'refs/tags/{tag}'
+              report['archive_tag'] = tag
+              existing = run('git', 'ls-remote', '--refs', 'origin', tagref)
+              if existing:
+                  run('git', 'fetch', 'origin', f'{tagref}:refs/recovery/verified-archive')
+                  archive = run('git', 'rev-parse', 'refs/recovery/verified-archive^{commit}')
+                  archived_inventory = json.loads(run('git', 'show', f'{archive}:.branch-preservation/inventory.json'))
+                  expected = {(b['branch'], b['sha']) for b in branches if b['branch'] != default}
+                  actual = {(b['branch'], b['sha']) for b in archived_inventory['branches'] if b['branch'] != default}
+                  if expected != actual or archived_inventory['pull_heads'] != pulls:
+                      raise RuntimeError('Existing archive does not match this exact branch/PR snapshot')
+              else:
+                  blob = run('git', 'hash-object', '-w', '--stdin',
+                             input=json.dumps(inventory, indent=2) + '\n')
+                  readme = ('# Preserved branch history\n\n'
+                            'inventory.json maps every original branch and pull-request head to its exact commit.\n'
+                            'The parents of this archive commit retain their complete Git histories and file trees.\n'
+                            'This is a recovery snapshot, not an assertion that all changes are active on main.\n\n'
+                            f'Restore any listed head with `git fetch origin refs/tags/{tag}` followed by\n'
+                            '`git switch -c recovered-work <listed-commit-sha>`.\n')
+                  readme_blob = run('git', 'hash-object', '-w', '--stdin', input=readme)
+                  metadata_tree = run('git', 'mktree', input=f'100644 blob {readme_blob}\tREADME.md\n100644 blob {blob}\tinventory.json\n')
+                  root = command('git', 'ls-tree', '-z', base).stdout
+                  root = ''.join(r + '\0' for r in root.split('\0') if r and r.split('\t', 1)[1] != '.branch-preservation')
+                  tree = run('git', 'mktree', '-z', input=root + f'040000 tree {metadata_tree}\t.branch-preservation\0')
+                  tips = list(dict.fromkeys([base] + [b['sha'] for b in branches] + [p['sha'] for p in pulls]))
+                  # Reduce redundant parents without altering a single original commit.
+                  parents = list(dict.fromkeys([base] + run('git', 'merge-base', '--independent', *tips).splitlines()))
+                  args = ['git', 'commit-tree', tree]
+                  for sha in parents:
+                      args.extend(['-p', sha])
+                  archive = run(*args, input='Preserve exact branch and closed-PR histories before consolidation\n\n'
+                                'Recovery snapshot only. No product source merge or completion claim.\n')
+                  run('git', 'tag', '-a', tag, archive, '-m', f'Complete pre-consolidation history for {repo}; snapshot {digest}')
+                  run('git', 'push', 'origin', tagref)
+              # Read the actual remote tag back before any branch deletion.
+              remote = dict(line.split('\t', 1)[::-1] for line in
+                            run('git', 'ls-remote', 'origin', tagref, tagref + '^{}').splitlines())
+              if remote.get(tagref + '^{}') != archive:
+                  raise RuntimeError('Remote archive readback does not match the preserved commit')
+              for entry in branches + pulls:
+                  if entry.get('branch') != default and not ancestor(entry['sha'], archive):
+                      raise RuntimeError('An original head is missing from the remotely anchored archive')
+              report['archive_commit'] = archive
+              report['archive_verified'] = True
+              # A second, self-contained copy is retained as the downloadable run artifact.
+              run('git', 'fetch', 'origin', f'{tagref}:refs/recovery/bundle-archive')
+              run('git', 'bundle', 'create', str(out / 'original-history.bundle'), 'refs/recovery/bundle-archive')
+              run('git', 'bundle', 'verify', str(out / 'original-history.bundle'))
+              print(f'ARCHIVE_VERIFIED {tag} {archive} branches={len(branches)} pull_heads={len(pulls)}', flush=True)
+              cache = {}
+              def files(sha):
+                  if sha not in cache:
+                      raw = command('git', 'ls-tree', '-rz', sha).stdout
+                      cache[sha] = {r.split('\t', 1)[1]: r.split('\t', 1)[0] for r in raw.split('\0') if r}
+                  return cache[sha]
+              main_files = files(base)
+              planned = []
+              for index, branch in enumerate(branches):
+                  name, sha = branch['branch'], branch['sha']
+                  entry = dict(branch)
+                  if name == default or branch['protected'] or name in active:
+                      entry['reason'] = 'default/protected branch' if name == default or branch['protected'] else 'active PR or workflow'
+                      report['retained'].append(entry)
+                      continue
+                  common = run('git', 'merge-base', base, sha)
+                  paths = [p for p in command('git', 'diff', '--name-only', '-z', '--no-renames', common, sha, '--').stdout.split('\0') if p]
+                  entry['merge_base'] = common
+                  entry['changed_paths'] = paths
+                  entry['different_paths'] = [p for p in paths if files(sha).get(p) != main_files.get(p)]
+                  if ancestor(sha, base):
+                      entry['reason'] = 'already in main history; original tree independently archived'
+                  elif not paths:
+                      entry['reason'] = 'no net branch delta; complete history archived'
+                  elif not entry['different_paths']:
+                      entry['reason'] = 'all branch-delta paths match current main exactly'
+                  elif name.startswith(('diag/', 'verify/', 'qualify/', 'ops/', 'work/')) and all(
+                          p.startswith('.github/workflows/') and p.endswith(('.yml', '.yaml')) for p in paths):
+                      entry['reason'] = 'archived one-off workflow only; not promoted into product CI'
                   else:
-                      git('cat-file','-e',sha)
-                  git('update-index','--add','--cacheinfo',mode,sha,path,env=env)
-              reviewed=git('write-tree',env=env)
-              if reviewed!='e0d8adb6c796e694150a3a09dbdf9f22e57ff389':
-                  raise RuntimeError('Complete source tree differs from reviewed tree')
-              # This token publishes source objects only, never workflow changes.
-              workflow='.github/workflows/repo-hygiene.yml'
-              current_workflow=git('rev-parse',current+':'+workflow)
-              git('update-index','--add','--cacheinfo','100644',current_workflow,workflow,env=env)
-              carrier_tree=git('write-tree',env=env)
-              if git('diff','--name-only',current,carrier_tree,'--','.github/workflows'):
-                  raise RuntimeError('Source carrier unexpectedly changes a workflow')
-              git('config','user.name','GitHub Actions source consolidation')
-              git('config','user.email','41898282+github-actions[bot]@users.noreply.github.com')
-              commit=git('commit-tree',carrier_tree,'-p',current,data='Preserve exact reviewed source objects for connector integration\n\nWorkflow files are unchanged. Main is not moved. Reviewed final tree: '+reviewed+'\n')
-              tag='branch-integration/staged-'+reviewed
-              if git('ls-remote','origin','refs/tags/'+tag+'^{}'):
-                  raise RuntimeError('Exact-tree carrier already exists; do not replace it')
-              git('tag','-a',tag,commit,'-m','Verified source carrier; restore the existing cleanup workflow through the authorized connector before main integration.')
-              git('push','origin','refs/tags/'+tag)
-              if git('ls-remote','origin','refs/tags/'+tag+'^{}').split()[0]!=commit:
-                  raise RuntimeError('Candidate readback failed')
-              print('REVIEWED_INTEGRATION '+json.dumps({'base':current,'commit':commit,'carrier_tree':carrier_tree,'reviewed_tree':reviewed,'tag':tag,'files':len(plan['entries'])}),flush=True)
-              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
-                  summary.write(f'\nVerified source carrier `{commit}`, tree `{carrier_tree}`; reviewed final tree `{reviewed}`. Main not moved.\n')
+                      merge = command('git', 'merge-tree', '--write-tree', base, sha, check=False)
+                      if merge.returncode not in (0, 1):
+                          raise RuntimeError(f'Could not compare the complete merge tree for {name}')
+                      entry['mergeable'] = merge.returncode == 0
+                      entry['candidate_tree'] = merge.stdout.splitlines()[0]
+                      if entry['mergeable'] and entry['candidate_tree'] == base_tree:
+                          entry['reason'] = 'three-way integration produces the exact current main tree'
+                      else:
+                          entry['reason'] = 'unique product changes retained for actual integration'
+                          patch = command('git', 'diff', '--binary', '--full-index', common, sha, '--').stdout
+                          filename = f'residual/{index:03d}-{sha[:12]}.patch'
+                          (out / filename).write_text(patch, encoding='utf-8')
+                          entry['patch'] = filename
+                          entry['commits'] = run('git', 'log', '--no-merges', '--format=%H %s', f'{common}..{sha}').splitlines()
+                          save(filename + '.json', entry)
+                          report['retained'].append(entry)
+                          continue
+                  planned.append(entry)
+              # Archive success never authorizes dropping newer work. Server-side leases
+              # reject any tip that changed since this preserved snapshot.
+              active = active_heads()
+              for entry in planned:
+                  name, sha = entry['branch'], entry['sha']
+                  if name in active:
+                      entry['reason'] = 'became active after snapshot; retained'
+                      report['retained'].append(entry)
+                      continue
+                  deletion = command('git', 'push', '--porcelain',
+                                     f'--force-with-lease=refs/heads/{name}:{sha}', 'origin', f':refs/heads/{name}', check=False)
+                  if deletion.returncode:
+                      entry['reason'] = 'server refused deletion or branch moved; retained'
+                      report['retained'].append(entry)
+                      report['failures'].append({'branch': name, 'detail': deletion.stderr[-2000:]})
+                  else:
+                      report['removed'].append(entry)
+              remaining = pages(f'repos/{repo}/branches?per_page=100')
+              report['branches_after'] = len(remaining)
+              report['remote_remaining'] = [{'branch': b['name'], 'sha': b['commit']['sha']} for b in remaining]
+              print(f"CONSOLIDATION_RESULT before={len(branches)} removed={len(report['removed'])} remaining={len(remaining)}", flush=True)
+              for item in report['retained']:
+                  print('RETAINED ' + json.dumps(item), flush=True)
+          except Exception as error:
+              report['error'] = str(error)
+              raise
           finally:
-              pathlib.Path(index).unlink(missing_ok=True)
-          PYTREE
+              save('report.json', report)
+              print('REPORT ' + json.dumps(report), flush=True)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## Branch preservation and consolidation\n\n')
+                  summary.write(f"Archive verified: {report['archive_verified']}. Removed {len(report['removed'])} branches; "
+                                f"retained {len(report['retained'])}.\n\n")
+                  if report.get('archive_tag'):
+                      summary.write(f"Recoverable Git archive: `{report['archive_tag']}`.\n\n")
+                  summary.write('Preserved history is not a claim that unresolved product work is implemented.\n')
+          if report['failures']:
+              raise SystemExit('Some deletions were refused; exact preserved and remaining heads are in report.json')
+          PYCODE
+      - name: Retain full recovery bundle and unresolved implementation diffs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-consolidation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/branch-consolidation/
+          if-no-files-found: error
+          retention-days: 90
