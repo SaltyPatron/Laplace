@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Laplace.SubstrateCRUD.Npgsql;
 using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat.Auth;
@@ -62,19 +63,14 @@ internal sealed class ApiKeyTenantResolver : ITenantResolver
             if (principal.Identity?.IsAuthenticated == true && !string.IsNullOrWhiteSpace(tenant)
                 && Guid.TryParse(user, out var userId))
             {
-                // A workspace cookie is only a selection, never an identity or a
-                // permission. Validate it against the signed-in user's live roster.
-                // Keep the durable login ticket immutable; in-flight cookie renewal
-                // cannot accidentally restore a previously selected workspace.
+                // The selection cookie grants nothing. Authorize it against the
+                // current membership; never retag the immutable login ticket.
                 if (context.Request.Cookies.TryGetValue(WorkspaceCookie, out var selected)
                     && !string.IsNullOrWhiteSpace(selected) && selected.Length <= 160)
                 {
                     var substrate = context.RequestServices.GetRequiredService<SubstrateClient>();
-                    await using var command = substrate.DataSource.CreateCommand("""
-                        SELECT role FROM app.tenant_memberships WHERE tenant_id = @tenant AND user_id = @user;
-                        """);
-                    command.Parameters.AddWithValue("tenant", selected);
-                    command.Parameters.AddWithValue("user", userId);
+                    await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+                        "account.membership_role", selected, userId);
                     if (await command.ExecuteScalarAsync(ct) is string role)
                     {
                         tenant = selected;
@@ -185,11 +181,8 @@ internal sealed class ApiKeyEnforcementMiddleware
                 if (role is null)
                 {
                     var substrate = context.RequestServices.GetRequiredService<SubstrateClient>();
-                    await using var command = substrate.DataSource.CreateCommand("""
-                        SELECT role FROM app.tenant_memberships WHERE tenant_id = @tenant AND user_id = @user;
-                        """);
-                    command.Parameters.AddWithValue("tenant", tenant.TenantId);
-                    command.Parameters.AddWithValue("user", Guid.Parse(tenant.Claims["user_id"]));
+                    await using var command = NpgsqlCatalog.Command(substrate.DataSource,
+                        "account.membership_role", tenant.TenantId, Guid.Parse(tenant.Claims["user_id"]));
                     role = await command.ExecuteScalarAsync(context.RequestAborted) as string;
                 }
                 if (role is null)
