@@ -1,0 +1,99 @@
+name: Qualify pinned CMake release
+on:
+  push:
+    branches: [qualify/cmake-443-*]
+permissions:
+  contents: read
+jobs:
+  cmake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: dcb9c6b2be8af4832f318b283a6cc98a49d1c46a
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: SaltyPatron/Laplace-Refactor
+          ref: f8e0059c449bce2aa2350542065c51dec0c2bb6e
+          path: .cmake-refactor-owner
+      - name: Authenticate and execute the selected official tool generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$GITHUB_WORKSPACE/.cmake-qualification"
+          mkdir -p "$work/scratch" "$work/evidence"
+          export TMPDIR="$work/scratch" TMP="$work/scratch" TEMP="$work/scratch"
+          printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\n' "$TMPDIR" "$TMP" "$TEMP" >> "$GITHUB_ENV"
+          bin=$(python3 scripts/provision-cmake.py --root "$work/install" --work "$work/scratch" --ensure)
+          printf '%s\n' "$bin" >> "$GITHUB_PATH"
+          "$bin/cmake" --version | tee "$work/evidence/cmake-version.txt"
+          "$bin/ctest" --version | tee "$work/evidence/ctest-version.txt"
+          "$bin/cpack" --version | tee "$work/evidence/cpack-version.txt"
+          cp "$bin/../laplace-cmake.json" "$work/evidence/"
+      - name: Execute owner controls and genuine compiler smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$GITHUB_WORKSPACE/.cmake-qualification/evidence"
+          python3 scripts/test-cmake-release.py -v 2>&1 | tee "$evidence/owner-controls.txt"
+          python3 scripts/test-test-profile-registry.py -v 2>&1 | tee "$evidence/registry-controls.txt"
+          bash -n scripts/pipeline.sh scripts/build-system-deps.sh scripts/bootstrap-chess-lab.sh scripts/bootstrap-laplace-runner.sh scripts/lib/fp.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import yaml
+          for path in ("scripts/provision-cmake.py", "scripts/test-cmake-release.py"):
+              compile(Path(path).read_text(), path, "exec")
+          yaml.safe_load(Path(".github/actions/setup-laplace-env/action.yml").read_text())
+          source = Path(".cmake-qualification/smoke")
+          source.mkdir()
+          (source / "main.c").write_text("int main(void) { return 0; }\n")
+          (source / "CMakeLists.txt").write_text(
+              "cmake_minimum_required(VERSION 3.20)\nproject(cmake_owner_smoke C CXX)\n"
+              "enable_testing()\nadd_executable(smoke main.c)\nadd_test(NAME smoke COMMAND smoke)\n")
+          PY
+          cmake -S .cmake-qualification/smoke -B .cmake-qualification/build -G Ninja 2>&1 | tee "$evidence/configure.txt"
+          cmake --build .cmake-qualification/build 2>&1 | tee "$evidence/build.txt"
+          ctest --test-dir .cmake-qualification/build --output-on-failure 2>&1 | tee "$evidence/ctest.txt"
+      - name: Derive Refactor release entry through its existing archive owner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, importlib.util, json
+          from pathlib import Path
+          def module(name, path):
+              spec=importlib.util.spec_from_file_location(name, path)
+              value=importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
+              return value
+          owner=module("cmake_acquire", Path("scripts/provision-cmake.py"))
+          release=module("release_owner", Path(".cmake-refactor-owner/tools/dependencies/release-assets.py"))
+          work=Path(".cmake-qualification")
+          pin={"version":"4.4.3","filename":"cmake-4.4.3.tar.gz",
+               "url":"https://github.com/Kitware/CMake/releases/download/v4.4.3/cmake-4.4.3.tar.gz",
+               "bytes":13288228,"sha256":"c46400618b4f1f2b43507f24fb22f3ae830c3416cf23b776e16e1d413aa892f0"}
+          archive=work/pin["filename"]
+          owner.acquire(archive,pin)
+          observed=release.inspect_archive(archive,"cmake-4.4.3")
+          assert observed["archive_sha256"] == pin["sha256"] and observed["archive_size_bytes"] == pin["bytes"]
+          entry={"version":pin["version"],"filename":pin["filename"],"url":pin["url"],
+                 "sha256":pin["sha256"],"size_bytes":pin["bytes"],"top_directory":"cmake-4.4.3",
+                 **{key:observed[key] for key in ("member_count","regular_file_count","uncompressed_bytes","tree_sha256")},
+                 "licenses":[{"path":"cmake-4.4.3/LICENSE.rst","sha256":observed["file_sha256"]["cmake-4.4.3/LICENSE.rst"]}]}
+          output=work/"evidence"
+          (output/"refactor-cmake-entry.json").write_text(json.dumps(entry,indent=2)+"\n")
+          # This is source inventory; the existing source-built package's upstream
+          # tests and consumer activation have not run and remain necessary.
+          print(json.dumps({"scope":"authenticated official source archive inventory",
+                            "source_owner":"f8e0059c449bce2aa2350542065c51dec0c2bb6e",
+                            "entry":entry},sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: cmake-443-qualification
+          path: .cmake-qualification/evidence/
+          if-no-files-found: error
+          retention-days: 90
