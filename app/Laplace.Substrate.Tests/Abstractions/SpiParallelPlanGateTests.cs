@@ -33,6 +33,7 @@ public sealed class SpiParallelPlanGateTests
             "chess_rating_repair.c",
             "conversation_session.c",
             "consensus_bulk_write.c",
+            "generated_stage_sink.c",
         };
 
     // Matches a real call, not the "SPI_prepare(unpack) failed" text inside elog messages.

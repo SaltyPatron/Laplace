@@ -22,6 +22,49 @@ class SqlOwnership(unittest.TestCase):
     def test_csharp_raw_and_verbatim_literals_are_captured(self):
         self.assertEqual(len(list(gate.statements('q = """SELECT id\nFROM entities"""; r = @"SELECT name FROM entities";'))), 2)
 
+    def test_workspace_selection_instruction_is_not_sql(self):
+        messages = (
+            "The request belongs to a different workspace. Select your workspace before starting checkout.",
+            "Select your workspace before starting checkout.",
+            "SELECT   your   workspace   before starting checkout.",
+            "select\nyour\tworkspace before starting checkout.",
+            "Sign in to select a workspace.",
+            "SELECT   a   workspace.",
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                self.assertEqual(list(gate.statements('Reject("""' + message + '""");')), [])
+
+    def test_workspace_words_remain_valid_sql_identifiers_and_aliases(self):
+        queries = (
+            "SELECT your workspace FROM accounts",
+            "SELECT your workspace",
+            "SELECT a workspace",
+            "SELECT a workspace FROM accounts",
+            "SELECT a.workspace FROM accounts a",
+            "SELECT your, workspace, before FROM accounts",
+            "SELECT your.workspace AS before FROM accounts your",
+            "SELECT 1",
+            "SELECT 'Select your workspace before starting checkout.' AS message",
+            'SELECT "your workspace before" FROM accounts',
+            'SELECT "a workspace." FROM accounts',
+        )
+        for query in queries:
+            with self.subTest(query=query):
+                self.assertEqual(list(gate.statements('q = """' + query + '""";')), [query])
+
+    def test_workspace_prose_cannot_hide_sql_elsewhere_in_the_literal(self):
+        prose = "Select your workspace before starting checkout. "
+        queries = ("SELECT 1", "SELECT id FROM accounts", "INSERT INTO accounts VALUES ($1)",
+                   "UPDATE accounts SET active=true", "DELETE FROM accounts",
+                   "WITH chosen AS (SELECT 1) SELECT * FROM chosen", "COPY accounts FROM STDIN")
+        for query in queries:
+            for text in (prose + query, prose + "; " + query, query + "; " + prose,
+                         "Sign in to select a workspace. " + query):
+                with self.subTest(text=text):
+                    self.assertEqual(list(gate.statements('q = "' + text + '";')), [text.strip()])
+                    self.assertTrue(gate.excess(gate.fingerprints('q = "' + text + '";'), {}))
+
     def test_quote_character_literals_do_not_turn_comments_into_sql(self):
         source = r'''switch (c) {
             case '"': cp = '"'; break;
@@ -64,6 +107,46 @@ class SqlOwnership(unittest.TestCase):
     def test_migration_to_catalog_reduces_debt(self):
         old = gate.fingerprints('q = "SELECT id FROM entities";')
         self.assertFalse(gate.excess(gate.fingerprints('q = SqlCatalog.Get("entity.ids");'), old))
+
+    def test_catalog_comments_between_macros_do_not_merge_parameter_contracts(self):
+        source = '''SQL_QUERY("masks", "bytea[],bytea[]", "SELECT f($1,$2)")
+        /* Direct indexed containment selects candidates, never unverified body rows. */
+        SQL_QUERY("readback", "bytea,bytea[],bytea,int4", "SELECT g($1,$2,$3,$4)")
+        // Trailing commentary must not hide the final query either.
+        '''
+        entries = gate.catalog_entries(source)
+        self.assertEqual([("masks", "bytea[],bytea[]", "SELECT f($1,$2)"),
+                          ("readback", "bytea,bytea[],bytea,int4", "SELECT g($1,$2,$3,$4)")], entries)
+        self.assertEqual([], gate.catalog_errors(entries))
+
+    def test_catalog_comments_between_arguments_and_fragments_are_ignored(self):
+        source = '''/* SQL_QUERY("fake", "", "SELECT forbidden") */
+        SQL_QUERY /* owned */ ("real", // parameter declaration
+            "bytea", /* body */ "SELECT id " /* join */ "FROM t WHERE id=$1")'''
+        self.assertEqual([("real", "bytea", "SELECT id FROM t WHERE id=$1")], gate.catalog_entries(source))
+
+    def test_catalog_literal_comment_markers_and_escaped_quotes_are_preserved(self):
+        source = r'''SQL_QUERY("literal", "bytea", "SELECT '/* ) */', '-- (', \"name\" FROM t WHERE id=$1")'''
+        self.assertEqual(r'''SELECT '/* ) */', '-- (', \"name\" FROM t WHERE id=$1''',
+                         gate.catalog_entries(source)[0][2])
+
+    def test_invalid_catalog_syntax_cannot_hide_a_later_entry(self):
+        valid = 'SQL_QUERY("one", "", "SELECT 1")'
+        for source in (valid + ' nonsense', valid + ' /* unclosed',
+                       'SQL_QUERY("one", "" "SELECT 1")',
+                       'SQL_QUERY("one", "", SOME_MACRO)',
+                       'SQL_QUERY("one", "", "SELECT 1"',
+                       valid + '\nSQL_QUERY("two", "", "SELECT 2"'):
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, "invalid macro syntax"):
+                gate.catalog_entries(source)
+
+    def test_catalog_checks_every_query_after_comments(self):
+        prefix = 'SQL_QUERY("one", "", "SELECT 1") /* boundary */\n'
+        for final, message in (( 'SQL_QUERY("two", "bytea", "SELECT $2")', "parameters disagree"),
+                              ( 'SQL_QUERY("one", "", "SELECT 2")', "duplicate native query"),
+                              ( 'SQL_QUERY("two", "", "SELECT generate_series(1,2)")', "canonical native operation")):
+            with self.subTest(final=final):
+                self.assertTrue(any(message in error for error in gate.catalog_errors(gate.catalog_entries(prefix + final))))
 
 
 if __name__ == "__main__":

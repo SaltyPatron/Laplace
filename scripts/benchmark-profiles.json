@@ -49,7 +49,7 @@
     {
       "id": "chess-environment",
       "kind": "chess-environment",
-      "description": "Measured Stockfish source-build search and CuteChess depth-8, 12-move match concurrency with exact executable identities, actual host resource limits, and configuration candidates.",
+      "description": "Measured Stockfish source-build search and complete CuteChess depth-8 game concurrency with exact executable identities, actual host resource limits, and configuration candidates.",
       "execution_boundary": "configured source-built external executables on the measured host",
       "mutability": "benchmark receipts and PGN only; no substrate writes or configuration changes",
       "resource_shape": "explicit thread/hash/concurrency sweep within effective CPU and memory budgets",

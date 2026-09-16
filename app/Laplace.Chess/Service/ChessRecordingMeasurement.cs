@@ -27,6 +27,7 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
     public string Schema => "laplace.chess-recording/v2";
     public string Purpose => retainedPgn ? "retained-pgn-ingestion" : "fresh-match-recording";
     internal bool RetainedPgn => retainedPgn;
+    internal bool RequiresNormalCompletion => _normalMatchVerified;
     public string ExperimentId { get; } = experimentId;
     public string PgnEvent => "chess-lab/cutechess/" + ExperimentId;
     public string Status { get; private set; } = "running";
@@ -148,6 +149,14 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
         if (game.PositionIds.Length != game.MoveIds.Length + 1
             || game.MoveIds.Length != game.Moves.Count)
             throw new InvalidDataException("recording input does not contain a complete legal move trajectory");
+        if (_normalMatchVerified && !game.NormalCompletionVerified)
+            throw new InvalidDataException("normal recorded game lacks serialized terminal-outcome verification");
+        string plyCount = PgnGames.TagStr(game.GameText, "PlyCount");
+        if (_normalMatchVerified && !string.IsNullOrEmpty(plyCount)
+            && (!int.TryParse(plyCount, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out int declaredPlies)
+                || declaredPlies != game.MoveIds.Length))
+            throw new InvalidDataException("normal recorded game PlyCount differs from its serialized legal moves");
         var result = PgnGames.TagStr(game.GameText, "Result");
         if (result != game.Result.ResultToken)
             throw new InvalidDataException("recording PGN header and parsed movetext result disagree");
@@ -212,13 +221,7 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
             var playingIds = games.Select(g => g.PlayingId).ToHashSet();
             var witnesses = expected.Concat(experimentChange.Attestations).DistinctBy(a => a.Id).ToArray();
             var stored = await NpgsqlAttestationReads.WitnessesAsync(ds,
-                witnesses.Select(a => a.SubjectId.ToBytes()).Distinct(ByteArrayComparer.Instance).ToArray(),
-                witnesses.Select(a => a.TypeId.ToBytes()).Distinct(ByteArrayComparer.Instance).ToArray(),
-                witnesses.Select(a => a.SourceId.ToBytes()).Distinct(ByteArrayComparer.Instance).ToArray(),
-                witnesses.Where(a => a.ContextId is not null).Select(a => a.ContextId!.Value.ToBytes())
-                    .Distinct(ByteArrayComparer.Instance).ToArray(),
-                witnesses.Where(a => a.ContextId is null).Select(a => a.SubjectId.ToBytes())
-                    .Distinct(ByteArrayComparer.Instance).ToArray(), ct);
+                WitnessScopes(witnesses), ct);
             ValidateWitnesses(witnesses, stored);
 
             var carriers = expectedCarriers.DistinctBy(p => p.EntityId).ToArray();
@@ -262,11 +265,16 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
         finally { ElapsedSeconds.Readback += Stopwatch.GetElapsedTime(started).TotalSeconds; }
     }
 
+    internal static NpgsqlAttestationReads.WitnessScope[] WitnessScopes(IReadOnlyList<AttestationRow> witnesses)
+        => witnesses.Select(a => new NpgsqlAttestationReads.WitnessScope(
+            a.SubjectId, a.TypeId, a.SourceId, a.ContextId)).Distinct().ToArray();
+
     internal static void ValidateWitnesses(IReadOnlyList<AttestationRow> expected,
         IReadOnlyList<NpgsqlAttestationReads.WitnessRow> actual)
     {
         if (actual.Count != expected.Count || actual.Select(a => ReadId(a.Id)).Distinct().Count() != actual.Count)
-            throw new InvalidDataException("committed witness set has missing, duplicate or conflicting members");
+            throw new InvalidDataException($"committed witness set has missing, duplicate or conflicting members "
+                + $"(expected={expected.Count}, actual={actual.Count}, unique={actual.Select(a => ReadId(a.Id)).Distinct().Count()})");
         var byId = actual.ToDictionary(a => ReadId(a.Id));
         foreach (var e in expected)
         {
@@ -350,10 +358,4 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
     private static Hash128 ReadId(byte[] bytes) => bytes.Length == 16 ? Hash128.FromBytes(bytes)
         : throw new InvalidDataException("committed witness identity must contain exactly 16 bytes");
     private static string Hex(Hash128 id) => Convert.ToHexStringLower(id.ToBytes());
-    private sealed class ByteArrayComparer : IEqualityComparer<byte[]>
-    {
-        internal static readonly ByteArrayComparer Instance = new();
-        public bool Equals(byte[]? x, byte[]? y) => x is not null && y is not null && x.AsSpan().SequenceEqual(y);
-        public int GetHashCode(byte[] value) => Hash128.FromBytes(value).GetHashCode();
-    }
 }

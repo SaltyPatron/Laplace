@@ -360,6 +360,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         ArgumentNullException.ThrowIfNull(stage);
         ArgumentNullException.ThrowIfNull(precedesOut);
         var filter = ComputeFilter(existingBitmap);
+        int firstPhysicality = stage.PhysicalityCount;
 
         nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
         for (nuint i = 0; i < nEnt; i++)
@@ -404,6 +405,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
                 games: pr.Games, sumScoreFp1e9: sumScore, witnessWeight: witnessWeight));
         }
 
+        stage.RecordPhysicalitySourceSince(firstPhysicality, _sourceId);
         return NativeInterop.ComposeRootId(ActiveResult);
     }
 
@@ -419,6 +421,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         ArgumentNullException.ThrowIfNull(builder);
         long nowUs = IngestClock.NowUnixUs();
         var stage = builder.ContentStage;
+        int firstPhysicality = stage.PhysicalityCount;
 
         unsafe
         {
@@ -444,6 +447,8 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             }
         }
 
+        stage.RecordPhysicalitySourceSince(firstPhysicality, _sourceId);
+
         nuint nEnt = NativeInterop.ComposeEntityCount(ActiveResult);
         for (nuint i = 0; i < nEnt; i++)
         {
@@ -456,7 +461,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         {
             NativeInterop.ComposePhysicalityNative ph;
             NativeInterop.ComposeGetPhysicality(ActiveResult, i, &ph);
-            builder.TrySeePhysicality(ph.Id);
+            builder.NoteStagedPhysicalityPlacement(ph.Id);
         }
 
         return NativeInterop.ComposeRootId(ActiveResult);

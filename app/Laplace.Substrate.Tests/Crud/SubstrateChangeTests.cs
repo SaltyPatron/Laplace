@@ -155,6 +155,60 @@ public class SubstrateChangeTests
         var change = b.Build();
         Assert.Single(change.Entities);
         Assert.Single(change.Physicalities);
+        Assert.Equal(2, change.PhysicalityObservations.Length);
+        Assert.All(change.PhysicalityObservations, observed => Assert.Same(phys, observed));
+    }
+
+    [Fact]
+    public void Builder_PreservesAlternateFormsAndActualObservationSourcesBeforePlacementSelection()
+    {
+        var entity = H(901);
+        var source = H(902);
+        var laterSource = H(903);
+        var body = new PhysicalityRow(
+            PhysicalityId.Compute(entity, PhysicalityType.Projection), entity, source,
+            PhysicalityType.Projection, .1, .2, .3, .4, default,
+            Trajectory.Build([H(904)]), 1, null, null, 10);
+        var alternate = body with
+        {
+            SourceId = laterSource,
+            CoordX = -.1,
+            TrajectoryXyzm = Trajectory.Build([H(905)]),
+            ObservedAtUnixUs = 20,
+        };
+        var builder = new SubstrateChangeBuilder(source, "same-source-unit");
+        builder.AddEntity(entity, 1, H(906), source);
+        builder.AddPhysicality(body);
+        long firstBytes = builder.StagedBytesEstimate;
+        builder.AddEntity(entity, 1, H(906), laterSource);
+        builder.AddPhysicality(alternate);
+        long bothBytes = builder.StagedBytesEstimate;
+        var result = builder.Build();
+        Assert.Single(result.Entities);
+        Assert.Same(body, Assert.Single(result.Physicalities));
+        Assert.Equal<PhysicalityRow>([body, alternate], result.PhysicalityObservations);
+        Assert.True(bothBytes > firstBytes);
+        Assert.Equal(source, result.PhysicalityObservations[0].SourceId);
+        Assert.Equal(laterSource, result.PhysicalityObservations[1].SourceId);
+        Assert.Equal(20, result.PhysicalityObservations[1].ObservedAtUnixUs);
+    }
+
+    [Fact]
+    public void Builder_AlreadyStagedPlacementCannotDiscardAnotherObservedForm()
+    {
+        var entity = H(910);
+        var source = H(911);
+        var body = new PhysicalityRow(
+            PhysicalityId.Compute(entity, PhysicalityType.Projection), entity, source,
+            PhysicalityType.Projection, .1, .2, .3, .4, default,
+            null, 0, null, null, 12);
+        var builder = new SubstrateChangeBuilder(source, "native-placement");
+        builder.NoteStagedPhysicalityPlacement(body.Id);
+        builder.AddPhysicality(body);
+        var result = builder.Build();
+        Assert.Empty(result.Physicalities);
+        Assert.Same(body, Assert.Single(result.PhysicalityObservations));
+        Assert.False(result.PhysicalityObservations.IsDefault);
     }
 
     [Fact]

@@ -1,4 +1,6 @@
 using global::Npgsql;
+using System.Diagnostics;
+using System.Globalization;
 using Laplace.Modality.Chess;
 
 namespace Laplace.Chess.Service;
@@ -29,6 +31,25 @@ public sealed record ChessSearchProviderReceipt(
     long SyzygyProbes,
     long SyzygyHits)
 {
+    // Root work is the shared provider's counter change during this configuration's calls.
+    // Concurrent API callers can overlap these deltas; serial UCI searches do not.
+    // Inclusive root time already contains frontier/read time: never sum them together.
+    // Snapshot preparation is outside Search's iteration clock, inside UCI's final go time.
+    public string RootWorkScope { get; init; } = "unavailable";
+    public long RootBackendReads { get; init; }
+    public long RootEvidenceCacheHits { get; init; }
+    public long RootFrontierBuilds { get; init; }
+    public long RootTransitionPerfcacheHits { get; init; }
+    public long RootTransitionNovelHits { get; init; }
+    public long RootTransitionCompositions { get; init; }
+    public double RootInclusiveMilliseconds { get; init; }
+    public double RootFrontierMilliseconds { get; init; }
+    public double RootEvidenceReadMilliseconds { get; init; }
+    public long SnapshotPreparations { get; init; }
+    public double SnapshotPreparationMilliseconds { get; init; }
+
+    private static string Ms(double value) => value.ToString("F3", CultureInfo.InvariantCulture);
+
     public static ChessSearchProviderReceipt Classical { get; } = new(
         false,
         0, 0, 0,
@@ -45,14 +66,22 @@ public sealed record ChessSearchProviderReceipt(
           $"(cells:{LearnedPstNonZeroCells}) " +
           $"tactics={TacticReads}/{TacticContributions}" +
           $"(patterns:{TacticPatternsLoaded}) " +
-          $"syzygy={SyzygyHits}/{SyzygyProbes}({SyzygyLargestMen}-men)"
+          $"syzygy={SyzygyHits}/{SyzygyProbes}({SyzygyLargestMen}-men) " +
+          $"root-work-scope={RootWorkScope} " +
+          $"root-backend={RootBackendReads} root-cache={RootEvidenceCacheHits} " +
+          $"root-frontiers={RootFrontierBuilds} " +
+          $"root-transitions={RootTransitionPerfcacheHits}/{RootTransitionNovelHits}/{RootTransitionCompositions} " +
+          $"root-ms-inclusive={Ms(RootInclusiveMilliseconds)} " +
+          $"frontier-ms={Ms(RootFrontierMilliseconds)} evidence-read-ms={Ms(RootEvidenceReadMilliseconds)} " +
+          $"snapshot-prepare={SnapshotPreparations}/{Ms(SnapshotPreparationMilliseconds)}ms"
         : "classical-only";
 }
 
 /// <summary>
 /// One immutable provider selection for one Search configuration. Database-backed readers are
-/// shared by <see cref="ChessSearchProviders"/>, but the counters are private to this
-/// configuration, so concurrent searches cannot contaminate each other's receipts.
+/// shared by <see cref="ChessSearchProviders"/>. Usage counters and enclosing timers belong
+/// to this configuration. Root work deltas observe the shared provider instance and can overlap
+/// concurrent callers; the receipt explicitly labels that scope.
 /// </summary>
 public sealed class ChessSearchConfiguration
 {
@@ -68,6 +97,10 @@ public sealed class ChessSearchConfiguration
         public long TacticContributions;
         public long TablebaseProbes;
         public long TablebaseHits;
+        public long RootBackendReads, RootEvidenceCacheHits, RootFrontierBuilds;
+        public long RootTransitionPerfcacheHits, RootTransitionNovelHits, RootTransitionCompositions;
+        public long RootTicks, RootFrontierTicks, RootEvidenceReadTicks;
+        public long SnapshotPreparations, SnapshotPreparationTicks;
     }
 
     private sealed class CountingRootBias(IRootBias inner, Counters counters) : IRootBias
@@ -75,13 +108,35 @@ public sealed class ChessSearchConfiguration
         public int[] Bonus(Board root, IReadOnlyList<ChessMove> moves)
         {
             Interlocked.Increment(ref counters.RootReads);
-            var bonus = inner.Bonus(root, moves);
-            long influenced = 0;
-            for (int i = 0; i < bonus.Length; i++)
-                if (bonus[i] != 0) influenced++;
-            if (influenced != 0)
-                Interlocked.Add(ref counters.RootMoves, influenced);
-            return bonus;
+            var observed = inner as SubstrateRootBias;
+            var before = observed?.ObserveWork();
+            long started = Stopwatch.GetTimestamp();
+            try
+            {
+                var bonus = inner.Bonus(root, moves);
+                long influenced = 0;
+                for (int i = 0; i < bonus.Length; i++)
+                    if (bonus[i] != 0) influenced++;
+                if (influenced != 0)
+                    Interlocked.Add(ref counters.RootMoves, influenced);
+                return bonus;
+            }
+            finally
+            {
+                Interlocked.Add(ref counters.RootTicks, Stopwatch.GetTimestamp() - started);
+                if (before is { } prior && observed is not null)
+                {
+                    var after = observed.ObserveWork();
+                    Interlocked.Add(ref counters.RootBackendReads, after.BackendReads - prior.BackendReads);
+                    Interlocked.Add(ref counters.RootEvidenceCacheHits, after.EvidenceCacheHits - prior.EvidenceCacheHits);
+                    Interlocked.Add(ref counters.RootFrontierBuilds, after.FrontierBuilds - prior.FrontierBuilds);
+                    Interlocked.Add(ref counters.RootTransitionPerfcacheHits, after.TransitionPerfcacheHits - prior.TransitionPerfcacheHits);
+                    Interlocked.Add(ref counters.RootTransitionNovelHits, after.TransitionNovelHits - prior.TransitionNovelHits);
+                    Interlocked.Add(ref counters.RootTransitionCompositions, after.TransitionCompositions - prior.TransitionCompositions);
+                    Interlocked.Add(ref counters.RootFrontierTicks, after.FrontierTicks - prior.FrontierTicks);
+                    Interlocked.Add(ref counters.RootEvidenceReadTicks, after.EvidenceReadTicks - prior.EvidenceReadTicks);
+                }
+            }
         }
     }
 
@@ -95,8 +150,19 @@ public sealed class ChessSearchConfiguration
         public long Version => inner.Version;
 
         public ISearchPositionEvaluator PrepareSearch()
-            => new CountingPositionEvaluator(
-                inner.PrepareSearch(), counters, atomActive, learnedActive, tacticActive);
+        {
+            Interlocked.Increment(ref counters.SnapshotPreparations);
+            long started = Stopwatch.GetTimestamp();
+            try
+            {
+                return new CountingPositionEvaluator(
+                    inner.PrepareSearch(), counters, atomActive, learnedActive, tacticActive);
+            }
+            finally
+            {
+                Interlocked.Add(ref counters.SnapshotPreparationTicks, Stopwatch.GetTimestamp() - started);
+            }
+        }
 
         public int Evaluate(Board board)
         {
@@ -143,6 +209,7 @@ public sealed class ChessSearchConfiguration
     private readonly bool _tacticContributes;
     private readonly int _tacticPatternsLoaded;
     private readonly int _syzygyLargest;
+    private readonly bool _rootWorkAvailable;
 
     internal ChessSearchConfiguration(
         bool substrate,
@@ -157,6 +224,7 @@ public sealed class ChessSearchConfiguration
         int tacticPatternsLoaded = 0)
     {
         _substrate = substrate;
+        _rootWorkAvailable = substrate && rootBias is SubstrateRootBias;
         _positionAtomsLoaded = substrate ? Math.Max(0, positionAtomsLoaded) : 0;
         _learnedSelected = substrate && learnedSelected;
         _learnedContributes = substrate && learnedContributes;
@@ -213,7 +281,24 @@ public sealed class ChessSearchConfiguration
                 Volatile.Read(ref _counters.RootMoves),
                 _syzygyLargest,
                 Volatile.Read(ref _counters.TablebaseProbes),
-                Volatile.Read(ref _counters.TablebaseHits));
+                Volatile.Read(ref _counters.TablebaseHits))
+            {
+                RootWorkScope = _rootWorkAvailable ? "provider-instance-deltas" : "unavailable",
+                RootBackendReads = Volatile.Read(ref _counters.RootBackendReads),
+                RootEvidenceCacheHits = Volatile.Read(ref _counters.RootEvidenceCacheHits),
+                RootFrontierBuilds = Volatile.Read(ref _counters.RootFrontierBuilds),
+                RootTransitionPerfcacheHits = Volatile.Read(ref _counters.RootTransitionPerfcacheHits),
+                RootTransitionNovelHits = Volatile.Read(ref _counters.RootTransitionNovelHits),
+                RootTransitionCompositions = Volatile.Read(ref _counters.RootTransitionCompositions),
+                RootInclusiveMilliseconds = Milliseconds(ref _counters.RootTicks),
+                RootFrontierMilliseconds = Milliseconds(ref _counters.RootFrontierTicks),
+                RootEvidenceReadMilliseconds = Milliseconds(ref _counters.RootEvidenceReadTicks),
+                SnapshotPreparations = Volatile.Read(ref _counters.SnapshotPreparations),
+                SnapshotPreparationMilliseconds = Milliseconds(ref _counters.SnapshotPreparationTicks),
+            };
+
+    private static double Milliseconds(ref long ticks)
+        => Volatile.Read(ref ticks) * (1000d / Stopwatch.Frequency);
 
     private SearchTablebaseVerdict? ProbeTablebase(Board board)
     {

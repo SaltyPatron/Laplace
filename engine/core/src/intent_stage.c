@@ -49,6 +49,10 @@ typedef struct {
     size_t   len;
     size_t   cap;
     size_t   row_count;
+    size_t*  allocated_bytes;
+    size_t*  peak_bytes;
+    size_t*  maximum_bytes;
+    int*     allocation_failed;
 } byte_buf_t;
 
 static size_t row_byte_len(const uint8_t* src, size_t len, size_t off);
@@ -64,8 +68,30 @@ static int buf_reserve(byte_buf_t* b, size_t additional) {
         if (new_cap > SIZE_MAX / 2) return -1;
         new_cap *= 2;
     }
-    uint8_t* p = (uint8_t*)realloc(b->data, new_cap);
-    if (!p) return -1;
+    const int bounded = b->maximum_bytes != NULL && *b->maximum_bytes != SIZE_MAX;
+    if (b->allocated_bytes != NULL) {
+        const size_t remaining = *b->maximum_bytes - *b->allocated_bytes;
+        if ((bounded ? needed : needed - b->cap) > remaining) {
+            *b->allocation_failed = 1;
+            return -1;
+        }
+        if ((bounded ? new_cap : new_cap - b->cap) > remaining) new_cap = needed;
+    }
+    uint8_t* p = bounded ? (uint8_t*)malloc(new_cap) : (uint8_t*)realloc(b->data, new_cap);
+    if (!p) {
+        if (b->allocation_failed != NULL) *b->allocation_failed = 1;
+        return -1;
+    }
+    if (bounded) {
+        if (b->len != 0u) memcpy(p, b->data, b->len);
+        const size_t peak = *b->allocated_bytes + new_cap;
+        if (peak > *b->peak_bytes) *b->peak_bytes = peak;
+        free(b->data);
+    }
+    if (b->allocated_bytes != NULL) {
+        *b->allocated_bytes += new_cap - b->cap;
+        if (*b->allocated_bytes > *b->peak_bytes) *b->peak_bytes = *b->allocated_bytes;
+    }
     b->data = p;
     b->cap = new_cap;
     return 0;
@@ -156,6 +182,7 @@ static int buf_append_field_float8(byte_buf_t* b, double v) {
 }
 
 static int buf_append_field_timestamptz(byte_buf_t* b, int64_t unix_us) {
+    if (unix_us < INT64_MIN + INTENT_STAGE_PG_EPOCH_UNIX_US) return -1;
     const int64_t pg_us = unix_us - INTENT_STAGE_PG_EPOCH_UNIX_US;
     return buf_append_field_int8(b, pg_us);
 }
@@ -196,9 +223,14 @@ struct intent_stage {
     hash128_t* witness_slots;
     size_t     witness_cap;
     size_t     witness_count;
+    size_t     allocated_bytes;
+    size_t     peak_bytes;
+    size_t     maximum_bytes;
+    int        allocation_failed;
 };
 
 static int witness_slot_empty(const hash128_t* h) { return (h->hi | h->lo) == 0; }
+static int witness_contains_unlocked(const intent_stage_t* stage, const hash128_t* id);
 
 static int witness_record_unlocked(intent_stage_t* stage, const hash128_t* id) {
     if (!stage || !id) return 0;
@@ -206,14 +238,30 @@ static int witness_record_unlocked(intent_stage_t* stage, const hash128_t* id) {
     size_t cap = stage->witness_cap;
     if (cap == 0) {
         cap = (size_t)1 << 16;
+        if (cap > (stage->maximum_bytes - stage->allocated_bytes) / sizeof(hash128_t)) {
+            stage->allocation_failed = 1;
+            return 0;
+        }
         slots = (hash128_t*)calloc(cap, sizeof(hash128_t));
-        if (!slots) return 0;
+        if (!slots) { stage->allocation_failed = 1; return 0; }
+        stage->allocated_bytes += cap * sizeof(hash128_t);
+        if (stage->allocated_bytes > stage->peak_bytes) stage->peak_bytes = stage->allocated_bytes;
         stage->witness_slots = slots;
         stage->witness_cap = cap;
     } else if ((stage->witness_count + 1) * 4 >= cap * 3) {
+        /* An existing witness never requires growth. Keep this additional
+         * lookup at the growth boundary, not on every successful insertion. */
+        if (witness_contains_unlocked(stage, id)) return 1;
+        if (cap > SIZE_MAX / 2u) { stage->allocation_failed = 1; return 0; }
         size_t ncap = cap << 1;
+        if (ncap > (stage->maximum_bytes - stage->allocated_bytes) / sizeof(hash128_t)) {
+            stage->allocation_failed = 1;
+            return 0;
+        }
         hash128_t* ns = (hash128_t*)calloc(ncap, sizeof(hash128_t));
         if (ns) {
+            const size_t peak = stage->allocated_bytes + ncap * sizeof(hash128_t);
+            if (peak > stage->peak_bytes) stage->peak_bytes = peak;
             size_t nmask = ncap - 1;
             for (size_t i = 0; i < cap; ++i) {
                 if (witness_slot_empty(&slots[i])) continue;
@@ -222,11 +270,12 @@ static int witness_record_unlocked(intent_stage_t* stage, const hash128_t* id) {
                 ns[j] = slots[i];
             }
             free(slots);
+            stage->allocated_bytes += (ncap - cap) * sizeof(hash128_t);
             slots = ns;
             stage->witness_slots = slots;
             stage->witness_cap = ncap;
             cap = ncap;
-        }
+        } else { stage->allocation_failed = 1; return 0; }
     }
     size_t mask = cap - 1;
     size_t j = (size_t)id->lo & mask;
@@ -286,8 +335,23 @@ int intent_stage_lower_entity_tier(intent_stage_t* stage, const hash128_t* id, i
 }
 
 intent_stage_t* intent_stage_new(size_t row_capacity_hint) {
+    return intent_stage_new_bounded(row_capacity_hint, SIZE_MAX);
+}
+
+intent_stage_t* intent_stage_new_bounded(size_t row_capacity_hint, size_t maximum_bytes) {
+    if (maximum_bytes < sizeof(intent_stage_t) || row_capacity_hint > SIZE_MAX / 256u) return NULL;
     intent_stage_t* s = (intent_stage_t*)calloc(1, sizeof(*s));
     if (!s) return NULL;
+    s->allocated_bytes = sizeof(*s);
+    s->peak_bytes = sizeof(*s);
+    s->maximum_bytes = maximum_bytes;
+    byte_buf_t* buffers[3] = {&s->entities, &s->physicalities, &s->attestations};
+    for (size_t i = 0; i < 3u; ++i) {
+        buffers[i]->allocated_bytes = &s->allocated_bytes;
+        buffers[i]->peak_bytes = &s->peak_bytes;
+        buffers[i]->maximum_bytes = &s->maximum_bytes;
+        buffers[i]->allocation_failed = &s->allocation_failed;
+    }
     if (row_capacity_hint > 0) {
         if (buf_reserve(&s->entities,      row_capacity_hint * 80)  != 0
             || buf_reserve(&s->physicalities, row_capacity_hint * 256) != 0
@@ -297,6 +361,18 @@ intent_stage_t* intent_stage_new(size_t row_capacity_hint) {
         }
     }
     return s;
+}
+
+size_t intent_stage_memory_bytes(const intent_stage_t* stage) {
+    return stage == NULL ? 0u : stage->allocated_bytes;
+}
+
+size_t intent_stage_memory_peak_bytes(const intent_stage_t* stage) {
+    return stage == NULL ? 0u : stage->peak_bytes;
+}
+
+int intent_stage_allocation_failed(const intent_stage_t* stage) {
+    return stage == NULL || stage->allocation_failed;
 }
 
 void intent_stage_free(intent_stage_t* stage) {
@@ -368,15 +444,9 @@ int intent_stage_add_physicality(
     laplace_physicality_id_compute(*entity_id, type, &expected_physicality_id);
     if (!hash128_equals(id, &expected_physicality_id)) return -2;
 
-    if (trajectory_n_vertices > 0) {
-        hash128_t manifest_id;
-        size_t logical_count = 0;
-        if (trajectory_content_identity(
-                trajectory_xyzm, trajectory_n_vertices, &manifest_id, &logical_count) != 0)
-            return -3;
-        if (logical_count != (size_t)n_constituents) return -3;
-        if (type == 1 && !hash128_equals(entity_id, &manifest_id)) return -4;
-    }
+    const int manifest_status = laplace_physicality_manifest_validate(
+        entity_id, type, trajectory_xyzm, trajectory_n_vertices, n_constituents);
+    if (manifest_status != 0) return manifest_status;
 
     byte_buf_t* b = &stage->physicalities;
     if (buf_append_be16(b, PHYSICALITY_COL_COUNT) != 0) return -1;
@@ -475,6 +545,55 @@ int intent_stage_add_attestation(
 static uint32_t be32_at(const uint8_t* p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16)
          | ((uint32_t)p[2] << 8)  | (uint32_t)p[3];
+}
+
+static int import_tuples(byte_buf_t* out, const uint8_t* data, size_t bytes, uint16_t columns) {
+    size_t offset = 0u, rows = 0u;
+    if (bytes != 0u && data == NULL) return -1;
+    while (offset < bytes) {
+        if (bytes - offset < 2u || ((uint16_t)((uint16_t)data[offset] << 8u) |
+                data[offset + 1u]) != columns) return -1;
+        offset += 2u;
+        for (size_t field = 0; field < columns; ++field) {
+            uint32_t length;
+            if (bytes - offset < 4u) return -1;
+            length = be32_at(data + offset);
+            offset += 4u;
+            if (length != UINT32_MAX) {
+                if (length > INT32_MAX || length > bytes - offset) return -1;
+                offset += length;
+            }
+        }
+        ++rows;
+    }
+    if (rows > SIZE_MAX - out->row_count) return -1;
+    if (bytes != 0u && buf_append(out, data, bytes) != 0) return -2;
+    out->row_count += rows;
+    return 0;
+}
+
+int intent_stage_from_tuple_bytes(
+    const uint8_t* entities, size_t entity_bytes,
+    const uint8_t* physicalities, size_t physicality_bytes,
+    const uint8_t* attestations, size_t attestation_bytes,
+    size_t maximum_bytes, intent_stage_t** out_stage) {
+    int status;
+    intent_stage_t* stage;
+    if (out_stage == NULL) return -1;
+    *out_stage = NULL;
+    stage = intent_stage_new_bounded(0u, maximum_bytes);
+    if (stage == NULL) return -2;
+    status = import_tuples(&stage->entities, entities, entity_bytes, ENTITY_COL_COUNT);
+    if (status == 0)
+        status = import_tuples(&stage->physicalities, physicalities, physicality_bytes, PHYSICALITY_COL_COUNT);
+    if (status == 0)
+        status = import_tuples(&stage->attestations, attestations, attestation_bytes, ATTESTATION_COL_COUNT);
+    if (status != 0) {
+        intent_stage_free(stage);
+        return status;
+    }
+    *out_stage = stage;
+    return 0;
 }
 
 static size_t row_byte_len(const uint8_t* src, size_t len, size_t off) {

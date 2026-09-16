@@ -31,6 +31,15 @@ void   math4d_scale(const double a[4], double s, double out[4]);
 
 void   math4d_centroid(const double* points, size_t n_points, double out[4]);
 
+/* Allocation-free canonical centroid. Size includes alignment padding, so any
+ * byte-addressed workspace of the returned size is accepted. Zero points need
+ * no workspace. Returns 0 on success, -1 for invalid arguments/size overflow;
+ * centroid outputs remain untouched on failure. Workspace must not overlap
+ * the input points or output. No malloc, qsort scratch, or input-order fallback. */
+int math4d_centroid_workspace_size(size_t n_points, size_t* out_bytes);
+int math4d_centroid_with_workspace(const double* points, size_t n_points,
+    void* workspace, size_t workspace_bytes, double out[4]);
+
 void   math4d_log_s3(const double base[4], const double p[4], double out_tangent[4]);
 void   math4d_exp_s3(const double base[4], const double tangent[4], double out[4]);
 

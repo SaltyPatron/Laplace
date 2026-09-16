@@ -96,7 +96,8 @@ public static class FeedbackContent
             throw new ArgumentException("need ≥2 resolved ids for a PRECEDES chain", nameof(ids));
 
         var b = new SubstrateChangeBuilder(Source, "attest/0", null,
-            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: ids.Count - 1);
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: ids.Count - 1)
+            .DeclareSourcePrior(SourceTrust.UserPrompt);
         Hash128 context = StageOccurrence(b, ids, ChainRelation,
             confirm, occurrenceKey);
         for (int i = 0; i + 1 < ids.Count; i++)
@@ -115,7 +116,8 @@ public static class FeedbackContent
         string? occurrenceKey = null)
     {
         var b = new SubstrateChangeBuilder(Source, "attest/0", null,
-            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1);
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1)
+            .DeclareSourcePrior(SourceTrust.UserPrompt);
         Hash128 relation = RelationTypeRegistry.RelationTypeId(canonicalRelation);
         Hash128 context = StageOccurrence(b, [subject, obj], relation, confirm, occurrenceKey);
         b.AddAttestation(NativeAttestation.CategoricalResolved(

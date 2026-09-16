@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
@@ -212,42 +215,15 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     [Fact]
     public async Task StripeWebhook_ApprovesQuote()
     {
-        using var quoteResponse = await _client.PostAsJsonAsync("/v1/billing/preflight", new
-        {
-            service_id = "audit.report",
-            units = 1,
-            tenant = "webhook-quote-tenant"
-        });
-        Assert.Equal(HttpStatusCode.OK, quoteResponse.StatusCode);
-
-        using var quoteJson = JsonDocument.Parse(await quoteResponse.Content.ReadAsStringAsync());
-        var quoteId = quoteJson.RootElement.GetProperty("quote_id").GetString();
-        var payload = JsonSerializer.Serialize(new
-        {
-            type = "checkout.session.completed",
-            data = new
-            {
-                @object = new
-                {
-                    id = "cs_test_quote",
-                    customer = "cus_test_quote",
-                    subscription = (string?)null,
-                    metadata = new
-                    {
-                        tenant = "webhook-quote-tenant",
-                        service_id = "audit.report",
-                        quote_id = quoteId
-                    }
-                }
-            }
-        });
-
+        var (quoteId, payload) = await PaidCheckoutAsync("audit.report", "webhook-quote-tenant", "evt_test_quote");
         using var webhookResponse = await PostStripeWebhookAsync(payload);
         Assert.Equal(HttpStatusCode.OK, webhookResponse.StatusCode);
+        using var webhookJson = JsonDocument.Parse(await webhookResponse.Content.ReadAsStringAsync());
+        Assert.True(webhookJson.RootElement.GetProperty("verified").GetBoolean());
+        Assert.Equal("quote_approved", webhookJson.RootElement.GetProperty("status").GetString());
 
         using var fetchedQuote = await _client.GetAsync($"/v1/billing/quotes/{quoteId}");
         Assert.Equal(HttpStatusCode.OK, fetchedQuote.StatusCode);
-
         using var fetchedJson = JsonDocument.Parse(await fetchedQuote.Content.ReadAsStringAsync());
         Assert.Equal("approved", fetchedJson.RootElement.GetProperty("status").GetString());
     }
@@ -256,37 +232,23 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     public async Task StripeWebhook_ActivatesPlanAndCreditsCanBeConsumed()
     {
         var tenant = $"tenant-{Guid.NewGuid():N}";
-        var payload = JsonSerializer.Serialize(new
-        {
-            id = $"evt_{Guid.NewGuid():N}",
-            type = "checkout.session.completed",
-            data = new
-            {
-                @object = new
-                {
-                    id = "cs_test_plan",
-                    customer = "cus_test_plan",
-                    subscription = "sub_test_plan",
-                    metadata = new
-                    {
-                        tenant,
-                        service_id = "plan.studio",
-                        quote_id = "q_test_plan"
-                    }
-                }
-            }
-        });
+        var subscription = $"sub_{Guid.NewGuid():N}";
+        var start = DateTimeOffset.UtcNow.AddDays(-1);
+        var end = start.AddDays(30);
+        var provider = _factory.Services.GetRequiredService<TestStripeSubscriptions>();
+        provider.Set(_factory.Services, subscription, tenant, "plan.studio", "cus_test_plan", start, end);
+        var (_, payload) = await PaidCheckoutAsync("plan.studio", tenant, $"evt_{Guid.NewGuid():N}", subscription);
 
         using var webhookResponse = await PostStripeWebhookAsync(payload);
         Assert.Equal(HttpStatusCode.OK, webhookResponse.StatusCode);
-
         using var webhookJson = JsonDocument.Parse(await webhookResponse.Content.ReadAsStringAsync());
-        Assert.Equal("plan_activated", webhookJson.RootElement.GetProperty("status").GetString());
+        Assert.Equal("subscription_active", webhookJson.RootElement.GetProperty("status").GetString());
         Assert.Equal("studio", webhookJson.RootElement.GetProperty("plan_id").GetString());
+        Assert.True(webhookJson.RootElement.GetProperty("verified").GetBoolean());
+        Assert.Equal(1, provider.Reads(subscription));
 
         using var consumeResponse = await ConsumeAsync(tenant, "synthesis", 10);
         Assert.Equal(HttpStatusCode.OK, consumeResponse.StatusCode);
-
         using var consumeJson = JsonDocument.Parse(await consumeResponse.Content.ReadAsStringAsync());
         Assert.True(consumeJson.RootElement.GetProperty("accepted").GetBoolean());
         Assert.Equal("studio", consumeJson.RootElement.GetProperty("plan_id").GetString());
@@ -296,10 +258,12 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         entitlementRequest.Headers.Add("X-Laplace-Tenant", tenant);
         using var entitlementResponse = await _client.SendAsync(entitlementRequest);
         Assert.Equal(HttpStatusCode.OK, entitlementResponse.StatusCode);
-
         using var entitlementJson = JsonDocument.Parse(await entitlementResponse.Content.ReadAsStringAsync());
         var entitlement = entitlementJson.RootElement.GetProperty("data").EnumerateArray().Single();
         Assert.Equal("studio", entitlement.GetProperty("plan_id").GetString());
+        Assert.Equal(subscription, entitlement.GetProperty("stripe_subscription_id").GetString());
+        Assert.Equal(start, entitlement.GetProperty("period_start").GetDateTimeOffset());
+        Assert.Equal(end, entitlement.GetProperty("period_end").GetDateTimeOffset());
         Assert.Equal(10, entitlement.GetProperty("used_credits").GetProperty("synthesis").GetInt32());
     }
 
@@ -308,36 +272,20 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     {
         var tenant = $"tenant-{Guid.NewGuid():N}";
         var eventId = $"evt_{Guid.NewGuid():N}";
-        var payload = JsonSerializer.Serialize(new
-        {
-            id = eventId,
-            type = "checkout.session.completed",
-            data = new
-            {
-                @object = new
-                {
-                    id = "cs_test_duplicate",
-                    customer = "cus_test_duplicate",
-                    subscription = "sub_test_duplicate",
-                    metadata = new
-                    {
-                        tenant,
-                        service_id = "plan.developer",
-                        quote_id = "q_test_duplicate"
-                    }
-                }
-            }
-        });
+        var subscription = $"sub_{Guid.NewGuid():N}";
+        var start = DateTimeOffset.UtcNow.AddDays(-1);
+        var provider = _factory.Services.GetRequiredService<TestStripeSubscriptions>();
+        provider.Set(_factory.Services, subscription, tenant, "plan.developer", "cus_test_duplicate", start, start.AddDays(30));
+        var (_, payload) = await PaidCheckoutAsync("plan.developer", tenant, eventId, subscription);
 
         using var first = await PostStripeWebhookAsync(payload);
         using var second = await PostStripeWebhookAsync(payload);
-
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-
         using var json = JsonDocument.Parse(await second.Content.ReadAsStringAsync());
         Assert.True(json.RootElement.GetProperty("duplicate").GetBoolean());
         Assert.Equal(eventId, json.RootElement.GetProperty("event_id").GetString());
+        Assert.Equal(1, provider.Reads(subscription));
     }
 
     [Fact]
@@ -345,46 +293,32 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     {
         var tenant = $"tenant-{Guid.NewGuid():N}";
         var subscription = $"sub_{Guid.NewGuid():N}";
-        await PostStripeWebhookAsync(new
-        {
-            id = $"evt_{Guid.NewGuid():N}",
-            type = "checkout.session.completed",
-            data = new
-            {
-                @object = new
-                {
-                    id = "cs_test_lifecycle",
-                    customer = "cus_test_lifecycle",
-                    subscription,
-                    metadata = new { tenant, service_id = "plan.studio", quote_id = "q_test_lifecycle" }
-                }
-            }
-        });
+        var start = DateTimeOffset.UtcNow.AddDays(-20);
+        var provider = _factory.Services.GetRequiredService<TestStripeSubscriptions>();
+        provider.Set(_factory.Services, subscription, tenant, "plan.studio", "cus_test_lifecycle", start, start.AddDays(30));
+        var (_, initial) = await PaidCheckoutAsync("plan.studio", tenant, $"evt_{Guid.NewGuid():N}", subscription);
+        using var initialEvent = JsonDocument.Parse(initial);
+        var created = initialEvent.RootElement.GetProperty("created").GetInt64();
+        using var activation = await PostStripeWebhookAsync(initial);
+        Assert.Equal(HttpStatusCode.OK, activation.StatusCode);
         using (var consume = await ConsumeAsync(tenant, "synthesis", 10))
-        {
             Assert.Equal(HttpStatusCode.OK, consume.StatusCode);
-        }
 
+        var renewedStart = DateTimeOffset.UtcNow.AddDays(-1);
+        provider.Set(_factory.Services, subscription, tenant, "plan.studio", "cus_test_lifecycle", renewedStart, renewedStart.AddDays(30));
         using var renewal = await PostStripeWebhookAsync(new
         {
             id = $"evt_{Guid.NewGuid():N}",
+            @object = "event",
+            api_version = Stripe.StripeConfiguration.ApiVersion,
+            request = (object?)null,
+            created = created + 1,
             type = "invoice.paid",
-            data = new
-            {
-                @object = new
-                {
-                    id = "in_test_lifecycle",
-                    customer = "cus_test_lifecycle",
-                    subscription,
-                    metadata = new { tenant, service_id = "plan.studio" }
-                }
-            }
+            data = new { @object = new { @object = "invoice", id = "in_test_lifecycle", subscription } }
         });
         Assert.Equal(HttpStatusCode.OK, renewal.StatusCode);
         using (var renewalJson = JsonDocument.Parse(await renewal.Content.ReadAsStringAsync()))
-        {
-            Assert.Equal("plan_renewed", renewalJson.RootElement.GetProperty("status").GetString());
-        }
+            Assert.Equal("subscription_active", renewalJson.RootElement.GetProperty("status").GetString());
 
         using (var consumeAfterRenewal = await ConsumeAsync(tenant, "synthesis", 500))
         {
@@ -393,27 +327,77 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
             Assert.Equal(0, consumedJson.RootElement.GetProperty("remaining").GetInt32());
         }
 
-        using var cancel = await PostStripeWebhookAsync(new
-        {
-            id = $"evt_{Guid.NewGuid():N}",
-            type = "customer.subscription.deleted",
-            data = new
-            {
-                @object = new
-                {
-                    id = subscription,
-                    metadata = new { tenant, service_id = "plan.studio" }
-                }
-            }
-        });
+        provider.Set(_factory.Services, subscription, tenant, "plan.studio", "cus_test_lifecycle",
+            renewedStart, renewedStart.AddDays(30), "canceled");
+        using var cancel = await PostStripeWebhookAsync(WebhookTestEvents.Subscription(
+            $"evt_{Guid.NewGuid():N}", "customer.subscription.deleted", subscription, created + 2));
         Assert.Equal(HttpStatusCode.OK, cancel.StatusCode);
         using (var cancelJson = JsonDocument.Parse(await cancel.Content.ReadAsStringAsync()))
-        {
-            Assert.Equal("plan_canceled", cancelJson.RootElement.GetProperty("status").GetString());
-        }
+            Assert.Equal("subscription_canceled", cancelJson.RootElement.GetProperty("status").GetString());
+        Assert.Equal(3, provider.Reads(subscription));
 
         using var blocked = await ConsumeAsync(tenant, "synthesis", 1);
         Assert.Equal(HttpStatusCode.PaymentRequired, blocked.StatusCode);
+    }
+
+    [Fact]
+    public async Task StripeWebhook_MissingCreatedIsRejectedWithoutApprovingQuote()
+    {
+        var (quoteId, valid) = await PaidCheckoutAsync("audit.report", "missing-created", $"evt_{Guid.NewGuid():N}");
+        var payload = JsonNode.Parse(valid)!.AsObject();
+        payload.Remove("created");
+        using var response = await PostStripeWebhookAsync(payload.ToJsonString());
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("invalid_event", result.RootElement.GetProperty("status").GetString());
+        Assert.Equal("pending_payment", (await _factory.Services.GetRequiredService<IBillingQuoteStore>()
+            .TryGetAsync(quoteId, CancellationToken.None))!.Status);
+    }
+
+    [Fact]
+    public async Task StripeWebhook_UnpaidCheckoutDoesNotApproveQuote()
+    {
+        var (quoteId, valid) = await PaidCheckoutAsync("audit.report", "unpaid-checkout", $"evt_{Guid.NewGuid():N}");
+        var payload = JsonNode.Parse(valid)!;
+        payload["data"]!["object"]!["payment_status"] = "unpaid";
+        using var response = await PostStripeWebhookAsync(payload.ToJsonString());
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("awaiting_payment", result.RootElement.GetProperty("status").GetString());
+        Assert.Equal("pending_payment", (await _factory.Services.GetRequiredService<IBillingQuoteStore>()
+            .TryGetAsync(quoteId, CancellationToken.None))!.Status);
+    }
+
+    [Fact]
+    public async Task StripeWebhook_MismatchedCheckoutIsRetryableWithoutApprovingQuote()
+    {
+        var eventId = $"evt_{Guid.NewGuid():N}";
+        var (quoteId, valid) = await PaidCheckoutAsync("audit.report", "mismatched-checkout", eventId);
+        var payload = JsonNode.Parse(valid)!;
+        payload["data"]!["object"]!["id"] = "cs_wrong_recorded_session";
+        var wrong = payload.ToJsonString();
+        var handler = _factory.Services.GetRequiredService<IBillingWebhookHandler>();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            handler.HandleStripeAsync(wrong, SignedWebhookFactory.Sign(wrong), CancellationToken.None));
+        Assert.Equal("Paid checkout does not match its recorded Laplace quote.", error.Message);
+        Assert.Equal("retryable", await _factory.Services.GetRequiredService<IBillingWebhookEventStore>()
+            .GetStatusAsync(eventId, CancellationToken.None));
+        Assert.Equal("pending_payment", (await _factory.Services.GetRequiredService<IBillingQuoteStore>()
+            .TryGetAsync(quoteId, CancellationToken.None))!.Status);
+
+        using var corrected = await PostStripeWebhookAsync(valid);
+        Assert.Equal(HttpStatusCode.OK, corrected.StatusCode);
+        Assert.Equal("approved", (await _factory.Services.GetRequiredService<IBillingQuoteStore>()
+            .TryGetAsync(quoteId, CancellationToken.None))!.Status);
+    }
+
+    [Fact]
+    public async Task StripeSubscriptionProviderRequiresConfiguredCredential()
+    {
+        var provider = new StripeSubscriptionGateway(Options.Create(new StripeBillingOptions()));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetAsync("sub_unconfigured", CancellationToken.None));
+        Assert.Equal("Stripe subscription synchronization requires its configured API credential.", error.Message);
     }
 
     [Fact]
@@ -425,8 +409,12 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         var payload = JsonSerializer.Serialize(new
         {
             id = $"evt_{Guid.NewGuid():N}",
+            @object = "event",
+            api_version = Stripe.StripeConfiguration.ApiVersion,
+            request = (object?)null,
+            created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             type = "checkout.session.completed",
-            data = new { @object = new { id = "cs_x", metadata = new { tenant = "attacker", service_id = "plan.studio" } } }
+            data = new { @object = new { @object = "checkout.session", id = "cs_x", metadata = new { tenant = "attacker", service_id = "plan.studio" } } }
         });
         var request = new HttpRequestMessage(HttpMethod.Post, "/v1/billing/webhooks/stripe")
         {
@@ -452,8 +440,12 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         var payload = JsonSerializer.Serialize(new
         {
             id = $"evt_{Guid.NewGuid():N}",
+            @object = "event",
+            api_version = Stripe.StripeConfiguration.ApiVersion,
+            request = (object?)null,
+            created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             type = "checkout.session.completed",
-            data = new { @object = new { id = "cs_x", metadata = new { tenant = "attacker", service_id = "plan.studio" } } }
+            data = new { @object = new { @object = "checkout.session", id = "cs_x", metadata = new { tenant = "attacker", service_id = "plan.studio" } } }
         });
         var request = new HttpRequestMessage(HttpMethod.Post, "/v1/billing/webhooks/stripe")
         {
@@ -658,6 +650,18 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
         Assert.Equal("recipe.compile", compile.RootElement.GetProperty("service_id").GetString());
         Assert.Equal("recipe.export", export.RootElement.GetProperty("service_id").GetString());
         Assert.True(export.RootElement.GetProperty("amount_cents").GetInt64() > compile.RootElement.GetProperty("amount_cents").GetInt64());
+    }
+
+    private async Task<(string QuoteId, string Payload)> PaidCheckoutAsync(
+        string serviceId, string tenant, string eventId, string? subscriptionId = null)
+    {
+        using var response = await _client.PostAsJsonAsync("/v1/billing/preflight", new { service_id = serviceId, units = 1, tenant });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var quote = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var quoteId = quote.RootElement.GetProperty("quote_id").GetString()!;
+        var sessionId = $"cs_{eventId}";
+        await WebhookTestEvents.BindCheckoutAsync(_factory.Services, quoteId, sessionId);
+        return (quoteId, WebhookTestEvents.PaidCheckout(eventId, tenant, serviceId, quoteId, sessionId, subscriptionId));
     }
 
     private async Task<HttpResponseMessage> PostStripeWebhookAsync(object payload) =>

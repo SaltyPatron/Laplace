@@ -45,7 +45,7 @@ class InstallTests(unittest.TestCase):
         path = self.base / "calls"
         return path.read_text() if path.exists() else ""
 
-    def test_chess_source_and_executable_selection_invalidate_publish_stamp(self):
+    def chess_publication_fixture(self):
         sources = [self.base / name for name in ("source-one", "source-two")]
         for source in sources:
             binary = source / "src/stockfish"
@@ -56,17 +56,40 @@ class InstallTests(unittest.TestCase):
         cc.parent.mkdir(parents=True)
         cc.write_text("#!/bin/sh\nexit 0\n")
         cc.chmod(0o755)
-        result = self.run_shell(function("phase_chess_lab") + r'''
+        # Exercise the real publication state machine. The controlled bootstrap
+        # materializes the GUI artifacts that its production contract now owns;
+        # GUI source/runtime verification is exercised by the verifier's own tests.
+        return sources, function("phase_chess_lab") + r'''
 ROOT="$PWD"
+export LAPLACE_CUTECHESS_GUI="$LAPLACE_INSTALL_PREFIX/bin/cutechess"
+export LAPLACE_CUTECHESS_GUI_RECEIPT="$PWD/cutechess-gui-build.json"
+export LAPLACE_CUTECHESS_BUILD="$PWD/cutechess-build"
+GUI_CHECKS="$PWD/gui-checks"
 fp_compute() { printf '%s\n' unchanged-files; }
 fp_check() { [[ -f "$FP_STAMP_DIR/$1" && $(cat "$FP_STAMP_DIR/$1") == "$2" ]]; }
 fp_record() { printf '%s\n' "$2" > "$FP_STAMP_DIR/$1"; }
 python3() {
-  if [[ "$*" == *--print-path* ]]; then printf '%s/src/stockfish\n' "$LAPLACE_STOCKFISH_SOURCE"; fi
+  if [[ "$*" == *--print-path* ]]; then
+    printf '%s/src/stockfish\n' "$LAPLACE_STOCKFISH_SOURCE"
+  elif [[ "$*" == *" --gui "* ]]; then
+    printf '%s\n' "$*" >> "$GUI_CHECKS"
+    [[ "${GUI_VERIFICATION_FAILURE:-0}" == 0 ]] || return 23
+  fi
 }
-bash() { printf 'published source=%s explicit=%s\n' "$LAPLACE_STOCKFISH_SOURCE" "${LAPLACE_STOCKFISH:-}" >> "$CALLS"; }
+bash() {
+  [[ "$#" == 2 && "$1" == "$ROOT/scripts/bootstrap-chess-lab.sh" && "$2" == --cutechess-gui ]] || return 77
+  printf 'published source=%s explicit=%s\n' "$LAPLACE_STOCKFISH_SOURCE" "${LAPLACE_STOCKFISH:-}" >> "$CALLS"
+  cp "$LAPLACE_INSTALL_PREFIX/bin/cutechess-cli" "$LAPLACE_CUTECHESS_GUI"
+  chmod +x "$LAPLACE_CUTECHESS_GUI"
+  printf '%s\n' '{"scope":"controlled-publication-fixture"}' > "$LAPLACE_CUTECHESS_GUI_RECEIPT"
+}
 export LAPLACE_STOCKFISH_SOURCE="$PWD/source-one"
-unset LAPLACE_STOCKFISH LAPLACE_CUTECHESS
+unset LAPLACE_STOCKFISH LAPLACE_CUTECHESS GUI_VERIFICATION_FAILURE
+'''
+
+    def test_chess_source_and_executable_selection_invalidate_publish_stamp(self):
+        sources, script = self.chess_publication_fixture()
+        result = self.run_shell(script + r'''
 phase_chess_lab
 phase_chess_lab
 export LAPLACE_STOCKFISH_SOURCE="$PWD/source-two"
@@ -80,6 +103,34 @@ phase_chess_lab
         self.assertIn("source=", calls[0])
         self.assertIn("source-two", calls[1])
         self.assertIn("explicit=" + str(sources[0] / "src/stockfish"), calls[2])
+        checks = (self.base / "gui-checks").read_text().splitlines()
+        self.assertEqual(1, len(checks), checks)
+        self.assertIn("--binary " + str(self.base / "install/bin/cutechess"), checks[0])
+        self.assertIn("--verify-receipt " + str(self.base / "cutechess-gui-build.json"), checks[0])
+
+    def test_chess_unchanged_stamp_requires_gui_artifacts_and_successful_reverification(self):
+        _, script = self.chess_publication_fixture()
+        result = self.run_shell(script + r'''
+phase_chess_lab
+phase_chess_lab
+rm "$LAPLACE_CUTECHESS_GUI"
+phase_chess_lab
+phase_chess_lab
+rm "$LAPLACE_CUTECHESS_GUI_RECEIPT"
+phase_chess_lab
+phase_chess_lab
+chmod -x "$LAPLACE_CUTECHESS_GUI"
+phase_chess_lab
+phase_chess_lab
+GUI_VERIFICATION_FAILURE=1 phase_chess_lab
+''')
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        # Missing or non-executable artifacts force publication even when the
+        # source fingerprint is unchanged. A verifier refusal cannot pass or
+        # silently replace the installed artifact with another bootstrap.
+        self.assertEqual(4, len(self.calls().splitlines()), self.calls())
+        checks = (self.base / "gui-checks").read_text().splitlines()
+        self.assertEqual(5, len(checks), checks)
 
     def test_install_manifest_detects_replacement_deletion_and_symlink_change(self):
         import runpy

@@ -23,7 +23,8 @@ public static class ResponseContent
 
     public static SubstrateChange BuildBootstrapChange()
     {
-        var b = new SubstrateChangeBuilder(Source, "bootstrap/Response", parentIntentId: null);
+        var b = new SubstrateChangeBuilder(Source, "bootstrap/Response", parentIntentId: null)
+            .DeclareSourcePrior(SourceTrust.SubstrateMandate);
         b.AddEntity(Source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId, Source);
         b.AddEntity(TextEntityBuilder.GraphemeTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
         b.AddEntity(TextEntityBuilder.WordTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
@@ -51,7 +52,8 @@ public static class ResponseContent
 
         var b = new SubstrateChangeBuilder(Source, intentLabel, parentIntentId,
             entityCapacity: entities.Length, physicalityCapacity: physicalities.Length,
-            attestationCapacity: attestations.Length);
+            attestationCapacity: attestations.Length)
+            .DeclareSourcePrior(SourceTrust.Response);
         foreach (var e in entities) b.AddEntity(e);
         foreach (var p in physicalities) b.AddPhysicality(p);
         foreach (var a in attestations) b.AddAttestation(a);

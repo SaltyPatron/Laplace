@@ -6,6 +6,7 @@ using Laplace.Engine.Core;
 using Laplace.Modality;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
+using Laplace.Decomposers.Abstractions;
 using Xunit;
 
 namespace Laplace.Chess.Service.Tests;
@@ -22,6 +23,59 @@ public sealed class ChessRecordingMeasurementTests
     [Fact]
     public void ExactWitnessSetAcceptsOriginalBody()
         => ChessRecordingMeasurement.ValidateWitnesses([Witness], [Stored(Witness)]);
+
+    [Fact]
+    public void ActualPgnHeadersDoNotBecomeExtraWitnessesThroughCartesianSelection()
+    {
+        // Already parsed, zero-move source record: this exercises the real recorder
+        // and native content/attestation owners without a second PGN parser.
+        var game = new ChessGameRecord(
+            "[Event \"readback-scope\"]\n[White \"White\"]\n[Black \"Black\"]\n[Result \"1-0\"]\n",
+            [], GameOutcome.WonBy(0), Id(20), Id(21), Id(22));
+        var builder = new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "readback-scope")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
+        ChessPgnDecomposer.RecordGame(game, builder);
+        var all = builder.Build().Attestations;
+        var expected = all.Where(a => ChessRecordingMeasurement.IsGameWitness(a, new HashSet<Hash128> { game.PlayingId })).ToArray();
+        var header = Assert.Single(all.Where(a => a.SubjectId == game.LineId
+            && a.TypeId == ChessVocabulary.HasEventType && a.ContextId == game.PlayingId));
+        Assert.DoesNotContain(header, expected);
+
+        // The old independent column sets admitted this genuine but unselected
+        // line-header witness and failed even though every selected row existed.
+        var oldRead = all.Where(a => expected.Any(e => e.SubjectId == a.SubjectId)
+            && expected.Any(e => e.TypeId == a.TypeId) && expected.Any(e => e.SourceId == a.SourceId)
+            && (a.ContextId is not null && expected.Any(e => e.ContextId == a.ContextId)
+                || a.ContextId is null && expected.Any(e => e.ContextId is null && e.SubjectId == a.SubjectId))).ToArray();
+        Assert.Contains(header, oldRead);
+        Assert.Throws<InvalidDataException>(() => ChessRecordingMeasurement.ValidateWitnesses(expected, oldRead.Select(Stored).ToArray()));
+
+        var scopes = ChessRecordingMeasurement.WitnessScopes(expected).ToHashSet();
+        bool Selected(AttestationRow row) => scopes.Contains(new(row.SubjectId, row.TypeId, row.SourceId, row.ContextId));
+        Assert.False(Selected(header));
+        var actual = all.Where(Selected).Select(Stored).ToArray();
+        ChessRecordingMeasurement.ValidateWitnesses(expected, actual);
+
+        // Exact tuple selection must still expose another object in the same
+        // proposition scope, rather than masking it by the expected witness ID.
+        var first = expected[0];
+        var conflict = NativeAttestation.CategoricalResolved(first.SubjectId, first.TypeId,
+            Id(99), first.SourceId, first.ContextId, SourceTrust.StructuredCorpus);
+        Assert.True(Selected(conflict));
+        Assert.Throws<InvalidDataException>(() => ChessRecordingMeasurement.ValidateWitnesses(
+            expected, actual.Append(Stored(conflict)).ToArray()));
+    }
+
+    [Fact]
+    public void WitnessScopeDeduplicatesOnlyCompleteTuples()
+    {
+        var rows = new[] { Witness, Witness with { Id = Id(90), ObjectId = Id(91) },
+            Witness with { Id = Id(92), SourceId = Id(93) }, Witness with { Id = Id(94), ContextId = null } };
+        var scopes = ChessRecordingMeasurement.WitnessScopes(rows);
+        Assert.Equal(3, scopes.Length);
+        Assert.Contains(new NpgsqlAttestationReads.WitnessScope(Witness.SubjectId, Witness.TypeId, Witness.SourceId, null), scopes);
+        Assert.Contains(new NpgsqlAttestationReads.WitnessScope(Witness.SubjectId, Witness.TypeId, Id(93), Witness.ContextId), scopes);
+    }
 
     [Theory]
     [InlineData("id")]

@@ -139,7 +139,8 @@ public sealed class ChessOpeningsDecomposer(bool recursive = false)
 
     internal static SubstrateChange ComposeLineForTest(string eco, string name, IReadOnlyList<string> sans)
     {
-        var b = new SubstrateChangeBuilder(ChessVocabulary.OpeningsSourceId, "test/openings");
+        var b = new SubstrateChangeBuilder(ChessVocabulary.OpeningsSourceId, "test/openings")
+            .DeclareSourcePrior(TC.AcademicCurated);
         AppendLine(b, new ChessModality(), sans.ToList(), eco, name);
         return b.SetInputUnitsConsumed(1).Build();
     }

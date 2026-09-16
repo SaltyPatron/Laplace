@@ -21,29 +21,33 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
         var source = H("source");
         var type = H("type");
         var first = H("entity/0");
-        string sourceHex = Convert.ToHexStringLower(source.ToBytes());
         string typeHex = Convert.ToHexStringLower(type.ToBytes());
         string firstHex = Convert.ToHexStringLower(first.ToBytes());
+        string attestationHex = Convert.ToHexStringLower(H("att").ToBytes());
+        string application = "physicality-durability-" + scope;
+        var connectionString = new NpgsqlConnectionStringBuilder(pg.ConnectionString)
+        { ApplicationName = application };
+        await using var applyDataSource = NpgsqlDataSource.Create(connectionString.ConnectionString);
         await using var setup = pg.DataSource.CreateCommand($"""
-            CREATE TABLE laplace.test_copy_durability (transaction_id bigint, commit_mode text);
+            CREATE TABLE laplace.test_copy_durability
+              (transaction_id bigint, commit_mode text, original_source_row boolean);
             CREATE FUNCTION laplace.test_copy_durability_capture() RETURNS trigger
             LANGUAGE plpgsql AS $$
             DECLARE selected boolean;
             BEGIN
+              IF current_setting('application_name') <> '{application}' THEN RETURN NEW; END IF;
               IF TG_ARGV[0] = 'entities' THEN
                 selected := NEW.type_id = decode('{typeHex}','hex');
               ELSIF TG_ARGV[0] = 'physicalities' THEN
                 selected := NEW.entity_id = decode('{firstHex}','hex');
               ELSE
-                selected := NEW.source_id = decode('{sourceHex}','hex');
+                selected := NEW.id = decode('{attestationHex}','hex');
               END IF;
-              IF selected THEN
-                IF current_setting('synchronous_commit') <> '{expected}' THEN
-                  RAISE EXCEPTION 'COPY did not use the selected commit acknowledgement';
-                END IF;
-                INSERT INTO laplace.test_copy_durability
-                VALUES (txid_current(), current_setting('synchronous_commit'));
+              IF current_setting('synchronous_commit') <> '{expected}' THEN
+                RAISE EXCEPTION 'COPY did not use the selected commit acknowledgement';
               END IF;
+              INSERT INTO laplace.test_copy_durability
+              VALUES (txid_current(), current_setting('synchronous_commit'), selected);
               RETURN NEW;
             END $$;
             CREATE TRIGGER test_copy_durability BEFORE INSERT ON laplace.entities
@@ -59,7 +63,8 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
         await setup.ExecuteNonQueryAsync();
         try
         {
-            var builder = new SubstrateChangeBuilder(source, "durability-copies");
+            var builder = new SubstrateChangeBuilder(source, "durability-copies")
+                .DeclareSourcePrior(SourceTrust.StructuredCorpus);
             // Several transport pages exercise detached COPY when the actual host
             // has parallel apply capacity; one-core environments retain one transaction.
             for (int i = 0; i < 1024; i++) builder.AddEntity(H("entity/" + i), 3, type);
@@ -70,7 +75,7 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
             builder.AddAttestation(new AttestationRow(H("att"), first, H("relation"), null,
                 source, null, AttestationOutcome.Confirm, IntentStage.PgEpochUnixUs, 1,
                 1_000_000_000L, 30_000_000_000L));
-            var writer = new NpgsqlSubstrateWriter(pg.DataSource, durability: mode);
+            var writer = new NpgsqlSubstrateWriter(applyDataSource, durability: mode);
             string? participantMode = null;
             var change = builder.Build();
             var applied = await writer.ApplyWorkingSetAtomicAsync([change], async (connection, transaction, _, ct) =>
@@ -79,17 +84,21 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
                 participantMode = settings.SynchronousCommit;
                 Assert.False(settings.WriteCommitAcknowledged);
             }, reconciliation: null);
+            PhysicalityWriterTestSupport.AssertAttempts(applied, 1024, 1, 1, 1);
             Assert.Equal(expected, participantMode);
             var commit = Assert.IsType<PostgresCommitReceipt>(applied.PostgresCommit);
             Assert.Equal(expected, commit.SynchronousCommit);
             Assert.True(commit.WriteCommitAcknowledged);
             Assert.Equal(mode == PostgresWriteDurability.Synchronous, commit.LocalWalFlushAcknowledged);
             await using var observed = pg.DataSource.CreateCommand(
-                "SELECT count(DISTINCT transaction_id), count(*) FROM laplace.test_copy_durability");
+                "SELECT count(DISTINCT transaction_id), count(*), "
+                + "count(*) FILTER (WHERE original_source_row) FROM laplace.test_copy_durability");
             await using (var rows = await observed.ExecuteReaderAsync())
             {
                 Assert.True(await rows.ReadAsync());
-                Assert.Equal(1026L, rows.GetInt64(1));
+                Assert.Equal((long)applied.EntitiesInserted + applied.PhysicalitiesInserted
+                    + applied.AttestationsInserted, rows.GetInt64(1));
+                Assert.Equal(1026L, rows.GetInt64(2));
                 Assert.Equal(rows.GetInt64(0), applied.CopyTransactionsStarted);
                 Assert.Equal(applied.CopyTransactionsStarted, applied.CopyTransactionsCommitted);
             }

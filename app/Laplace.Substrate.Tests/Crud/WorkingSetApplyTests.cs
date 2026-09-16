@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
@@ -28,7 +29,7 @@ public class WorkingSetApplyTests
         Id: PhysicalityId.Compute(H(seed), PhysicalityType.Content),
         EntityId: H(seed), SourceId: H("source"),
         Type: PhysicalityType.Content, CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
-        HilbertIndex: default, TrajectoryXyzm: null, NConstituents: 0,
+        HilbertIndex: Hilbert128.Encode([0.1, 0.2, 0.3, 0.4]), TrajectoryXyzm: null, NConstituents: 0,
         AlignmentResidual: null, SourceDim: null,
         ObservedAtUnixUs: IntentStage.PgEpochUnixUs);
 
@@ -72,22 +73,24 @@ public class WorkingSetApplyTests
         var src = H("source/repeat");
 
         SubstrateChange Change() => new SubstrateChangeBuilder(src, "repeat-unit")
+            .DeclareSourcePrior(H("source"), SourceTrust.StructuredCorpus)
             .AddEntity(Entity("repeat/e1"))
             .AddPhysicality(Phys("repeat/e1"))
             .AddAttestation(Att("repeat", 3, IntentStage.PgEpochUnixUs + 1_000_000))
             .Build();
 
         var first = await writer.ApplyAsync(Change());
-        Assert.Equal(1, first.EntitiesInserted);
-        Assert.Equal(1, first.PhysicalitiesInserted);
-        Assert.Equal(1, first.AttestationsInserted);
+        PhysicalityWriterTestSupport.AssertAttempts(first, 1, 1, 1, 1);
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
+            [H("repeat/e1")], [Phys("repeat/e1").Id], [H("att/repeat")]);
 
         var second = await writer.ApplyAsync(Change());
         Assert.Equal(0, second.EntitiesInserted);
         Assert.Equal(0, second.PhysicalitiesInserted);
         Assert.Equal(0, second.AttestationsInserted);
-        Assert.Equal(1, second.EntitiesSkippedAtMerge);
-        Assert.Equal(1, second.PhysicalitiesSkippedAtMerge);
+        PhysicalityWriterTestSupport.AssertAttempts(second, 1, 1, 1, 1);
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
+            [H("repeat/e1")], [Phys("repeat/e1").Id], [H("att/repeat")]);
 
         var (games, _) = await AttStateAsync(H("att/repeat"));
         Assert.Equal(3, games); // unchanged five-tuple is the same witness
@@ -150,12 +153,14 @@ public class WorkingSetApplyTests
         // A concurrent ingest committed entity X (with its physicality)
         // after our descent claimed it novel — the interior-subtree case.
         var concurrent = new SubstrateChangeBuilder(src, "subtract-concurrent")
+            .DeclareSourcePrior(H("source"), SourceTrust.StructuredCorpus)
             .AddEntity(Entity("subtract/x"))
             .AddPhysicality(Phys("subtract/x"))
             .Build();
         await writer.ApplyAsync(concurrent);
 
         var workingSet = new SubstrateChangeBuilder(src, "subtract-ws")
+            .DeclareSourcePrior(H("source"), SourceTrust.StructuredCorpus)
             .AddEntity(Entity("subtract/x"))
             .AddPhysicality(Phys("subtract/x"))
             .AddEntity(Entity("subtract/y"))
@@ -163,10 +168,10 @@ public class WorkingSetApplyTests
             .Build();
 
         var result = await writer.ApplyWorkingSetAsync(workingSet);
-        Assert.Equal(1, result.EntitiesInserted);
-        Assert.Equal(1, result.PhysicalitiesInserted);
-        Assert.Equal(1, result.EntitiesSkippedAtMerge);
-        Assert.Equal(1, result.PhysicalitiesSkippedAtMerge);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 2, 2, 0, 2);
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
+            [H("subtract/x"), H("subtract/y")],
+            [Phys("subtract/x").Id, Phys("subtract/y").Id], []);
 
         Assert.Equal(1L, await CountEntityAsync(H("subtract/y")));
         Assert.Equal(1L, await CountEntityAsync(H("subtract/x")));
@@ -180,6 +185,7 @@ public class WorkingSetApplyTests
         var subj = H("structural/e1");
 
         SubstrateChange Change(string unit, long games) => new SubstrateChangeBuilder(src, unit)
+            .DeclareSourcePrior(H("source"), SourceTrust.StructuredCorpus)
             .AddEntity(Entity("structural/e1"))
             .AddPhysicality(Phys("structural/e1"))
             .AddAttestation(new AttestationRow(
@@ -192,8 +198,9 @@ public class WorkingSetApplyTests
         // novel in the SAME batch, so the structural filter proves it novel
         // without a probe — it must still COPY.
         var first = await writer.ApplyWorkingSetAsync(Change("structural-a", 2));
-        Assert.Equal(1, first.EntitiesInserted);
-        Assert.Equal(1, first.AttestationsInserted);
+        PhysicalityWriterTestSupport.AssertAttempts(first, 1, 1, 1, 1);
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
+            [subj], [Phys("structural/e1").Id], [H("att/structural")]);
         var (games, _) = await AttStateAsync(H("att/structural"));
         Assert.Equal(2, games);
 
@@ -201,7 +208,11 @@ public class WorkingSetApplyTests
         // present now, the filter no longer fires, and the attestation rides
         // the routed merge lane.
         var second = await writer.ApplyWorkingSetAsync(Change("structural-b", 5));
-        Assert.Equal(0, second.AttestationsInserted);
+        PhysicalityWriterTestSupport.AssertAttempts(second, 1, 1, 1, 1);
+        // The new source unit contributes a distinct generated HAS_PHYSICALITY
+        // witness; the explicitly supplied original attestation remains unchanged.
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
+            [subj], [Phys("structural/e1").Id], [H("att/structural")]);
         (games, _) = await AttStateAsync(H("att/structural"));
         Assert.Equal(2, games);
     }

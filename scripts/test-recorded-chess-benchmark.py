@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the API measurement boundary and rejection of unrecorded results."""
+import copy
 import hashlib
 import importlib.util
 import json
@@ -76,6 +77,56 @@ class RecordedChessTests(unittest.TestCase):
         self.assertEqual(4, result["gamesPerSecondRecording"])
         self.assertAlmostEqual(2 / .7, result["gamesPerSecondRecordingAndReadback"])
         self.assertEqual(120, result["verifiedRecordedPlies"])
+
+    def test_new_playings_do_not_become_new_lines_when_only_observation_identity_changes(self):
+        # Exact readback bodies share a canonical line but have distinct playing IDs,
+        # as happens when Event/Round differ between real completed playings.
+        result = bench.validate_recording(*self.fixture(), 4)
+        inventory = result["contentInventory"]
+        self.assertEqual(2, result["newlyRecordedPlayings"])
+        self.assertEqual(2, inventory["playings"])
+        self.assertEqual(1, inventory["distinctStartPositions"])
+        self.assertEqual(1, inventory["distinctLines"])
+        self.assertEqual(1, inventory["distinctOrderedLines"])
+        self.assertEqual(1, inventory["repeatedLinePlayings"])
+        self.assertEqual(2, inventory["maximumPlayingsSharingLine"])
+        self.assertEqual("single-line", inventory["classification"])
+        self.assertFalse(inventory["multipleStartPositionsAndLines"])
+        self.assertEqual(.5, result["gamesPerSecondEndToEnd"])
+
+    def test_inventory_uses_ordered_native_content_and_preserves_multiplicity(self):
+        games = copy.deepcopy(self.fixture()[0]["games"])
+        games[0].update(lineId="a" * 32, moveIds=["b" * 32, "c" * 32])
+        games[1].update(lineId="A" * 32, moveIds=["B" * 32, "C" * 32])
+        games += [dict(games[0], playingId="8" * 32, lineId="d" * 32,
+                       moveIds=["c" * 32, "b" * 32]),
+                  dict(games[0], playingId="9" * 32, lineId="e" * 32,
+                       startPositionId="f" * 32)]
+        inventory = bench.content_inventory(games)
+        self.assertEqual((4, 2, 3, 3, 1), tuple(inventory[key] for key in
+            ("playings", "distinctStartPositions", "distinctLines", "distinctOrderedLines", "repeatedLinePlayings")))
+        self.assertEqual([2, 1, 1], [line["games"] for line in inventory["lineCounts"]])
+        self.assertTrue(inventory["multipleStartPositionsAndLines"])
+        self.assertEqual(inventory, bench.content_inventory(list(reversed(games))))
+
+    def test_inventory_refuses_conflicting_claims_about_exact_native_line_identity(self):
+        for mutation in ("start", "order", "line-id"):
+            games = copy.deepcopy(self.fixture()[0]["games"])
+            games[0]["moveIds"] = games[1]["moveIds"] = ["a" * 32, "b" * 32]
+            if mutation == "start": games[1]["startPositionId"] = "c" * 32
+            elif mutation == "order": games[1]["moveIds"] = list(reversed(games[0]["moveIds"]))
+            else: games[1]["lineId"] = "d" * 32
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, "conflicting"):
+                bench.content_inventory(games)
+
+    def test_combined_cases_count_repeated_content_across_new_experiments_once(self):
+        first = bench.validate_recording(*self.fixture(), 4)
+        second = copy.deepcopy(first)
+        second["verifiedPlayingIds"] = ["8" * 32, "9" * 32]
+        actual = bench.aggregate_content_inventory([first, second])
+        self.assertEqual((4, 1, 1, 3), tuple(actual[key] for key in
+            ("playings", "distinctLines", "distinctOrderedLines", "repeatedLinePlayings")))
+        self.assertFalse(actual["multipleStartPositionsAndLines"])
 
     def test_poll_and_transfer_delay_do_not_cap_server_throughput_or_disappear(self):
         data = self.fixture()
@@ -231,7 +282,8 @@ class RecordedChessTests(unittest.TestCase):
                 self.assertEqual("/chess/lab/stop/owned-job", calls[-1])
 
     def sustained(self, *, durations=(20, 20), duration=30, deadline=500, max_cases=10,
-                  duplicate=False, fail_at=None, games_per_case=1, checkpoint_seconds=2):
+                  duplicate=False, fail_at=None, games_per_case=1, checkpoint_seconds=2,
+                  inventory_seconds=0, corrupt_inventory_at=None, checkpoints=None):
         clock = [0.0]
         calls = []
         result = {}
@@ -240,14 +292,24 @@ class RecordedChessTests(unittest.TestCase):
             calls.append((request, timeout))
             clock[0] += durations[min(index, len(durations)-1)]
             identity = 0 if duplicate else index
+            inventory = bench.content_inventory([self.fixture()[0]["games"][0]] * games_per_case)
+            if index == corrupt_inventory_at:
+                inventory["lineCounts"][0]["startPositionId"] = "f" * 32
             return {"status": "failed" if index == fail_at else "passed",
                     "jobId": f"job-{identity}", "verifiedPlayingIds": [f"game-{identity}-{n}" for n in range(games_per_case)],
                     "verifiedRecordedGames": games_per_case, "verifiedRecordedPlies": 80 * games_per_case,
+                    "contentInventory": inventory,
                     "elapsedSeconds": {"total": 1}, "writer": {"applyCalls": 1}}
         def checkpoint():
+            if checkpoints is not None: checkpoints.append(copy.deepcopy(result))
             clock[0] += checkpoint_seconds  # Real coordinator work belongs in the aggregate denominator.
+        aggregate = bench.aggregate_content_inventory
+        def inventory(cases):
+            clock[0] += inventory_seconds
+            return aggregate(cases)
         with mock.patch.object(bench.time, "monotonic", side_effect=lambda: clock[0]), \
-             mock.patch.object(bench, "run_case", side_effect=case):
+             mock.patch.object(bench, "run_case", side_effect=case), \
+             mock.patch.object(bench, "aggregate_content_inventory", side_effect=inventory):
             bench.run_sustained(None, Path("unused"), bench.game_request(2, 4, 1, 1, 16),
                 duration, deadline, 600, .2, max_cases, {"limit": 100, "used": 0},
                 50, set(), set(), result, checkpoint)
@@ -262,6 +324,9 @@ class RecordedChessTests(unittest.TestCase):
         self.assertAlmostEqual(2 / 46, result[bench.SUSTAINED_METRIC])
         self.assertAlmostEqual(86400 * 2 / 46, result["gamesPerDayExtrapolated"])
         self.assertEqual(2, result["writerTotals"]["applyCalls"])
+        self.assertEqual(2, result["newlyRecordedPlayings"])
+        self.assertEqual(1, result["contentInventory"]["distinctLines"])
+        self.assertEqual(1, result["contentInventory"]["repeatedLinePlayings"])
         self.assertFalse(result["targetMet"])
         self.assertTrue(all(call[0]["config"]["rounds"] == 2 for call in calls))
 
@@ -298,6 +363,29 @@ class RecordedChessTests(unittest.TestCase):
         self.assertFalse(result["targetMet"])
         self.assertIn("deadline", result["error"])
 
+    def test_cross_case_inventory_corruption_retains_failed_checkpoint_and_original_error(self):
+        for fail_at, duration in ((None, 30), (2, 60)):
+            checkpoints = []
+            result, _ = self.sustained(corrupt_inventory_at=1, fail_at=fail_at,
+                                       duration=duration, checkpoints=checkpoints)
+            with self.subTest(fail_at=fail_at):
+                self.assertEqual("failed", result["status"])
+                self.assertIsNone(result["contentInventory"])
+                self.assertFalse(result["durationQualified"])
+                self.assertFalse(result["targetMet"])
+                self.assertIn("conflicting start positions", result["contentInventoryError"])
+                self.assertEqual(result, checkpoints[-1])
+                if fail_at is not None:
+                    self.assertIn("recorded-game acceptance failed", result["error"])
+
+    def test_final_inventory_cost_is_in_denominator_and_respects_deadline(self):
+        result, _ = self.sustained(deadline=50, inventory_seconds=10)
+        self.assertEqual(56, result["elapsedSeconds"])
+        self.assertAlmostEqual(2 / 56, result[bench.SUSTAINED_METRIC])
+        self.assertEqual("failed", result["status"])
+        self.assertFalse(result["durationQualified"])
+        self.assertIn("final inventory bookkeeping", result["error"])
+
     def test_explicit_short_duration_cannot_qualify_capacity(self):
         result, _ = self.sustained(duration=1, durations=(.1, .1))
         self.assertFalse(result["durationQualified"])
@@ -325,6 +413,7 @@ class RecordedChessTests(unittest.TestCase):
             return {"status": "passed", "jobId": str(index),
                 "verifiedPlayingIds": [f"{index * 2:032x}", f"{index * 2 + 1:032x}"],
                 "verifiedRecordedGames": 2, "verifiedRecordedPlies": 160,
+                "contentInventory": bench.content_inventory(self.fixture()[0]["games"]),
                 **{field: rate for field in bench.RATE_BOUNDARIES}, "writer": {"applyCalls": 1}}
         with tempfile.TemporaryDirectory() as root, \
              mock.patch.object(bench, "Client", return_value=Client()), \

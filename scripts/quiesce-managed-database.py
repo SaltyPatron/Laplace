@@ -29,6 +29,8 @@ STATE = Path("/var/lib/laplace-managed")
 PROC = Path("/proc")
 RECEIPTS = Path("/build/laplace/recovery/legacy-content-service-quiescence")
 REPAIR_RECEIPTS = Path("/build/laplace/recovery/legacy-content-repair")
+CHESS_OBSERVATION_RECEIPTS = Path("/build/laplace/recovery/chess-position-outcomes")
+CHESS_APPLICATION_ENV = "LAPLACE_CHESS_OBSERVATION_APPLICATION_NAME"
 MAX_METADATA_BYTES = 64 * 1024
 MAX_BYTES = 512 * 1024 * 1024
 MAX_LINE_BYTES = 2 * 1024 * 1024
@@ -483,9 +485,50 @@ def repair_lifecycle_command(command: list[str]) -> bool:
         and Path(command[1]).resolve() == Path(__file__).resolve().with_name("repair-legacy-content-lifecycle.sh")
 
 
+def chess_observation_command(command: list[str]) -> bool:
+    return len(command) == 2 and Path(command[0]).name == "bash" \
+        and Path(command[1]).resolve() == Path(__file__).resolve().with_name("repair-chess-position-outcomes.sh")
+
+
+def chess_database_observation(application_name: str) -> dict:
+    """Read the exact cluster and any remaining sessions of this source transition.
+
+    The source procedure commits bounded batches, so one xid cannot represent its
+    outcome. Its durable pending receipt requires replay/reconciliation; its unique
+    transport application name establishes that no old backend is still mutating.
+    """
+    if re.fullmatch(r"laplace-chess-outcome-[0-9a-f]{32}", application_name) is None:
+        raise ValueError("invalid chess transition database session identity")
+    prefix = Path(os.environ.get("LAPLACE_PG_PREFIX", "/opt/laplace/pgsql-18"))
+    command = [str(prefix / "bin/psql"), "-XqAt", "-w", "-v", "ON_ERROR_STOP=1",
+        "-h", "/var/run/postgresql", "-p", "5432", "-U", os.environ.get("PGUSER", "laplace_admin"), "-d", "laplace"]
+    sql = f"""BEGIN READ ONLY;
+SET LOCAL statement_timeout='5s';
+SELECT jsonb_build_object('database',current_database(),
+ 'database_oid',(SELECT oid::text FROM pg_database WHERE datname=current_database()),
+ 'system_identifier',(SELECT system_identifier::text FROM pg_control_system()),
+ 'sessions',coalesce((SELECT jsonb_agg(jsonb_build_object('pid',pid,'backend_start',backend_start,
+ 'state',state,'query_start',query_start)) FROM
+ (SELECT pid,backend_start,state,query_start FROM pg_stat_activity
+  WHERE application_name='{application_name}' LIMIT 129) owned),'[]'::jsonb));
+COMMIT;
+"""
+    result = subprocess.run(command, input=sql, capture_output=True, text=True, check=True, timeout=10)
+    if len(result.stdout.encode()) > MAX_METADATA_BYTES:
+        raise ValueError("chess transition database observation exceeds metadata bound")
+    observed = json.loads(result.stdout)
+    if not isinstance(observed, dict) or observed.get("database") != "laplace" \
+            or not isinstance(observed.get("sessions"), list) \
+            or any(not isinstance(observed.get(key), str) or not observed[key].isdecimal()
+                   for key in ("database_oid", "system_identifier")):
+        raise ValueError("incomplete chess transition database identity")
+    return observed
+
+
 class Quiescence:
     def __init__(self, directory: Path, *, state: Path = STATE, proc: Path = PROC,
                  repair_root: Path = REPAIR_RECEIPTS, resources: MaintenanceResources | None = None,
+                 chess_root: Path = CHESS_OBSERVATION_RECEIPTS,
                  execute=run):
         self.directory, self.state, self.proc, self.execute = directory, state, proc, execute
         self.prior: dict[str, dict] = {}
@@ -494,6 +537,7 @@ class Quiescence:
         self.transaction = None
         self.repair_root = repair_root
         self.resources = resources
+        self.chess_root = chess_root
 
     def record(self, name: str, value: dict) -> None:
         write_new_json(self.directory / (name + ".json"), value)
@@ -570,6 +614,28 @@ class Quiescence:
                                             "managed_main_pids": [0, 0, 0]})
 
     def repair_outcomes(self, *, permit_finished_unknown: bool = False) -> list[Path]:
+        chess_estate = self.directory / "chess-observation-estate.json"
+        if chess_estate.exists():
+            estate = bounded_metadata(chess_estate)
+            if estate.get("transaction_identity") != self.transaction \
+                    or estate.get("root") != str(self.chess_root.resolve()):
+                raise ValueError("chess observation estate does not belong to this maintenance transaction")
+            if standalone_writers(self.proc, set()):
+                raise ValueError("a chess transition writer is still running; services remain quiesced")
+            observed = chess_database_observation(estate.get("application_name", ""))
+            self.record("chess-observation-database-" + uuid.uuid4().hex, observed)
+            if any(observed.get(key) != estate.get("database_identity", {}).get(key)
+                   for key in ("database", "database_oid", "system_identifier")) or observed["sessions"]:
+                raise ValueError("chess transition database differs or its backend is still present; services remain quiesced")
+            pending = self.chess_root / "pending.json"
+            if pending.exists():
+                value = bounded_metadata(pending)
+                if value.get("Database") != observed["database"]:
+                    raise ValueError("pending chess source transition targets another database")
+                if not permit_finished_unknown:
+                    raise ValueError("chess source transition requires complete retained-evidence reconciliation; services remain quiesced")
+                return [pending]
+            return []
         bindings = sorted(self.directory.glob("repair-attempt-*.json"))
         estate_path = self.directory / "repair-estate.json"
         if not bindings and not estate_path.exists():
@@ -636,7 +702,8 @@ class Quiescence:
                 raise ValueError("held managed writer is no longer stopped: " + name)
         if standalone_writers(self.proc, set()):
             raise ValueError("standalone database writers remain; held transaction was not released")
-        if not any(self.directory.glob("repair-attempt-*.json")) and not (self.directory / "repair-estate.json").exists():
+        if not any(self.directory.glob("repair-attempt-*.json")) and not (self.directory / "repair-estate.json").exists() \
+                and not (self.directory / "chess-observation-estate.json").exists():
             raise ValueError("held service transaction has no bound repair attempt")
         pending = self.repair_outcomes(permit_finished_unknown=True)
         self.record("resume-confirmed-" + uuid.uuid4().hex, {"transaction_identity": identity,
@@ -713,15 +780,22 @@ def main() -> int:
             raise ValueError("resume receipt is not the single unresolved owned service transaction")
         if args.resume_if_needed and not pending:
             return 0
+        if args.resume_if_needed and chess_observation_command(command) and pending \
+                and not (pending[0] / "chess-observation-estate.json").exists():
+            # This source-specific probe neither claims nor restores another
+            # maintenance owner's retained transaction.
+            return 0
         if pending:
             directory = pending[0]
             invoked = json.loads((directory / "maintenance-command.json").read_text())
-            if not repair_lifecycle_command(command) or invoked.get("repair_lifecycle") is not True \
+            if not (repair_lifecycle_command(command) or chess_observation_command(command)) \
+                    or invoked.get("repair_lifecycle") is not True \
                     or invoked.get("argv_sha256") != hashlib.sha256(json.dumps(command).encode()).hexdigest():
                 raise ValueError("held repair must resume through its original measurement-lane lifecycle command")
             resources = MaintenanceResources.create(directory, repair_root=REPAIR_RECEIPTS,
                 max_bytes=args.max_bytes, max_line_bytes=args.max_line_bytes, max_prior_bytes=args.max_prior_bytes,
-                max_current_readback_bytes=args.max_current_readback_bytes, timeout_seconds=args.timeout_seconds)
+                max_current_readback_bytes=args.max_current_readback_bytes, timeout_seconds=args.timeout_seconds) \
+                if repair_lifecycle_command(command) else None
             boundary = Quiescence(directory, resources=resources)
             boundary.resume()  # A rejected resume must never enter restore().
         else:
@@ -729,7 +803,7 @@ def main() -> int:
             directory.mkdir(mode=0o770)
             sync_directory(RECEIPTS)
             write_new_json(directory / "maintenance-command.json", {
-                "repair_lifecycle": repair_lifecycle_command(command),
+                "repair_lifecycle": repair_lifecycle_command(command) or chess_observation_command(command),
                 "argv_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest()})
             resources = MaintenanceResources.create(directory, repair_root=REPAIR_RECEIPTS,
                 max_bytes=args.max_bytes, max_line_bytes=args.max_line_bytes, max_prior_bytes=args.max_prior_bytes,
@@ -742,14 +816,25 @@ def main() -> int:
                 if repair_lifecycle_command(command):
                     boundary.record("repair-estate", {"transaction_identity": boundary.transaction,
                         "repair_root": str(boundary.repair_root.resolve())})
+                elif chess_observation_command(command):
+                    application_name = "laplace-chess-outcome-" + uuid.uuid4().hex
+                    database = chess_database_observation(application_name)
+                    if database["sessions"]:
+                        raise ValueError("new chess transition identity already has database sessions")
+                    boundary.record("chess-observation-estate", {"transaction_identity": boundary.transaction,
+                        "root": str(boundary.chess_root.resolve()), "application_name": application_name,
+                        "database_identity": {key: database[key] for key in ("database", "database_oid", "system_identifier")}})
             environment = {**os.environ, "LAPLACE_DATABASE_QUIESCENCE_RECEIPT": str(directory.resolve())}
+            if chess_observation_command(command):
+                environment[CHESS_APPLICATION_ENV] = bounded_metadata(directory / "chess-observation-estate.json")["application_name"]
             if resources is not None:
                 resources.check_deadline()
                 environment[RESOURCE_ENV] = str(resources.path.resolve())
             else:
                 environment.pop(RESOURCE_ENV, None)
             return subprocess.run(command, check=False, env=environment,
-                timeout=resources.deadline - time.monotonic() if resources is not None else None).returncode
+                timeout=resources.deadline - time.monotonic() if resources is not None
+                    else args.timeout_seconds if chess_observation_command(command) else None).returncode
         finally:
             boundary.restore()
 

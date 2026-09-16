@@ -10,7 +10,7 @@ public enum IntentStageTable
     Attestations = 3,
 }
 
-public sealed class IntentStage : SafeHandle
+public sealed partial class IntentStage : SafeHandle
 {
     public const long PgEpochUnixUs = 946684800000000L;
 
@@ -284,6 +284,7 @@ public sealed class IntentStage : SafeHandle
         rootId = default;
         if (canonical.IsEmpty) return false;
         ThrowIfDisposed();
+        int firstPhysicality = PhysicalityCount;
 
         unsafe
         {
@@ -296,6 +297,7 @@ public sealed class IntentStage : SafeHandle
                 if (rc == -3) throw new InvalidOperationException(
                     "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
                 if (rc != 0) return false;
+                RecordPhysicalitySourceSince(firstPhysicality, sourceId);
                 rootId = root;
                 return true;
             }
@@ -325,6 +327,7 @@ public sealed class IntentStage : SafeHandle
         rootId = default;
         ArgumentNullException.ThrowIfNull(tree);
         ThrowIfDisposed();
+        int firstPhysicality = PhysicalityCount;
         unsafe
         {
             Hash128 src = sourceId;
@@ -346,6 +349,7 @@ public sealed class IntentStage : SafeHandle
             if (rc == -3) throw new InvalidOperationException(
                 "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
             if (rc != 0) return false;
+            RecordPhysicalitySourceSince(firstPhysicality, sourceId);
             rootId = root;
             return true;
         }
@@ -413,6 +417,7 @@ public sealed class IntentStage : SafeHandle
         rootId = default;
         ArgumentNullException.ThrowIfNull(tree);
         ThrowIfDisposed();
+        int firstPhysicality = PhysicalityCount;
         unsafe
         {
             Hash128 src = sourceId;
@@ -434,6 +439,7 @@ public sealed class IntentStage : SafeHandle
             if (rc == -3) throw new InvalidOperationException(
                 "modality ladder emit requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
             if (rc != 0) return false;
+            RecordPhysicalitySourceSince(firstPhysicality, sourceId);
             rootId = root;
             return true;
         }

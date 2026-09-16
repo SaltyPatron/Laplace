@@ -98,6 +98,10 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "super_fibonacci")]
     internal static partial void SuperFibonacci(nuint n, double* outQuats);
 
+    [LibraryImport(Library, EntryPoint = "laplace_byte_atoms_copy")]
+    internal static partial int ByteAtomsCopy(Hash128* ids, double* coordinates,
+        Hilbert128* hilberts, nuint capacity);
+
     [LibraryImport(Library, EntryPoint = "math4d_centroid")]
     internal static partial void Math4dCentroid(double* points, nuint nPoints, double* out4);
 
@@ -670,6 +674,8 @@ public static unsafe partial class NativeInterop
         public Hilbert128 Hilbert;
         public byte Tier;
         private byte _pad1, _pad2, _pad3, _pad4, _pad5, _pad6, _pad7;
+        public nuint FirstPhysicalityRow;
+        public nuint EmittedPhysicalityRows;
     }
 
     // --- Modality ladders above shared codepoint T0 (packaging buffers in, compose out) ---

@@ -96,7 +96,7 @@ public static class ChessLabRunners
             EvalTerm.All, bias, ttBits: 16,
             positionEvaluator: positionEvaluator, tablebase: tablebase);
         return (state, rng) => search.Think(
-            state.Board, new Search.Limits(MaxDepth: depth), ct).BestMove!.Value;
+            state, new Search.Limits(MaxDepth: depth), ct).BestMove!.Value;
     }
 
     public static async Task RunLadderAsync(ChessLabService lab, ChessLabService.JobSlot slot, CancellationToken ct)

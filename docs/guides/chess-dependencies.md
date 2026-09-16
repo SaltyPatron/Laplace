@@ -28,7 +28,8 @@ runtime libraries through Qt's own deployment tool.
 ## Installation and checks
 
 The normal Linux host setup and product publish invoke
-`scripts/bootstrap-chess-lab.sh`. Windows publishing invokes
+`scripts/bootstrap-chess-lab.sh --cutechess-gui` and build both official CMake
+targets, `cli` and `gui`. Windows publishing invokes
 `scripts/win/build-cutechess.cmd` and builds Stockfish from its Git checkout.
 The source trees use `LAPLACE_EXTERNAL`: `/build/external` by default on the
 Linux host and the repository's `external` directory on Windows. Source updates
@@ -42,7 +43,7 @@ root. The existing `LAPLACE_STOCKFISH` executable override still takes precedenc
 Run the installed dependency report from the repository:
 
 ```sh
-python3 scripts/check-chess-dependencies.py --prefix /opt/laplace --check-latest
+python3 scripts/check-chess-dependencies.py --prefix /opt/laplace --check-latest --cutechess-gui
 ```
 
 On Windows, provide the published UCI executable and use the same environment as
@@ -65,6 +66,84 @@ are missing. File presence and pairing do not certify complete tablebase coverag
 or checksums. A successful executable report alone does not claim complete data
 ingestion or online Lichess connectivity. The normal publish also runs an actual
 short Cute Chess match against the published Laplace UCI application.
+
+## Installed Cute Chess GUI and Qt capability
+
+Linux setup and product publication build the official GUI executable from the
+same verified Cute Chess source as the tournament CLI. They install the direct
+executable at `/opt/laplace/bin/cutechess` by default and persist
+`LAPLACE_CUTECHESS_GUI` plus `LAPLACE_CUTECHESS_GUI_RECEIPT` in the service
+configuration. The retained `laplace-cutechess-gui-build.json` binds the source
+commit and committed bytes, executable SHA-256, CMake cache, selected Qt SDK
+configuration files and available platform/SVG plugin hashes.
+
+The probe executes that GUI with `-platform offscreen --version`. Upstream
+constructs its QApplication before handling this option. A passing receipt
+requires the selected Cute Chess and Qt versions, successful process exit, and
+Qt's loader diagnostic identifying the exact selected offscreen plugin. Linux
+probes use temporary XDG settings directories under the build volume, preserving
+the operator's application settings. The doctor rechecks the current source,
+installed executable and Qt inputs against the retained build before probing.
+
+This establishes headless QApplication initialization. The receipt explicitly
+leaves interactive desktop readiness unverified: it does not open a window,
+run the event loop, or prove X11/Wayland connectivity. Platform and SVG plugin
+files are inventoried separately; their presence does not imply they were loaded.
+The seven required SDK modules are Core, Gui, Widgets, Concurrent, Svg,
+PrintSupport and Core5Compat. SDK module configuration hashes do not claim
+complete runtime shared-library identity.
+
+Launch the installed GUI from a working desktop session with
+`/opt/laplace/bin/cutechess`. The doctor receipt supplies the actual configured
+direct executable and selected Qt runtime/plugin environment when paths differ.
+On Linux this prepends the selected SDK library directory ahead of inherited
+library search paths. Qt is
+the GUI runtime; it is not another server to boot.
+
+Bare chess bootstrap calls may opt in with `--cutechess-gui` or
+`LAPLACE_CUTECHESS_GUI_BUILD=1`. Once a GUI executable or build receipt exists,
+later bootstrap calls rebuild it from the selected source alongside the CLI.
+Product publish always requests the GUI, and its unchanged-input path rechecks
+the installed GUI against the retained source build. The read-only chess
+benchmark readiness step also requires this proof. These dependency checks do not
+start corpus admission, game generation, or throughput benchmarks; those remain
+explicit operator operations.
+
+The separate virtual-X11 acceptance helper tests the installed GUI's event loop
+and actions on an owned display:
+
+```sh
+bash scripts/bootstrap-laplace-runner.sh chess-gui-runtime
+python3 scripts/check-cutechess-gui-session.py \
+  --binary /opt/laplace/bin/cutechess \
+  --receipt /build/cutechess/laplace-cutechess-gui-build.json \
+  --work /build/laplace/work \
+  --output-dir /build/laplace/recovery/cutechess-gui-session-manual-001 \
+  --timeout-seconds 60
+```
+
+Use the installed configuration's GUI and receipt paths when they differ. The
+output directory must be new so a prior acceptance result cannot be overwritten.
+Normal host setup installs the same X11 runtime dependencies. The narrow
+`chess-gui-runtime` bootstrap mode installs only those host libraries, fonts and
+tools; it does not modify the PostgreSQL cluster or register a runner.
+
+The helper requires `xvfb`, `xauth`, `xdotool` and `x11-utils`, plus the host
+libraries needed by the selected SDK's xcb platform plugin, following
+[Qt's Linux platform requirements](https://doc.qt.io/qt-6/linux-requirements.html).
+It starts its own
+authenticated Xvfb display, binds the GUI process and executable to the verified
+source build, and requires the selected xcb plugin to load. It observes a mapped
+main window, opens the actual New Game dialog with Ctrl+N, cancels with Escape,
+and requires a normal zero-status exit after Ctrl+Q. Both windows must belong to
+the same GUI process, and the dialog must be transient for the observed main
+window. Forced cleanup never counts as successful application exit.
+
+The receipt's scope is `virtual-x11-interactive`. It proves these actual window
+and event-loop interactions; it does not prove an operator's desktop session,
+engine play, or visual board correctness. The receipt and process logs are
+retained on failure as well as success. Temporary settings, Xauthority and display
+processes belong to this invocation and are removed when it finishes.
 
 ## Measured hart-server configuration (2026-09-15)
 
@@ -244,3 +323,75 @@ health. Startup verifies the token, its `bot:play` scope and the account's BOT
 title before establishing the event stream. It does not upgrade an account
 automatically. Token contents are never part of the dependency report or CLI
 startup output. Use the managed service's existing server-side token configuration.
+
+
+## Explicit complete acceptance on the installed machine
+
+The benchmark evidence workflow also offers suite `acceptance`.
+It runs independently of product deployment. After the selected main revision
+has completed deployment, create an explicitly named
+`verify/chess-acceptance-<invocation>` branch at that **exact commit**, without
+an extra branch-only commit. That narrowly scoped push invokes the same acceptance
+job and provides an execution path when workflow dispatch is unavailable. Ordinary
+main pushes do not select this work.
+
+The acceptance receipt records the requested and executed revision, fixed profile,
+individual phase status and duration, and every retained artifact's SHA-256.
+The installed-form native guard verifies the source fingerprints, tested CMake
+install bytes, installed extension SQL, migrations and all required chess ROMs.
+Fresh managed publications must match the current API, UCI, MCP and Lichess DLL
+and runtime configuration bytes. A mismatched runtime blocks corpus admission
+and game recording; it is never attributed to the requested revision.
+
+Before measurement, the explicit job inventories the requested local Stockfish
+directory without reading source/configuration contents, installs the bounded X11
+host package set, invokes the normal official-source chess provisioning owner,
+and records latest-release/NNUE/dependency and actual GUI interaction checks.
+It retains API/UI response observations, service timestamps, and sanitized Lichess
+account/event-stream readiness. A running process alone does not establish online
+readiness. An unconfigured online account remains visibly unconfigured.
+
+The fixed acceptance profile then retains:
+
+- Full selected official Stockfish source admission and exact native readback,
+  followed by a separate zero-amplification repeat.
+- Complete generated and recorded games: 24 games, depth 4, concurrency 1/2/4,
+  three repetitions, 600 seconds per case, a 7,200-second collector deadline,
+  and a separate duration-qualified window of at least 30 seconds.
+- Retained source admission: 16 complete games and two exact zero-writer replays,
+  with generation, admission and replay rates kept separate.
+- Prepared-corpus admission capacity: two authentic 24-game matches are completed
+  and retained before one sequential admission window. Every fresh playing is
+  committed and read back; each source job then has one exact zero-writer replay.
+  Preparation and measurement have separate 3,600-second deadlines and receipts.
+  A sample shorter than 30 seconds remains unqualified for sustained capacity.
+- GeometryZM storage: 100,000 existing unique rows, 10,000 rows per transaction,
+  concurrency 1/2/4, three repetitions and exact committed binary readback.
+- Stockfish/CuteChess configuration calibration with three repetitions and two
+  reserved logical CPUs, followed by another installed-native and service check.
+
+One shared host lock covers this sequence, including adjacent preparation and
+admission without an API restart between them. The self-hosted acceptance job has
+a finite 600-minute outer deadline to accommodate the independent per-phase
+envelopes; that deadline is not a claimed runtime. Independent measurements retain their
+own failures; a failed match does not erase the separate geometry result.
+Complete games have no move cap or adjudicated early stop. Geometry rows and
+retained replays are never counted as newly recorded games. The 2,500-games/s
+target has separate verdicts for the complete recorded workflow and prepared-corpus
+admission. A 48-game prepared pool cannot establish 2,500 games/s over 30 seconds;
+that would require at least 75,000 authentic fresh occurrences. See
+[retained capacity](../benchmarks/RETAINED_CHESS_CAPACITY.md) for the exact timing
+scope, content inventory and qualification rules.
+
+The job preserves failure evidence and excludes the private corpus selection file
+from its uploaded artifact. Service response times are labeled as response latency;
+current unit timestamps do not constitute a cold application boot measurement.
+The narrow GUI package command inventories installed package versions without sudo
+and installs only missing packages through root or noninteractive sudo.
+Before corpus and game measurement, the explicit startup phase invokes the existing
+API restart and managed activation owners, then verifies the complete application,
+UI, and configured Lichess account/event stream. It records old/new process IDs and
+monotonic process starts and measures restart request through full readiness. This
+is service startup with existing OS caches, not a machine cold reboot. Preserved
+operator-stopped services receive no startup claim. Services are not restarted
+during recorded-game timing.

@@ -157,6 +157,30 @@ jobs:
           flock --exclusive --close /build/laplace/work/host-resource.lock \
             python3 scripts/prove-live-recursive-substrate.py "${PGDATABASE:-laplace}"
 
+      - name: Resolve the Stockfish checkout for application publication
+        if: env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
+        env:
+          CONFIGURED_STOCKFISH_SOURCE: ${{ vars.LAPLACE_STOCKFISH_SOURCE }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CONFIGURED_STOCKFISH_SOURCE" ]]; then
+            export LAPLACE_STOCKFISH_SOURCE="$CONFIGURED_STOCKFISH_SOURCE"
+          fi
+          output="/build/laplace/work/stockfish-source-selection/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$output"
+          python3 scripts/install-stockfish.py --source-receipt \
+            --prefer-source /vault/External/Stockfish/SF_19 > "$output/source-selection.json"
+          python3 - "$output/source-selection.json" <<'PY'
+          import json, os, sys
+          selection = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(json.dumps(selection, sort_keys=True))
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              if selection["checkout_status"] != "pending-default-install":
+                  output.write("LAPLACE_STOCKFISH_SOURCE=" + selection["source"] + "\n")
+              output.write("LAPLACE_STOCKFISH=" + selection["executable"] + "\n")
+          PY
+
+
       - name: Reserve host for product phases
         id: product_session
         if: env.LAPLACE_FAST_ONLY != '1'
@@ -261,6 +285,14 @@ jobs:
         if: contains(env.LAPLACE_CI_PHASES, '|publish|')
         run: python3 "${LAPLACE_PHASE_CHECKOUT}/scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase publish
 
+      - name: Verify the installed direct build uses the selected Stockfish checkout
+        if: contains(env.LAPLACE_CI_PHASES, '|publish|')
+        run: |
+          output="/build/laplace/work/stockfish-source-selection/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          python3 scripts/install-stockfish.py --verify-source-receipt "$output/source-selection.json" \
+            > "$output/source-build.json"
+          cat "$output/source-build.json"
+
       - name: Verify ordinary operational execution
         id: product_operational_execution
         if: contains(env.LAPLACE_CI_PHASES, '|operational-execution|')
@@ -348,6 +380,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Retain chess playing observation migration evidence
+        if: always() && env.LAPLACE_FAST_ONLY != '1' && (env.LAPLACE_STAGE == 'all' || env.LAPLACE_STAGE == 'applications')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-chess-observation-migration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/recovery/chess-position-outcomes/${{ github.run_id }}-${{ github.run_attempt }}-*/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Retain existing live recursive proof receipts
         if: always()
         env:
@@ -377,3 +418,12 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+
+      - name: Retain exact Stockfish source selection
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: stockfish-source-selection-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/stockfish-source-selection/${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: warn
+          retention-days: 14

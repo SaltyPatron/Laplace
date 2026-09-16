@@ -20,7 +20,7 @@ public sealed class UdSentenceEmitterTests
     }
 
     [Fact]
-    public void SentenceEmitsOneParseAndOneLanguageClaim_NotTokenGlobalClaims()
+    public void SentenceProjectsTypedAnnotationsWithParseOccurrenceScope()
     {
         byte[] text = Utf8("The cat sat.");
         var sentence = Sentence(text,
@@ -34,7 +34,8 @@ public sealed class UdSentenceEmitterTests
         Hash128 hasParse = RelationTypeRegistry.Resolve("HAS_PARSE").Id;
         Hash128 hasLanguage = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
         AttestationRow parseClaim = Assert.Single(change.Attestations.Where(a => a.TypeId == hasParse));
-        AttestationRow languageClaim = Assert.Single(change.Attestations.Where(a => a.TypeId == hasLanguage));
+        AttestationRow languageClaim = Assert.Single(change.Attestations.Where(a =>
+            a.TypeId == hasLanguage && a.ContextId is null));
 
         Assert.Equal(ContentTierSpine.ResolveRoot(text), parseClaim.SubjectId);
         Assert.Equal(parseId, parseClaim.ObjectId);
@@ -43,21 +44,37 @@ public sealed class UdSentenceEmitterTests
         Assert.Equal(LanguageReference.Resolve("en"), languageClaim.ObjectId);
         Assert.Equal(3, parse.Tokens.Count);
 
-        string[] removedOccurrenceProjections =
-        [
-            "HAS_POS", "HAS_XPOS", "IS_LEMMA_OF", "HAS_PART",
-            "HAS_DEFINITION", "TRANSCRIBES_AS",
-        ];
-        foreach (string relation in removedOccurrenceProjections)
+        Hash128 occurrence = parseClaim.ContextId!.Value;
+        Hash128 hasPos = RelationTypeRegistry.Resolve("HAS_POS").Id;
+        Hash128 hasXpos = RelationTypeRegistry.Resolve("HAS_XPOS").Id;
+        Hash128 isLemmaOf = RelationTypeRegistry.Resolve("IS_LEMMA_OF").Id;
+        Assert.Equal(4, change.Attestations.Count(row => row.TypeId == hasLanguage));
+        foreach (UdParseStructure.DecodedToken token in parse.Tokens)
         {
-            Hash128 relationId = RelationTypeRegistry.Resolve(relation).Id;
-            Assert.DoesNotContain(change.Attestations, a => a.TypeId == relationId);
+            AssertProjectedClaim(change, token.FormId, hasLanguage, parse.LanguageId, occurrence);
+            AssertProjectedClaim(change, token.FormId, hasPos, token.UposId, occurrence);
+            AssertProjectedClaim(change, token.FormId, hasXpos, token.XposId, occurrence);
+            var feature = Assert.Single(token.Features);
+            AssertProjectedClaim(change, token.FormId, feature.RelationId, feature.ValueId, occurrence);
         }
-        Assert.DoesNotContain(change.Attestations, a =>
-            a.TypeId == RelationTypeRegistry.ResolveDeprel("det").Id
-            || a.TypeId == RelationTypeRegistry.ResolveDeprel("nsubj").Id
-            || a.TypeId == RelationTypeRegistry.ResolveDeprel("root").Id
-            || a.TypeId == RelationTypeRegistry.ResolveFeature("Number").Id);
+        AssertProjectedClaim(change, parse.Tokens[0].LemmaId, isLemmaOf, parse.Tokens[0].FormId, occurrence);
+        AssertProjectedClaim(change, parse.Tokens[2].LemmaId, isLemmaOf, parse.Tokens[2].FormId, occurrence);
+        Assert.DoesNotContain(change.Attestations, row =>
+            row.TypeId == isLemmaOf && row.SubjectId == row.ObjectId);
+        AssertProjectedClaim(change, parse.Tokens[1].FormId,
+            RelationTypeRegistry.ResolveDeprel("det").Id, parse.Tokens[0].FormId, occurrence);
+        AssertProjectedClaim(change, parse.Tokens[2].FormId,
+            RelationTypeRegistry.ResolveDeprel("nsubj").Id, parse.Tokens[1].FormId, occurrence);
+        Assert.Equal(16, change.Attestations.Count(row =>
+            row.ContextId == occurrence && row.TypeId != hasParse));
+
+        // Explicit source annotations become attributed relation cells. Order,
+        // root status and MWT expansion remain in the exact parse trajectory.
+        foreach (string relation in new[] { "HAS_PART", "HAS_DEFINITION", "TRANSCRIBES_AS" })
+            Assert.DoesNotContain(change.Attestations, row =>
+                row.TypeId == RelationTypeRegistry.Resolve(relation).Id);
+        Assert.DoesNotContain(change.Attestations, row =>
+            row.TypeId == RelationTypeRegistry.ResolveDeprel("root").Id);
     }
 
     [Fact]
@@ -69,7 +86,8 @@ public sealed class UdSentenceEmitterTests
             Token(2, had, Utf8("have"), "AUX", "VBN", [], 1, "dep"),
             Token(3, had, Utf8("have"), "AUX", "VBN", [], 2, "dep"));
 
-        var parse = EmitAndDecode(sentence).Parse;
+        var emitted = EmitAndDecode(sentence);
+        var parse = emitted.Parse;
 
         Assert.Equal(3, parse.Tokens.Count);
         Assert.Single(parse.Tokens.Select(t => t.FormId).Distinct());
@@ -78,6 +96,19 @@ public sealed class UdSentenceEmitterTests
         Assert.Equal(UdParseStructure.RootId, parse.Tokens[0].HeadRefId);
         Assert.Equal(UdParseStructure.TokenRefId("1"), parse.Tokens[1].HeadRefId);
         Assert.Equal(UdParseStructure.TokenRefId("2"), parse.Tokens[2].HeadRefId);
+        Hash128 occurrence = ParseClaim(emitted.Change).ContextId!.Value;
+        AssertProjectedClaim(emitted.Change, parse.Tokens[0].FormId,
+            RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id, parse.LanguageId, occurrence, 3);
+        AssertProjectedClaim(emitted.Change, parse.Tokens[0].FormId,
+            RelationTypeRegistry.Resolve("HAS_POS").Id, parse.Tokens[0].UposId, occurrence, 3);
+        AssertProjectedClaim(emitted.Change, parse.Tokens[0].LemmaId,
+            RelationTypeRegistry.Resolve("IS_LEMMA_OF").Id, parse.Tokens[0].FormId, occurrence, 3);
+        AssertProjectedClaim(emitted.Change, parse.Tokens[0].FormId,
+            RelationTypeRegistry.Resolve("HAS_XPOS").Id, parse.Tokens[0].XposId, occurrence);
+        AssertProjectedClaim(emitted.Change, parse.Tokens[1].FormId,
+            RelationTypeRegistry.Resolve("HAS_XPOS").Id, parse.Tokens[1].XposId, occurrence, 2);
+        AssertProjectedClaim(emitted.Change, parse.Tokens[0].FormId,
+            RelationTypeRegistry.ResolveDeprel("dep").Id, parse.Tokens[0].FormId, occurrence, 2);
     }
 
     [Fact]
@@ -113,8 +144,11 @@ public sealed class UdSentenceEmitterTests
     {
         UdToken token = Token(1, "seen", "see", "VERB", "VBN", [], 0, "root",
             deps: "0:root|2:nsubj:pass");
-        var parse = EmitAndDecode(Sentence(Utf8("seen"), token)).Parse;
-        var enhanced = Assert.Single(parse.Tokens).Enhanced;
+        var emitted = EmitAndDecode(Sentence(Utf8("seen him"), token,
+            Token(2, "him", "he", "PRON", "PRP", [], 1, "obj")));
+        var parse = emitted.Parse;
+        Assert.Equal(2, parse.Tokens.Count);
+        var enhanced = parse.Tokens[0].Enhanced;
 
         Assert.Contains(enhanced, edge =>
             edge.HeadRefId == UdParseStructure.TokenRefId("2")
@@ -122,6 +156,22 @@ public sealed class UdSentenceEmitterTests
         Assert.DoesNotContain(enhanced, edge =>
             edge.HeadRefId == UdParseStructure.TokenRefId("2")
             && edge.RelationId == RelationTypeRegistry.ResolveEnhancedDeprel("nsubj").Id);
+        Hash128 occurrence = ParseClaim(emitted.Change).ContextId!.Value;
+        AssertProjectedClaim(emitted.Change, parse.Tokens[1].FormId,
+            RelationTypeRegistry.ResolveEnhancedDeprel("nsubj:pass").Id,
+            parse.Tokens[0].FormId, occurrence);
+        Assert.DoesNotContain(emitted.Change.Attestations, row =>
+            row.TypeId == RelationTypeRegistry.ResolveEnhancedDeprel("nsubj").Id);
+    }
+
+    [Fact]
+    public void EnhancedDependencyWithAbsentHeadIsRejected()
+    {
+        UdToken token = Token(1, "seen", "see", "VERB", "VBN", [], 0, "root",
+            deps: "0:root|2:nsubj:pass");
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
+            EmitAndDecode(Sentence(Utf8("seen"), token)));
+        Assert.Equal("Native UD witness projection failed: -2", error.Message);
     }
 
     [Fact]
@@ -139,7 +189,7 @@ public sealed class UdSentenceEmitterTests
     }
 
     [Fact]
-    public void MiscAndMultiwordRangesRemainInsideTheParseStructure()
+    public void MiscAndMultiwordRangesRetainExactStructureAndScopedLanguageClaims()
     {
         var sentence = new UdSentence(
             Utf8("du monde"),
@@ -177,7 +227,18 @@ public sealed class UdSentenceEmitterTests
             && item.ValueId == UdParseStructure.PresentId);
 
         Hash128 hasLanguage = RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id;
-        Assert.Single(change.Attestations.Where(a => a.TypeId == hasLanguage));
+        Hash128 occurrence = ParseClaim(change).ContextId!.Value;
+        Assert.Equal(4, change.Attestations.Count(row => row.TypeId == hasLanguage));
+        AttestationRow sentenceLanguage = Assert.Single(change.Attestations.Where(row =>
+            row.TypeId == hasLanguage && row.ContextId is null));
+        Assert.Equal(parse.SentenceId, sentenceLanguage.SubjectId);
+        Assert.Equal(parse.LanguageId, sentenceLanguage.ObjectId);
+        AssertProjectedClaim(change, first.FormId, hasLanguage, LanguageReference.Resolve("fr"), occurrence);
+        AssertProjectedClaim(change, parse.Tokens[1].FormId, hasLanguage, parse.LanguageId, occurrence);
+        AssertProjectedClaim(change, mwt.FormId, hasLanguage, parse.LanguageId, occurrence);
+        Assert.DoesNotContain(change.Attestations, row =>
+            row.SubjectId == first.FormId && row.TypeId == hasLanguage
+            && row.ObjectId == parse.LanguageId);
     }
 
     [Fact]
@@ -268,13 +329,11 @@ public sealed class UdSentenceEmitterTests
         Assert.NotNull(parseClaim.ContextId);
         Assert.Equal(emitted.ParseId, parseClaim.ObjectId);
         Assert.All(emitted.Change.Entities, entity => Assert.Equal(witness.SourceId, entity.FirstObservedBy));
-        Assert.All(emitted.Change.Attestations, row => AssertWitness(
-            row, witness.SourceId,
-            row.TypeId == parseClaim.TypeId ? parseClaim.ContextId : witness.SourceFileContext,
-            witness.Trust));
-
         AttestationRow language = Assert.Single(emitted.Change.Attestations.Where(a =>
-            a.TypeId == RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id));
+            a.TypeId == RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id
+            && a.ContextId == witness.SourceFileContext));
+        AssertWitnessScopes(emitted.Change, parseClaim, language, witness.SourceId,
+            witness.SourceFileContext, witness.Trust);
         Assert.Equal(ContentTierSpine.ResolveRoot(sentence.TextUtf8), language.SubjectId);
         Assert.Equal(LanguageReference.Resolve("en"), language.ObjectId);
         UdParseStructure.DecodedToken token = Assert.Single(emitted.Parse.Tokens);
@@ -350,11 +409,39 @@ public sealed class UdSentenceEmitterTests
             <= explicitDefault.Change.Attestations.Min(row => row.LastObservedAtUnixUs));
         AttestationRow parseClaim = ParseClaim(implicitDefault.Change);
         Assert.NotNull(parseClaim.ContextId);
-        Assert.All(implicitDefault.Change.Attestations, row => AssertWitness(
-            row, UdSource, row.TypeId == parseClaim.TypeId ? parseClaim.ContextId : null,
-            SourceTrust.AcademicCurated));
+        AttestationRow language = Assert.Single(implicitDefault.Change.Attestations.Where(row =>
+            row.TypeId == RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id && row.ContextId is null));
+        AssertWitnessScopes(implicitDefault.Change, parseClaim, language, UdSource,
+            null, SourceTrust.AcademicCurated);
         Assert.DoesNotContain(implicitDefault.Change.Attestations,
             row => row.TypeId == RelationTypeRegistry.Resolve("CONTAINS").Id);
+    }
+
+    private static void AssertProjectedClaim(
+        SubstrateChange change, Hash128 subject, Hash128 relation, Hash128 obj,
+        Hash128 occurrence, long observationCount = 1)
+    {
+        AttestationRow row = Assert.Single(change.Attestations.Where(row =>
+            row.SubjectId == subject && row.TypeId == relation && row.ObjectId == obj
+            && row.ContextId == occurrence));
+        Assert.Equal(observationCount, row.ObservationCount);
+    }
+
+    private static void AssertWitnessScopes(
+        SubstrateChange change, AttestationRow parseClaim, AttestationRow sentenceLanguage,
+        Hash128 source, Hash128? fileContext, double trust)
+    {
+        Hash128 isA = RelationTypeRegistry.Resolve("IS_A").Id;
+        Hash128 contains = RelationTypeRegistry.Resolve("CONTAINS").Id;
+        // Vocabulary declarations, file containment and the sentence language
+        // use file scope. Native token annotations use the parse occurrence.
+        Assert.All(change.Attestations, row => AssertWitness(
+            row, source,
+            row.TypeId == isA || row.TypeId == contains || row.Id == sentenceLanguage.Id
+                ? fileContext : parseClaim.ContextId,
+            trust));
+        Assert.Equal(5, change.Attestations.Count(row =>
+            row.ContextId == parseClaim.ContextId && row.Id != parseClaim.Id));
     }
 
     private static AttestationRow ParseClaim(SubstrateChange change) =>

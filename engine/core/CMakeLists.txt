@@ -8,6 +8,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/hilbert4d.h
     include/laplace/core/mantissa.h
     include/laplace/core/super_fibonacci.h
+    include/laplace/core/byte_atoms.h
     include/laplace/core/glicko2.h
     include/laplace/core/score.h
     include/laplace/core/codepoint_table.h
@@ -19,6 +20,8 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/trajectory.h
     include/laplace/core/tier_tree.h
     include/laplace/core/intent_stage.h
+    include/laplace/core/physicality_descriptor.h
+    include/laplace/core/physicality_descriptor_admission.h
     include/laplace/core/ordered_composition.h
     include/laplace/core/merkle_dedup.h
     include/laplace/core/hash_composer.h
@@ -60,6 +63,7 @@ set(LAPLACE_CORE_SOURCES
     src/hilbert4d.c
     src/mantissa.c
     src/super_fibonacci.c
+    src/byte_atoms.c
     src/modality_decimal.c
     src/modality_witness.c
     src/image_decomposer.c
@@ -77,6 +81,11 @@ set(LAPLACE_CORE_SOURCES
     src/trajectory.c
     src/tier_tree.c
     src/intent_stage.c
+    src/physicality_descriptor.c
+    src/physicality_descriptor_stage.c
+    src/physicality_descriptor_read.c
+    src/physicality_descriptor_provider.c
+    src/physicality_descriptor_admission.cpp
     src/ordered_composition.c
     src/absence_filter.c
     src/merkle_dedup.c

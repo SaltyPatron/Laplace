@@ -271,6 +271,7 @@ run_suite() { step "$2"; }
 run_live_suite() { step "$1"; }
 run_install() { step native-install; }
 run_database_maintenance() { step database-maintenance; }
+resume_chess_observation_if_needed() { :; }
 restore_foundation_if_requested() { step foundation; }
 seed_operational_memory() { step operational-seed; }
 run_publish_with_recovery() { step publish; }
@@ -442,7 +443,7 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
             self.assertNotIn(forbidden, command)
         self.assertEqual("true", workflow["concurrency"]["cancel-in-progress"])
 
-    def test_private_database_proof_requires_each_source_and_session_case(self):
+    def test_private_database_proof_requires_each_source_session_physicality_and_chess_case(self):
         source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
         prefix = "Laplace.SubstrateCRUD.Tests."
         methods = [
@@ -452,6 +453,18 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
             prefix + "OperationalSourceExecutionTests.AuthoredAntonymTask_ExecutesNovelRequestThroughAdmittedWordBinding",
             prefix + "NativeSqlBatchTests.ConversationWriterResumesProjectionWithoutForgingContent",
             prefix + "NativeSqlBatchTests.LegacySessionContentIsPreservedAndRequiresExplicitRecovery",
+            prefix + "ChessPositionPlayingPersistenceTests.CompleteDistinctPlayingsFoldOnceAndExactReplayPreservesEvidenceAndStanding",
+            prefix + "NativeSqlBatchTests.WitnessScopesExcludeCrossProductsButRetainConflictingObjects",
+            prefix + "PhysicalityObservationWriterTests.OrdinaryWriterRetainsBothRawFormsAndReusesDurableDescriptorViewEvidence",
+            prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness",
+            prefix + "PhysicalityObservationWriterTests.ConsensusFoldsGeneratedEvidenceOncePerDistinctActualSourceUnit",
+            prefix + "PhysicalityObservationWriterTests.SourceOnlyJournalBackfillRequiresFreshVerificationAndAtomicGeneratedEvidence",
+            prefix + "PhysicalityObservationWriterTests.SourceOnlyConversationBackfillDoesNotAppendTheOriginalTurnAgain",
+            prefix + "PhysicalityObservationWriterTests.InvalidRawMetadataIsRejectedBeforeOpeningTheDatabase",
+            prefix + "SessionPhysicalityObservationTests.ExistingTurnAppendRetainsOldAndNewFormsAndWriterReplayDoesNotAppendAgain",
+            prefix + "SessionPhysicalityObservationTests.NativeSessionRollbackRetainsOriginalProjectionEvidenceAndFold",
+            prefix + "SessionPhysicalityObservationTests.WaitingReadCommittedAppenderReadsTheBodyCommittedAfterItsStatementStarted",
+            prefix + "PhysicalityObservationWriterTests.MissingCarrierRetainsDescriptorAndLaterContentCompletesOnlyItsView",
         ]
         expected_filter = "|".join("FullyQualifiedName=" + method for method in methods)
         self.assertIn("--filter '" + expected_filter + "'", source)
@@ -460,7 +473,22 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
                       source.split('rm -f ', 1)[1].split('PATH="$PG_PREFIX/bin:', 1)[0])
         validator = source.split('python3 - "$managed_results/operational-source-execution.trx" <<\'PY\'\n', 1)[1].split("\nPY\n", 1)[0]
         names = [methods[0], methods[1], methods[2], methods[3], methods[4] + "(batchPrefix: False)",
-                 methods[4] + "(batchPrefix: True)", methods[5]]
+                 methods[4] + "(batchPrefix: True)", methods[5], methods[6],
+                 prefix + "NativeSqlBatchTests.WitnessScopesExcludeCrossProductsButRetainConflictingObjects",
+                 prefix + "PhysicalityObservationWriterTests.OrdinaryWriterRetainsBothRawFormsAndReusesDurableDescriptorViewEvidence",
+                 prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness(variant: 0, transportedForms: 1, expectedWitnesses: 1)",
+                 prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness(variant: 1, transportedForms: 2, expectedWitnesses: 2)",
+                 prefix + "PhysicalityObservationWriterTests.SupplementalRawRowsCannotExcludeSelectedBodiesOrDuplicateTheirWitness(variant: 2, transportedForms: 3, expectedWitnesses: 2)",
+                 prefix + "PhysicalityObservationWriterTests.ConsensusFoldsGeneratedEvidenceOncePerDistinctActualSourceUnit",
+                 prefix + "PhysicalityObservationWriterTests.SourceOnlyJournalBackfillRequiresFreshVerificationAndAtomicGeneratedEvidence",
+                 prefix + "PhysicalityObservationWriterTests.SourceOnlyConversationBackfillDoesNotAppendTheOriginalTurnAgain",
+                 prefix + "PhysicalityObservationWriterTests.InvalidRawMetadataIsRejectedBeforeOpeningTheDatabase(partialTrajectory: False)",
+                 prefix + "PhysicalityObservationWriterTests.InvalidRawMetadataIsRejectedBeforeOpeningTheDatabase(partialTrajectory: True)",
+                 prefix + "SessionPhysicalityObservationTests.ExistingTurnAppendRetainsOldAndNewFormsAndWriterReplayDoesNotAppendAgain",
+                 prefix + "SessionPhysicalityObservationTests.NativeSessionRollbackRetainsOriginalProjectionEvidenceAndFold",
+                 prefix + "SessionPhysicalityObservationTests.WaitingReadCommittedAppenderReadsTheBodyCommittedAfterItsStatementStarted",
+                 prefix + "PhysicalityObservationWriterTests.MissingCarrierRetainsDescriptorAndLaterContentCompletesOnlyItsView",
+                 ]
 
         def receipt():
             root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
@@ -468,7 +496,7 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
             for name in names:
                 ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
             summary = ET.SubElement(root, "ResultSummary")
-            ET.SubElement(summary, "Counters", total="7", executed="7", passed="7",
+            ET.SubElement(summary, "Counters", total=str(len(names)), executed=str(len(names)), passed=str(len(names)),
                           failed="0", notExecuted="0")
             return root
 
@@ -491,7 +519,7 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
                 results = root.find("Results")
                 results.remove(next(result for result in results if result.get("testName") == missing_name))
                 check(root, False)
-        for corruption in ("missing", "repeated-theory", "wrong-test", "skipped", "failed", "counter-only"):
+        for corruption in ("missing", "repeated-theory", "repeated-form-variant", "wrong-test", "skipped", "failed", "counter-only"):
             with self.subTest(corruption=corruption):
                 root = receipt()
                 results = root.find("Results")
@@ -499,6 +527,8 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
                     results.remove(results[6])
                 elif corruption == "repeated-theory":
                     results[5].set("testName", names[4])
+                elif corruption == "repeated-form-variant":
+                    results[11].set("testName", names[10])
                 elif corruption == "wrong-test":
                     results[6].set("testName", prefix + "UnrelatedPassingTest")
                 elif corruption in ("skipped", "failed"):
@@ -506,6 +536,158 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
                 else:
                     root.find("ResultSummary/Counters").set("executed", "6")
                 check(root, False)
+
+    def test_private_database_executes_the_endpoint_identity_store(self):
+        source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
+        name = "Laplace.Endpoints.OpenAICompat.Tests.BrowserIdentityTests.PostgresIdentityStorePersistsAccountSessionAndConversation"
+        self.assertIn('identity_database="${REGRESS_DB}_identity"', source)
+        self.assertIn('"$PG_PREFIX/bin/createdb" "$identity_database"', source)
+        self.assertIn('-f "$ROOT/db/migrations/20260915000000_app_identity_sessions.sql"', source)
+        self.assertIn('LAPLACE_DB="Host=$socket_dir;Port=$PGPORT;Username=$PGUSER;Database=$identity_database"', source)
+        self.assertIn("--filter 'FullyQualifiedName=" + name + "'", source)
+        self.assertIn('rm -f -- "$identity_receipt"', source)
+        self.assertIn('"$PG_PREFIX/bin/dropdb" "$identity_database"', source)
+        validator = source.split("<<'PY_IDENTITY'\n", 1)[1].split("\nPY_IDENTITY\n", 1)[0]
+
+        def receipt():
+            root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
+            results = ET.SubElement(root, "Results")
+            ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
+            summary = ET.SubElement(root, "ResultSummary")
+            ET.SubElement(summary, "Counters", total="1", executed="1", passed="1",
+                          failed="0", notExecuted="0")
+            return root
+
+        for corruption in (None, "missing", "unrelated", "duplicate", "skipped", "failed", "counter"):
+            with self.subTest(corruption=corruption):
+                root = receipt()
+                results = root.find("Results")
+                if corruption == "missing":
+                    results.remove(results[0])
+                elif corruption == "unrelated":
+                    results[0].set("testName", name + "Unrelated")
+                elif corruption == "duplicate":
+                    ET.SubElement(results, "UnitTestResult", testName=name, outcome="Passed")
+                elif corruption in ("skipped", "failed"):
+                    results[0].set("outcome", "NotExecuted" if corruption == "skipped" else "Failed")
+                elif corruption == "counter":
+                    root.find("ResultSummary/Counters").set("executed", "0")
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "identity.trx"
+                    ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+                    result = subprocess.run([sys.executable, "-", str(path)], input=validator,
+                                            text=True, capture_output=True)
+                self.assertEqual(result.returncode == 0, corruption is None, result.stdout + result.stderr)
+
+    def test_private_database_executes_all_durable_billing_contracts(self):
+        source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
+        migrations = [
+            "20260611000000_app_billing.sql",
+            "20260722000000_app_billing_identity.sql",
+            "20260807020000_app_consume_credit.sql",
+            "20260915000000_app_identity_sessions.sql",
+            "20260916000000_app_workspace_invitations.sql",
+            "20260916000100_app_subscription_sync.sql",
+            "20260916000200_browser_ticket_identity_binding.sql",
+        ]
+        migration_positions = [source.index('-f "$ROOT/db/migrations/' + name + '"') for name in migrations]
+        self.assertEqual(migration_positions, sorted(migration_positions))
+        billing_filter = "--filter 'FullyQualifiedName~Laplace.Endpoints.OpenAICompat.Tests.PostgresBillingStoreContractTests.'"
+        self.assertIn(billing_filter, source)
+        self.assertLess(migration_positions[-1], source.index(billing_filter))
+        self.assertLess(source.index(billing_filter), source.index('"$PG_PREFIX/bin/dropdb" "$identity_database"'))
+        self.assertIn('rm -f -- "$billing_receipt"', source)
+        self.assertIn("--logger 'trx;LogFileName=billing-stores.trx'", source)
+        tests = (ROOT / "app/Laplace.Endpoints.OpenAICompat.Tests/BillingStoreContractTests.cs").read_text(encoding="utf-8")
+        self.assertIn('[Trait("Tier", "db")]\npublic sealed class PostgresBillingStoreContractTests', tests)
+        validator = source.split("<<'PY_BILLING'\n", 1)[1].split("\nPY_BILLING\n", 1)[0]
+        prefix = "Laplace.Endpoints.OpenAICompat.Tests.PostgresBillingStoreContractTests."
+        methods = [
+            "QuoteStore_PutGetUpdate_RoundTrips",
+            "Ledger_RecordsAndReadsNewestFirst",
+            "Entitlements_ActivateConsumeExhaustDeactivate",
+            "Entitlements_RenewResetsUsedCredits",
+            "WebhookEvents_DuplicateBeginIsRejected",
+            "PriceMap_SetOverwritesAndGets",
+            "ApiKeys_PutGetRevokeAndLabelLookup",
+            "Config_SetOverwritesAndGets",
+        ]
+
+        def receipt():
+            root = ET.Element("TestRun", xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
+            results = ET.SubElement(root, "Results")
+            for method in methods:
+                ET.SubElement(results, "UnitTestResult", testName=prefix + method, outcome="Passed")
+            summary = ET.SubElement(root, "ResultSummary")
+            ET.SubElement(summary, "Counters", total="8", executed="8", passed="8",
+                          failed="0", notExecuted="0")
+            return root
+
+        def check(root, passes):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "billing.trx"
+                ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+                result = subprocess.run([sys.executable, "-", str(path)], input=validator,
+                                        text=True, capture_output=True)
+            self.assertEqual(result.returncode == 0, passes, result.stdout + result.stderr)
+
+        check(receipt(), True)
+        for omitted in range(len(methods)):
+            with self.subTest(omitted=methods[omitted]):
+                root = receipt()
+                results = root.find("Results")
+                results.remove(results[omitted])
+                check(root, False)
+        for corruption in ("duplicate", "unrelated", "skipped", "failed", "counter"):
+            with self.subTest(corruption=corruption):
+                root = receipt()
+                results = root.find("Results")
+                if corruption == "duplicate":
+                    results[0].set("testName", results[1].get("testName"))
+                elif corruption == "unrelated":
+                    results[0].set("testName", prefix + "UnrelatedPassingTest")
+                elif corruption in ("skipped", "failed"):
+                    results[0].set("outcome", "NotExecuted" if corruption == "skipped" else "Failed")
+                else:
+                    root.find("ResultSummary/Counters").set("executed", "7")
+                check(root, False)
+
+    def test_private_native_database_requires_built_physicality_fixtures_in_order(self):
+        source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
+        self.assertIn('ctest --test-dir "$BUILD" --show-only=json-v1 -L regress > "$native_selection"', source)
+        self.assertIn('ctest --test-dir "$BUILD" --output-on-failure --no-tests=error -L regress', source)
+        validator = source.split("<<'PY_NATIVE_SELECTION'\n", 1)[1].split("\nPY_NATIVE_SELECTION\n", 1)[0]
+        required = ["physicality_descriptor_admission", "physicality_readback", "physicality_readback_cold"]
+        selection = {"tests": [{"name": "regress_laplace_substrate", "command": [
+            "/branch/pg_regress", "--use-existing", "bootstrap", *required]}]}
+
+        def check(document, passes):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "selection.json"
+                path.write_text(json.dumps(document), encoding="utf-8")
+                result = subprocess.run([sys.executable, "-", str(path)], input=validator,
+                                        text=True, capture_output=True)
+            self.assertEqual(result.returncode == 0, passes, result.stdout + result.stderr)
+
+        check(selection, True)
+        check({"tests": []}, False)
+        check({"tests": selection["tests"] * 2}, False)
+        disabled = copy.deepcopy(selection)
+        disabled["tests"][0]["properties"] = [{"name": "DISABLED", "value": True}]
+        check(disabled, False)
+        for fixture in required:
+            for mutation in ("missing", "repeated"):
+                with self.subTest(fixture=fixture, mutation=mutation):
+                    changed = copy.deepcopy(selection)
+                    command = changed["tests"][0]["command"]
+                    if mutation == "missing":
+                        command.remove(fixture)
+                    else:
+                        command.append(fixture)
+                    check(changed, False)
+        changed = copy.deepcopy(selection)
+        changed["tests"][0]["command"][-2:] = list(reversed(required[-2:]))
+        check(changed, False)
 
     def test_manual_db_mutation_shares_product_lifecycle_lock(self):
         db = load(WORKFLOWS / "db-ops.yml")
@@ -526,6 +708,7 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
         self.assertNotIn("ensure-foundation.sh", recreate["run"])
         self.assertIn("ensure-foundation.sh --force", restore["run"])
         self.assertEqual("inputs.operation == 'recreate' && inputs.restore_foundation", restore["if"])
+
 
     def test_seed_workflows_are_manual_or_reusable_not_source_triggered(self):
         for path in sorted(WORKFLOWS.glob("seed-*.yml")):
@@ -579,6 +762,44 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
     def step(workflows, filename, key, value):
         job = next(iter(workflows[filename]["jobs"].values()))
         return next(step for step in job["steps"] if step.get(key) == value)
+
+    def test_explicit_chess_acceptance_cannot_become_main_push_work(self):
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["on"]["push"].update(
+            {"branches": ["main"]}), "explicitly named operator branch")
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["acceptance"].update(
+            {"if": "always()"}), "acceptance must remain explicitly selected")
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["benchmark"].update(
+            {"if": "always()"}), "ordinary suites must exclude")
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["acceptance"].update(
+            {"needs": "product"}), "independent from deployment")
+
+    def test_acceptance_selector_distinguishes_reusable_main_push_from_operator_push(self):
+        workflow = load(WORKFLOWS / "benchmark-evidence.yml")
+        self.assertEqual(
+            "(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/verify/chess-acceptance-')) || inputs.suite == 'acceptance'",
+            workflow["jobs"]["acceptance"]["if"])
+        self.assertEqual(
+            "inputs.suite != 'acceptance' && (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/verify/chess-acceptance-'))",
+            workflow["jobs"]["benchmark"]["if"])
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["acceptance"].update(
+            {"if": "github.event_name == 'push' || inputs.suite == 'acceptance'"}),
+            "acceptance must remain explicitly selected")
+
+    def test_explicit_acceptance_retains_whole_job_deadline(self):
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["acceptance"].update(
+            {"timeout-minutes": "0"}), "finite whole-job envelope")
+
+    def test_explicit_acceptance_retains_lock_owner_and_failed_evidence(self):
+        def edit_execution(ws):
+            steps = ws["benchmark-evidence.yml"]["jobs"]["acceptance"]["steps"]
+            step = next(s for s in steps if s.get("id") == "chess_acceptance")
+            step["run"] = step["run"].replace("flock --exclusive --close", "true")
+        self.check_audit(edit_execution, "canonical locked owner")
+        def suppress_evidence(ws):
+            steps = ws["benchmark-evidence.yml"]["jobs"]["acceptance"]["steps"]
+            step = next(s for s in steps if s.get("name") == "Upload complete chess acceptance evidence")
+            step["if"] = "success()"
+        self.check_audit(suppress_evidence, "acceptance evidence must upload on failure")
 
     def test_deferred_readiness_and_optional_baseline_are_accepted(self):
         self.check_audit()
@@ -704,13 +925,37 @@ raise SystemExit(int(os.environ[mode]))
 bash() { echo publication-recovery; }
 ensure_api_running() { echo API-START; }
 run_publish() { echo published; }
+python3() {
+  if [[ "$*" == *'--resume-if-needed'* ]]; then return 0; fi
+  [[ "$*" == 'scripts/quiesce-managed-database.py --database laplace --timeout-seconds 3600 -- bash scripts/repair-chess-position-outcomes.sh' ]] || return 90
+  [[ "$LAPLACE_REPAIR_PUBLISHED_SOURCE" == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]] || return 91
+  echo observation-migration
+}
+git() { printf '%s\\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }
+PGDATABASE=laplace
 verify_operational_execution() { echo operational-proof-rejected; return 37; }
 run_phase publish
 run_phase operational-execution
 """
         result = subprocess.run(["bash", "-c", script], text=True, capture_output=True, timeout=10)
         self.assertEqual(37, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(["published", "operational-proof-rejected"], result.stdout.splitlines())
+        self.assertEqual(["published", "observation-migration", "operational-proof-rejected"], result.stdout.splitlines())
+
+    def test_observation_migration_failure_stops_acceptance_after_publication(self):
+        source = PRODUCT.read_text()
+        definitions = source[source.index("run_policy() {"):source.index('case "${2:-}" in')]
+        script = "set -euo pipefail\nstage=all\n" + definitions + """
+recover_publish() { echo unexpected-publication-rollback; }
+run_publish() { echo published; }
+python3() { if [[ "$*" == *'--resume-if-needed'* ]]; then return 0; fi; echo observation-migration-rejected; return 43; }
+git() { printf '%s\\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }
+verify_operational_execution() { echo unexpected-operational-proof; }
+run_phase publish
+run_phase operational-execution
+"""
+        result = subprocess.run(["bash", "-c", script], text=True, capture_output=True, timeout=10)
+        self.assertEqual(43, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(["published", "observation-migration-rejected"], result.stdout.splitlines())
 
     def test_failed_proof_cannot_be_hidden_at_step_or_job(self):
         mutations = [

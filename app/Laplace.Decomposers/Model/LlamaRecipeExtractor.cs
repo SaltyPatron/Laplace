@@ -163,7 +163,8 @@ public sealed class LlamaRecipeExtractor
         Hash128 architectureEntityId)
     {
         var b = new SubstrateChangeBuilder(sourceId, "recipe/config.json",
-            entityCapacity: 2, physicalityCapacity: 0, attestationCapacity: 8);
+            entityCapacity: 2, physicalityCapacity: 0, attestationCapacity: 8)
+            .DeclareSourcePrior(SourceTrust.AiModelProbe);
         StageLegacyRecipe(b, recipe, sourceId, modelRecipeTypeId, hasHiddenSizeTypeId, hasNumLayersTypeId,
             hasNumHeadsTypeId, hasNumKvHeadsTypeId, hasIntermSizeTypeId, hasVocabSizeTypeId,
             isATypeId, architectureEntityId);

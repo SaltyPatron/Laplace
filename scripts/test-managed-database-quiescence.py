@@ -397,6 +397,114 @@ class QuiescenceTests(unittest.TestCase):
             self.assertEqual(0,Q.main())
         constructor.assert_not_called()
 
+    def chess_estate(self):
+        self.boundary.chess_root = self.base / "chess-observations"
+        self.boundary.chess_root.mkdir()
+        observed = {"database":"laplace", "database_oid":"42", "system_identifier":"123456", "sessions":[]}
+        self.boundary.record("chess-observation-estate", {
+            "transaction_identity":self.boundary.transaction,
+            "root":str(self.boundary.chess_root),
+            "application_name":"laplace-chess-outcome-" + "a" * 32,
+            "database_identity":{key:value for key,value in observed.items() if key != "sessions"}})
+        return observed
+
+    def test_chess_pre_submission_failure_restores_original_services(self):
+        self.boundary.enter()
+        observed = self.chess_estate()
+        with patch.object(Q,"chess_database_observation",return_value=observed):
+            self.boundary.restore()
+        self.assertTrue((self.receipt / "restored.json").exists())
+        self.assertEqual(["active","active","inactive"], [self.states[n]["active_state"] for n in ("api","mcp","lichess")])
+
+    def test_chess_partial_transition_holds_then_exact_resume_restores_after_completion(self):
+        generation = {"source_sha":"a"*40}
+        with patch.object(Q,"published_application_generation",return_value=generation):
+            self.boundary.enter()
+            observed = self.chess_estate()
+            pending = self.boundary.chess_root / "pending.json"
+            pending.write_text(json.dumps({"Database":"laplace"}))
+            with patch.object(Q,"chess_database_observation",return_value=observed):
+                with self.assertRaisesRegex(ValueError,"complete retained-evidence reconciliation"):
+                    self.boundary.restore()
+                self.assertTrue((self.state / "transaction.json").exists())
+                self.boundary.resume()
+                self.assertFalse(any(c[-1] in ("commit","start") for c in self.calls))
+                pending.rename(self.boundary.chess_root / "completed-pending.json")
+                self.boundary.restore()
+        self.assertTrue((self.receipt / "restored.json").exists())
+
+    def test_chess_live_backend_wrong_cluster_or_pending_database_cannot_restore(self):
+        self.boundary.enter()
+        observed = self.chess_estate()
+        for change in ({"sessions":[{"pid":101}]}, {"system_identifier":"999"}, {"database_oid":"99"}):
+            with self.subTest(change=change), patch.object(Q,"chess_database_observation",return_value=observed | change):
+                with self.assertRaisesRegex(ValueError,"database differs or its backend"):
+                    self.boundary.restore()
+        pending = self.boundary.chess_root / "pending.json"
+        pending.write_text(json.dumps({"Database":"another"}))
+        with patch.object(Q,"chess_database_observation",return_value=observed):
+            with self.assertRaisesRegex(ValueError,"another database"):
+                self.boundary.repair_outcomes(permit_finished_unknown=True)
+        self.assertFalse(any(c[-1] in ("commit","start") for c in self.calls))
+
+    def test_chess_orphan_producer_prevents_restore_before_database_session_exists(self):
+        self.boundary.enter()
+        self.chess_estate()
+        self.process(212,["dotnet","/app/Laplace.Cli.dll","chess","repair-position-outcomes"],{"PGDATABASE":"laplace"})
+        with patch.object(Q,"chess_database_observation") as observe:
+            with self.assertRaisesRegex(ValueError,"writer is still running"):
+                self.boundary.restore()
+        observe.assert_not_called()
+        self.assertFalse(any(c[-1] in ("commit","start") for c in self.calls))
+
+    def test_chess_database_observation_authenticates_cluster_and_exact_session(self):
+        observed = {"database":"laplace", "database_oid":"42", "system_identifier":"123456", "sessions":[]}
+        response = subprocess.CompletedProcess(["psql"],0,stdout=json.dumps(observed))
+        name = "laplace-chess-outcome-" + "b"*32
+        with patch.object(Q.subprocess,"run",return_value=response) as execute:
+            self.assertEqual(observed,Q.chess_database_observation(name))
+        sql=execute.call_args.kwargs["input"]
+        for fragment in ("BEGIN READ ONLY", "pg_control_system()", "current_database()", "LIMIT 129", "application_name='"+name+"'"):
+            self.assertIn(fragment,sql)
+        self.assertEqual(10,execute.call_args.kwargs["timeout"])
+        with patch.object(Q.subprocess,"run") as execute:
+            with self.assertRaises(ValueError):Q.chess_database_observation("unbound-session")
+        execute.assert_not_called()
+
+    def test_chess_resume_probe_leaves_other_maintenance_owner_untouched(self):
+        self.boundary.enter()
+        command=["bash",str(ROOT / "scripts/repair-chess-position-outcomes.sh")]
+        with patch.object(Q,"RECEIPTS",self.base), patch.object(Q,"Quiescence") as constructor, \
+                patch.object(sys,"argv",["quiesce","--database","laplace","--resume-if-needed","--",*command]):
+            self.assertEqual(0,Q.main())
+        constructor.assert_not_called()
+        self.assertTrue((self.state / "transaction.json").exists())
+
+    def test_chess_repair_exec_replaces_launcher_before_timeout(self):
+        # Run the actual shell entrypoint in a minimal copied checkout. Its exec
+        # must make the observed producer the process subprocess.run owns/kills.
+        import shutil
+        import time
+        checkout = self.base / "checkout"
+        scripts = checkout / "scripts"; scripts.mkdir(parents=True)
+        shutil.copyfile(ROOT / "scripts/repair-chess-position-outcomes.sh", scripts / "repair-chess-position-outcomes.sh")
+        (scripts / "sync-managed-native-artifacts.sh").write_text("#!/bin/bash\nexit 0\n")
+        binary = self.base / "bin"; binary.mkdir()
+        producer = binary / "dotnet"
+        producer.write_text("#!"+sys.executable+"\nimport os,time,pathlib,sys\n"
+            +"pathlib.Path(os.environ['PRODUCER_PID']).write_text(str(os.getpid()))\n"
+            +"assert sys.argv[1].endswith('Laplace.Cli.dll')\n"
+            +"time.sleep(5)\npathlib.Path(os.environ['LATE_WRITE']).write_text('unsafe')\n")
+        producer.chmod(0o755)
+        pidfile=self.base / "producer.pid"; late=self.base / "late-write"
+        with self.assertRaises(subprocess.TimeoutExpired):
+            subprocess.run(["bash",str(scripts / "repair-chess-position-outcomes.sh")],
+                env={**os.environ,"PATH":str(binary)+os.pathsep+os.environ["PATH"],
+                     "PRODUCER_PID":str(pidfile),"LATE_WRITE":str(late)},timeout=0.5,check=True)
+        self.assertTrue(pidfile.is_file())
+        with self.assertRaises(ProcessLookupError):os.kill(int(pidfile.read_text()),0)
+        self.assertFalse(late.exists())
+
 class MaintenanceResourceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", "/build/laplace/work"))
@@ -589,7 +697,7 @@ class ProducerGenerationTests(unittest.TestCase):
 
 
 class ProductMaintenanceOrderTests(unittest.TestCase):
-    def test_product_deploy_preserves_preflight_without_automatic_repair(self):
+    def test_product_deploy_resumes_owned_chess_transition_before_install_and_preserves_preflight(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR","/build/laplace/work")) as temp:
             root=Path(temp);scripts=root / "scripts";scripts.mkdir()
             deploy=root / "deploy/linux";deploy.mkdir(parents=True)
@@ -604,25 +712,33 @@ class ProductMaintenanceOrderTests(unittest.TestCase):
             (scripts / "quiesce-managed-database.py").write_text(
                 'import os,sys\n'
                 'with open(os.environ["TRACE"],"a") as f:f.write("quiesce:"+" ".join(sys.argv[1:])+"\\n")\n'
-                'sys.exit(91 if "--resume-if-needed" in sys.argv else 0)\n')
-            for fail in (False,True):
-                trace=root / ("failure.log" if fail else "success.log")
+                'sys.exit(int(os.environ.get("RESUME_FAILURE","0")) if "--resume-if-needed" in sys.argv else 0)\n')
+            for fail,resume_fail in ((False,False),(True,False),(False,True)):
+                trace=root / (f"trace-{fail}-{resume_fail}.log")
                 result=subprocess.run(["bash",str(scripts / "product-ci.sh"),"deploy"],capture_output=True,text=True,
                     env={**os.environ,"TRACE":str(trace),"PREFLIGHT_FAILURE":"37" if fail else "0",
+                         "RESUME_FAILURE":"91" if resume_fail else "0",
                          "LAPLACE_OPERATIONAL_PROOF_DIRECTORY":str(root / "operational-proof"),
                          "LAPLACE_CI_SESSION_DIRECTORY":"",
                          "PGDATABASE":"laplace","LAPLACE_FRESH_DB":"1","LAPLACE_RESTORE_FOUNDATION":"0"})
                 events=trace.read_text().splitlines()
-                self.assertNotIn("--resume-if-needed", "\n".join(events))
+                resume="quiesce:--database laplace --resume-if-needed --timeout-seconds 3600 -- bash scripts/repair-chess-position-outcomes.sh"
+                self.assertIn(resume,events)
                 self.assertNotIn("repair-legacy-content", "\n".join(events))
-                if fail:
+                if resume_fail:
+                    self.assertEqual(91,result.returncode,result.stderr)
+                    self.assertEqual(resume,events[-1])
+                    self.assertNotIn("managed:preflight",events)
+                    self.assertNotIn("pipeline:install",events)
+                elif fail:
                     self.assertEqual(37,result.returncode,result.stderr)
                     self.assertEqual("managed:preflight",events[-1])
                     self.assertNotIn("pipeline:install",events)
-                    self.assertFalse(any(event.startswith("quiesce:") for event in events))
+                    self.assertEqual([resume],[event for event in events if event.startswith("quiesce:")])
                 else:
                     self.assertEqual(0,result.returncode,result.stderr)
-                    self.assertEqual(["managed:preflight","pipeline:install","managed:preflight",
+                    self.assertLess(events.index(resume),events.index("managed:preflight"))
+                    self.assertEqual(["managed:preflight","pipeline:install","managed:preflight",resume,
                         "quiesce:--database laplace -- bash scripts/maintain-installed-database.sh"],
                         events[events.index("managed:preflight"):])
 

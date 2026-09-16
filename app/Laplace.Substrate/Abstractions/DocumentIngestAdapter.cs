@@ -71,7 +71,8 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
             builder,
             DocumentSource.SourceId,
             record.CanonicalUtf8,
-            metadata);
+            metadata,
+            SourceTrust.StructuredCorpus);
         if (file.ContentRootId != contentRoot
             || (record.FileId != default && file.FileId != record.FileId))
             throw new InvalidOperationException(

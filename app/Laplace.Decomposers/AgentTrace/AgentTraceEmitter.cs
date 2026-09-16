@@ -97,6 +97,12 @@ public static class AgentTraceEmitter
     public static void Emit(SubstrateChangeBuilder b, AgentSession session)
     {
         var scope = ProviderScope.Resolve(session.Provider);
+        b.DeclareSourcePrior(LaneSource, TC.AppDerived)
+            .DeclareSourcePrior(scope.Tenant.PromptSource, TC.UserPrompt)
+            .DeclareSourcePrior(scope.Tenant.ResponseSource, TC.Response)
+            // This prior describes the application-captured tool-result structure,
+            // not a claim that the external tool output is true.
+            .DeclareSourcePrior(scope.ToolSource, TC.AppDerived);
         Hash128 sessionId = ConversationContent.SessionId(
             session.Provider, SanitizeKey(session.SessionKey));
         long sessionUs = session.StartedAtUnixUs;
@@ -214,8 +220,7 @@ public static class AgentTraceEmitter
             for (int i = 0; i < turnIds.Count; i++) turnCoords[i].CopyTo(flat, i * 4);
             double[] centroid = Math4d.KarcherMean(flat);
             Hash128 physId = PhysicalityId.Compute(sessionId, PhysicalityType.Projection);
-            if (b.TrySeePhysicality(physId))
-                b.AddPhysicalityPreSeen(new PhysicalityRow(
+            b.AddPhysicality(new PhysicalityRow(
                     Id: physId, EntityId: sessionId, SourceId: scope.Tenant.PromptSource,
                     Type: PhysicalityType.Projection,
                     CoordX: centroid[0], CoordY: centroid[1],
@@ -322,8 +327,7 @@ public static class AgentTraceEmitter
 
         b.AddEntity(id, tier, typeId, sourceId);
         Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);
-        if (b.TrySeePhysicality(physId))
-            b.AddPhysicalityPreSeen(new PhysicalityRow(
+        b.AddPhysicality(new PhysicalityRow(
                 Id: physId, EntityId: id, SourceId: sourceId,
                 Type: PhysicalityType.Content,
                 CoordX: centroid[0], CoordY: centroid[1],

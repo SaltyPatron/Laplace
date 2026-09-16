@@ -265,8 +265,9 @@ internal static class IngestDescentFlush
                     root = unit.DrainInto(builder, config.WitnessWeight, bm);
                 }
                 handler.WalkWitness(record, root, builder, unit);
-                if (root != default)
-                    reader.MarkProven([root]);
+                // Draining only stages rows in this builder. The working-set
+                // stage owns queued dedup; persisted presence requires an
+                // acknowledged write or an actual reader probe.
             }
             finally
             {

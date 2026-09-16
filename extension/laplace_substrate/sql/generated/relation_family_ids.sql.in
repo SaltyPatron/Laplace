@@ -120,6 +120,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_family_ids(p_family text)
         WHEN 'HAS_PARSE' THEN ARRAY[laplace.relation_type_id('HAS_PARSE')]
         WHEN 'HAS_PART' THEN ARRAY[laplace.relation_type_id('CONTAINS'), laplace.relation_type_id('HAS_A'), laplace.relation_type_id('HAS_MEMBER'), laplace.relation_type_id('HAS_PART'), laplace.relation_type_id('HAS_SUBSTANCE'), laplace.relation_type_id('MADE_UP_OF')]
         WHEN 'HAS_PATCH' THEN ARRAY[laplace.relation_type_id('HAS_PATCH')]
+        WHEN 'HAS_PHYSICALITY' THEN ARRAY[laplace.relation_type_id('HAS_PHYSICALITY')]
         WHEN 'HAS_POS' THEN ARRAY[laplace.relation_type_id('HAS_POS'), laplace.relation_type_id('HAS_XPOS')]
         WHEN 'HAS_PREREQUISITE' THEN ARRAY[laplace.relation_type_id('HAS_PREREQUISITE')]
         WHEN 'HAS_PROPERTY' THEN ARRAY[laplace.relation_type_id('HAS_PROPERTY')]

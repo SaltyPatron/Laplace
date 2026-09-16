@@ -9,6 +9,7 @@ public static class StructuredGrammarIngest
         string filePath,
         string modalityId,
         Hash128 sourceId,
+        double sourceTrust,
         IGrammarWitness witness,
         int batchSize,
         double witnessWeight,
@@ -44,7 +45,7 @@ public static class StructuredGrammarIngest
             WorkingSetProfile = sizingProfile,
         };
 
-        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
+        return IngestBatchPipeline.RunAsync(stream, handler, config, ct).WithSourcePrior(sourceId, sourceTrust, ct);
     }
 
     /// <summary>
@@ -56,6 +57,7 @@ public static class StructuredGrammarIngest
         string filePath,
         string modalityId,
         Hash128 sourceId,
+        double sourceTrust,
         IGrammarWitness witness,
         double witnessWeight,
         string batchLabelPrefix,
@@ -89,7 +91,7 @@ public static class StructuredGrammarIngest
             WorkingSetRecordCap = sized.WorkingSetRecordCap,
             WorkingSetProfile = profile,
         };
-        return IngestBatchPipeline.RunAsync(stream, handler, config, ct);
+        return IngestBatchPipeline.RunAsync(stream, handler, config, ct).WithSourcePrior(sourceId, sourceTrust, ct);
     }
 
     /// <summary>Frame-only record stream: raw record bytes out, no parsing.</summary>
@@ -146,6 +148,7 @@ public static class StructuredGrammarIngest
             filePath,
             source.Modality.GrammarId,
             source.SourceId,
+            source.Trust,
             witness,
             batchSize,
             witnessWeight,
@@ -202,6 +205,7 @@ public static class StructuredGrammarIngest
         string filePath,
         string modalityId,
         Hash128 sourceId,
+        double sourceTrust,
         IGrammarWitness witness,
         int batchSize,
         double witnessWeight,
@@ -215,7 +219,7 @@ public static class StructuredGrammarIngest
         GrammarRecordFraming recordFraming = GrammarRecordFraming.Grammar,
         CancellationToken ct = default)
         => IngestFileAsync(
-            filePath, modalityId, sourceId, witness, batchSize, witnessWeight,
+            filePath, modalityId, sourceId, sourceTrust, witness, batchSize, witnessWeight,
             batchLabelPrefix, reportUnits, IngestSourceProfile.Wiktionary,
             contextId, commitEpoch, acceptRow,
             maxInputUnits, containmentReader, recordFraming, ct);
@@ -286,6 +290,7 @@ public static class StructuredGrammarIngest
         string filePath,
         string modalityId,
         Hash128 sourceId,
+        double sourceTrust,
         IGrammarWitness witness,
         double witnessWeight,
         string batchLabel,
@@ -311,18 +316,20 @@ public static class StructuredGrammarIngest
         if (utf8.Length == 0) return null;
 
         using var ast = GrammarDecomposer.Parse(utf8, recipe);
+        var presenceScope = containmentReader?.CapturePresenceScope() ?? default;
         if (containmentReader is not null
             && GrammarRowComposer.TryProbeRowRoot(utf8, ast, modalityId, out var rootId, out _)
             && (containmentReader.IsProvenPresent(rootId)
                 || (await containmentReader.EntitiesExistBitmapAsync([rootId], ct).ConfigureAwait(false))[0] != 0))
         {
             var b = new SubstrateChangeBuilder(sourceId, batchLabel, null, 1, 1, 4)
+                .DeclareSourcePrior(sourceTrust)
                 .SetCommitEpoch(0)
                 .EnableDeferredContent(containmentReader);
             witness.WalkRow(
                 new GrammarComposeContext(utf8, ast, rootId, null),
                 new RowContext(0, 1), b);
-            containmentReader.MarkProven([rootId]);
+            containmentReader.MarkProven([rootId], presenceScope);
             return await b.SetInputUnitsConsumed(1).BuildAsync(ct);
         }
 
@@ -338,6 +345,7 @@ public static class StructuredGrammarIngest
         // them unconditionally — without it, category anchors bypass the
         // containment reader entirely and already-present content re-stages.
         var builder = new SubstrateChangeBuilder(sourceId, batchLabel, null, 1, 1, 4)
+            .DeclareSourcePrior(sourceTrust)
             .SetCommitEpoch(0)
             .EnableDeferredContent(containmentReader);
         foreach (var e in ents) builder.AddEntity(e);

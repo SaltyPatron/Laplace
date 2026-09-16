@@ -316,7 +316,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
                                isolateFileFailures: PerFileCompletion,
                                resume: resume,
                                ct: ct))
-                yield return change;
+                yield return change.WithSourcePrior(SourceId, SourceTrust);
             yield break;
         }
 
@@ -337,7 +337,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
         {
             await foreach (var change in IngestBatchPipeline.RunAsync(
                                stream, CreateHandler(options), BuildConfig(), ct))
-                yield return change;
+                yield return change.WithSourcePrior(SourceId, SourceTrust);
             yield break;
         }
 
@@ -348,7 +348,7 @@ public abstract class Decomposer<TRecord> : IDecomposer
                            segments,
                            BatchLabelPrefix,
                            ct))
-            yield return change;
+            yield return change.WithSourcePrior(SourceId, SourceTrust);
     }
 
 }
@@ -712,6 +712,8 @@ public abstract class DecomposerMultiPhase : IDecomposer
         }
 
         await foreach (var change in phase.DecomposeAsync(context, phaseOptions, ct))
+            // Each phase owns its source/prior declarations. A multi-source
+            // container cannot replace them with its own identity or trust class.
             yield return change;
     }
 

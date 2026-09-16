@@ -2,6 +2,38 @@
   "schema_version": 1,
   "suites": [
     {
+      "id": "policy-retained-chess-capacity",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": [
+        "python3",
+        "scripts/test-retained-chess-capacity.py"
+      ],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-chess-acceptance",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": [
+        "python3",
+        "scripts/test-chess-acceptance.py"
+      ],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-source-contract",
       "profile": "policy",
       "owner": "ci",
@@ -254,6 +286,19 @@
       "owner": "chess",
       "runner": "script",
       "command": ["python3", "scripts/test-cutechess-release.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-cutechess-gui-session",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-cutechess-gui-session.py"],
       "environment": "source-tree",
       "mutability": "none",
       "shared_substrate": "not-applicable",

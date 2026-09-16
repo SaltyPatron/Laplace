@@ -21,7 +21,23 @@ typedef enum {
 #define INTENT_STAGE_PG_EPOCH_UNIX_US INT64_C(946684800000000)
 
 intent_stage_t* intent_stage_new(size_t row_capacity_hint);
+/* Same serializer with an admitted live-allocation ceiling, including bounded
+ * buffer replacement while old/new allocations coexist. */
+intent_stage_t* intent_stage_new_bounded(size_t row_capacity_hint, size_t maximum_bytes);
 void            intent_stage_free(intent_stage_t* stage);
+size_t intent_stage_memory_bytes(const intent_stage_t* stage);
+/* Bounded stages include simultaneous old/new buffers during growth. */
+size_t intent_stage_memory_peak_bytes(const intent_stage_t* stage);
+int intent_stage_allocation_failed(const intent_stage_t* stage);
+
+/* Bulk transport of the native tuple buffers. Validates exact row framing and
+ * table field counts; typed consumers retain semantic validation ownership.
+ * Returns 0, -1 for malformed input, or -2 for the allocation limit. */
+int intent_stage_from_tuple_bytes(
+    const uint8_t* entities, size_t entity_bytes,
+    const uint8_t* physicalities, size_t physicality_bytes,
+    const uint8_t* attestations, size_t attestation_bytes,
+    size_t maximum_bytes, intent_stage_t** out_stage);
 
 size_t intent_stage_entity_count(const intent_stage_t* stage);
 size_t intent_stage_physicality_count(const intent_stage_t* stage);

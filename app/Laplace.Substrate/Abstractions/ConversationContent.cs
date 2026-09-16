@@ -101,7 +101,8 @@ public static class ConversationContent
         }
 
         var attribution = new SubstrateChangeBuilder(
-            scope.PromptSource, $"bootstrap/tenant/{scope.Tenant}", parentIntentId: null);
+            scope.PromptSource, $"bootstrap/tenant/{scope.Tenant}", parentIntentId: null)
+            .DeclareSourcePrior(SourceTrust.SubstrateMandate);
         if (ContentEmitter.Emit(attribution, scope.Tenant, scope.PromptSource) is { } tenantRoot)
         {
             attribution.AddAttestation(NativeAttestation.Categorical(
@@ -191,7 +192,9 @@ public static class ConversationContent
             phase == TurnPhase.Output ? scope.ResponseSource : scope.PromptSource,
             phase == TurnPhase.Complete
                 ? $"conversation/turn/{sessionId}/{occurrenceKey}"
-                : $"conversation/turn/{sessionId}/{occurrenceKey}/{phase}", parentIntentId: null);
+                : $"conversation/turn/{sessionId}/{occurrenceKey}/{phase}", parentIntentId: null)
+            .DeclareSourcePrior(scope.PromptSource, SourceTrust.UserPrompt)
+            .DeclareSourcePrior(scope.ResponseSource, SourceTrust.Response);
 
         b.AddEntity(sessionId, EntityTier.Document, SessionType, scope.PromptSource);
         if ((phase != TurnPhase.Output && !ContentTierSpine.EmitTree(b, promptTree, scope.PromptSource, [], out _))

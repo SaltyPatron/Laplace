@@ -57,7 +57,8 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
     {
         if (edges.Count == 0) return;
 
-        var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, _learnContext);
+        var b = new SubstrateChangeBuilder(ChessVocabulary.SourceId, _learnContext)
+            .DeclareSourcePrior(SourceTrust.Response);
 
         ChessVocabulary.EmitPlayer(
             b, ChessVocabulary.LaplacePlayerId, "Laplace", ChessVocabulary.SourceId, SourceTrust.Response);

@@ -186,8 +186,7 @@ public static class UdParseStructure
             throw new InvalidOperationException("UD parse has no sentence or token placement");
 
         Hash128 physicalityId = PhysicalityId.Compute(parseId, PhysicalityType.ParseStructure);
-        if (builder.TrySeePhysicality(physicalityId))
-            builder.AddPhysicalityPreSeen(new PhysicalityRow(
+        builder.AddPhysicality(new PhysicalityRow(
                 physicalityId,
                 parseId,
                 sourceId,

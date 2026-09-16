@@ -27,6 +27,113 @@ public sealed class SearchTests
             => Enumerable.Repeat(centipawns, moves.Count).ToArray();
     }
 
+    private sealed class CountingZeroBias : IRootBias
+    {
+        public int Calls { get; private set; }
+        public int[] Bonus(Board root, IReadOnlyList<ChessMove> moves)
+        {
+            Calls++;
+            return new int[moves.Count];
+        }
+    }
+
+    [Theory]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public void AllZeroRootBias_PreservesClassicalResultAndNodeCount(int depth)
+    {
+        var board = Board.FromFen(ChessModality.StartFen);
+        var limits = new Search.Limits(MaxDepth: depth);
+        var provider = new CountingZeroBias();
+        var guided = new Search(rootBias: provider, ttBits: 14);
+        var classical = new Search(ttBits: 14);
+
+        Assert.Equal(classical.Think(board, limits), guided.Think(board, limits));
+        Assert.Equal(1, provider.Calls);
+
+        // A new go re-observes its provider once, even when the prior go found no bonuses.
+        Assert.Equal(classical.Think(board, limits), guided.Think(board, limits));
+        Assert.Equal(2, provider.Calls);
+    }
+
+    [Fact]
+    public void CompletedIterations_ReportCumulativeWorkAndExactCompletedResult()
+    {
+        var board = Board.FromFen(ChessModality.StartFen);
+        var state = new ChessState(board);
+        var iterations = new List<Search.Iteration>();
+        var result = new Search(ttBits: 14).Think(state,
+            new Search.Limits(MaxDepth: 4), onIterationCompleted: iterations.Add);
+
+        Assert.Equal(new[] { 1, 2, 3, 4 }, iterations.Select(i => i.Depth));
+        Assert.All(iterations, i => Assert.Contains(i.BestMove, MoveGen.Legal(board)));
+        for (int i = 1; i < iterations.Count; i++)
+        {
+            Assert.True(iterations[i].Nodes > iterations[i - 1].Nodes);
+            Assert.True(iterations[i].ElapsedMilliseconds >= iterations[i - 1].ElapsedMilliseconds);
+        }
+        var last = iterations[^1];
+        Assert.Equal(new Search.Result(last.BestMove, last.Score, last.Depth, last.Nodes), result);
+        Assert.Equal(ChessModality.StartFen, board.ToFen());
+    }
+
+    [Fact]
+    public void CancellationAfterCompletedIteration_RetainsThatMoveScoreAndDepth()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var iterations = new List<Search.Iteration>();
+        var result = new Search(ttBits: 14).Think(Board.FromFen(ChessModality.StartFen),
+            new Search.Limits(MaxDepth: 64), cancellation.Token, iteration =>
+            {
+                iterations.Add(iteration);
+                if (iteration.Depth == 2) cancellation.Cancel();
+            });
+
+        Assert.Equal(new[] { 1, 2 }, iterations.Select(i => i.Depth));
+        var last = iterations[^1];
+        Assert.NotEqual(0, last.Score); // cancellation's unfinished call returns zero internally
+        Assert.Equal(last.BestMove, result.BestMove);
+        Assert.Equal(last.Score, result.Score);
+        Assert.Equal(last.Depth, result.Depth);
+        Assert.Equal(last.Nodes, result.Nodes);
+    }
+
+    [Fact]
+    public void NodeLimitInsideDeeperIteration_RetainsLastCompletedResult()
+    {
+        var board = Board.FromFen(ChessModality.StartFen);
+        var completed = new Search(ttBits: 14).Think(board, new Search.Limits(MaxDepth: 2));
+        var iterations = new List<Search.Iteration>();
+        long budget = completed.Nodes + 40;
+        var result = new Search(ttBits: 14).Think(board,
+            new Search.Limits(MaxDepth: 64, MaxNodes: budget), onIterationCompleted: iterations.Add);
+
+        Assert.Equal(new[] { 1, 2 }, iterations.Select(i => i.Depth));
+        Assert.Equal(completed.BestMove, result.BestMove);
+        Assert.Equal(completed.Score, result.Score);
+        Assert.Equal(completed.Depth, result.Depth);
+        Assert.Equal(budget, result.Nodes);
+        Assert.True(result.Nodes > iterations[^1].Nodes);
+    }
+
+    [Theory]
+    [InlineData(ChessModality.StartFen, true)]
+    [InlineData("7k/6Q1/5K2/8/8/8/8/8 b - - 0 1", false)]
+    public void NoCompletedIteration_DoesNotPublishProgress(string fen, bool hasLegalMove)
+    {
+        var board = Board.FromFen(fen);
+        var iterations = new List<Search.Iteration>();
+        var result = new Search(ttBits: 14).Think(board,
+            new Search.Limits(MaxDepth: 64, MaxNodes: 0), onIterationCompleted: iterations.Add);
+
+        Assert.Empty(iterations);
+        Assert.Equal(0, result.Depth);
+        Assert.Equal(0, result.Nodes);
+        if (hasLegalMove) Assert.Contains(result.BestMove!.Value, MoveGen.Legal(board));
+        else Assert.Null(result.BestMove);
+    }
+
     [Fact]
     public void RootBias_SteersSelection_TheSubstrateSeam()
     {

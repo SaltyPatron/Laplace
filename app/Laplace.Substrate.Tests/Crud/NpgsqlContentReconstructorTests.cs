@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Abstractions;
 using System.Diagnostics;
 using System.Text;
 using Laplace.Decomposers.Abstractions.Tests;
@@ -73,7 +74,8 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
 
         Hash128 source = Hash128.OfCanonical(
             $"substrate/test/reconstruct/source/{Guid.NewGuid():N}");
-        var builder = new SubstrateChangeBuilder(source, "test/reconstruct/canonical");
+        var builder = new SubstrateChangeBuilder(source, "test/reconstruct/canonical")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
         Assert.True(builder.ContentStage.TryAddContentWitness(admitted, source, out Hash128 contentId));
 
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
@@ -93,7 +95,8 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
     {
         byte[] bytes = Encoding.UTF8.GetBytes(content);
         Hash128 source = Hash128.OfCanonical($"reconstruct-nul/source/{Guid.NewGuid():N}");
-        var builder = new SubstrateChangeBuilder(source, "test/reconstruct/nul");
+        var builder = new SubstrateChangeBuilder(source, "test/reconstruct/nul")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
         Assert.True(builder.ContentStage.TryAddContentWitness(bytes, source, out Hash128 id));
         await new NpgsqlSubstrateWriter(_pg.DataSource).ApplyAsync(builder.Build());
         Assert.Equal(bytes, await NpgsqlContentReconstructor.ReconstructUtf8Async(_pg.DataSource, id));
@@ -193,7 +196,8 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         CodepointPerfcache.LoadDefault();
         Hash128 source = Hash128.OfCanonical($"render-depth/source/{Guid.NewGuid():N}");
         Hash128 type = Hash128.OfCanonical("TestFixture");
-        var builder = new SubstrateChangeBuilder(source, "test/render/depth");
+        var builder = new SubstrateChangeBuilder(source, "test/render/depth")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
         Assert.True(builder.ContentStage.TryAddContentWitness(
             Encoding.UTF8.GetBytes("a"), source, out Hash128 atomA));
         Assert.True(builder.ContentStage.TryAddContentWitness(

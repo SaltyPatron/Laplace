@@ -120,7 +120,6 @@ internal sealed class OperationalTaskShapeWitness : IGrammarWitness
             builder.AddEntity(slot.Id, EntityTier.Document, EntityTypeRegistry.CodeConcept, source);
 
         Hash128 physicality = PhysicalityId.Compute(shape.Id, PhysicalityType.ParseStructure);
-        if (builder.TrySeePhysicality(physicality))
         {
             // The type-8 placement realizes the canonical declaration, whose
             // geometry must not depend on source-file formatting or key order.
@@ -155,7 +154,7 @@ internal sealed class OperationalTaskShapeWitness : IGrammarWitness
             OrderedCompositionComponent placement = projection.RootComponent();
             projection.DrainInto(builder, SourceTrust.SubstrateMandate);
             double[] coord = [placement.CoordX, placement.CoordY, placement.CoordZ, placement.CoordM];
-            builder.AddPhysicalityPreSeen(new PhysicalityRow(
+            builder.AddPhysicality(new PhysicalityRow(
                 physicality, shape.Id, source, PhysicalityType.ParseStructure,
                 coord[0], coord[1], coord[2], coord[3], Hilbert128.Encode(coord),
                 Trajectory.Build(shape.Constituents), shape.Constituents.Length, null, null, 0));

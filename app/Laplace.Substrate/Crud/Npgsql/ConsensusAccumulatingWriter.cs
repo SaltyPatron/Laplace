@@ -235,7 +235,24 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
                 command.Parameters.AddWithValue(NpgsqlDbType.TimestampTz,
                     change.Metadata.BuiltAt.ToUniversalTime());
-                await command.ExecuteScalarAsync(token).ConfigureAwait(false);
+                command.Parameters.AddWithValue(NpgsqlDbType.Bytea, change.Metadata.IntentId.ToBytes());
+                long physicalityBudget = IngestSizing.ResolveWorkingSetBudgetBytes();
+                command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget);
+                command.Parameters.AddWithValue(NpgsqlDbType.Integer, 512);
+                command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget / MemoryTopology.Hash128Bytes);
+                void OnSessionNotice(object sender, NpgsqlNoticeEventArgs notice)
+                {
+                    const string prefix = "session descriptor view unavailable; transaction pending: ";
+                    if (notice.Notice.MessageText.StartsWith(prefix, StringComparison.Ordinal))
+                        _log.LogInformation("SESSION_PHYSICALITY_VIEW transaction_pending=true receipt={Receipt}",
+                            notice.Notice.MessageText[prefix.Length..]);
+                }
+                // The native appender keeps its scalar turn-count ABI. Expose its
+                // bounded missing-view receipt for this operation and detach on
+                // failure as well as success before the connection is reused.
+                connection.Notice += OnSessionNotice;
+                try { await command.ExecuteScalarAsync(token).ConfigureAwait(false); }
+                finally { connection.Notice -= OnSessionNotice; }
             });
     }
 
@@ -356,7 +373,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 {
                     result = await ((NpgsqlSubstrateWriter)_inner).ApplyWorkingSetAtomicAsync(
                         forwarded,
-                        async (connection, transaction, admittedAttestations, token) =>
+                        async (connection, transaction, acceptance, token) =>
                         {
                             if (_bulkRun)
                             {
@@ -365,12 +382,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                                     System.Diagnostics.Stopwatch.GetTimestamp(),
                                     comparand: 0);
                             }
-                            var acceptedDelta = BuildDelta(changes, admittedAttestations);
+                            var acceptedDelta = BuildDelta(
+                                acceptance.OriginalReplay ? [] : changes,
+                                acceptance.AttestationIds, acceptance.GeneratedAttestations);
                             if (acceptedDelta is { Count: > 0 })
                                 atomicStats = await UpsertDeltaInTransactionAsync(
                                     acceptedDelta, connection, transaction, token).ConfigureAwait(false);
-                            if (appendConversation is not null)
+                            if (!acceptance.OriginalReplay && appendConversation is not null)
                                 await appendConversation(connection, transaction, token).ConfigureAwait(false);
+                            // A descriptor backfill is a new commit and must still
+                            // verify its captured source before accepting evidence.
                             if (precommitVerifier is not null)
                                 await precommitVerifier(token).ConfigureAwait(false);
                         },
@@ -427,7 +448,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     }
 
     private Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta>? BuildDelta(
-        IReadOnlyList<SubstrateChange> changes, IReadOnlySet<Hash128>? admittedAttestations = null)
+        IReadOnlyList<SubstrateChange> changes, IReadOnlySet<Hash128>? admittedAttestations = null,
+        IReadOnlyList<AttestationRow>? generatedAttestations = null)
     {
         // Flatten to the attestation arrays that actually carry testimony. The
         // merge below is over a contiguous index space across those arrays, so
@@ -465,6 +487,17 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             if (accepted.IsEmpty) continue;
             (blocks ??= new()).Add(accepted);
             total += accepted.Length;
+        }
+        if (generatedAttestations is { Count: > 0 })
+        {
+            var accepted = generatedAttestations
+                .Where(a => admittedAttestations is null || admittedAttestations.Contains(a.Id))
+                .ToImmutableArray();
+            if (!accepted.IsEmpty)
+            {
+                (blocks ??= new()).Add(accepted);
+                total += accepted.Length;
+            }
         }
         if (blocks is null || total == 0)
         {

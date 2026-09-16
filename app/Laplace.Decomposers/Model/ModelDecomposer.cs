@@ -198,7 +198,8 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
                 {
                     var cb = new SubstrateChangeBuilder(_source, "checkpoint/byte-ranges", null,
                         entityCapacity: tensors.Count + 1, physicalityCapacity: 0,
-                        attestationCapacity: 2 * tensors.Count);
+                        attestationCapacity: 2 * tensors.Count)
+                        .DeclareSourcePrior(Abstractions.SourceTrust.AiModelProbe);
                     var root = ModelCheckpoint.StageCheckpoint(cb, tensors, _source);
                     checkpointChange = cb.Build();
                     log.LogInformation("phase=checkpoint: {Tensors} tensor byte-ranges deposited, root={Root}",

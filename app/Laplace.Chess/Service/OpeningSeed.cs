@@ -63,7 +63,11 @@ public static class OpeningSeed
             n++;
         }
         fen = s.Board.ToFen();
-        return n > 0;
+        // An opening catalog can contain a complete miniature (for example Fool's
+        // Mate). Cute Chess still sends "go" from a terminal EPD and records the
+        // engine's no-move response as an illegal-move loss. Only ongoing states
+        // can seed a new playing; keep scanning the corpus to fill the request.
+        return n > 0 && m.Terminal(s) is null;
     }
 
     private static IEnumerable<string> Files(string path)

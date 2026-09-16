@@ -410,5 +410,284 @@ class CuteChessReleaseTests(unittest.TestCase):
             self.assertTrue(cutechess.probe(Path('fixture'), self.lock, '6.11.2')['ready'])
 
 
+    def gui_fixture(self):
+        """Protocol fixtures exercise our probe; these bytes are not a Qt runtime."""
+        source, cli, _ = self.build_fixture()
+        sdk = self.root / "qt-sdk"
+        for name in cutechess.GUI_MODULES:
+            config = sdk / f"lib/cmake/Qt6{name}/Qt6{name}Config.cmake"
+            config.parent.mkdir(parents=True)
+            config.write_text(f"# controlled {name} SDK configuration fixture\n")
+        version = sdk / "lib/cmake/Qt6/Qt6ConfigVersion.cmake"
+        version.parent.mkdir(parents=True)
+        version.write_text('include("\u0024{CMAKE_CURRENT_LIST_DIR}/Qt6ConfigVersionImpl.cmake")\n')
+        version.with_name("Qt6ConfigVersionImpl.cmake").write_text('set(PACKAGE_VERSION "6.11.2")\n')
+        plugin = sdk / "plugins/platforms" / ("qoffscreen.dll" if os.name == "nt" else "libqoffscreen.so")
+        plugin.parent.mkdir(parents=True)
+        plugin.write_bytes(b"controlled offscreen plugin identity fixture")
+        binary = cli.with_name("cutechess")
+        self.write_gui_program(binary, plugin)
+        return source, binary, sdk, cli.parent / "laplace-cutechess-gui-build.json"
+
+    def write_gui_program(self, binary, plugin, version="1.5.1", qt="6.11.2", exit_code=0, loader=True):
+        observed = self.root / "gui-child-observation.json"
+        binary.write_text(
+            "#!" + sys.executable + "\nimport json, os, sys\n"
+            "from pathlib import Path\n"
+            "keys = ['XDG_CONFIG_HOME', 'XDG_CONFIG_DIRS', 'XDG_DATA_HOME', "
+            "'XDG_DATA_DIRS', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR']\n"
+            "settings = {key: os.environ[key] for key in keys}\n"
+            "assert all(Path(path).is_dir() for path in settings.values())\n"
+            "assert 'DISPLAY' not in os.environ and 'WAYLAND_DISPLAY' not in os.environ\n"
+            "assert os.environ['QT_QPA_PLATFORM'] == 'offscreen'\n"
+            "assert sys.argv[1:] == ['-platform', 'offscreen', '--version']\n"
+            "Path(" + repr(str(observed)) + ").write_text(json.dumps({"
+            "'argv': sys.argv, 'settings': settings, 'cwd': os.getcwd(), "
+            "'plugin_path': os.environ['QT_PLUGIN_PATH']}))\n"
+            "print(" + repr("Cute Chess " + version + "\nUsing Qt version " + qt) + ")\n"
+            + ("sys.stderr.write(" + repr("qt.core.library: " + json.dumps(str(plugin)) + " loaded library\n") + ")\n"
+               if loader else "")
+            + "sys.exit(" + repr(exit_code) + ")\n")
+        binary.chmod(0o755)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux direct GUI child and XDG isolation")
+    def test_gui_receipt_binds_source_installed_copy_and_real_child_plugin_protocol(self):
+        source, binary, sdk, receipt_path = self.gui_fixture()
+        scratch = self.root / "probe-work"
+        with patch.dict(os.environ, {"DISPLAY": "operator-display", "WAYLAND_DISPLAY": "operator-wayland",
+                                     "XDG_CONFIG_HOME": str(self.root / "operator-settings")}):
+            receipt = cutechess.verify_gui_build(source, binary, self.lock, sdk, receipt_path, scratch)
+            self.assertEqual("operator-display", os.environ["DISPLAY"])
+        self.assertEqual(receipt, json.loads(receipt_path.read_text()))
+        runtime = receipt["runtime"]
+        self.assertEqual("gui", receipt["build_target"])
+        self.assertEqual(self.lock["commit"], receipt["source_integrity"]["commit"])
+        self.assertEqual("ready-headless", runtime["status"])
+        self.assertTrue(runtime["qapplication_initialized"])
+        self.assertFalse(runtime["interactive_desktop_tested"])
+        self.assertIsNone(runtime["interactive_desktop_ready"])
+        self.assertEqual(set(cutechess.GUI_MODULES), set(runtime["qt"]["modules"]))
+        self.assertEqual(2, len(runtime["qt"]["version_files"]))
+        child = json.loads((self.root / "gui-child-observation.json").read_text())
+        for path in child["settings"].values():
+            self.assertTrue(Path(path).is_relative_to(scratch))
+            self.assertFalse(Path(path).exists())
+        installed = self.root / "installed-cutechess"
+        shutil.copy2(binary, installed)
+        checked = cutechess.verify_gui_install(installed, receipt_path, self.lock, scratch)
+        self.assertEqual(cutechess.digest(installed), checked["runtime"]["binary_sha256"])
+        self.assertEqual([str(installed)], checked["runtime"]["direct_launch"]["argv"])
+        self.assertEqual(str(sdk / "plugins"), checked["runtime"]["direct_launch"]["environment"]["QT_PLUGIN_PATH"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux controlled GUI executable protocol")
+    def test_gui_wrong_release_qt_exit_and_loader_identity_are_rejected(self):
+        _, binary, sdk, _ = self.gui_fixture()
+        selected = sdk / "plugins/platforms/libqoffscreen.so"
+        foreign = self.root / "other-sdk/platforms/libqoffscreen.so"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_bytes(selected.read_bytes())
+        for options in ({"version": "1.4.0"}, {"qt": "6.8.3"}, {"exit_code": 7},
+                        {"loader": False}, {"plugin": foreign}):
+            with self.subTest(options=options):
+                arguments = {"plugin": selected, **options}
+                self.write_gui_program(binary, **arguments)
+                with self.assertRaises(RuntimeError):
+                    cutechess.probe_gui(binary, self.lock, sdk, self.root / "probe-work")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux GUI SDK plugin inventory")
+    def test_gui_missing_modules_platform_and_wrong_wrapper_version_fail_before_launch(self):
+        _, binary, sdk, _ = self.gui_fixture()
+        targets = [sdk / f"lib/cmake/Qt6{name}/Qt6{name}Config.cmake" for name in cutechess.GUI_MODULES]
+        targets.append(sdk / "plugins/platforms/libqoffscreen.so")
+        for target in targets:
+            with self.subTest(target=target):
+                original = target.read_bytes()
+                target.unlink()
+                with patch.object(cutechess.subprocess, "run") as launch:
+                    with self.assertRaises((OSError, RuntimeError)):
+                        cutechess.probe_gui(binary, self.lock, sdk, self.root / "probe-work")
+                    launch.assert_not_called()
+                target.write_bytes(original)
+        version = sdk / "lib/cmake/Qt6/Qt6ConfigVersionImpl.cmake"
+        version.write_text('set(PACKAGE_VERSION "6.4.2")\n')
+        with patch.object(cutechess.subprocess, "run") as launch:
+            with self.assertRaisesRegex(RuntimeError, "selected Qt"):
+                cutechess.probe_gui(binary, self.lock, sdk, self.root / "probe-work")
+            launch.assert_not_called()
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux direct GUI installed file contract")
+    def test_gui_changed_source_binary_or_plugin_cannot_reuse_receipt(self):
+        source, binary, sdk, receipt_path = self.gui_fixture()
+        work = self.root / "probe-work"
+        cutechess.verify_gui_build(source, binary, self.lock, sdk, receipt_path, work)
+        for target in (source / "source.h", binary, sdk / "plugins/platforms/libqoffscreen.so"):
+            with self.subTest(target=target):
+                original = target.read_bytes()
+                target.write_bytes(original + b"\nchanged\n")
+                with patch.object(cutechess, "probe_gui") as probe:
+                    with self.assertRaises((RuntimeError, ValueError)):
+                        cutechess.verify_gui_install(binary, receipt_path, self.lock, work)
+                    probe.assert_not_called()
+                target.write_bytes(original)
+        linked = self.root / "linked-cutechess"
+        linked.symlink_to(binary)
+        with patch.object(cutechess, "probe_gui") as probe:
+            with self.assertRaisesRegex(RuntimeError, "installed executable"):
+                cutechess.verify_gui_install(linked, receipt_path, self.lock, work)
+            probe.assert_not_called()
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux GUI child lifecycle")
+    def test_gui_timeout_cleans_isolated_settings_and_preserves_prior_receipt(self):
+        source, binary, sdk, receipt_path = self.gui_fixture()
+        scratch = self.root / "probe-work"
+        prior = cutechess.verify_gui_build(source, binary, self.lock, sdk, receipt_path, scratch)
+        original_run = cutechess.subprocess.run
+        def timeout(command, **kwargs):
+            if str(command[0]) == str(binary):
+                self.assertEqual(30, kwargs["timeout"])
+                self.assertTrue(Path(kwargs["cwd"]).is_dir())
+                raise subprocess.TimeoutExpired(command, 30)
+            return original_run(command, **kwargs)
+        with patch.object(cutechess.subprocess, "run", side_effect=timeout):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                cutechess.verify_gui_build(source, binary, self.lock, sdk, receipt_path, scratch)
+        self.assertEqual(prior, json.loads(receipt_path.read_text()))
+        self.assertEqual([], list(scratch.iterdir()))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux GUI before/after runtime integrity")
+    def test_gui_plugin_changed_during_probe_cannot_replace_prior_receipt(self):
+        source, binary, sdk, receipt_path = self.gui_fixture()
+        scratch = self.root / "probe-work"
+        cutechess.verify_gui_build(source, binary, self.lock, sdk, receipt_path, scratch)
+        prior = receipt_path.read_bytes()
+        original_run = cutechess.subprocess.run
+        def mutate(command, **kwargs):
+            result = original_run(command, **kwargs)
+            if str(command[0]) == str(binary):
+                (sdk / "plugins/platforms/libqoffscreen.so").write_bytes(b"changed during GUI process")
+            return result
+        with patch.object(cutechess.subprocess, "run", side_effect=mutate):
+            with self.assertRaisesRegex(RuntimeError, "changed during"):
+                cutechess.verify_gui_build(source, binary, self.lock, sdk, receipt_path, scratch)
+        self.assertEqual(prior, receipt_path.read_bytes())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux CLI argument dispatch to GUI verification")
+    def test_gui_command_line_build_and_installed_verification(self):
+        source, binary, sdk, receipt_path = self.gui_fixture()
+        lock_path = self.root / "gui-release.json"
+        lock_path.write_text(json.dumps(self.lock))
+        common = [sys.executable, cutechess.__file__, "--lock", str(lock_path), "--gui", "--binary", str(binary),
+                  "--work", str(self.root / "probe-work")]
+        result = subprocess.run([*common, "--verify-source", str(source), "--qt-prefix", str(sdk),
+                                 "--receipt", str(receipt_path)], capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("gui", json.loads(result.stdout)["build_target"])
+        result = subprocess.run([*common, "--verify-receipt", str(receipt_path)], capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("ready-headless", json.loads(result.stdout)["runtime"]["status"])
+
+
+
+    def test_gui_sdk_direct_and_wrapped_versions_are_unambiguous(self):
+        _, _, sdk, _ = self.gui_fixture()
+        version = sdk / "lib/cmake/Qt6/Qt6ConfigVersion.cmake"
+        implementation = version.with_name("Qt6ConfigVersionImpl.cmake")
+        wrapped = version.read_text()
+        expected = cutechess.gui_inventory(sdk, self.lock)
+        self.assertEqual("6.11.2", expected["version"])
+        self.assertEqual(2, len(expected["version_files"]))
+        version.write_text(wrapped + 'set(PACKAGE_VERSION "6.4.2")\n')
+        with self.assertRaises(RuntimeError):
+            cutechess.gui_inventory(sdk, self.lock)
+        version.write_text('# ' + wrapped + 'set(PACKAGE_VERSION "6.11.2")\n')
+        self.assertEqual(1, len(cutechess.gui_inventory(sdk, self.lock)["version_files"]))
+        version.write_text('set(PACKAGE_VERSION "6.11.2")\n')
+        self.assertEqual(1, len(cutechess.gui_inventory(sdk, self.lock)["version_files"]))
+        version.write_text('set(PACKAGE_VERSION "6.11.2")\nset(PACKAGE_VERSION "6.4.2")\n')
+        with self.assertRaises(RuntimeError):
+            cutechess.gui_inventory(sdk, self.lock)
+        version.write_text(wrapped)
+        implementation.unlink()
+        with self.assertRaises(FileNotFoundError):
+            cutechess.gui_inventory(sdk, self.lock)
+
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux bootstrap option/presence selection")
+    def test_bootstrap_gui_option_and_existing_artifacts_select_fresh_build(self):
+        bootstrap = Path(cutechess.__file__).with_name("bootstrap-chess-lab.sh").read_text()
+        self.assertTrue(bootstrap.endswith('main "$@"\n'))
+        # Exercise the actual option/presence state machine while replacing the
+        # downstream installation work. This is not a GUI runtime acceptance.
+        script = self.root / "selection.sh"
+        script.write_text(bootstrap.removesuffix('main "$@"\n') + r'''
+ensure_dirs() { mkdir -p "$CC_BUILD" "$CC_BIN_DIR"; }
+build_cutechess() { printf '%s\n' "$CUTECHESS_GUI_BUILD" > "$SELECTION_RESULT"; }
+build_zstd() { :; }
+run_as_owner() { :; }
+verify() { :; }
+write_api_env() { :; }
+main "$@"
+''')
+        environment = dict(os.environ)
+        for key in ("LAPLACE_CUTECHESS_GUI", "LAPLACE_CUTECHESS_GUI_BUILD"):
+            environment.pop(key, None)
+        prefix, build = self.root / "prefix", self.root / "selected-build"
+        result = self.root / "selection-result"
+        environment.update(LAPLACE_INSTALL_PREFIX=str(prefix), LAPLACE_CUTECHESS_BUILD=str(build),
+                           LAPLACE_WORK_ROOT=str(self.root / "work"), SELECTION_RESULT=str(result))
+        for arguments, expected in (([], "0"), (["--cutechess-gui"], "1")):
+            run = subprocess.run(["bash", str(script), *arguments], env=environment, capture_output=True, text=True)
+            self.assertEqual(0, run.returncode, run.stderr)
+            self.assertEqual(expected, result.read_text().strip())
+        for artifact in (prefix / "bin/cutechess", build / "cutechess", build / "laplace-cutechess-gui-build.json"):
+            with self.subTest(artifact=artifact):
+                artifact.write_text("existing GUI selects rebuild; these bytes are not reused")
+                run = subprocess.run(["bash", str(script)], env=environment, capture_output=True, text=True)
+                self.assertEqual(0, run.returncode, run.stderr)
+                self.assertEqual("1", result.read_text().strip())
+                artifact.unlink()
+        environment["LAPLACE_CUTECHESS_GUI_BUILD"] = "invalid"
+        result.unlink()
+        run = subprocess.run(["bash", str(script)], env=environment, capture_output=True, text=True)
+        self.assertEqual(2, run.returncode)
+        self.assertFalse(result.exists())
+
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux ELF DT_RUNPATH loader behavior")
+    def test_gui_selected_sdk_library_wins_over_inherited_conflicting_library(self):
+        compiler = shutil.which("cc") or shutil.which("gcc")
+        if not compiler:
+            self.skipTest("A C compiler is required for the real ELF loader control")
+        sdk = self.root / "selected-sdk"
+        selected, foreign, other = sdk / "lib", self.root / "foreign-lib", self.root / "other-lib"
+        for directory in (selected, foreign, other):
+            directory.mkdir(parents=True)
+        soname = "liblaplace_gui_loader_control.so"
+        for directory, label in ((selected, "selected-sdk"), (foreign, "foreign-library")):
+            source = directory / "identity.c"
+            source.write_text('const char *gui_library_identity(void) { return "' + label + '"; }\n')
+            subprocess.run([compiler, "-shared", "-fPIC", str(source),
+                            "-Wl,-soname," + soname, "-o", str(directory / soname)],
+                           check=True, capture_output=True, text=True)
+        main = self.root / "loader.c"
+        main.write_text('#include <stdio.h>\nextern const char *gui_library_identity(void);\n'
+                        'int main(void) { puts(gui_library_identity()); return 0; }\n')
+        executable = self.root / "actual-elf-loader"
+        subprocess.run([compiler, str(main), "-L" + str(selected), "-llaplace_gui_loader_control",
+                        "-Wl,--enable-new-dtags,-rpath," + str(selected), "-o", str(executable)],
+                       check=True, capture_output=True, text=True)
+        inherited = os.pathsep.join((str(foreign), str(other)))
+        environment = dict(os.environ, LD_LIBRARY_PATH=inherited)
+        before = subprocess.run([str(executable)], env=environment, check=True, capture_output=True, text=True)
+        self.assertEqual("foreign-library", before.stdout.strip())
+        with patch.dict(os.environ, {"LD_LIBRARY_PATH": inherited}):
+            overlay = cutechess.gui_environment(sdk)
+        self.assertEqual([str(selected), str(foreign), str(other)],
+                         overlay["LD_LIBRARY_PATH"].split(os.pathsep))
+        environment.update(overlay)
+        after = subprocess.run([str(executable)], env=environment, check=True, capture_output=True, text=True)
+        self.assertEqual("selected-sdk", after.stdout.strip())
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -118,7 +118,7 @@ public static class ContentTierSpine
         return results.Length > 0 ? results[0] : null;
     }
 
-    /// <summary>Merkle-DAG emit: only nodes not covered by the existence bitmap are staged.</summary>
+    /// <summary>Emit source forms; the existence bitmap suppresses duplicate entity insertion.</summary>
     public static bool EmitTree(
         SubstrateChangeBuilder builder,
         TierTree tree,
@@ -144,41 +144,18 @@ public static class ContentTierSpine
         rootId = default;
         if (canonicalUtf8.IsEmpty) return false;
 
-        // Ask whether this surface's ladder is already deposited BEFORE deriving it.
-        // A hit proves the ladder is persisted (ContentLadderLedger holds only roots
-        // from committed applies), so recurrences across batches skip derivation AND
-        // re-emission into the merge lane. The lookup key is the memo alone: the old
-        // shape called ResolveRoot here, which on a memo miss made a SECOND full
-        // native derivation under the process-global lock before TryAddContentWitness
-        // derived the same surface again — measured on the 2026-08-06 full-file run
-        // as 77 records/s with 11 compose workers serialized behind an armed-but-empty
-        // ledger. A memo miss now derives exactly once, in the same single native
-        // crossing that emits, and memoizes the root it returns for future hits.
-        if (ContentLadderLedger.Armed)
-        {
-            var key = Hash128.Blake3(canonicalUtf8);
-            if (RootMemo.TryGetValue(key, out var memo))
-            {
-                if (ContentLadderLedger.HasEntries
-                    && memo is { } m
-                    && ContentLadderLedger.IsPersisted(m))
-                {
-                    rootId = m;
-                    return true;
-                }
-            }
-            else if (builder.DeferredContent is null)
-            {
-                if (!builder.ContentStage.TryAddContentWitness(canonicalUtf8, sourceId, out rootId))
-                    return false;
-                TryMemoize(key, rootId);
-                return true;
-            }
-        }
-
         if (builder.DeferredContent is { } cb)
             return cb.Append(canonicalUtf8, sourceId, out rootId);
-        return builder.ContentStage.TryAddContentWitness(canonicalUtf8, sourceId, out rootId);
+
+        // A memo or committed root proves identity/presence, not that this
+        // source unit's form was observed. The native owner derives once and
+        // retains raw forms before its entity filter. Admission owns exact
+        // descriptor reuse and source-unit replay exclusion.
+        if (!builder.ContentStage.TryAddContentWitness(canonicalUtf8, sourceId, out rootId))
+            return false;
+        if (ContentLadderLedger.Armed)
+            TryMemoize(Hash128.Blake3(canonicalUtf8), rootId);
+        return true;
     }
 
     public static bool TryStageUnderscoredIntoBuilder(

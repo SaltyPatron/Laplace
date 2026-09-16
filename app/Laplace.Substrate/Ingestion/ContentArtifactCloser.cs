@@ -217,7 +217,8 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
         var builder = new SubstrateChangeBuilder(
             scope.Source,
             $"user-content/{scope.Tenant}/{metadata.RelativePath}",
-            parentIntentId: null);
+            parentIntentId: null)
+            .DeclareSourcePrior(SourceTrust.UserPrompt * scope.TenantTrust);
 
         using var ast = GrammarDecomposer.Parse(utf8, modality);
         using var composer = new GrammarRowComposer(
@@ -233,7 +234,8 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
             modality,
             scope.Source,
             SourceTrust.UserPrompt * scope.TenantTrust);
-        FileIdentity file = FileEntity.Emit(builder, scope.Source, contentRoot, metadata);
+        FileIdentity file = FileEntity.Emit(builder, scope.Source, contentRoot, metadata,
+            SourceTrust.UserPrompt * scope.TenantTrust);
 
         double weight = RelationTypeRank.Associative * SourceTrust.UserPrompt * scope.TenantTrust;
         builder.AddAttestation(NativeAttestation.Categorical(

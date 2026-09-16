@@ -18,9 +18,9 @@ namespace Laplace.Chess.Service;
 /// </summary>
 public static class ChessPositionOutcomes
 {
-    // v2 includes the terminal board. v1 deposited only pre-move boards, leaving every completed
-    // line's final trajectory constituent without its content entity/physicality.
-    public const int Version = 2;
+    // v3 binds each observation to its actual playing. Existing null-context v2 evidence
+    // requires the complete playing backfill and standing rebuild before replacement.
+    public const int Version = 3;
     public const string SourceName = "ChessPositionOutcomes";
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source(SourceName);
     public static readonly Hash128 TrustClassId = ChessVocabulary.AnalysisTrustClass;
@@ -38,10 +38,10 @@ public static class ChessPositionOutcomes
         var state = start.Initial;
         for (int ply = 0; ply < game.ResolvedMoves.Length; ply++)
         {
-            AppendBoard(b, state.Board, game.Result);
+            AppendBoard(b, state.Board, game.Result, game.PlayingId);
             state = modality.Apply(state, game.ResolvedMoves[ply]);
         }
-        AppendBoard(b, state.Board, game.Result);
+        AppendBoard(b, state.Board, game.Result, game.PlayingId);
         AddMarker(b, game.PlayingId);
     }
 
@@ -60,7 +60,7 @@ public static class ChessPositionOutcomes
         }
 
         foreach (var position in replay.Positions)
-            AppendComposed(b, ChessGraph.EmitComposed(b, position, SourceId), game.Result);
+            AppendComposed(b, ChessGraph.EmitComposed(b, position, SourceId), game.Result, game.PlayingId);
         AddMarker(b, game.PlayingId);
     }
 
@@ -74,10 +74,10 @@ public static class ChessPositionOutcomes
         {
             var move = San.Resolve(state.Board, san, scratch);
             if (move is null) return;
-            AppendBoard(b, state.Board, game.Result);
+            AppendBoard(b, state.Board, game.Result, game.PlayingId);
             state = modality.Apply(state, move.Value);
         }
-        AppendBoard(b, state.Board, game.Result);
+        AppendBoard(b, state.Board, game.Result, game.PlayingId);
         AddMarker(b, game.PlayingId);
     }
 
@@ -86,18 +86,18 @@ public static class ChessPositionOutcomes
         GameOutcome result, Hash128 playingId)
     {
         foreach (string surface in positionSurfaces)
-            AppendComposed(b, ChessGraph.EmitComposed(b, surface, SourceId), result);
+            AppendComposed(b, ChessGraph.EmitComposed(b, surface, SourceId), result, playingId);
         AddMarker(b, playingId);
     }
 
-    private static void AppendBoard(SubstrateChangeBuilder b, Board board, GameOutcome result)
+    private static void AppendBoard(SubstrateChangeBuilder b, Board board, GameOutcome result, Hash128 playingId)
     {
         var composed = ChessGraph.EmitComposed(b, board, SourceId);
-        AppendComposed(b, composed, result);
+        AppendComposed(b, composed, result, playingId);
     }
 
     private static void AppendComposed(
-        SubstrateChangeBuilder b, ChessComposed composed, GameOutcome result)
+        SubstrateChangeBuilder b, ChessComposed composed, GameOutcome result, Hash128 playingId)
     {
         long score = ChessGraph.ScoreFp1e9(result.ForMover(0));
         foreach (var atom in composed.Substructures)
@@ -106,7 +106,7 @@ public static class ChessPositionOutcomes
                 typeId: ChessVocabulary.OutcomeType,
                 obj: ChessVocabulary.OutcomeObject,
                 sourceId: SourceId,
-                contextId: null,
+                contextId: playingId,
                 games: 1,
                 sumScoreFp1e9: score,
                 witnessWeight: OutcomeWeight));
@@ -123,7 +123,7 @@ public sealed record ChessPositionOutcomeRecord(ChessWitnessedGame Game) : ITrun
 }
 
 /// <summary>Marker-gated backfill for games recorded before the fused constituent fold.</summary>
-public sealed class ChessPositionOutcomesDecomposer
+public sealed class ChessPositionOutcomesDecomposer(long? strictMaterializationBytes = null)
     : ComposeDecomposer<ChessPositionOutcomeRecord>, IIngestNoOpExplainer
 {
     private long _candidatesStreamed;
@@ -155,7 +155,8 @@ public sealed class ChessPositionOutcomesDecomposer
         _candidatesStreamed = 0;
         await foreach (var game in ChessWitnessHydrator.StreamUnanalyzedEventsAsync(
                            ds, ContainmentReader, ws.Batch,
-                           ChessPositionOutcomes.MarkerId, includeLive: true, ct))
+                           ChessPositionOutcomes.MarkerId, includeLive: true, ct,
+                           strictMaterializationBytes: strictMaterializationBytes))
         {
             _candidatesStreamed++;
             yield return new ChessPositionOutcomeRecord(game);

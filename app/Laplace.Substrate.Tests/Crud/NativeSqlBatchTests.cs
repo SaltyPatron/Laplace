@@ -1,3 +1,4 @@
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
 using Npgsql;
@@ -10,6 +11,41 @@ namespace Laplace.SubstrateCRUD.Tests;
 [Trait("Tier", "db")]
 public sealed class NativeSqlBatchTests(LocalPgFixture pg)
 {
+    [Fact]
+    public async Task WitnessScopesExcludeCrossProductsButRetainConflictingObjects()
+    {
+        var prefix = "witness-scope/" + Guid.NewGuid().ToString("N");
+        Hash128 Id(string name) => Hash128.OfCanonical(prefix + "/" + name);
+        var source = Id("source"); var otherSource = Id("other-source");
+        var playing = Id("playing"); var line = Id("line"); var context = Id("context");
+        var hasEvent = Id("has-event"); var hasResult = Id("has-result");
+        var eventId = Id("event"); var resultId = Id("result"); var conflicting = Id("conflicting");
+        AttestationRow Row(Hash128 subject, Hash128 type, Hash128 obj, Hash128 src, Hash128? ctx)
+            => NativeAttestation.CategoricalResolved(subject, type, obj, src, ctx, SourceTrust.StructuredCorpus);
+        var selectedEvent = Row(playing, hasEvent, eventId, source, null);
+        var selectedResult = Row(line, hasResult, resultId, source, playing);
+        var conflictingResult = Row(line, hasResult, conflicting, source, playing);
+        var rows = new[] { selectedEvent, selectedResult, conflictingResult,
+            Row(line, hasEvent, eventId, source, playing), // actual PGN header cross-product
+            Row(line, hasResult, resultId, otherSource, playing),
+            Row(line, hasResult, resultId, source, context),
+            Row(line, hasResult, resultId, source, null) };
+        var builder = new SubstrateChangeBuilder(source, prefix).DeclareSourcePrior(SourceTrust.StructuredCorpus);
+        foreach (var id in new[] { source, otherSource, playing, line, context, hasEvent, hasResult, eventId, resultId, conflicting })
+            builder.AddEntity(id, 0, id);
+        foreach (var row in rows) builder.AddAttestation(row);
+        var writer = new NpgsqlSubstrateWriter(pg.DataSource);
+        await writer.ApplyAsync(builder.Build());
+        NpgsqlAttestationReads.WitnessScope[] scopes =
+        [new(playing, hasEvent, source, null), new(line, hasResult, source, playing), new(playing, hasEvent, source, null)];
+        var actual = await NpgsqlAttestationReads.WitnessesAsync(pg.DataSource, scopes, CancellationToken.None);
+        Assert.Equal(3, actual.Count);
+        Assert.Equal<Hash128>(new[] { selectedEvent.Id, selectedResult.Id, conflictingResult.Id }.OrderBy(id => id.Hi).ThenBy(id => id.Lo),
+            actual.Select(a => Hash128.FromBytes(a.Id)).OrderBy(id => id.Hi).ThenBy(id => id.Lo));
+        Assert.Contains(actual, a => a.ContextId is null);
+        Assert.Empty(await NpgsqlAttestationReads.WitnessesAsync(pg.DataSource, [], CancellationToken.None));
+    }
+
     [Fact]
     public async Task ChessSearchBindsTextArrayAndBooleanThroughTheNativeCatalog()
     {
@@ -31,13 +67,14 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
         var turn = Hash128.Merkle(4, atoms);
         var type = Hash128.OfCanonical("catalog-conversation/type");
         var builder = new SubstrateChangeBuilder(source, tag)
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddEntity(new EntityRow(session, 4, type, source))
             .AddEntity(new EntityRow(turn, 4, type, source))
             .AddPhysicality(new PhysicalityRow(
                 Id: PhysicalityId.Compute(turn, PhysicalityType.Content),
                 EntityId: turn, SourceId: source, Type: PhysicalityType.Content,
                 CoordX: 0.1, CoordY: 0.2, CoordZ: 0.3, CoordM: 0.4,
-                HilbertIndex: default,
+                HilbertIndex: Hilbert128.Encode([0.1, 0.2, 0.3, 0.4]),
                 TrajectoryXyzm: Trajectory.Build(atoms,
                     [Trajectory.VertexFlags(0, false, 0), Trajectory.VertexFlags(0, false, 0)]),
                 NConstituents: atoms.Length,
@@ -53,7 +90,7 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
             builder.AddEntity(new EntityRow(atom, 0, type, source));
             builder.AddPhysicality(new PhysicalityRow(
                 PhysicalityId.Compute(atom, PhysicalityType.Content), atom, source,
-                PhysicalityType.Content, 0.1, 0.2, 0.3, 0.4, default, null, 0,
+                PhysicalityType.Content, 0.1, 0.2, 0.3, 0.4, Hilbert128.Encode([0.1, 0.2, 0.3, 0.4]), null, 0,
                 null, null, IntentStage.PgEpochUnixUs));
         }
         if (batchPrefix)
@@ -62,7 +99,7 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
             // native appender must retain the batch prefix even without flags.
             builder.AddPhysicality(new PhysicalityRow(
                 PhysicalityId.Compute(session, PhysicalityType.Projection), session, source,
-                PhysicalityType.Projection, 0.1, 0.2, 0.3, 0.4, default,
+                PhysicalityType.Projection, 0.1, 0.2, 0.3, 0.4, Hilbert128.Encode([0.1, 0.2, 0.3, 0.4]),
                 Trajectory.Build(new[] { turn }), 1, null, null, IntentStage.PgEpochUnixUs));
         }
         var change = builder.Build();

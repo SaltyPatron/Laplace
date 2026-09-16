@@ -206,7 +206,51 @@ internal static class CopyTupleParser
         return result;
     }
 
-    public static unsafe AttestationRows ParseAttestations(IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
+    /// <summary>Complete entity transport for APIs that return managed rows.
+    /// Keep the writer's compact verification parser above unchanged.</summary>
+    internal static unsafe List<EntityRow> DecodeEntityRows(IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
+    {
+        var result = new List<EntityRow>();
+        foreach (var (pointer, length) in blobs)
+        {
+            byte* bytes = (byte*)pointer;
+            long offset = 0;
+            while (offset < length)
+            {
+                Hash128 id = default, type = default;
+                Hash128? source = null;
+                byte tier = 0;
+                WalkRow(bytes, length, ref offset, EntityFields, "entities", (field, valueOffset, valueLength) =>
+                {
+                    switch (field)
+                    {
+                        case 0: id = ReadHash(bytes, valueOffset, valueLength, "entities.id"); break;
+                        case 1: tier = checked((byte)ReadInt16(bytes, valueOffset, valueLength, "entities.tier")); break;
+                        case 2: type = ReadHash(bytes, valueOffset, valueLength, "entities.type_id"); break;
+                        case 3: source = valueLength == -1 ? null
+                            : ReadHash(bytes, valueOffset, valueLength, "entities.first_observed_by"); break;
+                    }
+                });
+                result.Add(new EntityRow(id, tier, type, source));
+            }
+        }
+        return result;
+    }
+
+    public static AttestationRows ParseAttestations(IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
+        => ParseAttestationsCore(blobs, null, true);
+
+    public static AttestationRows ParseAttestations(
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<AttestationRow>? decoded)
+        => ParseAttestationsCore(blobs, decoded, true);
+
+    // The generated-evidence fold needs full rows, but no second merge index.
+    public static void DecodeAttestations(
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<AttestationRow> decoded)
+        => ParseAttestationsCore(blobs, decoded, false);
+
+    private static unsafe AttestationRows ParseAttestationsCore(
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<AttestationRow>? decoded, bool collectIndex)
     {
         var result = new AttestationRows();
         for (int b = 0; b < blobs.Count; b++)
@@ -218,7 +262,11 @@ internal static class CopyTupleParser
             {
                 long rowStart = off;
                 Hash128 id = default, subjectId = default, typeId = default;
-                Hash128 objectId = default, contextId = default;
+                Hash128 objectId = default, contextId = default, sourceId = default;
+                bool objectNull = true, contextNull = true;
+                short outcome = 0;
+                long opponentRd = 0, opponentRating = 0;
+                Mask256 highwayMask = default;
                 long ts = 0, games = 0, sumScore = 0;
                 bool foldReplayable = true;
                 long countValOff = -1, sumValOff = -1;
@@ -230,10 +278,18 @@ internal static class CopyTupleParser
                         case 1: subjectId = ReadHash(p, valOff, valLen, "attestations.subject_id"); break;
                         case 2: typeId = ReadHash(p, valOff, valLen, "attestations.type_id"); break;
                         case 3:
-                            if (valLen == 16) objectId = ReadHash(p, valOff, valLen, "attestations.object_id");
+                            if (valLen == 16) { objectId = ReadHash(p, valOff, valLen, "attestations.object_id"); objectNull = false; }
+                            else if (decoded is not null && valLen != -1) throw new InvalidOperationException("invalid attestation object width");
+                            break;
+                        case 4:
+                            if (decoded is not null) sourceId = ReadHash(p, valOff, valLen, "attestations.source_id");
                             break;
                         case 5:
-                            if (valLen == 16) contextId = ReadHash(p, valOff, valLen, "attestations.context_id");
+                            if (valLen == 16) { contextId = ReadHash(p, valOff, valLen, "attestations.context_id"); contextNull = false; }
+                            else if (decoded is not null && valLen != -1) throw new InvalidOperationException("invalid attestation context width");
+                            break;
+                        case 6:
+                            if (decoded is not null) outcome = ReadInt16(p, valOff, valLen, "attestations.outcome");
                             break;
                         case 7: ts = ReadInt64(p, valOff, valLen, "attestations.last_observed_at"); break;
                         case 8:
@@ -244,8 +300,26 @@ internal static class CopyTupleParser
                             sumScore = ReadInt64(p, valOff, valLen, "attestations.sum_score_fp1e9");
                             sumValOff = valOff;
                             break;
+                        case 10:
+                            if (decoded is not null) opponentRd = ReadInt64(p, valOff, valLen, "attestations.opponent_rd_fp1e9");
+                            break;
+                        case 11:
+                            if (decoded is not null) opponentRating = ReadInt64(p, valOff, valLen, "attestations.opponent_rating_fp1e9");
+                            break;
                         case 12:
                             foldReplayable = ReadBool(p, valOff, valLen, "attestations.fold_replayable");
+                            break;
+                        case 13:
+                            if (decoded is not null && valLen != -1)
+                            {
+                                if (valLen != 32) throw new InvalidOperationException("invalid attestation mask width");
+                                var bytes = new ReadOnlySpan<byte>(p + valOff, 32);
+                                highwayMask = new Mask256(
+                                    BinaryPrimitives.ReadUInt64LittleEndian(bytes),
+                                    BinaryPrimitives.ReadUInt64LittleEndian(bytes[8..]),
+                                    BinaryPrimitives.ReadUInt64LittleEndian(bytes[16..]),
+                                    BinaryPrimitives.ReadUInt64LittleEndian(bytes[24..]));
+                            }
                             break;
                     }
                 });
@@ -253,18 +327,32 @@ internal static class CopyTupleParser
                     throw new InvalidOperationException("attestations row missing observation_count");
                 if (sumValOff < 0)
                     throw new InvalidOperationException("attestations row missing sum_score_fp1e9");
-                result.Ids.Add(id);
-                result.SubjectIds.Add(subjectId);
-                result.TypeIds.Add(typeId);
-                result.ObjectIds.Add(objectId);
-                result.ContextIds.Add(contextId);
-                result.TimestampsPgUs.Add(ts);
-                result.Counts.Add(games);
-                result.CountValueOffsets.Add(checked((int)(countValOff - rowStart)));
-                result.SumScores.Add(sumScore);
-                result.FoldReplayable.Add(foldReplayable);
-                result.SumScoreValueOffsets.Add(checked((int)(sumValOff - rowStart)));
-                result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
+                if (collectIndex)
+                {
+                    result.Ids.Add(id);
+                    result.SubjectIds.Add(subjectId);
+                    result.TypeIds.Add(typeId);
+                    result.ObjectIds.Add(objectId);
+                    result.ContextIds.Add(contextId);
+                    result.TimestampsPgUs.Add(ts);
+                    result.Counts.Add(games);
+                    result.CountValueOffsets.Add(checked((int)(countValOff - rowStart)));
+                    result.SumScores.Add(sumScore);
+                    result.FoldReplayable.Add(foldReplayable);
+                    result.SumScoreValueOffsets.Add(checked((int)(sumValOff - rowStart)));
+                    result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
+                }
+                if (decoded is not null)
+                {
+                    if (!Enum.IsDefined((AttestationOutcome)outcome))
+                        throw new InvalidOperationException("invalid native attestation outcome");
+                    // The tuple carries the aggregate score total. The scalar score
+                    // is unused when SumScoreFp1e9 is supplied to the ordinary fold.
+                    decoded.Add(new AttestationRow(id, subjectId, typeId,
+                        objectNull ? null : objectId, sourceId, contextNull ? null : contextId,
+                        (AttestationOutcome)outcome, checked(ts + IntentStage.PgEpochUnixUs),
+                        games, 0, opponentRd, opponentRating, sumScore, highwayMask, foldReplayable));
+                }
             }
         }
         return result;

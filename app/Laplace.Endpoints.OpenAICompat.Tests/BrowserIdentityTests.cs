@@ -6,6 +6,8 @@ using Laplace.Engine.Core;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using Xunit;
 
@@ -79,6 +81,9 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
     public async Task AnonymousIdentityDiscoveryIsPublicAndReportsNoSession()
     {
         using var client = _factory.CreateClient();
+        Assert.Equal("header", _factory.Services.GetRequiredService<IOptions<LaplaceAuthOptions>>().Value.Mode);
+        Assert.Equal("memory", _factory.Services.GetRequiredService<BillingStoreMode>().Mode);
+        Assert.Empty(_factory.Services.GetRequiredService<BrowserAuthSettings>().Providers);
         using var me = await client.GetAsync("/v1/auth/me");
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
         using var document = JsonDocument.Parse(await me.Content.ReadAsStringAsync());
@@ -119,12 +124,18 @@ public sealed class BrowserIdentityTests : IClassFixture<GoldenFactory>
             await store.UpsertConversationAsync(
                 account.TenantId, account.UserId, $"s-{suffix}", "Persistent chat", CancellationToken.None);
 
+            var retainedSession = await store.GetWebSessionAsync($"ws-{suffix}", CancellationToken.None);
+            Assert.NotNull(retainedSession);
+            Assert.Equal(account.UserId, retainedSession!.UserId);
+            Assert.Equal(account.TenantId, retainedSession.TenantId);
+            Assert.Equal(new byte[] { 1, 2, 3 }, retainedSession.Ticket);
             Assert.Single(await store.ListWebSessionsAsync(account.UserId, CancellationToken.None));
             var conversations = await store.ListConversationsAsync(
                 account.UserId, account.TenantId, CancellationToken.None);
             Assert.Equal("Persistent chat", Assert.Single(conversations).Title);
 
             await store.RevokeWebSessionAsync($"ws-{suffix}", account.UserId, CancellationToken.None);
+            Assert.Null(await store.GetWebSessionAsync($"ws-{suffix}", CancellationToken.None));
             Assert.Empty(await store.ListWebSessionsAsync(account.UserId, CancellationToken.None));
 
             await using var secretProbe = dataSource.CreateCommand("""
