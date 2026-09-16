@@ -1,5 +1,6 @@
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using Xunit;
