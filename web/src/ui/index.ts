@@ -2,6 +2,8 @@
 export { TooltipProvider, type TooltipProviderProps } from './providers/TooltipProvider';
 export { cn } from './lib/cn';
 export { useControllableState } from './hooks/useControllableState';
+export { useReadResource, type ReadResourceOptions } from './hooks/useReadResource';
+export { ReadResource, type ReadLoader, type ReadSnapshot } from './lib/readResource';
 
 // Tier 1 — Primitives
 export { Button, IconButton, buttonVariants, type ButtonProps } from './primitives/Button';
@@ -39,6 +41,7 @@ export { Alert, type AlertProps } from './composites/Alert';
 export { ConsensusBadge, type ConsensusBadgeProps } from './composites/ConsensusBadge';
 export { Modal, type ModalProps } from './composites/Modal';
 export { Table, TableScroll, Th, Td } from './composites/Table';
+export { ReadStatus, type ReadStatusProps } from './composites/ReadStatus/ReadStatus';
 
 // Tier 4 — Layout
 export { Panel, type PanelProps } from './layout/Panel';
@@ -47,3 +50,6 @@ export { Stack, type StackProps } from './layout/Stack';
 export { AppHeader, type AppHeaderProps } from './layout/AppHeader';
 export { TenantField, type TenantFieldProps } from './layout/TenantField';
 export { NavTabs, type NavTab, type NavTabsProps } from './layout/NavTabs';
+
+export { OperationFields, type OperationFieldsProps } from './composites/OperationFields/OperationFields';
+export { initialOperationDraft, operationArguments, type OperationParameter, type OperationDraft } from './lib/operationFields';

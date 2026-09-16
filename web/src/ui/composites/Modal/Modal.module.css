@@ -1,28 +1,22 @@
 @layer components {
-  .backdrop {
+  .panel {
     position: fixed;
     inset: 0;
-    z-index: var(--z-modal);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.55);
-    padding: var(--space-5);
-  }
-
-  .panel {
-    background: var(--color-bg-panel);
+    margin: auto;
+    width: min(36rem, calc(100vw - 2rem));
+    max-width: calc(100vw - 2rem);
+    max-height: calc(100dvh - 2rem);
+    box-sizing: border-box;
+    overflow: auto;
+    overscroll-behavior: contain;
+    background: var(--material-enamel);
+    color: var(--color-text-primary, inherit);
     border: 1px solid var(--color-border-default);
-    border-radius: var(--radius-lg);
-    padding: var(--space-5);
-    max-width: 24rem;
-    width: 100%;
+    border-radius: var(--radius-md);
+    padding: var(--space-5, 1.5rem);
+    box-shadow: var(--shadow-instrument);
   }
-
-  .actions {
-    display: flex;
-    gap: var(--space-3);
-    margin-top: var(--space-4);
-    justify-content: flex-end;
-  }
+  .panel::backdrop { background: rgb(0 0 0 / 0.45); }
+  .panel h2 { margin-top: 0; overflow-wrap: anywhere; }
+  .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
 }

@@ -13,7 +13,11 @@
     "storybook": "cross-env STORYBOOK_DISABLE_TELEMETRY=1 storybook dev -p 6006",
     "build-storybook": "cross-env CI=true STORYBOOK_DISABLE_TELEMETRY=1 storybook build",
     "test:e2e": "playwright test",
-    "test:chess-ui": "node scripts/test-chess-ui.mjs",
+    "test:ui": "npm run test:read-resource && npm run test:workspace-ui && npm run test:data-ui && node scripts/test-chess-ui.mjs",
+    "test:read-resource": "node --test scripts/test-read-resource.mjs scripts/test-data-workspace.mjs",
+    "test:workspace-ui": "node scripts/test-workspace-ui.mjs",
+    "test:data-ui": "node scripts/test-data-ui.mjs",
+    "test:chess-ui": "npm run test:ui",
     "gen:api": "openapi-typescript ./openapi/openapi.json -o ./src/api/types.gen.ts"
   },
   "dependencies": {

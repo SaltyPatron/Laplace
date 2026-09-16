@@ -95,14 +95,18 @@ public sealed class ChessPositionFloorTests
     {
         string path = Blob();
         using var start = new Barrier(5);
+        using var witnessedLoadedMap = new CountdownEvent(4);
         int stop = 0;
         long reads = 0, hits = 0;
+        Task[] readers = [];
         try
         {
             ChessPositionFloor.Load(path);
-            Task[] readers = Enumerable.Range(0, 4).Select(worker => Task.Run(() =>
+            // Dedicated readers cannot starve behind a saturated test thread pool.
+            readers = Enumerable.Range(0, 4).Select(worker => Task.Factory.StartNew(() =>
             {
-                start.SignalAndWait();
+                Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(30)), "Readers did not rendezvous.");
+                bool witnessed = false;
                 while (Volatile.Read(ref stop) == 0)
                 {
                     if (ChessPositionFloor.TryLookup(new(1, 2), out var x, out var y,
@@ -112,27 +116,38 @@ public sealed class ChessPositionFloorTests
                         Assert.Equal(0.3, z); Assert.Equal(0.4, m);
                         Assert.Equal(4u, n); Assert.Equal((byte)2, tier);
                         Interlocked.Increment(ref hits);
+                        if (!witnessed)
+                        {
+                            witnessed = true;
+                            witnessedLoadedMap.Signal();
+                        }
                     }
                     Assert.InRange(ChessPositionFloor.Observe().RecordCount, 0, 1);
                     Interlocked.Increment(ref reads);
                 }
-            })).ToArray();
-            start.SignalAndWait();
-            try
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+            Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(30)), "Publisher did not rendezvous.");
+            for (int i = 0; i < 512; i++)
             {
-                for (int i = 0; i < 512; i++)
-                {
-                    // Direct native unload intentionally bypasses the managed publication gate.
-                    NativeUnload();
-                    ChessPositionFloor.Load(path);
-                }
+                // Direct native unload intentionally bypasses the managed publication gate.
+                NativeUnload();
+                ChessPositionFloor.Load(path);
             }
-            finally { Volatile.Write(ref stop, 1); }
-            await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(30));
-            Assert.True(reads > 0);
-            Assert.True(hits > 0);
+            // A miss during an unloaded interval is valid. Do not stop immediately
+            // after the last load: scheduling can otherwise give every reader only
+            // unloaded intervals. Keep the final map published until EACH reader
+            // has copied and checked an actual record, without weakening any assertion.
+            Assert.True(witnessedLoadedMap.Wait(TimeSpan.FromSeconds(30)),
+                "Every concurrent reader must observe a valid loaded map.");
         }
-        finally { Volatile.Write(ref stop, 1); ChessPositionFloor.Unload(); File.Delete(path); }
+        finally
+        {
+            Volatile.Write(ref stop, 1);
+            try { await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(30)); }
+            finally { ChessPositionFloor.Unload(); File.Delete(path); }
+        }
+        Assert.True(reads > 0);
+        Assert.True(hits >= 4);
     }
 
     [Fact]
