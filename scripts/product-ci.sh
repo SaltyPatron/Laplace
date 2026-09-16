@@ -22,6 +22,8 @@ run_build() {
   [[ "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || args+=(--force-rebuild)
   [[ "${LAPLACE_FORCE_CODEGEN:-}" != 1 ]] || args+=(--force-codegen)
   bash scripts/pipeline.sh "${args[@]}" build
+  mkdir -p build
+  git rev-parse HEAD > build/.laplace-source-revision
 }
 
 run_dev_tests() {
