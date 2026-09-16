@@ -258,6 +258,82 @@ public sealed class WorkingSetPipelineTests
     }
 
     [Fact]
+    public async Task FailedDirectDrain_DisposesItsUntransferredNativeStage()
+    {
+        IntentStage? staged = null;
+        SubstrateChangeBuilder? builder = null;
+        var handler = new DirectComposeHandler<int>((_, value) =>
+        {
+            builder = value;
+            staged = value.ContentStage;
+            staged.AddEntity(TestSource, 0, TestSource, TestSource);
+            throw new InvalidOperationException("controlled direct-drain failure");
+        });
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var unused in IngestBatchPipeline.RunAsync(
+                new IngestBatchPipeline.ListRecordStream<int>([1]), handler,
+                WorkingSetConfig(reader: null, probeChunk: 1, recordCap: 1)))
+            {
+                throw new Xunit.Sdk.XunitException("failed drain published a change");
+            }
+        });
+
+        Assert.Equal("controlled direct-drain failure", error.Message);
+        Assert.NotNull(staged);
+        Assert.True(staged.IsClosed);
+        Assert.NotNull(builder);
+        Assert.Throws<ObjectDisposedException>(() => builder.AddEntity(
+            TestSource, 0, TestSource, TestSource));
+    }
+
+    [Fact]
+    public async Task BuilderResetAndEnd_DisposeBuildersButPreserveTransferredStageOwnership()
+    {
+        var builders = new List<SubstrateChangeBuilder>();
+        var changes = new List<SubstrateChange>();
+        var handler = new DirectComposeHandler<int>((record, builder) =>
+        {
+            // Reaching a second window must have retired the prior builder.
+            if (builders.Count != 0)
+                Assert.Throws<ObjectDisposedException>(() => builders[^1].AddEntity(
+                    TestSource, 0, TestSource, TestSource));
+            builders.Add(builder);
+            var id = Hash128.Blake3(BitConverter.GetBytes(record));
+            builder.ContentStage.AddEntity(id, 0, TestSource, TestSource);
+        });
+
+        try
+        {
+            await foreach (var change in IngestBatchPipeline.RunAsync(
+                new IngestBatchPipeline.ListRecordStream<int>([1, 2]), handler,
+                WorkingSetConfig(reader: null, probeChunk: 1, recordCap: 1)))
+                changes.Add(change);
+
+            Assert.Equal(2, changes.Count);
+            Assert.Equal(2, builders.Count);
+            Assert.All(builders, builder => Assert.Throws<ObjectDisposedException>(
+                () => builder.AddEntity(TestSource, 0, TestSource, TestSource)));
+            Assert.All(changes, change =>
+            {
+                Assert.Equal(1, change.Metadata.InputUnitsConsumed);
+                var stage = Assert.Single(change.IntentStages);
+                Assert.False(stage.IsClosed);
+                Assert.Equal(1, stage.EntityCount);
+                Assert.NotEmpty(stage.EmitCopyBinary(IntentStageTable.Entities));
+            });
+        }
+        finally
+        {
+            foreach (var change in changes)
+                foreach (var stage in change.IntentStages)
+                    stage.Dispose();
+        }
+        Assert.All(changes, change => Assert.True(Assert.Single(change.IntentStages).IsClosed));
+    }
+
+    [Fact]
     public void PipelineBuilders_DefaultToBulkContentPresenceProbe()
     {
         var reader = new ProbeTrackingReader(present: true);

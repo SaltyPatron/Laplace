@@ -175,6 +175,8 @@ Modes:
   bootstrap   Full Layer 0: runner, PG cluster, API unit, chess-lab, secrets
   chess-gui-runtime
               Install host X11 libraries and virtual-display acceptance tools only
+  chess-gui-acceptance-tools
+              Install optional AT-SPI/DBus operator-test tools only; no engine requirement
   status      Print current state (no changes)
   stripe      Stripe sandbox block into runner .env
   pg-bounce-sudoers
@@ -238,6 +240,12 @@ bootstrap_chess_gui_runtime() {
         libxcb-shape0 libxcb-xfixes0 libxcb-sync1 libxcb-shm0
         libxcb-render0 libxcb-util1 libxcb1 libx11-xcb1 fonts-dejavu-core
     )
+    # This opt-in selection supports actual named-widget GUI acceptance. It is
+    # separate from the normal runtime package list and does not alter engine setup.
+    if [ "${1:-runtime}" = accessibility ]; then
+        packages=(dbus-daemon at-spi2-core gir1.2-atspi-2.0 python3-gi)
+        say "Optional GUI acceptance tools: isolated DBus and typed AT-SPI"
+    fi
     local -a missing=() installer=(apt-get)
     for attempt in 1 2; do
         missing=()
@@ -2007,6 +2015,9 @@ case "$MODE" in
         ;;
     chess-gui-runtime)
         bootstrap_chess_gui_runtime
+        ;;
+    chess-gui-acceptance-tools)
+        bootstrap_chess_gui_runtime accessibility
         ;;
     status)
         do_status

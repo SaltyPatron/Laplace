@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 
 namespace Laplace.SubstrateCRUD;
 
@@ -23,6 +24,9 @@ public sealed class SubstrateChangeBuilder : IDisposable
     private readonly Dictionary<Hash128, int> _physByEntity = new();
     private int _physIndexWatermark;
     private long _physicalityTrajectoryBytes;
+    private PhysicalityDescriptorSizing.Shape _observationShape;
+    private PhysicalityDescriptorSizing.Shape _selectedShape;
+    private bool _partialTrajectory;
     private bool _disposed;
 
     // The canonical member order for a set composition. memcmp of the 16-byte host layout,
@@ -121,11 +125,23 @@ public sealed class SubstrateChangeBuilder : IDisposable
         ArgumentNullException.ThrowIfNull(row);
         // The placement address does not identify an immutable body. Capture
         // source forms before selecting the compatible first placement row.
-        long trajectoryBytes = checked(_physicalityTrajectoryBytes
-            + (long)(row.TrajectoryXyzm?.Length ?? 0) * sizeof(double));
+        int values = row.TrajectoryXyzm?.Length ?? 0;
+        long trajectoryBytes = checked(_physicalityTrajectoryBytes + (long)values * sizeof(double));
+        ulong vertices = (ulong)(values / 4);
+        var shape = new PhysicalityDescriptorSizing.Shape(1, vertices, vertices);
+        var observations = _observationShape.Add(shape);
+        bool selected = !_seenPhysicalities.Contains(row.Id);
+        var selection = selected ? _selectedShape.Add(shape) : _selectedShape;
         _physicalityObservations.Add(row);
         _physicalityTrajectoryBytes = trajectoryBytes;
-        if (_seenPhysicalities.Add(row.Id)) _physicalities.Add(row);
+        _observationShape = observations;
+        _selectedShape = selection;
+        _partialTrajectory |= values % 4 != 0;
+        if (selected)
+        {
+            _seenPhysicalities.Add(row.Id);
+            _physicalities.Add(row);
+        }
         return this;
     }
 
@@ -395,6 +411,34 @@ public sealed class SubstrateChangeBuilder : IDisposable
 
 
 
+    /// <summary>
+    /// Modeled source-local admission payload for builders sharing one apply.
+    /// Native tuple/capture/descriptor widths come from their actual owners;
+    /// growing native stages use a constant-time framing-inclusive shape bound.
+    /// Managed dimensions accumulate on append, including every raw observation.
+    /// Deferred content not yet materialized, provider closure, elected views and
+    /// other fixed SQL/native owners remain subject to the actual runtime grant.
+    /// This is a grouping estimate, never a promise that a complete apply fits.
+    /// </summary>
+    public static long ModeledSourceAdmissionPayloadBytes(params SubstrateChangeBuilder[] builders)
+    {
+        ArgumentNullException.ThrowIfNull(builders);
+        var total = default(IngestAdmissionSizing);
+        foreach (var builder in builders)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+            ObjectDisposedException.ThrowIf(builder._disposed, builder);
+            if (builder._partialTrajectory)
+                throw new InvalidOperationException("physicality observation contains a partial trajectory vertex");
+            total = total.Add(IngestAdmissionSizing.MeasureParts(
+                builder.StagedBytesEstimate, builder._intentStages,
+                builder._selectedShape, builder._observationShape,
+                (ulong)builder._entities.Count, (ulong)builder._attestations.Count,
+                growingStages: true));
+        }
+        return total.ModeledSourcePayloadBytes;
+    }
+
     public SubstrateChangeBuilder AddTestimonyWalk(TestimonyWalkRow walk)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -532,6 +576,9 @@ public sealed class SubstrateChangeBuilder : IDisposable
         foreach (var stage in _intentStages) stage.Dispose();
         _intentStages.Clear();
         _contentStage = null;
+        _observationShape = default;
+        _selectedShape = default;
+        _partialTrajectory = false;
     }
 
     private static Hash128 ComputeIntentId(

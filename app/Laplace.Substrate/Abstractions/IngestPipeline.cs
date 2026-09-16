@@ -1440,8 +1440,15 @@ public static class IngestBatchPipeline
 
         public void Dispose()
         {
-            (WorkingSetDeferred as IWorkingSetDeferredBatch)?.Dispose();
-            WorkingSetDeferred = null;
+            try
+            {
+                (WorkingSetDeferred as IWorkingSetDeferredBatch)?.Dispose();
+            }
+            finally
+            {
+                WorkingSetDeferred = null;
+                Builder.Dispose();
+            }
         }
 
         public async Task FinalizeWorkingSetAsync<TRecord>(
@@ -1470,7 +1477,13 @@ public static class IngestBatchPipeline
             _rowsInBatch += units;
         }
 
-        public void ResetBuilder(SubstrateChangeBuilder next) => Builder = next;
+        public void ResetBuilder(SubstrateChangeBuilder next)
+        {
+            ArgumentNullException.ThrowIfNull(next);
+            var previous = Builder;
+            Builder = next;
+            previous.Dispose();
+        }
 
         public async Task<SubstrateChange> YieldBatchAsync(CancellationToken ct)
         {

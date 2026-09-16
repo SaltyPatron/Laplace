@@ -2,6 +2,45 @@
   "schema_version": 1,
   "suites": [
     {
+      "id": "policy-qualified-chess-floor-export",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-qualified-chess-floor-export.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-cutechess-user-engines",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-cutechess-user-engines.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
+      "id": "policy-cutechess-gui-game",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-cutechess-gui-game.py"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-cmake-release",
       "profile": "policy",
       "owner": "build",

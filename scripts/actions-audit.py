@@ -125,6 +125,57 @@ def visible_phases(job: dict, kind: str) -> tuple[list[str], int, int]:
 
 def result_authority(name: str, workflow: dict) -> None:
     """Optional diagnostics never acquire proof authority; readiness is deferred."""
+    if name == "chess-floor-export.yml":
+        context = "chess-floor-export.yml"
+        jobs = workflow.get("jobs") or {}
+        if set(jobs) != {"export"}:
+            fail(f"{context}: only one explicit floor export job is allowed")
+        if triggers(workflow) != {"push", "workflow_dispatch"} or (workflow.get("on") or {}).get("push") != {
+                "branches": ["verify/chess-floor-export-*"]}:
+            fail(f"{context}: floor export must use explicit operator branches or manual dispatch")
+        if workflow.get("permissions") != {"contents": "read", "actions": "read"}:
+            fail(f"{context}: floor export must retain read-only repository and proof access")
+        if workflow.get("concurrency") != {"group": "laplace-shared-workspace", "cancel-in-progress": "false"}:
+            fail(f"{context}: floor export must retain shared workspace serialization")
+        export = jobs.get("export", {})
+        if "needs" in export or export.get("timeout-minutes") != "180":
+            fail(f"{context}: floor export must remain independent and finitely bounded")
+        if export.get("runs-on") != ["self-hosted", "laplace"]:
+            fail(f"{context}: floor export must use the ordinary installed host")
+        steps = export.get("steps") or []
+        execute = unique_step(steps, "id", "export", context)
+        result = unique_step(steps, "name", "Retain explicit export result", context)
+        upload = unique_step(steps, "name", "Upload bounded qualification evidence", context)
+        if execute:
+            if "if" in execute[1] or (execute[1].get("env") or {}).get("TARGET_SHA") != "${{ github.sha }}":
+                fail(f"{context}: floor export must execute the selected immutable workflow source")
+            run = execute[1].get("run", "")
+            for token in ("set -euo pipefail",
+                          "timeout --signal=TERM --kill-after=15s 9300s",
+                          "flock --exclusive --no-fork --timeout 1800 /build/laplace/work/host-resource.lock",
+                          "git diff --quiet", "git diff --cached --quiet",
+                          'git checkout --detach "$TARGET_SHA"',
+                          '[[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]',
+                          'selection="$PWD/.github/chess-floor-export-selection.json"',
+                          'test -f "$selection"', "scripts/export-qualified-chess-floors.py",
+                          'git worktree add --detach "$candidate_root" "$candidate_sha"',
+                          'candidate + "/scripts/chess-runtime-env.py"',
+                          '"--selection", selection, "--candidate-root", candidate, "--output", output'):
+                if token not in run:
+                    fail(f"{context}: floor export owner lost {token}")
+        if result and (result[1].get("if") != "always()"
+                       or (result[1].get("env") or {}).get("EXPORT_OUTCOME") != "${{ steps.export.outcome }}"):
+            fail(f"{context}: explicit export outcome must survive failure")
+        if upload and (upload[1].get("if") != "always()"
+                       or not upload[1].get("uses", "").startswith("actions/upload-artifact@")
+                       or (upload[1].get("with") or {}).get("if-no-files-found") != "error"):
+            fail(f"{context}: bounded export evidence must upload after failure")
+        if execute and result and upload and not execute[0] < result[0] < upload[0]:
+            fail(f"{context}: export outcome and evidence must follow the attempted export")
+        for token in ("product-ci.sh", "ci-session.py", "pipeline.sh install", "pipeline.sh migrate",
+                      "publish-applications.sh", "systemctl ", "sudo "):
+            if token in runs(export):
+                fail(f"{context}: floor export cannot activate product changes: {token}")
     if name == "chess-corpus-evidence.yml":
         jobs = workflow.get("jobs") or {}
         if set(jobs) != {"corpus"}:
@@ -514,7 +565,7 @@ for name, workflow in workflows.items():
             fail(f"{name}: seed mutation lacks explicit invocation")
 
 push = {name for name, workflow in workflows.items() if "push" in triggers(workflow)}
-if push != {"laplace.yml", "repo-hygiene.yml", "benchmark-evidence.yml", "chess-corpus-evidence.yml"}:
+if push != {"laplace.yml", "repo-hygiene.yml", "benchmark-evidence.yml", "chess-corpus-evidence.yml", "chess-floor-export.yml"}:
     fail(f"automatic push workflows drifted: {sorted(push)}")
 
 runner = (ROOT / "scripts" / "bootstrap-laplace-runner.sh").read_text(encoding="utf-8")

@@ -130,6 +130,84 @@ static inline int physicality_descriptor_cancel_requested(
         cancellation->requested(cancellation->context) != 0;
 }
 
+/* Source-local shape accounting. These helpers do not authenticate body
+ * identities, replace full descriptor validation, or predict provider closure.
+ * Fields count raw occurrences, never distinct canonical nodes. All arithmetic
+ * is checked; outputs publish only on success. The stage scanner shares the
+ * ordinary capture framing/EWKB owner and allocates no decoded row storage. */
+typedef struct {
+    size_t forms;
+    size_t stored_vertices;
+    size_t maximum_vertices;
+} physicality_descriptor_shape_t;
+physicality_descriptor_status_t physicality_descriptor_stages_shape(
+    const intent_stage_t* const* stages, size_t stage_count,
+    physicality_descriptor_shape_t* out_shape);
+/* Constant-time producer bound from existing physicality row count and tuple
+ * payload length. Treats every complete 32 bytes (including tuple framing) as
+ * a possible XYZM vertex and assigns that total to the widest possible row.
+ * This deliberately overcounts; it does not scan/authenticate tuple contents.
+ * Use stages_shape for exact finalized dimensions and ordinary capture for
+ * validation. No retained stage metadata, layout or allocation changes. */
+physicality_descriptor_status_t physicality_descriptor_stage_shape_bound(
+    const intent_stage_t* stage, physicality_descriptor_shape_t* out_shape);
+/* Exact decoded capture payload (opaque capture + input/observation arrays +
+ * copied XYZM vertices), excluding a descriptor plan and borrowed stages. */
+physicality_descriptor_status_t physicality_descriptor_capture_payload_bound(
+    size_t forms, size_t stored_vertices, size_t* out_retained_bytes);
+/* Conservative complete source-plan reservation from the actual recipe:
+ * <=14 nodes/form +5/vertex and <=95 children/form +42/vertex, exact occurrence
+ * arrays, geometric capacities and old+new replacement payload. Deduplication
+ * can reduce actual usage. This excludes input/capture, vocabulary, provider
+ * closure, view materialization, output serialization and allocator metadata. */
+physicality_descriptor_status_t physicality_descriptor_plan_payload_bound(
+    size_t forms, size_t stored_vertices, size_t maximum_vertices,
+    size_t* out_peak_bytes);
+
+/* Optional bounded failure evidence from the same planner. No pointers or
+ * body contents escape. A growth request is the complete replacement payload,
+ * charged alongside retained bytes even if realloc could grow in place.
+ * INITIAL reports the whole fixed reservation before any plan allocation;
+ * allocator refusal there may occur after partial allocation, which is freed.
+ * SIZE_OVERFLOW has requested_bytes == 0 (no representable request).
+ * Invalid body/cancellation may return counts with refusal == NONE.
+ * These counters are payload accounting, not RSS, and do not change grants,
+ * capacities, canonical identities, occurrence multiplicity or cleanup. */
+typedef enum {
+    PHYSICALITY_DESCRIPTOR_PLAN_NO_ALLOCATION = 0,
+    PHYSICALITY_DESCRIPTOR_PLAN_INITIAL = 1,
+    PHYSICALITY_DESCRIPTOR_PLAN_NODES = 2,
+    PHYSICALITY_DESCRIPTOR_PLAN_CHILDREN = 3,
+    PHYSICALITY_DESCRIPTOR_PLAN_SLOTS = 4,
+    PHYSICALITY_DESCRIPTOR_PLAN_GRAPH = 5
+} physicality_descriptor_plan_allocation_t;
+typedef enum {
+    PHYSICALITY_DESCRIPTOR_PLAN_NO_REFUSAL = 0,
+    PHYSICALITY_DESCRIPTOR_PLAN_GRANT_REFUSED = 1,
+    PHYSICALITY_DESCRIPTOR_PLAN_ALLOCATOR_REFUSED = 2,
+    PHYSICALITY_DESCRIPTOR_PLAN_SIZE_OVERFLOW = 3
+} physicality_descriptor_plan_refusal_t;
+typedef struct {
+    physicality_descriptor_plan_allocation_t allocation;
+    physicality_descriptor_plan_refusal_t refusal;
+    size_t requested_bytes, maximum_bytes, retained_bytes, peak_bytes;
+    size_t input_count, completed_inputs;
+    size_t node_count, node_capacity, child_count, child_capacity;
+    size_t reference_count, reference_capacity, root_count, slot_count, scratch_capacity;
+} physicality_descriptor_plan_diagnostics_t;
+
+/* diagnostics is caller-owned and copied synchronously before failure cleanup
+ * or success publication; it is never retained by an output plan. NULL uses
+ * precisely the existing allocator and validation path. Existing entrypoints
+ * remain wrappers over this owner, with no opaque plan-size/layout change. */
+physicality_descriptor_status_t physicality_descriptor_plan_build_diagnosed_cancelable(
+    const physicality_descriptor_input_t* inputs, size_t input_count,
+    const physicality_descriptor_basis_t* basis,
+    const physicality_descriptor_limits_t* limits,
+    const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_plan_diagnostics_t* diagnostics,
+    physicality_descriptor_plan_t** out_plan);
+
 physicality_descriptor_status_t physicality_descriptor_plan_build_cancelable(
     const physicality_descriptor_input_t* inputs, size_t input_count,
     const physicality_descriptor_basis_t* basis,

@@ -980,4 +980,310 @@ TEST(PhysicalityDescriptorReadback, AccountsForItsPeakWorksetAndRejectsInvalidOf
     EXPECT_EQ(output, nullptr);
 }
 
+
+
+
+TEST(PhysicalityDescriptor, DiagnosedPlannerPreservesOutputsAndExactFiniteGrantDecisions) {
+    std::vector<physicality_descriptor_input_t> inputs;
+    for (size_t i = 0; i < 16u; ++i) {
+        auto input = body();
+        input.entity_id.lo += i;
+        input.coord[0] += static_cast<double>(i) / 64.0;
+        inputs.push_back(input);
+    }
+    const auto vocabulary = basis();
+    const auto reference = build(inputs);
+    ASSERT_NE(reference, nullptr);
+    const size_t peak = physicality_descriptor_plan_peak_bytes(reference.get());
+    bool saw_initial = false, saw_growth = false, saw_success = false;
+    for (size_t grant = 0; grant <= peak + 128u; grant += 128u) {
+        const physicality_descriptor_limits_t limits{grant};
+        physicality_descriptor_plan_t *plain_raw = nullptr, *diagnosed_raw = nullptr;
+        physicality_descriptor_plan_diagnostics_t diagnostic;
+        std::memset(&diagnostic, 0xa5, sizeof(diagnostic));
+        const auto plain_status = physicality_descriptor_plan_build(
+            inputs.data(), inputs.size(), &vocabulary, &limits, &plain_raw);
+        const auto diagnosed_status = physicality_descriptor_plan_build_diagnosed_cancelable(
+            inputs.data(), inputs.size(), &vocabulary, &limits, nullptr, &diagnostic, &diagnosed_raw);
+        Plan plain(plain_raw, physicality_descriptor_plan_free);
+        Plan diagnosed(diagnosed_raw, physicality_descriptor_plan_free);
+        ASSERT_EQ(diagnosed_status, plain_status) << "grant=" << grant;
+        EXPECT_EQ(diagnostic.maximum_bytes, grant);
+        EXPECT_EQ(diagnostic.input_count, inputs.size());
+        EXPECT_LE(diagnostic.completed_inputs, inputs.size());
+        EXPECT_LE(diagnostic.retained_bytes, diagnostic.peak_bytes);
+        EXPECT_LE(diagnostic.peak_bytes, grant);
+        EXPECT_LE(diagnostic.node_count, diagnostic.node_capacity);
+        EXPECT_LE(diagnostic.child_count, diagnostic.child_capacity);
+        EXPECT_LE(diagnostic.reference_count, diagnostic.reference_capacity);
+        if (plain_status != PHYSICALITY_DESCRIPTOR_OK) {
+            ASSERT_EQ(plain_status, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+            EXPECT_EQ(plain.get(), nullptr);
+            EXPECT_EQ(diagnosed.get(), nullptr);
+            ASSERT_EQ(diagnostic.refusal, PHYSICALITY_DESCRIPTOR_PLAN_GRANT_REFUSED);
+            EXPECT_GT(diagnostic.requested_bytes, grant - diagnostic.retained_bytes);
+            EXPECT_LT(diagnostic.completed_inputs, inputs.size());
+            if (diagnostic.allocation == PHYSICALITY_DESCRIPTOR_PLAN_INITIAL) {
+                saw_initial = true;
+                EXPECT_EQ(diagnostic.retained_bytes, 0u);
+                EXPECT_EQ(diagnostic.completed_inputs, 0u);
+            } else {
+                saw_growth = true;
+                EXPECT_TRUE(diagnostic.allocation == PHYSICALITY_DESCRIPTOR_PLAN_NODES ||
+                    diagnostic.allocation == PHYSICALITY_DESCRIPTOR_PLAN_CHILDREN ||
+                    diagnostic.allocation == PHYSICALITY_DESCRIPTOR_PLAN_SLOTS);
+                EXPECT_GT(diagnostic.retained_bytes, 0u);
+            }
+            continue;
+        }
+        saw_success = true;
+        ASSERT_NE(plain, nullptr);
+        ASSERT_NE(diagnosed, nullptr);
+        EXPECT_EQ(diagnostic.refusal, PHYSICALITY_DESCRIPTOR_PLAN_NO_REFUSAL);
+        EXPECT_EQ(diagnostic.allocation, PHYSICALITY_DESCRIPTOR_PLAN_NO_ALLOCATION);
+        EXPECT_EQ(diagnostic.requested_bytes, 0u);
+        EXPECT_EQ(diagnostic.completed_inputs, inputs.size());
+        EXPECT_EQ(diagnostic.retained_bytes, physicality_descriptor_plan_bytes(plain.get()));
+        EXPECT_EQ(diagnostic.peak_bytes, physicality_descriptor_plan_peak_bytes(plain.get()));
+        const auto plain_roots = roots(plain), diagnosed_roots = roots(diagnosed);
+        ASSERT_EQ(plain_roots.size(), diagnosed_roots.size());
+        EXPECT_EQ(std::memcmp(plain_roots.data(), diagnosed_roots.data(),
+            plain_roots.size() * sizeof(hash128_t)), 0);
+        size_t n = 0, m = 0;
+        const auto* pn = physicality_descriptor_plan_nodes(plain.get(), &n);
+        const auto* dn = physicality_descriptor_plan_nodes(diagnosed.get(), &m);
+        ASSERT_EQ(n, m);
+        EXPECT_EQ(std::memcmp(pn, dn, n * sizeof(*pn)), 0);
+        const auto* pc = physicality_descriptor_plan_children(plain.get(), &n);
+        const auto* dc = physicality_descriptor_plan_children(diagnosed.get(), &m);
+        ASSERT_EQ(n, m);
+        EXPECT_EQ(std::memcmp(pc, dc, n * sizeof(*pc)), 0);
+        const auto* pr = physicality_descriptor_plan_references(plain.get(), &n);
+        const auto* dr = physicality_descriptor_plan_references(diagnosed.get(), &m);
+        ASSERT_EQ(n, m);
+        EXPECT_EQ(std::memcmp(pr, dr, n * sizeof(*pr)), 0);
+    }
+    EXPECT_TRUE(saw_initial);
+    EXPECT_TRUE(saw_growth);
+    EXPECT_TRUE(saw_success);
+}
+
+TEST(PhysicalityDescriptor, DiagnosedPlannerKeepsInvalidBodyCancellationAndOverflowDistinct) {
+    const auto vocabulary = basis();
+    const physicality_descriptor_limits_t limits{1024u * 1024u};
+    std::array<physicality_descriptor_input_t, 2> inputs{body(), body()};
+    inputs[1].coord[0] = std::numeric_limits<double>::quiet_NaN();
+    physicality_descriptor_plan_diagnostics_t diagnostic{};
+    physicality_descriptor_plan_t* raw = nullptr;
+    EXPECT_EQ(physicality_descriptor_plan_build_diagnosed_cancelable(
+        inputs.data(), inputs.size(), &vocabulary, &limits, nullptr, &diagnostic, &raw),
+        PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+    EXPECT_EQ(raw, nullptr);
+    EXPECT_EQ(diagnostic.refusal, PHYSICALITY_DESCRIPTOR_PLAN_NO_REFUSAL);
+    EXPECT_EQ(diagnostic.completed_inputs, 1u);
+    EXPECT_GT(diagnostic.node_count, 0u);
+    const physicality_descriptor_cancel_t cancelled{
+        [](void*) -> int { return 1; }, nullptr};
+    EXPECT_EQ(physicality_descriptor_plan_build_diagnosed_cancelable(
+        inputs.data(), inputs.size(), &vocabulary, &limits, &cancelled, &diagnostic, &raw),
+        PHYSICALITY_DESCRIPTOR_CANCELLED);
+    EXPECT_EQ(raw, nullptr);
+    EXPECT_EQ(diagnostic.refusal, PHYSICALITY_DESCRIPTOR_PLAN_NO_REFUSAL);
+    EXPECT_EQ(diagnostic.completed_inputs, 0u);
+    EXPECT_EQ(diagnostic.retained_bytes, 0u);
+    EXPECT_EQ(physicality_descriptor_plan_build_diagnosed_cancelable(
+        inputs.data(), SIZE_MAX, &vocabulary, &limits, nullptr, &diagnostic, &raw),
+        PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(raw, nullptr);
+    EXPECT_EQ(diagnostic.allocation, PHYSICALITY_DESCRIPTOR_PLAN_INITIAL);
+    EXPECT_EQ(diagnostic.refusal, PHYSICALITY_DESCRIPTOR_PLAN_SIZE_OVERFLOW);
+    EXPECT_EQ(diagnostic.requested_bytes, 0u);
+    EXPECT_EQ(diagnostic.retained_bytes, 0u);
+}
+
+
+TEST(PhysicalityDescriptor, SourcePlanBoundCoversActualRecipeAndOccurrenceArrays) {
+    const auto vocabulary = basis();
+    const std::array<hash128_t, 3> operands{{{11, 21}, {12, 22}, {11, 21}}};
+    std::array<double, 12> trajectory{};
+    ASSERT_EQ(trajectory_build(operands.data(), operands.size(), trajectory.data()), 0);
+    for (size_t count : {size_t{0}, size_t{1}, size_t{16}, size_t{257}}) {
+        std::vector<physicality_descriptor_input_t> inputs;
+        for (size_t i = 0u; i < count; ++i) {
+            auto input = body();
+            input.entity_id.lo += i;
+            input.coord[0] += static_cast<double>(i) / 512.0;
+            input.trajectory_xyzm = trajectory.data();
+            input.trajectory_vertices = operands.size();
+            input.n_constituents = static_cast<int32_t>(operands.size());
+            input.alignment_residual_is_null = 0;
+            input.alignment_residual = 0.125;
+            input.source_dim_is_null = 0;
+            input.source_dim = 4;
+            inputs.push_back(input);
+        }
+        size_t bound = 0u;
+        ASSERT_EQ(physicality_descriptor_plan_payload_bound(count, count * operands.size(),
+            count == 0u ? 0u : operands.size(), &bound), PHYSICALITY_DESCRIPTOR_OK);
+        const physicality_descriptor_limits_t limits{bound};
+        physicality_descriptor_plan_t* raw = nullptr;
+        ASSERT_EQ(physicality_descriptor_plan_build(inputs.data(), inputs.size(), &vocabulary,
+            &limits, &raw), PHYSICALITY_DESCRIPTOR_OK);
+        Plan plan(raw, physicality_descriptor_plan_free);
+        EXPECT_LE(physicality_descriptor_plan_peak_bytes(plan.get()), bound);
+        size_t roots_count = 0u, references_count = 0u;
+        physicality_descriptor_plan_roots(plan.get(), &roots_count);
+        physicality_descriptor_plan_references(plan.get(), &references_count);
+        EXPECT_EQ(roots_count, count);
+        EXPECT_EQ(references_count, count * (operands.size() + 1u));
+    }
+    // The larger factor recipe and both nullable fields are covered too.
+    const float values[]{0.25f, -0.75f, 0.5f, 0.125f, 0.875f, -0.625f};
+    double factor_vertex[4]{};
+    size_t factor_vertices = 0u;
+    ASSERT_EQ(laplace_factor_pack_values(values, 6u, factor_vertex, &factor_vertices), 0);
+    auto factor = body();
+    factor.trajectory_xyzm = factor_vertex; factor.trajectory_vertices = factor_vertices;
+    factor.n_constituents = 1; factor.alignment_residual_is_null = 0;
+    factor.alignment_residual = 0.25; factor.source_dim_is_null = 0; factor.source_dim = 4;
+    size_t factor_bound = 0u;
+    ASSERT_EQ(physicality_descriptor_plan_payload_bound(1u, factor_vertices, factor_vertices, &factor_bound),
+        PHYSICALITY_DESCRIPTOR_OK);
+    const physicality_descriptor_limits_t factor_limits{factor_bound};
+    physicality_descriptor_plan_t* factor_raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_plan_build(&factor, 1u, &vocabulary, &factor_limits, &factor_raw),
+        PHYSICALITY_DESCRIPTOR_OK);
+    Plan factor_plan(factor_raw, physicality_descriptor_plan_free);
+    EXPECT_LE(physicality_descriptor_plan_peak_bytes(factor_plan.get()), factor_bound);
+    size_t unchanged = 987u;
+    EXPECT_EQ(physicality_descriptor_plan_payload_bound(SIZE_MAX, 0u, 0u, &unchanged),
+        PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(unchanged, 987u);
+    EXPECT_EQ(physicality_descriptor_plan_payload_bound(1u, SIZE_MAX, SIZE_MAX, &unchanged),
+        PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(unchanged, 987u);
+    EXPECT_EQ(physicality_descriptor_plan_payload_bound(0u, 1u, 1u, &unchanged),
+        PHYSICALITY_DESCRIPTOR_INVALID);
+    EXPECT_EQ(physicality_descriptor_plan_payload_bound(1u, 1u, 2u, &unchanged),
+        PHYSICALITY_DESCRIPTOR_INVALID);
+    EXPECT_EQ(physicality_descriptor_plan_payload_bound(1u, 100u, 1u, &unchanged),
+        PHYSICALITY_DESCRIPTOR_INVALID);
+    EXPECT_EQ(unchanged, 987u);
+}
+
+TEST(PhysicalityDescriptorStage, ShapeAndPayloadBoundsUseActualOrdinaryTupleFrames) {
+    Stage stage(intent_stage_new(0), intent_stage_free);
+    ASSERT_NE(stage, nullptr);
+    const hash128_t source{501, 502}, type{601, 602}, relation{701, 702}, attestation{801, 802};
+    auto empty = body();
+    empty.alignment_residual_is_null = 0;
+    empty.alignment_residual = 0.25;
+    empty.source_dim_is_null = 0;
+    empty.source_dim = 4;
+    auto point = empty, line = empty;
+    const std::array<hash128_t, 2> operands{{{21, 31}, {22, 32}}};
+    std::array<double, 8> trajectory{};
+    ASSERT_EQ(trajectory_build(operands.data(), operands.size(), trajectory.data()), 0);
+    point.trajectory_xyzm = trajectory.data(); point.trajectory_vertices = 1u; point.n_constituents = 1;
+    line.trajectory_xyzm = trajectory.data(); line.trajectory_vertices = 2u; line.n_constituents = 2;
+    stage_body(stage.get(), empty, INTENT_STAGE_PG_EPOCH_UNIX_US + 1);
+    stage_body(stage.get(), point, INTENT_STAGE_PG_EPOCH_UNIX_US + 2);
+    stage_body(stage.get(), line, INTENT_STAGE_PG_EPOCH_UNIX_US + 3);
+    ASSERT_EQ(intent_stage_add_entity(stage.get(), &empty.entity_id, 4, &type, &source), 0);
+    std::array<uint8_t, 32> mask{}; mask.fill(0xff);
+    ASSERT_EQ(intent_stage_add_attestation_mode(stage.get(), &attestation, &empty.entity_id,
+        &relation, &source, &source, &type, 1, INTENT_STAGE_PG_EPOCH_UNIX_US + 4,
+        1, 1, 0, 0, 1, mask.data()), 0);
+    const intent_stage_t* stages[]{stage.get()};
+    physicality_descriptor_shape_t shape{};
+    ASSERT_EQ(physicality_descriptor_stages_shape(stages, 1u, &shape), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(shape.forms, 3u);
+    EXPECT_EQ(shape.stored_vertices, 3u);
+    EXPECT_EQ(shape.maximum_vertices, 2u);
+    size_t capture_bytes = 0u, tuple_bound = 0u;
+    ASSERT_EQ(physicality_descriptor_capture_payload_bound(shape.forms, shape.stored_vertices,
+        &capture_bytes), PHYSICALITY_DESCRIPTOR_OK);
+    physicality_descriptor_capture_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_capture_stage_rows(stages, 1u, capture_bytes, &raw),
+        PHYSICALITY_DESCRIPTOR_OK);
+    Capture owned(raw, physicality_descriptor_capture_free);
+    EXPECT_EQ(physicality_descriptor_capture_bytes(owned.get()), capture_bytes);
+    EXPECT_EQ(physicality_descriptor_capture_peak_bytes(owned.get()), capture_bytes);
+    raw = nullptr;
+    EXPECT_EQ(physicality_descriptor_capture_stage_rows(stages, 1u, capture_bytes - 1u, &raw),
+        PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(raw, nullptr);
+    ASSERT_EQ(intent_stage_tuple_payload_bound(1u, 3u, 3u, 1u, &tuple_bound), 0);
+    size_t e = 0u, p = 0u, a = 0u;
+    intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ENTITIES, &e);
+    const auto* physicalities = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &p);
+    intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &a);
+    EXPECT_EQ(e, 68u);
+    EXPECT_EQ(a, 229u);
+    EXPECT_EQ(p, (153u + 158u + 162u) + 3u * 32u);
+    EXPECT_EQ(tuple_bound, 68u + 3u * 162u + 3u * 32u + 229u);
+    EXPECT_LE(e + p + a, tuple_bound);
+    size_t unchanged = 987u;
+    EXPECT_EQ(intent_stage_tuple_payload_bound(SIZE_MAX, 0u, 0u, 0u, &unchanged), -2);
+    EXPECT_EQ(intent_stage_tuple_payload_bound(0u, 0u, 1u, 0u, &unchanged), -1);
+    EXPECT_EQ(physicality_descriptor_capture_payload_bound(SIZE_MAX, 0u, &unchanged),
+        PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(unchanged, 987u);
+    // The shared scanner must reject malformed tuple framing without publishing partial shape.
+    auto* mutable_bytes = const_cast<uint8_t*>(physicalities);
+    const uint8_t saved = mutable_bytes[1];
+    mutable_bytes[1] = 9;
+    shape = {901u, 902u, 903u};
+    EXPECT_EQ(physicality_descriptor_stages_shape(stages, 1u, &shape), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+    EXPECT_EQ(shape.forms, 901u);
+    EXPECT_EQ(shape.stored_vertices, 902u);
+    EXPECT_EQ(shape.maximum_vertices, 903u);
+    mutable_bytes[1] = saved;
+}
+
+
+TEST(PhysicalityDescriptorStage, ConstantTimeProducerShapeBoundsExactRowsWithoutChangingStage) {
+    Stage stage(intent_stage_new(0), intent_stage_free);
+    ASSERT_NE(stage, nullptr);
+    physicality_descriptor_shape_t upper{901u, 902u, 903u}, exact{};
+    ASSERT_EQ(physicality_descriptor_stage_shape_bound(stage.get(), &upper), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(upper.forms, 0u);
+    EXPECT_EQ(upper.stored_vertices, 0u);
+    EXPECT_EQ(upper.maximum_vertices, 0u);
+    const std::array<hash128_t, 3> operands{{{51, 61}, {52, 62}, {51, 61}}};
+    std::array<double, 12> trajectory{};
+    ASSERT_EQ(trajectory_build(operands.data(), operands.size(), trajectory.data()), 0);
+    const intent_stage_t* stages[]{stage.get()};
+    for (size_t i = 0u; i < 32u; ++i) {
+        auto input = body();
+        input.trajectory_xyzm = i % 2u == 0u ? nullptr : trajectory.data();
+        input.trajectory_vertices = i % 2u == 0u ? 0u : operands.size();
+        input.n_constituents = static_cast<int32_t>(input.trajectory_vertices);
+        stage_body(stage.get(), input, INTENT_STAGE_PG_EPOCH_UNIX_US + static_cast<int64_t>(i));
+        size_t before_bytes = 0u, after_bytes = 0u;
+        const auto* before = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &before_bytes);
+        const std::vector<uint8_t> saved(before, before + before_bytes);
+        ASSERT_EQ(physicality_descriptor_stage_shape_bound(stage.get(), &upper), PHYSICALITY_DESCRIPTOR_OK);
+        ASSERT_EQ(physicality_descriptor_stages_shape(stages, 1u, &exact), PHYSICALITY_DESCRIPTOR_OK);
+        EXPECT_EQ(upper.forms, exact.forms);
+        EXPECT_GE(upper.stored_vertices, exact.stored_vertices);
+        EXPECT_GE(upper.maximum_vertices, exact.maximum_vertices);
+        EXPECT_EQ(upper.stored_vertices, before_bytes / 32u);
+        const auto* after = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &after_bytes);
+        ASSERT_EQ(after_bytes, before_bytes);
+        EXPECT_EQ(std::memcmp(saved.data(), after, after_bytes), 0);
+        size_t upper_plan = 0u, exact_plan = 0u;
+        ASSERT_EQ(physicality_descriptor_plan_payload_bound(upper.forms, upper.stored_vertices,
+            upper.maximum_vertices, &upper_plan), PHYSICALITY_DESCRIPTOR_OK);
+        ASSERT_EQ(physicality_descriptor_plan_payload_bound(exact.forms, exact.stored_vertices,
+            exact.maximum_vertices, &exact_plan), PHYSICALITY_DESCRIPTOR_OK);
+        EXPECT_GE(upper_plan, exact_plan);
+    }
+    upper = {901u, 902u, 903u};
+    EXPECT_EQ(physicality_descriptor_stage_shape_bound(nullptr, &upper), PHYSICALITY_DESCRIPTOR_INVALID);
+    EXPECT_EQ(upper.forms, 901u);
+    EXPECT_EQ(upper.stored_vertices, 902u);
+    EXPECT_EQ(upper.maximum_vertices, 903u);
+}
+
 } // namespace

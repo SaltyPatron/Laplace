@@ -61,6 +61,38 @@ class CMakeProvisionTests(unittest.TestCase):
         with mock.patch.object(owner.urllib.request, "urlopen", side_effect=AssertionError("network")):
             self.assertEqual(selected, owner.select(self.root, self.work, self.lock, ensure=True))
 
+    def test_restrictive_umask_keeps_new_namespace_and_package_runner_readable(self):
+        self.root = self.base / "prefix" / "tools" / "cmake"
+        raw = self.archive()
+        previous = os.umask(0o077)
+        try:
+            selected = self.select(raw)
+        finally:
+            os.umask(previous)
+        for path in (self.base / "prefix", self.root.parent, self.root,
+                     selected.parent, *selected.parent.rglob("*")):
+            if path.is_dir() and not path.is_symlink():
+                self.assertEqual(0o555, path.stat().st_mode & 0o555, str(path))
+        self.assertEqual(0o644, (selected.parent / owner.RECEIPT).stat().st_mode & 0o777)
+        self.assertEqual(0o755, (selected / "cmake").stat().st_mode & 0o777)
+        self.assertEqual(0o644, (selected.parent / "share/cmake/module.cmake").stat().st_mode & 0o777)
+        with mock.patch.object(owner.urllib.request, "urlopen", side_effect=AssertionError("network")):
+            self.assertEqual(selected, owner.select(self.root, self.work, self.lock))
+
+    def test_new_namespace_does_not_chmod_existing_ancestor(self):
+        prefix = self.base / "existing-prefix"
+        prefix.mkdir()
+        prefix.chmod(0o750)
+        self.root = prefix / "tools" / "cmake"
+        previous = os.umask(0o077)
+        try:
+            self.select(self.archive())
+        finally:
+            os.umask(previous)
+        self.assertEqual(0o750, prefix.stat().st_mode & 0o777)
+        for path in (prefix / "tools", self.root):
+            self.assertEqual(0o555, path.stat().st_mode & 0o555)
+
     def test_missing_generation_read_only_selection_does_not_acquire(self):
         with mock.patch.object(owner.urllib.request, "urlopen") as network:
             with self.assertRaisesRegex(RuntimeError, "not installed"):

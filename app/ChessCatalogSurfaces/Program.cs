@@ -11,6 +11,8 @@ static class Program
 {
     static int Main(string[] args)
     {
+        if (args.FirstOrDefault() == ChessGuiGameEvidence.Mode)
+            return ChessGuiGameEvidence.Run(args[1..]);
         if (args.FirstOrDefault() == ChessRecordedFloorWitness.Mode)
             return ChessRecordedFloorWitness.Run(args[1..]);
         if (args.FirstOrDefault() == ChessStartingSideInventory.Mode)
