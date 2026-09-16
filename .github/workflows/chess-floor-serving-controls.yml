@@ -1,36 +1,198 @@
-name: Qualify recording runtime scope
+name: Dispatch the corpus pilot with qualified recording runtime scope
+
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
+
 permissions:
   contents: read
+  actions: write
+
 jobs:
-  qualification:
+  operation:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Qualify exact recording runtime scope without a database
+      - name: Dispatch the unchanged corpus pilot after exact native installation
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          work="/build/laplace/work/recording-scope-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work"
-          export TMPDIR="$work/tmp" TMP="$work/tmp" TEMP="$work/tmp"
-          mkdir -p "$TMPDIR" "$work/source"
-          cd "$work/source"
-          git init -q
-          git remote add origin https://github.com/SaltyPatron/Laplace.git
-          git fetch --no-tags --depth=1 origin 1c52b4d8baef263e393962c1ba27100ce898e217
-          git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = '1c52b4d8baef263e393962c1ba27100ce898e217'
-          test "$(git rev-parse HEAD^{tree})" = '1ec74fb926b51805a169be5aa1c0b97d3cf258b3'
-          python3 -B - <<'PY'
-          import ast,pathlib
-          for name in ("check-application-runtime.py","test-application-runtime.py","measure-installed-chess-corpus.py","test-installed-chess-corpus.py"):
-              ast.parse(pathlib.Path("scripts",name).read_text())
-          print("AST4_PASS")
+          python3 - <<'PY'
+          import ast, base64, hashlib, json, os, pathlib, re, shutil, subprocess, tempfile, urllib.error, urllib.request, zipfile, yaml
+          REPOSITORY = "SaltyPatron/Laplace"
+          EXPECTED_SOURCE = "baba1ccea538c5f7380692cd7432b94d6f4bf46b"
+          EXPECTED_TREE = "a2394ec45d026812fe5805bbca331c353260e237"
+          EXPECTED_OPERATOR = "68dd3c7c986759afc658ebcb2b639a2a5052178d"
+          NATIVE_RUN, NATIVE_ATTEMPT, NATIVE_JOB = 35142154113, 1, 104949056631
+          ARTIFACT_ID = 10465762490
+          EXPECTED_ZIP_BYTES = 38820
+          EXPECTED_ZIP_SHA256 = "fda32128785565e49a8eee33c07966827c5c94c945ee9e1244cfd8abf493e3ca"
+          TARGET_REF = "verify/chess-corpus-pilot-20260916-4fa186e"
+          PILOT_SOURCE = "aacdac71f567aa919fc4562298a40425c98daa9e"
+          PILOT_TREE = "a6df0767e99ff86d1740aa433834e31eaf408b55"
+          PILOT_WORKFLOW = "d4fdcc4e754b24a5a49e63e5e85b6fb09fc6bbf9"
+          OBSERVATION_CHANGES = {"scripts/check-application-runtime.py":"14c7d5b0a6e557f07de48061cb0abb2d0e0ce670","scripts/measure-installed-chess-corpus.py":"4e52650ad225f40f580d1f0ea19c2f036729056a","scripts/test-application-runtime.py":"fe4274c6b030ad8fbf55f3a97b3c041e2b77dc70","scripts/test-installed-chess-corpus.py":"156a7fd3e5eac7ed51dbdcef758f0ba8103a34c2",".github/workflows/chess-corpus-evidence.yml":"d4fdcc4e754b24a5a49e63e5e85b6fb09fc6bbf9"}
+          OBSERVED_PGN = "/vault/Data/Games/Chess/Lumbras/otb/LumbrasGigaBase_OTB_2025.pgn"
+          def require(value, message):
+              if not value: raise ValueError(message)
+          require(all(re.fullmatch(r"[0-9a-f]{40}", v) for v in (EXPECTED_SOURCE, EXPECTED_TREE, EXPECTED_OPERATOR)),
+                  "exact immutable source identities required")
+          require(re.fullmatch(r"[0-9a-f]{64}", EXPECTED_ZIP_SHA256)
+                  and min(NATIVE_RUN, NATIVE_ATTEMPT, NATIVE_JOB, ARTIFACT_ID, EXPECTED_ZIP_BYTES) > 0
+                  and EXPECTED_ZIP_BYTES <= 2 * 1024**3, "exact bounded terminal artifact required")
+          require(re.fullmatch(r"verify/chess-corpus-pilot-[a-z0-9-]+", TARGET_REF),
+                  "reuse an exact non-triggering historical pilot reference")
+          base = "https://api.github.com/repos/" + REPOSITORY
+          headers = {"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2026-03-10"}
+          def api(path):
+              with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=30) as response:
+                  raw = response.read(2 * 1024**2 + 1)
+              require(len(raw) <= 2 * 1024**2, "API metadata exceeded its bound")
+              return json.loads(raw)
+          run = api("/actions/runs/" + str(NATIVE_RUN))
+          require(run["head_sha"] == EXPECTED_OPERATOR and run["status"] == "completed"
+                  and run["conclusion"] == "success" and run["event"] == "push"
+                  and run["head_branch"] == "verify/chess-floor-serving-controls-20260916"
+                  and run["path"] == ".github/workflows/chess-floor-serving-controls.yml"
+                  and run["run_attempt"] == NATIVE_ATTEMPT, "native operator attempt differs from observed success")
+          jobs = api("/actions/runs/" + str(NATIVE_RUN) + "/attempts/" + str(NATIVE_ATTEMPT) + "/jobs?per_page=100")
+          selected = [job for job in jobs["jobs"] if job["id"] == NATIVE_JOB]
+          require(jobs["total_count"] == 1 and len(selected) == 1, "native job absent or ambiguous")
+          job = selected[0]
+          require(job["status"] == "completed" and job["conclusion"] == "success", "native job did not succeed")
+          required_steps = ("Prepare retained native execution paths",
+              "Execute existing native dependency build proof and install owners", "Observe fixed public managed service state",
+              "Retain native operator outcome", "Retain native execution evidence")
+          positions = []
+          for name in required_steps:
+              matches = [s for s in job["steps"] if s["name"] == name]
+              require(len(matches) == 1 and matches[0]["status"] == "completed" and matches[0]["conclusion"] == "success",
+                      "required native step did not succeed: " + name)
+              positions.append(job["steps"].index(matches[0]))
+          require(positions == sorted(positions), "native operator step order changed")
+          require(not any(s["conclusion"] in ("failure", "cancelled") for s in job["steps"]), "native step failed or cancelled")
+          artifact = api("/actions/artifacts/" + str(ARTIFACT_ID))
+          require(not artifact.get("expired") and artifact["workflow_run"]["id"] == NATIVE_RUN
+                  and artifact["workflow_run"]["head_sha"] == EXPECTED_OPERATOR
+                  and artifact["name"] == "original-native-install-" + str(NATIVE_RUN) + "-" + str(NATIVE_ATTEMPT)
+                  and artifact["size_in_bytes"] == EXPECTED_ZIP_BYTES
+                  and artifact.get("digest") == "sha256:" + EXPECTED_ZIP_SHA256, "native artifact identity changed")
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, response_headers, new_url): return None
+          try:
+              urllib.request.build_opener(NoRedirect).open(
+                  urllib.request.Request(base + "/actions/artifacts/" + str(ARTIFACT_ID) + "/zip", headers=headers), timeout=30)
+              raise ValueError("expected authenticated artifact redirect")
+          except urllib.error.HTTPError as redirect:
+              if redirect.code != 302: raise
+              location = redirect.headers["Location"]
+          require(location.startswith("https://"), "artifact download must use HTTPS")
+          work = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "native-dispatch-artifact"
+          work.mkdir(mode=0o700, exist_ok=False)
+          require(shutil.disk_usage(work).free >= EXPECTED_ZIP_BYTES + 512 * 1024**2, "insufficient artifact disk")
+          documents, document_identities = {}, {}
+          with tempfile.TemporaryFile(prefix="native-install-", dir=work) as handle:
+              digest, total = hashlib.sha256(), 0
+              # The signed URL receives no GitHub bearer header.
+              with urllib.request.urlopen(location, timeout=60) as response:
+                  while True:
+                      block = response.read(min(1 << 20, EXPECTED_ZIP_BYTES + 1 - total))
+                      if not block: break
+                      total += len(block)
+                      require(total <= EXPECTED_ZIP_BYTES, "download exceeds observed artifact bytes")
+                      digest.update(block)
+                      handle.write(block)
+              require(total == EXPECTED_ZIP_BYTES and digest.hexdigest() == EXPECTED_ZIP_SHA256, "artifact bytes differ")
+              handle.seek(0)
+              with zipfile.ZipFile(handle) as archive:
+                  entries = archive.infolist()
+                  require(len(entries) <= 10000, "native archive entry count exceeded")
+                  for name in ("receipt.json", "selection.json", "workflow-outcome.json", "service-status.json"):
+                      matches = [e for e in entries if e.filename == name]
+                      require(len(matches) == 1 and not matches[0].is_dir() and matches[0].file_size <= 131072,
+                              "missing, duplicate or oversized native document: " + name)
+                      with archive.open(matches[0]) as stream: raw = stream.read(131073)
+                      require(len(raw) == matches[0].file_size, "native document bytes differ")
+                      documents[name] = json.loads(raw)
+                      document_identities[name] = {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+          receipt, selection, outcome = (documents[name] for name in ("receipt.json", "selection.json", "workflow-outcome.json"))
+          for value in (receipt, selection):
+              require(value["schema"] == "laplace.native-only-install/v1" and value["source"] == EXPECTED_SOURCE
+                      and value["tree"] == EXPECTED_TREE and str(value["runId"]) == str(NATIVE_RUN)
+                      and str(value["attempt"]) == str(NATIVE_ATTEMPT) and value["managedPublication"] == "not_attempted"
+                      and value["fullLifecyclePassed"] is False and value["databaseRecreation"] is False
+                      and value["foundationIngestion"] is False, "native receipt scope or identity differs")
+          require(selection["operatorSource"] == EXPECTED_OPERATOR and selection["status"] == "running"
+                  and receipt["status"] == "completed", "native selection/completion differs")
+          require(selection["postgresqlSelection"]["commit"] == "724edf9bde9d356724ad384a2e196edc3c9f80f7"
+                  and selection["postgresqlSelection"]["version"] == "18.6" and receipt["serverVersionNum"] == 180006,
+                  "PostgreSQL release or activation differs")
+          expected = ["pg-pin", "pg-checkout", "pg-source", "dependency-build", "dependency-identity", "native-managed-build",
+              "isolated-native-database", "native-tests", "managed-tests", "uci-tests", "quiet-native-owner", "native-install",
+              "extension-sql", "database-health", "postgres-activation"]
+          require(receipt["completedPhases"] in (expected, expected[:1] + ["pg-fetch"] + expected[1:]),
+                  "completed native phases differ from the required order")
+          require(outcome == {"workflowOutcome": "success", "source": EXPECTED_SOURCE,
+                              "applicationPublication": "not_attempted", "fullLifecyclePassed": False}, "native outcome differs")
+          required_files = ("/opt/laplace/lib/liblaplace_core.so", "/opt/laplace/pgsql-18/bin/postgres",
+                            "/opt/laplace/pgsql-18/bin/pg_config")
+          require(set(receipt["identities"]) == set(required_files), "native installed file inventory differs")
+          for name, identity in receipt["identities"].items():
+              require(isinstance(identity["bytes"], int) and identity["bytes"] > 0
+                      and re.fullmatch(r"[0-9a-f]{64}", identity["sha256"])
+                      and pathlib.PurePosixPath(identity["path"]).is_absolute(), "invalid native identity: " + name)
+          require(api("/git/commits/" + EXPECTED_SOURCE)["tree"]["sha"] == EXPECTED_TREE, "selected product tree differs")
+          require(api("/git/commits/" + PILOT_SOURCE)["tree"]["sha"] == PILOT_TREE, "pilot source tree differs")
+          delta = api("/compare/" + EXPECTED_SOURCE + "..." + PILOT_SOURCE)
+          require(delta.get("status") == "ahead" and len(delta.get("files", [])) == len(OBSERVATION_CHANGES)
+                  and {item["filename"]: item["sha"] for item in delta["files"]} == OBSERVATION_CHANGES
+                  and all(item["status"] == "modified" for item in delta["files"]),
+                  "pilot differs from installed source beyond the exact reviewed recording observation changes")
+          qualified = api("/actions/runs/35144466238")
+          require(qualified["head_sha"] == "57a03ee68ff6a4eb389b036422cfc3db329c1bb6"
+                  and qualified["status"] == "completed" and qualified["conclusion"] == "success",
+                  "recording scope qualification has not passed")
+          workflow_blob = api("/git/blobs/" + PILOT_WORKFLOW)
+          require(workflow_blob["encoding"] == "base64" and workflow_blob["size"] <= 65536,
+                  "pilot workflow content bound differs")
+          workflow_raw = base64.b64decode(workflow_blob["content"])
+          require(hashlib.sha1(b"blob " + str(len(workflow_raw)).encode() + b"\x00" + workflow_raw).hexdigest()
+                  == PILOT_WORKFLOW, "pilot workflow blob authentication failed")
+          workflow = yaml.load(workflow_raw, Loader=yaml.BaseLoader)
+          scripts = [step["run"] for job in workflow["jobs"].values() for step in job["steps"] if "run" in step]
+          for script in scripts:
+              subprocess.run(["bash", "-n"], input=script, text=True, check=True, timeout=10)
+          module = next(script for script in scripts if "CORPUS_INGEST_OBSERVATION" in script)
+          embedded = module.split('<<"PY"\n', 1)[1].split("\nPY", 1)[0]
+          ast.parse(embedded)
+          require(api("/git/ref/heads/" + TARGET_REF)["object"]["sha"] == PILOT_SOURCE,
+                  "pilot ref differs from the qualified observation-only source")
+          # Main/operator refs may advance independently. The exact pilot target and
+          # subsequent actual run head/native-before/native-after bind this product.
+          print("VERIFIED_NATIVE_INSTALLATION_EVIDENCE " + json.dumps({
+              "operatorSource": EXPECTED_OPERATOR, "productSource": EXPECTED_SOURCE, "productTree": EXPECTED_TREE,
+              "runId": NATIVE_RUN, "attempt": NATIVE_ATTEMPT, "jobId": NATIVE_JOB, "artifactId": ARTIFACT_ID,
+              "artifactBytes": EXPECTED_ZIP_BYTES, "artifactSha256": EXPECTED_ZIP_SHA256, "receipt": receipt,
+              "workflowOutcome": outcome, "documentIdentities": document_identities,
+              "observedServiceState": documents["service-status.json"],
+              "pilotSource": PILOT_SOURCE, "pilotTree": PILOT_TREE, "observationOnlyChanges": OBSERVATION_CHANGES,
+              "pilotScope": "Historical native installation remains baba. Pilot changes only the exact recording guard, wrapper, their controls and bounded read-only workflow observation; all native/managed/database source bytes unchanged. Corpus wrapper binds installed native/extension/DB and matching CLI/PGN before and after. No new installation, application lifecycle or recording success claim."
+          }), flush=True)
+          body = {"ref": TARGET_REF, "inputs": {"mode": "measure", "pgn": OBSERVED_PGN, "family": "otb-2025", "games": "2000"}}
+          request = urllib.request.Request(base + "/actions/workflows/chess-corpus-evidence.yml/dispatches",
+              data=json.dumps(body).encode(), headers={**headers, "Content-Type": "application/json"}, method="POST")
+          # Exactly one POST; ambiguous transport errors are never retried.
+          with urllib.request.urlopen(request, timeout=30) as response: code, raw = response.status, response.read(65537)
+          require(code in (200, 204) and len(raw) <= 65536, "unexpected bounded dispatch response")
+          result = json.loads(raw) if raw else {}
+          require(api("/git/ref/heads/" + TARGET_REF)["object"]["sha"] == PILOT_SOURCE,
+                  "pilot ref moved during dispatch; inspect created run before claiming identity")
+          print("CHESS_CORPUS_PILOT_DISPATCH " + json.dumps({
+              "status": "requested", "expectedHead": PILOT_SOURCE, "installedNativeSource": EXPECTED_SOURCE, "ref": TARGET_REF, "nativeInstallationRun": NATIVE_RUN,
+              "nativeInstallationAttempt": NATIVE_ATTEMPT, "fullLifecyclePassed": False, "applicationPublication": "not_attempted",
+              "inputs": body["inputs"], "workflowRunId": result.get("workflow_run_id"), "runUrl": result.get("html_url")
+          }), flush=True)
           PY
-          timeout 180s python3 -B scripts/test-application-runtime.py -v
-          timeout 180s python3 -B scripts/test-installed-chess-corpus.py -v
-          test -z "$(git status --porcelain --untracked-files=no)"
-          echo RECORDING_SCOPE_QUALIFIED
