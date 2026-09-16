@@ -70,10 +70,20 @@ cutechess-cli \
   -rounds 10 -pgnout games.pgn -debug all
 ```
 
-`st=1` = one second per move (watchable, ~2–3 min/game). Depth-limited play
-(`-each tc=inf depth=8`) has **no clock at all** — a deep search can sit on a
-single move for up to its 120 s internal ceiling; use it only for strength
-tests you don't intend to watch.
+`st=1` selects one second per move; complete game duration depends on the game.
+Depth-limited play (`-each tc=inf depth=8`) has **no implicit move clock**.
+Laplace combines explicit UCI `depth`, `nodes`, `movetime`, and the moving
+side's clock budget, stopping when a selected bound is reached. `movetime`
+is passed in milliseconds without an undeclared overhead deduction; ordinary
+clock allocation uses the declared increment and `movestogo` when present.
+Omitted time/node bounds use the existing search representation's maxima
+(`int.MaxValue` milliseconds and `long.MaxValue` nodes); supported depth remains
+1..64. A bare `go` adds no two-second or million-node cutoff. `go infinite`
+retains any completed terminal/mate result until `stop`, and `stop` cancels
+in-flight work. See the [official UCI command reference](https://official-stockfish.github.io/docs/stockfish-wiki/UCI-Protocol-and-Stockfish-Commands.html#go).
+Use an explicit move clock for bounded per-move latency. Benchmark collectors'
+declared external deadlines still apply independently; a requested depth is
+not proof that the search completed that depth.
 
 `-rounds 10` is **ten games**, not ten pairs: cutechess-cli(6) says the option
 "should be used to set the total number of games to play" for a two-engine

@@ -133,6 +133,24 @@ public sealed class SessionPhysicalityObservationTests(LocalPgFixture pg)
             await transaction.RollbackAsync();
         }
         EqualSnapshot(before, await ReadAsync(f.Session));
+        // A loaded native floor is not persisted E evidence. Removing one
+        // actual vocabulary atom must still fail the strict generated sink,
+        // even after a prior successful append warmed its native providers.
+        Hash128 atom = CodepointPerfcache.Records['A'].Hash;
+        Assert.True(CodepointPerfcache.IsKnownCodepointId(atom));
+        await using (var connection = await pg.DataSource.OpenConnectionAsync())
+        await using (var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted))
+        {
+            await using var remove = new NpgsqlCommand(
+                "DELETE FROM laplace.entities WHERE id=$1 AND tier=0", connection, transaction);
+            remove.Parameters.AddWithValue(NpgsqlDbType.Bytea, atom.ToBytes());
+            Assert.Equal(1, await remove.ExecuteNonQueryAsync());
+            var absent = await Assert.ThrowsAsync<PostgresException>(() => AppendAsync(f, connection, transaction));
+            Assert.Equal("23503", absent.SqlState);
+            Assert.Equal("generated stage sink: referenced entity is not admitted", absent.MessageText);
+            await transaction.RollbackAsync();
+        }
+        EqualSnapshot(before, await ReadAsync(f.Session));
         await using var staleConnection = await pg.DataSource.OpenConnectionAsync();
         await using var staleTransaction = await staleConnection.BeginTransactionAsync(IsolationLevel.RepeatableRead);
         var error = await Assert.ThrowsAsync<PostgresException>(() => AppendAsync(f, staleConnection, staleTransaction));

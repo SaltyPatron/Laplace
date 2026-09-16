@@ -89,8 +89,10 @@ typedef struct {
 
 /* current_content_stages are actual Content bodies from one pinned reader
  * transaction. Explicitly missing ids distinguish a checked absence from an
- * unqueried reference. On absence, admitted_content_stages supply the actual
- * placement winners which the same writer operation will install. Alternate
+ * unqueried reference. On absence, admitted_content_stages supply the same
+ * original stages, in the same order, that the writer will install. Every
+ * typed body is authenticated; the first Content placement per entity is the
+ * provider winner, matching the writer's first-placement deduplication. Alternate
  * raw forms in captured_source do not choose a provider. Otherwise the frontier requests the next
  * bulk provider read. The finite closure contains original physicalities only;
  * generated descriptor/view rows are never fed back into that closure. */

@@ -725,8 +725,8 @@ void laplace_generated_stage_sink(const intent_stage_t *const *stages,
 {
     if (limits == NULL || out_receipt == NULL || (stage_count && stages == NULL))
         sink_invalid("missing sink argument");
-    if (stage_count > 3)
-        sink_invalid("generated sink accepts at most source, vocabulary and generated stages");
+    if (stage_count > LAPLACE_GENERATED_STAGE_SINK_MAX_STAGES)
+        sink_invalid("generated sink accepts at most four source declaration, vocabulary and generated stages");
     /* Reentrant: session callers acquire this same lock before their row lock.
      * Other callers still get the common writer ordering and isolation guard. */
     sink_require_isolation();

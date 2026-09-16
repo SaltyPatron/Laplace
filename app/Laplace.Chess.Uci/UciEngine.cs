@@ -94,7 +94,7 @@ public sealed class UciEngine
                     lock (_outputLock) output.WriteLine("bestmove 0000");
                     return true;
                 }
-                StartSearch(ParseGo(tok), output);
+                StartSearch(ParseGo(tok), output, waitForStop: Array.IndexOf(tok, "infinite") >= 0);
                 return true;
 
             case "stop":
@@ -218,7 +218,7 @@ public sealed class UciEngine
     // Runs the search on a background task so "stop" (and the next "position"/"quit") can be
     // read from stdin immediately instead of blocking behind Think(). Each substrate search gets
     // a fresh counting configuration so the receipt belongs to THIS go, not process lifetime.
-    private void StartSearch(Search.Limits limits, TextWriter output)
+    private void StartSearch(Search.Limits limits, TextWriter output, bool waitForStop)
     {
         StopSearch();
         var cts = new CancellationTokenSource();
@@ -256,6 +256,10 @@ public sealed class UciEngine
                     }
                 });
                 sw.Stop();
+                // A terminal position, a proven mate, or an explicit finite limit can finish
+                // Think before an infinite analysis is stopped. Keep its actual result and
+                // wait without spinning; UCI requires bestmove only after the caller's stop.
+                if (waitForStop) cts.Token.WaitHandle.WaitOne();
                 string best = result.BestMove?.ToUci() ?? "0000";
                 var receipt = configured?.Receipt() ?? ChessSearchProviderReceipt.Classical;
                 lock (_outputLock)
@@ -277,13 +281,21 @@ public sealed class UciEngine
                     output.Flush();
                 }
             }
-        }, cts.Token);
+        }); // Cancellation belongs inside Think: even immediate stop must publish bestmove.
     }
 
     private void StopSearch()
     {
         _searchCts?.Cancel();
         try { _searchTask?.Wait(2000); } catch { /* best-effort; don't hang the UCI loop on a stuck search */ }
+        if (_searchTask?.IsCompleted == true)
+        {
+            // Infinite analysis may have allocated the token's wait handle. Its worker is
+            // finished now, so release that handle before starting another search.
+            _searchCts?.Dispose();
+            _searchCts = null;
+            _searchTask = null;
+        }
     }
 
     /// Blocks until any in-flight "go" search has written its bestmove, or the timeout elapses.
@@ -339,29 +351,35 @@ public sealed class UciEngine
 
     private Search.Limits ParseGo(string[] tok)
     {
-        int Int(string key, int def)
+        long? Number(string key)
         {
             int i = Array.IndexOf(tok, key);
-            return i >= 0 && i + 1 < tok.Length && int.TryParse(tok[i + 1], out var v) ? v : def;
+            return i >= 0 && i + 1 < tok.Length
+                && long.TryParse(tok[i + 1], System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var value) && value >= 0
+                ? value : null;
         }
 
-        int depth = Int("depth", 0);
-        // A bounded ceiling even for an explicit depth request — "go depth N" with no other time
-        // control (e.g. cutechess-cli's tc=inf/depth=N) must still remain interruptible.
-        if (depth > 0) return new Search.Limits(MaxDepth: Math.Clamp(depth, 1, 64), MaxTimeMs: 120_000);
+        // Independent UCI limits combine; depth must not discard a declared clock or node
+        // budget. Missing time/nodes retain Search's existing unbounded representation.
+        int depth = Number("depth") is > 0 and var requestedDepth
+            ? (int)Math.Min(64, requestedDepth) : 64;
+        long nodes = Number("nodes") is > 0 and var requestedNodes ? requestedNodes : long.MaxValue;
+        int milliseconds = Number("movetime") is { } movetime
+            ? (int)Math.Clamp(movetime, 1, int.MaxValue) : int.MaxValue;
 
-        int movetime = Int("movetime", 0);
-        if (movetime > 0) return new Search.Limits(MaxDepth: 64, MaxTimeMs: Math.Max(10, movetime - 20));
-
-        int wtime = Int("wtime", 0), btime = Int("btime", 0), winc = Int("winc", 0), binc = Int("binc", 0);
-        if (wtime > 0 || btime > 0)
+        if (Number(_state.Board.WhiteToMove ? "wtime" : "btime") is { } remaining)
         {
-            int myTime = _state.Board.WhiteToMove ? wtime : btime;
-            int myInc = _state.Board.WhiteToMove ? winc : binc;
-            int budget = Math.Max(10, Math.Min(myTime - 30, myTime / 30 + (int)(myInc * 0.8)));
-            return new Search.Limits(MaxDepth: 64, MaxTimeMs: budget);
+            long myTime = Math.Min(remaining, int.MaxValue);
+            long myInc = Math.Min(Number(_state.Board.WhiteToMove ? "winc" : "binc") ?? 0, int.MaxValue);
+            long moves = Number("movestogo") is > 0 and var movesToGo ? movesToGo : 30;
+            // Preserve the clock allocation policy, now using the caller's moves-to-go and
+            // wide arithmetic. A zero/exhausted clock cannot become an absent time limit.
+            int budget = (int)Math.Clamp(Math.Min(myTime - 30, myTime / moves + myInc * 4 / 5),
+                1, int.MaxValue);
+            milliseconds = Math.Min(milliseconds, budget);
         }
 
-        return new Search.Limits(MaxDepth: 64, MaxNodes: 1_000_000, MaxTimeMs: 2000);
+        return new Search.Limits(MaxDepth: depth, MaxNodes: nodes, MaxTimeMs: milliseconds);
     }
 }

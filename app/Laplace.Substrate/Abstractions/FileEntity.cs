@@ -220,11 +220,12 @@ public static class FileEntity
         SubstrateChangeBuilder builder,
         Hash128 parentSourceId,
         byte[] canonicalContent,
-        in FileMetadata metadata)
+        in FileMetadata metadata,
+        double sourceTrust)
     {
         using var contentTree = ContentTierSpine.BuildTree(canonicalContent)
             ?? throw new InvalidOperationException("FileEntity.Emit: content has no root");
-        return Emit(builder, parentSourceId, RootComponent(contentTree), metadata);
+        return Emit(builder, parentSourceId, RootComponent(contentTree), metadata, sourceTrust);
     }
 
     /// <summary>
@@ -235,12 +236,17 @@ public static class FileEntity
         SubstrateChangeBuilder builder,
         Hash128 parentSourceId,
         in OrderedCompositionComponent contentRoot,
-        in FileMetadata metadata)
+        in FileMetadata metadata,
+        double sourceTrust)
     {
         ArgumentNullException.ThrowIfNull(builder);
+        builder.DeclareSourcePrior(parentSourceId, sourceTrust);
         using var metadataTree = ContentTierSpine.BuildTree(metadata.IdentityCanonicalUtf8())
             ?? throw new InvalidOperationException("FileEntity.Emit: metadata has no root");
         var identity = Compose(contentRoot, RootComponent(metadataTree), parentSourceId, builder.ContentStage);
+        // Metadata is witnessed by this exact file occurrence. Its producer
+        // declares the same source prior explicitly for that native row owner.
+        builder.DeclareSourcePrior(identity.FileId, sourceTrust);
         if (!ContentTierSpine.EmitTree(
                 builder, metadataTree, identity.FileId, ReadOnlySpan<byte>.Empty, out var metadataRoot)
             || metadataRoot != identity.MetadataRootId)
@@ -286,6 +292,7 @@ public static class FileEntity
     public static void EmitMetadata(
         SubstrateChangeBuilder builder, Hash128 fileRoot, in FileMetadata metadata)
     {
+        builder.DeclareSourcePrior(fileRoot, SourceTrust.SubstrateMandate);
         if (ContentEmitter.Emit(builder, metadata.IdentityCanonicalUtf8(), fileRoot) is not { } metaRoot)
             return;
         builder

@@ -137,6 +137,79 @@ public sealed class SubstrateChangeSourcePriorTests
         Assert.Equal(new PhysicalitySourceRange(0, 1, Source), Assert.Single(stage.PhysicalitySourceRanges));
     }
 
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.375)]
+    [InlineData(1.0)]
+    public void RawFileProducerDeclaresItsActualFileMetadataOwnerPrior(double prior)
+    {
+        CodepointPerfcache.LoadDefault();
+        byte[] content = Encoding.UTF8.GetBytes("one unchanged physical file");
+        var metadata = new FileMetadata("prior.txt", "proof/prior.txt", content.Length,
+            DateTime.UnixEpoch, "text");
+        var record = new GrammarComposeRecord(content, "text", FileMetadata: metadata, RawText: true);
+        var handler = new GrammarComposeHandler(Source, prior, null);
+        var builder = new SubstrateChangeBuilder(Source, "raw-file-prior");
+        using var unit = handler.CreateDeferredUnit(record);
+        // The relation weight is deliberately different from the source prior.
+        Hash128 file = unit.DrainInto(builder, 0.17, null);
+        SubstrateChange change = builder.Build();
+        try
+        {
+            Assert.Equal(FileEntity.Resolve(content, metadata).FileId, file);
+            Assert.Equal(file, change.Metadata.FileId);
+            Assert.Equal(prior, change.RequireSourcePrior(Source));
+            Assert.Equal(prior, change.RequireSourcePrior(file));
+            var ranges = change.IntentStages.SelectMany(stage => stage.PhysicalitySourceRanges).ToArray();
+            Assert.Contains(ranges, range => range.SourceId == file);
+            Assert.All(ranges, range => Assert.Equal(prior, change.RequireSourcePrior(range.SourceId)));
+        }
+        finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
+    }
+
+    [Fact]
+    public void UserTextArtifactDeclaresTenantContentAndFileObservationPriors()
+    {
+        CodepointPerfcache.LoadDefault();
+        var scope = UserArtifactContent.Resolve("prior-proof", tenantTrust: 0.35);
+        double prior = SourceTrust.UserPrompt * scope.TenantTrust;
+        Assert.True(UserArtifactContent.TryBuildTextArtifactChange(scope, "note.txt", "proof/note.txt",
+            Encoding.UTF8.GetBytes("reused content still has its observed form"), null,
+            DateTime.UnixEpoch, out var change, out var ids));
+        try
+        {
+            Assert.Equal(prior, change.RequireSourcePrior(scope.Source));
+            Assert.Equal(prior, change.RequireSourcePrior(ids.ContentId));
+            Assert.Equal(prior, change.RequireSourcePrior(ids.FileId));
+            var ranges = change.IntentStages.SelectMany(stage => stage.PhysicalitySourceRanges).ToArray();
+            Assert.Contains(ranges, range => range.SourceId == ids.ContentId);
+            Assert.Contains(ranges, range => range.SourceId == ids.FileId);
+            Assert.All(ranges, range => Assert.Equal(prior, change.RequireSourcePrior(range.SourceId)));
+        }
+        finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
+    }
+
+    [Fact]
+    public void LegacyFileMetadataRetainsItsExplicitMandatePrior()
+    {
+        CodepointPerfcache.LoadDefault();
+        var builder = new SubstrateChangeBuilder(Source, "legacy-file-metadata");
+        FileEntity.EmitMetadata(builder, OtherSource,
+            new FileMetadata("image.png", "proof/image.png", 16, DateTime.UnixEpoch));
+        SubstrateChange change = builder.Build();
+        try
+        {
+            var ranges = change.IntentStages.SelectMany(stage => stage.PhysicalitySourceRanges).ToArray();
+            Assert.NotEmpty(ranges);
+            Assert.All(ranges, range =>
+            {
+                Assert.Equal(OtherSource, range.SourceId);
+                Assert.Equal(SourceTrust.SubstrateMandate, change.RequireSourcePrior(range.SourceId));
+            });
+        }
+        finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
+    }
+
     [Fact]
     public void ExplicitSingleSourceAttachmentDoesNotInventOwnersForUnannotatedStages()
     {

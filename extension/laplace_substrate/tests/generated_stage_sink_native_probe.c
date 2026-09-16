@@ -304,6 +304,48 @@ int main(void)
     CHECK(receipt.operations==executions+prepares-prepares_before);
     CHECK(query_calls[SQ_LOCK]==1 && query_calls[SQ_EPOCH]==1);
     CHECK(receipt.inserted_rows[2]==3 && deleted_contexts==contexts_before+1);
+
+    /* Session admission supplies its own source declaration alongside the
+     * descriptor source/vocabulary/generated stages. Exercise four nonempty
+     * native stages through the public sink, retaining aggregate validation,
+     * dedup and all fourth-stage evidence. These are real native COPY tuples;
+     * only persistence services are doubled. */
+    size_t entity_bytes,physicality_bytes,attestation_bytes,first_two=0;
+    const uint8 *entities=intent_stage_tuple_ptr(stage,INTENT_STAGE_TABLE_ENTITIES,&entity_bytes);
+    const uint8 *physicalities=intent_stage_tuple_ptr(stage,INTENT_STAGE_TABLE_PHYSICALITIES,&physicality_bytes);
+    const uint8 *attestations=intent_stage_tuple_ptr(stage,INTENT_STAGE_TABLE_ATTESTATIONS,&attestation_bytes);
+    SinkRow witness_row={0};
+    for(unsigned i=0;i<2;++i)sink_read_row(attestations,attestation_bytes,&first_two,14,&witness_row);
+    CHECK(first_two>0 && first_two<attestation_bytes);
+    intent_stage_t *parts[4]={NULL,NULL,NULL,NULL};
+    CHECK(intent_stage_from_tuple_bytes(entities,entity_bytes,NULL,0,NULL,0,1024*1024,&parts[0])==0);
+    CHECK(intent_stage_from_tuple_bytes(NULL,0,physicalities,physicality_bytes,NULL,0,1024*1024,&parts[1])==0);
+    CHECK(intent_stage_from_tuple_bytes(NULL,0,NULL,0,attestations,first_two,1024*1024,&parts[2])==0);
+    CHECK(intent_stage_from_tuple_bytes(NULL,0,NULL,0,attestations+first_two,
+                                      attestation_bytes-first_two,1024*1024,&parts[3])==0);
+    const intent_stage_t *session_stages[5]={parts[0],parts[1],parts[2],parts[3],parts[0]};
+    LaplaceGeneratedStageSinkReceipt combined=receipt;
+    reset_spi();prepares_before=prepares;
+    laplace_generated_stage_sink(session_stages,4,&limits,&receipt);
+    for(unsigned i=0;i<3;++i) {
+        CHECK(receipt.input_rows[i]==combined.input_rows[i]);
+        CHECK(receipt.distinct_rows[i]==combined.distinct_rows[i]);
+        CHECK(receipt.inserted_rows[i]==combined.inserted_rows[i]);
+    }
+    CHECK(receipt.tuple_bytes==combined.tuple_bytes && receipt.logical_work==combined.logical_work);
+    CHECK(receipt.stored_vertices==combined.stored_vertices && receipt.folded_cells==combined.folded_cells);
+    CHECK(receipt.folded_observations==6 && actual_groups==2 && actual_score==3500000000);
+    executions=0;for(unsigned i=0;i<SQ_COUNT;++i)executions+=query_calls[i];
+    CHECK(receipt.operations==executions+prepares-prepares_before);
+    reset_spi();LaplaceGeneratedStageSinkReceipt four_stage_receipt=receipt;
+    REFUSES(laplace_generated_stage_sink(session_stages,5,&limits,&receipt),"at most four");
+    CHECK(query_calls[SQ_LOCK]==0 && memcmp(&receipt,&four_stage_receipt,sizeof(receipt))==0);
+    limits.maximum_rows=combined.input_rows[0]+combined.input_rows[1]+combined.input_rows[2]-1;
+    REFUSES(laplace_generated_stage_sink(session_stages,4,&limits,&receipt),"row grant");
+    CHECK(query_calls[SQ_LOCK]==0 && memcmp(&receipt,&four_stage_receipt,sizeof(receipt))==0);
+    limits.maximum_rows=1000;
+    for(unsigned i=0;i<4;++i)intent_stage_free(parts[i]);
+
     reset_spi();memset(&receipt,0x55,sizeof(receipt));
     LaplaceGeneratedStageSinkReceipt unchanged=receipt;
     limits.maximum_operations=0;

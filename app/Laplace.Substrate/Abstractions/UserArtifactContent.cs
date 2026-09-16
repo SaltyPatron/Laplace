@@ -107,9 +107,10 @@ public static class UserArtifactContent
                 builder, contentUtf8, documentId, out var emittedContent)
             || emittedContent != file.ContentRootId)
             return false;
+        builder.DeclareSourcePrior(documentId, SourceTrust.UserPrompt * scope.TenantTrust);
 
         FileIdentity emittedFile = FileEntity.Emit(
-            builder, scope.Source, contentUtf8, metadata);
+            builder, scope.Source, contentUtf8, metadata, SourceTrust.UserPrompt * scope.TenantTrust);
         if (emittedFile != file)
             throw new InvalidOperationException("user artifact file identity changed during compose");
 

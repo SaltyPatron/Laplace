@@ -208,6 +208,75 @@ TEST_F(PhysicalityDescriptorAdmission, FrontierRequiresCheckedAbsenceAndTheExpli
     EXPECT_EQ(result, nullptr);
 }
 
+TEST_F(PhysicalityDescriptorAdmission, MixedWriterStagesSelectFirstContentPlacementAndRetainAllRawForms) {
+    const auto child = composition({atom('A'), atom('B')});
+    auto alternate = child;
+    alternate.value.coord[0] += 0.125;
+    hilbert4d_encode(alternate.value.coord, &alternate.value.hilbert_index);
+    const auto parent = composition({child, atom('C')});
+    auto projection = parent;
+    projection.value.type = 3;
+    auto parse = parent;
+    parse.value.type = 8;
+    auto first = stage({parent, projection, parse, child});
+    auto second = stage({alternate, child});
+    auto all = stage({parent, projection, parse, child, alternate, child});
+    auto source = capture(all.get());
+    auto current = stage({child});
+    auto changed_current = stage({alternate});
+    Materialization fallback(nullptr, physicality_descriptor_materialization_free);
+    Materialization replay(nullptr, physicality_descriptor_materialization_free);
+    Materialization reversed(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(source, {}, {first.get(), second.get()}, {}, witnesses(6), fallback),
+        PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER);
+    ASSERT_EQ(run(source, {}, {first.get(), second.get()}, {child.value.entity_id}, witnesses(6), fallback),
+        PHYSICALITY_DESCRIPTOR_OK);
+    ASSERT_EQ(run(source, {current.get()}, {}, {}, witnesses(6), replay), PHYSICALITY_DESCRIPTOR_OK);
+    for (size_t i = 0; i < 6; ++i) {
+        const auto admitted = form(fallback, i), stored = form(replay, i);
+        EXPECT_TRUE(hash128_equals(&admitted.descriptor_id, &stored.descriptor_id));
+        EXPECT_TRUE(hash128_equals(&admitted.view_id, &stored.view_id));
+    }
+    const auto first_form = form(fallback, 3), alternate_form = form(fallback, 4), repeated_form = form(fallback, 5);
+    EXPECT_FALSE(hash128_equals(&first_form.descriptor_id, &alternate_form.descriptor_id));
+    EXPECT_TRUE(hash128_equals(&first_form.descriptor_id, &repeated_form.descriptor_id));
+    ASSERT_EQ(run(source, {}, {second.get(), first.get()}, {child.value.entity_id}, witnesses(6), reversed),
+        PHYSICALITY_DESCRIPTOR_OK);
+    const auto original_parent = form(fallback), changed_parent = form(reversed);
+    EXPECT_TRUE(hash128_equals(&original_parent.descriptor_id, &changed_parent.descriptor_id));
+    EXPECT_FALSE(hash128_equals(&original_parent.view_id, &changed_parent.view_id));
+    ASSERT_EQ(run(source, {changed_current.get()}, {}, {}, witnesses(6), replay), PHYSICALITY_DESCRIPTOR_OK);
+    const auto current_parent = form(replay);
+    EXPECT_TRUE(hash128_equals(&changed_parent.view_id, &current_parent.view_id));
+    Stage generated(physicality_descriptor_materialization_take_stage(fallback.get()), intent_stage_free);
+    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 5u);
+}
+
+TEST_F(PhysicalityDescriptorAdmission, ProvidersAuthenticateEveryBodyAndCurrentSelectionRemainsStrict) {
+    const auto child = composition({atom('A'), atom('B')});
+    const auto parent = composition({child, atom('C')});
+    auto alternate = child;
+    alternate.value.coord[0] += 0.125;
+    hilbert4d_encode(alternate.value.coord, &alternate.value.hilbert_index);
+    auto projection = parent;
+    projection.value.type = 3;
+    auto original = stage({parent});
+    auto source = capture(original.get());
+    auto mixed = stage({child, projection});
+    auto conflicting = stage({child, alternate});
+    Materialization result(nullptr, physicality_descriptor_materialization_free);
+    EXPECT_EQ(run(source, {mixed.get()}, {}, {}, witnesses(1), result), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+    EXPECT_EQ(result, nullptr);
+    EXPECT_EQ(run(source, {conflicting.get()}, {}, {}, witnesses(1), result), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+    EXPECT_EQ(result, nullptr);
+    // A typed row excluded from Content selection is still authenticated.
+    projection.value.coord[0] = std::numeric_limits<double>::quiet_NaN();
+    auto malformed = stage({child, projection});
+    EXPECT_EQ(run(source, {}, {malformed.get()}, {child.value.entity_id}, witnesses(1), result),
+        PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+    EXPECT_EQ(result, nullptr);
+}
+
 TEST_F(PhysicalityDescriptorAdmission, RepeatedCompositeCarrierRequiresProviderAndReusesAdmittedBodyAsCurrent) {
     const auto child = composition({atom('A'), atom('B')});
     auto parent = composition({child, child});

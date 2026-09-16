@@ -177,10 +177,15 @@ physicality_descriptor_status_t materialize(
         require(current_inputs[i].type == 1);
         inputs.push_back(current_inputs[i]);
     }
-    for (size_t i = 0; i < admitted_count; ++i) {
-        require(admitted_inputs[i].type == 1);
-        inputs.push_back(admitted_inputs[i]);
-    }
+    /* The ordinary writer supplies its original stages in transport order.
+     * Capture above authenticates every typed body; only Content can provide
+     * a constituent's selected geometry. Match the writer's first-placement
+     * rule before combining these providers with the complete raw source.
+     * Alternate bodies remain in original and retain their own D/HAS rows. */
+    IdSet admitted_winners(&memory);
+    for (size_t i = 0; i < admitted_count; ++i)
+        if (admitted_inputs[i].type == 1 && admitted_winners.insert(admitted_inputs[i].entity_id).second)
+            inputs.push_back(admitted_inputs[i]);
 
     External<physicality_descriptor_plan_t, physicality_descriptor_plan_free> plan(memory);
     limits.maximum_plan_bytes = memory.remaining();

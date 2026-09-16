@@ -4,6 +4,10 @@
 #include "postgres.h"
 #include "laplace/core/intent_stage.h"
 
+/* Optional session source declaration plus descriptor source, vocabulary and
+ * generated observations. The aggregate grants below still bound all stages. */
+#define LAPLACE_GENERATED_STAGE_SINK_MAX_STAGES 4
+
 typedef struct LaplaceGeneratedStageSinkLimits {
     size_t maximum_rows;
     size_t maximum_bytes;
@@ -35,7 +39,8 @@ typedef struct LaplaceGeneratedStageSinkReceipt {
  * READ COMMITTED is required; callers pin provider snapshots AFTER this lock. */
 void laplace_generated_stage_sink_lock(void);
 
-/* Persist native-generated source/vocabulary/descriptor Content stages and
+/* Persist native-generated source/vocabulary/descriptor Content stages, an
+ * optional session source declaration, and
  * replayable HAS_PHYSICALITY evidence. This is not an arbitrary ingest API.
  * The stages remain borrowed. Duplicate exact witnesses are replay, never
  * additive evidence. Only INSERT RETURNING's accepted attestations are folded.

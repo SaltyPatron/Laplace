@@ -191,7 +191,7 @@ public sealed class DocumentArtifactIdentityTests
 
         var builder = new SubstrateChangeBuilder(source, "test/grammar-file");
         Assert.Equal(root.Id, composer.DrainInto(builder, 1.0));
-        FileIdentity emitted = FileEntity.Emit(builder, source, root, metadata);
+        FileIdentity emitted = FileEntity.Emit(builder, source, root, metadata, 1.0);
         Assert.Equal(resolved, emitted);
 
         SubstrateChange change = builder.Build();

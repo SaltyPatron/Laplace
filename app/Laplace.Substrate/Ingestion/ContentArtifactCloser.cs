@@ -234,7 +234,8 @@ public sealed class ContentArtifactCloser : IAsyncDisposable
             modality,
             scope.Source,
             SourceTrust.UserPrompt * scope.TenantTrust);
-        FileIdentity file = FileEntity.Emit(builder, scope.Source, contentRoot, metadata);
+        FileIdentity file = FileEntity.Emit(builder, scope.Source, contentRoot, metadata,
+            SourceTrust.UserPrompt * scope.TenantTrust);
 
         double weight = RelationTypeRank.Associative * SourceTrust.UserPrompt * scope.TenantTrust;
         builder.AddAttestation(NativeAttestation.Categorical(

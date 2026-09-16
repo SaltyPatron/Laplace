@@ -110,7 +110,7 @@ recipe/epoch receipt. Using verified current Content placements does not prove
 the historical child curve of an old observation.
 
 `physicality_descriptor_materialize` accepts the original capture, actual
-current Content provider stages, actual admitted placement winners, checked
+current Content provider stages, original writer stages in transport order, checked
 absence ids and one actual source/source-unit/prior tuple per source body.
 It publishes a sorted unique pending frontier with no generated stage until
 the finite original-body closure is available. The provider order is declared
@@ -118,6 +118,11 @@ by `PhysicalityCurrentFloorAdmittedWinnerRecipeV1`: current database Content,
 mapped codepoint floor, then the actual placement winner this writer will
 install after a checked database absence. Alternate raw source bodies never
 choose the provider by incidental order or by a different minimum-id rule.
+All typed rows in the original writer stages are authenticated. Only Content
+rows enter the fallback provider set, and its first placement per entity follows
+the writer's actual first-occurrence rule across those stages. Projection,
+parse and alternate Content observations remain in the original capture and
+receive their own exact descriptors and source-unit evidence.
 
 Every view contains a canonical sorted receipt of the selected bodies reachable
 from that root. A change to C in A→B→C changes A's view receipt even when A and
