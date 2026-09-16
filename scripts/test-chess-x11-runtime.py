@@ -237,9 +237,13 @@ class RuntimeSelectionControls(unittest.TestCase):
 
     def test_dependency_resolution_failure_cannot_create_successful_selection(self):
         with mock.patch.object(owner.shutil, "which", return_value="/fixture/tool"), \
-             mock.patch.object(owner, "snapshot", side_effect=RuntimeError("unresolved shared library")):
+             mock.patch.object(owner, "snapshot", side_effect=RuntimeError("unresolved shared library")), \
+             mock.patch.object(owner.core, "load") as load, \
+             mock.patch.object(owner.core, "provision") as provision:
             with self.assertRaisesRegex(RuntimeError, "unresolved"):
-                owner.ensure(Path("/fixture"), time.monotonic() + 30)
+                owner.ensure(Path("/private-store"), time.monotonic() + 30)
+            load.assert_not_called()
+            provision.assert_not_called()
 
     def test_cli_preserves_failed_acquisition_receipt_without_gui_ready_claim(self):
         with tempfile.TemporaryDirectory() as temporary:
