@@ -167,18 +167,30 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual(12, cap)
         self.assertEqual("derived", source)
 
-    def test_workflow_is_manual_or_post_deploy_and_routes_through_suite_runner(self):
+    def test_workflow_explicit_invocations_route_through_owned_runners(self):
         import yaml
         path = ROOT / ".github/workflows/benchmark-evidence.yml"
         workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         triggers = workflow["on"]
         names = {triggers} if isinstance(triggers, str) else set(triggers)
-        self.assertEqual({"workflow_dispatch", "workflow_call"}, names)
+        self.assertEqual({"workflow_dispatch", "workflow_call", "push"}, names)
+        self.assertEqual({"branches": ["verify/chess-acceptance-*"]}, triggers["push"])
         inputs = workflow["on"]["workflow_dispatch"]["inputs"]
         self.assertIn("query", inputs["suite"]["options"])
         self.assertIn("chess", inputs["suite"]["options"])
+        self.assertIn("acceptance", inputs["suite"]["options"])
         self.assertEqual("chess", workflow["on"]["workflow_call"]["inputs"]["suite"]["default"])
         job = workflow["jobs"]["benchmark"]
+        self.assertEqual(
+            "inputs.suite != 'acceptance' && (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/verify/chess-acceptance-'))",
+            job["if"])
+        acceptance = workflow["jobs"]["acceptance"]
+        self.assertEqual(
+            "(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/verify/chess-acceptance-')) || inputs.suite == 'acceptance'",
+            acceptance["if"])
+        acceptance_commands = "\n".join(step.get("run", "") for step in acceptance["steps"])
+        self.assertIn("python3 scripts/accept-chess-environment.py", acceptance_commands)
+        self.assertIn("flock --exclusive --close /build/laplace/work/host-resource.lock", acceptance_commands)
         commands = "\n".join(step.get("run", "") for step in job["steps"] if isinstance(step, dict))
         self.assertIn("python3 scripts/benchmark_suite.py validate", commands)
         self.assertIn("python3 scripts/benchmark_scale_plan.py", commands)

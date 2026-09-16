@@ -5,7 +5,8 @@
   "workflow": ".github/workflows/benchmark-evidence.yml",
   "triggers": [
     "workflow_dispatch",
-    "workflow_call after successful product deployment"
+    "explicit workflow_call",
+    "push only to verify/chess-acceptance-* operator branches at the exact deployed revision"
   ],
   "source_core_mutability": "none_except_temporary_outputs",
   "artifact_binding": {
@@ -88,5 +89,23 @@
     ],
     "retained_ingestion_and_replay": "separately measured; neither is generated-and-recorded capacity",
     "daily_rate": "arithmetic extrapolation of the measured interval, never a day-long observation"
+  },
+  "explicit_acceptance": {
+    "workflow_suite": "acceptance",
+    "owner": "scripts/accept-chess-environment.py",
+    "ordinary_delivery_dependency": false,
+    "requires_exact_deployed_source_revision": true,
+    "requires_installed_native_and_managed_byte_binding": true,
+    "host_lock": "/build/laplace/work/host-resource.lock",
+    "scope": [
+      "official chess dependency provisioning and GUI interaction",
+      "service restart through full application and configured account readiness",
+      "full Stockfish corpus native readback and zero-amplification repeat",
+      "complete recorded games with duration-qualified readback",
+      "retained admission and exact zero-writer replay",
+      "GeometryZM storage baseline",
+      "Stockfish and Laplace UCI calibration"
+    ],
+    "game_capacity_authority": "complete generated-and-recorded collector only"
   }
 }
