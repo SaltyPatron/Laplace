@@ -6,35 +6,26 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 stage="${1:-all}"
-# A push to main is development validation, not deployment or host mutation.
-if [[ "${GITHUB_EVENT_NAME:-}" == "push" && "$stage" == "all" ]]; then
-  stage="test"
-fi
 case "$stage" in
   reconcile|check|build|test|deploy|integrate|all|application-check|applications) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
-# Documentation/tooling/workflow-only pushes get cheap syntax validation only.
-if [[ "${GITHUB_EVENT_NAME:-}" == "push" && "$stage" == "check" ]]; then
-  bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-policy.sh scripts/ci-deps.sh
+if [[ "$stage" == "check" ]]; then
+  bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-deps.sh
   python3 - <<'PY'
 from pathlib import Path
 import yaml
 for path in sorted(Path('.github/workflows').glob('*.yml')):
     yaml.load(path.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
-print('source-only syntax check passed')
+print('source syntax check passed')
 PY
   exit 0
 fi
 
-run_policy() {
-  bash scripts/ci-policy.sh
-}
-
 run_deps() {
-  # Normal commits verify dependency state; only an explicit operator lifecycle
-  # may provision/upgrade the persistent host dependency installation.
+  # Development verifies dependency state; explicit operator lifecycles may
+  # provision or upgrade the persistent host dependency installation.
   if [[ "${GITHUB_EVENT_NAME:-}" == "push" ]]; then
     bash scripts/ci-deps.sh --check-only
   else
@@ -56,9 +47,7 @@ run_suite() {
 run_install() (
   resume_chess_observation_if_needed
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
-  bash deploy/linux/managed-publish.sh preflight
   bash scripts/pipeline.sh install
-  bash deploy/linux/managed-publish.sh preflight
 )
 
 run_database_maintenance() (
@@ -124,9 +113,6 @@ run_live_suite() {
 }
 
 product_phases() {
-  # Policy is pre-release/operator work. Normal pushes compile and test instead
-  # of replaying the policy registry on every commit.
-  [[ "${GITHUB_EVENT_NAME:-}" == "push" ]] || echo policy
   if [[ "$stage" == reconcile ]]; then echo reconcile; return; fi
   [[ "$stage" != check ]] || return 0
 
@@ -143,7 +129,7 @@ product_phases() {
   fi
 
   # Product activation owns installation and non-destructive migration only.
-  # Destructive recreation is db-ops; all ingestion is seed-*.
+  # Destructive recreation is db-ops; ingestion is owned by explicit seed/ingest workflows.
   printf '%s\n' native-install database-maintenance
   [[ "$stage" != deploy ]] || return 0
 
@@ -157,7 +143,6 @@ product_phases() {
 
 run_phase() {
   case "$1" in
-    policy) run_policy ;;
     reconcile) reconcile_installed_product ;;
     dependencies) run_deps ;;
     build) run_build ;;

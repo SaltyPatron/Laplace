@@ -47,7 +47,7 @@ env:
 
 jobs:
   development:
-    name: Development — build and test changed source
+    name: Development — build and test
     if: github.event_name == 'push'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
@@ -55,69 +55,17 @@ jobs:
       group: laplace-development-${{ github.ref }}
       cancel-in-progress: true
     steps:
-      - name: Checkout exact revision without discarding persistent build cache
+      - name: Checkout exact revision
         env:
           TARGET_SHA: ${{ github.sha }}
         run: |
           git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
           git checkout --force "$TARGET_SHA"
 
-      - name: Classify source change
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          fast=1
-          if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
-            fast=0
-          else
-            git fetch --no-tags --depth=1 origin "$BEFORE_SHA" || true
-            while IFS= read -r path; do
-              [[ -z "$path" ]] && continue
-              case "$path" in
-                docs/*|.github/*|scripts/test-*|scripts/check-*|scripts/actions-audit.py|scripts/repo-hygiene-gate.py|scripts/test-profiles.json|scripts/benchmark-profiles.json)
-                  ;;
-                *)
-                  fast=0
-                  break
-                  ;;
-              esac
-            done < <(git diff --name-only "$BEFORE_SHA" "$TARGET_SHA")
-          fi
-          echo "LAPLACE_FAST_ONLY=$fast" >> "$GITHUB_ENV"
-          echo "development classification: source_only=$fast"
-
-      - name: Validate source-only change
-        if: env.LAPLACE_FAST_ONLY == '1'
-        run: bash scripts/product-ci.sh check
-
       - uses: ./.github/actions/setup-laplace-env
-        if: env.LAPLACE_FAST_ONLY != '1'
 
-      - name: Verify installed dependencies
-        if: env.LAPLACE_FAST_ONLY != '1'
-        run: bash scripts/ci-deps.sh --check-only
-
-      - name: Build changed product source
-        if: env.LAPLACE_FAST_ONLY != '1'
-        run: bash scripts/pipeline.sh build
-
-      - name: Test native engine
-        if: env.LAPLACE_FAST_ONLY != '1'
-        run: bash scripts/test-parallel.sh --profile dev-native --suite native-dev
-
-      - name: Test managed code
-        if: env.LAPLACE_FAST_ONLY != '1'
-        run: bash scripts/test-parallel.sh --profile dev-managed --suite managed-dev
-
-      - name: Test UCI runtime
-        if: env.LAPLACE_FAST_ONLY != '1'
-        run: bash scripts/test-parallel.sh --profile dev-managed --suite uci-dev
-
-      - name: Test browser product
-        if: env.LAPLACE_FAST_ONLY != '1'
-        run: bash scripts/test-parallel.sh --profile dev-managed --suite browser-dev
+      - name: Build and test the product
+        run: bash scripts/product-ci.sh test
 
   operator:
     name: Operator — ${{ inputs.stage }}
@@ -158,20 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 0002
-          export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
-          mkdir -p /build/laplace/work/ci-sessions
-          directory="/build/laplace/work/ci-sessions/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-operator"
-          cleanup() {
-            python3 scripts/ci-session.py stop --directory "$directory" || true
-          }
-          trap cleanup EXIT INT TERM HUP
-          python3 scripts/ci-session.py start --directory "$directory" \
-            --lock /build/laplace/work/host-resource.lock \
-            --checkout "$GITHUB_WORKSPACE" --kind product --stage "$LAPLACE_STAGE"
-          while IFS= read -r phase; do
-            echo "::group::${phase}"
-            python3 scripts/ci-session.py run --directory "$directory" --phase "$phase"
-            echo "::endgroup::"
-          done < <(bash scripts/product-ci.sh "$LAPLACE_STAGE" --list-phases)
-          python3 scripts/ci-session.py stop --directory "$directory"
-          trap - EXIT INT TERM HUP
+          mkdir -p /build/laplace/work
+          exec 9>/build/laplace/work/host-resource.lock
+          flock 9
+          bash scripts/product-ci.sh "$LAPLACE_STAGE"

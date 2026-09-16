@@ -375,27 +375,19 @@ class EntryPointTests(unittest.TestCase):
         registry = json.loads((ROOT / "scripts/test-profiles.json").read_text())
 
         jobs = yaml.load(workflow, Loader=yaml.BaseLoader)["jobs"]
-        steps = jobs["product"]["steps"]
-        commands = {
-            step["name"]: step.get("run", "")
-            for step in steps if "name" in step
-        }
-        command = commands["Check source-only changes without touching the installed host"]
-        self.assertIn("set -euo pipefail", command)
-        self.assertIn("bash scripts/product-ci.sh check", command)
-        # Source checks neither reserve nor reconcile the installed host.
-        # Physical phases retain the session's continuous reservation.
+        development_steps = jobs["development"]["steps"]
+        source_check = next(step for step in development_steps if step.get("name") == "Validate source-only change")
+        self.assertIn("bash scripts/product-ci.sh check", source_check["run"])
         for forbidden in ("flock", "product-ci.sh reconcile", "systemctl", "pg_ctl"):
-            self.assertNotIn(forbidden, command)
-        session = next(step for step in steps if step.get("id") == "product_session")
-        native_install = next(step for step in steps if step.get("id") == "product_native_install")
-        self.assertIn("set -euo pipefail", session["run"])
-        self.assertIn('python3 scripts/ci-session.py start --directory "$directory"', session["run"])
-        self.assertIn('--lock /build/laplace/work/host-resource.lock --checkout "$GITHUB_WORKSPACE"', session["run"])
-        self.assertIn('--kind product --stage "$LAPLACE_STAGE"', session["run"])
-        self.assertLess(steps.index(session), steps.index(native_install))
-        self.assertIn('scripts/ci-session.py" run --directory "$LAPLACE_CI_SESSION_DIRECTORY" --phase native-install',
-                      native_install["run"])
+            self.assertNotIn(forbidden, source_check["run"])
+
+        operator_steps = jobs["operator"]["steps"]
+        lifecycle = next(step for step in operator_steps if step.get("name") == "Run requested lifecycle under one host reservation")
+        self.assertIn("set -euo pipefail", lifecycle["run"])
+        self.assertIn('python3 scripts/ci-session.py start --directory "$directory"', lifecycle["run"])
+        self.assertIn('--lock /build/laplace/work/host-resource.lock', lifecycle["run"])
+        self.assertIn('--checkout "$GITHUB_WORKSPACE" --kind product --stage "$LAPLACE_STAGE"', lifecycle["run"])
+        self.assertIn('scripts/ci-session.py run --directory "$directory" --phase "$phase"', lifecycle["run"])
         self.assertIn("native-install) run_install ;;", product)
         self.assertIn("test-profile-registry.py run --profile policy", policy)
         self.assertNotIn("python3 scripts/test-managed-host.py", policy)
@@ -414,12 +406,10 @@ class EntryPointTests(unittest.TestCase):
         self.assertNotIn('sudo python3 deploy/linux/laplace-managed-deploy bootstrap', publish)
         self.assertNotIn('sudo python3 deploy/linux/laplace-managed-deploy bootstrap', workflow)
 
-        reconciliations = [match.start() for match in re.finditer("managed-publish.sh preflight", product)]
-        install = product.index("pipeline.sh install")
-        self.assertEqual(2, len(reconciliations))
-        self.assertLess(product.index("wait-for-quiet-substrate.sh"), reconciliations[0])
-        self.assertLess(reconciliations[0], install)
-        self.assertLess(install, reconciliations[1])
+        install_block = product.split("run_install() (", 1)[1].split("\n)", 1)[0]
+        self.assertIn("wait-for-quiet-substrate.sh", install_block)
+        self.assertIn("pipeline.sh install", install_block)
+        self.assertNotIn("managed-publish.sh", install_block)
 
     def test_native_install_cleanup_preserves_root_managed_public_ca(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()

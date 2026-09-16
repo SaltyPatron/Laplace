@@ -143,33 +143,37 @@ for required in (
     if required not in product:
         fail(f"product-ci.sh: lifecycle boundary missing {required}")
 
-# Database recreation must produce a usable product from the selected revision.
+# Database lifecycle owns database state only. Source build/install, application
+# publication and ingestion have separate owners and must never be hidden in reset.
 manual_db = workflows.get("db-ops.yml", {})
 if triggers(manual_db) != {"workflow_dispatch"}:
     fail("db-ops.yml: database lifecycle must be dispatch-only")
 if (manual_db.get("concurrency") or {}).get("group") != "laplace-substrate-lifecycle":
     fail("db-ops.yml: database lifecycle must share product mutation ownership")
 steps = ((manual_db.get("jobs") or {}).get("db") or {}).get("steps") or []
-recreate = next((s for s in steps if s.get("name") == "Recreate database structure and runtime"), None)
+db_job = ((manual_db.get("jobs") or {}).get("db") or {})
+if (db_job.get("env") or {}).get("LAPLACE_REQUIRE_PREBUILT_MIGRATIONS") != "1":
+    fail("db-ops.yml: database lifecycle must reject implicit migration builds")
+recreate = next((s for s in steps if s.get("name") == "Recreate database structure from installed runtime"), None)
 if not recreate:
     fail("db-ops.yml: missing structural recreate step")
 else:
     command = recreate.get("run", "")
     for required in (
-        "--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env",
-        "check-database-health.sh", "verify-application-release.py",
+        "--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc",
+        "check-database-health.sh",
     ):
         if required not in command:
             fail(f"db-ops.yml: recreate lost required operation {required}")
 all_db_commands = runs((manual_db.get("jobs") or {}).get("db") or {})
-for required in (
-    "pipeline.sh build install", "ensure-foundation.sh --required-lexical",
-    "ensure-foundation.sh", "check-substrate-floor.sh",
+for forbidden in (
+    "pipeline.sh build", "pipeline.sh install", "ensure-foundation.sh",
+    "dotnet build", "dotnet publish",
+    "ingest-source.sh", "publish-applications.sh", "api-env",
+    "verify-application-release.py", "check-substrate-floor.sh",
 ):
-    if required not in all_db_commands:
-        fail(f"db-ops.yml: recreation cannot produce a usable product without {required}")
-if not ((manual_db.get("on") or {}).get("workflow_dispatch") or {}).get("inputs", {}).get("restore_foundation"):
-    fail("db-ops.yml: recreation lost complete-foundation selection")
+    if forbidden in all_db_commands:
+        fail(f"db-ops.yml: database lifecycle crosses into another owner: {forbidden}")
 
 # Branch consolidation is exceptional maintenance, not per-commit work.
 hygiene = workflows.get("repo-hygiene.yml", {})
@@ -187,5 +191,5 @@ if failures:
 
 print(
     f"ACTIONS_AUDIT_OK workflows={len(workflows)} "
-    "push=build-test operator=explicit db=usable-recreate seeds=explicit artifacts=none"
+    "push=build-test operator=explicit db=database-only seeds=explicit artifacts=none"
 )

@@ -1,4 +1,4 @@
-name: Compare verified terminal selected-body traversal
+name: Compare adjacent exact physicality body recipe reuse
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -22,9 +22,9 @@ jobs:
             fi
             test -w "$parent"
           done
-          qualification_dir="/build/laplace/work/terminal-body-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          build_dir="/build/laplace/build/terminal-body-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          source_dir="/build/laplace/worktrees/terminal-body-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          qualification_dir="/build/laplace/work/adjacent-body-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          build_dir="/build/laplace/build/adjacent-body-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          source_dir="/build/laplace/worktrees/adjacent-body-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           test ! -e "$qualification_dir"
           test ! -e "$build_dir"
           test ! -e "$source_dir"
@@ -63,15 +63,15 @@ jobs:
           print("actual workflow syntax:",len(blocks),"Bash blocks,",parsed,"Python bodies")
           VALIDATE
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git fetch --no-tags origin f775fd1ce06dd2163999a38bc2e5751c3906bc5f d9abbaf3855039b5e90bdd8da4f6c2e707ee0b4c
-          test "$(git diff --name-only f775fd1ce06dd2163999a38bc2e5751c3906bc5f d9abbaf3855039b5e90bdd8da4f6c2e707ee0b4c)" = engine/core/src/physicality_descriptor_admission.cpp
-          test "$(git diff --name-only d9abbaf3855039b5e90bdd8da4f6c2e707ee0b4c HEAD)" = .github/workflows/native-admission-footprint-qualification.yml
-          baseline=f775fd1ce06dd2163999a38bc2e5751c3906bc5f
+          git fetch --no-tags origin cee63224e4a47eb1e6a8cf0cd8b11e2ba3bd3ab6 9b6da748ac12aa79ecf1d9e5e66fb032c882d8ab
+          test "$(git diff --name-only cee63224e4a47eb1e6a8cf0cd8b11e2ba3bd3ab6 9b6da748ac12aa79ecf1d9e5e66fb032c882d8ab)" = engine/core/src/physicality_descriptor.c
+          test "$(git diff --name-only 9b6da748ac12aa79ecf1d9e5e66fb032c882d8ab HEAD)" = .github/workflows/native-admission-footprint-qualification.yml
+          baseline=cee63224e4a47eb1e6a8cf0cd8b11e2ba3bd3ab6
           git worktree add --detach "$QUALIFICATION_SOURCE" "$baseline"
           cd "$QUALIFICATION_SOURCE"
-          test "$(git hash-object engine/core/src/physicality_descriptor_admission.cpp)" = a85da4672293d7ca41e89789de64df62c38155e4
-          test "$(git hash-object engine/core/tests/test_physicality_descriptor_admission.cpp)" = ab49de5836c17edfda3d2a643cd7155ca017da6b
-          printf 'baseline_with_identical_tests=%s\ncandidate_diagnostic=%s\nbaseline_product=%s\ncandidate_product=%s\n' "$baseline" "$GITHUB_SHA" baba1ccea538c5f7380692cd7432b94d6f4bf46b d9abbaf3855039b5e90bdd8da4f6c2e707ee0b4c > "$QUALIFICATION_DIR/evidence/source.txt"
+          test "$(git hash-object engine/core/src/physicality_descriptor.c)" = c8dde9a718ee6f82c2c0012b5da93606cd7d1c4c
+          test "$(git hash-object engine/core/tests/test_physicality_descriptor.cpp)" = 631e2b4088e1e2afb287a91958fc09c096b9c963
+          printf 'baseline_with_identical_tests=%s\ncandidate_diagnostic=%s\nbaseline_product=%s\ncandidate_product=%s\n' "$baseline" "$GITHUB_SHA" d79f433cbc2e7db3804f5dc7d290c9a77fc53216 9b6da748ac12aa79ecf1d9e5e66fb032c882d8ab > "$QUALIFICATION_DIR/evidence/source.txt"
       - name: Acquire existing pinned native build inputs
         shell: bash
         run: |
@@ -166,9 +166,9 @@ jobs:
           from pathlib import Path
           root=Path(os.environ["QUALIFICATION_DIR"]);evidence=root/"evidence"
           build=Path(os.environ["QUALIFICATION_BUILD"]);source=Path(os.environ["QUALIFICATION_SOURCE"])
-          expected=["PhysicalityDescriptorAdmission.PhasedCaptureRetiresEncodedSourceBeforeCompleteValidation","PhysicalityDescriptorAdmission.CancelledCapturePublishesNothingAndPreservesBorrowedRows","PhysicalityDescriptorAdmission.CancellationUnwindsMaterializationIncludingLateOutputThenRetryMatchesLegacy","PhysicalityDescriptorAdmission.ActualByteCarriersUsePinnedBasisAndStoredContentTakesPrecedence","PhysicalityDescriptorAdmission.TransitiveProviderChangeKeepsExactDescriptorAndChangesRootView","PhysicalityDescriptorAdmission.RootIdentityAndViewIgnoreUnrelatedBatchNeighborsAndStageOrder","PhysicalityDescriptorAdmission.FrontierRequiresCheckedAbsenceAndTheExplicitAdmittedWinner","PhysicalityDescriptorAdmission.MixedWriterStagesSelectFirstContentPlacementAndRetainAllRawForms","PhysicalityDescriptorAdmission.ReleasedCaptureKeepsExactMaterializationAndFiniteCoexistence","PhysicalityDescriptorAdmission.ProvidersAuthenticateEveryBodyAndCurrentSelectionRemainsStrict","PhysicalityDescriptorAdmission.RepeatedCompositeCarrierRequiresProviderAndReusesAdmittedBodyAsCurrent","PhysicalityDescriptorAdmission.ExactSelfReferenceCycleTerminatesWithoutGeneratedFeedback","PhysicalityDescriptorAdmission.DuplicateSourceUnitWitnessesKeepOneObservationAndLatestTime","PhysicalityDescriptorAdmission.RejectsInvalidOrConflictingSourcePriorWithoutPublishingStage","PhysicalityDescriptorAdmission.RetainedReceiptTracksStageTransferAndBudgetFailurePublishesNothing","PhysicalityDescriptorAdmission.ExactBodyReadsBackFromActualGeneratedCompositionTrajectories","PhysicalityDescriptorAdmission.DiagnosedRefusalsRetainExactOwnerAndRetryPublishesCompleteRows","PhysicalityDescriptorAdmission.SourceContextRunsMatchScalarOwnersAcrossBothIdentifiersAndTimes","PhysicalityDescriptorAdmission.CachedObservationContextsKeepCancellationAndPriorConflictChecks","PhysicalityDescriptorAdmission.SourceContextObservationWorkload","PhysicalityDescriptorAdmission.TerminalBodyMemoPreservesScopesAndExactSelectedWinner","PhysicalityDescriptorAdmission.TerminalBodyMemoKeepsCancellationAndFiniteGrantCleanup","PhysicalityDescriptorAdmission.TerminalSelectedBodyViewsWorkload"]
-          patterns=("shared_terminal_bodies","native_floor_only")
-          candidate="d9abbaf3855039b5e90bdd8da4f6c2e707ee0b4c";baseline=subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()
+          expected=["PhysicalityDescriptor.ReusesExactFormAndSeparatesAlternateBodiesWithoutChangingEntity","PhysicalityDescriptor.RootIdentityIsIndependentOfBatchOrderAndUnrelatedNeighbors","PhysicalityDescriptor.EveryNodeUsesTheOrdinaryOrderedIdentityOwner","PhysicalityDescriptor.CarrierReferencesRemainOrdinaryChildrenAndKeepOccurrenceScope","PhysicalityDescriptor.PreservesRawCarrierWordsAndLogicalRunSemantics","PhysicalityDescriptor.EncodesWideLogicalTrajectoryWithoutOrdinalCeiling","PhysicalityDescriptor.FactorIdSizedPayloadDoesNotBecomeEntityReference","PhysicalityDescriptor.ExactBinary64AndNullableFieldsHaveDistinctContent","PhysicalityDescriptor.RejectsInvalidBodyBeforePublishingAnyPlan","PhysicalityDescriptor.RejectsContentParentMismatchAndNoncanonicalCarrierBits","PhysicalityDescriptor.EnforcesPeakAllocationIncludingEmptyBatch","PhysicalityDescriptor.RepeatedFormsFitTheirActualGraphWithoutLosingOccurrences","PhysicalityDescriptor.RehashAndArrayGrowthPreserveOrderedIdentityUnderFiniteGrants","PhysicalityDescriptor.RejectsArithmeticOverflowWithoutReadingBorrowedBody","PhysicalityDescriptor.RejectsAliasedProviderVocabularyBeforeBinaryFieldsLoseInformation","PhysicalityDescriptorStage.RepeatedRawFormsFitSameGrantAndKeepEveryObservation","PhysicalityDescriptorStage.CapturesActualBodiesBeforePlacementDedupAndKeepsObservations","PhysicalityDescriptorStage.ExactCopyReadbackRetainsBodyAndRetiresBorrowedSourceSafely","PhysicalityDescriptorStage.ReleasesOnlyValidatedPlanAndRetainsExactCapturedRows","PhysicalityDescriptorStage.PreservesIdentityAcrossActualStagePartitionBoundaries","PhysicalityDescriptorStage.RejectsMalformedActualTupleAndIncorrectPlacementKey","PhysicalityDescriptorStage.EnforcesSeparateCaptureAndPlanPeakBudgets","PhysicalityDescriptorReadback.ReconstructsExactBodyFromOrdinaryCompositionRecords","PhysicalityDescriptorReadback.RejectsGinCandidateWithWrongTypedFieldDespiteValidContentIdentity","PhysicalityDescriptorReadback.RejectsWrongSchemaAndMissingOrForgedCompositionRecords","PhysicalityDescriptorReadback.ReconstructsFactorWordsWithoutIntroducingCarrierReferences","PhysicalityDescriptorReadback.AccountsForItsPeakWorksetAndRejectsInvalidOffsets","PhysicalityDescriptor.DiagnosedPlannerPreservesOutputsAndExactFiniteGrantDecisions","PhysicalityDescriptor.DiagnosedPlannerKeepsInvalidBodyCancellationAndOverflowDistinct","PhysicalityDescriptor.SourcePlanBoundCoversActualRecipeAndOccurrenceArrays","PhysicalityDescriptorStage.ShapeAndPayloadBoundsUseActualOrdinaryTupleFrames","PhysicalityDescriptorStage.ConstantTimeProducerShapeBoundsExactRowsWithoutChangingStage","PhysicalityDescriptor.AdjacentBodyReuseMatchesScalarPlansAcrossEveryRecipeField","PhysicalityDescriptor.AdjacentBodyReuseCannotHideInvalidFollowingBody","PhysicalityDescriptor.AdjacentBodyReusePreservesCancellationAndFiniteGrantDecisions","PhysicalityDescriptor.AdjacentBodyRecipeWorkload","PhysicalityDescriptorAdmission.PhasedCaptureRetiresEncodedSourceBeforeCompleteValidation","PhysicalityDescriptorAdmission.CancelledCapturePublishesNothingAndPreservesBorrowedRows","PhysicalityDescriptorAdmission.CancellationUnwindsMaterializationIncludingLateOutputThenRetryMatchesLegacy","PhysicalityDescriptorAdmission.ActualByteCarriersUsePinnedBasisAndStoredContentTakesPrecedence","PhysicalityDescriptorAdmission.TransitiveProviderChangeKeepsExactDescriptorAndChangesRootView","PhysicalityDescriptorAdmission.RootIdentityAndViewIgnoreUnrelatedBatchNeighborsAndStageOrder","PhysicalityDescriptorAdmission.FrontierRequiresCheckedAbsenceAndTheExplicitAdmittedWinner","PhysicalityDescriptorAdmission.MixedWriterStagesSelectFirstContentPlacementAndRetainAllRawForms","PhysicalityDescriptorAdmission.ReleasedCaptureKeepsExactMaterializationAndFiniteCoexistence","PhysicalityDescriptorAdmission.ProvidersAuthenticateEveryBodyAndCurrentSelectionRemainsStrict","PhysicalityDescriptorAdmission.RepeatedCompositeCarrierRequiresProviderAndReusesAdmittedBodyAsCurrent","PhysicalityDescriptorAdmission.ExactSelfReferenceCycleTerminatesWithoutGeneratedFeedback","PhysicalityDescriptorAdmission.DuplicateSourceUnitWitnessesKeepOneObservationAndLatestTime","PhysicalityDescriptorAdmission.RejectsInvalidOrConflictingSourcePriorWithoutPublishingStage","PhysicalityDescriptorAdmission.RetainedReceiptTracksStageTransferAndBudgetFailurePublishesNothing","PhysicalityDescriptorAdmission.ExactBodyReadsBackFromActualGeneratedCompositionTrajectories","PhysicalityDescriptorAdmission.DiagnosedRefusalsRetainExactOwnerAndRetryPublishesCompleteRows","PhysicalityDescriptorAdmission.SourceContextRunsMatchScalarOwnersAcrossBothIdentifiersAndTimes","PhysicalityDescriptorAdmission.CachedObservationContextsKeepCancellationAndPriorConflictChecks","PhysicalityDescriptorAdmission.SourceContextObservationWorkload"]
+          patterns=("adjacent","alternating","unique")
+          candidate="9b6da748ac12aa79ecf1d9e5e66fb032c882d8ab";baseline=subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()
           def require(ok,message):
               if not ok:raise RuntimeError(message)
           def sha(path):
@@ -196,11 +196,11 @@ jobs:
                   destination/"laplace_core_tests",destination/"liblaplace_core.so",
                   build/"core/perfcache/laplace_t0_perfcache.bin",build/"core/perfcache/laplace_modality_number_perfcache.bin")]
               commands=json.loads((build/"compile_commands.json").read_text())
-              selected=[x for x in commands if x["file"].endswith("/physicality_descriptor_admission.cpp")]
-              require(len(selected)==1,"ordinary materializer compile command missing")
+              selected=[x for x in commands if x["file"].endswith("/physicality_descriptor.c")]
+              require(len(selected)==1,"ordinary planner compile command missing")
               identities[label]={"commit":git("rev-parse","HEAD"),"tree":git("rev-parse","HEAD^{tree}"),
-                  "engine_tree":git("rev-parse","HEAD:engine"),"core_cpp":git("hash-object","engine/core/src/physicality_descriptor_admission.cpp"),
-                  "same_test_blob":git("hash-object","engine/core/tests/test_physicality_descriptor_admission.cpp"),
+                  "engine_tree":git("rev-parse","HEAD:engine"),"core_source":git("hash-object","engine/core/src/physicality_descriptor.c"),
+                  "same_test_blob":git("hash-object","engine/core/tests/test_physicality_descriptor.cpp"),
                   "compile_command":selected[0],"files":closure}
               shutil.copy2(build/"CMakeCache.txt",evidence/(label+"-CMakeCache.txt"))
               (evidence/"build-identities.json").write_text(json.dumps(identities,sort_keys=True,indent=2)+"\n")
@@ -216,13 +216,13 @@ jobs:
               selected_stat=library.stat()
               byte_dir=evidence/(tag+"-tuple-bytes");byte_dir.mkdir()
               env=os.environ.copy()
-              env["LAPLACE_TERMINAL_BODY_EVIDENCE_DIR"]=str(byte_dir)
+              env["LAPLACE_BODY_REUSE_EVIDENCE_DIR"]=str(byte_dir)
               env.update(LD_LIBRARY_PATH=str(destination),OMP_NUM_THREADS="1",OPENBLAS_NUM_THREADS="1",MKL_NUM_THREADS="1")
               loader=subprocess.run(["ldd",str(destination/"laplace_core_tests")],check=True,env=env,
                   stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=20).stdout
               (evidence/(tag+"-loader.txt")).write_text(loader)
               require("not found" not in loader and str(destination)+"/liblaplace_core.so" in loader,"wrong ordinary core loader route")
-              test_filter="PhysicalityDescriptorAdmission.*" if all_cases else "PhysicalityDescriptorAdmission.TerminalSelectedBodyViewsWorkload"
+              test_filter="PhysicalityDescriptor.*:PhysicalityDescriptorStage.*:PhysicalityDescriptorReadback.*:PhysicalityDescriptorAdmission.*" if all_cases else "PhysicalityDescriptor.AdjacentBodyRecipeWorkload"
               xml=evidence/(tag+".xml");log=evidence/(tag+".log")
               argv=["taskset","-c",str(cpu),str(destination/"laplace_core_tests"),"--gtest_filter="+test_filter,"--gtest_output=xml:"+str(xml)]
               observed=[];started=time.monotonic()
@@ -250,21 +250,13 @@ jobs:
                   "library":str(library),"library_sha256":sha(library),"mapped":observed,"elapsed_seconds":time.monotonic()-started},sort_keys=True,indent=2)+"\n")
               document=ET.parse(xml);cases=document.findall(".//testcase")
               names=[c.attrib["classname"]+"."+c.attrib["name"] for c in cases]
-              require(sorted(names)==sorted(expected if all_cases else [expected[-1]]),"selected control set differs")
+              require(sorted(names)==sorted(expected if all_cases else ["PhysicalityDescriptor.AdjacentBodyRecipeWorkload"]),"selected control set differs")
               require(all(c.find("failure") is None and c.find("skipped") is None
                   and c.attrib.get("status")=="run" and c.attrib.get("result")=="completed" for c in cases),"failed/skipped native control")
-              case=next(c for c in cases if c.attrib["name"]=="TerminalSelectedBodyViewsWorkload")
+              case=next(c for c in cases if c.attrib["name"]=="AdjacentBodyRecipeWorkload")
               properties={p.attrib["name"]:p.attrib["value"] for p in case.findall("./properties/property")}
-              require(properties["root_forms"]=="128" and properties["selected_leaf_bodies"]=="12"
-                  and properties["leaf_vertices"]=="24" and properties["finite_grant_bytes"]=="67108864","workload changed")
-              if all_cases:
-                  semantic={}
-                  for item in cases:
-                      if item.attrib["name"].startswith("TerminalBodyMemo"):
-                          semantic[item.attrib["name"]]={p.attrib["name"]:p.attrib["value"]
-                              for p in item.findall("./properties/property") if p.attrib["name"].endswith(("_hash128","_bytes"))}
-                  require(all(semantic.values()) and len(semantic)==2,"new semantic output receipts missing")
-                  (evidence/(tag+"-semantic-bytes.json")).write_text(json.dumps(semantic,sort_keys=True,indent=2)+"\n")
+              require(properties["forms"]=="2048" and properties["vertices_per_form"]=="8"
+                  and properties["finite_grant_bytes"]=="67108864","workload changed")
               return properties
           snapshot("baseline")
           baseline_properties=execute("baseline","baseline-controls",True)
@@ -276,77 +268,69 @@ jobs:
                   "--target","laplace_core_tests","--parallel","2"],stdout=output,stderr=subprocess.STDOUT,check=True,timeout=925)
           snapshot("candidate")
           candidate_properties=execute("candidate","candidate-controls",True)
-          require(identities["baseline"]["compile_command"]==identities["candidate"]["compile_command"],"materializer compiler arguments differ")
-          require(identities["baseline"]["same_test_blob"]==identities["candidate"]["same_test_blob"]=="ab49de5836c17edfda3d2a643cd7155ca017da6b","fixture differs")
-          require(identities["baseline"]["core_cpp"]=="a85da4672293d7ca41e89789de64df62c38155e4"
-              and identities["candidate"]["core_cpp"]=="bea3ca79fc33558cb416e0b1b6d6c967e2f4c5f3","production comparison differs")
+          require(identities["baseline"]["compile_command"]==identities["candidate"]["compile_command"],"planner compiler arguments differ")
+          require(identities["baseline"]["same_test_blob"]==identities["candidate"]["same_test_blob"]=="631e2b4088e1e2afb287a91958fc09c096b9c963","fixture differs")
+          require(identities["baseline"]["core_source"]=="c8dde9a718ee6f82c2c0012b5da93606cd7d1c4c"
+              and identities["candidate"]["core_source"]=="3a5f3e78fbe837ee60169235f71c4783297e9cf3","production comparison differs")
           require(identities["baseline"]["files"][1]["sha256"]!=identities["candidate"]["files"][1]["sha256"],"core library did not change")
           require(identities["baseline"]["files"][2:]==identities["candidate"]["files"][2:],"actual floor identity changed")
           def equivalent(left,right):
               for pattern in patterns:
-                  for table in (1,2,3):
-                      for field in ("hash128","bytes"):
-                          key=f"{pattern}_table{table}_{field}"
-                          require(left[key]==right[key],"full tuple identity differs: "+key)
-                  require(int(left[pattern+"_peak_bytes"])<=67108864 and int(right[pattern+"_peak_bytes"])<=67108864,
-                      "native owner exceeded unchanged grant")
-          require(json.loads((evidence/"baseline-controls-semantic-bytes.json").read_text())==
-              json.loads((evidence/"candidate-controls-semantic-bytes.json").read_text()),"semantic fixture full tuple bytes differ")
-          def compare_tuple_files(left_tag,right_tag,all_cases):
+                  for field in ("retained_bytes","peak_bytes"):
+                      require(left[pattern+"_"+field]==right[pattern+"_"+field],
+                          "plan allocation decision changed: "+pattern+"_"+field)
+                  require(int(left[pattern+"_peak_bytes"])<=67108864,"native owner exceeded unchanged grant")
+          def compare_plan_files(left_tag,right_tag):
               left=evidence/(left_tag+"-tuple-bytes");right=evidence/(right_tag+"-tuple-bytes")
-              prefixes=list(patterns)+(["selection0","selection1","selection2","retry"] if all_cases else [])
-              names=sorted(f"{prefix}_table{table}.bin" for prefix in prefixes for table in (1,2,3))
-              require(sorted(p.name for p in left.iterdir())==names,"baseline tuple file inventory differs")
-              require(sorted(p.name for p in right.iterdir())==names,"candidate tuple file inventory differs")
+              names=sorted(pattern+".plan" for pattern in patterns)
+              require(sorted(p.name for p in left.iterdir())==names,"baseline plan file inventory differs")
+              require(sorted(p.name for p in right.iterdir())==names,"candidate plan file inventory differs")
               output=[]
               for name in names:
                   a,b=left/name,right/name
-                  require(a.stat().st_size==b.stat().st_size,"ordered tuple file length differs: "+name)
-                  require(a.stat().st_size<=64<<20,"ordered tuple file exceeded bound")
+                  require(a.stat().st_size==b.stat().st_size,"ordered plan file length differs: "+name)
+                  require(a.stat().st_size<=64<<20,"ordered plan file exceeded bound")
                   with a.open("rb") as x,b.open("rb") as y:
                       while True:
                           xb,yb=x.read(1<<20),y.read(1<<20)
-                          require(xb==yb,"complete ordered tuple bytes differ: "+name)
+                          require(xb==yb,"complete ordered public plan bytes differ: "+name)
                           if not xb:break
                   output.append({"file":name,"bytes":a.stat().st_size,"sha256":sha(a)})
               return output
-          compared_files=compare_tuple_files("baseline-controls","candidate-controls",True)
+          compared_files=compare_plan_files("baseline-controls","candidate-controls")
           equivalent(baseline_properties,candidate_properties)
           runs=[]
           for index,label in enumerate(("baseline","candidate","candidate","baseline"),1):
               properties=execute(label,f"comparison-{index}-{label}",False)
               equivalent(baseline_properties,properties)
-              # Every timed invocation retains and directly compares all
-              # workload E/P/A bytes too, beyond the XML fingerprints.
               selected_tag=f"comparison-{index}-{label}"
               if index==1:first_timed_tag=selected_tag
-              else:compare_tuple_files(first_timed_tag,selected_tag,False)
+              else:compare_plan_files(first_timed_tag,selected_tag)
               runs.append({"label":label,"properties":properties})
           timings={}
           for pattern in patterns:
-              timings[pattern]={}
-              for metric in ("views_to_observations_checkpoint_ns","uninstrumented_materialization_ns"):
-                  values={}
-                  for label in ("baseline","candidate"):
-                      values[label]=[int(run["properties"][f"{pattern}_sample{sample}_{metric}"])
-                          for run in runs if run["label"]==label for sample in range(1,6)]
-                      require(len(values[label])==10 and min(values[label])>0,"timing sample coverage")
-                  timings[pattern][metric]={"samples_ns":values,
-                      "baseline_median_ns":statistics.median(values["baseline"]),
-                      "candidate_median_ns":statistics.median(values["candidate"]),
-                      "ratio_baseline_over_candidate":statistics.median(values["baseline"])/statistics.median(values["candidate"])}
+              values={}
+              for label in ("baseline","candidate"):
+                  values[label]=[int(run["properties"][f"{pattern}_sample{sample}_ns"])
+                      for run in runs if run["label"]==label for sample in range(1,6)]
+                  require(len(values[label])==10 and min(values[label])>0,"timing sample coverage")
+              timings[pattern]={"samples_ns":values,
+                  "baseline_median_ns":statistics.median(values["baseline"]),
+                  "candidate_median_ns":statistics.median(values["candidate"]),
+                  "ratio_baseline_over_candidate":statistics.median(values["baseline"])/statistics.median(values["candidate"])}
           require(git("status","--porcelain","--untracked-files=all")=="","candidate source changed")
           for label in identities:
               require(sha(root/label/"liblaplace_core.so")==identities[label]["files"][1]["sha256"],"retained core changed")
-          report={"schema":"laplace.native-terminal-body-comparison/v1","status":"passed",
-              "baseline_product":"baba1ccea538c5f7380692cd7432b94d6f4bf46b","candidate_product":"d9abbaf3855039b5e90bdd8da4f6c2e707ee0b4c",
-              "diagnostic_commit":os.environ["GITHUB_SHA"],"same_fixture_blob":"ab49de5836c17edfda3d2a643cd7155ca017da6b",
+          report={"schema":"laplace.native-adjacent-body-comparison/v1","status":"passed",
+              "baseline_product":"d79f433cbc2e7db3804f5dc7d290c9a77fc53216","candidate_product":"9b6da748ac12aa79ecf1d9e5e66fb032c882d8ab",
+              "diagnostic_commit":os.environ["GITHUB_SHA"],"same_fixture_blob":"631e2b4088e1e2afb287a91958fc09c096b9c963",
               "baseline_controls_passed":len(expected),"candidate_controls_passed":len(expected),"failed":0,"skipped":0,
-              "root_forms":128,"selected_leaf_bodies":12,"leaf_vertices":24,"finite_owner_grant_bytes":67108864,"timing_order":["baseline","candidate","candidate","baseline"],
-              "compared_complete_tuple_files":compared_files,"timings":timings,"ordered_tuple_parity":True,"unchanged_grant_enforced":True,
-              "owner_accounting":{"baseline":{p:{k:baseline_properties[p+"_"+k] for k in ("peak_bytes","views_checkpoints")} for p in patterns},
-                  "candidate":{p:{k:candidate_properties[p+"_"+k] for k in ("peak_bytes","views_checkpoints")} for p in patterns}},"identities":identities,
-              "scope":"Same-runner pinned-CPU actual native materialization. Instrumented interval spans first VIEWS through first OBSERVATIONS checkpoint; full-call samples have no callback. Complete ordered E/P/A tuples and fixed observation times match. The same finite grant is enforced; actual peak and callback work counts are reported independently, not forced equal. No PostgreSQL/backend/installed or recorded-game throughput claim."}
+              "forms":2048,"vertices_per_form":8,"adjacent_run_length":64,"finite_owner_grant_bytes":67108864,
+              "timing_order":["baseline","candidate","candidate","baseline"],
+              "compared_complete_plan_files":compared_files,"timings":timings,"ordered_plan_parity":True,"unchanged_grant_enforced":True,
+              "owner_accounting":{"baseline":{p:{k:baseline_properties[p+"_"+k] for k in ("peak_bytes","retained_bytes")} for p in patterns},
+                  "candidate":{p:{k:candidate_properties[p+"_"+k] for k in ("peak_bytes","retained_bytes")} for p in patterns}},"identities":identities,
+              "scope":"Same-runner pinned-CPU actual native descriptor plan build. Identical complete ordered public nodes/children/roots/references are directly compared, including all observation indices. Adjacent reuse only; alternating and unique controls retain the ordinary recipe path. No PostgreSQL/backend/installed/materialization or recorded-game throughput claim."}
           (evidence/"result.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
           print(json.dumps(report,sort_keys=True))
           
@@ -356,7 +340,7 @@ jobs:
         id: artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: native-terminal-body-${{ github.run_id }}-${{ github.run_attempt }}
+          name: native-adjacent-body-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ env.QUALIFICATION_DIR }}/evidence/
             ${{ env.QUALIFICATION_DIR }}/baseline/
