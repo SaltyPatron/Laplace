@@ -1,56 +1,178 @@
-name: Observe native dependency ownership after the actual policy refusal
+name: Install the selected native PostgreSQL and admission repair
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
 permissions:
   contents: read
 jobs:
-  observe:
+  native:
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 3
+    timeout-minutes: 120
+    env:
+      TARGET_SHA: baba1ccea538c5f7380692cd7432b94d6f4bf46b
+      TARGET_TREE: a2394ec45d026812fe5805bbca331c353260e237
+      LAPLACE_EXTERNAL: /build/external
+      LAPLACE_INSTALL_PREFIX: /opt/laplace
+      LAPLACE_PG_PREFIX: /opt/laplace/pgsql-18
+      PGHOST: /var/run/postgresql
+      PGPORT: '5432'
+      PGUSER: laplace_admin
+      PGDATABASE: laplace
+      LAPLACE_DATA_ROOT: /vault/Data
+      MSBUILDDISABLENODEREUSE: '1'
+      UseSharedCompilation: 'false'
     steps:
-      - name: Read fixed dependency metadata without checkout or mutation
+      - name: Prepare retained native execution paths
         shell: bash
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=5s 60s python3 - <<'PY'
-          import datetime, json, os, pathlib, stat, subprocess
-          def emit(kind, value):
-              print(json.dumps({"kind":kind, **value}, sort_keys=True), flush=True)
-          emit("identity", {"uid":os.getuid(),"gid":os.getgid(),"groups":os.getgroups(),
-               "utc":datetime.datetime.now(datetime.timezone.utc).isoformat()})
-          paths=["/build/external","/build/external/PINS.tsv","/build/external/postgresql",
-                 "/build/external/postgresql/.git","/opt/laplace","/opt/laplace/pgsql-18",
-                 "/opt/laplace/pgsql-18/bin","/opt/laplace/include","/opt/laplace/lib",
-                 "/opt/laplace/share","/opt/laplace/bin","/usr/local/libexec/laplace-managed-deploy"]
+          evidence="/build/laplace/recovery/native-install/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$evidence"
+          chmod 0700 "$evidence"
+          echo "NATIVE_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+      - name: Execute existing native dependency build proof and install owners
+        id: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=30s 6900s \
+            flock --exclusive --close --timeout 1800 /build/laplace/work/host-resource.lock \
+            timeout --signal=TERM --kill-after=30s 5100s bash -s <<'NATIVE' 2>&1 | tee "$NATIVE_EVIDENCE/execution.log"
+          set -euo pipefail
+          umask 0002
+          cd "$GITHUB_WORKSPACE"
+          [[ -z "$(git status --porcelain --untracked-files=no)" ]] || { echo "tracked workspace changes preserved; native checkout refused"; exit 1; }
+          timeout 120s git fetch --no-tags origin "$TARGET_SHA"
+          git checkout --detach "$TARGET_SHA"
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" && "$(git rev-parse HEAD^{tree})" == "$TARGET_TREE" ]]
+          export NATIVE_SOURCE_ROOT="$PWD"
+          export TMPDIR="$NATIVE_EVIDENCE/tmp" TMP="$NATIVE_EVIDENCE/tmp" TEMP="$NATIVE_EVIDENCE/tmp"
+          mkdir -p "$TMPDIR" "$NATIVE_EVIDENCE/private"
+          chmod 0700 "$TMPDIR" "$NATIVE_EVIDENCE/private"
+          export LAPLACE_CI_SESSION_DIRECTORY="$NATIVE_EVIDENCE/private"
+          export LAPLACE_REGRESS_DB="laplace_native_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          cmake_bin="$(python3 scripts/provision-cmake.py --root /opt/laplace/tools/cmake --work /build/laplace/work/cmake --ensure)"
+          export PATH="$cmake_bin:/opt/laplace/pgsql-18/bin:$PATH"
+          export LD_LIBRARY_PATH="$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}"
+          export LAPLACE_DB='Host=/var/run/postgresql;Username=laplace_admin;Database=laplace'
+          export LAPLACE_QUERY_DB=laplace
+          export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
+          export CTEST_PARALLEL_LEVEL="${CTEST_PARALLEL_LEVEL:-$(nproc)}"
+          phase() {
+            local name="$1"; shift
+            echo "NATIVE_PHASE $name running $(date -u +%FT%TZ)"
+            "$@"
+            printf '%s\n' "$name" >> "$NATIVE_EVIDENCE/completed-phases.txt"
+            echo "NATIVE_PHASE $name passed $(date -u +%FT%TZ)"
+          }
+          python3 - <<'PY'
+          import json, os, pathlib, stat, subprocess
+          paths=["/build/external/PINS.tsv","/build/external/postgresql","/build/external/postgresql/.git","/opt/laplace/pgsql-18"]
           for name in paths:
-              try:
-                  p=pathlib.Path(name); info=p.lstat()
-                  emit("path",{"path":name,"uid":info.st_uid,"gid":info.st_gid,
-                      "mode":oct(stat.S_IMODE(info.st_mode)),"symlink":p.is_symlink(),
-                      "readable":os.access(p,os.R_OK),"writable":os.access(p,os.W_OK),
-                      "traversable":os.access(p,os.X_OK),"device":info.st_dev,"inode":info.st_ino})
-              except OSError as exc: emit("path",{"path":name,"errorType":type(exc).__name__,"errno":exc.errno})
-          p=pathlib.Path("/build/external/PINS.tsv")
-          try:
-              if p.stat().st_size > 1048576: raise ValueError("pin metadata read budget exceeded")
-              rows=[line.split("\t") for line in p.read_text().splitlines()
-                    if line.split("\t",1)[0].removeprefix("external/")=="postgresql"]
-              emit("postgresqlPin",{"rows":rows})
-          except (OSError,ValueError) as exc: emit("postgresqlPin",{"errorType":type(exc).__name__})
-          commands=[
-              ("sourceHead",["git","-c","safe.directory=/build/external/postgresql","-C","/build/external/postgresql","rev-parse","HEAD"]),
-              ("postgresVersion",["/opt/laplace/pgsql-18/bin/postgres","--version"]),
-              ("pgConfigVersion",["/opt/laplace/pgsql-18/bin/pg_config","--version"]),
-              ("apiActive",["systemctl","is-active","laplace-api"]),
-              ("runningPostgres",["/opt/laplace/pgsql-18/bin/psql","-X","-h","/var/run/postgresql","-U","laplace_admin","-d","postgres","-Atqc","SHOW server_version_num"])
-          ]
-          for label, argv in commands:
-              try:
-                  result=subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
-                      stderr=subprocess.PIPE,text=True,timeout=10)
-                  emit(label,{"exitCode":result.returncode,"stdout":result.stdout.strip()[:512],
-                      "stderrBytes":len(result.stderr.encode())})
-              except (OSError,subprocess.TimeoutExpired) as exc:
-                  emit(label,{"errorType":type(exc).__name__})
+              p=pathlib.Path(name); s=p.lstat()
+              if p.is_symlink() or s.st_uid != os.getuid() or not os.access(p,os.W_OK):
+                  raise SystemExit("native owner access changed: "+name)
+          repo="/build/external/postgresql"
+          tracked=subprocess.check_output(["git","-c","safe.directory="+repo,"-C",repo,"status","--porcelain","--untracked-files=no"],text=True)
+          if tracked: raise SystemExit("PostgreSQL tracked user changes preserved; source update refused")
+          selected=json.loads(pathlib.Path("deploy/postgresql-release.json").read_text())
+          if selected["commit"]!="724edf9bde9d356724ad384a2e196edc3c9f80f7" or selected["version"]!="18.6":
+              raise SystemExit("selected release differs from reviewed official PostgreSQL18.6")
+          output={"schema":"laplace.native-only-install/v1","status":"running","source":os.environ["TARGET_SHA"],
+                  "tree":os.environ["TARGET_TREE"],"operatorSource":os.environ["GITHUB_SHA"],
+                  "runId":os.environ["GITHUB_RUN_ID"],"attempt":os.environ["GITHUB_RUN_ATTEMPT"],
+                  "uid":os.getuid(),"managedPublication":"not_attempted","fullLifecyclePassed":False,
+                  "databaseRecreation":False,"foundationIngestion":False,"postgresqlSelection":selected}
+          pathlib.Path(os.environ["NATIVE_EVIDENCE"],"selection.json").write_text(json.dumps(output,indent=2)+"\n")
           PY
+          phase pg-pin python3 scripts/postgresql-release.py select-pin --external /build/external
+          if ! git -c safe.directory=/build/external/postgresql -C /build/external/postgresql cat-file -e 724edf9bde9d356724ad384a2e196edc3c9f80f7^{commit}; then
+            phase pg-fetch timeout 180s git -c safe.directory=/build/external/postgresql -C /build/external/postgresql fetch --no-tags https://git.postgresql.org/git/postgresql.git 724edf9bde9d356724ad384a2e196edc3c9f80f7
+          fi
+          phase pg-checkout git -c safe.directory=/build/external/postgresql -C /build/external/postgresql checkout --detach 724edf9bde9d356724ad384a2e196edc3c9f80f7
+          phase pg-source python3 scripts/postgresql-release.py source --external /build/external
+          phase dependency-build bash scripts/build-system-deps.sh
+          phase dependency-identity python3 scripts/postgresql-release.py installed --prefix /opt/laplace/pgsql-18
+          phase native-managed-build bash scripts/pipeline.sh build
+          phase isolated-native-database bash scripts/pr-db-proof.sh
+          phase native-tests bash scripts/pr-proof.sh --phase native-dev
+          phase managed-tests bash scripts/pr-proof.sh --phase managed-dev
+          phase uci-tests bash scripts/pr-proof.sh --phase uci-dev
+          phase quiet-native-owner bash scripts/wait-for-quiet-substrate.sh laplace 300
+          phase native-install bash scripts/pipeline.sh install
+          phase extension-sql bash scripts/pipeline.sh sync-extension
+          phase database-health bash scripts/check-database-health.sh laplace
+          running="$(psql -X -d postgres -U laplace_admin -Atqc 'SHOW server_version_num')"
+          [[ "$running" == 180006 ]]
+          phase postgres-activation python3 scripts/postgresql-release.py restart-needed --prefix /opt/laplace/pgsql-18 --server-version-num "$running"
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,subprocess
+          root=pathlib.Path(os.environ["NATIVE_EVIDENCE"])
+          files=["/opt/laplace/lib/liblaplace_core.so","/opt/laplace/pgsql-18/bin/postgres",
+                 "/opt/laplace/pgsql-18/bin/pg_config"]
+          identities={}
+          for name in files:
+              p=pathlib.Path(name); h=hashlib.sha256()
+              with p.open("rb") as stream:
+                  for chunk in iter(lambda:stream.read(1048576),b""):h.update(chunk)
+              identities[name]={"path":str(p.resolve()),"bytes":p.stat().st_size,"sha256":h.hexdigest()}
+          outcome={"schema":"laplace.native-only-install/v1","status":"completed","source":os.environ["TARGET_SHA"],
+                   "tree":os.environ["TARGET_TREE"],"runId":os.environ["GITHUB_RUN_ID"],"attempt":os.environ["GITHUB_RUN_ATTEMPT"],
+                   "completedPhases":(root/"completed-phases.txt").read_text().splitlines(),"identities":identities,
+                   "serverVersionNum":180006,"managedPublication":"not_attempted","fullLifecyclePassed":False,
+                   "databaseRecreation":False,"foundationIngestion":False}
+          (root/"receipt.json").write_text(json.dumps(outcome,indent=2)+"\n")
+          print("NATIVE_INSTALL_RESULT "+json.dumps(outcome),flush=True)
+          PY
+          NATIVE
+      - name: Observe fixed public managed service state
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,pathlib,subprocess,os
+          rows=[]
+          for service in ("mcp","lichess"):
+              try:
+                  p=subprocess.run(["sudo","-n","/usr/local/libexec/laplace-service-control",service,"status"],
+                      stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=15)
+                  row={"service":service,"exitCode":p.returncode,"stderrBytes":len(p.stderr.encode())}
+                  if p.returncode==0:
+                      value=json.loads(p.stdout)
+                      row["status"]={key:value[key] for key in ("unit","load","active","sub","main_pid","enabled","operator_stopped") if key in value}
+                  rows.append(row)
+              except (OSError,ValueError,subprocess.TimeoutExpired) as exc:rows.append({"service":service,"errorType":type(exc).__name__})
+          for unit in ("laplace-api.service","laplace-mcp.service","laplace-lichess.service"):
+              try:
+                  p=subprocess.run(["systemctl","show",unit,"--property=Id,LoadState,ActiveState,SubState,UnitFileState,MainPID,User,Group,FragmentPath"],
+                      stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=10)
+                  rows.append({"unit":unit,"exitCode":p.returncode,"properties":dict(line.split("=",1) for line in p.stdout.splitlines() if "=" in line)})
+              except (OSError,ValueError,subprocess.TimeoutExpired) as exc:rows.append({"unit":unit,"errorType":type(exc).__name__})
+          root=pathlib.Path(os.environ["NATIVE_EVIDENCE"]); (root/"service-status.json").write_text(json.dumps(rows,indent=2)+"\n")
+          print(json.dumps(rows),flush=True)
+          PY
+      - name: Retain native operator outcome
+        if: always()
+        env:
+          NATIVE_OUTCOME: ${{ steps.native.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib
+          root=pathlib.Path(os.environ["NATIVE_EVIDENCE"])
+          result={"workflowOutcome":os.environ["NATIVE_OUTCOME"],"source":os.environ["TARGET_SHA"],
+                  "applicationPublication":"not_attempted","fullLifecyclePassed":False}
+          (root/"workflow-outcome.json").write_text(json.dumps(result,indent=2)+"\n")
+          print(json.dumps(result))
+          PY
+      - name: Retain native execution evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: original-native-install-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.NATIVE_EVIDENCE }}/
+          if-no-files-found: error
+          retention-days: 30
