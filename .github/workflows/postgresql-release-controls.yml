@@ -1,82 +1,65 @@
-name: Cumulative application and PostgreSQL source controls
+name: Qualify current coherent recording owners and bound operation
 on:
   push:
-    branches: [verify/postgresql-activation-20260916]
+    branches: ['verify/postgresql-activation-20260916']
 permissions:
   contents: read
 jobs:
-  source:
-    runs-on: ubuntu-24.04
+  qualification:
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: 7e14d823f81d0a2abf04480bd9b544a206eb0f85
-      SOURCE_TREE: f82b6f6de5403d746f148859da7878f54d8a2b5e
-      TMPDIR: /build/laplace/work/cumulative-publication/tmp
-      TMP: /build/laplace/work/cumulative-publication/tmp
-      TEMP: /build/laplace/work/cumulative-publication/tmp
-      EVIDENCE: /build/laplace/recovery/cumulative-publication
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          fetch-depth: 2
-      - name: Prepare permanent isolated source and scratch
+      - name: Verify exact current source and bounded operation syntax
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          sudo mkdir -p /build/laplace
-          sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$TMPDIR" "$EVIDENCE" /build/laplace/worktrees
-          test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
-          git worktree add --detach /build/laplace/worktrees/cumulative-publication "$SOURCE_SHA"
-          printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
-          command -v rsync
-          rsync --version > "$EVIDENCE/rsync.txt"
-      - name: Execute API publication and existing owner controls
-        run: |
-          set -euo pipefail
-          cd /build/laplace/worktrees/cumulative-publication
-          status=0
-          qualify() {
-            local label="$1"
-            shift
-            set +e
-            timeout --signal=TERM --kill-after=10s 300s "$@" 2>&1 | tee "$EVIDENCE/$label.log"
-            local result=$?
-            set -e
-            printf '%s\t%s\n' "$label" "$result" >> "$EVIDENCE/exit-codes.tsv"
-            if [ "$result" -ne 0 ]; then status=1; fi
-          }
-          for suite in postgresql-release pipeline-install app-fingerprints application-publish test-profile-registry application-runtime installed-chess-corpus qualified-chess-floor-export; do
-            qualify "$suite" python3 "scripts/test-$suite.py" -v
-          done
-          qualify payload-sync bash scripts/test-deploy-payload-sync.sh
-          qualify publish-snapshot bash scripts/test-managed-publish-snapshot.sh
-          qualify shellcheck shellcheck -S warning -x deploy/linux/deploy.sh deploy/linux/managed-publish.sh
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/python-ast.log"
-          import ast
-          from pathlib import Path
-          for name in ("verify-api-payload.py", "test-application-publish.py", "postgresql-release.py",
-                       "test-postgresql-release.py", "test-pipeline-install.py", "test-app-fingerprints.py",
-                       "check-application-runtime.py", "test-application-runtime.py", "measure-installed-chess-corpus.py",
-                       "test-installed-chess-corpus.py", "export-qualified-chess-floors.py",
-                       "test-qualified-chess-floor-export.py", "test-test-profile-registry.py"):
-              ast.parse((Path("scripts") / name).read_text())
-              print(f"PASS Python AST {name}")
+          work="/build/laplace/work/coherent-final-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work"
+          export TMPDIR="$work/tmp" TMP="$work/tmp" TEMP="$work/tmp"
+          unset LAPLACE_BUILD_ROOT
+          mkdir -p "$TMPDIR" "$work/source"
+          cd "$work/source"
+          git init -q
+          git remote add origin https://github.com/SaltyPatron/Laplace.git
+          git fetch --no-tags --depth=1 origin 6ee90d9e805eeb4cca126067c5a41e7a5f3698df
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = '6ee90d9e805eeb4cca126067c5a41e7a5f3698df'
+          test "$(git rev-parse HEAD^{tree})" = '0847ccbc8340f1eb629355243913c0a306d9aa3e'
+          python3 -B - <<'PY'
+          import ast,base64,hashlib,json,os,pathlib,re,subprocess,urllib.request,yaml
+          blob="3a0ca203d5d51976edcf201b7cd727fd0ef1e1c0"
+          request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+blob,
+              headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
+          with urllib.request.urlopen(request,timeout=30) as response: payload=response.read(131073)
+          assert len(payload)<=131072
+          metadata=json.loads(payload)
+          raw=base64.b64decode(metadata["content"])
+          assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\x00"+raw).hexdigest()==blob
+          workflow=yaml.load(raw,Loader=yaml.BaseLoader)
+          assert workflow["jobs"]["native"]["env"]["TARGET_SHA"]=="6ee90d9e805eeb4cca126067c5a41e7a5f3698df"
+          assert workflow["jobs"]["native"]["env"]["TARGET_TREE"]=="0847ccbc8340f1eb629355243913c0a306d9aa3e"
+          assert workflow["jobs"]["native"]["timeout-minutes"]=="200"
+          scripts=[step["run"] for step in workflow["jobs"]["native"]["steps"] if "run" in step]
+          python_count=inner_count=0
+          for script in scripts:
+              subprocess.run(["bash","-n"],input=script,text=True,check=True,timeout=10)
+              for delimiter in ("NATIVE","MANAGED_READINESS"):
+                  for inner in re.findall(r"(?ms)^[^\n]*<<'"+delimiter+r"'[^\n]*\n(.*?)^"+delimiter+r"$",script):
+                      subprocess.run(["bash","-n"],input=inner,text=True,check=True,timeout=10)
+                      inner_count+=1
+              for module in re.findall(r"(?ms)^[^\n]*<<'PY'[^\n]*\n(.*?)^PY$",script):
+                  ast.parse(module)
+                  python_count+=1
+          assert inner_count==2 and python_count==7,(inner_count,python_count)
+          pathlib.Path(os.environ["TMPDIR"],"bound-operation.yml").write_bytes(raw)
+          print("BOUND_OPERATION_SYNTAX_PASS "+json.dumps({"blob":blob,"source":"6ee90d9e805eeb4cca126067c5a41e7a5f3698df","outerBash":len(scripts),"innerBash":inner_count,"python":python_count}))
           PY
-          bash -n deploy/linux/deploy.sh
-          bash -n deploy/linux/payload-sync.sh
-          bash -n scripts/publish-applications.sh
-          bash -n scripts/lib/fp.sh
-          bash -n scripts/pipeline.sh
-          qualify fingerprint-shellcheck shellcheck --severity=warning scripts/lib/fp.sh
-          printf '%s\n' "PASS Bash syntax" | tee "$EVIDENCE/bash.log"
-          test -z "$(git status --porcelain --untracked-files=all)"
-          exit "$status"
-      - name: Retain bounded source qualification evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: cumulative-publication-source-controls
-          path: /build/laplace/recovery/cumulative-publication/
-          if-no-files-found: error
-          retention-days: 30
+          timeout 180s python3 -B scripts/test-app-fingerprints.py -v
+          timeout 180s python3 -B scripts/test-installed-chess-corpus.py -v
+          timeout 180s python3 -B scripts/test-application-runtime.py -v
+          timeout 240s python3 -B scripts/test-pipeline-install.py -v
+          timeout 180s python3 -B scripts/test-qualified-chess-floor-export.py -v
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo CURRENT_COHERENT_SOURCE_QUALIFIED

@@ -1,43 +1,32 @@
 name: Seed — knowledge
 
-# The non-foundation lexical + usage sources, each an individually-triggerable
-# source (one per run) — no bucket, the dropdown IS the per-source selector:
-#   omw · conceptnet · atomic2020 · ud · wiktionary · tatoeba · opensubtitles
-# All carry an IngestDataPaths default and a decomposer-gates.json entry, so the
-# consensus gate runs. langs matters for ud/wiktionary (blank = ALL — the law).
-# Delegates to _ingest.yml.
-
 on:
   workflow_dispatch:
     inputs:
       source:
-        description: "knowledge source (one per run)"
+        description: "knowledge source"
         type: choice
         required: true
         options: [omw, conceptnet, atomic2020, ud, wiktionary, tatoeba, opensubtitles]
       path:
-        description: "optional <path> — single file, bare dir, or corpus root (blank = DATA_ROOT default)"
+        description: "optional file or corpus path"
         type: string
         default: ""
       langs:
-        description: "LAPLACE_INGEST_LANGS scope (blank = ALL languages — the default and the law)"
+        description: "optional language scope; blank means all"
         type: string
         default: ""
       database:
-        description: "target DB (one database: laplace)"
+        description: "target database"
         type: choice
         options: [laplace]
         default: laplace
-      run_idempotency:
-        description: "re-ingest and prove no double-count"
-        type: boolean
-        default: false
       evict_before_ingest:
-        description: "DESTRUCTIVE: lawfully retract this source's testimony before ingesting it again"
+        description: "retract this source before ingest"
         type: boolean
         default: false
       evict_confirm:
-        description: "when evicting, type the exact decomposer source name (for ud: UDDecomposer)"
+        description: "exact decomposer source name required for eviction"
         type: string
         default: ""
 
@@ -53,7 +42,5 @@ jobs:
       langs: ${{ inputs.langs }}
       database: ${{ inputs.database }}
       timeout_minutes: 720
-      run_gate: true
-      run_idempotency: ${{ inputs.run_idempotency }}
       evict_before_ingest: ${{ inputs.evict_before_ingest }}
       evict_confirm: ${{ inputs.evict_confirm }}

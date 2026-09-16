@@ -2,9 +2,31 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
-[[ -f "$DLL" ]] || DLL="$ROOT/app/Laplace.Cli/bin/Debug/net10.0/Laplace.Cli.dll"
-[[ -f "$DLL" ]] || { echo "laplace: CLI not built — run: dotnet build $ROOT/app/Laplace.Cli" >&2; exit 1; }
 
-export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=laplace}"
+candidates=()
+if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
+  candidates+=(
+    "$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/Laplace.Cli.dll"
+    "$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Debug/net10.0/Laplace.Cli.dll"
+  )
+fi
+candidates+=(
+  "$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
+  "$ROOT/app/Laplace.Cli/bin/Debug/net10.0/Laplace.Cli.dll"
+)
+
+DLL=""
+for candidate in "${candidates[@]}"; do
+  if [[ -f "$candidate" ]]; then
+    DLL="$candidate"
+    break
+  fi
+done
+
+[[ -n "$DLL" ]] || {
+  echo "laplace: CLI not built — run: bash $ROOT/scripts/pipeline.sh build" >&2
+  exit 1
+}
+
+export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}}"
 exec dotnet "$DLL" "$@"

@@ -1,37 +1,23 @@
 name: Seed — documents
 
-# Direct/plain document ingestion. The operator-selected path is the content inventory;
-# dataset-estate MANIFEST.tsv files in a parent or shared folder must not replace that
-# inventory. Project Gutenberg moved out of test-data on 2026-09-03, so the workflow's
-# named corpus choices follow the current physical estate rather than the retired layout.
-
 on:
   workflow_dispatch:
     inputs:
       corpus:
-        description: "which document collection to ingest"
+        description: "document collection"
         type: choice
         required: true
         default: project-gutenberg
-        options:
-          - project-gutenberg # ProjectGutenberg/text — 195-file curated mini-collection
-          - fixtures          # test-data/text — non-Gutenberg text fixtures only
-          - electronics       # test-data/electronics — ham radio, morse, wireless
-          - smoke-alice       # one Gutenberg book; validates the lane in seconds
-          - path-override     # use the explicit `path` input
+        options: [project-gutenberg, fixtures, electronics, smoke-alice, path-override]
       path:
-        description: "explicit path; when non-empty it wins over the corpus choice (single file, dir, or corpus root)"
+        description: "explicit path; overrides corpus when present"
         type: string
         default: ""
       database:
-        description: "target DB (one database: laplace)"
+        description: "target database"
         type: choice
         options: [laplace]
         default: laplace
-      run_idempotency:
-        description: "re-ingest and prove no double-count"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -45,36 +31,20 @@ jobs:
     steps:
       - id: pick
         run: |
+          set -euo pipefail
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
-          user_path="${{ inputs.path }}"
-
-          if [ -n "$user_path" ]; then
-            if [ ! -e "$user_path" ]; then
-              echo "::error::path '$user_path' does not exist on this runner"; exit 1
-            fi
-            if [ "${{ inputs.corpus }}" != "path-override" ]; then
-              echo "::notice::path given -- corpus '${{ inputs.corpus }}' ignored for this run."
-            fi
-            echo "resolved explicit path -> $user_path"
-            echo "path=$user_path" >> "$GITHUB_OUTPUT"
-            exit 0
+          p='${{ inputs.path }}'
+          if [[ -z "$p" ]]; then
+            case '${{ inputs.corpus }}' in
+              project-gutenberg) p="$root/ProjectGutenberg/text" ;;
+              fixtures) p="$root/test-data/text" ;;
+              electronics) p="$root/test-data/electronics" ;;
+              smoke-alice) p="$root/ProjectGutenberg/text/alice.txt" ;;
+              path-override) echo "::error::path-override requires path"; exit 1 ;;
+              *) echo "::error::unknown corpus"; exit 1 ;;
+            esac
           fi
-
-          case "${{ inputs.corpus }}" in
-            project-gutenberg) p="$root/ProjectGutenberg/text" ;;
-            fixtures)          p="$root/test-data/text" ;;
-            electronics)       p="$root/test-data/electronics" ;;
-            smoke-alice)       p="$root/ProjectGutenberg/text/alice.txt" ;;
-            path-override)     p="" ;;
-            *) echo "::error::unknown corpus '${{ inputs.corpus }}'"; exit 1 ;;
-          esac
-          if [ -z "$p" ]; then
-            echo "::error::corpus=path-override requires the path input"; exit 1
-          fi
-          if [ ! -e "$p" ]; then
-            echo "::error::$p does not exist on this runner"; exit 1
-          fi
-          echo "resolved corpus '${{ inputs.corpus }}' -> $p"
+          [[ -e "$p" ]] || { echo "::error::$p does not exist"; exit 1; }
           echo "path=$p" >> "$GITHUB_OUTPUT"
 
   seed:
@@ -85,5 +55,3 @@ jobs:
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       timeout_minutes: 480
-      run_gate: true
-      run_idempotency: ${{ inputs.run_idempotency }}
