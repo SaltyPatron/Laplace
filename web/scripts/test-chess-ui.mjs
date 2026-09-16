@@ -1,4 +1,4 @@
-// Ephemeral loopback UI server; the selected browser tests mock every chess API.
+// Ephemeral loopback UI server; chess APIs are mocked and billing format controls are local.
 // Never start an API service, connect to PostgreSQL, or launch a tournament.
 import { createServer } from 'vite';
 import { spawn } from 'node:child_process';
@@ -13,7 +13,7 @@ try {
   const result = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [
       'node_modules/@playwright/test/cli.js', 'test',
-      '--grep', 'gauntlet accepts non-default|replay stepping never steals page scroll', `--output=${output}`,
+      '--grep', 'gauntlet accepts non-default|replay stepping never steals page scroll|billing cents', `--output=${output}`,
     ], { stdio: 'inherit', env: { ...process.env, LAPLACE_E2E_URL: server.resolvedUrls.local[0] } });
     child.once('error', reject);
     child.once('exit', (code) => resolve(code ?? 1));

@@ -18,15 +18,18 @@ internal sealed partial class ChessRecordingMeasurement
     internal sealed record ScopeRequest(byte[][] Entities, byte[][] Physicalities,
         byte[][] Witnesses, byte[][] WitnessTypes, IReadOnlyList<StoredScopeRow> Before);
 
-    public string ReplayScope => "Exact explicit EntityRows emitted by the source game recorder and experiment builder; "
-        + "selected nonempty line Content physicalities; exact source playing/header/setup/result "
-        + "and experiment witnesses with observation_count. Native text-stage interior rows, "
+    public string ReplayScope => "Exact explicit EntityRows emitted by the source game recorder"
+        + (IsCorpus ? "; " : " and experiment builder; ")
+        + "selected nonempty line Content physicalities; exact source playing/header/setup/result"
+        + (IsCorpus ? " witnesses" : " and experiment witnesses")
+        + " with observation_count. Native text-stage interior rows, "
         + "calculated analysis lanes, shared bootstrap rows and unrelated service writes are outside this snapshot.";
 
     internal bool IsVerifiedNoOpReplay => retainedPgn && NovelGames == 0 && AppliedGames == 0
         && Writer.ApplyCalls == 0 && Writer.EntitiesInserted == 0 && Writer.PhysicalitiesInserted == 0
-        && Writer.AttestationsInserted == 0 && ReplayScopes.Count > 0
-        && ReplayScopes.All(s => s.Unchanged && ScopeRowsEqual(s.Before, s.After));
+        && Writer.AttestationsInserted == 0
+        && (IsCorpus ? CorpusReplayScopesUnchanged : ReplayScopes.Count > 0
+            && ReplayScopes.All(s => s.Unchanged && ScopeRowsEqual(s.Before, s.After)));
 
     // This is a typed projection of CutechessExperimentReceipt written by this
     // service. Source PGN still enters through the registered native grammar;

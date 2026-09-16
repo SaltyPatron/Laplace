@@ -16,7 +16,7 @@ namespace Laplace.Chess.Service;
 /// ApplyManyAsync, including its consensus continuation, rather than PostgreSQL COMMIT alone.
 /// No durable-success flag is set from the ingestor's Parsed/Novel/Applied counters.
 /// </summary>
-internal sealed partial class ChessRecordingMeasurement(string experimentId, int requestedGames, bool retainedPgn = false)
+internal sealed partial class ChessRecordingMeasurement(string? experimentId, int requestedGames, bool retainedPgn = false)
 {
     private readonly long _started = Stopwatch.GetTimestamp();
     private readonly HashSet<Hash128> _playingIds = [];
@@ -25,11 +25,12 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
     private bool _matchVerified;
     private bool _verified;
     public string Schema => "laplace.chess-recording/v2";
-    public string Purpose => retainedPgn ? "retained-pgn-ingestion" : "fresh-match-recording";
+    public string Purpose => IsCorpus ? "authentic-corpus-ingestion"
+        : retainedPgn ? "retained-pgn-ingestion" : "fresh-match-recording";
     internal bool RetainedPgn => retainedPgn;
     internal bool RequiresNormalCompletion => _normalMatchVerified;
-    public string ExperimentId { get; } = experimentId;
-    public string PgnEvent => "chess-lab/cutechess/" + ExperimentId;
+    public string? ExperimentId { get; } = experimentId;
+    public string? PgnEvent => ExperimentId is null ? null : "chess-lab/cutechess/" + ExperimentId;
     public string Status { get; private set; } = "running";
     public string? Error { get; private set; }
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
@@ -40,13 +41,14 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
     public int NovelGames { get; private set; }
     public int AppliedGames { get; private set; }
     public int CommittedGames { get; private set; }
-    public int ReadbackGames => Games.Count;
-    public long ReadbackPlies => Games.Sum(g => (long)g.MoveIds.Length);
+    public int ReadbackGames => _streamedReadbackGames + Games.Count;
+    public long ReadbackPlies => _streamedReadbackPlies + Games.Sum(g => (long)g.MoveIds.Length);
     public FileIdentity? Pgn { get; private set; }
     public string? ExperimentReceiptSha256 { get; private set; }
     public string? ExperimentArtifactSha256 { get; private set; }
     public VerificationState Verification => new(
-        _verified, _verified, _verified, _verified, _verified && _normalMatchVerified);
+        _verified, _verified, _verified, _verified && !IsCorpus,
+        _verified && (_normalMatchVerified || IsCorpus));
     public List<GameIdentity> Games { get; } = [];
     public WriterCounts Writer { get; } = new();
     public PostgresCommitReceipt? Durability { get; private set; }
@@ -102,6 +104,7 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
         if (Pgn is null || file.Length != Pgn.Bytes
             || Convert.ToHexStringLower(await SHA256.HashDataAsync(file, ct)) != Pgn.Sha256)
             throw new InvalidDataException("PGN input changed during recording/readback");
+        if (IsCorpus) _corpusSourceUnchanged = true;
     }
 
     internal async Task IdentifyFinalExperimentAsync(string path)
@@ -160,10 +163,15 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
         var result = PgnGames.TagStr(game.GameText, "Result");
         if (result != game.Result.ResultToken)
             throw new InvalidDataException("recording PGN header and parsed movetext result disagree");
-        var key = (game.WhiteName, game.BlackName, result);
-        if (!_matchVerified || !_matchGames.TryGetValue(key, out int remaining) || remaining < 1)
-            throw new InvalidDataException("PGN players/result do not match a completed gauntlet game");
-        _matchGames[key] = remaining - 1;
+        if (IsCorpus)
+            ObserveCorpusParsed(game);
+        else
+        {
+            var key = (game.WhiteName, game.BlackName, result);
+            if (!_matchVerified || !_matchGames.TryGetValue(key, out int remaining) || remaining < 1)
+                throw new InvalidDataException("PGN players/result do not match a completed gauntlet game");
+            _matchGames[key] = remaining - 1;
+        }
         ParsedGames++;
     }
 
@@ -211,15 +219,19 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
     }
 
     internal async Task VerifyChunkAsync(NpgsqlDataSource ds, IReadOnlyList<ChessGameRecord> games,
-        IReadOnlyList<AttestationRow> expected, IReadOnlyList<PhysicalityRow> expectedCarriers, SubstrateChange experimentChange,
-        ChessExperimentEvidence experiment, CancellationToken ct)
+        IReadOnlyList<AttestationRow> expected, IReadOnlyList<PhysicalityRow> expectedCarriers, SubstrateChange? experimentChange,
+        ChessExperimentEvidence? experiment, CancellationToken ct)
     {
+        if ((experimentChange is null) != (experiment is null)
+            || (experiment is null && !IsCorpus))
+            throw new InvalidDataException("recording has no bound source provenance");
         CommittedGames += games.Count;
         long started = Stopwatch.GetTimestamp();
         try
         {
             var playingIds = games.Select(g => g.PlayingId).ToHashSet();
-            var witnesses = expected.Concat(experimentChange.Attestations).DistinctBy(a => a.Id).ToArray();
+            var witnesses = expected.Concat(experimentChange is null
+                ? Enumerable.Empty<AttestationRow>() : experimentChange.Attestations).DistinctBy(a => a.Id).ToArray();
             var stored = await NpgsqlAttestationReads.WitnessesAsync(ds,
                 WitnessScopes(witnesses), ct);
             ValidateWitnesses(witnesses, stored);
@@ -240,16 +252,24 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
                 whiteByPlaying.GetValueOrDefault(g.PlayingId), blackByPlaying.GetValueOrDefault(g.PlayingId))).ToArray();
             ValidateGames(expectedGames, hydrated);
 
-            var receipt = experimentChange.Attestations.First();
             var resultRows = expected.Where(a => a.TypeId == ChessVocabulary.HasResultType).ToArray();
-            var textIds = new[] { receipt.ObjectId!.Value, receipt.ContextId!.Value }
-                .Concat(resultRows.Select(a => a.ObjectId!.Value)).ToArray();
+            var textIds = new List<Hash128>();
+            if (experimentChange is not null)
+            {
+                var receipt = experimentChange.Attestations.First();
+                textIds.Add(receipt.ObjectId!.Value);
+                textIds.Add(receipt.ContextId!.Value);
+            }
+            int resultOffset = textIds.Count;
+            textIds.AddRange(resultRows.Select(a => a.ObjectId!.Value));
             var text = await NpgsqlSubstrateReads.RenderTextBatchAsync(ds, textIds.Select(id => id.ToBytes()).ToArray(), ct);
-            if (text is null || text.Length != textIds.Length || text[0] != experiment.ReceiptJson || text[1] != experiment.PgnEvent)
+            if (text is null || text.Length != textIds.Count)
+                throw new InvalidDataException("committed source result text inventory differs");
+            if (experiment is not null && (text[0] != experiment.ReceiptJson || text[1] != experiment.PgnEvent))
                 throw new InvalidDataException("committed experiment receipt/context did not reconstruct exactly");
             var resultByPlaying = games.ToDictionary(g => g.PlayingId, g => g.Result.ResultToken);
             for (int i = 0; i < resultRows.Length; i++)
-                if (text[i + 2] != resultByPlaying[resultRows[i].ContextId!.Value])
+                if (text[i + resultOffset] != resultByPlaying[resultRows[i].ContextId!.Value])
                     throw new InvalidDataException("committed result body did not reconstruct exactly");
 
             var hydratedByPlaying = hydrated.ToDictionary(g => g.PlayingId);
@@ -331,13 +351,16 @@ internal sealed partial class ChessRecordingMeasurement(string experimentId, int
 
     internal void Complete(string status, string? error = null)
     {
-        if (status == "completed" && (!_matchVerified || _matchGames.Values.Any(n => n != 0)
+        bool sourceVerified = IsCorpus ? CorpusSourceVerified
+            : _matchVerified && _matchGames.Values.All(n => n == 0)
+                && ExperimentReceiptSha256 is not null && ExperimentArtifactSha256 is not null;
+        if (status == "completed" && (!sourceVerified
             || ParsedGames != RequestedGames || ReadbackGames != RequestedGames
-            || CommittedGames != RequestedGames || Pgn is null || ExperimentReceiptSha256 is null
-            || ExperimentArtifactSha256 is null
+            || CommittedGames != RequestedGames || Pgn is null
             || (Durability is not { LocalWalFlushAcknowledged: true } && !IsVerifiedNoOpReplay)))
             throw new InvalidDataException("recording cannot complete without every requested committed game and exact readback");
         _verified = status == "completed";
+        if (_verified && IsCorpus) _playingIds.Clear();
         Status = status;
         Error = error;
         FinishedAt = DateTimeOffset.UtcNow;

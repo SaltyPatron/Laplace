@@ -5,13 +5,23 @@ namespace Laplace.Chess.Service;
 
 internal static class PgnGames
 {
-    public static IEnumerable<string> StreamGames(string path)
+    public static IEnumerable<string> StreamGames(string path, bool requireUtf8 = false)
     {
         // Provider exports are specified and served as UTF-8. Reject malformed input instead
         // of silently replacing bytes with U+FFFD and minting corrupted player/game identities.
+        // Match the UTF-8 preamble ourselves: generic BOM detection would otherwise
+        // replace this strict decoder with Encoding.UTF8 and lose its error fallback.
         using var reader = new StreamReader(
-            path, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
+            path, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true, throwOnInvalidBytes: true),
             detectEncodingFromByteOrderMarks: true);
+        if (requireUtf8)
+        {
+            // Detecting BOMs also recognizes UTF-16/32. A measured UTF-8 source
+            // must not silently switch decoder and mint a different corpus scope.
+            _ = reader.Peek();
+            if (reader.CurrentEncoding.CodePage != Encoding.UTF8.CodePage)
+                throw new InvalidDataException("measured corpus source must use UTF-8 encoding");
+        }
         var sb = new StringBuilder(2048);
         bool inGame = false;
         string? line;

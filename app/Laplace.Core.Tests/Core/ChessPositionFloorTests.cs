@@ -95,20 +95,21 @@ public sealed class ChessPositionFloorTests
     {
         string path = Blob();
         using var start = new Barrier(5);
-        using var witnessedLoadedMap = new CountdownEvent(4);
-        int stop = 0;
+        int stop = 0, finalPublished = 0, finalReaders = 0;
         long reads = 0, hits = 0;
-        Task[] readers = [];
         try
         {
             ChessPositionFloor.Load(path);
-            // Dedicated readers cannot starve behind a saturated test thread pool.
-            readers = Enumerable.Range(0, 4).Select(worker => Task.Factory.StartNew(() =>
+            // Keep dedicated readers from main so a saturated pool cannot starve the barrier.
+            Task[] readers = Enumerable.Range(0, 4).Select(worker => Task.Factory.StartNew(() =>
             {
-                Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(30)), "Readers did not rendezvous.");
-                bool witnessed = false;
+                Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(30)),
+                    "Concurrent readers did not reach the start barrier.");
                 while (Volatile.Read(ref stop) == 0)
                 {
+                    // Capture the phase before lookup so an older hit cannot
+                    // acknowledge the final, stable publication.
+                    bool finalObservation = Volatile.Read(ref finalPublished) != 0;
                     if (ChessPositionFloor.TryLookup(new(1, 2), out var x, out var y,
                             out var z, out var m, out _, out var n, out var tier))
                     {
@@ -116,38 +117,42 @@ public sealed class ChessPositionFloorTests
                         Assert.Equal(0.3, z); Assert.Equal(0.4, m);
                         Assert.Equal(4u, n); Assert.Equal((byte)2, tier);
                         Interlocked.Increment(ref hits);
-                        if (!witnessed)
-                        {
-                            witnessed = true;
-                            witnessedLoadedMap.Signal();
-                        }
+                        if (finalObservation) Interlocked.Or(ref finalReaders, 1 << worker);
                     }
                     Assert.InRange(ChessPositionFloor.Observe().RecordCount, 0, 1);
                     Interlocked.Increment(ref reads);
                 }
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
-            Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(30)), "Publisher did not rendezvous.");
-            for (int i = 0; i < 512; i++)
+            bool finalObserved = false;
+            try
             {
-                // Direct native unload intentionally bypasses the managed publication gate.
-                NativeUnload();
-                ChessPositionFloor.Load(path);
+                Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(30)),
+                    "Publisher did not reach the start barrier.");
+                for (int i = 0; i < 512; i++)
+                {
+                    // Direct native unload intentionally bypasses the managed publication gate.
+                    NativeUnload();
+                    ChessPositionFloor.Load(path);
+                }
+                // A racing read may legitimately fall in any unloaded interval.
+                // Keep the last map published until all readers validate its
+                // complete record instead of relying on scheduler timing.
+                Volatile.Write(ref finalPublished, 1);
+                finalObserved = SpinWait.SpinUntil(
+                    () => Volatile.Read(ref finalReaders) == 0b1111 || readers.Any(task => task.IsFaulted),
+                    TimeSpan.FromSeconds(30));
             }
-            // A miss during an unloaded interval is valid. Do not stop immediately
-            // after the last load: scheduling can otherwise give every reader only
-            // unloaded intervals. Keep the final map published until EACH reader
-            // has copied and checked an actual record, without weakening any assertion.
-            Assert.True(witnessedLoadedMap.Wait(TimeSpan.FromSeconds(30)),
-                "Every concurrent reader must observe a valid loaded map.");
+            finally
+            {
+                Volatile.Write(ref stop, 1);
+                await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(30));
+            }
+            Assert.True(finalObserved, "Readers did not observe the final publication before the deadline.");
+            Assert.Equal(0b1111, Volatile.Read(ref finalReaders));
+            Assert.True(reads > 0);
+            Assert.True(hits > 0);
         }
-        finally
-        {
-            Volatile.Write(ref stop, 1);
-            try { await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(30)); }
-            finally { ChessPositionFloor.Unload(); File.Delete(path); }
-        }
-        Assert.True(reads > 0);
-        Assert.True(hits >= 4);
+        finally { Volatile.Write(ref stop, 1); ChessPositionFloor.Unload(); File.Delete(path); }
     }
 
     [Fact]

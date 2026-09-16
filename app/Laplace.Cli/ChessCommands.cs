@@ -28,6 +28,7 @@ internal static class ChessCommands
             "lichess" => await LichessAsync(args[1..]),
             "match" => await MatchAsync(args[1..]),
             "bench" => Bench(args[1..]),
+            "measure-corpus" => await ChessCorpusCommands.RunAsync(args[1..]),
             "repair-position-outcomes" => await RepairPositionOutcomesAsync(args[1..]),
             _ => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
@@ -96,7 +97,7 @@ internal static class ChessCommands
     }
 
     private const string Usage =
-        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match>\n"
+        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|measure-corpus>\n"
         + "  match [--rounds N] [--depth D] [--st S] [--elo E] [--no-ingest]   (engine-vs-engine, live terminal board; games stream into the substrate)\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
@@ -107,6 +108,9 @@ internal static class ChessCommands
         + "      --openings = seed games from the ingested ECO openings (where the corpus HAS data)\n"
         + "  ladder [--games N] [--depth D] [--openings] [--no-record]   (overlay-ablation: each EvalTerm's individual Elo)\n"
         + "  review <pgn-file|dir> [--depth D] [--max-games N]   (centipawn-loss + 'crazy win' triage over ingested games)\n"
+        + "  measure-corpus --pgn /absolute/games.pgn --evidence-root /absolute/new-directory\n"
+        + "      [--games 75000] [--minimum-seconds 30] [--replays 1] [--deadline-seconds 3600]\n"
+        + "      [--expected-sha256 lowercase64]   (authentic PGN recording, readback, and replay evidence)\n"
         + "  repair-position-outcomes [--evidence-root DIR] [--maximum-retained-mib N] [--invocation NAME]\n"
         + "      retain and verify the complete playing corpus, then replace legacy observations under writer quiescence.\n"
         + "  learned-pst [--piece PNBRQK]   (what the corpus LEARNED about each piece-square — the data-driven PST)\n"
