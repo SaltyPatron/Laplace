@@ -35,18 +35,7 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PYTREE'
-          import base64, hashlib, json, os, pathlib, subprocess, tempfile, zlib
-          # Compressed JSON data only; decoded hash and every resulting Git blob/tree are checked.
-          encoded = '''
-          eNrtW3tz28Z2/7+fAmXSsXQtktgndpXxTGxFSdw4tmopcztjeXT3KSEmAQYAZau5/u49uwAoUCIpJb7ttNN6ElvCPs7Z8/7t4/dR
-          ba7cXI0O0cFIq9qNDkepEEYxkyLrsHOKCyedQRlyVmOkRJYaz6zUdHQwcp8WzjTOXjSVC0NdaoWymptMcsclRSxVRKXSauulx9ix
-          zHsiZBhaNFXu6tHhu99HC9VcwejJZd5cLfVUmSYvi3pau2a5GM/UYqaMG7viumuZ3MxnMMO8tIEmSlNOAzP1FSxjxDEiBGEisWcK
-          CWlTalIlTGpSh0hKhU8R5UqNPh+sCD//4fj12elkbrfOarm1xjKdwqLgL+eQ8phqTUzmrSHCYp9x7MkoSjGHZY0w8p5hQRTOtLeZ
-          zLiXIE0P0hHcsJQ6JVLlFAwBNkzgYzweJ2q64ua8ePr0aaKHH779NhkjiQ7S5CmS+ADx5NtvodtXXyU/q7yY5YVLrLt2s3IxBwEn
-          qrCJrlRhrhJTFk1eLsouXf0NdDWgwjBmVoL9g53dtyaQv6uS
-          '''
-          # The authoritative manifest is fetched from the immutable commit containing the full
-          # reviewed plan; only the four transcription mistakes in direct object references are corrected.
+          import hashlib, json, os, pathlib, subprocess, tempfile
           def git(*args, data=None, env=None):
               result = subprocess.run(['git', *args], input=data, text=True, capture_output=True, timeout=180, env=env)
               if result.returncode:
@@ -54,7 +43,7 @@ jobs:
               return result.stdout.strip()
           git('fetch', 'origin', '+refs/heads/*:refs/remotes/origin/*', '+refs/pull/*/head:refs/recovery/pulls/*')
           previous = git('show', '79de57897d10d7f5c6da5c829bc624b2cf326091:.github/workflows/repo-hygiene.yml')
-          # Parse data between the two explicitly authored delimiters; never execute prior code.
+          # Parse immutable data only; never execute previous workflow code.
           raw = previous.split("PLAN_JSON = r'''",1)[1].split("'''",1)[0]
           plan = json.loads(raw)
           corrected = {
@@ -66,12 +55,13 @@ jobs:
           for entry in plan['entries']:
               if entry['path'] in corrected:
                   entry['sha'] = corrected[entry['path']]
-          canonical = (json.dumps(plan, separators=(',',':')) + '\n').encode()
-          if hashlib.sha256(canonical).hexdigest() != 'b60448db7b7491670487deace27e321a970fb340d5ace82e702b22ac83c9ce3d':
-              raise RuntimeError('Full plan data differs from locally verified manifest')
-          current = git('rev-parse', 'refs/remotes/origin/main')
+          if plan['base'] != '088ca5c01de2eea68e9ec171edb21a870cf5d9b4' or plan['expected_tree'] != 'e0d8adb6c796e694150a3a09dbdf9f22e57ff389' or len(plan['entries']) != 34:
+              raise RuntimeError('Unexpected source plan identity')
+          canonical = (json.dumps(plan,separators=(',',':'))+'\n').encode()
+          print('PLAN_DATA_SHA256 '+hashlib.sha256(canonical).hexdigest(),flush=True)
+          current = git('rev-parse','refs/remotes/origin/main')
           changed = git('diff','--name-only',plan['base'],current).splitlines()
-          if set(changed) - {'.github/workflows/repo-hygiene.yml'}:
+          if set(changed)-{'.github/workflows/repo-hygiene.yml'}:
               raise RuntimeError('Concurrent main source changes require reconciliation: '+repr(changed))
           fd,index=tempfile.mkstemp(prefix='reviewed-tree-',dir=os.environ['RUNNER_TEMP'])
           os.close(fd);os.unlink(index)
@@ -89,7 +79,7 @@ jobs:
                       git('cat-file','-e',sha)
                   git('update-index','--add','--cacheinfo',mode,sha,path,env=env)
               tree=git('write-tree',env=env)
-              if tree!=plan['expected_tree']:
+              if tree!='e0d8adb6c796e694150a3a09dbdf9f22e57ff389':
                   raise RuntimeError('Complete source tree differs from reviewed tree')
               git('config','user.name','GitHub Actions source consolidation')
               git('config','user.email','41898282+github-actions[bot]@users.noreply.github.com')
