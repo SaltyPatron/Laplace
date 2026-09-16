@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Fail-closed, read-only guard for publishing apps against an unchanged engine.
+"""Read-only native compatibility guard with distinct publication and recording scopes.
 
-Uses existing successful build/install fingerprints, a temporary DESTDIR CMake install
-for exact installed-form native comparisons, raw ROM comparisons, live extension
-versions and the migration journal. No bootstrap, installation into the live prefix,
-SQL writes, service action, network DB auth or secret output.
+Observes the existing CMake configuration, a temporary DESTDIR CMake install for
+exact installed-form native comparisons, raw ROM comparisons, live extension
+versions and the migration journal. Build execution and source provenance belong
+to the build/install owner; configuration observation is not a substitute for them.
+No bootstrap, installation into the live prefix, SQL writes, service action,
+network DB auth or secret output.
 """
 import argparse
 import copy
@@ -59,17 +61,32 @@ def digest(path):
     return value.hexdigest()
 
 
-def native_fingerprint(root):
-    subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-                   check=True, capture_output=True, text=True, timeout=10)
-    result = subprocess.run(["bash", "-c", 'ROOT="$1"; source "$ROOT/scripts/lib/fp.sh"; fp_native',
-                             "application-guard", str(root)], check=True, capture_output=True,
-                            text=True, timeout=30)
-    value = result.stdout.strip()
-    if not re.fullmatch(r"[0-9a-f]{64}", value):
-        raise ValueError("native fingerprint unavailable")
-    return value
+def build_identity(root, prefix):
+    """Observe the configured build; never invent or require build/install stamps."""
+    root, prefix = Path(root).resolve(strict=True), Path(prefix).resolve(strict=True)
+    build = (root / "build").resolve(strict=True)
+    cache_path = build / "CMakeCache.txt"
+    program = build / "cmake_install.cmake"
+    cache = cache_path.read_text()
 
+    def directory(key, kind):
+        values = re.findall(r"^" + re.escape(key) + ":" + kind + r"=(.*)$",
+                            cache, re.MULTILINE)
+        if len(values) != 1 or not Path(values[0]).is_absolute():
+            raise ValueError("configured CMake directory is missing or ambiguous: " + key)
+        return Path(values[0]).resolve(strict=True)
+
+    for key, kind, expected in (
+            ("CMAKE_HOME_DIRECTORY", "INTERNAL", root),
+            ("CMAKE_CACHEFILE_DIR", "INTERNAL", build),
+            ("CMAKE_INSTALL_PREFIX", "PATH", prefix)):
+        if directory(key, kind) != expected:
+            raise ValueError("configured CMake directory differs: " + key)
+    if not program.is_file():
+        raise ValueError("configured CMake install program missing from prepared build")
+    return {"directory": str(build), "sourceDirectory": str(root),
+            "installPrefix": str(prefix), "cacheSha256": digest(cache_path),
+            "installProgramSha256": digest(program)}
 
 def read_database(pg_prefix):
     socket = os.environ.get("PGHOST", "/var/run/postgresql")
@@ -158,15 +175,16 @@ def installed_native_hashes(root, prefix):
     return hashes
 
 
-def snapshot(root, prefix, database, fingerprint):
-    build = root / "build"
-    for stamp in ("build-native", "install-native"):
-        path = build / ".stamps" / stamp
-        if not path.is_file() or path.read_text().strip() != fingerprint:
-            raise ValueError(f"{stamp} differs from target native sources; use the full engine pipeline")
+def snapshot(root, prefix, database, *, purpose="publication"):
+    if purpose not in ("publication", "recording"):
+        raise ValueError("unknown runtime guard purpose")
+    identity = build_identity(root, prefix)
+    build = Path(identity["directory"])
     if not 180000 <= int(database["server_version"]) < 190000:
         raise ValueError("application runtime guard requires the deployed PostgreSQL 18 contract")
-    if database["running_ingests"] != 0:
+    if type(database["running_ingests"]) is not int or database["running_ingests"] < 0:
+        raise ValueError("invalid ingest journal observation")
+    if purpose == "publication" and database["running_ingests"] != 0:
         raise ValueError("running/unresolved ingest journal entries; application publish postponed")
     if not database["extension_functions"]:
         raise ValueError("live extension function contract is missing")
@@ -206,25 +224,54 @@ def snapshot(root, prefix, database, fingerprint):
             if actual_pair["files"][filename]["sha256"] != hashes[field]:
                 raise ValueError("installed chess floor generation receipt differs from installed-file bytes")
         hashes["chess_floor_pair_receipt"] = digest(installed_pair)
-    return {"format": 1, "native_fingerprint": fingerprint, "artifacts": hashes,
-            "database": copy.deepcopy(database)}
+    if build_identity(root, prefix) != identity:
+        raise ValueError("configured native build changed during runtime observation")
+    state = {"format": 2, "build": identity, "artifacts": hashes,
+             "database": copy.deepcopy(database)}
+    if purpose == "recording":
+        state["purpose"] = purpose
+    return state
+
+
+def compatible(before, after, *, purpose="publication"):
+    """Compare every native/database contract; journal progress is an observation.
+
+    Recording admission remains serialized by the ordinary writer transaction.
+    A global journal row can describe an interrupted unrelated ingest and is not
+    an active-process or transaction lock. Preserve its count in each receipt.
+    """
+    if purpose not in ("publication", "recording"):
+        raise ValueError("unknown runtime guard purpose")
+    if purpose == "publication":
+        return before == after
+    before = copy.deepcopy(before)
+    after = copy.deepcopy(after)
+    for state in (before, after):
+        if state.get("purpose") != "recording":
+            raise ValueError("recording comparison requires recording snapshots")
+        count = state["database"].pop("running_ingests")
+        if type(count) is not int or count < 0:
+            raise ValueError("invalid ingest journal observation")
+    return before == after
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument("--snapshot", type=Path)
+    parser.add_argument("--purpose", choices=("publication", "recording"), default="publication")
     parser.add_argument("--compare", type=Path)
     args = parser.parse_args()
     prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
     pg_prefix = Path(os.environ.get("LAPLACE_PG_PREFIX", "/opt/laplace/pgsql-18"))
-    state = snapshot(args.repo_root, prefix, read_database(pg_prefix), native_fingerprint(args.repo_root))
-    if args.compare and state != json.loads(args.compare.read_text()):
-        raise ValueError("native/database runtime changed during application publish; refusing commit")
+    state = snapshot(args.repo_root, prefix, read_database(pg_prefix), purpose=args.purpose)
+    if args.compare and not compatible(json.loads(args.compare.read_text()), state, purpose=args.purpose):
+        raise ValueError("native/database runtime changed during the guarded operation")
     if args.snapshot:
         with args.snapshot.open("x") as output:
             json.dump(state, output, sort_keys=True)
-    print("PASS: tested installed-form native artifacts, installed SQL versions, applied migrations and idle ingest state match")
+    print(f"PASS: configured installed-form native artifacts, installed SQL versions and applied migrations match; "
+          f"purpose={args.purpose}; observed_running_ingests={state['database']['running_ingests']}")
 
 
 if __name__ == "__main__":

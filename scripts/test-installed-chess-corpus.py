@@ -162,6 +162,42 @@ class InstalledCorpusTests(unittest.TestCase):
                 owner.module.assert_called_once_with("corpus_source_file_identity",
                                                      "lib/chess_corpus_inventory.py")
 
+
+    def test_cli_identity_uses_configured_release_and_cannot_accept_default_decoys(self):
+        # Real files and hashes; no managed build/native execution is claimed.
+        repo = self.root / "source"
+        (repo / "scripts").mkdir(parents=True)
+        (repo / "scripts/laplace").write_bytes(b"launcher fixture")
+        conventional = repo / "app/Laplace.Cli/bin/Release/net10.0"
+        configured_root = self.root / "alternate build"
+        configured = configured_root / "app/bin/Laplace.Cli/Release/net10.0"
+        names = ("Laplace.Cli.dll", "Laplace.Cli.deps.json", "Laplace.Cli.runtimeconfig.json",
+                 "liblaplace_core.so", "liblaplace_dynamics.so", "liblaplace_synthesis.so")
+        for directory in (conventional, configured):
+            directory.mkdir(parents=True)
+            for name in names:
+                (directory / name).write_bytes(("fixture-" + name).encode())
+        for component in ("core", "dynamics", "synthesis"):
+            path = repo / "build/engine" / component / ("liblaplace_" + component + ".so")
+            path.parent.mkdir(parents=True)
+            path.write_bytes((conventional / path.name).read_bytes())
+        owner = SimpleNamespace(sha256=lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest())
+        with patch.object(wrapper, "ROOT", repo), patch.dict(os.environ):
+            os.environ.pop("LAPLACE_BUILD_ROOT", None)
+            self.assertEqual(str(conventional), wrapper.cli_identity(owner)["directory"])
+            os.environ["LAPLACE_BUILD_ROOT"] = str(configured_root)
+            self.assertEqual(str(configured), wrapper.cli_identity(owner)["directory"])
+            target = configured / "liblaplace_core.so"
+            original = target.read_bytes()
+            target.write_bytes(b"stale configured native")
+            with self.assertRaisesRegex(ValueError, "differs from the shared exact build"):
+                wrapper.cli_identity(owner)
+            target.write_bytes(original)
+            (configured / "Laplace.Cli.dll").unlink()
+            with self.assertRaisesRegex(ValueError, "output is incomplete"):
+                wrapper.cli_identity(owner)
+            self.assertTrue((conventional / "Laplace.Cli.dll").is_file())
+
     def test_measurement_argv_preserves_original_path_hash_and_owned_output(self):
         path = self.otb / "original game $(literal).pgn"
         path.write_bytes(self.pgn.read_bytes())
@@ -322,6 +358,11 @@ class InstalledCorpusTests(unittest.TestCase):
                 self.assertEqual(75000, proof["measurement"]["newlyRecordedGames"])
                 self.assertTrue((args.output_dir / "measurement/corpus-recording.json").is_file())
                 self.assertTrue(any("--compare" in command for command in commands))
+                native_commands = [command for command in commands
+                                   if any(value.endswith("/check-application-runtime.py") for value in command)]
+                self.assertEqual(2, len(native_commands))
+                for command in native_commands:
+                    self.assertEqual("recording", command[command.index("--purpose") + 1])
                 self.assertIn("cli-identity-after", [phase["name"] for phase in proof["phases"]])
                 self.assertIn("source-after", [phase["name"] for phase in proof["phases"]])
                 self.assertIn("native-after", [phase["name"] for phase in proof["phases"]])

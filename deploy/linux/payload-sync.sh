@@ -28,6 +28,20 @@ laplace_sync_payload() {
     "$source_dir/" "$destination_dir/"
 }
 
+# One API publication changes only the flat API/SPA payload. These paths are
+# owned by configuration, user data, or independently leased service releases.
+# Snapshot, install, and rollback must use the exact same exclusion set.
+LAPLACE_API_PAYLOAD_EXCLUDES=(
+  --exclude '/laplace-api.env' --exclude '/agents.json' --exclude '/logs/'
+  --exclude '/chess-lab-work/' --exclude '/mcp-runtime/' --exclude '/mcp/'
+  --exclude '/releases/' --exclude '/managed-services/'
+  --exclude '/laplace-uci' --exclude '/laplace-mcp' --exclude '/laplace-lichess'
+)
+
+laplace_sync_api_payload() {
+  laplace_sync_payload "$1" "$2" --checksum "${LAPLACE_API_PAYLOAD_EXCLUDES[@]}"
+}
+
 # Managed publish backups are rollback state only while a publish receipt owns them.
 # Completed/rolled-back transactions must not become an append-only archive on the
 # application LV. Delete only bootstrap-shaped managed.* directories under the exact
