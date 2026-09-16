@@ -336,6 +336,46 @@ dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICom
 On a shared host, set `LAPLACE_BUILD_ROOT` to an isolated directory for local
 checks. The tests do not start a real Lichess bot or mutate systemd/production DB.
 
+
+## API-only publication against the installed engine
+
+The existing application owner has an explicit API scope:
+
+```bash
+bash scripts/publish-applications.sh api-deploy
+# Retry an interrupted restore with the same GITHUB_RUN_ID/transaction owner:
+bash scripts/publish-applications.sh api-recover
+```
+
+Run it from the selected source checkout inside the ordinary exclusive CI or
+operator session, with the normal permanent build/work environment. The existing
+runtime guard requires matching successful native build/install fingerprints,
+the exact installed native/ROM forms, applied migrations, and no running ingest.
+It does not run host setup or install a different service policy.
+
+This scope builds the API and SPA, seals the entire staged payload, and checks
+every app-local native library and SONAME alias against the selected
+`build/engine` outputs before stopping the API. It preserves API configuration,
+logs, user work, UCI/MCP/Lichess launchers, their immutable releases, and managed
+service definitions. It uses the existing fixed systemctl API controls; it
+does not change units, sudoers, peer authentication, secrets, or service accounts.
+
+The transaction keeps an owned rollback snapshot under the existing
+`/opt/laplace/app-backups` root. Readiness, the actual SPA, and a typed substrate
+operation must pass. The verifier binds the serving systemd PID and process start
+time to the exact app-local API/Core/Chess assemblies and native core device/inode.
+All published libraries are byte-verified, while lazy libraries not exercised by
+these operations are reported as unexercised. Empty/thin substrates retain their
+honest `product_ready=false` classification. Boot ID and enablement are observed;
+a service restart is not a cold-boot test.
+
+Successful API-scope evidence is retained in
+`build/.api-publish-{payload,verified,native}.json`. The full application publish
+stamp is unchanged. A failed deployment restores the previous API payload and its
+prior active/inactive state; a failed restoration retains its marker and backup
+for the same owner's `api-recover`. The normal full publication remains the owner
+for changes to MCP, Lichess, UCI, credentials and managed host policy.
+
 ## Branch validation evidence (2026-08-27)
 
 On hart-server, with outputs isolated under `/tmp/laplace-managed-build.nB2AVV`:

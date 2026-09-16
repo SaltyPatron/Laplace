@@ -1,4 +1,4 @@
-name: Application fingerprint owner correction controls
+name: API-only publication source controls
 on:
   push:
     branches: [verify/postgresql-activation-20260916]
@@ -10,12 +10,12 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: fc2e8fc968b6213ef17408cc0323714282e2fe8b
-      SOURCE_TREE: 9fa8454abdd9dbedf4801f745601a8ea3d426890
-      TMPDIR: /build/laplace/work/postgresql-release/tmp
-      TMP: /build/laplace/work/postgresql-release/tmp
-      TEMP: /build/laplace/work/postgresql-release/tmp
-      EVIDENCE: /build/laplace/recovery/postgresql-release
+      SOURCE_SHA: fed152f24971300e7f52e9c18b18c936f784d0e3
+      SOURCE_TREE: 74a8dea369f62f3c3175984712e64a019913f1c9
+      TMPDIR: /build/laplace/work/api-publication/tmp
+      TMP: /build/laplace/work/api-publication/tmp
+      TEMP: /build/laplace/work/api-publication/tmp
+      EVIDENCE: /build/laplace/recovery/api-publication
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -27,39 +27,48 @@ jobs:
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$TMPDIR" "$EVIDENCE" /build/laplace/worktrees
           test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
-          git worktree add --detach /build/laplace/worktrees/postgresql-release "$SOURCE_SHA"
+          git worktree add --detach /build/laplace/worktrees/api-publication "$SOURCE_SHA"
           printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
-      - name: Execute corrected application fingerprint owner controls
+          command -v rsync
+          rsync --version > "$EVIDENCE/rsync.txt"
+      - name: Execute API publication and existing owner controls
         run: |
           set -euo pipefail
-          cd /build/laplace/worktrees/postgresql-release
+          cd /build/laplace/worktrees/api-publication
           status=0
-          for test in test-app-fingerprints.py; do
+          qualify() {
+            local label="$1"
+            shift
             set +e
-            timeout --signal=TERM --kill-after=10s 300s python3 "scripts/$test" -v 2>&1 | tee "$EVIDENCE/$test.log"
-            result=$?
+            timeout --signal=TERM --kill-after=10s 300s "$@" 2>&1 | tee "$EVIDENCE/$label.log"
+            local result=$?
             set -e
-            printf '%s\t%s\n' "$test" "$result" >> "$EVIDENCE/exit-codes.tsv"
+            printf '%s\t%s\n' "$label" "$result" >> "$EVIDENCE/exit-codes.tsv"
             if [ "$result" -ne 0 ]; then status=1; fi
-          done
+          }
+          qualify application-publish python3 scripts/test-application-publish.py -v
+          qualify profile-registry python3 scripts/test-test-profile-registry.py -v
+          qualify payload-sync bash scripts/test-deploy-payload-sync.sh
+          qualify publish-snapshot bash scripts/test-managed-publish-snapshot.sh
+          qualify shellcheck shellcheck -S warning -x deploy/linux/deploy.sh deploy/linux/managed-publish.sh
           python3 - <<'PY' 2>&1 | tee "$EVIDENCE/python-ast.log"
           import ast
           from pathlib import Path
-          for name in ("test-app-fingerprints.py",):
+          for name in ("verify-api-payload.py", "test-application-publish.py"):
               ast.parse((Path("scripts") / name).read_text())
               print(f"PASS Python AST {name}")
           PY
-          bash -n scripts/lib/fp.sh
-          bash -n scripts/pipeline.sh
-          shellcheck --severity=warning scripts/lib/fp.sh 2>&1 | tee "$EVIDENCE/shellcheck.log"
-          printf '%s\n' "PASS Bash syntax and fingerprint ShellCheck" | tee "$EVIDENCE/bash.log"
+          bash -n deploy/linux/deploy.sh
+          bash -n deploy/linux/payload-sync.sh
+          bash -n scripts/publish-applications.sh
+          printf '%s\n' "PASS Bash syntax" | tee "$EVIDENCE/bash.log"
           test -z "$(git status --porcelain --untracked-files=all)"
           exit "$status"
       - name: Retain bounded source qualification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: postgresql-release-source-controls
-          path: /build/laplace/recovery/postgresql-release/
+          name: api-publication-source-controls
+          path: /build/laplace/recovery/api-publication/
           if-no-files-found: error
           retention-days: 30

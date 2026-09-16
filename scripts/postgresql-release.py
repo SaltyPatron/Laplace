@@ -190,71 +190,6 @@ def verify_installed(prefix: Path, selected: dict) -> dict:
     return {"installed_tools": versions, "running_server_checked": False}
 
 
-
-def build_inputs(prefix: Path, selected: dict) -> dict:
-    """Fingerprint actual installed inputs used by the native PostgreSQL build."""
-    installed = verify_installed(prefix, selected)
-    prefix = prefix.resolve(strict=True)
-    config = prefix / "bin/pg_config"
-    paths = {}
-    for option in ("includedir", "includedir-server", "libdir", "pkglibdir", "sharedir", "bindir"):
-        path = Path(output([str(config), "--" + option]))
-        if not path.is_absolute() or not path.is_dir():
-            raise ValueError("pg_config --" + option + " did not select an existing absolute directory")
-        paths[option] = path.resolve(strict=True)
-    configuration = (paths["includedir-server"] / "pg_config.h").read_text(encoding="utf-8")
-    major, minor = (int(part) for part in selected["version"].split("."))
-    versions = re.findall(r'^#define\s+PG_VERSION\s+"([^"]+)"\s*$', configuration, re.MULTILINE)
-    numbers = re.findall(r"^#define\s+PG_VERSION_NUM\s+([0-9]+)\s*$", configuration, re.MULTILINE)
-    if versions != [selected["version"]] or numbers != [str(major * 10000 + minor)]:
-        raise ValueError("PostgreSQL server headers differ from the selected installed release")
-
-    def file(path: Path) -> dict:
-        before = path.stat()
-        if not stat.S_ISREG(before.st_mode):
-            raise ValueError("PostgreSQL build input is not a regular file: " + str(path))
-        digest = sha256(path)
-        after = path.stat()
-        identity = lambda value: (value.st_dev, value.st_ino, value.st_size,
-                                  value.st_mtime_ns, value.st_ctime_ns)
-        if identity(before) != identity(after):
-            raise ValueError("PostgreSQL build input changed while hashing: " + str(path))
-        return {"bytes": before.st_size, "sha256": digest}
-
-    def headers(root: Path) -> dict:
-        rows = []
-        active = set()
-        def visit(directory: Path):
-            info = directory.stat()
-            identity = (info.st_dev, info.st_ino)
-            if identity in active:
-                raise ValueError("PostgreSQL include directory contains a link cycle")
-            active.add(identity)
-            try:
-                for path in sorted(directory.iterdir()):
-                    if path.is_dir():
-                        visit(path)
-                    else:
-                        row = {"path": str(path.relative_to(root)), **file(path)}
-                        if path.is_symlink():
-                            row["link"] = os.readlink(path)
-                        rows.append(row)
-            finally:
-                active.remove(identity)
-        visit(root)
-        if not rows:
-            raise ValueError("PostgreSQL include directory is empty: " + str(root))
-        raw = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
-        return {"path": str(root), "files": len(rows), "sha256": hashlib.sha256(raw).hexdigest()}
-
-    # The public include tree normally contains the server tree. Hash each
-    # logical selected tree explicitly so custom pg_config layouts are covered.
-    return {**installed, "prefix": str(prefix),
-            "configuration_paths": {key: str(value) for key, value in paths.items()},
-            "tools": {name: file(prefix / "bin" / name) for name in ("postgres", "pg_config")},
-            "headers": {key: headers(paths[key]) for key in ("includedir", "includedir-server")}}
-
-
 def verify_archive(path: Path, selected: dict) -> dict:
     observed = sha256(path)
     if (path.stat().st_size != selected["archive"]["size_bytes"]
@@ -265,7 +200,7 @@ def verify_archive(path: Path, selected: dict) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("select-pin", "source", "prepare-source", "installed", "build-inputs", "restart-needed", "archive"))
+    parser.add_argument("mode", choices=("select-pin", "source", "prepare-source", "installed", "restart-needed", "archive"))
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--external", type=Path, default=Path(os.environ.get("LAPLACE_EXTERNAL", "/build/external")))
     parser.add_argument("--prefix", type=Path, default=Path(os.environ.get("LAPLACE_PG_PREFIX", "/opt/laplace/pgsql-18")))
@@ -280,8 +215,6 @@ def main(argv: list[str] | None = None) -> int:
             result = verify_source(args.external, selected)
         elif args.mode == "prepare-source":
             result = prepare_source(args.external, selected)
-        elif args.mode == "build-inputs":
-            result = build_inputs(args.prefix, selected)
         elif args.mode in ("installed", "restart-needed"):
             result = verify_installed(args.prefix, selected)
             if args.mode == "restart-needed":
