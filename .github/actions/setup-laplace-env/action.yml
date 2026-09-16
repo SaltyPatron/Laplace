@@ -1,48 +1,48 @@
 name: Set up Laplace build/runtime env
-description: >
-  Export the workspace-relative runtime env into $GITHUB_ENV: Intel oneAPI
-  toolchain vars (when the runner service was started without them),
-  build-tree LD_LIBRARY_PATH for the engine .so files, and PostgreSQL
-  connection defaults (peer auth as laplace_admin over the unix socket).
+description: Export the installed toolchain and runtime environment for one job.
+
+inputs:
+  provision_tools:
+    description: "allow this explicit operator job to install the pinned CMake tool"
+    required: false
+    default: "false"
 
 runs:
   using: composite
   steps:
-    - name: Export workspace env (oneAPI always re-sourced fresh)
+    - name: Export installed toolchain and runtime environment
       shell: bash
       run: |
-        # Always source setvars: the runner daemon .env snapshots versioned
-        # oneAPI roots (MKLROOT=/opt/intel/oneapi/mkl/<ver>) at bootstrap
-        # time, and an apt upgrade + autoremove deletes that version out from
-        # under every subsequent run (2026.0 -> 2026.1, 2026-07-16). Fresh
-        # setvars resolves the currently-installed toolchain each run.
+        set -euo pipefail
         set +u
         source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
         set -u
         printenv | grep -E '^(ONEAPI_ROOT|CMPLR_ROOT|MKLROOT|TBBROOT|CPATH|LIBRARY_PATH|PKG_CONFIG_PATH|SETVARS_COMPLETED)=' >> "$GITHUB_ENV"
-        cmake_bin=$(python3 scripts/provision-cmake.py \
-          --root "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/tools/cmake" \
-          --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+
+        args=(
+          --root "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/tools/cmake"
+          --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake"
+        )
+        if [[ '${{ inputs.provision_tools }}' == true ]]; then
+          args+=(--ensure)
+        fi
+        cmake_bin=$(python3 scripts/provision-cmake.py "${args[@]}")
         export PATH="$cmake_bin:$PATH"
         echo "PATH=$PATH" >> "$GITHUB_ENV"
+
         echo "LD_LIBRARY_PATH=$PWD/build/engine/core:$PWD/build/engine/dynamics:$PWD/build/engine/synthesis:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
         echo "PGDATABASE=${PGDATABASE:-laplace}" >> "$GITHUB_ENV"
         echo "LAPLACE_QUERY_DB=${LAPLACE_QUERY_DB:-laplace}" >> "$GITHUB_ENV"
         echo "LAPLACE_DB=${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}}" >> "$GITHUB_ENV"
-        # MSBuild worker nodes and the Roslyn compiler server outlive their
-        # jobs on a persistent runner (killed as orphans at cleanup, seen
-        # every seed run). Cross-job reuse buys nothing here — disable both
-        # so builds stop leaking processes.
         echo "MSBUILDDISABLENODEREUSE=1" >> "$GITHUB_ENV"
         echo "UseSharedCompilation=false" >> "$GITHUB_ENV"
-        # Build/test parallelism (parity with scripts/win/env.cmd).
-        # Set LAPLACE_TEST_SERIAL=1 on the runner to force serial ctest.
+
         nproc_n="$(nproc 2>/dev/null || echo 1)"
-        if [ -z "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]; then
+        if [[ -z "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]]; then
           echo "CMAKE_BUILD_PARALLEL_LEVEL=$nproc_n" >> "$GITHUB_ENV"
         fi
-        if [ -z "${CTEST_PARALLEL_LEVEL:-}" ]; then
-          if [ "${LAPLACE_TEST_SERIAL:-}" = "1" ]; then
+        if [[ -z "${CTEST_PARALLEL_LEVEL:-}" ]]; then
+          if [[ "${LAPLACE_TEST_SERIAL:-}" == 1 ]]; then
             echo "CTEST_PARALLEL_LEVEL=1" >> "$GITHUB_ENV"
           else
             echo "CTEST_PARALLEL_LEVEL=$nproc_n" >> "$GITHUB_ENV"

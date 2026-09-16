@@ -14,11 +14,6 @@ laplace_storage_init
 LAPLACE_BUILD_DIRECTORY=$(python3 "$ROOT/scripts/place-build-directory.py" "$ROOT")
 export LAPLACE_BUILD_DIRECTORY
 
-# These helpers resolve configured corpus paths and source identity. They are not
-# execution gates: fp_check deliberately never authorizes skipping work.
-# shellcheck source=scripts/lib/fp.sh
-source "$ROOT/scripts/lib/fp.sh"
-
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
@@ -26,9 +21,12 @@ LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
 PYTHON="$(command -v python3 || command -v python || true)"
 [[ -n "$PYTHON" ]] || { echo "::error::python3 is required by source/code generators" >&2; exit 127; }
 
-cmake_bin=$("$PYTHON" "$ROOT/scripts/provision-cmake.py" \
-  --root "$LAPLACE_INSTALL_PREFIX/tools/cmake" \
-  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+cmake_args=(
+  --root "$LAPLACE_INSTALL_PREFIX/tools/cmake"
+  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake"
+)
+[[ "${LAPLACE_PROVISION_TOOLS:-0}" != 1 ]] || cmake_args+=(--ensure)
+cmake_bin=$("$PYTHON" "$ROOT/scripts/provision-cmake.py" "${cmake_args[@]}")
 export PATH="$cmake_bin:$PATH"
 
 [[ -x "$LAPLACE_PG_PREFIX/bin/psql" && -x "$LAPLACE_PG_PREFIX/bin/pg_config" ]] || {
@@ -87,6 +85,21 @@ psql() {
   else
     command "$LAPLACE_PG_PREFIX/bin/psql" -X -w "$@"
   fi
+}
+
+chess_openings_path() {
+  if [[ -n "${LAPLACE_CHESS_OPENINGS:-}" ]]; then
+    printf '%s\n' "$LAPLACE_CHESS_OPENINGS"
+    return
+  fi
+  local chess_root="${LAPLACE_DATA_ROOT:-/vault/Data}/Games/Chess" candidate
+  for candidate in "$chess_root/lichess-openings" "$chess_root/openings"; do
+    if [[ -d "$candidate" ]] && [[ -n "$(find -H "$candidate" -type f -name '*.tsv' -print -quit)" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+  printf '%s\n' "$chess_root/lichess-openings"
 }
 
 preloaded_so_digest() {
@@ -194,7 +207,7 @@ phase_build() {
   local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
   local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
   local chess_openings chess_corpus_export
-  chess_openings=$(fp_chess_openings_path)
+  chess_openings=$(chess_openings_path)
   chess_corpus_export=$("$PYTHON" "$ROOT/scripts/chess-floor-artifacts.py" selected-export \
     --prefix "$LAPLACE_INSTALL_PREFIX" --path-only)
   local build_flags=()
@@ -228,7 +241,6 @@ phase_build() {
     }
   fi
   phase_build_app
-  fp_record build-native "$(fp_native)"
 }
 
 phase_test() {
