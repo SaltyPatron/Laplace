@@ -92,27 +92,22 @@ class ActionsArchitectureTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("source-only syntax check passed", result.stdout)
 
-    def test_database_recreate_is_structural_only(self):
+    def test_database_recreate_restores_a_usable_product(self):
         db = load(WORKFLOWS / "db-ops.yml")
         self.assertEqual({"workflow_dispatch"}, triggers(db))
         self.assertEqual("laplace-substrate-lifecycle", db["concurrency"]["group"])
         inputs = db["on"]["workflow_dispatch"]["inputs"]
-        self.assertNotIn("restore_foundation", inputs)
+        self.assertIn("restore_foundation", inputs)
         steps = db["jobs"]["db"]["steps"]
-        recreate = next(step for step in steps if step.get("name") == "Recreate database structure")
+        install = next(step for step in steps if step.get("name") == "Build and install the exact runtime used by recreation")
+        self.assertIn("pipeline.sh build install", install["run"])
+        recreate = next(step for step in steps if step.get("name") == "Recreate database structure and runtime")
         command = recreate["run"]
-        self.assertIn("--fresh-db migrate sync-extension", command)
+        self.assertIn("--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env", command)
         self.assertIn("check-database-health.sh", command)
-        for forbidden in (
-            "ensure-foundation", "ingest", "pipeline.sh build", "pipeline.sh install",
-            "tune-pg", "perfcache-guc", "api-env", "verify-application-release.py",
-        ):
-            self.assertNotIn(forbidden, command)
-        for step in steps:
-            if step.get("if") == "inputs.operation == 'recreate'":
-                self.assertNotIn("ensure-foundation", step.get("run", ""))
-                self.assertNotIn("ingest", step.get("run", ""))
-        self.assertFalse(any("foundation" in str(step.get("name", "")).lower() for step in steps))
+        commands = "\n".join(step.get("run", "") for step in steps)
+        self.assertIn("ensure-foundation.sh --required-lexical", commands)
+        self.assertIn("check-substrate-floor.sh", commands)
 
     def test_seed_workflows_are_explicit_not_source_triggered(self):
         for path in sorted(WORKFLOWS.glob("seed-*.yml")):
@@ -127,10 +122,10 @@ class ActionsArchitectureTests(unittest.TestCase):
         self.assertEqual("github.event_name == 'workflow_dispatch'", job["if"])
         self.assertFalse(any(str(use).startswith("actions/upload-artifact@") for use in uses(job)))
 
-    def test_main_has_one_product_job_and_source_only_classifier(self):
+    def test_main_separates_development_and_operator_ownership(self):
         workflow = load(MAIN)
-        self.assertEqual(["product"], list(workflow["jobs"]))
-        self.assertEqual("laplace-substrate-lifecycle", workflow["concurrency"]["group"])
+        self.assertEqual(["development", "operator"], list(workflow["jobs"]))
+        self.assertEqual("laplace-substrate-lifecycle", workflow["jobs"]["operator"]["concurrency"]["group"])
         source = MAIN.read_text(encoding="utf-8")
         self.assertIn("LAPLACE_FAST_ONLY", source)
         self.assertIn("bash scripts/product-ci.sh check", source)

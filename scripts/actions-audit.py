@@ -143,29 +143,33 @@ for required in (
     if required not in product:
         fail(f"product-ci.sh: lifecycle boundary missing {required}")
 
-# Database recreation is structural only and finitely bounded.
+# Database recreation must produce a usable product from the selected revision.
 manual_db = workflows.get("db-ops.yml", {})
 if triggers(manual_db) != {"workflow_dispatch"}:
     fail("db-ops.yml: database lifecycle must be dispatch-only")
 if (manual_db.get("concurrency") or {}).get("group") != "laplace-substrate-lifecycle":
     fail("db-ops.yml: database lifecycle must share product mutation ownership")
 steps = ((manual_db.get("jobs") or {}).get("db") or {}).get("steps") or []
-recreate = next((s for s in steps if s.get("name") == "Recreate database structure"), None)
+recreate = next((s for s in steps if s.get("name") == "Recreate database structure and runtime"), None)
 if not recreate:
     fail("db-ops.yml: missing structural recreate step")
 else:
     command = recreate.get("run", "")
-    for required in ("--fresh-db migrate sync-extension", "check-database-health.sh"):
-        if required not in command:
-            fail(f"db-ops.yml: recreate lost structural operation {required}")
-    for forbidden in (
-        "ensure-foundation", "ingest", "pipeline.sh build", "pipeline.sh install",
-        "tune-pg", "perfcache-guc", "api-env", "verify-application-release.py",
+    for required in (
+        "--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env",
+        "check-database-health.sh", "verify-application-release.py",
     ):
-        if forbidden in command:
-            fail(f"db-ops.yml: recreate contains non-structural work: {forbidden}")
-if ((manual_db.get("on") or {}).get("workflow_dispatch") or {}).get("inputs", {}).get("restore_foundation"):
-    fail("db-ops.yml: foundation restore belongs to seed-foundation.yml")
+        if required not in command:
+            fail(f"db-ops.yml: recreate lost required operation {required}")
+all_db_commands = runs((manual_db.get("jobs") or {}).get("db") or {})
+for required in (
+    "pipeline.sh build install", "ensure-foundation.sh --required-lexical",
+    "ensure-foundation.sh", "check-substrate-floor.sh",
+):
+    if required not in all_db_commands:
+        fail(f"db-ops.yml: recreation cannot produce a usable product without {required}")
+if not ((manual_db.get("on") or {}).get("workflow_dispatch") or {}).get("inputs", {}).get("restore_foundation"):
+    fail("db-ops.yml: recreation lost complete-foundation selection")
 
 # Branch consolidation is exceptional maintenance, not per-commit work.
 hygiene = workflows.get("repo-hygiene.yml", {})
@@ -183,5 +187,5 @@ if failures:
 
 print(
     f"ACTIONS_AUDIT_OK workflows={len(workflows)} "
-    "push=build-test operator=explicit db=structural seeds=explicit artifacts=none"
+    "push=build-test operator=explicit db=usable-recreate seeds=explicit artifacts=none"
 )

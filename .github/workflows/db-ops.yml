@@ -1,8 +1,8 @@
 name: DB — lifecycle ops
 
-# Explicit operator surface for database structure. Database creation/migration is
-# deliberately separate from corpus/foundation ingestion, application publication,
-# host tuning, and native builds. Those operations have their own owners.
+# Explicit operator surface for a usable database lifecycle. Recreate publishes the
+# exact checked-out runtime before dropping state, restores the required lexical
+# floor, and proves the resulting installed product instead of leaving an empty DB.
 
 on:
   workflow_dispatch:
@@ -18,12 +18,17 @@ on:
           - repair      # Explicit runtime repair/tuning. NO DATA LOSS.
           - reindex     # Rebuild INVALID indexes. NO DATA LOSS.
           - remigrate   # `reset` + `up`: re-apply migrations. Keeps substrate data.
-          - recreate    # DESTRUCTIVE. Recreate DB structure only. Does not ingest data.
+          - recreate    # DESTRUCTIVE. Install current runtime, recreate, restore lexical floor.
       confirm:
         description: "type the database name to authorize recreate"
         type: string
         required: false
         default: ""
+      restore_foundation:
+        description: "after recreate, restore the complete canonical foundation"
+        type: boolean
+        required: false
+        default: true
       database:
         description: "target DB (one database: laplace)"
         type: choice
@@ -41,7 +46,7 @@ jobs:
   db:
     name: "DB — ${{ inputs.operation }}"
     runs-on: [self-hosted, laplace]
-    timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || (inputs.operation == 'recreate' && 60) || 30 }}
+    timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || (inputs.operation == 'recreate' && 480) || 30 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: { submodules: false, clean: false }
@@ -57,7 +62,7 @@ jobs:
                 exit 1
               fi
               echo "::warning::'$op' authorized: dropping ${{ inputs.database }}. Existing substrate/corpus data is lost."
-              echo "::notice::recreate is structural only; no corpus or foundation ingest is part of this operation."
+              echo "::notice::recreate will install this revision, restore the required lexical floor, and verify readback."
               ;;
             remigrate)
               echo "::notice::'$op' re-applies all migrations; substrate data is preserved."
@@ -67,10 +72,10 @@ jobs:
               ;;
           esac
 
-      - name: Guard — refuse destructive mutation over a running ingest
-        if: inputs.operation == 'recreate' || inputs.operation == 'remigrate'
-        timeout-minutes: 6
-        run: bash scripts/wait-for-quiet-substrate.sh "${{ inputs.database }}" 300
+      - name: Guard — wait for the current ingest owner
+        if: inputs.operation == 'recreate' || inputs.operation == 'remigrate' || inputs.operation == 'reindex'
+        timeout-minutes: 305
+        run: bash scripts/wait-for-quiet-substrate.sh "${{ inputs.database }}"
 
       - name: Status (read-only)
         if: inputs.operation == 'status'
@@ -139,11 +144,32 @@ jobs:
           dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll reset --yes
           bash scripts/pipeline.sh migrate
 
-      - name: Recreate database structure
+      - name: Build and install the exact runtime used by recreation
+        if: inputs.operation == 'recreate'
+        run: bash scripts/pipeline.sh build install
+
+      - name: Recreate database structure and runtime
         if: inputs.operation == 'recreate'
         run: |
-          bash scripts/pipeline.sh --fresh-db migrate sync-extension
+          bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
           bash scripts/check-database-health.sh "${{ inputs.database }}"
+          python3 scripts/verify-application-release.py --readiness-only --timeout-seconds 120
+
+      - name: Admit required lexical foundation
+        if: inputs.operation == 'recreate'
+        timeout-minutes: 360
+        run: bash scripts/ensure-foundation.sh --required-lexical
+
+      - name: Restore complete canonical foundation
+        if: inputs.operation == 'recreate' && inputs.restore_foundation
+        timeout-minutes: 360
+        run: bash scripts/ensure-foundation.sh
+
+      - name: Verify recreated product floor
+        if: inputs.operation == 'recreate'
+        run: |
+          bash scripts/check-substrate-floor.sh "${{ inputs.database }}"
+          python3 scripts/verify-application-release.py --readiness-only --timeout-seconds 120
 
       - name: Verify structural database health
         if: inputs.operation != 'status'
