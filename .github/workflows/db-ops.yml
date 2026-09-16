@@ -68,31 +68,12 @@ jobs:
               ;;
           esac
 
-          migration=""
-          for candidate in \
-            "${LAPLACE_BUILD_ROOT:-}/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll" \
-            "$PWD/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"; do
-            [[ "$candidate" == /* && -f "$candidate" ]] || continue
-            migration="$candidate"
-            break
-          done
-
-          require_migration() {
-            [[ -n "$migration" ]] || {
-              echo "::error::prebuilt migration runtime not found; build/deploy owns compilation"
-              exit 1
-            }
-          }
-
           case "$op" in
             status)
-              require_migration
-              dotnet "$migration" status
-              bash scripts/check-database-health.sh "$db"
+              scripts/db-migrations.sh status
               ;;
             migrate)
-              require_migration
-              dotnet "$migration" up
+              scripts/db-migrations.sh up
               bash scripts/check-database-health.sh "$db"
               ;;
             repair)
@@ -100,15 +81,13 @@ jobs:
               bash scripts/check-database-health.sh "$db"
               ;;
             remigrate)
-              require_migration
-              dotnet "$migration" reset --yes
-              dotnet "$migration" up
+              scripts/db-migrations.sh reset --yes
+              scripts/db-migrations.sh up
               bash scripts/check-database-health.sh "$db"
               ;;
             recreate)
-              require_migration
-              dotnet "$migration" nuke --yes
-              dotnet "$migration" up
+              scripts/db-migrations.sh nuke --yes
+              scripts/db-migrations.sh up
               bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc
               bash scripts/check-database-health.sh "$db"
               ;;
