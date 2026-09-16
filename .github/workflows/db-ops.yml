@@ -48,51 +48,29 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
         with:
           use_cmake: false
+          require_built_revision: true
 
       - name: Run requested database operation
         run: |
           set -euo pipefail
           op='${{ inputs.operation }}'
           db='${{ inputs.database }}'
-
           if [[ "$op" == recreate && '${{ inputs.confirm }}' != "$db" ]]; then
             echo "::error::recreate is destructive; type '$db' in confirm"
             exit 1
           fi
-
           case "$op" in
             recreate|remigrate|reindex)
               busy=$(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active' AND query ILIKE 'COPY laplace.%'" || echo 0)
-              if [[ "${busy:-0}" != 0 ]]; then
-                echo "::error::$busy active ingest COPY session(s); refusing structural mutation instead of waiting for hours"
-                exit 1
-              fi
+              [[ "${busy:-0}" == 0 ]] || { echo "::error::$busy active ingest COPY session(s); refusing structural mutation"; exit 1; }
               ;;
           esac
-
           case "$op" in
-            status)
-              scripts/db-migrations.sh status
-              ;;
-            migrate)
-              scripts/db-migrations.sh up
-              bash scripts/check-database-health.sh "$db"
-              ;;
-            repair)
-              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc
-              bash scripts/check-database-health.sh "$db"
-              ;;
-            remigrate)
-              scripts/db-migrations.sh reset --yes
-              scripts/db-migrations.sh up
-              bash scripts/check-database-health.sh "$db"
-              ;;
-            recreate)
-              scripts/db-migrations.sh nuke --yes
-              scripts/db-migrations.sh up
-              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc
-              bash scripts/check-database-health.sh "$db"
-              ;;
+            status) scripts/db-migrations.sh status ;;
+            migrate) scripts/db-migrations.sh up; bash scripts/check-database-health.sh "$db" ;;
+            repair) bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc; bash scripts/check-database-health.sh "$db" ;;
+            remigrate) scripts/db-migrations.sh reset --yes; scripts/db-migrations.sh up; bash scripts/check-database-health.sh "$db" ;;
+            recreate) scripts/db-migrations.sh nuke --yes; scripts/db-migrations.sh up; bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc; bash scripts/check-database-health.sh "$db" ;;
             reindex)
               P(){ psql -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
               while IFS=$'\t' read -r idx def; do

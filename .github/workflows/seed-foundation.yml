@@ -60,6 +60,7 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
         with:
           use_cmake: false
+          require_built_revision: true
 
       - name: Ingest foundation
         run: |

@@ -53,6 +53,7 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
         with:
           use_cmake: false
+          require_built_revision: true
 
       - name: Evict selected source
         if: inputs.evict_before_ingest
@@ -63,16 +64,10 @@ jobs:
           LANGS_INPUT: ${{ inputs.langs }}
         run: |
           set -euo pipefail
-          [[ -z "$PATH_INPUT" && -z "$LANGS_INPUT" ]] || {
-            echo "::error::source eviction requires a complete source ingest"
-            exit 1
-          }
+          [[ -z "$PATH_INPUT" && -z "$LANGS_INPUT" ]] || { echo "::error::source eviction requires a complete source ingest"; exit 1; }
           src_name=$(python3 -c 'import json,os; x=json.load(open("scripts/decomposer-gates.json"))["sources"].get(os.environ["SOURCE_KEY"]); print(x["decomposer"] if x else "")')
           [[ -n "$src_name" ]] || { echo "::error::no source mapping for $SOURCE_KEY"; exit 1; }
-          [[ "$CONFIRM" == "$src_name" ]] || {
-            echo "::error::type '$src_name' in evict_confirm"
-            exit 1
-          }
+          [[ "$CONFIRM" == "$src_name" ]] || { echo "::error::type '$src_name' in evict_confirm"; exit 1; }
           scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict "$src_name"
           echo "LAPLACE_INGEST_FORCE=1" >> "$GITHUB_ENV"
 
@@ -84,13 +79,5 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$INGEST_LOGDIR"
-          if [[ -n "$LANGS_INPUT" ]]; then
-            export LAPLACE_INGEST_LANGS="$LANGS_INPUT"
-          else
-            unset LAPLACE_INGEST_LANGS || true
-          fi
-          if [[ -n "$PATH_INPUT" ]]; then
-            scripts/ingest-source.sh "$SOURCE_KEY" "$PATH_INPUT"
-          else
-            scripts/ingest-source.sh "$SOURCE_KEY"
-          fi
+          if [[ -n "$LANGS_INPUT" ]]; then export LAPLACE_INGEST_LANGS="$LANGS_INPUT"; else unset LAPLACE_INGEST_LANGS || true; fi
+          if [[ -n "$PATH_INPUT" ]]; then scripts/ingest-source.sh "$SOURCE_KEY" "$PATH_INPUT"; else scripts/ingest-source.sh "$SOURCE_KEY"; fi

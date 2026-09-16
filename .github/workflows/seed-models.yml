@@ -40,16 +40,14 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
         with:
           use_cmake: false
+          require_built_revision: true
 
       - name: Ingest model
         run: |
           set -euo pipefail
           model_dir="${MODEL_DIR_INPUT:-}"
           [[ -n "$model_dir" ]] || model_dir="${LAPLACE_TINYLLAMA_DIR:-}"
-          [[ -n "$model_dir" && -d "$model_dir" ]] || {
-            echo "::error::model directory is missing; provide model_dir or LAPLACE_TINYLLAMA_DIR"
-            exit 1
-          }
+          [[ -n "$model_dir" && -d "$model_dir" ]] || { echo "::error::model directory is missing; provide model_dir or LAPLACE_TINYLLAMA_DIR"; exit 1; }
           mkdir -p "$INGEST_LOGDIR"
           scripts/ingest-source.sh model "$model_dir"
 
@@ -69,6 +67,7 @@ jobs:
       - uses: ./.github/actions/setup-laplace-env
         with:
           use_cmake: false
+          require_built_revision: true
 
       - name: Synthesize GGUF
         run: |
