@@ -15,18 +15,12 @@ import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import { AmbientFamiliar } from './layout/AmbientFamiliar';
 import { AccountControls } from './auth/AccountControls';
+import { SettingsView, BillingReturnView } from './auth/SettingsView';
 import { apiGet } from './api/client';
 import type { AuthProvider, AuthUser } from './store';
 import styles from './App.module.css';
 
-/**
- * One shell, one nav, for every surface. Previously the app ran two shells — a
- * tab-state MainShell and a separate ExploreShell whose header showed only two
- * destinations, so entering Explore hid Home/Query/Play/Lab/Billing and stranded
- * you there. Everything is a route now: the header is identical everywhere,
- * every surface has a URL (deep-link, refresh, back button), and no page can
- * hide another.
- */
+/** One shell and stable route navigation for every product surface. */
 const TABS: { id: string; label: string; path: string }[] = [
   { id: 'home', label: 'Home', path: '/' },
   { id: 'chat', label: 'Chat', path: '/chat' },
@@ -36,6 +30,7 @@ const TABS: { id: string; label: string; path: string }[] = [
   { id: 'play', label: 'Play', path: '/play' },
   { id: 'lab', label: 'Lab', path: '/lab' },
   { id: 'billing', label: 'Billing', path: '/billing' },
+  { id: 'settings', label: 'Settings', path: '/settings' },
   { id: 'operator', label: 'Operator', path: '/operator' },
 ];
 
@@ -47,7 +42,7 @@ function isActive(pathname: string, tabPath: string): boolean {
 function Shell() {
   const { tenant, setTenant, authReady, authUser, authProviders, setAuth } = useAppStore();
   const nav = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, search, hash } = useLocation();
 
   useEffect(() => {
     let live = true;
@@ -78,7 +73,7 @@ function Shell() {
         }
         tenant={
           authReady && (authUser || authProviders.length > 0)
-            ? <AccountControls user={authUser} providers={authProviders} returnUrl={pathname} />
+            ? <AccountControls user={authUser} providers={authProviders} returnUrl={`${pathname}${search}${hash}`} />
             : <TenantField value={tenant} onChange={setTenant} />
         }
       />
@@ -95,6 +90,9 @@ function Shell() {
           <Route path="/play" element={<ChessView />} />
           <Route path="/lab/*" element={<LabView />} />
           <Route path="/billing" element={<BillingView />} />
+          <Route path="/billing/success" element={<BillingReturnView />} />
+          <Route path="/billing/cancel" element={<BillingReturnView />} />
+          <Route path="/settings" element={<SettingsView />} />
           <Route path="/operator" element={<AdminView />} />
         </Routes>
       </main>
