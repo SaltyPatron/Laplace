@@ -20,10 +20,10 @@ export function AdminView() {
         options={SECTIONS} label="Operator section" />
     </header>
     <Banner variant="warning">
-      Privileges are not enforced. There is no authentication on this deployment — the tenant is
-      a free-text header any caller can set, and every operation here is reachable directly over
-      HTTP without it. Treat this page as a convenience over public endpoints, not as an admin
-      boundary. Cancellation, repair and retraction are all reachable the same way.
+      These controls can affect shared database state, not only the selected tenant.
+      Sign-in and API-key requirements depend on the server's authentication mode;
+      header tenancy is for trusted local development. Signing in is not an operator-role
+      check. Host service controls separately require the operator credential.
     </Banner>
     {section === 'ingest' ? <IngestJournal /> : section === 'activity' ? <Activity />
       : section === 'ops' ? <OpConsole /> : section === 'repair' ? <Repair /> : <Agents />}

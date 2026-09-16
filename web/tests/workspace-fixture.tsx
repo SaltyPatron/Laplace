@@ -2,7 +2,7 @@
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { Button, Field, Input, Modal, NavTabs, Panel, ReadStatus, TooltipProvider, useReadResource } from '../src/ui';
+import { Button, Field, Input, Modal, NavTabs, Panel, ReadStatus, Select, TextArea, TooltipProvider, useReadResource } from '../src/ui';
 import { apiGet } from '../src/api/client';
 import { QueryConsole } from '../src/query/QueryConsole';
 import { BillingView } from '../src/billing/BillingView';
@@ -43,8 +43,11 @@ function Fixture() {
     <Field label="Exact value" help="Preserve spaces and letter case." error="An explicit validation error.">
       <Input id="exact-value" aria-describedby="extra-description" defaultValue=" King " />
     </Field><span id="extra-description">Existing description.</span>
+    <Field label="Automatic input" help="Bound without an authored ID."><Input defaultValue="preserved" /></Field>
+    <Field label="Automatic selection" help="Selection help."><Select defaultValue="one"><option value="one">First option</option></Select></Field>
+    <Field label="Automatic multiline" help="Multiline help."><TextArea defaultValue="original text" /></Field>
     <Button visuallyDisabled onClick={() => setActivations((n) => n + 1)}>Disabled action</Button>
-    <Button visuallyDisabled asChild><a href="#unwanted" onClick={() => setActivations((n) => n + 1)}>Disabled link</a></Button>
+    <Button visuallyDisabled asChild><a href="#unwanted" onClick={() => setActivations((n) => n + 1)} onAuxClickCapture={() => setActivations((n) => n + 1)} onAuxClick={() => setActivations((n) => n + 1)}>Disabled link</a></Button>
     <output data-testid="activations">{activations}</output>
     <Button onClick={() => setScope(scope === 'A' ? 'B' : 'A')}>Change scope</Button>
     <Button onClick={() => void read.refresh()}>Refresh fixture</Button>

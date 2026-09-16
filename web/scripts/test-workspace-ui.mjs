@@ -61,10 +61,31 @@ try {
   await expect(field).toHaveAttribute('aria-invalid', 'true');
   const descriptions = await field.getAttribute('aria-describedby');
   assert.equal(descriptions.split(' ').length, 3); await expect(field).toHaveValue(' King ');
+  const generatedIds = [];
+  for (const [role, name, value] of [
+    ['textbox', 'Automatic input', 'preserved'],
+    ['combobox', 'Automatic selection', 'one'],
+    ['textbox', 'Automatic multiline', 'original text'],
+  ]) {
+    const control = page.getByRole(role, { name, exact: true });
+    await expect(control).toHaveValue(value);
+    const id = await control.getAttribute('id');
+    assert.ok(id); generatedIds.push(id);
+    const description = await control.getAttribute('aria-describedby');
+    assert.ok(description);
+    assert.equal(await control.evaluate((node) =>
+      node.getAttribute('aria-describedby').split(' ').every((part) => document.getElementById(part))), true);
+    await page.getByText(name, { exact: true }).click();
+    await expect(control).toBeFocused();
+  }
+  assert.equal(new Set(generatedIds).size, 3, 'automatic field IDs must be unique');
   // Playwright rightly refuses ordinary click on aria-disabled; dispatch exercises
   // the real capture/bubble handlers directly, alongside physical keyboard input.
   await page.getByRole('button', { name: 'Disabled action', exact: true }).dispatchEvent('click');
   await page.getByRole('link', { name: 'Disabled link', exact: true }).dispatchEvent('click');
+  const disabledLink = page.getByRole('link', { name: 'Disabled link', exact: true });
+  await disabledLink.dispatchEvent('auxclick', { button: 1, bubbles: true, cancelable: true });
+  assert.equal(await disabledLink.getAttribute('href'), null, 'disabled native links have no navigable destination');
   await page.getByRole('link', { name: 'Disabled link', exact: true }).focus(); await page.keyboard.press('Enter');
   await expect(page.getByTestId('activations')).toHaveText('0'); assert.ok(!page.url().endsWith('#unwanted'));
 
@@ -182,7 +203,7 @@ try {
   await expect.poll(() => invocations.length).toBe(beforeReview + 1);
   assert.equal(JSON.parse(invocations.at(-1)).name, 'ops.fixture_write');
   assert.deepEqual(errors, []);
-  console.log('WORKSPACE_UI_OK scope fencing; non-overlapping polling; independent panes; URL/back/reload; exact accessible fields; disabled activation; retained DOM/editor; nested modal focus/Escape; four viewport widths; actual Query exact submission/failure retention; actual Billing independent/failed/empty/tenant states; actual operation catalog/exact parameters/default/null/write confirmation');
+  console.log('WORKSPACE_UI_OK scope fencing; non-overlapping polling; independent panes; URL/back/reload; exact accessible fields; automatic label/description/focus binding; disabled primary/auxiliary activation; retained DOM/editor; nested modal focus/Escape; four viewport widths; actual Query exact submission/failure retention; actual Billing independent/failed/empty/tenant states; actual operation catalog/exact parameters/default/null/write confirmation');
   passed = true;
 } finally {
   if (context) await context.tracing.stop({ path: join(artifacts, 'trace.zip') });
