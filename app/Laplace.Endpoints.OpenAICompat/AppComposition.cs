@@ -2,6 +2,9 @@ using Laplace.Chess.Service;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD.Npgsql;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -69,6 +72,44 @@ internal static class AppComposition
     }
     public static IServiceCollection AddOpenAiCompatServices(this IServiceCollection services)
     {
+        var browserAuth = BuildBrowserAuthSettings();
+        services.AddSingleton(browserAuth);
+        var dataProtectionPath = IdentityConfig("LAPLACE_DATA_PROTECTION_KEYS");
+        if (!string.IsNullOrWhiteSpace(dataProtectionPath))
+        {
+            Directory.CreateDirectory(dataProtectionPath);
+            services.AddDataProtection()
+                .SetApplicationName("Laplace")
+                .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath));
+        }
+        services.AddSingleton<IIdentityStore>(sp =>
+            new PostgresIdentityStore(sp.GetRequiredService<SubstrateClient>().DataSource));
+        services.AddSingleton<BrowserTicketStore>();
+
+        var authentication = services.AddAuthentication(options =>
+        {
+            options.DefaultAuthenticateScheme = BrowserAuthSettings.CookieScheme;
+            options.DefaultSignInScheme = BrowserAuthSettings.CookieScheme;
+        }).AddCookie(BrowserAuthSettings.CookieScheme, options =>
+        {
+            options.Cookie.Name = "__Host-laplace-session";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SameSite = SameSiteMode.Lax;
+            options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+            options.Cookie.Path = "/";
+            options.ExpireTimeSpan = TimeSpan.FromDays(14);
+            options.SlidingExpiration = true;
+            options.LoginPath = "/login";
+            options.AccessDeniedPath = "/login";
+        });
+        foreach (var provider in browserAuth.Providers)
+        {
+            authentication.AddOpenIdConnect(provider.Scheme, provider.DisplayName,
+                options => BrowserAuthentication.Configure(options, provider));
+        }
+        services.AddOptions<CookieAuthenticationOptions>(BrowserAuthSettings.CookieScheme)
+            .Configure<BrowserTicketStore>((options, tickets) => options.SessionStore = tickets);
+
         services.AddSingleton<ITenantResolver, ApiKeyTenantResolver>();
 
         services.AddSingleton<SubstrateClient>();
@@ -79,6 +120,8 @@ internal static class AppComposition
         services.AddSingleton<IConversationWitness>(sp => sp.GetRequiredService<TurnWitness>());
         services.AddServerHostedService(sp => sp.GetRequiredService<TurnWitness>());
         services.AddServerHostedService<CatalogPrewarmService>();
+        if (browserAuth.Providers.Count > 0)
+            services.AddServerHostedService<IdentityClientBootstrapService>();
 
         const double chessWeight = 0.5d;
         services.AddSingleton(sp => new ChessRuntimeService(
@@ -157,6 +200,57 @@ internal static class AppComposition
         });
 
         return services;
+    }
+
+    private static BrowserAuthSettings BuildBrowserAuthSettings()
+    {
+        var providers = new List<ExternalOidcProvider>();
+        AddProvider(
+            providers,
+            scheme: "microsoft",
+            displayName: "Microsoft",
+            clientId: IdentityConfig("LAPLACE_AUTH_MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_ID"),
+            clientSecret: IdentityConfig("LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET", "MICROSOFT_CLIENT_SECRET"),
+            authority: IdentityConfig("LAPLACE_AUTH_MICROSOFT_AUTHORITY")
+                ?? "https://login.microsoftonline.com/common/v2.0",
+            callbackPath: "/signin-microsoft");
+        AddProvider(
+            providers,
+            scheme: "google",
+            displayName: "Google",
+            clientId: IdentityConfig("LAPLACE_AUTH_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"),
+            clientSecret: IdentityConfig("LAPLACE_AUTH_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"),
+            authority: "https://accounts.google.com",
+            callbackPath: "/signin-google");
+        return new BrowserAuthSettings(providers);
+    }
+
+    private static void AddProvider(
+        ICollection<ExternalOidcProvider> providers,
+        string scheme,
+        string displayName,
+        string? clientId,
+        string? clientSecret,
+        string authority,
+        string callbackPath)
+    {
+        if (string.IsNullOrWhiteSpace(clientId) && string.IsNullOrWhiteSpace(clientSecret))
+            return;
+        if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+            throw new InvalidOperationException(
+                $"{displayName} sign-in requires both its OAuth client id and client secret.");
+        providers.Add(new ExternalOidcProvider(
+            scheme, displayName, clientId, clientSecret, authority.TrimEnd('/'), callbackPath));
+    }
+
+    private static string? IdentityConfig(params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            var value = LaplaceInstall.TryReadConfig(key, "identity.env");
+            if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+        }
+        return null;
     }
 
     /// <summary>

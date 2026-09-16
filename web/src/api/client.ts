@@ -85,5 +85,6 @@ export async function apiPost<T>(path: string, payload: unknown, opts: ApiOption
     body: JSON.stringify(payload),
   });
   if (!res.ok) await parseError(res);
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }

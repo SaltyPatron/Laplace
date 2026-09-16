@@ -43,6 +43,20 @@ export interface QuerySeed {
   relationType?: string;
 }
 
+export interface AuthProvider {
+  id: string;
+  displayName: string;
+  loginUrl: string;
+}
+
+export interface AuthUser {
+  id: string;
+  tenantId: string;
+  displayName?: string | null;
+  email?: string | null;
+  provider?: string | null;
+}
+
 interface AppState {
   tenant: string;
   quoteId: string;
@@ -55,6 +69,9 @@ interface AppState {
   pendingQuote: QuoteGate | null;
   exploreSeedPrompt: string | null;
   querySeed: QuerySeed | null;
+  authReady: boolean;
+  authUser: AuthUser | null;
+  authProviders: AuthProvider[];
   setTenant: (tenant: string) => void;
   setSession: (session: string | null) => void;
   setQuoteId: (quoteId: string) => void;
@@ -64,24 +81,35 @@ interface AppState {
   setPendingQuote: (gate: QuoteGate | null) => void;
   setExploreSeedPrompt: (prompt: string | null) => void;
   setQuerySeed: (seed: QuerySeed | null) => void;
+  setAuth: (user: AuthUser | null, providers: AuthProvider[]) => void;
   clearConversation: () => void;
 }
 
+const initialTenant = localStorage.getItem('laplace.tenant') ?? 'local-dev';
+const sessionKey = (tenant: string) => `laplace.session.${tenant}`;
+
 export const useAppStore = create<AppState>((set) => ({
-  tenant: localStorage.getItem('laplace.tenant') ?? 'local-dev',
+  tenant: initialTenant,
   quoteId: '',
   model: 'laplace-converse-001',
-  session: null,
+  session: localStorage.getItem(sessionKey(initialTenant)),
   messages: [],
   pendingQuote: null,
   exploreSeedPrompt: null,
   querySeed: null,
+  authReady: false,
+  authUser: null,
+  authProviders: [],
   setTenant: (tenant) => {
     localStorage.setItem('laplace.tenant', tenant);
     // A tenant switch is a different witnessed world — never carry a session across.
-    set({ tenant, session: null });
+    set({ tenant, session: localStorage.getItem(sessionKey(tenant)), messages: [] });
   },
-  setSession: (session) => set({ session }),
+  setSession: (session) => set((state) => {
+    if (session) localStorage.setItem(sessionKey(state.tenant), session);
+    else localStorage.removeItem(sessionKey(state.tenant));
+    return { session };
+  }),
   setQuoteId: (quoteId) => set({ quoteId }),
   setModel: (model) => set({ model }),
   pushMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
@@ -99,7 +127,22 @@ export const useAppStore = create<AppState>((set) => ({
   setPendingQuote: (pendingQuote) => set({ pendingQuote }),
   setExploreSeedPrompt: (exploreSeedPrompt) => set({ exploreSeedPrompt }),
   setQuerySeed: (querySeed) => set({ querySeed }),
-  clearConversation: () => set({ messages: [], pendingQuote: null, session: null }),
+  setAuth: (authUser, authProviders) => set((state) => {
+    if (!authUser) return { authReady: true, authUser: null, authProviders };
+    localStorage.setItem('laplace.tenant', authUser.tenantId);
+    return {
+      authReady: true,
+      authUser,
+      authProviders,
+      tenant: authUser.tenantId,
+      session: localStorage.getItem(sessionKey(authUser.tenantId)),
+      messages: state.tenant === authUser.tenantId ? state.messages : [],
+    };
+  }),
+  clearConversation: () => set((state) => {
+    localStorage.removeItem(sessionKey(state.tenant));
+    return { messages: [], pendingQuote: null, session: null };
+  }),
 }));
 
 

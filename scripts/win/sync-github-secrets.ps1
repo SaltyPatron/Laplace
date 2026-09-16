@@ -51,6 +51,10 @@ $stripePub = Pick $root @("STRIPE_API_Publishable", "STRIPE_API_PUBLISHED", "STR
 if (-not $stripePub) { $stripePub = Pick $stripeFile @("STRIPE_API_Publishable", "STRIPE_API_PUBLISHED", "STRIPE_API_PUBLISHABLE") }
 $whsec = Pick $root @("STRIPE_WEBHOOK_SECRET", "LAPLACE_STRIPE_WEBHOOK_SECRET")
 if (-not $whsec) { $whsec = Pick $stripeFile @("STRIPE_WEBHOOK_SECRET", "LAPLACE_STRIPE_WEBHOOK_SECRET") }
+$microsoftClientId = Pick $root @("LAPLACE_AUTH_MICROSOFT_CLIENT_ID")
+$microsoftClientSecret = Pick $root @("LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET")
+$googleClientId = Pick $root @("LAPLACE_AUTH_GOOGLE_CLIENT_ID")
+$googleClientSecret = Pick $root @("LAPLACE_AUTH_GOOGLE_CLIENT_SECRET")
 
 if (-not $lichess) { throw "No LICHESS_API in .env" }
 if (-not $stripeSecret) { throw "No STRIPE_API_SECRET in .env" }
@@ -72,6 +76,20 @@ Set-GhSecret "STRIPE_API_SECRET" $stripeSecret
 if ($whsec) { Set-GhSecret "STRIPE_WEBHOOK_SECRET" $whsec }
 else { Write-Warning "[sync-github-secrets] STRIPE_WEBHOOK_SECRET missing — signed webhooks will fail on host until set" }
 if ($stripePub) { Set-GhVar "STRIPE_API_PUBLISHABLE" $stripePub }
+if ($microsoftClientId -or $microsoftClientSecret) {
+  if (-not $microsoftClientId -or -not $microsoftClientSecret) {
+    throw "Microsoft OAuth requires both LAPLACE_AUTH_MICROSOFT_CLIENT_ID and LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET"
+  }
+  Set-GhSecret "LAPLACE_AUTH_MICROSOFT_CLIENT_ID" $microsoftClientId
+  Set-GhSecret "LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET" $microsoftClientSecret
+}
+if ($googleClientId -or $googleClientSecret) {
+  if (-not $googleClientId -or -not $googleClientSecret) {
+    throw "Google OAuth requires both LAPLACE_AUTH_GOOGLE_CLIENT_ID and LAPLACE_AUTH_GOOGLE_CLIENT_SECRET"
+  }
+  Set-GhSecret "LAPLACE_AUTH_GOOGLE_CLIENT_ID" $googleClientId
+  Set-GhSecret "LAPLACE_AUTH_GOOGLE_CLIENT_SECRET" $googleClientSecret
+}
 
 # Drop the misnamed secret if it still exists from an earlier pass.
 & gh secret delete LICHESS_TOKEN -R $Repo 2>$null
