@@ -22,6 +22,7 @@ static char error_text[512];
 static int error_code;
 static unsigned spi_calls;
 static unsigned spi_prepare_calls;
+static unsigned spi_prepare_cursor_calls;
 static Snapshot required_snapshot;
 static size_t fake_raw_size;
 static Datum fake_raw_datum;
@@ -128,6 +129,11 @@ SPIPlanPtr SPI_prepare(const char *query, int nargs, Oid *types) {
     CHECK(strcmp(query, "metadata") == 0 || strcmp(query, "payload") == 0);
     return (SPIPlanPtr)(uintptr_t)(strcmp(query, "metadata") == 0 ? 1 : 2);
 }
+SPIPlanPtr SPI_prepare_cursor(const char *query, int nargs, Oid *types, int cursor_options) {
+    ++spi_prepare_cursor_calls;
+    CHECK(cursor_options == CURSOR_OPT_PARALLEL_OK);
+    return SPI_prepare(query, nargs, types);
+}
 static admission_state *probe_state(Snapshot snapshot) {
     admission_state *s = palloc0(sizeof(*s));
     s->maximum_bytes = 64 * 1024 * 1024;
@@ -233,11 +239,11 @@ int main(void) {
 
     s = probe_state(&snapshot);
     admission_prepare_provider_plans(s, "metadata", "payload");
-    CHECK(s->operations == 2 && spi_prepare_calls == 2);
+    CHECK(s->operations == 2 && spi_prepare_calls == 2 && spi_prepare_cursor_calls == 2);
     CHECK(s->metadata_plan == (SPIPlanPtr)(uintptr_t)1 && s->payload_plan == (SPIPlanPtr)(uintptr_t)2);
     s->maximum_operations = 3;
     REFUSES(admission_prepare_provider_plans(s, "metadata", "payload"), "require two database operations");
-    CHECK(s->operations == 2 && spi_prepare_calls == 2);
+    CHECK(s->operations == 2 && spi_prepare_calls == 2 && spi_prepare_cursor_calls == 2);
     probe_stages_free(s);
     s = probe_state(&snapshot);
     encoded = admission_snapshot_text(s);
