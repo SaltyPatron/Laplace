@@ -1,4 +1,4 @@
-name: Qualify required lexical lifecycle
+name: Qualify deployment maintenance fixture
 on:
   push:
     branches: [qualify/lexical-foundation-20260916]
@@ -11,20 +11,18 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 828b329f6216be08b278602e4d7998feec876c78
+          ref: bdbbc9026b68a3fd4c78dae0d16372b5513afa54
           persist-credentials: false
       - name: Execute exact production orchestration controls
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 828b329f6216be08b278602e4d7998feec876c78
-          test "$(git write-tree)" = 9090614ae610ca6232cfeb027d268e0a0fefb678
+          test "$(git rev-parse HEAD)" = bdbbc9026b68a3fd4c78dae0d16372b5513afa54
+          test "$(git write-tree)" = 18aae3186ef915d7dcbf5fd5dc113fe287336087
           export TMPDIR="$RUNNER_TEMP/lexical-control-scratch"
           export TMP="$TMPDIR" TEMP="$TMPDIR"
           mkdir -p "$TMPDIR"
           python3 -m venv "$RUNNER_TEMP/lexical-control-python"
           "$RUNNER_TEMP/lexical-control-python/bin/python" -m pip install --disable-pip-version-check PyYAML==6.0.2
           export PATH="$RUNNER_TEMP/lexical-control-python/bin:$PATH"
-          bash -n scripts/ensure-foundation.sh scripts/product-ci.sh
-          python scripts/actions-audit.py
-          python scripts/test-actions-topology.py
+          python scripts/test-managed-database-quiescence.py
