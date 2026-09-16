@@ -1,8 +1,7 @@
 name: DB — lifecycle ops
 
-# Explicit operator surface for a usable database lifecycle. Recreate publishes the
-# exact checked-out runtime before dropping state, restores the required lexical
-# floor, and proves the resulting installed product instead of leaving an empty DB.
+# Explicit operator surface for database lifecycle only. It consumes the installed
+# runtime and never builds, installs, publishes, or ingests repository source.
 
 on:
   workflow_dispatch:
@@ -18,17 +17,12 @@ on:
           - repair      # Explicit runtime repair/tuning. NO DATA LOSS.
           - reindex     # Rebuild INVALID indexes. NO DATA LOSS.
           - remigrate   # `reset` + `up`: re-apply migrations. Keeps substrate data.
-          - recreate    # DESTRUCTIVE. Install current runtime, recreate, restore lexical floor.
+          - recreate    # DESTRUCTIVE. Recreate from the already-installed runtime.
       confirm:
         description: "type the database name to authorize recreate"
         type: string
         required: false
         default: ""
-      restore_foundation:
-        description: "after recreate, restore the complete canonical foundation"
-        type: boolean
-        required: false
-        default: true
       database:
         description: "target DB (one database: laplace)"
         type: choice
@@ -47,6 +41,10 @@ jobs:
     name: "DB — ${{ inputs.operation }}"
     runs-on: [self-hosted, laplace]
     timeout-minutes: ${{ inputs.operation == 'reindex' && 720 || (inputs.operation == 'recreate' && 480) || 30 }}
+    env:
+      # Database operations consume artifacts produced by the deployment owner.
+      # They fail closed instead of compiling a different runtime implicitly.
+      LAPLACE_REQUIRE_PREBUILT_MIGRATIONS: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: { submodules: false, clean: false }
@@ -62,7 +60,7 @@ jobs:
                 exit 1
               fi
               echo "::warning::'$op' authorized: dropping ${{ inputs.database }}. Existing substrate/corpus data is lost."
-              echo "::notice::recreate will install this revision, restore the required lexical floor, and verify readback."
+              echo "::notice::recreate uses the already-installed database runtime; it does not build or ingest repository source."
               ;;
             remigrate)
               echo "::notice::'$op' re-applies all migrations; substrate data is preserved."
@@ -82,8 +80,13 @@ jobs:
         run: |
           set +e
           rc=0
-          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release -v q --nologo || rc=1
-          dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll status || rc=1
+          if [ -n "${LAPLACE_BUILD_ROOT:-}" ]; then
+            migration="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll"
+          else
+            migration="$PWD/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
+          fi
+          test -f "$migration" || rc=1
+          dotnet "$migration" status || rc=1
           echo "----- extension -----"
           psql -h /var/run/postgresql -U laplace_admin -d "${{ inputs.database }}" -c \
             "SELECT extname, extversion FROM pg_extension WHERE extname LIKE 'laplace%'" || rc=1
@@ -105,9 +108,9 @@ jobs:
         if: inputs.operation == 'migrate'
         run: bash scripts/pipeline.sh migrate
 
-      - name: Repair installed database runtime
+      - name: Repair database runtime
         if: inputs.operation == 'repair'
-        run: bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
+        run: bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc
 
       - name: Reindex — rebuild INVALID indexes
         if: inputs.operation == 'reindex'
@@ -140,36 +143,20 @@ jobs:
       - name: Remigrate (reset + up)
         if: inputs.operation == 'remigrate'
         run: |
-          dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release -v q --nologo
-          dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll reset --yes
+          if [ -n "${LAPLACE_BUILD_ROOT:-}" ]; then
+            migration="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll"
+          else
+            migration="$PWD/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
+          fi
+          test -f "$migration"
+          dotnet "$migration" reset --yes
           bash scripts/pipeline.sh migrate
 
-      - name: Build and install the exact runtime used by recreation
-        if: inputs.operation == 'recreate'
-        run: bash scripts/pipeline.sh build install
-
-      - name: Recreate database structure and runtime
+      - name: Recreate database structure from installed runtime
         if: inputs.operation == 'recreate'
         run: |
-          bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
+          bash scripts/pipeline.sh --fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc
           bash scripts/check-database-health.sh "${{ inputs.database }}"
-          python3 scripts/verify-application-release.py --readiness-only --timeout-seconds 120
-
-      - name: Admit required lexical foundation
-        if: inputs.operation == 'recreate'
-        timeout-minutes: 360
-        run: bash scripts/ensure-foundation.sh --required-lexical
-
-      - name: Restore complete canonical foundation
-        if: inputs.operation == 'recreate' && inputs.restore_foundation
-        timeout-minutes: 360
-        run: bash scripts/ensure-foundation.sh
-
-      - name: Verify recreated product floor
-        if: inputs.operation == 'recreate'
-        run: |
-          bash scripts/check-substrate-floor.sh "${{ inputs.database }}"
-          python3 scripts/verify-application-release.py --readiness-only --timeout-seconds 120
 
       - name: Verify structural database health
         if: inputs.operation != 'status'

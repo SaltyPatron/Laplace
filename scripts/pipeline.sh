@@ -477,16 +477,20 @@ phase_build() {
     fi
   fi
   echo "===== PHASE — BUILD APP ====="
-  phase_build_app
+  # Managed outputs carry app-local copies of the native closure. Fold the
+  # native fingerprint into their build plan so a native-only ABI change cannot
+  # leave yesterday's liblaplace_core.so beside today's CLI or services.
+  phase_build_app "$native_fp"
 }
 
 phase_build_app() {
+  local native_fp="${1:-}"
   # Affected-only dotnet build: the planner walks the ProjectReference graph
   # with per-project Merkle fingerprints, so building the printed roots builds
   # every affected project. Empty plan = nothing changed. Any planner failure
   # falls back to the full solution — never trade correctness for speed.
   local plan_out plan_rc=0
-  plan_out=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns build) || plan_rc=$?
+  plan_out=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns build --salt "$native_fp") || plan_rc=$?
   if [[ "$plan_rc" -ne 0 ]]; then
     echo "::warning::affected-app plan failed (rc=$plan_rc) — full solution build"
     ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
@@ -513,7 +517,7 @@ phase_build_app() {
     fi
     echo "app stamps present but $missing lacks bin/Release — full solution build"
     ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
-    "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build
+    "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build --salt "$native_fp"
     return 0
   fi
   local -a roots=()
@@ -528,7 +532,7 @@ phase_build_app() {
       ( cd "$ROOT/app" && dotnet build "$r" -c Release )
     done
   fi
-  "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build
+  "$PYTHON" "$ROOT/scripts/affected-app.py" record --ns build --salt "$native_fp"
 }
 
 phase_test() {
@@ -640,8 +644,29 @@ phase_install() (
 
 phase_migrate() {
   echo "===== PHASE — MIGRATE ($PGDATABASE) ====="
-  local mig="$ROOT/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
-  if [[ ! -f "$mig" || "$FORCE_REBUILD" -eq 1 || "$CLEAN_FIRST" -eq 1 ]]; then
+  local mig
+  if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
+    mig="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll"
+  else
+    mig="$ROOT/app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll"
+  fi
+  if [[ "${LAPLACE_REQUIRE_PREBUILT_MIGRATIONS:-0}" == 1 ]]; then
+    local app_plan native_fp
+    [[ -f "$mig" ]] || {
+      echo "::error::database lifecycle requires the prebuilt migration artifact; deploy/build owns compilation" >&2
+      return 1
+    }
+    native_fp=$(fp_native)
+    app_plan=$("$PYTHON" "$ROOT/scripts/affected-app.py" plan --ns build --salt "$native_fp") || {
+      echo "::error::cannot prove the prebuilt migration artifact belongs to this revision" >&2
+      return 1
+    }
+    [[ -z "$app_plan" ]] || {
+      echo "::error::prebuilt managed artifacts are stale; deploy/build the selected revision before database operations" >&2
+      return 1
+    }
+    echo "migrate: verified prebuilt $mig"
+  elif [[ ! -f "$mig" || "$FORCE_REBUILD" -eq 1 || "$CLEAN_FIRST" -eq 1 ]]; then
     dotnet build "$ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" -c Release
   else
     echo "migrate: using existing $mig"

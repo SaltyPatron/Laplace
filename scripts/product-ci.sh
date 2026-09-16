@@ -56,9 +56,7 @@ run_suite() {
 run_install() (
   resume_chess_observation_if_needed
   bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
-  bash deploy/linux/managed-publish.sh preflight
   bash scripts/pipeline.sh install
-  bash deploy/linux/managed-publish.sh preflight
 )
 
 run_database_maintenance() (

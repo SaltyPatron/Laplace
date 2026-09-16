@@ -208,17 +208,23 @@ if(WIN32)
     target_link_libraries(laplace_execution PRIVATE ${EXT_NAME} "${LAPLACE_PG_LIBDIR}/postgres.lib")
 endif()
 
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in
-    ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
-    @ONLY
-)
-
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in
-    ${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h
-    @ONLY
-)
+# These generated files live in the shared build tree. Preserve unchanged mtimes
+# and avoid configure_file's unconditional chmod across group-member ownership.
+function(laplace_configure_shared input output)
+    file(READ "${input}" _template)
+    string(CONFIGURE "${_template}" _configured @ONLY)
+    set(_existing "")
+    if(EXISTS "${output}")
+        file(READ "${output}" _existing)
+    endif()
+    if(NOT _existing STREQUAL _configured)
+        file(WRITE "${output}" "${_configured}")
+    endif()
+endfunction()
+laplace_configure_shared("${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control")
+laplace_configure_shared("${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h")
 
 laplace_write_sql_chain(
     "${CMAKE_CURRENT_BINARY_DIR}/sql/generated/install_chain.sql.in"
