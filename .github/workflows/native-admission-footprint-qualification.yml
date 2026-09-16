@@ -1,86 +1,66 @@
-name: Qualify final GUI corpus cache and foundation operator
+name: Inspect retained installed corpus failure
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
 permissions:
   contents: read
 jobs:
-  source:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      PYTHONDONTWRITEBYTECODE: '1'
-      EVIDENCE: /build/laplace/work/final-gui-cache/evidence
-      TMPDIR: /build/laplace/work/final-gui-cache/tmp
-      TMP: /build/laplace/work/final-gui-cache/tmp
-      TEMP: /build/laplace/work/final-gui-cache/tmp
+  observation:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 5
     steps:
-      - name: Prepare permanent qualification directory
+      - name: Retain exact corpus failure logs and receipts without database mutation
+        shell: bash
         run: |
           set -euo pipefail
-          sudo mkdir -p /build/laplace
-          sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$EVIDENCE" "$TMPDIR"
-      - name: Authenticate final source and warm service-startup invocation syntax
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/qualification.log"
-          import ast,base64,fcntl,hashlib,json,os,re,signal,subprocess,sys,textwrap,time,urllib.request,yaml
-          from pathlib import Path
-          evidence=Path(os.environ["EVIDENCE"])
-          selections={"workflow":"affed8fe3ddf3f96eb916f8e1514da28c512a180","gui":"ed1cd32b7432d99be96e770800a55f7ae6ddb423","bootstrap":"1aafd564ecec11a9f7a9ce450dc00e8563d1b63b","cache":"9859fe785ba9208282d92a6135115ed161378323","follow":"cf1ea1fb62c901bedd6bd95af94cacc45e993791","managed":"ddf5d4c219cc386d52a44274394a8b0dff8251d6","accept":"b7846e06e1f9dc67c9ca0c06df93340f9dd7d697","stockfish":"50cadf5154a84005145023b1f9336cc0d0c1813e"}
-          sources={}
-          for name,sha in selections.items():
-              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
-                  headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
-              with urllib.request.urlopen(request,timeout=30) as response:encoded=response.read((2<<20)+1)
-              assert len(encoded)<=2<<20
-              item=json.loads(encoded)
-              assert item["sha"]==sha and item["encoding"]=="base64"
-              raw=base64.b64decode(item["content"])
-              assert len(raw)==item["size"] and len(raw)<1<<20
-              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
-              sources[name]=raw.decode()
-              (evidence/(name+(".yml" if name=="workflow" else ".sh" if name=="pipeline" else ".py"))).write_bytes(raw)
-              if name not in ("workflow","pipeline"):ast.parse(raw,filename=name+".py")
-          document=yaml.safe_load(sources["workflow"])
-          counts={"outerBash":0,"innerBash":0,"pythonHeredocs":0}
-          for job in document["jobs"].values():
-              for step in job["steps"]:
-                  program=step.get("run")
-                  if program is None:continue
-                  subprocess.run(["bash","-n"],input=program,text=True,check=True)
-                  counts["outerBash"]+=1
-                  lines=program.splitlines()
-                  for i,line in enumerate(lines):
-                      match=re.search(r"<<'([A-Z_]+)'",line)
-                      if not match:continue
-                      delimiter=match.group(1)
-                      end=next(j for j in range(i+1,len(lines)) if lines[j].strip()==delimiter)
-                      body=textwrap.dedent("\n".join(lines[i+1:end]))+"\n"
-                      if delimiter=="PY":
-                          ast.parse(body)
-                          counts["pythonHeredocs"]+=1
-                      elif delimiter=="FOLLOW":
-                          subprocess.run(["bash","-n"],input=body,text=True,check=True)
-                          counts["innerBash"]+=1
-          assert counts=={"outerBash":6,"innerBash":1,"pythonHeredocs":6},counts
-          assert document["jobs"]["foundation"]["if"]=="always()"
-          assert "env" not in document["jobs"]["foundation"]
-          assert len(document["jobs"]["chess"]["env"])==10
-          receipt={"status":"passed","selections":selections,"syntax":counts,
-                   "scope":"Authenticated final source syntax including canonical warm service-startup invocation; no host execution"}
-          (evidence/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
-          print(json.dumps(receipt))
-          
+          umask 0077
+          evidence="/build/laplace/recovery/corpus-failure-observation/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$evidence"
+          export OBSERVATION_EVIDENCE="$evidence"
+          echo "OBSERVATION_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,stat
+          native=pathlib.Path("/build/laplace/recovery/native-install/35161276382-3")
+          receipt=json.loads((native/"receipt.json").read_text())
+          assert receipt["source"]=="2ef3f7ff885c8eccbc81d76caf8284436a482ffe"
+          assert receipt["status"]=="completed" and receipt["attempt"]=="3"
+          evidence=pathlib.Path(os.environ["OBSERVATION_EVIDENCE"])
+          source=native/"corpus"
+          files=sorted(p for p in source.rglob("*") if p.is_file() and p.suffix in (".log",".json",".jsonl",".txt"))
+          assert len(files)<=128
+          inventory=[]
+          remaining=16*1024*1024
+          for p in files:
+              info=p.lstat()
+              assert stat.S_ISREG(info.st_mode) and not p.is_symlink()
+              size=info.st_size
+              relative=p.relative_to(source)
+              row={"path":str(relative),"bytes":size}
+              if size>remaining:
+                  row["retained"]=False
+                  row["reason"]="sixteen-megabyte evidence limit"
+                  inventory.append(row)
+                  continue
+              raw=p.read_bytes()
+              assert len(raw)==size
+              remaining-=size
+              target=evidence/"corpus"/relative
+              target.parent.mkdir(parents=True,exist_ok=True)
+              target.write_bytes(raw)
+              row.update(retained=True,sha256=hashlib.sha256(raw).hexdigest())
+              inventory.append(row)
+              if p.suffix==".log" or p.name in ("recording.json","corpus-recording.json","result.json"):
+                  shown=raw if len(raw)<=65536 else raw[:8192]+b"\n[bounded middle omitted]\n"+raw[-57344:]
+                  print("CORPUS_RETAINED_FILE "+json.dumps(row),flush=True)
+                  print(shown.decode(errors="replace"),flush=True)
+          (evidence/"inventory.json").write_text(json.dumps(inventory,indent=2)+"\n")
+          print("CORPUS_RETAINED_INVENTORY "+json.dumps(inventory),flush=True)
           PY
-      - name: Retain final operational controls
+      - name: Retain original corpus failure evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: final-gui-corpus-cache-startup-source
-          path: /build/laplace/work/final-gui-cache/evidence/
+          name: original-corpus-failure-attempt3
+          path: ${{ env.OBSERVATION_EVIDENCE }}/
           if-no-files-found: error
           retention-days: 30
