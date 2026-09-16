@@ -4,8 +4,31 @@
 -- MEASURED live, 200-node frontier / 21,413 candidate edges: the batch edge
 -- query costs 30,305ms with the coordinate joins and 408ms without.
 -- See generate_walk.c above WALK_BATCH_QUERY.
+--
+-- Highway masks are rebuildable accelerator projections. The historical native
+-- p_intent_mask branch hard-gated candidate entities by their stored aggregate
+-- mask, so a stale/partial mask changed the answer. Keep the native ABI installed
+-- behind a private surface, but pass NULL for the mask from the canonical public
+-- operation until a sound accelerator implementation can prove parity with the
+-- authoritative relation set. Explicit p_type remains the semantic relation scope.
 DROP FUNCTION IF EXISTS laplace.walk_branches(bytea, bytea, int, int, bytea, bytea[], bool);
 DROP FUNCTION IF EXISTS consensus.walk_branches(bytea, bytea, int, int, bytea, bytea[], bool);
+DROP FUNCTION IF EXISTS consensus.walk_branches_native(bytea, bytea, int, int, bytea, bytea[], bool, bool);
+
+CREATE OR REPLACE FUNCTION consensus.walk_branches_native(
+    p_prompt              bytea,
+    p_type                bytea,
+    p_depth               int,
+    p_breadth             int,
+    p_intent_mask         bytea,
+    p_topic_bias          bytea[],
+    p_ordinal_continuity  bool,
+    p_use_geometry        bool)
+    RETURNS TABLE(depth int, path bytea[], types bytea[], entity_id bytea,
+                  eff_mu numeric, path_mu numeric, witnesses bigint)
+    AS 'MODULE_PATHNAME', 'pg_laplace_walk_branches'
+    LANGUAGE C STABLE;
+
 CREATE OR REPLACE FUNCTION consensus.walk_branches(
     p_prompt              bytea,
     p_type                bytea    DEFAULT NULL,
@@ -17,5 +40,16 @@ CREATE OR REPLACE FUNCTION consensus.walk_branches(
     p_use_geometry        bool     DEFAULT false)
     RETURNS TABLE(depth int, path bytea[], types bytea[], entity_id bytea,
                   eff_mu numeric, path_mu numeric, witnesses bigint)
-    AS 'MODULE_PATHNAME', 'pg_laplace_walk_branches'
-    LANGUAGE C STABLE;
+    LANGUAGE sql STABLE
+BEGIN ATOMIC
+    SELECT *
+    FROM consensus.walk_branches_native(
+        p_prompt,
+        p_type,
+        p_depth,
+        p_breadth,
+        NULL::bytea,
+        p_topic_bias,
+        p_ordinal_continuity,
+        p_use_geometry);
+END;
