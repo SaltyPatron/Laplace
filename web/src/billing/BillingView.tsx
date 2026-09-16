@@ -7,13 +7,8 @@ import {
 } from '../api/client';
 import { AccountControls } from '../auth/AccountControls';
 import { useAppStore } from '../store';
+import { formatCents, formatCurrencyCents } from './amounts';
 import styles from './BillingView.module.css';
-
-function amount(cents: number | undefined | null, currency: string | undefined | null) {
-  const code = currency?.toUpperCase() || 'USD';
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: code }).format((cents ?? 0) / 100); }
-  catch { return `${((cents ?? 0) / 100).toFixed(2)} ${code}`; }
-}
 
 export function BillingView() {
   const { tenant, authUser, authProviders, authReady } = useAppStore();
@@ -97,7 +92,7 @@ export function BillingView() {
         {plans?.filter((plan) => plan.active !== false).map((plan) => (
           <div key={plan.plan_id} className={styles.planCard}>
             <h3>{plan.name}</h3>
-            <p className={styles.price}>{amount(plan.monthly_price_cents, plan.currency)}/month</p>
+            <p className={styles.price}>{formatCurrencyCents(plan.monthly_price_cents, plan.currency)}/month</p>
             <Muted>{plan.description}</Muted>
             <ul className={styles.credits}>
               {Object.entries(plan.monthly_credits ?? {}).map(([service, credits]) => (
@@ -113,7 +108,7 @@ export function BillingView() {
       </div>
 
       {checkout && <Banner>
-        <strong>{checkout.plan_id}</strong> — {amount(checkout.amount_cents, checkout.currency)}, status {checkout.status}.{' '}
+        <strong>{checkout.plan_id}</strong> — {formatCurrencyCents(checkout.amount_cents, checkout.currency)}, status {checkout.status}.{' '}
         {checkout.stripe_checkout_url ? <a href={checkout.stripe_checkout_url}>Continue to secure checkout</a> :
           <span>Checkout is unavailable. No subscription has been activated by this request.</span>}
       </Banner>}
@@ -125,8 +120,8 @@ export function BillingView() {
           <thead><tr><Th>Service</Th><Th>Unit</Th><Th>Unit price</Th><Th>Base fee</Th></tr></thead>
           <tbody>{services.filter((service) => service.active !== false).map((service) => <tr key={service.service_id}>
             <Td>{service.display_name}</Td><Td>{service.unit}</Td>
-            <Td>{amount(service.unit_price_cents, service.currency)}</Td>
-            <Td>{amount(service.base_fee_cents, service.currency)}</Td>
+            <Td>{formatCurrencyCents(service.unit_price_cents, service.currency)}</Td>
+            <Td>{formatCurrencyCents(service.base_fee_cents, service.currency)}</Td>
           </tr>)}</tbody>
         </Table>
       </TableScroll>}
@@ -139,7 +134,7 @@ export function BillingView() {
           <thead><tr><Th>Service</Th><Th>Units</Th><Th>Recorded amount</Th><Th>Executed</Th></tr></thead>
           <tbody>{usage.entries.map((entry, index) => <tr key={index}>
             <Td>{entry.serviceId}</Td><Td>{entry.units}</Td>
-            <Td>{((entry.amountCents ?? 0) / 100).toFixed(2)}</Td>
+            <Td>{formatCents(entry.amountCents)}</Td>
             <Td>{entry.executedAt ? new Date(entry.executedAt).toLocaleString() : '—'}</Td>
           </tr>)}</tbody>
         </Table>
