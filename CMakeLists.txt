@@ -146,7 +146,7 @@ install(CODE "
       # installation owns only its generated perfcache payloads, so clean that
       # namespace rather than deleting every entry and maintaining exceptions.
       if [ -d \\\"\$share\\\" ]; then
-        find \\\"\$share\\\" -maxdepth 1 -type f -name 'laplace_*.bin' -delete
+        find \\\"\$share\\\" -maxdepth 1 -type f -name 'laplace_*.bin' ! -name 'laplace_chess_position_perfcache.bin' ! -name 'laplace_chess_transition_perfcache.bin' -delete
       fi
       rm -f \${_laplace_install_root}/lib/liblaplace_*.so* 2>/dev/null || true
       rm -f \${_laplace_install_root}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so 2>/dev/null || true

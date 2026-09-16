@@ -484,6 +484,11 @@ internal static class ChessWitnessHydrator
         return groups;
     }
 
+    /// <summary>Replay the complete typed input after the strict reader has reserved its
+    /// checked expanded work. The existing UI default remains independent of admission.</summary>
+    internal static ChessReplayResult ReplayAdmittedLine(IReadOnlyList<Hash128> moveIds, string? startFen)
+        => ChessReplay.Replay(moveIds, startFen, maxPlies: moveIds.Count);
+
     private static async Task<IReadOnlyList<ChessWitnessedGame>> MaterializeAsync(
         NpgsqlDataSource ds, IReadOnlyList<(Hash128 Line, Hash128 Event, GameMeta Meta)> wanted,
         CancellationToken ct, IReadOnlyDictionary<Hash128, string>? positionOutcomeResults = null)
@@ -567,7 +572,11 @@ internal static class ChessWitnessHydrator
             if (startPositionId != expectedStart) continue;
             if (ChessCompose.LineId(startPositionId, moveIds) != lineId) continue;
 
-            var replay = ChessReplay.Replay(moveIds, startFen);
+            // Strict callers reserved every expanded occurrence before MaterializeAsync.
+            // A UI replay window is not a semantic limit on an admitted recorded game.
+            var replay = positionOutcomeResults is null
+                ? ChessReplay.Replay(moveIds, startFen)
+                : ReplayAdmittedLine(moveIds, startFen);
             if (replay.Truncated is not null || replay.Plies.Count != moveIds.Length) continue;
             var moves = replay.Plies.Select(static p => p.San).ToArray();
             string?[]? comments = RenderLane(
@@ -588,7 +597,10 @@ internal static class ChessWitnessHydrator
                 gm.White != default ? gm.White : null,
                 gm.Black != default ? gm.Black : null,
                 startFen, clockTokens, evalTokens, quality, spent)
-                { MoveIds = moveIds, StartPositionId = startPositionId });
+                {
+                    MoveIds = moveIds, StartPositionId = startPositionId,
+                    AdmittedReplay = positionOutcomeResults is null ? null : replay
+                });
         }
         return outList;
     }
