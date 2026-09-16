@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -467,4 +468,14 @@ class ArtifactTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    # Source policy runs only filesystem/format controls. Post-build CTest invokes
+    # the actual native method explicitly with the exact built core path.
+    selected = None
+    if "--source-only" in sys.argv:
+        sys.argv.remove("--source-only")
+        selected = [
+            "ArtifactTests." + name
+            for name in unittest.defaultTestLoader.getTestCaseNames(ArtifactTests)
+            if name != "test_native_hash_abi_and_floor_checksum_when_current_library_is_available"
+        ]
+    unittest.main(defaultTest=selected, verbosity=2)
