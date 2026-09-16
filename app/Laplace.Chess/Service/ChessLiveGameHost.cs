@@ -214,7 +214,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     b, lineId, startPoint, movePoints, ChessVocabulary.SourceId, nowUs);
                 ChessMoveOutcomes.AppendGame(
                     b, lineId, Array.ConvertAll(movePoints, static n => n.Id),
-                    result, ChessVocabulary.SourceId, WitnessWeight);
+                    result, session.Plies[0].MoverSide == 0, ChessVocabulary.SourceId, WitnessWeight);
                 WitnessResult(b, lineId, playingId, result);
                 if (session.WhitePlayerId is { } emitWhite && session.WhitePlayerName is { Length: > 0 } whiteName)
                     ChessVocabulary.EmitPlayer(
@@ -256,7 +256,8 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 };
                 ChessAnalyze.DeriveFromWitnessed(b, witnessed);
                 ChessGraph.AppendTransitions(
-                    b, session.PositionIds, result, SourceTrust.StructuredCorpus,
+                    b, session.PositionIds, result, session.Plies[0].MoverSide == 0,
+                    SourceTrust.StructuredCorpus,
                     ChessTransitions.SourceId, playingId);
                 b.AddEntity(
                     ChessTransitions.MarkerId(playingId), EntityTier.Document,
@@ -412,13 +413,15 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         await _ds.DisposeAsync();
     }
 
-    private static GameOutcome InferOutcome(IReadOnlyList<RecordedEdge> edges, bool adjudicated)
+    internal static GameOutcome InferOutcome(IReadOnlyList<RecordedEdge> edges, bool adjudicated)
     {
         if (adjudicated) return GameOutcome.Draw;
         for (int i = 0; i < edges.Count; i++)
         {
-            if (edges[i].MoverOutcome == PlyOutcome.Win)
-                return GameOutcome.WonBy(i % 2);
+            if (edges[i].MoverOutcome != PlyOutcome.Win) continue;
+            if (!PositionContent.TryFenFromSurface(edges[i].SubjectKey, out var fen))
+                throw new InvalidOperationException("live outcome has no typed pre-move board");
+            return GameOutcome.WonBy(Board.FromFen(fen).WhiteToMove ? 0 : 1);
         }
         return GameOutcome.Draw;
     }

@@ -56,6 +56,137 @@ public sealed class ChessPositionPlayingObservationTests
         }
     }
 
+    [Theory]
+    [InlineData("parsed")]
+    [InlineData("shared-replay")]
+    [InlineData("witnessed")]
+    [InlineData("live-trajectory")]
+    public void NativeBoardBatchesMatchScalarEvidenceForEveryFullGamePosition(string path)
+    {
+        CodepointPerfcache.LoadDefault();
+        for (int fixture = 1; fixture <= 2; fixture++)
+        {
+            var pgn = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Fixtures", $"position-playing-game-{fixture}.pgn"));
+            var game = Assert.IsType<ChessGameRecord>(ChessPgnDecomposer.TryParseGame(pgn));
+            var replay = ChessPgnDecomposer.MaterializeParsedReplay(game);
+            Assert.Equal(154, game.ResolvedMoves.Length);
+            Assert.Equal(155, replay.Positions.Length);
+            var expected = DepositScalar(game, replay, out long occurrences);
+            SubstrateChange? actual = null;
+            try
+            {
+                long before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
+                actual = Deposit(game, path);
+                long after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000 + 999;
+                AssertChangesEqual(expected, actual);
+                Assert.Equal(occurrences, actual.Attestations.Sum(row => row.ObservationCount));
+                Assert.Contains(actual.Attestations, row => row.ObservationCount > 1);
+                Assert.All(actual.Attestations, row =>
+                {
+                    Assert.True(row.FoldReplayable);
+                    Assert.InRange(row.LastObservedAtUnixUs, Math.Min(before, after), Math.Max(before, after));
+                });
+            }
+            finally
+            {
+                foreach (var stage in expected.IntentStages) stage.Dispose();
+                if (actual is not null)
+                    foreach (var stage in actual.IntentStages) stage.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public void NativeBoardBatchesKeepOccurrencesWhenALegalLineReturnsToItsInitialBoard()
+    {
+        CodepointPerfcache.LoadDefault();
+        const string pgn = "[Event \"batch-repeat\"]\n[White \"White\"]\n[Black \"Black\"]\n[Result \"1/2-1/2\"]\n\n1. Nf3 Nf6 2. Ng1 Ng8 1/2-1/2";
+        var game = Assert.IsType<ChessGameRecord>(ChessPgnDecomposer.TryParseGame(pgn));
+        var replay = ChessPgnDecomposer.MaterializeParsedReplay(game);
+        Assert.Equal(5, replay.Positions.Length);
+        Assert.Equal(game.PositionIds[0], game.PositionIds[^1]);
+        var expected = DepositScalar(game, replay, out long occurrences);
+        SubstrateChange? actual = null;
+        try
+        {
+            actual = Deposit(game, "shared-replay");
+            AssertChangesEqual(expected, actual);
+            Assert.Equal(occurrences, actual.Attestations.Sum(row => row.ObservationCount));
+            foreach (var atom in replay.Positions[0].Substructures)
+                Assert.True(Assert.Single(actual.Attestations,
+                    row => row.SubjectId == atom.Id).ObservationCount >= 2);
+        }
+        finally
+        {
+            foreach (var stage in expected.IntentStages) stage.Dispose();
+            if (actual is not null)
+                foreach (var stage in actual.IntentStages) stage.Dispose();
+        }
+    }
+
+    private static SubstrateChange DepositScalar(
+        ChessGameRecord game, ChessParsedReplay replay, out long occurrences)
+    {
+        var builder = new SubstrateChangeBuilder(ChessPositionOutcomes.SourceId,
+            "test/position-playing/" + game.PlayingId);
+        occurrences = 0;
+        long score = ChessGraph.ScoreFp1e9(game.Result.ForMover(0));
+        foreach (var position in replay.Positions)
+        {
+            var composed = ChessGraph.EmitComposed(builder, position, ChessPositionOutcomes.SourceId);
+            foreach (var atom in composed.Substructures)
+            {
+                builder.AddAttestation(NativeAttestation.Aggregated(atom.Id,
+                    ChessVocabulary.OutcomeType, ChessVocabulary.OutcomeObject,
+                    ChessPositionOutcomes.SourceId, game.PlayingId, 1, score, 0.9));
+                occurrences++;
+            }
+        }
+        builder.AddEntity(ChessPositionOutcomes.MarkerId(game.PlayingId), EntityTier.Document,
+            ChessVocabulary.AnalysisMarkerType, ChessPositionOutcomes.SourceId);
+        return builder.SetInputUnitsConsumed(1).Build();
+    }
+
+    private static void AssertChangesEqual(SubstrateChange expected, SubstrateChange actual)
+    {
+        Assert.Equal(expected.Metadata with { BuiltAt = default }, actual.Metadata with { BuiltAt = default });
+        Assert.Equal(expected.Entities, actual.Entities);
+        Assert.Equal(expected.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }),
+            actual.Attestations.Select(row => row with { LastObservedAtUnixUs = 0 }));
+        Assert.Equal(expected.PhysicalitySourcePriors.OrderBy(row => row.Key.ToString()),
+            actual.PhysicalitySourcePriors.OrderBy(row => row.Key.ToString()));
+        AssertPhysicalitiesEqual(expected.Physicalities, actual.Physicalities);
+        AssertPhysicalitiesEqual(expected.PhysicalityObservations, actual.PhysicalityObservations);
+        Assert.Equal(expected.CanonicalNames, actual.CanonicalNames);
+    }
+
+    private static void AssertPhysicalitiesEqual(
+        IReadOnlyList<PhysicalityRow> expected, IReadOnlyList<PhysicalityRow> actual)
+    {
+        Assert.Equal(expected.Count, actual.Count);
+        for (int i = 0; i < expected.Count; i++)
+        {
+            Assert.Equal(PhysicalityBody(expected[i]), PhysicalityBody(actual[i]));
+            Assert.Equal(expected[i].TrajectoryXyzm?.Select(BitConverter.DoubleToInt64Bits),
+                actual[i].TrajectoryXyzm?.Select(BitConverter.DoubleToInt64Bits));
+        }
+    }
+
+    // Compare exact payload bits and source attribution; processing timestamps are
+    // intentionally different across independent scalar and batch executions.
+    private static object PhysicalityBody(PhysicalityRow row) => new
+    {
+        row.Id, row.EntityId, row.SourceId, row.Type,
+        X = BitConverter.DoubleToInt64Bits(row.CoordX),
+        Y = BitConverter.DoubleToInt64Bits(row.CoordY),
+        Z = BitConverter.DoubleToInt64Bits(row.CoordZ),
+        M = BitConverter.DoubleToInt64Bits(row.CoordM),
+        row.HilbertIndex, row.NConstituents, row.SourceDim,
+        Alignment = row.AlignmentResidual is { } alignment
+            ? (long?)BitConverter.DoubleToInt64Bits(alignment) : null
+    };
+
     private static SubstrateChange Deposit(ChessGameRecord game, string path)
     {
         var builder = new SubstrateChangeBuilder(ChessPositionOutcomes.SourceId,

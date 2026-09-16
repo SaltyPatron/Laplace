@@ -15,6 +15,9 @@ namespace Laplace.Chess.Service;
 /// </summary>
 public static class ChessTransitions
 {
+    // Keep the existing completion marker: changing its id before replacing prior
+    // evidence would count the same playing twice. Historical POV repair uses
+    // `evict ChessTransitions --rederive`; see chess-starting-side-outcomes.md.
     public const int Version = 1;
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source("ChessTransitions");
     public static readonly Hash128 TrustClassId = ChessVocabulary.AnalysisTrustClass;
@@ -26,6 +29,7 @@ public static class ChessTransitions
     {
         ChessGraph.AppendTransitions(
             b, parsed.PositionIds, parsed.Result,
+            parsed.InitialWhiteToMove ?? throw new InvalidDataException("parsed transitions lack the validated initial mover"),
             TC.StructuredCorpus, SourceId, parsed.PlayingId);
         b.AddEntity(
             MarkerId(parsed.PlayingId), EntityTier.Document,
@@ -50,7 +54,8 @@ public static class ChessTransitions
             positions.Add(ChessCompose.PositionId(state.Board));
         }
         ChessGraph.AppendTransitions(
-            b, positions, game.Result, TC.StructuredCorpus, SourceId, game.PlayingId);
+            b, positions, game.Result, initial.Initial.Board.WhiteToMove,
+            TC.StructuredCorpus, SourceId, game.PlayingId);
         b.AddEntity(
             MarkerId(game.PlayingId), EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, SourceId);

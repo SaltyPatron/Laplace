@@ -449,9 +449,9 @@ public static class ChessSyzygy
         for (int ply = 0; ply <= n; ply++)
         {
             if (largest > 0
-                && m.Terminal(cur) is null
                 && cur.Board.Castle == CastleRights.None
                 && MenCount(cur.Board) <= largest
+                && m.Terminal(cur) is null
                 && prober.Probe(cur.Board) is { } verdict)
             {
                 string surface = m.StateKey(cur);

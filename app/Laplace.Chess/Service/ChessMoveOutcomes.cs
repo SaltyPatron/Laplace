@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Modality;
+using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
@@ -22,11 +23,14 @@ namespace Laplace.Chess.Service;
 /// start and after EVERY recorded live game — 6.4s measured on the deployed API for a
 /// 384-cell answer that should be an index read.
 ///
-/// Ply parity is the mover: constituent ordinals are 1-based, odd = White. The record
-/// already fixes who moved; no board, no replay, no legal-move generation.
+/// Ordinals alternate from the initial board's actual side to move. PGN admission
+/// retains that side from its legal replay; hydrated games recover it from their
+/// admitted starting board. A SetUp/FEN game need not begin with White.
 /// </summary>
 public static class ChessMoveOutcomes
 {
+    // Preserve the completion marker until the owning source's evidence is
+    // replaced; a marker bump alone would double-count historical observations.
     public const int Version = 1;
 
     public static readonly Hash128 SourceId = SubstrateCanonicalIds.Source("ChessMoveOutcomes");
@@ -51,7 +55,7 @@ public static class ChessMoveOutcomes
     /// </summary>
     public static void AppendGame(
         SubstrateChangeBuilder b, Hash128 lineId, IReadOnlyList<Hash128> moveIds,
-        GameOutcome result, Hash128 src, double witnessWeight)
+        GameOutcome result, bool initialWhiteToMove, Hash128 src, double witnessWeight)
     {
         ArgumentNullException.ThrowIfNull(b);
         ArgumentNullException.ThrowIfNull(moveIds);
@@ -65,7 +69,7 @@ public static class ChessMoveOutcomes
                 sourceId: src,
                 contextId: null,
                 games: 1,
-                sumScoreFp1e9: ChessGraph.ScoreFp1e9(result.ForMover(i % 2)),
+                sumScoreFp1e9: ChessGraph.ScoreFp1e9(result.ForMover((initialWhiteToMove ? 0 : 1) ^ (i & 1))),
                 witnessWeight: witnessWeight));
 
         b.AddEntity(MarkerId(lineId, Version), EntityTier.Document,
@@ -76,7 +80,10 @@ public static class ChessMoveOutcomes
     public static void DeriveGame(SubstrateChangeBuilder b, ChessWitnessedGame game)
     {
         ArgumentNullException.ThrowIfNull(game);
-        AppendGame(b, game.LineId, game.MoveIds, game.Result, SourceId, OutcomeWeight);
+        var initial = ChessAnalyze.InitialState(game.StartFen, new ChessModality())
+            ?? throw new InvalidDataException("hydrated move outcomes have no valid initial board");
+        AppendGame(b, game.LineId, game.MoveIds, game.Result,
+            initial.Initial.Board.WhiteToMove, SourceId, OutcomeWeight);
     }
 }
 
