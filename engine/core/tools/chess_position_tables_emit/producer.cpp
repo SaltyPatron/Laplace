@@ -35,7 +35,7 @@ constexpr size_t levels = 64u;
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
-uint64_t add(uint64_t a, uint64_t b) {
+uint64_t checked_add(uint64_t a, uint64_t b) {
     require(b <= UINT64_MAX - a, "producer byte/count overflow");
     return a + b;
 }
@@ -159,7 +159,7 @@ bool valid_record(const Record& record) {
 struct Run {
     uint64_t serial = 0, count = 0;
     bool present = false;
-    uint64_t bytes() const { return add(multiply(count, sizeof(Entry)), trailer_bytes); }
+    uint64_t bytes() const { return checked_add(multiply(count, sizeof(Entry)), trailer_bytes); }
 };
 fs::path run_path(const Directory& directory, const Run& run) {
     return directory.path() / ("run-" + std::to_string(run.serial));
@@ -170,7 +170,7 @@ public:
     void append(const Entry& entry) {
         ledger_.reserve(sizeof(entry));
         file_.write(&entry, sizeof(entry)); digest_.update(&entry, sizeof(entry));
-        count_ = add(count_, 1u);
+        count_ = checked_add(count_, 1u);
     }
     uint64_t finish() {
         const hash128_t hash = digest_.finish();
@@ -252,7 +252,7 @@ Input scan(const fs::path& path, LineVisitor visitor, void* context) {
         size_t length = used;
         if (length && line[length - 1u] == '\r') --length;
         if (length) {
-            result.occurrences = add(result.occurrences, 1u);
+            result.occurrences = checked_add(result.occurrences, 1u);
             if (visitor) visitor(std::string_view(line.data(), length), context);
         }
         used = 0;
@@ -260,7 +260,7 @@ Input scan(const fs::path& path, LineVisitor visitor, void* context) {
     for (;;) {
         const size_t count = input.read(block.data(), block.size());
         if (!count) break;
-        digest.update(block.data(), count); result.bytes = add(result.bytes, count);
+        digest.update(block.data(), count); result.bytes = checked_add(result.bytes, count);
         for (size_t i = 0; i < count; ++i) {
             const char value = block[i];
             if (value == '\n') emit();
@@ -327,7 +327,7 @@ bool validate_blob(const fs::path& path, const hash128_t& source, uint64_t* coun
 }
 
 uint64_t default_spill_bytes(uint64_t records) {
-    return add(multiply(multiply(records, sizeof(Entry)), 3u), 4096u);
+    return checked_add(multiply(multiply(records, sizeof(Entry)), 3u), 4096u);
 }
 
 class Producer::Impl {
@@ -423,7 +423,7 @@ public:
                 Entry entry{};
                 while (reader.next(entry)) {
                     write(&entry.record, sizeof(entry.record));
-                    if (entry.origins & board_origin) stats.board_ids = add(stats.board_ids, 1u);
+                    if (entry.origins & board_origin) stats.board_ids = checked_add(stats.board_ids, 1u);
                 }
             }
             const hash128_t checksum = digest.finish();
@@ -437,7 +437,7 @@ public:
         workspace.remove_empty();
         stats.records = final.count; stats.spill_peak_bytes = ledger.peak;
         replace(temporary, destination);
-        ledger.release(add(sizeof(prefix) + trailer_bytes, multiply(final.count, sizeof(Record))));
+        ledger.release(checked_add(sizeof(prefix) + trailer_bytes, multiply(final.count, sizeof(Record))));
         require(ledger.live == 0u, "producer retained unexpected scratch bytes");
         finished = true;
         return stats;
