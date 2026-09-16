@@ -661,8 +661,8 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
 
     def test_private_native_database_requires_built_physicality_fixtures_in_order(self):
         source = (ROOT / "scripts/pr-db-proof.sh").read_text(encoding="utf-8")
-        self.assertIn('ctest --test-dir "$BUILD" --show-only=json-v1 -L regress > "$native_selection"', source)
-        self.assertIn('ctest --test-dir "$BUILD" --output-on-failure --no-tests=error -L regress', source)
+        self.assertIn('cmake_tool ctest -- --test-dir "$BUILD" --show-only=json-v1 -L regress > "$native_selection"', source)
+        self.assertIn('cmake_tool ctest -- --test-dir "$BUILD" --output-on-failure --no-tests=error -L regress', source)
         validator = source.split("<<'PY_NATIVE_SELECTION'\n", 1)[1].split("\nPY_NATIVE_SELECTION\n", 1)[0]
         required = ["physicality_descriptor_admission", "physicality_readback", "physicality_readback_cold"]
         selection = {"tests": [{"name": "regress_laplace_substrate", "command": [
