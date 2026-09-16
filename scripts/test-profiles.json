@@ -2,6 +2,19 @@
   "schema_version": 1,
   "suites": [
     {
+      "id": "policy-chess-floor-artifacts",
+      "profile": "policy",
+      "owner": "chess",
+      "runner": "script",
+      "command": ["python3", "scripts/test-chess-floor-artifacts.py", "--source-only"],
+      "environment": "source-tree",
+      "mutability": "none",
+      "shared_substrate": "not-applicable",
+      "blocking_authority": "policy",
+      "timeout_class": "fast",
+      "required": true
+    },
+    {
       "id": "policy-installed-chess-corpus",
       "profile": "policy",
       "owner": "chess",
