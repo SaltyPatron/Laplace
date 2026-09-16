@@ -363,6 +363,27 @@ intent_stage_t* intent_stage_new_bounded(size_t row_capacity_hint, size_t maximu
     return s;
 }
 
+size_t intent_stage_retain_physicalities(intent_stage_t* stage) {
+    if (stage == NULL) return 0u;
+    size_t released = stage->witness_cap * sizeof(hash128_t);
+    byte_buf_t* discarded[2] = {&stage->entities, &stage->attestations};
+    for (size_t i = 0u; i < 2u; ++i) {
+        byte_buf_t* buffer = discarded[i];
+        released += buffer->cap;
+        free(buffer->data);
+        buffer->data = NULL;
+        buffer->len = 0u;
+        buffer->cap = 0u;
+        buffer->row_count = 0u;
+    }
+    free(stage->witness_slots);
+    stage->witness_slots = NULL;
+    stage->witness_cap = 0u;
+    stage->witness_count = 0u;
+    stage->allocated_bytes -= released;
+    return released;
+}
+
 size_t intent_stage_memory_bytes(const intent_stage_t* stage) {
     return stage == NULL ? 0u : stage->allocated_bytes;
 }

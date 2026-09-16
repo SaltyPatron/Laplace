@@ -25,6 +25,14 @@ intent_stage_t* intent_stage_new(size_t row_capacity_hint);
  * buffer replacement while old/new allocations coexist. */
 intent_stage_t* intent_stage_new_bounded(size_t row_capacity_hint, size_t maximum_bytes);
 void            intent_stage_free(intent_stage_t* stage);
+/* Exclusive-owner lifetime operation for a stage whose entity/attestation
+ * rows are no longer needed. Frees those table capacities and the entity
+ * witness cache, resets their counts, and returns the exact released payload.
+ * Physicality rows, bytes and borrowed physicality pointers remain unchanged;
+ * borrowed entity/attestation pointers become invalid. The stage's historical
+ * peak is unchanged. NULL and repeated calls return zero. This does not
+ * validate input: admission callers must finish full tuple import first. */
+size_t intent_stage_retain_physicalities(intent_stage_t* stage);
 size_t intent_stage_memory_bytes(const intent_stage_t* stage);
 /* Bounded stages include simultaneous old/new buffers during growth. */
 size_t intent_stage_memory_peak_bytes(const intent_stage_t* stage);

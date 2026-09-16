@@ -217,6 +217,10 @@ static void admission_import(admission_state *s, transport_array *a, stage_list 
         if (rc != 0) admission_status(rc == -2 ? PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED :
                                     PHYSICALITY_DESCRIPTOR_INVALID, "tuple import");
         admission_native_peak(s, intent_stage_memory_peak_bytes(*slot));
+        /* Full E/P/A framing was validated above. Descriptor admission uses
+         * only physicality observations from this owned copy; original caller
+         * stages remain intact for the ordinary writer. Keep the import peak. */
+        intent_stage_retain_physicalities(*slot);
         admission_charge(s, intent_stage_memory_bytes(*slot));
     }
 }
@@ -742,6 +746,10 @@ static void admission_clone_stages(admission_state *s,
         if (rc != 0) admission_status(rc == -2 ? PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED :
                                     PHYSICALITY_DESCRIPTOR_INVALID, "caller stage import");
         admission_native_peak(s, intent_stage_memory_peak_bytes(*slot));
+        /* Full E/P/A framing was validated above. Descriptor admission uses
+         * only physicality observations from this owned copy; original caller
+         * stages remain intact for the ordinary writer. Keep the import peak. */
+        intent_stage_retain_physicalities(*slot);
         admission_charge(s, intent_stage_memory_bytes(*slot));
     }
 }
