@@ -1,8 +1,6 @@
-name: Laplace — development and operator lifecycle
+name: Laplace — operator lifecycle
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       stage:
@@ -42,30 +40,8 @@ env:
   LAPLACE_DATA_ROOT: /vault/Data
 
 jobs:
-  development:
-    name: Development — build and test
-    if: github.event_name == 'push'
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 120
-    concurrency:
-      group: laplace-development-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - name: Checkout exact revision
-        env:
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-
-      - uses: ./.github/actions/setup-laplace-env
-
-      - name: Build and test the product
-        run: bash scripts/product-ci.sh test
-
   operator:
     name: Operator — ${{ inputs.stage }}
-    if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     concurrency:
