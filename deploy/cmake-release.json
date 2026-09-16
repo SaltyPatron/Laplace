@@ -1,0 +1,13 @@
+{
+  "schema": "laplace.cmake-release/v1",
+  "version": "4.4.3",
+  "upstream": "https://github.com/Kitware/CMake",
+  "release_url": "https://github.com/Kitware/CMake/releases/tag/v4.4.3",
+  "platform": "Linux",
+  "architecture": "x86_64",
+  "filename": "cmake-4.4.3-linux-x86_64.tar.gz",
+  "url": "https://github.com/Kitware/CMake/releases/download/v4.4.3/cmake-4.4.3-linux-x86_64.tar.gz",
+  "sha256": "d6c83076c575bc00b823522ac974bda66d0af05d6ddc30e739c12385cf32c6cc",
+  "bytes": 64872980,
+  "top_directory": "cmake-4.4.3-linux-x86_64"
+}

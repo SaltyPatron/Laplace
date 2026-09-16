@@ -24,6 +24,7 @@ registry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(registry)
 
 POLICY_IDS = {
+    "policy-cmake-release",
     "policy-chess-floor-serving",
     "policy-chess-floor-artifacts",
     "policy-source-contract", "policy-registry", "policy-sql-catalog", "policy-actions-topology",

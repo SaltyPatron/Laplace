@@ -309,6 +309,11 @@ bootstrap_build_environment() {
     chgrp "$RUNNER_GROUP" /opt/laplace
     chmod 2775 /opt/laplace
     green "✓ /opt/laplace: shared group $RUNNER_GROUP mode 2775 (setgid, owner preserved)"
+    local cmake_bin
+    cmake_bin=$(python3 "$(dirname "${BASH_SOURCE[0]}")/provision-cmake.py" \
+        --root /opt/laplace/tools/cmake \
+        --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+    green "✓ Pinned CMake selected: $cmake_bin"
 }
 
 bootstrap_migrate_runner_home() {

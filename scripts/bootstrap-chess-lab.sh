@@ -25,6 +25,9 @@ CC_BIN_DIR="$PREFIX/bin"
 APP_DIR="$PREFIX/app"
 ENV_FILE="$APP_DIR/laplace-api.env"
 CUTECHESS_GUI_BUILD="${LAPLACE_CUTECHESS_GUI_BUILD:-0}"
+CMAKE_BIN=$(python3 "$REPO_ROOT/scripts/provision-cmake.py" \
+  --root "$PREFIX/tools/cmake" \
+  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)/cmake
 
 green()  { printf '\033[0;32m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$1"; }
@@ -83,12 +86,12 @@ build_cutechess() {
   # This also works with CMake launchers that do not recognize --fresh, while
   # preserving build outputs/receipts and admitting a changed source path or Qt.
   run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" --reset-build-cache "$CC_BUILD"
-  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 cmake -S "$src" -B "$CC_BUILD" -G Ninja \
+  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 "$CMAKE_BIN" -S "$src" -B "$CC_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF -DCMAKE_PREFIX_PATH="$qt" \
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH="$qt/lib"
   local -a targets=(cli)
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then targets+=(gui); fi
-  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 cmake --build "$CC_BUILD" --clean-first --target "${targets[@]}"
+  run_as_owner env GIT_NO_REPLACE_OBJECTS=1 "$CMAKE_BIN" --build "$CC_BUILD" --clean-first --target "${targets[@]}"
   run_as_owner python3 "$SCRIPT_DIR/provision-cutechess.py" --verify-source "$src" \
     --binary "$CC_BUILD/cutechess-cli" --receipt "$CC_BUILD/laplace-cutechess-build.json"
   if [[ "$CUTECHESS_GUI_BUILD" == 1 ]]; then

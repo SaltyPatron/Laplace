@@ -28,6 +28,10 @@ BUILD="${LAPLACE_DEPS_BUILD:-/build/deps}"
 PREFIX="${LAPLACE_DEPS_PREFIX:-/opt/laplace}"
 ISA="${LAPLACE_TARGET_ISA:-AVX2}"
 RUN_AS="${LAPLACE_DEPS_USER:-laplace-runner}"
+cmake_bin=$(python3 "$ROOT/scripts/provision-cmake.py" \
+  --root "$PREFIX/tools/cmake" \
+  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+export PATH="$cmake_bin:$PATH"
 
 # PIN the generator. It was unset, so cmake picked whatever the ambient
 # environment yielded — Ninja under CI, Unix Makefiles from a bare shell — and
@@ -57,6 +61,10 @@ deps_fingerprint() {
   local d rev
   {
     echo "isa=$ISA"
+    printf 'cmake-release='
+    sha256sum "$ROOT/deploy/cmake-release.json"
+    printf 'cmake-owner='
+    sha256sum "$ROOT/scripts/provision-cmake.py"
     echo "prefix=$PREFIX"
     echo "external=$EXT"
     # HASH THE SUPERBUILD, don't just note its presence.

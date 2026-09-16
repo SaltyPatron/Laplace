@@ -84,6 +84,11 @@ source "$ROOT/scripts/lib/fp.sh"
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+# Select one authenticated CMake/CTest/CPack generation before fingerprinted work.
+cmake_bin=$(python3 "$ROOT/scripts/provision-cmake.py" \
+  --root "$LAPLACE_INSTALL_PREFIX/tools/cmake" \
+  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+export PATH="$cmake_bin:$PATH"
 # The substrate runs the PostgreSQL build under LAPLACE_PG_PREFIX.  Never let a
 # distro client or pg_config win merely because /usr/bin appears first in the
 # runner's inherited PATH: build, install, migrate, tune, regress and benchmark

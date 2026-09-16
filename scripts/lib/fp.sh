@@ -23,6 +23,8 @@ FP_NATIVE_PATHS=(
   cmake
   CMakeLists.txt
   scripts/codegen-attestation-law.py
+  deploy/cmake-release.json
+  scripts/provision-cmake.py
   scripts/chess-floor-artifacts.py
   # engine/core invokes ChessCatalogSurfaces to produce two installed ROMs.
   # Without these inputs the outer pipeline skips CMake entirely, so even a
