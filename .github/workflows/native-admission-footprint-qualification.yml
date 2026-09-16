@@ -1,0 +1,174 @@
+name: Qualify constant-time native stage bound
+on:
+  push:
+    branches: [qualify/native-admission-footprint-o1-20260916]
+permissions:
+  contents: read
+jobs:
+  ordinary-native-controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Read exact native product candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Build ordinary native target and run actual descriptor controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object engine/core/include/laplace/core/intent_stage.h)" = e63c4de9642f35884e911b3fe294cf89e79f9e9a
+          test "$(git hash-object engine/core/include/laplace/core/physicality_descriptor.h)" = 1683d98ed50f85300699ab28b5e73bf2dd29d686
+          test "$(git hash-object engine/core/include/laplace/core/physicality_descriptor_admission.h)" = 1340c521052be6b43d4a3359cac5c04cbd159b11
+          test "$(git hash-object engine/core/src/intent_stage.c)" = 74e8d50266dcc50b08fd5f553f5b58ecf518fa49
+          test "$(git hash-object engine/core/src/physicality_descriptor.c)" = c8dde9a718ee6f82c2c0012b5da93606cd7d1c4c
+          test "$(git hash-object engine/core/src/physicality_descriptor_admission.cpp)" = 368d3a012dd35d9ef603db0f6822d915f61fa1ef
+          test "$(git hash-object engine/core/src/physicality_descriptor_stage.c)" = b0b8fd8fb81f344134ae9a32d800e8fbb292825e
+          test "$(git hash-object engine/core/tests/test_physicality_descriptor.cpp)" = 48e91a75e50c2691d73f5a23386a207a5565f410
+          test "$(git hash-object engine/core/tests/test_physicality_descriptor_admission.cpp)" = 6702d5c69b38bc8a8cc125a45349ea412416e35f
+          test "$(git hash-object engine/core/tests/test_physicality_descriptor_provider.cpp)" = ec4726a5babd9bd8d6769da9f0264d8907888ab1
+          test "$(git hash-object extension/laplace_substrate/src/physicality_descriptor_admission.c)" = ccdc23bec65f33c52de956e9dda544291b0ebd6a
+          test "$(git rev-parse HEAD^)" = 1404ff7f52817980ab61403a6df7fdb79955f523
+          test "$(git hash-object extension/laplace_substrate/tests/physicality_descriptor_native_probe.c)" = cf88c5cde2942252d6e49bd0d64883fc4cec8850
+          qualification_dir="/build/laplace/work/native-admission-footprint-o1/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test ! -e "$qualification_dir"
+          sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$qualification_dir"
+          export QUALIFICATION_DIR="$qualification_dir"
+          printf 'QUALIFICATION_DIR=%s\n' "$qualification_dir" >> "$GITHUB_ENV"
+          mkdir -m 0700 "$qualification_dir/evidence"
+          timeout --signal=TERM --kill-after=15s 300s sudo apt-get update 2>&1 | tee "$qualification_dir/evidence/apt-update.log"
+          timeout --signal=TERM --kill-after=15s 300s sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libicu-dev libxml2-dev zlib1g-dev bison flex 2>&1 | tee "$qualification_dir/evidence/apt-install.log"
+          cc --version | tee "$qualification_dir/evidence/compiler.txt"
+          cmake --version | tee "$qualification_dir/evidence/cmake.txt"
+          python3 - <<'PY' 2>&1 | tee "$qualification_dir/evidence/acquire.log"
+          import concurrent.futures, hashlib, json, os, subprocess, zipfile
+          from pathlib import Path
+          root=Path(os.environ["QUALIFICATION_DIR"])
+          external=root/"external";external.mkdir()
+          ucd=root/"unicode";ucd.mkdir()
+          evidence=root/"evidence"
+          dependencies=[{"archive_sha256":"b8352186f14559127a324333c3378f4208a2de9aea855746bf2fcd1f883efef1","name":"blake3","revision":"f3149ec5bb5449af877ba20377a11008ff499fa2","url":"https://github.com/BLAKE3-team/BLAKE3.git"},{"archive_sha256":"5f1252d70f39d43243b1346f3cdeb944178d6d28cd18c44ed3614625d371e6f0","name":"eigen","revision":"bc3b39870ecb690a623a3f49149a358b95c5781d","url":"https://gitlab.com/libeigen/eigen.git"},{"archive_sha256":"61bd3406aceed3ae5304fa7d37b346aa0e0a896a6be5b0c0db50ec2db0544663","name":"fathom","revision":"c9c6fef0dddc05d2e242c183acf5833149ab676d","url":"https://github.com/jdart1/Fathom"},{"archive_sha256":"080653414b45e6dbe93380c3a65a2c6a6cbf376f9dbc488587c78d73d1b05b77","name":"googletest","revision":"063de7e9578f82b369302001269680b4b1553359","url":"https://github.com/google/googletest.git"},{"archive_sha256":"166ec535ee8908bdec1f03a9a6c71e9621cae881a820396a2cd1386e035dd7be","name":"spectra","revision":"6841bcbacaa0f0a8446210314e682057a084be4e","url":"https://github.com/yixuan/spectra.git"},{"archive_sha256":"033a2ceab11bd6cebbcddba8d5e1d8127bc9e49446d0cd74bf10f991fa80ade3","name":"tree-sitter","revision":"d97971e24500218865c05ed1febdee2acf41bae1","url":"https://github.com/tree-sitter/tree-sitter.git"},{"archive_sha256":"c54b7a5fc55b530887a7e8939575da79a8a6490c124727f836cea7ebeba4ac00","name":"tree-sitter-grammars/tree-sitter-python","revision":"26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64","url":"https://github.com/tree-sitter/tree-sitter-python"},{"archive_sha256":"9194799a7a7dcedf020ba2558fc92fc430633d73680243ae1f1d9de78c719528","name":"tree-sitter-grammars/tree-sitter-c","revision":"b780e47fc780ddc8da13afa35a3f4ed5c157823d","url":"https://github.com/tree-sitter/tree-sitter-c"},{"archive_sha256":"a162edeecfebe736bc561d826dd6d694b78ac970f70a1d4b6dbf5f07429a768a","name":"tree-sitter-grammars/tree-sitter-cpp","revision":"8b5b49eb196bec7040441bee33b2c9a4838d6967","url":"https://github.com/tree-sitter/tree-sitter-cpp"},{"archive_sha256":"291c9b0efda9cdb0a92b491898ba06b914d8d2978a2799f95e66d0f6147405ff","name":"tree-sitter-grammars/tree-sitter-javascript","revision":"58404d8cf191d69f2674a8fd507bd5776f46cb11","url":"https://github.com/tree-sitter/tree-sitter-javascript"},{"archive_sha256":"fef700984cd8d3310f4cf16256fcf73f558b616c8b5ef2b0dabe8638d664e949","name":"tree-sitter-grammars/tree-sitter-rust","revision":"77a3747266f4d621d0757825e6b11edcbf991ca5","url":"https://github.com/tree-sitter/tree-sitter-rust"},{"archive_sha256":"940f56cf414c593d1407681865b24c45b6db27183dcbd749a0b5b22c9f8cf926","name":"tree-sitter-grammars/tree-sitter-go","revision":"2346a3ab1bb3857b48b29d779a1ef9799a248cd7","url":"https://github.com/tree-sitter/tree-sitter-go"},{"archive_sha256":"a912894237b675c773281f1ba6585e01976461092ece7425ebe8d357649b39a8","name":"tree-sitter-grammars/tree-sitter-c-sharp","revision":"cac6d5fb595f5811a076336682d5d595ac1c9e85","url":"https://github.com/tree-sitter/tree-sitter-c-sharp"},{"archive_sha256":"139a5aa58dfa25aea0f35af6b6099e80cf71a06675d7ca25a5a3ece840d86ec6","name":"tree-sitter-grammars/tree-sitter-bash","revision":"a06c2e4415e9bc0346c6b86d401879ffb44058f7","url":"https://github.com/tree-sitter/tree-sitter-bash"},{"archive_sha256":"d1300929944d2bb3b65b9cb83b1e347d0ddc343c80f0ebf8e9bdeef792b3c243","name":"tree-sitter-grammars/tree-sitter-json","revision":"001c28d7a29832b06b0e831ec77845553c89b56d","url":"https://github.com/tree-sitter/tree-sitter-json"},{"archive_sha256":"31f53c7ad2fd385b758ed00766979934fbd3353313aa48dd70342753f2aadd4b","name":"tree-sitter-grammars/tree-sitter-markdown","revision":"c3570720f7f7bbad22fe96603f106276618e0cf5","url":"https://github.com/MDeiml/tree-sitter-markdown"},{"archive_sha256":"b0e8d34a6391af9a7a813b3c278e7f0da16820546500c886388c268852945d61","name":"tree-sitter-grammars/tree-sitter-csv","revision":"f6bf6e35eb0b95fbadea4bb39cb9709507fcb181","url":"https://github.com/amaanq/tree-sitter-csv"},{"archive_sha256":"a9374de60e45d6506bb74d13696729fb8fd8b858961e583a86af50280ff5978d","name":"tree-sitter-grammars/tree-sitter-turtle","revision":"7f789ea7ef765080f71a298fc96b7c957fa24422","url":"https://github.com/GordianDziwis/tree-sitter-turtle"},{"archive_sha256":"5b82017b3bcc79af503e04eb561501487fe8cd89f6b037589d5e9dc1f34d4b05","name":"tree-sitter-grammars/tree-sitter-xml","revision":"5000ae8f22d11fbe93939b05c1e37cf21117162d","url":"https://github.com/tree-sitter-grammars/tree-sitter-xml"},{"archive_sha256":"d237a4a7972374a46ac677c7974cd1b71a96ffa286c93c040c91303441fe7d88","name":"tree-sitter-grammars/tree-sitter-typescript","revision":"75b3874edb2dc714fb1fd77a32013d0f8699989f","url":"https://github.com/tree-sitter/tree-sitter-typescript"},{"archive_sha256":"261f7341de183847ebb04720990c8f55d094a28557b4aef0340dfe86148f9df2","name":"tree-sitter-grammars/tree-sitter-java","revision":"e10607b45ff745f5f876bfa3e94fbcc6b44bdc11","url":"https://github.com/tree-sitter/tree-sitter-java"},{"archive_sha256":"17dced7665a9a6555d9c56dcdb409acdab3f63bd3571081f94598e161b696298","name":"tree-sitter-grammars/tree-sitter-ruby","revision":"ad907a69da0c8a4f7a943a7fe012712208da6dee","url":"https://github.com/tree-sitter/tree-sitter-ruby"},{"archive_sha256":"9ab54123e5fdc27fd43d4877c97a65c4b32c4f35e71809f395900ae77c50a065","name":"tree-sitter-grammars/tree-sitter-julia","revision":"e0f9dcd180fdcfcfa8d79a3531e11d99e79321d3","url":"https://github.com/tree-sitter/tree-sitter-julia"},{"archive_sha256":"5afd3460e186ff08ff8759268e598442c0b90d61e48a432eecd9fcca9965c2d8","name":"tree-sitter-grammars/tree-sitter-kotlin","revision":"f66d2908542e93c0204c6c241f794afe4e9cd5d1","url":"https://github.com/fwcd/tree-sitter-kotlin"},{"archive_sha256":"b47383d2f7ad78e1a84f5670f9379d8dc963141013ae34ecbc0ec624afb85b9f","name":"tree-sitter-grammars/tree-sitter-php","revision":"3f2465c217d0a966d41e584b42d75522f2a3149e","url":"https://github.com/tree-sitter/tree-sitter-php"},{"archive_sha256":"8df9206728f976ed73a7c89c996434d712ea8fd37a81593fef84d446f8b826eb","name":"tree-sitter-grammars/tree-sitter-cuda","revision":"48b066f334f4cf2174e05a50218ce2ed98b6fd01","url":"https://github.com/theHamsta/tree-sitter-cuda"},{"archive_sha256":"9ee2adf4cd9d89ffe6b30667840e8bc8c93d4779a3d469343160ae566bf6fac0","name":"tree-sitter-grammars/tree-sitter-glsl","revision":"24a6c8ef698e4480fecf8340d771fbcb5de8fbb4","url":"https://github.com/theHamsta/tree-sitter-glsl"},{"archive_sha256":"acaec9fc582ecb0f5ee2edd5d5a05faddf21d06f3e57e8e6d3fff36fbfcec8eb","name":"tree-sitter-grammars/tree-sitter-hlsl","revision":"bab9111922d53d43668fabb61869bec51bbcb915","url":"https://github.com/theHamsta/tree-sitter-hlsl"},{"archive_sha256":"cee8be578765d4c082824869d521d5e9f075bc5c0a27680690431c1d9f8c09d7","name":"tree-sitter-grammars/tree-sitter-wgsl","revision":"40259f3c77ea856841a4e0c4c807705f3e4a2b65","url":"https://github.com/szebniok/tree-sitter-wgsl"},{"archive_sha256":"883146ffc05a42a70c2183f09676a061183c4f8af134b1628547dc8e045b41a1","name":"tree-sitter-grammars/tree-sitter-fortran","revision":"7edacd2b21aa80057d9725384a1304a1c758e0f8","url":"https://github.com/stadelmanma/tree-sitter-fortran"},{"archive_sha256":"70c098fca7cfd5d8b6f085ead2241bd752ccf84f6e4bee5913f0dd445fff6e39","name":"tree-sitter-grammars/tree-sitter-asm","revision":"839741fef4dab5128952334624905c82b40c7133","url":"https://github.com/RubixDev/tree-sitter-asm"},{"archive_sha256":"55aff257f5ba972e22afc77d323dbcce226bad70911e56b5c554b5ce83620b54","name":"tree-sitter-grammars/tree-sitter-nasm","revision":"d1b3638d017f2a8585e26dcfc66fe1df94185e30","url":"https://github.com/naclsn/tree-sitter-nasm"},{"archive_sha256":"dfb2d777259df8ad130b5a92af1944133e33fb93309f599b8e2125229ec49189","name":"tree-sitter-grammars/tree-sitter-llvm","revision":"2914786ae6774d4c4e25a230f4afe16aa68fe1c1","url":"https://github.com/benwilliamgraham/tree-sitter-llvm"},{"archive_sha256":"2ccb2012891665dfb71c7c46f4b5233cda31c3c71075932bd0ab106422ade47c","name":"tree-sitter-grammars/tree-sitter-mlir","revision":"f234edcdab9a10ee7444c172f19f41a8d4afba56","url":"https://github.com/artagnon/tree-sitter-mlir"},{"archive_sha256":"17c79d2fa23b75d2352d06bd14648455176456a8efb774e26866e7932ca7c9b4","name":"tree-sitter-grammars/tree-sitter-cmake","revision":"c7b2a71e7f8ecb167fad4c97227c838439280175","url":"https://github.com/uyha/tree-sitter-cmake"},{"archive_sha256":"67c933597586ecf5d388324ea0514c0eb0a01e6626b701611427a0b7b93f5812","name":"tree-sitter-grammars/tree-sitter-ispc","revision":"ba1bb38ac8ddfa6aa7571cbfe9b4d029f7f77447","url":"https://github.com/fab4100/tree-sitter-ispc"},{"archive_sha256":"8151e172d065e981655663b5380c6354811bdd770b937a5ea8269ea3b9e20646","name":"tree-sitter-grammars/tree-sitter-zig","revision":"6479aa13f32f701c383083d8b28360ebd682fb7d","url":"https://github.com/tree-sitter-grammars/tree-sitter-zig"},{"archive_sha256":"ff0acd10a039d391454f4ea6941184f56a8564e2e5010099f93f438082c900cc","name":"postgresql","revision":"724edf9bde9d356724ad384a2e196edc3c9f80f7","url":"https://git.postgresql.org/git/postgresql.git"}]
+          unicode_files=[{"bytes":2827429,"path":"ucd/NormalizationTest.txt","role":"uax15-conformance","sha256":"5019ffd530751a741900c849c0e010332f142a3612234639bd200b82138a87db","url":"https://www.unicode.org/Public/17.0.0/ucd/NormalizationTest.txt"},{"bytes":126570,"path":"ucd/auxiliary/GraphemeBreakTest.txt","role":"uax29-grapheme-conformance","sha256":"e2d134d2c52919bace503ebb6a551c1855fe1a1faec18478c78fff254a1793ec","url":"https://www.unicode.org/Public/17.0.0/ucd/auxiliary/GraphemeBreakTest.txt"},{"bytes":322136,"path":"ucd/auxiliary/WordBreakTest.txt","role":"uax29-word-conformance","sha256":"1de23a75f37904abc7d206239ee8d34f8fdf0fb4ab32a7174dfbabbde25419b2","url":"https://www.unicode.org/Public/17.0.0/ucd/auxiliary/WordBreakTest.txt"},{"bytes":87946,"path":"ucd/auxiliary/SentenceBreakTest.txt","role":"uax29-sentence-conformance","sha256":"12cb47d028ded0c1cb8a28558f95479cbcd24559c46977015c82f3b50a1cc6e4","url":"https://www.unicode.org/Public/17.0.0/ucd/auxiliary/SentenceBreakTest.txt"},{"bytes":2304434,"path":"uca/allkeys.txt","role":"ducet-explicit-and-implicit-collation-elements","sha256":"2503d09367c2639a4fb8fd55e81aaacb0d9fb4ea26600333329bd12456b99ecd","url":"https://www.unicode.org/Public/17.0.0/uca/allkeys.txt"}]
+          def command(args,timeout=180):
+              try:
+                  return subprocess.run(args,check=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=timeout).stdout
+              except subprocess.CalledProcessError as error:
+                  print(error.stdout.decode(errors="replace"),flush=True)
+                  raise
+          def acquire(item):
+              path=external/item["name"];path.mkdir(parents=True)
+              command(["git","init","-q",str(path)])
+              command(["git","-C",str(path),"-c","protocol.version=2","fetch","--no-tags","--depth=1",item["url"],item["revision"]])
+              observed=command(["git","-C",str(path),"rev-parse","FETCH_HEAD"]).decode().strip()
+              if observed!=item["revision"]:raise RuntimeError("immutable upstream revision mismatch")
+              archive=path/"qualification.tar"
+              with archive.open("xb") as stream:
+                  subprocess.run(["git","-C",str(path),"archive","--format=tar",observed],check=True,stdout=stream,timeout=120)
+              digest=hashlib.file_digest(archive.open("rb"),"sha256").hexdigest()
+              if digest!=item["archive_sha256"]:raise RuntimeError("upstream Git archive digest mismatch: "+item["name"])
+              archive.unlink()
+              command(["git","-C",str(path),"checkout","--detach","-q",observed])
+              print("qualified dependency",item["name"],observed,flush=True)
+              return item
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+              acquired=list(pool.map(acquire,dependencies))
+          for item in unicode_files:
+              path=ucd/item["path"];path.parent.mkdir(parents=True,exist_ok=True)
+              command(["curl","--fail","--location","--proto","=https","--connect-timeout","20","--max-time","120","--max-filesize","10000000",item["url"],"--output",str(path)])
+              if path.stat().st_size!=item["bytes"] or hashlib.file_digest(path.open("rb"),"sha256").hexdigest()!=item["sha256"]:
+                  raise RuntimeError("pinned Unicode input mismatch: "+item["path"])
+          xml=ucd/"ucdxml/ucd.nounihan.flat.zip";xml.parent.mkdir()
+          xml_url="https://www.unicode.org/Public/17.0.0/ucdxml/ucd.nounihan.flat.zip"
+          command(["curl","--fail","--location","--proto","=https","--connect-timeout","20","--max-time","120","--max-filesize","25000000",xml_url,"--output",str(xml)])
+          with zipfile.ZipFile(xml) as archive:
+              members=archive.infolist()
+              if len(members)!=1 or members[0].filename!="ucd.nounihan.flat.xml" or members[0].file_size>200000000:
+                  raise RuntimeError("unexpected official UCDXML archive")
+              with archive.open(members[0]) as stream:
+                  member_hash=hashlib.file_digest(stream,"sha256").hexdigest()
+          receipt={"schema":"laplace.hosted-native-qualification-inputs/v1",
+                   "scope":"isolated upstream build inputs; not installed Original dependency provenance",
+                   "pin_source":{"repository":"SaltyPatron/Laplace-Refactor","commit":"e5fb773c3c5758679eb13c3dd228a0ba2aab27af",
+                                 "dependency_lock_blob":"ebdeb881c389a00f6b8a52fd069c1049e886058c",
+                                 "grammar_lock_blob":"da364f3938a9d23fd54a1857431817c9b14a7453",
+                                 "unicode_source_contract_blob":"ea504d53c83d0820b9cfb02be7d6cf278db8c4e3"},
+                   "dependencies":acquired,"pinned_unicode_files":unicode_files,
+                   "official_ucdxml_observation":{"url":xml_url,"bytes":xml.stat().st_size,
+                       "sha256":hashlib.file_digest(xml.open("rb"),"sha256").hexdigest(),
+                       "member_sha256":member_hash,"identity_kind":"observed official versioned HTTPS download"}}
+          (evidence/"inputs.json").write_text(json.dumps(receipt,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(receipt,sort_keys=True))
+          PY
+          timeout --signal=TERM --kill-after=15s 120s cmake -S engine -B "$qualification_dir/build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+            -DLAPLACE_EXTERNAL="$qualification_dir/external" -DLAPLACE_UCD_PATH="$qualification_dir/unicode" \
+            -DLAPLACE_REQUIRE_MKL=OFF -DLAPLACE_SYNTHESIS_REQUIRE_MKL=OFF \
+            '-DLAPLACE_INSTALL_FILE_PERMS=OWNER_READ;OWNER_WRITE;GROUP_READ;WORLD_READ' \
+            '-DLAPLACE_INSTALL_EXEC_PERMS=OWNER_READ;OWNER_WRITE;OWNER_EXECUTE;GROUP_READ;GROUP_EXECUTE;WORLD_READ;WORLD_EXECUTE' \
+            '-DLAPLACE_INSTALL_DIR_PERMS=OWNER_READ;OWNER_WRITE;OWNER_EXECUTE;GROUP_READ;GROUP_EXECUTE;WORLD_READ;WORLD_EXECUTE' \
+            2>&1 | tee "$qualification_dir/evidence/configure.log"
+          timeout --signal=TERM --kill-after=15s 1500s cmake --build "$qualification_dir/build" --target laplace_core_tests --parallel 2 \
+            2>&1 | tee "$qualification_dir/evidence/build.log"
+          timeout --signal=TERM --kill-after=15s 300s "$qualification_dir/build/core/tests/laplace_core_tests" \
+            --gtest_filter='PhysicalityDescriptor.*:PhysicalityDescriptorStage.*:PhysicalityDescriptorReadback.*:PhysicalityDescriptorStageAllocation.*:PhysicalityDescriptorVocabulary.*:PhysicalityDescriptorProviderBatch.*:PhysicalityDescriptorAdmission.*' \
+            --gtest_output="xml:$qualification_dir/evidence/native-tests.xml" \
+            2>&1 | tee "$qualification_dir/evidence/native-tests.log"
+          python3 - <<'PY' 2>&1 | tee "$qualification_dir/evidence/result.log"
+          import hashlib,json,os,xml.etree.ElementTree as ET
+          from pathlib import Path
+          root=Path(os.environ["QUALIFICATION_DIR"]);evidence=root/"evidence";build=root/"build"
+          expected=["PhysicalityDescriptor.ReusesExactFormAndSeparatesAlternateBodiesWithoutChangingEntity","PhysicalityDescriptor.RootIdentityIsIndependentOfBatchOrderAndUnrelatedNeighbors","PhysicalityDescriptor.EveryNodeUsesTheOrdinaryOrderedIdentityOwner","PhysicalityDescriptor.CarrierReferencesRemainOrdinaryChildrenAndKeepOccurrenceScope","PhysicalityDescriptor.PreservesRawCarrierWordsAndLogicalRunSemantics","PhysicalityDescriptor.EncodesWideLogicalTrajectoryWithoutOrdinalCeiling","PhysicalityDescriptor.FactorIdSizedPayloadDoesNotBecomeEntityReference","PhysicalityDescriptor.ExactBinary64AndNullableFieldsHaveDistinctContent","PhysicalityDescriptor.RejectsInvalidBodyBeforePublishingAnyPlan","PhysicalityDescriptor.RejectsContentParentMismatchAndNoncanonicalCarrierBits","PhysicalityDescriptor.EnforcesPeakAllocationIncludingEmptyBatch","PhysicalityDescriptor.RepeatedFormsFitTheirActualGraphWithoutLosingOccurrences","PhysicalityDescriptor.RehashAndArrayGrowthPreserveOrderedIdentityUnderFiniteGrants","PhysicalityDescriptor.RejectsArithmeticOverflowWithoutReadingBorrowedBody","PhysicalityDescriptor.RejectsAliasedProviderVocabularyBeforeBinaryFieldsLoseInformation","PhysicalityDescriptorStage.RepeatedRawFormsFitSameGrantAndKeepEveryObservation","PhysicalityDescriptorStage.CapturesActualBodiesBeforePlacementDedupAndKeepsObservations","PhysicalityDescriptorStage.ExactCopyReadbackRetainsBodyAndRetiresBorrowedSourceSafely","PhysicalityDescriptorStage.ReleasesOnlyValidatedPlanAndRetainsExactCapturedRows","PhysicalityDescriptorStage.PreservesIdentityAcrossActualStagePartitionBoundaries","PhysicalityDescriptorStage.RejectsMalformedActualTupleAndIncorrectPlacementKey","PhysicalityDescriptorStage.EnforcesSeparateCaptureAndPlanPeakBudgets","PhysicalityDescriptorReadback.ReconstructsExactBodyFromOrdinaryCompositionRecords","PhysicalityDescriptorReadback.RejectsGinCandidateWithWrongTypedFieldDespiteValidContentIdentity","PhysicalityDescriptorReadback.RejectsWrongSchemaAndMissingOrForgedCompositionRecords","PhysicalityDescriptorReadback.ReconstructsFactorWordsWithoutIntroducingCarrierReferences","PhysicalityDescriptorReadback.AccountsForItsPeakWorksetAndRejectsInvalidOffsets","PhysicalityDescriptorStageAllocation.EmptyAndHintAllocationsRespectTheDeclaredCeiling","PhysicalityDescriptorStageAllocation.AllCopyBuffersShareOneRetainedBudget","PhysicalityDescriptorStageAllocation.WitnessStorageIsChargedAndExistingWitnessesNeedNoGrowth","PhysicalityDescriptorStageAllocation.BufferGrowthChargesOldAndNewStorageAtTheSameTime","PhysicalityDescriptorStageAllocation.MixedTableGrowthPreservesPublicBytesAndRefusedPrefix","PhysicalityDescriptorVocabulary.GeneratedSourceIsOrdinarySelfWitnessedContentUnderItsBudget","PhysicalityDescriptorVocabulary.SessionProjectionHasAnOrdinaryDistinctDerivationSource","PhysicalityDescriptorVocabulary.AllNumericAndSchemaRootsMatchTheOrdinaryContentOwner","PhysicalityDescriptorVocabulary.GeneratedStageMatchesOrdinaryWitnessEmission","PhysicalityDescriptorVocabulary.ReceiptIsCopiedAndStageOwnershipTransfersExactlyOnce","PhysicalityDescriptorVocabulary.RejectsMissingFloorAndInsufficientRetainedBudgetWithoutOutput","PhysicalityDescriptorVocabulary.FloorIndexPreparationIsBoundedReportedAndReused","PhysicalityDescriptorProviderBatch.PreservesEveryBodyVariantAndObservationInTheNativeStage","PhysicalityDescriptorProviderBatch.ReportsResourceFailureAndKeepsPriorSuccessfulRowsOnInvalidInput","PhysicalityDescriptorAdmission.CancelledCapturePublishesNothingAndPreservesBorrowedRows","PhysicalityDescriptorAdmission.CancellationUnwindsMaterializationIncludingLateOutputThenRetryMatchesLegacy","PhysicalityDescriptorAdmission.ActualByteCarriersUsePinnedBasisAndStoredContentTakesPrecedence","PhysicalityDescriptorAdmission.TransitiveProviderChangeKeepsExactDescriptorAndChangesRootView","PhysicalityDescriptorAdmission.RootIdentityAndViewIgnoreUnrelatedBatchNeighborsAndStageOrder","PhysicalityDescriptorAdmission.FrontierRequiresCheckedAbsenceAndTheExplicitAdmittedWinner","PhysicalityDescriptorAdmission.MixedWriterStagesSelectFirstContentPlacementAndRetainAllRawForms","PhysicalityDescriptorAdmission.ReleasedCaptureKeepsExactMaterializationAndFiniteCoexistence","PhysicalityDescriptorAdmission.ProvidersAuthenticateEveryBodyAndCurrentSelectionRemainsStrict","PhysicalityDescriptorAdmission.RepeatedCompositeCarrierRequiresProviderAndReusesAdmittedBodyAsCurrent","PhysicalityDescriptorAdmission.ExactSelfReferenceCycleTerminatesWithoutGeneratedFeedback","PhysicalityDescriptorAdmission.DuplicateSourceUnitWitnessesKeepOneObservationAndLatestTime","PhysicalityDescriptorAdmission.RejectsInvalidOrConflictingSourcePriorWithoutPublishingStage","PhysicalityDescriptorAdmission.RetainedReceiptTracksStageTransferAndBudgetFailurePublishesNothing","PhysicalityDescriptorAdmission.ExactBodyReadsBackFromActualGeneratedCompositionTrajectories","PhysicalityDescriptorAdmission.PhasedCaptureRetiresEncodedSourceBeforeCompleteValidation","PhysicalityDescriptor.DiagnosedPlannerPreservesOutputsAndExactFiniteGrantDecisions","PhysicalityDescriptor.DiagnosedPlannerKeepsInvalidBodyCancellationAndOverflowDistinct","PhysicalityDescriptor.SourcePlanBoundCoversActualRecipeAndOccurrenceArrays","PhysicalityDescriptorStage.ShapeAndPayloadBoundsUseActualOrdinaryTupleFrames","PhysicalityDescriptorAdmission.DiagnosedRefusalsRetainExactOwnerAndRetryPublishesCompleteRows","PhysicalityDescriptorStage.ConstantTimeProducerShapeBoundsExactRowsWithoutChangingStage"]
+          tree=ET.parse(evidence/"native-tests.xml")
+          cases=tree.findall(".//testcase")
+          names=[case.attrib["classname"]+"."+case.attrib["name"] for case in cases]
+          if sorted(names)!=sorted(expected) or len(names)!=63:
+              raise RuntimeError("ordinary native target did not run exact selected 63 tests")
+          if any(case.find("failure") is not None or case.find("skipped") is not None or case.attrib.get("status")!="run" or case.attrib.get("result")!="completed" for case in cases):
+              raise RuntimeError("native controls contain failure or skipped/unexecuted cases")
+          files=[build/"core/tests/laplace_core_tests",build/"core/liblaplace_core.so",
+                 build/"core/perfcache/laplace_t0_perfcache.bin",build/"core/perfcache/laplace_modality_number_perfcache.bin"]
+          artifacts=[{"path":str(p),"bytes":p.stat().st_size,"sha256":hashlib.file_digest(p.open("rb"),"sha256").hexdigest()} for p in files]
+          result={"schema":"laplace.native-buffer-growth-controls/v1","status":"passed","tests":names,
+                  "passed":63,"failed":0,"skipped":0,"ordinary_target":"laplace_core_tests",
+                  "source_commit":os.environ["GITHUB_SHA"],"product_candidate":"1404ff7f52817980ab61403a6df7fdb79955f523","artifacts":artifacts,
+                  "scope":"GCC ordinary native core target with actual generated Unicode17 floor; portable cancellation, allocator, phased capture, descriptor bounds and constant-time producer sizing controls; no installed PG/runtime or throughput claim"}
+          (evidence/"result.json").write_text(json.dumps(result,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(result,sort_keys=True))
+          PY
+          test "$(git hash-object engine/core/include/laplace/core/intent_stage.h)" = e63c4de9642f35884e911b3fe294cf89e79f9e9a
+          test "$(git hash-object engine/core/include/laplace/core/physicality_descriptor.h)" = 1683d98ed50f85300699ab28b5e73bf2dd29d686
+          test "$(git hash-object engine/core/include/laplace/core/physicality_descriptor_admission.h)" = 1340c521052be6b43d4a3359cac5c04cbd159b11
+          test "$(git hash-object engine/core/src/intent_stage.c)" = 74e8d50266dcc50b08fd5f553f5b58ecf518fa49
+          test "$(git hash-object engine/core/src/physicality_descriptor.c)" = c8dde9a718ee6f82c2c0012b5da93606cd7d1c4c
+          test "$(git hash-object engine/core/src/physicality_descriptor_admission.cpp)" = 368d3a012dd35d9ef603db0f6822d915f61fa1ef
+          test "$(git hash-object engine/core/src/physicality_descriptor_stage.c)" = b0b8fd8fb81f344134ae9a32d800e8fbb292825e
+          test "$(git hash-object engine/core/tests/test_physicality_descriptor.cpp)" = 48e91a75e50c2691d73f5a23386a207a5565f410
+          test "$(git hash-object engine/core/tests/test_physicality_descriptor_admission.cpp)" = 6702d5c69b38bc8a8cc125a45349ea412416e35f
+          test "$(git hash-object engine/core/tests/test_physicality_descriptor_provider.cpp)" = ec4726a5babd9bd8d6769da9f0264d8907888ab1
+          test "$(git hash-object extension/laplace_substrate/src/physicality_descriptor_admission.c)" = ccdc23bec65f33c52de956e9dda544291b0ebd6a
+          git diff --exit-code
+          
+      - name: Retain native controls, actual Unicode floor and source bindings
+        id: artifact
+        if: always() && env.QUALIFICATION_DIR != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-admission-footprint-o1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.QUALIFICATION_DIR }}/evidence/
+            ${{ env.QUALIFICATION_DIR }}/build/core/tests/laplace_core_tests
+            ${{ env.QUALIFICATION_DIR }}/build/core/liblaplace_core.so*
+            ${{ env.QUALIFICATION_DIR }}/build/core/perfcache/laplace_t0_perfcache.bin
+            ${{ env.QUALIFICATION_DIR }}/build/core/perfcache/laplace_modality_number_perfcache.bin
+            ${{ env.QUALIFICATION_DIR }}/build/CMakeCache.txt
+          if-no-files-found: error
+          retention-days: 90
+      - name: Print retained artifact identity
+        if: always()
+        env:
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
+          ARTIFACT_SHA256: ${{ steps.artifact.outputs.artifact-digest }}
+        run: |
+          printf 'artifact_id=%s\nartifact_sha256=%s\n' "$ARTIFACT_ID" "$ARTIFACT_SHA256"
