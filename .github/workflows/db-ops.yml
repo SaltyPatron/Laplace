@@ -5,6 +5,8 @@ name: DB — lifecycle ops
 # operation cannot overlap install/schema/publication mutation.
 #
 # Recreate restores the authentic lexical sources required by product task execution.
+# It must first publish the current checked-out native/managed runtime so ingest never
+# runs against stale binaries left on a persistent self-hosted runner.
 # Restoring the broader canonical foundation remains an explicit option.
 
 on:
@@ -21,7 +23,7 @@ on:
           - repair      # Re-sync extension SQL + re-tune + re-point perfcache/API env. NO DATA LOSS.
           - reindex     # Rebuild INVALID indexes. CONCURRENTLY; NO DATA LOSS.
           - remigrate   # `reset` + `up`: re-apply ALL migrations. Keeps substrate data.
-          - recreate    # DESTRUCTIVE. Nuke + migrate + runtime repair + required lexical sources.
+          - recreate    # DESTRUCTIVE. Build/install current runtime, nuke + migrate + lexical sources.
       confirm:
         description: "type the database name to authorize a destructive operation (recreate)"
         type: string
@@ -150,6 +152,10 @@ jobs:
           dotnet build app/Laplace.Migrations/Laplace.Migrations.csproj -c Release -v q --nologo
           dotnet app/Laplace.Migrations/bin/Release/net10.0/Laplace.Migrations.dll reset --yes
           bash scripts/pipeline.sh migrate
+
+      - name: Publish current runtime before recreate
+        if: inputs.operation == 'recreate'
+        run: bash scripts/pipeline.sh build install
 
       - name: Recreate database structure and runtime
         if: inputs.operation == 'recreate'
