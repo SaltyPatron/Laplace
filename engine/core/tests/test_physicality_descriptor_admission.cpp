@@ -575,9 +575,39 @@ TEST_F(PhysicalityDescriptorAdmission, ReleasedCaptureKeepsExactMaterializationA
         // no assertion assumes that old peak-minus-one must fail after growth.
         ASSERT_LE(native_peak, kBudget - capture_bytes);
         const size_t grant = std::max(capture_peak, capture_bytes + native_peak);
-        ASSERT_EQ(run(released, selected.current, selected.admitted, selected.missing, sources, after,
-            grant - capture_bytes), selected.status);
+        physicality_descriptor_materialization_diagnostics_t diagnostics{};
+        physicality_descriptor_materialization_t* after_raw = nullptr;
+        const auto diagnosed_status = physicality_descriptor_materialize_diagnosed_cancelable(
+            released.get(), vocabulary.get(), selected.current.data(), selected.current.size(),
+            selected.admitted.data(), selected.admitted.size(),
+            selected.missing.data(), selected.missing.size(), sources.data(), sources.size(),
+            &kSource, 200, grant - capture_bytes, nullptr, &diagnostics, &after_raw);
+        after.reset(after_raw);
+        ASSERT_EQ(diagnosed_status, selected.status);
+        EXPECT_EQ(diagnostics.status, selected.status);
+        EXPECT_EQ(diagnostics.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_NONE);
+        if (selected.status == PHYSICALITY_DESCRIPTOR_OK) {
+            EXPECT_EQ(diagnostics.phase, PHYSICALITY_MATERIALIZATION_COMPLETE);
+            // The combined plan was fully authenticated before its owners
+            // retired; copied forms and complete E/P/A bytes are checked below.
+            EXPECT_GT(diagnostics.plan.node_count, 0u);
+            EXPECT_GE(diagnostics.released_before_serialization_bytes,
+                diagnostics.plan.retained_bytes);
+            EXPECT_GT(diagnostics.serialization_entry_bytes, 0u);
+            EXPECT_LE(diagnostics.peak_bytes, diagnostics.maximum_bytes);
+        } else {
+            EXPECT_EQ(diagnostics.phase, PHYSICALITY_MATERIALIZATION_PROVIDER_INDEX);
+            EXPECT_EQ(diagnostics.released_before_serialization_bytes, 0u);
+        }
         ASSERT_NE(after, nullptr);
+        // Both OK and NEEDS_PROVIDER diagnostics describe the published owner
+        // after local temporaries retire, in the documented header-free scope.
+        const size_t result_header = (grant - capture_bytes) - diagnostics.maximum_bytes;
+        EXPECT_GT(result_header, 0u);
+        EXPECT_EQ(diagnostics.retained_bytes + result_header,
+            physicality_descriptor_materialization_bytes(after.get()));
+        EXPECT_EQ(diagnostics.peak_bytes + result_header,
+            physicality_descriptor_materialization_peak_bytes(after.get()));
         EXPECT_LE(capture_bytes + physicality_descriptor_materialization_peak_bytes(after.get()), grant);
         EXPECT_LE(capture_peak, grant);
         EXPECT_EQ(physicality_descriptor_capture_peak_bytes(released.get()), capture_peak);
@@ -956,6 +986,104 @@ TEST_F(PhysicalityDescriptorAdmission, ExactBodyReadsBackFromActualGeneratedComp
     EXPECT_TRUE(std::signbit(got->alignment_residual));
     EXPECT_EQ(got->source_dim_is_null, 0);
     EXPECT_EQ(got->source_dim, expected.source_dim);
+}
+
+TEST_F(PhysicalityDescriptorAdmission, DiagnosedRefusalsRetainExactOwnerAndRetryPublishesCompleteRows) {
+    const auto body = composition({atom('A'), atom('B')});
+    std::vector<Body> bodies(4096, body);
+    auto original = stage(bodies);
+    auto captured = capture(original.get());
+    ASSERT_NE(captured, nullptr);
+    auto sources = witnesses(bodies.size());
+    const auto execute = [&](size_t grant,
+        physicality_descriptor_materialization_diagnostics_t& diagnostics,
+        Materialization& output) {
+        physicality_descriptor_materialization_t* raw = nullptr;
+        const auto status = physicality_descriptor_materialize_diagnosed_cancelable(
+            captured.get(), vocabulary.get(), nullptr, 0, nullptr, 0, nullptr, 0,
+            sources.data(), sources.size(), &kSource, 200, grant, nullptr, &diagnostics, &raw);
+        output.reset(raw);
+        return status;
+    };
+    Materialization full(nullptr, physicality_descriptor_materialization_free);
+    physicality_descriptor_materialization_diagnostics_t full_diagnostics{};
+    ASSERT_EQ(execute(kBudget, full_diagnostics, full), PHYSICALITY_DESCRIPTOR_OK);
+    ASSERT_NE(full, nullptr);
+    EXPECT_EQ(full_diagnostics.status, PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(full_diagnostics.phase, PHYSICALITY_MATERIALIZATION_COMPLETE);
+    EXPECT_EQ(full_diagnostics.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_NONE);
+    EXPECT_EQ(full_diagnostics.plan.input_count, bodies.size());
+    EXPECT_EQ(full_diagnostics.plan.completed_inputs, bodies.size());
+    EXPECT_GE(full_diagnostics.released_before_serialization_bytes,
+        full_diagnostics.plan.retained_bytes);
+    const size_t peak = physicality_descriptor_materialization_peak_bytes(full.get());
+    ASSERT_LE(peak, kBudget);
+
+    Materialization refused(nullptr, physicality_descriptor_materialization_free);
+    physicality_descriptor_materialization_diagnostics_t refusal{};
+    // Too small for the existing fixed basis validation scratch, while large
+    // enough to create the result owner. No generated rows may escape.
+    ASSERT_EQ(execute(2048u, refusal, refused), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(refused, nullptr);
+    EXPECT_EQ(refusal.status, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(refusal.phase, PHYSICALITY_MATERIALIZATION_ENTRY);
+    EXPECT_EQ(refusal.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_GRANT);
+    ASSERT_LE(refusal.retained_bytes, refusal.maximum_bytes);
+    EXPECT_GT(refusal.requested_bytes, refusal.maximum_bytes - refusal.retained_bytes);
+    EXPECT_LE(refusal.peak_bytes, refusal.maximum_bytes);
+
+    // Derive this refusal from the actual nested planner's grant and mandatory
+    // occurrence arrays. It does not guess unique graph counts or hash slack.
+    const size_t before_plan = kBudget - full_diagnostics.plan.maximum_bytes;
+    const size_t mandatory = bodies.size() *
+        (sizeof(hash128_t) + 3u * sizeof(physicality_descriptor_reference_t));
+    ASSERT_GT(mandatory, 0u);
+    const size_t plan_refusal_grant = before_plan + mandatory - 1u;
+    ASSERT_EQ(execute(plan_refusal_grant, refusal, refused), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(refused, nullptr);
+    EXPECT_EQ(refusal.phase, PHYSICALITY_MATERIALIZATION_COMBINED_PLAN);
+    EXPECT_EQ(refusal.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_PLAN);
+    EXPECT_EQ(refusal.plan.allocation, PHYSICALITY_DESCRIPTOR_PLAN_INITIAL);
+    EXPECT_EQ(refusal.plan.refusal, PHYSICALITY_DESCRIPTOR_PLAN_GRANT_REFUSED);
+    EXPECT_EQ(refusal.maximum_bytes, refusal.plan.maximum_bytes);
+    EXPECT_EQ(refusal.requested_bytes, refusal.plan.requested_bytes);
+    EXPECT_GT(refusal.requested_bytes, refusal.maximum_bytes);
+    EXPECT_EQ(refusal.plan.input_count, bodies.size());
+
+    Materialization retry(nullptr, physicality_descriptor_materialization_free);
+    physicality_descriptor_materialization_diagnostics_t retry_diagnostics{};
+    ASSERT_EQ(execute(peak, retry_diagnostics, retry), PHYSICALITY_DESCRIPTOR_OK);
+    ASSERT_NE(retry, nullptr);
+    EXPECT_LE(physicality_descriptor_materialization_peak_bytes(retry.get()), peak);
+    EXPECT_EQ(retry_diagnostics.status, PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(retry_diagnostics.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_NONE);
+    size_t full_count = 0, retry_count = 0;
+    const auto* full_forms = physicality_descriptor_materialization_forms(full.get(), &full_count);
+    const auto* retry_forms = physicality_descriptor_materialization_forms(retry.get(), &retry_count);
+    ASSERT_EQ(full_count, bodies.size());
+    ASSERT_EQ(retry_count, full_count);
+    for (size_t i = 0; i < full_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&full_forms[i].descriptor_id, &retry_forms[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&full_forms[i].view_id, &retry_forms[i].view_id));
+        EXPECT_EQ(full_forms[i].view_state, retry_forms[i].view_state);
+        EXPECT_EQ(full_forms[i].missing_first, retry_forms[i].missing_first);
+        EXPECT_EQ(full_forms[i].missing_count, retry_forms[i].missing_count);
+    }
+    Stage full_stage(physicality_descriptor_materialization_take_stage(full.get()), intent_stage_free);
+    Stage retry_stage(physicality_descriptor_materialization_take_stage(retry.get()), intent_stage_free);
+    ASSERT_NE(full_stage, nullptr);
+    ASSERT_NE(retry_stage, nullptr);
+    for (const auto table : {INTENT_STAGE_TABLE_ENTITIES, INTENT_STAGE_TABLE_PHYSICALITIES,
+                            INTENT_STAGE_TABLE_ATTESTATIONS}) {
+        size_t full_bytes = 0, retry_bytes = 0;
+        const auto* full_data = intent_stage_tuple_ptr(full_stage.get(), table, &full_bytes);
+        const auto* retry_data = intent_stage_tuple_ptr(retry_stage.get(), table, &retry_bytes);
+        ASSERT_GT(full_bytes, 0u);
+        ASSERT_EQ(retry_bytes, full_bytes);
+        EXPECT_EQ(std::memcmp(full_data, retry_data, full_bytes), 0);
+    }
+    // Both refusals left the caller's borrowed source intact.
+    EXPECT_EQ(intent_stage_physicality_count(original.get()), bodies.size());
 }
 
 } // namespace

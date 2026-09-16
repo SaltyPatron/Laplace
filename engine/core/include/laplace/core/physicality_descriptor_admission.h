@@ -142,6 +142,62 @@ physicality_descriptor_status_t physicality_descriptor_materialize_cancelable(
     size_t maximum_bytes,
     const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_materialization_t** out_materialization);
+
+/* Per-call diagnostics. No pointer is retained by a materialization. The
+ * allocation tuple describes the refusing native subowner, not process RSS:
+ * Memory excludes the result header; a nested plan/stage reports its own
+ * grant. requested_bytes == 0 means unavailable for an older nested owner,
+ * never an inferred allocation. Success retains the measured lifetime delta.
+ * These observations do not change admission, identity, or finite grants. */
+enum {
+    PHYSICALITY_MATERIALIZATION_ENTRY = 0,
+    PHYSICALITY_MATERIALIZATION_CURRENT_CAPTURE = 1,
+    PHYSICALITY_MATERIALIZATION_ADMITTED_CAPTURE = 2,
+    PHYSICALITY_MATERIALIZATION_COMBINED_PLAN = 3,
+    PHYSICALITY_MATERIALIZATION_PROVIDER_INDEX = 4,
+    PHYSICALITY_MATERIALIZATION_GEOMETRY = 5,
+    PHYSICALITY_MATERIALIZATION_VIEWS = 6,
+    PHYSICALITY_MATERIALIZATION_OBSERVATIONS = 7,
+    PHYSICALITY_MATERIALIZATION_SERIALIZATION = 8,
+    PHYSICALITY_MATERIALIZATION_COMPLETE = 9
+};
+enum {
+    PHYSICALITY_MATERIALIZATION_REFUSAL_NONE = 0,
+    PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_GRANT = 1,
+    PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_ALLOCATOR = 2,
+    PHYSICALITY_MATERIALIZATION_REFUSAL_PLAN = 3,
+    PHYSICALITY_MATERIALIZATION_REFUSAL_CAPTURE = 4,
+    PHYSICALITY_MATERIALIZATION_REFUSAL_STAGE = 5,
+    PHYSICALITY_MATERIALIZATION_REFUSAL_SIZE_OR_UNREPORTED = 6
+};
+typedef struct {
+    int32_t status;
+    uint32_t phase;
+    uint32_t refusal_kind;
+    size_t materialization_grant_bytes;
+    size_t maximum_bytes;
+    size_t retained_bytes;
+    size_t peak_bytes;
+    size_t requested_bytes;
+    size_t released_before_serialization_bytes;
+    size_t serialization_entry_bytes;
+    physicality_descriptor_plan_diagnostics_t plan;
+} physicality_descriptor_materialization_diagnostics_t;
+
+physicality_descriptor_status_t physicality_descriptor_materialize_diagnosed_cancelable(
+    const physicality_descriptor_capture_t* captured_source,
+    const physicality_descriptor_vocabulary_t* vocabulary,
+    const intent_stage_t* const* current_content_stages, size_t current_stage_count,
+    const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
+    const hash128_t* explicitly_missing_ids, size_t missing_count,
+    const physicality_descriptor_source_observation_t* observation_sources,
+    size_t observation_source_count,
+    const hash128_t* source_id, int64_t observed_at_unix_us,
+    size_t maximum_bytes,
+    const physicality_descriptor_cancel_t* cancellation,
+    physicality_descriptor_materialization_diagnostics_t* diagnostics,
+    physicality_descriptor_materialization_t** out_materialization);
+
 void physicality_descriptor_materialization_free(
     physicality_descriptor_materialization_t* materialization);
 const hash128_t* physicality_descriptor_materialization_pending(
