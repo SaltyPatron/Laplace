@@ -349,8 +349,8 @@ bash scripts/publish-applications.sh api-recover
 
 Run it from the selected source checkout inside the ordinary exclusive CI or
 operator session, with the normal permanent build/work environment. The existing
-runtime guard requires matching successful native build/install fingerprints,
-the exact installed native/ROM forms, applied migrations, and no running ingest.
+runtime guard requires the configured native build identity, the exact installed
+native/ROM forms, applied migrations, and no running/unresolved ingest-journal entries.
 It does not run host setup or install a different service policy.
 
 This scope builds the API and SPA, seals the entire staged payload, and checks
@@ -370,11 +370,50 @@ honest `product_ready=false` classification. Boot ID and enablement are observed
 a service restart is not a cold-boot test.
 
 Successful API-scope evidence is retained in
-`build/.api-publish-{payload,verified,native}.json`. The full application publish
-stamp is unchanged. A failed deployment restores the previous API payload and its
+`build/.api-publish-{payload,verified,native}.json`. This does not claim a full application deployment. A failed deployment restores the previous API payload and its
 prior active/inactive state; a failed restoration retains its marker and backup
 for the same owner's `api-recover`. The normal full publication remains the owner
-for changes to MCP, Lichess, UCI, credentials and managed host policy.
+for coordinated changes to MCP, Lichess, credentials and managed host policy.
+
+## UCI-only publication for the installed chess GUI
+
+After the selected source's ordinary native and managed build succeeds, the
+existing deployment owner can update the installed UCI runtime independently:
+
+```bash
+bash deploy/linux/deploy.sh --uci-only
+# Retry a retained failed restoration from the same source/build selection:
+bash deploy/linux/deploy.sh --uci-recover
+```
+
+Invoke this inside the ordinary exclusive deployment/operator session with its
+permanent build environment. The command uses `dotnet publish --no-build`,
+compares every staged native library and alias with the exact selected
+`build/engine`, and stages a new immutable UCI release. It verifies the real
+lease wrapper with a UCI handshake, completed depth-one search, legal starting
+move and normal exit before and after atomically selecting
+`/opt/laplace/app/laplace-uci`. Existing processes retain their old release
+through the normal shared lease. API, MCP, Lichess, configuration, credentials
+and systemd state remain under their existing owners.
+
+A failed publication restores the previous UCI selection and verifies that
+launcher. If restoration itself fails, `build/.uci-publish-pending` retains the
+exact checkpoint for retry; the generic application `recover` command also
+dispatches this existing recovery. Successful closure and launch evidence is
+saved as `build/.uci-publish-payload.json` and
+`build/.uci-publish-verified.json`; restoration evidence uses
+`build/.uci-publish-restored.json`. This packaging search explicitly uses the
+existing substrate-off check. It does not prove database access, a recorded
+game, or a GUI game.
+
+For user acceptance, run the installed `laplace-cutechess` public launcher as
+the configured local PostgreSQL peer account. The separate existing
+`check-cutechess-user-engines.py` check verifies official EngineManager
+configuration and substrate-on search; `check-cutechess-gui-game.py` drives the
+real GUI through a complete uncapped 60+1 game, validates the PGN through the
+native chess owner, and requires the Laplace per-search provider evidence and
+normal GUI exit. Its private virtual display is an acceptance session; it does
+not claim an operator desktop is resident or that a cold boot was tested.
 
 ## Branch validation evidence (2026-08-27)
 

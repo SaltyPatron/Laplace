@@ -1,16 +1,158 @@
--- Ingest run history, newest first: the answer to "did that ingest finish,
--- and if not, how far did it get?". A 'running' row whose process is gone is
--- a cut-off run; seed verification passes on the latest row for a source
--- being ok/skipped-complete with evidence persisted.
--- BEGIN ATOMIC: GH #764.
-DROP FUNCTION IF EXISTS laplace.ingest_runs(int);
+-- Canonical ingest-run liveness and recent history.
+--
+-- A persisted status='running' is an execution journal fact, not proof that an
+-- execution is still alive. Liveness has two independent witnesses:
+--   1. the per-run advisory lock held by NpgsqlIngestObservability; and
+--   2. a heartbeat advanced by run/file journal activity.
+-- A run is orphaned only when BOTH witnesses are absent/stale. Every reader and
+-- reconciler below uses this one predicate so the Operator UI, deployment quiet
+-- check, and next-run cleanup cannot disagree about whether a run is alive.
 
-CREATE OR REPLACE FUNCTION ops.ingest_runs(p_limit int DEFAULT 20)
-    RETURNS SETOF laplace.ingest_run_journal
-    LANGUAGE sql STABLE
+ALTER TABLE @extschema@.ingest_run_journal
+    ADD COLUMN IF NOT EXISTS heartbeat_at timestamptz NOT NULL DEFAULT now();
+
+-- Historical rows with dynamic discovery legitimately started with files_total=0.
+-- Once a run is terminal, files_done is an observed lower bound on the final total;
+-- never expose impossible terminal states such as 6 / 0 or 10 / 0.
+UPDATE @extschema@.ingest_run_journal
+   SET files_total = files_done
+ WHERE status <> 'running'
+   AND files_total < files_done;
+
+CREATE OR REPLACE FUNCTION ops.ingest_run_live(
+    p_run uuid,
+    p_stale_after interval DEFAULT interval '90 seconds')
+RETURNS boolean
+LANGUAGE sql
+STABLE
 BEGIN ATOMIC
-    SELECT *
-    FROM laplace.ingest_run_journal
-    ORDER BY started_at DESC
-    LIMIT greatest(p_limit, 0);
+    SELECT COALESCE((
+        SELECT j.status = 'running'
+           AND (
+               j.heartbeat_at >= now() - greatest(p_stale_after, interval '0 seconds')
+               OR EXISTS (
+                   SELECT 1
+                     FROM pg_catalog.pg_locks l
+                    WHERE l.locktype = 'advisory'
+                      AND l.database = (
+                          SELECT d.oid
+                            FROM pg_catalog.pg_database d
+                           WHERE d.datname = current_database())
+                      AND l.classid = 1280330827::oid -- 0x4C504C4B, "LPLK"
+                      AND l.objsubid = 2
+                      AND l.objid::bigint =
+                          (hashtext(j.run_id::text)::bigint & 4294967295)
+               )
+           )
+          FROM @extschema@.ingest_run_journal j
+         WHERE j.run_id = p_run
+    ), false);
 END;
+
+CREATE OR REPLACE FUNCTION ops.ingest_run_touch()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- Legacy callers used "missing advisory lock" by itself as proof of death.
+    -- Refuse that transition while the canonical liveness predicate still has a
+    -- fresh heartbeat or a beacon. This makes old next-run cleanup obey the same
+    -- law as current Operator/deployment reconciliation without a parallel path.
+    IF OLD.status = 'running'
+       AND NEW.status = 'cancelled'
+       AND COALESCE(NEW.error, '') LIKE 'run did not reach completion: liveness lock absent%'
+       AND ops.ingest_run_live(OLD.run_id, interval '90 seconds') THEN
+        RETURN NULL;
+    END IF;
+
+    IF OLD.status = 'running' THEN
+        NEW.heartbeat_at := clock_timestamp();
+        IF NEW.status <> 'running' AND NEW.files_total < NEW.files_done THEN
+            NEW.files_total := NEW.files_done;
+        END IF;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS ingest_run_touch ON @extschema@.ingest_run_journal;
+CREATE TRIGGER ingest_run_touch
+BEFORE UPDATE ON @extschema@.ingest_run_journal
+FOR EACH ROW
+EXECUTE FUNCTION ops.ingest_run_touch();
+
+CREATE OR REPLACE FUNCTION ops.ingest_file_touch_run()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE @extschema@.ingest_run_journal
+       SET heartbeat_at = clock_timestamp()
+     WHERE run_id = NEW.run_id
+       AND status = 'running';
+    RETURN NULL;
+END
+$$;
+
+DROP TRIGGER IF EXISTS ingest_file_touch_run ON @extschema@.ingest_file_journal;
+CREATE TRIGGER ingest_file_touch_run
+AFTER INSERT OR UPDATE ON @extschema@.ingest_file_journal
+FOR EACH ROW
+EXECUTE FUNCTION ops.ingest_file_touch_run();
+
+CREATE OR REPLACE FUNCTION ops.ingest_reconcile_orphans(
+    p_stale_after interval DEFAULT interval '90 seconds')
+RETURNS TABLE(
+    run_id uuid,
+    source_name text,
+    input_units_done bigint,
+    input_units_total bigint)
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog, laplace, ops
+AS $$
+    WITH dead AS (
+        UPDATE laplace.ingest_run_journal j
+           SET status = 'cancelled',
+               phase = 'cancelled',
+               ended_at = clock_timestamp(),
+               error = 'run did not reach completion: heartbeat stale and liveness lock absent; reconciled by canonical ingest liveness'
+         WHERE j.status = 'running'
+           AND NOT ops.ingest_run_live(j.run_id, p_stale_after)
+        RETURNING j.run_id, j.source_name, j.input_units_done, j.input_units_total
+    ), closed_files AS (
+        UPDATE laplace.ingest_file_journal f
+           SET status = 'cancelled',
+               ended_at = clock_timestamp(),
+               error = 'file did not reach completion: owning ingest run was reconciled as orphaned'
+          FROM dead d
+         WHERE f.run_id = d.run_id
+           AND f.status IN ('inventoried', 'running', 'composed')
+        RETURNING f.run_id
+    )
+    SELECT d.run_id, d.source_name, d.input_units_done, d.input_units_total
+      FROM dead d;
+$$;
+
+-- Ingest run history, newest first. Reading the journal first reconciles rows
+-- that can no longer be live by the same heartbeat+beacon law used by deployment.
+-- This makes the Operator portal show execution reality rather than a stale
+-- persisted word left behind by a dead process.
+DROP FUNCTION IF EXISTS laplace.ingest_runs(int);
+CREATE OR REPLACE FUNCTION ops.ingest_runs(p_limit int DEFAULT 20)
+RETURNS SETOF laplace.ingest_run_journal
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog, laplace, ops
+AS $$
+BEGIN
+    PERFORM 1 FROM ops.ingest_reconcile_orphans(interval '90 seconds');
+    RETURN QUERY
+        SELECT j.*
+          FROM laplace.ingest_run_journal j
+         ORDER BY j.started_at DESC
+         LIMIT greatest(p_limit, 0);
+END
+$$;

@@ -38,16 +38,16 @@ jobs:
           git checkout --force "$TARGET_SHA"
 
       - uses: ./.github/actions/setup-laplace-env
+        with:
+          use_cmake: false
+          require_built_revision: true
 
       - name: Ingest model
         run: |
           set -euo pipefail
           model_dir="${MODEL_DIR_INPUT:-}"
           [[ -n "$model_dir" ]] || model_dir="${LAPLACE_TINYLLAMA_DIR:-}"
-          [[ -n "$model_dir" && -d "$model_dir" ]] || {
-            echo "::error::model directory is missing; provide model_dir or LAPLACE_TINYLLAMA_DIR"
-            exit 1
-          }
+          [[ -n "$model_dir" && -d "$model_dir" ]] || { echo "::error::model directory is missing; provide model_dir or LAPLACE_TINYLLAMA_DIR"; exit 1; }
           mkdir -p "$INGEST_LOGDIR"
           scripts/ingest-source.sh model "$model_dir"
 
@@ -65,6 +65,9 @@ jobs:
           git checkout --force "$TARGET_SHA"
 
       - uses: ./.github/actions/setup-laplace-env
+        with:
+          use_cmake: false
+          require_built_revision: true
 
       - name: Synthesize GGUF
         run: |
@@ -74,7 +77,6 @@ jobs:
           [[ -f "$model_dir/config.json" ]] || { echo "::error::$model_dir/config.json missing"; exit 1; }
           mkdir -p "$(dirname "$GGUF_OUT")"
           rm -f "$GGUF_OUT"
-          bash scripts/pipeline.sh build
           scripts/laplace synthesize substrate "$model_dir/config.json" "$GGUF_OUT"
           [[ -s "$GGUF_OUT" ]] || { echo "::error::synthesis produced no GGUF"; exit 1; }
           echo "GGUF_READY path=$GGUF_OUT bytes=$(stat -c%s "$GGUF_OUT")"
