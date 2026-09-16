@@ -1,4 +1,4 @@
-name: Qualify constant-time native stage bound
+name: Compare native source context reuse
 on:
   push:
     branches: [qualify/native-admission-footprint-o1-20260916]
@@ -8,36 +8,77 @@ jobs:
   ordinary-native-controls:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Read exact native product candidate
+      - name: Prepare permanent owned qualification paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          for parent in /build/laplace/work /build/laplace/build /build/laplace/worktrees; do
+            if [[ ! -d "$parent" ]]; then
+              sudo install -d -m 2775 -o "$(id -u)" -g "$(id -g)" "$parent"
+            fi
+            test -w "$parent"
+          done
+          qualification_dir="/build/laplace/work/source-context-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          build_dir="/build/laplace/build/source-context-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          source_dir="/build/laplace/worktrees/source-context-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test ! -e "$qualification_dir"
+          test ! -e "$build_dir"
+          test ! -e "$source_dir"
+          mkdir -m 0700 "$qualification_dir" "$build_dir"
+          mkdir -m 0700 "$qualification_dir/evidence" "$qualification_dir/tmp"
+          printf 'QUALIFICATION_DIR=%s\nQUALIFICATION_BUILD=%s\nQUALIFICATION_SOURCE=%s\n' "$qualification_dir" "$build_dir" "$source_dir" >> "$GITHUB_ENV"
+          printf 'TMPDIR=%s/tmp\nTMP=%s/tmp\nTEMP=%s/tmp\n' "$qualification_dir" "$qualification_dir" "$qualification_dir" >> "$GITHUB_ENV"
+      - name: Read exact ordinary native sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 2
-      - name: Build ordinary native target and run actual descriptor controls
+          fetch-depth: 4
+      - name: Bind preserved history and identical baseline fixture
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object engine/core/include/laplace/core/intent_stage.h)" = e63c4de9642f35884e911b3fe294cf89e79f9e9a
-          test "$(git hash-object engine/core/include/laplace/core/physicality_descriptor.h)" = 1683d98ed50f85300699ab28b5e73bf2dd29d686
-          test "$(git hash-object engine/core/include/laplace/core/physicality_descriptor_admission.h)" = 1340c521052be6b43d4a3359cac5c04cbd159b11
-          test "$(git hash-object engine/core/src/intent_stage.c)" = 74e8d50266dcc50b08fd5f553f5b58ecf518fa49
-          test "$(git hash-object engine/core/src/physicality_descriptor.c)" = c8dde9a718ee6f82c2c0012b5da93606cd7d1c4c
+          python3 - <<'VALIDATE'
+          import ast,re,subprocess
+          from pathlib import Path
+          lines=Path(".github/workflows/native-admission-footprint-qualification.yml").read_text().splitlines()
+          blocks=[];index=0
+          while index<len(lines):
+              if lines[index]=="        run: |":
+                  index+=1;body=[]
+                  while index<len(lines) and (not lines[index].strip() or lines[index].startswith("          ")):
+                      body.append(lines[index][10:]);index+=1
+                  blocks.append("\n".join(body)+"\n")
+              else:index+=1
+          parsed=0
+          for block in blocks:
+              subprocess.run(["bash","-n"],input=block,text=True,check=True,timeout=10)
+              for match in re.finditer(r"python3 - <<'PY'[^\n]*\n(.*?)^PY$",block,re.M|re.S):
+                  ast.parse(match.group(1));parsed+=1
+          assert len(blocks)==5 and parsed==2,(len(blocks),parsed)
+          print("actual workflow syntax:",len(blocks),"Bash blocks,",parsed,"Python bodies")
+          VALIDATE
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^^)" = 5e5c3250b11eca2e7b7f85dccff23497f4a24f6c
+          test "$(git rev-parse HEAD^^^)" = 1404ff7f52817980ab61403a6df7fdb79955f523
+          test "$(git rev-parse HEAD:engine)" = 40fe1580bf39dc2f96c7602a06673a7ccbc6f189
+          test "$(git rev-parse HEAD^:engine)" = 6d9e6d44eb53b1544f5923fc53ab593c06535570
+          test "$(git diff --name-only HEAD^ HEAD)" = engine/core/src/physicality_descriptor_admission.cpp
+          baseline=$(git rev-parse HEAD^)
+          git worktree add --detach "$QUALIFICATION_SOURCE" "$baseline"
+          cd "$QUALIFICATION_SOURCE"
           test "$(git hash-object engine/core/src/physicality_descriptor_admission.cpp)" = 368d3a012dd35d9ef603db0f6822d915f61fa1ef
-          test "$(git hash-object engine/core/src/physicality_descriptor_stage.c)" = b0b8fd8fb81f344134ae9a32d800e8fbb292825e
-          test "$(git hash-object engine/core/tests/test_physicality_descriptor.cpp)" = 48e91a75e50c2691d73f5a23386a207a5565f410
-          test "$(git hash-object engine/core/tests/test_physicality_descriptor_admission.cpp)" = 6702d5c69b38bc8a8cc125a45349ea412416e35f
-          test "$(git hash-object engine/core/tests/test_physicality_descriptor_provider.cpp)" = ec4726a5babd9bd8d6769da9f0264d8907888ab1
-          test "$(git hash-object extension/laplace_substrate/src/physicality_descriptor_admission.c)" = ccdc23bec65f33c52de956e9dda544291b0ebd6a
-          test "$(git rev-parse HEAD^)" = 1404ff7f52817980ab61403a6df7fdb79955f523
-          test "$(git hash-object extension/laplace_substrate/tests/physicality_descriptor_native_probe.c)" = cf88c5cde2942252d6e49bd0d64883fc4cec8850
-          qualification_dir="/build/laplace/work/native-admission-footprint-o1/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          test ! -e "$qualification_dir"
-          sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$qualification_dir"
-          export QUALIFICATION_DIR="$qualification_dir"
-          printf 'QUALIFICATION_DIR=%s\n' "$qualification_dir" >> "$GITHUB_ENV"
-          mkdir -m 0700 "$qualification_dir/evidence"
+          test "$(git hash-object engine/core/tests/test_physicality_descriptor_admission.cpp)" = 97d446aabf2ad6323fda06ce7795cb7b3754f16b
+          printf 'baseline_with_identical_tests=%s\ncandidate_diagnostic=%s\nbaseline_product=%s\ncandidate_product=%s\n' "$baseline" "$GITHUB_SHA" 1404ff7f52817980ab61403a6df7fdb79955f523 4eda46cc178bf597fe84e9c00c6def75730a5b8c > "$QUALIFICATION_DIR/evidence/source.txt"
+      - name: Acquire existing pinned native build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          qualification_dir="$QUALIFICATION_DIR"
           timeout --signal=TERM --kill-after=15s 300s sudo apt-get update 2>&1 | tee "$qualification_dir/evidence/apt-update.log"
           timeout --signal=TERM --kill-after=15s 300s sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libicu-dev libxml2-dev zlib1g-dev bison flex 2>&1 | tee "$qualification_dir/evidence/apt-install.log"
           cc --version | tee "$qualification_dir/evidence/compiler.txt"
@@ -101,74 +142,190 @@ jobs:
           (evidence/"inputs.json").write_text(json.dumps(receipt,sort_keys=True,indent=2)+"\n")
           print(json.dumps(receipt,sort_keys=True))
           PY
-          timeout --signal=TERM --kill-after=15s 120s cmake -S engine -B "$qualification_dir/build" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+      - name: Build the ordinary baseline target with the comparison tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          qualification_dir="$QUALIFICATION_DIR"
+          build_dir="$QUALIFICATION_BUILD"
+          cd "$QUALIFICATION_SOURCE"
+          timeout --signal=TERM --kill-after=15s 120s cmake -S engine -B "$build_dir" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DLAPLACE_EXTERNAL="$qualification_dir/external" -DLAPLACE_UCD_PATH="$qualification_dir/unicode" \
             -DLAPLACE_REQUIRE_MKL=OFF -DLAPLACE_SYNTHESIS_REQUIRE_MKL=OFF \
             '-DLAPLACE_INSTALL_FILE_PERMS=OWNER_READ;OWNER_WRITE;GROUP_READ;WORLD_READ' \
             '-DLAPLACE_INSTALL_EXEC_PERMS=OWNER_READ;OWNER_WRITE;OWNER_EXECUTE;GROUP_READ;GROUP_EXECUTE;WORLD_READ;WORLD_EXECUTE' \
             '-DLAPLACE_INSTALL_DIR_PERMS=OWNER_READ;OWNER_WRITE;OWNER_EXECUTE;GROUP_READ;GROUP_EXECUTE;WORLD_READ;WORLD_EXECUTE' \
             2>&1 | tee "$qualification_dir/evidence/configure.log"
-          timeout --signal=TERM --kill-after=15s 1500s cmake --build "$qualification_dir/build" --target laplace_core_tests --parallel 2 \
+          timeout --signal=TERM --kill-after=15s 1500s cmake --build "$build_dir" --target laplace_core_tests --parallel 2 \
             2>&1 | tee "$qualification_dir/evidence/build.log"
-          timeout --signal=TERM --kill-after=15s 300s "$qualification_dir/build/core/tests/laplace_core_tests" \
-            --gtest_filter='PhysicalityDescriptor.*:PhysicalityDescriptorStage.*:PhysicalityDescriptorReadback.*:PhysicalityDescriptorStageAllocation.*:PhysicalityDescriptorVocabulary.*:PhysicalityDescriptorProviderBatch.*:PhysicalityDescriptorAdmission.*' \
-            --gtest_output="xml:$qualification_dir/evidence/native-tests.xml" \
-            2>&1 | tee "$qualification_dir/evidence/native-tests.log"
-          python3 - <<'PY' 2>&1 | tee "$qualification_dir/evidence/result.log"
-          import hashlib,json,os,xml.etree.ElementTree as ET
+      - name: Run ordinary baseline and candidate controls and alternating timing samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=15s 1200s python3 - <<'PY' 2>&1 | tee "$QUALIFICATION_DIR/evidence/comparison.log"
+          import hashlib,json,os,resource,shutil,signal,statistics,subprocess,time,xml.etree.ElementTree as ET
           from pathlib import Path
-          root=Path(os.environ["QUALIFICATION_DIR"]);evidence=root/"evidence";build=root/"build"
-          expected=["PhysicalityDescriptor.ReusesExactFormAndSeparatesAlternateBodiesWithoutChangingEntity","PhysicalityDescriptor.RootIdentityIsIndependentOfBatchOrderAndUnrelatedNeighbors","PhysicalityDescriptor.EveryNodeUsesTheOrdinaryOrderedIdentityOwner","PhysicalityDescriptor.CarrierReferencesRemainOrdinaryChildrenAndKeepOccurrenceScope","PhysicalityDescriptor.PreservesRawCarrierWordsAndLogicalRunSemantics","PhysicalityDescriptor.EncodesWideLogicalTrajectoryWithoutOrdinalCeiling","PhysicalityDescriptor.FactorIdSizedPayloadDoesNotBecomeEntityReference","PhysicalityDescriptor.ExactBinary64AndNullableFieldsHaveDistinctContent","PhysicalityDescriptor.RejectsInvalidBodyBeforePublishingAnyPlan","PhysicalityDescriptor.RejectsContentParentMismatchAndNoncanonicalCarrierBits","PhysicalityDescriptor.EnforcesPeakAllocationIncludingEmptyBatch","PhysicalityDescriptor.RepeatedFormsFitTheirActualGraphWithoutLosingOccurrences","PhysicalityDescriptor.RehashAndArrayGrowthPreserveOrderedIdentityUnderFiniteGrants","PhysicalityDescriptor.RejectsArithmeticOverflowWithoutReadingBorrowedBody","PhysicalityDescriptor.RejectsAliasedProviderVocabularyBeforeBinaryFieldsLoseInformation","PhysicalityDescriptorStage.RepeatedRawFormsFitSameGrantAndKeepEveryObservation","PhysicalityDescriptorStage.CapturesActualBodiesBeforePlacementDedupAndKeepsObservations","PhysicalityDescriptorStage.ExactCopyReadbackRetainsBodyAndRetiresBorrowedSourceSafely","PhysicalityDescriptorStage.ReleasesOnlyValidatedPlanAndRetainsExactCapturedRows","PhysicalityDescriptorStage.PreservesIdentityAcrossActualStagePartitionBoundaries","PhysicalityDescriptorStage.RejectsMalformedActualTupleAndIncorrectPlacementKey","PhysicalityDescriptorStage.EnforcesSeparateCaptureAndPlanPeakBudgets","PhysicalityDescriptorReadback.ReconstructsExactBodyFromOrdinaryCompositionRecords","PhysicalityDescriptorReadback.RejectsGinCandidateWithWrongTypedFieldDespiteValidContentIdentity","PhysicalityDescriptorReadback.RejectsWrongSchemaAndMissingOrForgedCompositionRecords","PhysicalityDescriptorReadback.ReconstructsFactorWordsWithoutIntroducingCarrierReferences","PhysicalityDescriptorReadback.AccountsForItsPeakWorksetAndRejectsInvalidOffsets","PhysicalityDescriptorStageAllocation.EmptyAndHintAllocationsRespectTheDeclaredCeiling","PhysicalityDescriptorStageAllocation.AllCopyBuffersShareOneRetainedBudget","PhysicalityDescriptorStageAllocation.WitnessStorageIsChargedAndExistingWitnessesNeedNoGrowth","PhysicalityDescriptorStageAllocation.BufferGrowthChargesOldAndNewStorageAtTheSameTime","PhysicalityDescriptorStageAllocation.MixedTableGrowthPreservesPublicBytesAndRefusedPrefix","PhysicalityDescriptorVocabulary.GeneratedSourceIsOrdinarySelfWitnessedContentUnderItsBudget","PhysicalityDescriptorVocabulary.SessionProjectionHasAnOrdinaryDistinctDerivationSource","PhysicalityDescriptorVocabulary.AllNumericAndSchemaRootsMatchTheOrdinaryContentOwner","PhysicalityDescriptorVocabulary.GeneratedStageMatchesOrdinaryWitnessEmission","PhysicalityDescriptorVocabulary.ReceiptIsCopiedAndStageOwnershipTransfersExactlyOnce","PhysicalityDescriptorVocabulary.RejectsMissingFloorAndInsufficientRetainedBudgetWithoutOutput","PhysicalityDescriptorVocabulary.FloorIndexPreparationIsBoundedReportedAndReused","PhysicalityDescriptorProviderBatch.PreservesEveryBodyVariantAndObservationInTheNativeStage","PhysicalityDescriptorProviderBatch.ReportsResourceFailureAndKeepsPriorSuccessfulRowsOnInvalidInput","PhysicalityDescriptorAdmission.CancelledCapturePublishesNothingAndPreservesBorrowedRows","PhysicalityDescriptorAdmission.CancellationUnwindsMaterializationIncludingLateOutputThenRetryMatchesLegacy","PhysicalityDescriptorAdmission.ActualByteCarriersUsePinnedBasisAndStoredContentTakesPrecedence","PhysicalityDescriptorAdmission.TransitiveProviderChangeKeepsExactDescriptorAndChangesRootView","PhysicalityDescriptorAdmission.RootIdentityAndViewIgnoreUnrelatedBatchNeighborsAndStageOrder","PhysicalityDescriptorAdmission.FrontierRequiresCheckedAbsenceAndTheExplicitAdmittedWinner","PhysicalityDescriptorAdmission.MixedWriterStagesSelectFirstContentPlacementAndRetainAllRawForms","PhysicalityDescriptorAdmission.ReleasedCaptureKeepsExactMaterializationAndFiniteCoexistence","PhysicalityDescriptorAdmission.ProvidersAuthenticateEveryBodyAndCurrentSelectionRemainsStrict","PhysicalityDescriptorAdmission.RepeatedCompositeCarrierRequiresProviderAndReusesAdmittedBodyAsCurrent","PhysicalityDescriptorAdmission.ExactSelfReferenceCycleTerminatesWithoutGeneratedFeedback","PhysicalityDescriptorAdmission.DuplicateSourceUnitWitnessesKeepOneObservationAndLatestTime","PhysicalityDescriptorAdmission.RejectsInvalidOrConflictingSourcePriorWithoutPublishingStage","PhysicalityDescriptorAdmission.RetainedReceiptTracksStageTransferAndBudgetFailurePublishesNothing","PhysicalityDescriptorAdmission.ExactBodyReadsBackFromActualGeneratedCompositionTrajectories","PhysicalityDescriptorAdmission.PhasedCaptureRetiresEncodedSourceBeforeCompleteValidation","PhysicalityDescriptor.DiagnosedPlannerPreservesOutputsAndExactFiniteGrantDecisions","PhysicalityDescriptor.DiagnosedPlannerKeepsInvalidBodyCancellationAndOverflowDistinct","PhysicalityDescriptor.SourcePlanBoundCoversActualRecipeAndOccurrenceArrays","PhysicalityDescriptorStage.ShapeAndPayloadBoundsUseActualOrdinaryTupleFrames","PhysicalityDescriptorAdmission.DiagnosedRefusalsRetainExactOwnerAndRetryPublishesCompleteRows","PhysicalityDescriptorStage.ConstantTimeProducerShapeBoundsExactRowsWithoutChangingStage"]
-          tree=ET.parse(evidence/"native-tests.xml")
-          cases=tree.findall(".//testcase")
-          names=[case.attrib["classname"]+"."+case.attrib["name"] for case in cases]
-          if sorted(names)!=sorted(expected) or len(names)!=63:
-              raise RuntimeError("ordinary native target did not run exact selected 63 tests")
-          if any(case.find("failure") is not None or case.find("skipped") is not None or case.attrib.get("status")!="run" or case.attrib.get("result")!="completed" for case in cases):
-              raise RuntimeError("native controls contain failure or skipped/unexecuted cases")
-          files=[build/"core/tests/laplace_core_tests",build/"core/liblaplace_core.so",
-                 build/"core/perfcache/laplace_t0_perfcache.bin",build/"core/perfcache/laplace_modality_number_perfcache.bin"]
-          artifacts=[{"path":str(p),"bytes":p.stat().st_size,"sha256":hashlib.file_digest(p.open("rb"),"sha256").hexdigest()} for p in files]
-          result={"schema":"laplace.native-buffer-growth-controls/v1","status":"passed","tests":names,
-                  "passed":63,"failed":0,"skipped":0,"ordinary_target":"laplace_core_tests",
-                  "source_commit":os.environ["GITHUB_SHA"],"product_candidate":"1404ff7f52817980ab61403a6df7fdb79955f523","artifacts":artifacts,
-                  "scope":"GCC ordinary native core target with actual generated Unicode17 floor; portable cancellation, allocator, phased capture, descriptor bounds and constant-time producer sizing controls; no installed PG/runtime or throughput claim"}
-          (evidence/"result.json").write_text(json.dumps(result,sort_keys=True,indent=2)+"\n")
-          print(json.dumps(result,sort_keys=True))
-          PY
-          test "$(git hash-object engine/core/include/laplace/core/intent_stage.h)" = e63c4de9642f35884e911b3fe294cf89e79f9e9a
-          test "$(git hash-object engine/core/include/laplace/core/physicality_descriptor.h)" = 1683d98ed50f85300699ab28b5e73bf2dd29d686
-          test "$(git hash-object engine/core/include/laplace/core/physicality_descriptor_admission.h)" = 1340c521052be6b43d4a3359cac5c04cbd159b11
-          test "$(git hash-object engine/core/src/intent_stage.c)" = 74e8d50266dcc50b08fd5f553f5b58ecf518fa49
-          test "$(git hash-object engine/core/src/physicality_descriptor.c)" = c8dde9a718ee6f82c2c0012b5da93606cd7d1c4c
-          test "$(git hash-object engine/core/src/physicality_descriptor_admission.cpp)" = 368d3a012dd35d9ef603db0f6822d915f61fa1ef
-          test "$(git hash-object engine/core/src/physicality_descriptor_stage.c)" = b0b8fd8fb81f344134ae9a32d800e8fbb292825e
-          test "$(git hash-object engine/core/tests/test_physicality_descriptor.cpp)" = 48e91a75e50c2691d73f5a23386a207a5565f410
-          test "$(git hash-object engine/core/tests/test_physicality_descriptor_admission.cpp)" = 6702d5c69b38bc8a8cc125a45349ea412416e35f
-          test "$(git hash-object engine/core/tests/test_physicality_descriptor_provider.cpp)" = ec4726a5babd9bd8d6769da9f0264d8907888ab1
-          test "$(git hash-object extension/laplace_substrate/src/physicality_descriptor_admission.c)" = ccdc23bec65f33c52de956e9dda544291b0ebd6a
-          git diff --exit-code
+          root=Path(os.environ["QUALIFICATION_DIR"]);evidence=root/"evidence"
+          build=Path(os.environ["QUALIFICATION_BUILD"]);source=Path(os.environ["QUALIFICATION_SOURCE"])
+          expected=["PhysicalityDescriptorAdmission.PhasedCaptureRetiresEncodedSourceBeforeCompleteValidation","PhysicalityDescriptorAdmission.CancelledCapturePublishesNothingAndPreservesBorrowedRows","PhysicalityDescriptorAdmission.CancellationUnwindsMaterializationIncludingLateOutputThenRetryMatchesLegacy","PhysicalityDescriptorAdmission.ActualByteCarriersUsePinnedBasisAndStoredContentTakesPrecedence","PhysicalityDescriptorAdmission.TransitiveProviderChangeKeepsExactDescriptorAndChangesRootView","PhysicalityDescriptorAdmission.RootIdentityAndViewIgnoreUnrelatedBatchNeighborsAndStageOrder","PhysicalityDescriptorAdmission.FrontierRequiresCheckedAbsenceAndTheExplicitAdmittedWinner","PhysicalityDescriptorAdmission.MixedWriterStagesSelectFirstContentPlacementAndRetainAllRawForms","PhysicalityDescriptorAdmission.ReleasedCaptureKeepsExactMaterializationAndFiniteCoexistence","PhysicalityDescriptorAdmission.ProvidersAuthenticateEveryBodyAndCurrentSelectionRemainsStrict","PhysicalityDescriptorAdmission.RepeatedCompositeCarrierRequiresProviderAndReusesAdmittedBodyAsCurrent","PhysicalityDescriptorAdmission.ExactSelfReferenceCycleTerminatesWithoutGeneratedFeedback","PhysicalityDescriptorAdmission.DuplicateSourceUnitWitnessesKeepOneObservationAndLatestTime","PhysicalityDescriptorAdmission.RejectsInvalidOrConflictingSourcePriorWithoutPublishingStage","PhysicalityDescriptorAdmission.RetainedReceiptTracksStageTransferAndBudgetFailurePublishesNothing","PhysicalityDescriptorAdmission.ExactBodyReadsBackFromActualGeneratedCompositionTrajectories","PhysicalityDescriptorAdmission.DiagnosedRefusalsRetainExactOwnerAndRetryPublishesCompleteRows","PhysicalityDescriptorAdmission.SourceContextRunsMatchScalarOwnersAcrossBothIdentifiersAndTimes","PhysicalityDescriptorAdmission.CachedObservationContextsKeepCancellationAndPriorConflictChecks","PhysicalityDescriptorAdmission.SourceContextObservationWorkload"]
+          patterns=("contiguous","blocks64","alternating")
+          candidate=os.environ["GITHUB_SHA"];baseline=subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()
+          def require(ok,message):
+              if not ok:raise RuntimeError(message)
+          def sha(path):
+              with path.open("rb") as stream:return hashlib.file_digest(stream,"sha256").hexdigest()
+          def cmd(argv,timeout=30):
+              return subprocess.run(argv,check=True,timeout=timeout,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True).stdout
+          def git(*args):return cmd(["git","-C",str(source),*args]).strip()
+          cpu=min(os.sched_getaffinity(0))
+          (evidence/"host.json").write_text(json.dumps({"affinity":sorted(os.sched_getaffinity(0)),"selected_cpu":cpu,
+              "uname":cmd(["uname","-a"]),"lscpu":cmd(["lscpu"]),"compiler":cmd(["c++","--version"]),
+              "cmake":cmd(["cmake","--version"]),"OMP_NUM_THREADS":"1","scope":"one hosted runner; no installed-machine or game-rate claim"},sort_keys=True,indent=2)+"\n")
+          identities={}
+          def snapshot(label):
+              destination=root/label;destination.mkdir()
+              shutil.copy2(build/"core/tests/laplace_core_tests",destination/"laplace_core_tests")
+              for path in sorted((build/"core").glob("liblaplace_core.so*")):
+                  target=destination/path.name
+                  if path.is_symlink():
+                      link=os.readlink(path)
+                      require(Path(link).name==link,"unexpected core link")
+                      target.symlink_to(link)
+                  else:shutil.copy2(path,target)
+              require((destination/"liblaplace_core.so").is_file(),"ordinary core output absent")
+              closure=[{"path":str(p),"bytes":p.stat().st_size,"sha256":sha(p)} for p in (
+                  destination/"laplace_core_tests",destination/"liblaplace_core.so",
+                  build/"core/perfcache/laplace_t0_perfcache.bin",build/"core/perfcache/laplace_modality_number_perfcache.bin")]
+              commands=json.loads((build/"compile_commands.json").read_text())
+              selected=[x for x in commands if x["file"].endswith("/physicality_descriptor_admission.cpp")]
+              require(len(selected)==1,"ordinary materializer compile command missing")
+              identities[label]={"commit":git("rev-parse","HEAD"),"tree":git("rev-parse","HEAD^{tree}"),
+                  "engine_tree":git("rev-parse","HEAD:engine"),"core_cpp":git("hash-object","engine/core/src/physicality_descriptor_admission.cpp"),
+                  "same_test_blob":git("hash-object","engine/core/tests/test_physicality_descriptor_admission.cpp"),
+                  "compile_command":selected[0],"files":closure}
+              shutil.copy2(build/"CMakeCache.txt",evidence/(label+"-CMakeCache.txt"))
+              (evidence/"build-identities.json").write_text(json.dumps(identities,sort_keys=True,indent=2)+"\n")
+          def stop(process):
+              if process.poll() is None:
+                  os.killpg(process.pid,signal.SIGTERM)
+                  try:process.wait(timeout=3)
+                  except subprocess.TimeoutExpired:
+                      os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=3)
+          def execute(label,tag,all_cases):
+              destination=root/label
+              library=(destination/"liblaplace_core.so").resolve()
+              selected_stat=library.stat()
+              env=os.environ.copy()
+              env.update(LD_LIBRARY_PATH=str(destination),OMP_NUM_THREADS="1",OPENBLAS_NUM_THREADS="1",MKL_NUM_THREADS="1")
+              loader=subprocess.run(["ldd",str(destination/"laplace_core_tests")],check=True,env=env,
+                  stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=20).stdout
+              (evidence/(tag+"-loader.txt")).write_text(loader)
+              require("not found" not in loader and str(destination)+"/liblaplace_core.so" in loader,"wrong ordinary core loader route")
+              test_filter="PhysicalityDescriptorAdmission.*" if all_cases else "PhysicalityDescriptorAdmission.SourceContextObservationWorkload"
+              xml=evidence/(tag+".xml");log=evidence/(tag+".log")
+              argv=["taskset","-c",str(cpu),str(destination/"laplace_core_tests"),"--gtest_filter="+test_filter,"--gtest_output=xml:"+str(xml)]
+              observed=[];started=time.monotonic()
+              def limit():resource.setrlimit(resource.RLIMIT_FSIZE,(64<<20,64<<20))
+              with log.open("xb") as output:
+                  process=subprocess.Popen(argv,env=env,stdout=output,stderr=subprocess.STDOUT,stdin=subprocess.DEVNULL,
+                      start_new_session=True,preexec_fn=limit)
+                  try:
+                      while process.poll() is None:
+                          try:
+                              maps=Path(f"/proc/{process.pid}/maps").read_text()
+                              for line in maps.splitlines():
+                                  pieces=line.split(maxsplit=5)
+                                  if len(pieces)==6 and Path(pieces[5]).name.startswith("liblaplace_core.so"):
+                                      require(int(pieces[4])==selected_stat.st_ino and Path(pieces[5]).resolve()==library,
+                                          "actual process loaded another native core")
+                                      if not observed:observed.append(line)
+                          except FileNotFoundError:pass
+                          if time.monotonic()-started>300:raise TimeoutError("bounded native comparison exceeded 300 seconds")
+                          time.sleep(.01)
+                      require(process.returncode==0,"native controls failed: "+tag)
+                  finally:stop(process)
+              require(observed,"actual native process mapping was not witnessed")
+              (evidence/(tag+"-process.json")).write_text(json.dumps({"argv":argv,"pid":process.pid,
+                  "library":str(library),"library_sha256":sha(library),"mapped":observed,"elapsed_seconds":time.monotonic()-started},sort_keys=True,indent=2)+"\n")
+              document=ET.parse(xml);cases=document.findall(".//testcase")
+              names=[c.attrib["classname"]+"."+c.attrib["name"] for c in cases]
+              require(sorted(names)==sorted(expected if all_cases else [expected[-1]]),"selected control set differs")
+              require(all(c.find("failure") is None and c.find("skipped") is None
+                  and c.attrib.get("status")=="run" and c.attrib.get("result")=="completed" for c in cases),"failed/skipped native control")
+              case=next(c for c in cases if c.attrib["name"]=="SourceContextObservationWorkload")
+              properties={p.attrib["name"]:p.attrib["value"] for p in case.findall("./properties/property")}
+              require(properties["observation_rows"]=="16384" and properties["finite_grant_bytes"]=="67108864","workload changed")
+              return properties
+          snapshot("baseline")
+          baseline_properties=execute("baseline","baseline-controls",True)
+          require(git("status","--porcelain","--untracked-files=all")=="","baseline source changed")
+          git("checkout","--detach",candidate)
+          require(git("rev-parse","HEAD:engine")=="40fe1580bf39dc2f96c7602a06673a7ccbc6f189","candidate source mismatch")
+          with (evidence/"candidate-incremental-build.log").open("xb") as output:
+              subprocess.run(["timeout","--signal=TERM","--kill-after=15s","900s","cmake","--build",str(build),
+                  "--target","laplace_core_tests","--parallel","2"],stdout=output,stderr=subprocess.STDOUT,check=True,timeout=925)
+          snapshot("candidate")
+          candidate_properties=execute("candidate","candidate-controls",True)
+          require(identities["baseline"]["compile_command"]==identities["candidate"]["compile_command"],"materializer compiler arguments differ")
+          require(identities["baseline"]["same_test_blob"]==identities["candidate"]["same_test_blob"]=="97d446aabf2ad6323fda06ce7795cb7b3754f16b","fixture differs")
+          require(identities["baseline"]["core_cpp"]=="368d3a012dd35d9ef603db0f6822d915f61fa1ef"
+              and identities["candidate"]["core_cpp"]=="a85da4672293d7ca41e89789de64df62c38155e4","production comparison differs")
+          require(identities["baseline"]["files"][1]["sha256"]!=identities["candidate"]["files"][1]["sha256"],"core library did not change")
+          require(identities["baseline"]["files"][2:]==identities["candidate"]["files"][2:],"actual floor identity changed")
+          def equivalent(left,right):
+              for pattern in patterns:
+                  for table in (1,2,3):
+                      for field in ("hash128","bytes"):
+                          key=f"{pattern}_table{table}_{field}"
+                          require(left[key]==right[key],"full tuple identity differs: "+key)
+                  for field in ("peak_bytes","retained_bytes"):
+                      key=pattern+"_"+field
+                      require(left[key]==right[key],"native owner accounting differs: "+key)
+          equivalent(baseline_properties,candidate_properties)
+          runs=[]
+          for index,label in enumerate(("baseline","candidate","candidate","baseline"),1):
+              properties=execute(label,f"comparison-{index}-{label}",False)
+              equivalent(baseline_properties,properties)
+              runs.append({"label":label,"properties":properties})
+          timings={}
+          for pattern in patterns:
+              timings[pattern]={}
+              for metric in ("observations_to_serialization_checkpoint_ns","uninstrumented_materialization_ns"):
+                  values={}
+                  for label in ("baseline","candidate"):
+                      values[label]=[int(run["properties"][f"{pattern}_sample{sample}_{metric}"])
+                          for run in runs if run["label"]==label for sample in range(1,6)]
+                      require(len(values[label])==10 and min(values[label])>0,"timing sample coverage")
+                  timings[pattern][metric]={"samples_ns":values,
+                      "baseline_median_ns":statistics.median(values["baseline"]),
+                      "candidate_median_ns":statistics.median(values["candidate"]),
+                      "ratio_baseline_over_candidate":statistics.median(values["baseline"])/statistics.median(values["candidate"])}
+          require(git("status","--porcelain","--untracked-files=all")=="","candidate source changed")
+          for label in identities:
+              require(sha(root/label/"liblaplace_core.so")==identities[label]["files"][1]["sha256"],"retained core changed")
+          report={"schema":"laplace.native-source-context-comparison/v1","status":"passed",
+              "baseline_product":"1404ff7f52817980ab61403a6df7fdb79955f523","candidate_product":"4eda46cc178bf597fe84e9c00c6def75730a5b8c",
+              "diagnostic_commit":candidate,"same_fixture_blob":"97d446aabf2ad6323fda06ce7795cb7b3754f16b",
+              "baseline_controls_passed":len(expected),"candidate_controls_passed":len(expected),"failed":0,"skipped":0,
+              "rows_per_fixture":16384,"finite_owner_grant_bytes":67108864,"timing_order":["baseline","candidate","candidate","baseline"],
+              "timings":timings,"tuple_and_peak_parity":True,"identities":identities,
+              "scope":"Same-runner pinned-CPU actual native materialization. Instrumented phase includes observation work, dead-owner retirement and serializer entry until its first checkpoint; full-call samples have no callback. Complete ordinary E/P/A tuples, finite grant, peak and retained bytes match. No PostgreSQL/backend/installed or recorded-game throughput claim."}
+          (evidence/"result.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(report,sort_keys=True))
           
-      - name: Retain native controls, actual Unicode floor and source bindings
-        id: artifact
+          PY
+      - name: Retain compared native binaries, exact floors, timings and failure evidence
         if: always() && env.QUALIFICATION_DIR != ''
+        id: artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: native-admission-footprint-o1-${{ github.run_id }}-${{ github.run_attempt }}
+          name: native-source-context-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ env.QUALIFICATION_DIR }}/evidence/
-            ${{ env.QUALIFICATION_DIR }}/build/core/tests/laplace_core_tests
-            ${{ env.QUALIFICATION_DIR }}/build/core/liblaplace_core.so*
-            ${{ env.QUALIFICATION_DIR }}/build/core/perfcache/laplace_t0_perfcache.bin
-            ${{ env.QUALIFICATION_DIR }}/build/core/perfcache/laplace_modality_number_perfcache.bin
-            ${{ env.QUALIFICATION_DIR }}/build/CMakeCache.txt
+            ${{ env.QUALIFICATION_DIR }}/baseline/
+            ${{ env.QUALIFICATION_DIR }}/candidate/
+            ${{ env.QUALIFICATION_BUILD }}/core/perfcache/laplace_t0_perfcache.bin
+            ${{ env.QUALIFICATION_BUILD }}/core/perfcache/laplace_modality_number_perfcache.bin
           if-no-files-found: error
           retention-days: 90
-      - name: Print retained artifact identity
-        if: always()
-        env:
-          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
-          ARTIFACT_SHA256: ${{ steps.artifact.outputs.artifact-digest }}
-        run: |
-          printf 'artifact_id=%s\nartifact_sha256=%s\n' "$ARTIFACT_ID" "$ARTIFACT_SHA256"
