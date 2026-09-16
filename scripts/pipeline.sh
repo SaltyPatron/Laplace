@@ -84,6 +84,11 @@ source "$ROOT/scripts/lib/fp.sh"
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+# Select one authenticated CMake/CTest/CPack generation before fingerprinted work.
+cmake_bin=$(python3 "$ROOT/scripts/provision-cmake.py" \
+  --root "$LAPLACE_INSTALL_PREFIX/tools/cmake" \
+  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+export PATH="$cmake_bin:$PATH"
 # The substrate runs the PostgreSQL build under LAPLACE_PG_PREFIX.  Never let a
 # distro client or pg_config win merely because /usr/bin appears first in the
 # runner's inherited PATH: build, install, migrate, tune, regress and benchmark
@@ -244,6 +249,25 @@ ensure_extension_library_path() {
   }
   echo "dynamic_library_path: '$current' -> '$desired'"
   return 0
+}
+
+# Same return convention as ensure_extension_library_path: 0 needs activation,
+# 1 is already current, 2 is failed observation. A server-version change is not
+# represented by pg_settings.pending_restart, which only describes GUC changes.
+postgresql_restart_required() {
+  local running rc
+  if ! running=$(psql -d postgres -U laplace_admin -tAc "SHOW server_version_num"); then
+    echo "::error::cannot observe running PostgreSQL release" >&2
+    return 2
+  fi
+  if "$PYTHON" "$ROOT/scripts/postgresql-release.py" restart-needed \
+       --prefix "$LAPLACE_PG_PREFIX" --server-version-num "$running"; then
+    return 1
+  else
+    rc=$?
+    [[ "$rc" -eq 3 ]] && return 0
+    return 2
+  fi
 }
 
 restart_postgres() {
@@ -517,7 +541,13 @@ phase_test() {
 phase_install() (
   echo "===== PHASE — INSTALL ====="
   test -d build || { echo "::error::build/ missing — run 'pipeline.sh build' first"; exit 1; }
-  local native_fp installed_fp library_path_changed=0
+  local native_fp installed_fp library_path_changed=0 server_release_changed=0
+  if postgresql_restart_required; then
+    server_release_changed=1
+  else
+    local server_rc=$?
+    [[ "$server_rc" -eq 1 ]] || return "$server_rc"
+  fi
   native_fp=$(fp_native)
   if ensure_extension_library_path; then
     library_path_changed=1
@@ -533,7 +563,7 @@ phase_install() (
     echo "::error::native build artifacts are stale — run 'pipeline.sh build install'" >&2
     exit 1
   fi
-  if [[ "$library_path_changed" -eq 0 ]] \
+  if [[ "$library_path_changed" -eq 0 && "$server_release_changed" -eq 0 ]] \
      && fp_check install-native "$native_fp" \
      && installed_fp=$(installed_artifact_digest) \
      && fp_check install-artifacts "$installed_fp"; then
@@ -578,15 +608,26 @@ phase_install() (
   # core exports even when the preload module itself is byte-identical.
   # Chess floors are also pinned by application/postmaster mappings. Their pair
   # hashes participate even when the native libraries are byte-identical.
+  local postgres_activation_required="$server_release_changed"
   if [[ "$so_before" != "$so_after" || "$library_path_changed" -eq 1 ]]; then
     local preload
     preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")
     if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
        || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
-      restart_postgres "install: staged native image, chess floor pair, or resolution path changed"
+      postgres_activation_required=1
     fi
+  fi
+  if [[ "$postgres_activation_required" -eq 1 ]]; then
+    restart_postgres "install: PostgreSQL release, staged native image, chess floor pair, or resolution path changed"
   else
-    echo "install: preloaded native images and chess floors unchanged — no PG bounce needed"
+    echo "install: PostgreSQL release, preloaded native images and chess floors unchanged — no PG bounce needed"
+  fi
+  if postgresql_restart_required; then
+    echo "::error::running PostgreSQL release still differs after native activation" >&2
+    return 2
+  else
+    local activated_server_rc=$?
+    [[ "$activated_server_rc" -eq 1 ]] || return "$activated_server_rc"
   fi
   if [[ "$api_was_active" -eq 1 ]]; then
     sudo -n systemctl start laplace-api
