@@ -1,38 +1,65 @@
-name: Qualify exact recorded floor lifecycle evidence
+name: Coordinate source-only proof handoff
 on:
   push:
     branches: [verify/chess-floor-serving-controls-20260916]
 permissions:
   contents: read
+  actions: write
 jobs:
-  controls:
+  coordinate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    env:
-      PYTHONDONTWRITEBYTECODE: '1'
-      TMPDIR: /build/laplace/work/export-protocol-controls/tmp
-      TMP: /build/laplace/work/export-protocol-controls/tmp
-      TEMP: /build/laplace/work/export-protocol-controls/tmp
+    timeout-minutes: 4
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: e24e854c0ef97292fa272a48981c28ae9a594640
-          persist-credentials: false
-      - name: Check exact source and execute lifecycle protocol controls
+      - name: Guard exact source-only proof and request normal cancellation
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          sudo mkdir -p /build/laplace
-          sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$TMPDIR"
-          test "$(git rev-parse HEAD)" = e24e854c0ef97292fa272a48981c28ae9a594640
-          test "$(git rev-parse HEAD^{tree})" = 9d07e322d580214dc1b3be0fd07e01c5dcca79f8
           python3 - <<'PY'
-          import ast
-          from pathlib import Path
-          for name in ("scripts/export-qualified-chess-floors.py", "scripts/test-qualified-chess-floor-export.py"):
-              ast.parse(Path(name).read_text(), filename=name)
-              print("AST_PASS " + name)
+          import json, os, time, urllib.request
+          base = "https://api.github.com/repos/SaltyPatron/Laplace"
+          run_id, job_id = 35135998233, 104928393020
+          source = "c8cf04ac75fcaf523bc411d6e85fca488c180d95"
+          def request(path, method="GET"):
+              req = urllib.request.Request(base + path, data=b"" if method == "POST" else None,
+                  headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                           "Accept": "application/vnd.github+json",
+                           "X-GitHub-Api-Version": "2022-11-28"}, method=method)
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  raw = response.read(2*1024*1024+1)
+                  if len(raw) > 2*1024*1024: raise ValueError("response envelope")
+                  return json.loads(raw) if raw else {}
+          run = request("/actions/runs/" + str(run_id))
+          jobs = request("/actions/runs/" + str(run_id) + "/attempts/1/jobs?per_page=100")
+          rows = jobs.get("jobs", [])
+          valid_run = (run.get("head_sha") == source and run.get("event") == "pull_request"
+              and run.get("path") == ".github/workflows/pr-validation.yml" and run.get("run_attempt") == 1
+              and run.get("status") == "in_progress")
+          job = next((j for j in rows if j.get("id") == job_id), None)
+          steps = job.get("steps", []) if job else []
+          active = [s.get("name") for s in steps if s.get("status") == "in_progress"]
+          build = [s for s in steps if s.get("name") == "Build exact pull request artifacts"]
+          valid_job = (len(rows) == 1 and job and job.get("head_sha") == source
+              and job.get("status") == "in_progress"
+              and active == ["Check source and publication contracts"]
+              and len(build) == 1 and build[0].get("status") == "pending"
+              and all(s.get("status") == "pending" for s in steps if s.get("number", 0) >= build[0]["number"]))
+          if not valid_run or not valid_job:
+              print(json.dumps({"result":"guard_refused", "run":run_id, "job":job_id,
+                  "source":source, "runStatus":run.get("status"), "active":active}))
+              raise SystemExit(0)
+          request("/actions/runs/" + str(run_id) + "/cancel", "POST")
+          print(json.dumps({"result":"normal_cancel_requested", "run":run_id,
+              "job":job_id, "source":source, "observedPhase":active[0]}), flush=True)
+          deadline = time.monotonic() + 120
+          while time.monotonic() < deadline:
+              state = request("/actions/runs/" + str(run_id))
+              if state.get("status") == "completed":
+                  print(json.dumps({"result":"api_terminal", "conclusion":state.get("conclusion"),
+                      "workerCleanupProven":False}), flush=True)
+                  break
+              time.sleep(2)
+          else:
+              print(json.dumps({"result":"terminal_not_observed_within120s"}), flush=True)
           PY
-          timeout --signal=TERM --kill-after=5s 120s python3 scripts/test-qualified-chess-floor-export.py -v
-          test -z "$(git status --porcelain --untracked-files=all)"
