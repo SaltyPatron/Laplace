@@ -6,11 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 stage="${1:-all}"
-# A push to main is a development event, not an operator request to install,
+# A push to main is development validation, not an operator request to install,
 # mutate the shared database, ingest corpora, publish services, or benchmark.
-# Keep the explicit `all` dispatch semantics for operators, but cap an ordinary
-# push at the development-test boundary even if the workflow's historical
-# default still passes `all`.
 if [[ "${GITHUB_EVENT_NAME:-}" == "push" && "$stage" == "all" ]]; then
   stage="test"
 fi
@@ -19,10 +16,8 @@ case "$stage" in
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
-# The workflow classifier sends documentation/tooling/workflow-only pushes here.
-# Those edits do not justify reserving the host or executing the entire policy
-# registry. Validate the actual shell/YAML syntax and finish. Operator-dispatched
-# `check` still executes the complete policy profile below.
+# Documentation/tooling/workflow-only pushes do not need the policy registry,
+# host reservation, dependency convergence, build, database, or artifact work.
 if [[ "${GITHUB_EVENT_NAME:-}" == "push" && "$stage" == "check" ]]; then
   bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-policy.sh scripts/ci-deps.sh
   python3 - <<'PY'
@@ -40,7 +35,13 @@ run_policy() {
 }
 
 run_deps() {
-  bash scripts/ci-deps.sh
+  # A source push may verify the persistent dependency installation but must not
+  # provision/upgrade PostgreSQL, managed host policy, or the external cache.
+  if [[ "${GITHUB_EVENT_NAME:-}" == "push" ]]; then
+    bash scripts/ci-deps.sh --check-only
+  else
+    bash scripts/ci-deps.sh
+  fi
 }
 
 run_build() {
@@ -200,7 +201,9 @@ run_live_suite() {
 }
 
 product_phases() {
-  echo policy
+  # Policy is an explicit operator/pre-release profile. Normal source pushes get
+  # compile/test evidence instead of replaying dozens of topology/chess/policy scripts.
+  [[ "${GITHUB_EVENT_NAME:-}" == "push" ]] || echo policy
   if [[ "$stage" == reconcile ]]; then echo reconcile; return; fi
   [[ "$stage" != check ]] || return 0
   printf '%s\n' dependencies build
