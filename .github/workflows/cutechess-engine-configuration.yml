@@ -9,8 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      CANDIDATE_SHA: 86ac572e34644202eaabe3c0e04d07a257f9b213
-      CANDIDATE_TREE: ccf3659aefacbcf9945e7ad2a44628df9b9e8dd1
+      CANDIDATE_SHA: dff94712ecaa72c40b4855002a02ba1592f928a1
+      CANDIDATE_TREE: fbb008a1a530ead182b31399ae15a61e1ca5de92
       LAPLACE_WORK_ROOT: /build/laplace/work/cutechess-engine-configuration
       TMPDIR: /build/laplace/work/cutechess-engine-configuration/tmp
       TMP: /build/laplace/work/cutechess-engine-configuration/tmp
@@ -25,7 +25,7 @@ jobs:
           mkdir -p "$TMPDIR" /build/laplace/worktrees /build/laplace/recovery/cutechess-engine-configuration
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 86ac572e34644202eaabe3c0e04d07a257f9b213
+          ref: dff94712ecaa72c40b4855002a02ba1592f928a1
           persist-credentials: false
           fetch-depth: 1
       - name: Bind exact product candidate

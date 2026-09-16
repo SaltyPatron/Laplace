@@ -528,24 +528,7 @@ def main():
     # The inheritable lock remains held by the GUI for its whole lifetime.
     session_lock, session_environment, _ = session.prepare(
         SELECTION["engine_catalog"], binary, SELECTION["work_root"])
-    environment = dict(os.environ)
-    environment.update(session_environment)
-    environment.update(SELECTION["environment"])
-    floor_root = Path(SELECTION["chess_floor_root"])
-    generation = (floor_root / "current").resolve(strict=True)
-    if generation.parent != (floor_root / "generations").resolve(strict=True):
-        raise RuntimeError("installed chess floor selection is not an owned generation")
-    environment["LAPLACE_PERFCACHE_BIN"] = SELECTION["t0_perfcache"]
-    for key, filename in (("LAPLACE_CHESS_PERFCACHE_BIN", "laplace_chess_position_perfcache.bin"),
-                          ("LAPLACE_CHESS_TRANSITION_BIN", "laplace_chess_transition_perfcache.bin")):
-        path = generation / filename
-        if not path.is_file():
-            raise RuntimeError("installed chess floor is unavailable")
-        environment[key] = str(path)
-    selected = SELECTION["qt_library_path"]
-    inherited = [item for item in environment.get("LD_LIBRARY_PATH", "").split(os.pathsep)
-                 if item and item != selected]
-    environment["LD_LIBRARY_PATH"] = os.pathsep.join([selected, *inherited])
+    environment = session.launch_environment(SELECTION, session_environment)
     os.execve(str(binary), [*SELECTION["argv"], *sys.argv[1:]], environment)
 
 if __name__ == "__main__":
@@ -571,6 +554,7 @@ if __name__ == "__main__":
               "engine_catalog": {"path": str(engine_catalog), "sha256": digest(engine_catalog)},
               "session_helper": {"path": str(session_helper), "sha256": digest(session_helper)},
               "stockfish": stockfish_selection, "session_work_root": str(work_root),
+              "launch": selection,
               "t0_perfcache": str(perfcache),
               "engine_execution_verified": False, "desktop_substrate_access_verified": False,
               "system_desktop_file": str(system) if system.is_symlink() and
