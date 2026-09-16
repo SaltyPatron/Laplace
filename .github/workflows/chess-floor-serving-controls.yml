@@ -1,78 +1,57 @@
-name: Verify direct native operator cleanup and lock lifetime
+name: Retire superseded unassigned observation attempts
 on:
   push:
     branches: ['verify/chess-floor-serving-controls-20260916']
 permissions:
   contents: read
+  actions: write
 jobs:
-  qualification:
+  cancel:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
-      - name: Parse exact operator and execute real TERM cleanup lock controls
+      - name: Cancel only exact queued observers replaced by the Refactor route
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          work="/build/laplace/work/direct-native-operation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          sudo install -d -m 0775 -o "$(id -u)" -g "$(id -g)" "$work"
-          export TMPDIR="$work" TMP="$work" TEMP="$work"
-          python3 -B - <<'PY'
-          import ast,base64,hashlib,json,os,pathlib,re,shlex,subprocess,tempfile,time,urllib.request,yaml
-          blob="b33e36703f13955eac554d511fc0deaf67dd2dd3"
-          request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+blob,
-              headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
-          with urllib.request.urlopen(request,timeout=30) as response: payload=response.read(131073)
-          assert len(payload)<=131072
-          raw=base64.b64decode(json.loads(payload)["content"])
-          assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\x00"+raw).hexdigest()==blob
-          workflow=yaml.load(raw,Loader=yaml.BaseLoader)
-          assert workflow["jobs"]["native"]["env"]["TARGET_SHA"]=="__SOURCE_SHA__"
-          assert workflow["jobs"]["native"]["env"]["TARGET_TREE"]=="__SOURCE_TREE__"
-          assert workflow["jobs"]["native"]["timeout-minutes"]=="200"
-          assert b"flock --exclusive --no-fork --timeout 1800" in raw
-          assert b"pr-db-proof.sh" not in raw and b"pr-proof.sh" not in raw and b"/build/laplace/worktrees/" not in raw
-          scripts=[step["run"] for step in workflow["jobs"]["native"]["steps"] if "run" in step]
-          python_count=inner_count=0
-          for script in scripts:
-              subprocess.run(["bash","-n"],input=script,text=True,check=True,timeout=10)
-              for delimiter in ("NATIVE","MANAGED_READINESS"):
-                  for inner in re.findall(r"(?ms)^[^\n]*<<'"+delimiter+r"'[^\n]*\n(.*?)^"+delimiter+r"$",script):
-                      subprocess.run(["bash","-n"],input=inner,text=True,check=True,timeout=10)
-                      inner_count+=1
-              for module in re.findall(r"(?ms)^[^\n]*<<'PY'[^\n]*\n(.*?)^PY$",script):
-                  ast.parse(module)
-                  python_count+=1
-          assert inner_count==2 and python_count==8,(inner_count,python_count)
-          print("DIRECT_OWNER_OPERATOR_SYNTAX_PASS "+json.dumps({"blob":blob,"outerBash":len(scripts),"innerBash":inner_count,"python":python_count}),flush=True)
-          for mode,expected_during in (("--no-fork",1),):
-              with tempfile.TemporaryDirectory(prefix="term-lock-",dir=os.environ["TMPDIR"]) as td:
-                  root=pathlib.Path(td); marker=root/"cleanup-started"; finished=root/"cleanup-finished"; lock=root/"host.lock"
-                  script="set -eu\ncleanup() { rc=$?; trap - EXIT; trap '' TERM INT; printf started > "+shlex.quote(str(marker))+"; sleep 1.5; printf finished > "+shlex.quote(str(finished))+"; exit \"$rc\"; }\ntrap cleanup EXIT\ntrap 'exit 143' TERM\ntrap 'exit 130' INT\nsleep 30\n"
-                  started=time.monotonic()
-                  process=subprocess.Popen(["timeout","--signal=TERM","--kill-after=5s","1s",
-                      "flock","--exclusive",mode,str(lock),"timeout","--signal=TERM","--kill-after=5s","20s",
-                      "bash","-c",script],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-                  try:
-                      stop=time.monotonic()+5
-                      while not marker.exists() and time.monotonic()<stop: time.sleep(0.025)
-                      assert marker.exists(),"TERM cleanup did not start"
-                      assert not finished.exists(),"cleanup ended before lock observation"
-                      during=subprocess.run(["flock","--exclusive","--nonblock",str(lock),"true"],capture_output=True,timeout=2).returncode
-                      assert during==expected_during,(mode,during,expected_during)
-                      stdout,stderr=process.communicate(timeout=8)
-                      assert process.returncode==124,(mode,process.returncode)
-                      assert finished.read_text()=="finished"
-                      after=subprocess.run(["flock","--exclusive","--nonblock",str(lock),"true"],capture_output=True,timeout=2).returncode
-                      assert after==0
-                      print("REAL_TERM_CLEANUP_LOCK_CONTROL "+json.dumps({"mode":mode,"duringCleanupExit":during,
-                          "afterCleanupExit":after,"outerExit":process.returncode,"cleanupCompleted":True,
-                          "elapsedSeconds":time.monotonic()-started}),flush=True)
-                  finally:
-                      if process.poll() is None:
-                          process.terminate()
-                          process.communicate(timeout=8)
-          print("DIRECT_OWNER_OPERATION_QUALIFIED",flush=True)
-          
+          timeout --signal=TERM --kill-after=5s 100s python3 -B - <<'PY'
+          import json,os,time,urllib.request
+          base="https://api.github.com/repos/SaltyPatron/Laplace"
+          headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"}
+          def api(path,method="GET"):
+              request=urllib.request.Request(base+path,headers=headers,method=method,data=b"{}" if method=="POST" else None)
+              with urllib.request.urlopen(request,timeout=15) as response:
+                  raw=response.read(262145)
+              assert len(raw)<=262144
+              return json.loads(raw) if raw else {}
+          selected=[(35143439459,"574e998f894b641cc8378465aed6d30c13ca5ebe"),
+                    (35149038646,"24de661122387207caf967478e6aabba3d3db896")]
+          for run_id,source in selected:
+              run=api("/actions/runs/"+str(run_id))
+              assert run["id"]==run_id and run["head_sha"]==source and run["run_attempt"]==1
+              assert run["path"]==".github/workflows/chess-floor-serving-controls.yml"
+              assert run["head_branch"]=="verify/chess-floor-serving-controls-20260916" and run["event"]=="push"
+              jobs=api("/actions/runs/"+str(run_id)+"/jobs")["jobs"]
+              assert len(jobs)==1
+              job=jobs[0]
+              observation={"run":run_id,"source":source,"status":run["status"],"conclusion":run["conclusion"],
+                           "job":job["id"],"jobStatus":job["status"],"runnerId":job["runner_id"],"runnerName":job["runner_name"]}
+              print("OBSERVER_RETIRE_BEFORE "+json.dumps(observation),flush=True)
+              if run["status"]=="completed":
+                  print("OBSERVER_ALREADY_TERMINAL "+str(run_id),flush=True)
+                  continue
+              assert run["status"]=="queued" and job["status"]=="queued", "observer began: cancellation refused"
+              assert not job.get("runner_id") and not job.get("runner_name") and not job.get("steps"),"assigned observer preserved"
+              api("/actions/runs/"+str(run_id)+"/cancel","POST")
+              print("OBSERVER_CANCEL_ACK "+str(run_id),flush=True)
+              end=time.monotonic()+30
+              while time.monotonic()<end:
+                  result=api("/actions/runs/"+str(run_id))
+                  assert result["head_sha"]==source and result["run_attempt"]==1
+                  if result["status"]=="completed": break
+                  time.sleep(1)
+              assert result["status"]=="completed" and result["conclusion"]=="cancelled"
+              print("OBSERVER_RETIRE_TERMINAL "+json.dumps({"run":run_id,"source":source,"status":result["status"],"conclusion":result["conclusion"]}),flush=True)
           PY
