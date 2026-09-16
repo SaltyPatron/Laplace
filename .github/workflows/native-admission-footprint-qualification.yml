@@ -1,66 +1,112 @@
-name: Inspect retained installed corpus failure
+name: Read retained corpus receipts and exact lock ownership
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
 permissions:
   contents: read
 jobs:
-  observation:
+
+  receipt-projection:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 5
     steps:
-      - name: Retain exact corpus failure logs and receipts without database mutation
-        shell: bash
+      - name: Read exact failed pilot work and chunk receipts
         run: |
-          set -euo pipefail
-          umask 0077
-          evidence="/build/laplace/recovery/corpus-failure-observation/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          mkdir -p "$evidence"
-          export OBSERVATION_EVIDENCE="$evidence"
-          echo "OBSERVATION_EVIDENCE=$evidence" >> "$GITHUB_ENV"
           python3 - <<'PY'
-          import hashlib,json,os,pathlib,stat
-          native=pathlib.Path("/build/laplace/recovery/native-install/35161276382-3")
-          receipt=json.loads((native/"receipt.json").read_text())
-          assert receipt["source"]=="2ef3f7ff885c8eccbc81d76caf8284436a482ffe"
-          assert receipt["status"]=="completed" and receipt["attempt"]=="3"
-          evidence=pathlib.Path(os.environ["OBSERVATION_EVIDENCE"])
-          source=native/"corpus"
-          files=sorted(p for p in source.rglob("*") if p.is_file() and p.suffix in (".log",".json",".jsonl",".txt"))
-          assert len(files)<=128
-          inventory=[]
-          remaining=16*1024*1024
-          for p in files:
-              info=p.lstat()
-              assert stat.S_ISREG(info.st_mode) and not p.is_symlink()
-              size=info.st_size
-              relative=p.relative_to(source)
-              row={"path":str(relative),"bytes":size}
-              if size>remaining:
-                  row["retained"]=False
-                  row["reason"]="sixteen-megabyte evidence limit"
-                  inventory.append(row)
-                  continue
-              raw=p.read_bytes()
-              assert len(raw)==size
-              remaining-=size
-              target=evidence/"corpus"/relative
-              target.parent.mkdir(parents=True,exist_ok=True)
-              target.write_bytes(raw)
-              row.update(retained=True,sha256=hashlib.sha256(raw).hexdigest())
-              inventory.append(row)
-              if p.suffix==".log" or p.name in ("recording.json","corpus-recording.json","result.json"):
-                  shown=raw if len(raw)<=65536 else raw[:8192]+b"\n[bounded middle omitted]\n"+raw[-57344:]
-                  print("CORPUS_RETAINED_FILE "+json.dumps(row),flush=True)
-                  print(shown.decode(errors="replace"),flush=True)
-          (evidence/"inventory.json").write_text(json.dumps(inventory,indent=2)+"\n")
-          print("CORPUS_RETAINED_INVENTORY "+json.dumps(inventory),flush=True)
+          import collections,json,pathlib,re
+          root=pathlib.Path("/build/laplace/recovery/native-install/35161276382-3/corpus/measurement")
+          fresh=json.loads((root/"fresh/recording.json").read_text())
+          selected={key:fresh.get(key) for key in (
+              "schema","status","error","startedAt","finishedAt","elapsedSeconds",
+              "requestedGames","parsedGames","novelGames","appliedGames","committedGames",
+              "readbackGames","readbackPlies","writer","durability","work","corpusEvidence")}
+          print("EXACT_FAILED_RECORDING "+json.dumps(selected,sort_keys=True),flush=True)
+          writer=fresh.get("writerLog") or {}
+          durations=collections.defaultdict(list)
+          events=[]
+          for entry in writer.get("entries",[]):
+              fields=entry.get("fields") or {}
+              phase=fields.get("Phase")
+              elapsed=fields.get("ElapsedMs")
+              message=entry.get("message","")
+              if phase is None:
+                  match=re.search(r"WS_APPLY phase: ([^ ]+)",message)
+                  if match:phase=match.group(1)
+              if elapsed is None:
+                  match=re.search(r"elapsed_ms=([0-9.]+)",message)
+                  if match:elapsed=float(match.group(1))
+              if phase is not None and isinstance(elapsed,(float,int)):
+                  durations[phase].append(elapsed)
+              if re.search(r"physical|plan|budget|grant|tuple|copy",message,re.I):
+                  events.append(entry)
+          aggregate={phase:{"samples":len(values),"sumObservedMs":sum(values),
+                            "minimumObservedMs":min(values),"maximumObservedMs":max(values)}
+                     for phase,values in sorted(durations.items())}
+          print("WRITER_PHASE_SAMPLES "+json.dumps({
+              "scope":"Retained diagnostic samples can overlap and are not additive exclusive phase totals",
+              "droppedEntries":writer.get("droppedEntries"),
+              "phaseDurations":aggregate,"physicalPlanAndCopyEvents":events,
+              "lastEntries":writer.get("entries",[])[-16:]},sort_keys=True),flush=True)
+          chunks=(root/"fresh/chunks.jsonl").read_text().splitlines()
+          print("EXACT_CHUNK_MANIFEST "+json.dumps([json.loads(line) for line in chunks if line.strip()],sort_keys=True),flush=True)
+          for path in sorted((root/"fresh").glob("chunk-*.json")):
+              value=json.loads(path.read_text())
+              detail={key:value.get(key) for key in (
+                  "schema","status","error","requestedGames","parsedGames","novelGames",
+                  "appliedGames","committedGames","readbackGames","readbackPlies",
+                  "elapsedSeconds","writer","durability","work","corpusEvidence")}
+              detail["receipt"]=path.name
+              print("EXACT_CHUNK_DETAIL "+json.dumps(detail,sort_keys=True),flush=True)
+          progress=root/"fresh/progress.json"
+          if progress.is_file():print("FINAL_ADMISSION_PROGRESS "+progress.read_text(),flush=True)
           PY
-      - name: Retain original corpus failure evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: original-corpus-failure-attempt3
-          path: ${{ env.OBSERVATION_EVIDENCE }}/
-          if-no-files-found: error
-          retention-days: 30
+
+      - name: Observe exact host lock ownership without taking the lock
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib,re,time
+          lock=pathlib.Path("/build/laplace/work/host-resource.lock")
+          result={"scope":"Read-only inode and same-UID FD observation; no lock acquisition or process mutation"}
+          deadline=time.monotonic()+8
+          try:
+              target=lock.stat()
+              result["lock"]={"path":str(lock),"device":target.st_dev,"inode":target.st_ino,
+                              "major":os.major(target.st_dev),"minor":os.minor(target.st_dev)}
+              locks=[]
+              for line in pathlib.Path("/proc/locks").read_text().splitlines():
+                  match=re.search(r"([0-9a-f]+):([0-9a-f]+):([0-9]+)",line)
+                  if match and (int(match[1],16),int(match[2],16),int(match[3]))==(os.major(target.st_dev),os.minor(target.st_dev),target.st_ino):
+                      locks.append(line)
+              result["kernelLockRecords"]=locks
+              processes=[]
+              for process in pathlib.Path("/proc").iterdir():
+                  if time.monotonic()>deadline:
+                      result["truncated"]=True
+                      break
+                  if not process.name.isdigit():continue
+                  try:
+                      if process.stat().st_uid!=os.getuid():continue
+                      fds=[]
+                      for descriptor in (process/"fd").iterdir():
+                          if time.monotonic()>deadline:break
+                          try:
+                              info=descriptor.stat()
+                              if (info.st_dev,info.st_ino)==(target.st_dev,target.st_ino):fds.append(str(descriptor))
+                          except OSError:continue
+                      if not fds:continue
+                      state=(process/"stat").read_text()
+                      start=state.index("(");end=state.rindex(")")
+                      rest=state[end+2:].split()
+                      row={"pid":int(process.name),"ppid":int(rest[1]),"comm":state[start+1:end],
+                           "startTicks":int(rest[19]),"fileDescriptors":fds}
+                      try:
+                          executable=pathlib.Path(os.readlink(process/"exe")).name.removesuffix(" (deleted)")
+                          if executable in ("dotnet","bash","sh","flock","timeout","python3","python3.10","python3.11","python3.12","ctest","Runner.Worker","Runner.Listener","Laplace.Cli"):
+                              row["recognizedExecutable"]=executable
+                      except OSError:pass
+                      processes.append(row)
+                  except (OSError,ValueError,IndexError):continue
+              result["sameUidProcesses"]=processes
+          except OSError as error:result["errorType"]=type(error).__name__
+          print("HOST_LOCK_OBSERVATION "+json.dumps(result,sort_keys=True),flush=True)
+          PY
