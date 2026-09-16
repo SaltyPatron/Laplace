@@ -18,7 +18,8 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
         var path = http.Request.Path;
         if (!path.StartsWithSegments("/v1")) { await next(http); return; }
         var tenant = await resolver.ResolveAsync(http, http.RequestAborted);
-        if (tenant.AuthKind is "browser" or "api_key")
+        if (tenant.AuthKind is "browser" or "api_key"
+            || path.StartsWithSegments("/v1/auth") || path.StartsWithSegments("/v1/account"))
             http.Response.Headers.CacheControl = "private, no-store";
 
         if (!path.StartsWithSegments("/v1/billing")
@@ -61,7 +62,8 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
                     await Reject(http, 400, "invalid_json", "Billing requests must be JSON objects.");
                     return;
                 }
-                if (root.TryGetProperty("tenant", out var supplied) && supplied.ValueKind != JsonValueKind.Null)
+                var supplied = UniqueProperty(root, "tenant");
+                if (supplied.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
                 {
                     if (supplied.ValueKind != JsonValueKind.String)
                     {
@@ -75,10 +77,15 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
                         return;
                     }
                 }
-                if (path.Equals(new PathString("/v1/billing/keys/redeem"))
-                    && root.TryGetProperty("session_id", out var id) && id.ValueKind == JsonValueKind.String
-                    && !string.IsNullOrWhiteSpace(id.GetString()))
+                if (path.Equals(new PathString("/v1/billing/keys/redeem")))
                 {
+                    var id = UniqueProperty(root, "session_id");
+                    if (id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString())
+                        || id.GetString()!.Length > 256)
+                    {
+                        await Reject(http, 400, "invalid_session", "A valid checkout session ID is required.");
+                        return;
+                    }
                     var session = await stripe.TryGetSessionAsync(id.GetString()!.Trim(), ct);
                     if (!session.Found || !string.Equals(session.Tenant, tenant.TenantId, StringComparison.Ordinal))
                     {
@@ -89,7 +96,7 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
             }
             catch (JsonException)
             {
-                await Reject(http, 400, "invalid_json", "Request body must be valid JSON.");
+                await Reject(http, 400, "invalid_json", "Request body must be a valid JSON object without duplicate identity fields.");
                 return;
             }
             catch (IOException)
@@ -119,6 +126,20 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
             }
         }
         await next(http);
+    }
+
+    private static JsonElement UniqueProperty(JsonElement root, string name)
+    {
+        JsonElement result = default;
+        var found = false;
+        foreach (var property in root.EnumerateObject())
+        {
+            if (!property.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) continue;
+            if (found) throw new JsonException("Duplicate identity field.");
+            found = true;
+            result = property.Value;
+        }
+        return result;
     }
 
     private static Task Reject(HttpContext http, int status, string code, string message)
