@@ -1,0 +1,139 @@
+name: Focused physicality source capture controls
+on:
+  push:
+    branches: [diag/physicality-capture-controls-20260916]
+permissions:
+  contents: read
+concurrency:
+  group: laplace-shared-workspace
+  cancel-in-progress: false
+jobs:
+  controls:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 25
+    env:
+      TARGET_SHA: 7d02c19517b37af1850e7967fd45aea878c29573
+      INSTALLED_SOURCE_SHA: f40078c50e6936fda9e74951ba3905b56e396407
+    steps:
+      - name: Run exact managed controls against the verified existing native build
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          flock --exclusive --close --timeout 900 /build/laplace/work/host-resource.lock bash -s <<'SH'
+          set -euo pipefail
+          git fetch --no-tags --depth=2 origin "$TARGET_SHA" "$INSTALLED_SOURCE_SHA"
+          git checkout --force "$TARGET_SHA"
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test -z "$(git diff --name-only "$INSTALLED_SOURCE_SHA" "$TARGET_SHA" -- engine extension)"
+          set +u
+          source /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1
+          set -u
+          ROOT="$PWD"
+          source scripts/lib/storage.sh
+          laplace_storage_init
+          export MSBUILDDISABLENODEREUSE=1 UseSharedCompilation=false
+          export LAPLACE_ENGINE_BUILD="$PWD/build/engine"
+          export LD_LIBRARY_PATH="$LAPLACE_ENGINE_BUILD/core:$LAPLACE_ENGINE_BUILD/dynamics:$LAPLACE_ENGINE_BUILD/synthesis:${LD_LIBRARY_PATH:-}"
+          export LAPLACE_PERFCACHE_BIN="$LAPLACE_ENGINE_BUILD/core/perfcache/laplace_t0_perfcache.bin"
+          export CAPTURE_CONTROL_EVIDENCE="/build/laplace/work/physicality-capture-controls-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$CAPTURE_CONTROL_EVIDENCE"
+          python3 - <<'PY'
+          import hashlib, importlib.util, json, os, sys
+          from pathlib import Path
+          build=Path(os.environ["LAPLACE_ENGINE_BUILD"])
+          evidence=Path(os.environ["CAPTURE_CONTROL_EVIDENCE"])
+          def digest(path):
+              h=hashlib.sha256()
+              with path.open("rb") as stream:
+                  for part in iter(lambda:stream.read(1024*1024),b""): h.update(part)
+              return h.hexdigest()
+          root=Path.cwd()
+          prefix=Path("/opt/laplace")
+          spec=importlib.util.spec_from_file_location("capture_runtime_owner",root/"scripts/check-application-runtime.py")
+          owner=importlib.util.module_from_spec(spec)
+          sys.modules[spec.name]=owner
+          spec.loader.exec_module(owner)
+          installed_hashes=owner.installed_native_hashes(root,prefix)
+          native=[{"path":str((root/"build"/path).resolve(strict=True)),
+                   "loaderName":Path(path).name,"sha256":digest(root/"build"/path)} for path in owner.MODULES]
+          caches=[]
+          for name in ("laplace_t0_perfcache.bin","laplace_highway_perfcache.bin"):
+              path=(build/"core/perfcache"/name).resolve(strict=True)
+              installed=(prefix/"share/laplace"/name).resolve(strict=True)
+              item={"path":str(path),"bytes":path.stat().st_size,"sha256":digest(path),
+                    "installed":str(installed),"installedSha256":digest(installed)}
+              if item["sha256"] != item["installedSha256"]:raise RuntimeError("installed ROM differs from tested build: "+name)
+              caches.append(item)
+          receipt={"schema":"laplace.focused-physicality-controls/v1","managedSource":os.environ["TARGET_SHA"],
+                   "installedNativeSource":os.environ["INSTALLED_SOURCE_SHA"],"native":native,"perfcaches":caches,
+                   "installedArtifacts":installed_hashes,
+                   "scope":"Focused managed/native transport tests; no database, package acceptance or throughput claim."}
+          (evidence/"binding-before.json").write_text(json.dumps(receipt,indent=2)+"\n")
+          print(json.dumps(receipt))
+          PY
+          set +e
+          timeout --signal=TERM --kill-after=15s 300s dotnet test app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj             -c Release --filter 'FullyQualifiedName~Laplace.SubstrateCRUD.Tests.PhysicalityAdmissionTransportTests.SourceCapture_'             --logger 'trx;LogFileName=physicality-source-capture.trx' --results-directory "$CAPTURE_CONTROL_EVIDENCE"             > "$CAPTURE_CONTROL_EVIDENCE/test.log" 2>&1
+          result=$?
+          set -e
+          cat "$CAPTURE_CONTROL_EVIDENCE/test.log"
+          python3 - <<'PY'
+          import hashlib,json,os,xml.etree.ElementTree as ET
+          from pathlib import Path
+          evidence=Path(os.environ["CAPTURE_CONTROL_EVIDENCE"])
+          before=json.loads((evidence/"binding-before.json").read_text())
+          def digest(path):
+              h=hashlib.sha256()
+              with Path(path).open("rb") as stream:
+                  for part in iter(lambda:stream.read(1024*1024),b""):h.update(part)
+              return h.hexdigest()
+          for item in before["native"]:
+              if digest(item["path"]) != item["sha256"]:raise RuntimeError("native build bytes changed during focused controls")
+          for relative,sha256 in before["installedArtifacts"].items():
+              if digest(Path("/opt/laplace")/relative) != sha256:raise RuntimeError("installed native bytes changed during focused controls")
+          for item in before["perfcaches"]:
+              if digest(item["path"]) != item["sha256"] or digest(item["installed"]) != item["installedSha256"]:
+                  raise RuntimeError("perfcache changed during focused controls")
+          (evidence/"binding-after.json").write_text(json.dumps(before,indent=2)+"\n")
+          trx=ET.parse(evidence/"physicality-source-capture.trx")
+          ns={"t":"http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          counters=trx.find(".//t:ResultSummary/t:Counters",ns)
+          if counters is None:raise RuntimeError("focused TRX omitted counters")
+          counts={key:int(value) for key,value in counters.attrib.items()}
+          if any(counts.get(key)!=5 for key in ("total","executed","passed")):
+              raise RuntimeError("focused TRX did not pass exactly five executed cases: "+str(counts))
+          if any(value for key,value in counts.items() if key not in ("total","executed","passed")):
+              raise RuntimeError("focused TRX contains non-passing cases: "+str(counts))
+          build_root=os.environ.get("LAPLACE_BUILD_ROOT")
+          output=(Path(build_root)/"app/bin/Laplace.Substrate.Tests" if build_root
+                  else Path.cwd()/"app/Laplace.Substrate.Tests/bin")
+          assembly=(output/"Release/net10.0/Laplace.Substrate.Tests.dll").absolute()
+          if not assembly.is_file():raise RuntimeError("selected managed test output is missing")
+          # VSTest normalizes UnitTest.Storage to lowercase on every platform.
+          # Bind that value to the real case-preserved output; do not resolve it.
+          storages={test.attrib["storage"] for test in trx.findall(".//t:TestDefinitions/t:UnitTest",ns)}
+          if storages != {str(assembly).lower()}:
+              raise RuntimeError("focused TRX does not identify the selected managed output")
+          app_local=[]
+          for item in before["native"]:
+              if "/engine/" not in item["path"]:continue
+              path=assembly.parent/item["loaderName"]
+              sha256=digest(path)
+              if sha256 != item["sha256"]:raise RuntimeError("test-host native payload differs from verified build: "+str(path))
+              app_local.append({"path":str(path),"sha256":sha256})
+          summary={"passed":5,"failed":0,"skipped":0,"testAssembly":str(assembly),
+                   "testAssemblySha256":digest(assembly),"appLocalNative":app_local}
+          (evidence/"test-result.json").write_text(json.dumps(summary,indent=2)+"\n")
+          print(json.dumps(summary))
+          PY
+          exit "$result"
+          SH
+      - name: Retain focused controls and byte bindings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: physicality-capture-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /build/laplace/work/physicality-capture-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
