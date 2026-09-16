@@ -19,6 +19,7 @@ static unsigned checks;
 static jmp_buf expected_error;
 static bool expecting_error;
 static char error_text[512];
+static char error_detail[2048];
 static int error_code;
 static unsigned spi_calls;
 static unsigned spi_prepare_calls;
@@ -37,13 +38,19 @@ static HeapTuple row_pointers[3];
 MemoryContext CurrentMemoryContext;
 static MemoryContext allocation_context;
 volatile sig_atomic_t InterruptPending;
+volatile sig_atomic_t QueryCancelPending;
+volatile sig_atomic_t ProcDiePending;
+volatile uint32 InterruptHoldoffCount;
+volatile uint32 QueryCancelHoldoffCount;
+volatile uint32 CritSectionCount;
+ErrorContextCallback *error_context_stack;
 uint64 SPI_processed;
 SPITupleTable *SPI_tuptable;
 
 #define CHECK(expression) do { ++checks; if (!(expression)) { \
     fprintf(stderr, "check failed at %s:%d: %s\n", __FILE__, __LINE__, #expression); exit(1); } } while (0)
 #define REFUSES(expression, fragment) do { \
-    expecting_error = true; error_text[0] = 0; \
+    expecting_error = true; error_text[0] = 0; error_detail[0] = 0; \
     if (setjmp(expected_error) == 0) { expression; CHECK(false); } \
     expecting_error = false; CHECK(strstr(error_text, fragment) != NULL); \
 } while (0)
@@ -54,6 +61,11 @@ int errcode(int code) { error_code = code; return 0; }
 int errmsg(const char *format, ...) {
     va_list args; va_start(args, format); vsnprintf(error_text, sizeof(error_text), format, args); va_end(args); return 0;
 }
+int errdetail(const char *format, ...) {
+    va_list args; va_start(args, format); vsnprintf(error_detail, sizeof(error_detail), format, args); va_end(args); return 0;
+}
+int set_errcontext_domain(const char *domain) { (void)domain; return 0; }
+int errcontext_msg(const char *format, ...) { (void)format; return 0; }
 int errmsg_internal(const char *format, ...) {
     va_list args; va_start(args,format);vsnprintf(error_text,sizeof(error_text),format,args);va_end(args);return 0;
 }
@@ -208,7 +220,33 @@ static void probe_view_arrays(void) {
     pfree(views);probe_stages_free(s);CurrentMemoryContext=NULL;
 }
 
+static void probe_cancel_holdoffs(void)
+{
+    CHECK(admission_cancel_requested(NULL) == 0);
+    QueryCancelPending = 1;
+    CHECK(admission_cancel_requested(NULL) == 1);
+    QueryCancelHoldoffCount = 1;
+    CHECK(admission_cancel_requested(NULL) == 0);
+    ProcDiePending = 1;
+    CHECK(admission_cancel_requested(NULL) == 1);
+    InterruptHoldoffCount = 1;
+    CHECK(admission_cancel_requested(NULL) == 0);
+    InterruptHoldoffCount = 0;
+    CritSectionCount = 1;
+    CHECK(admission_cancel_requested(NULL) == 0);
+    CritSectionCount = 0;
+    QueryCancelHoldoffCount = 0;
+    QueryCancelPending = ProcDiePending = 0;
+    CHECK(admission_cancel_requested(NULL) == 0);
+    /* A returned cancellation cannot become partial success even when no
+     * PostgreSQL interrupt is pending. This test double does not run PG. */
+    REFUSES(admission_status(PHYSICALITY_DESCRIPTOR_CANCELLED, "probe"), "cancelled");
+    CHECK(error_code == ERRCODE_QUERY_CANCELED);
+    CHECK(error_context_stack == NULL);
+}
+
 int main(void) {
+    probe_cancel_holdoffs();
     probe_view_arrays();
     probe_session_view_receipt();
     SnapshotData snapshot = {0};
@@ -419,6 +457,107 @@ int main(void) {
     const hash128_t *roots = physicality_descriptor_plan_roots(physicality_descriptor_capture_plan(capture), &root_count);
     CHECK(observed_count == 2 && root_count == 2 && memcmp(&roots[0], &roots[1], 16) != 0);
     CHECK(observations[0].observed_at_unix_us + 10 == observations[1].observed_at_unix_us);
+    {
+        const intent_stage_t *source_copy[] = {original};
+        admission_state *phased = probe_state(&snapshot);
+        admission_clone_stages(phased, source_copy, 1, &phased->source);
+        const size_t before = phased->bytes;
+        const size_t encoded = intent_stage_memory_bytes(phased->source.items[0]);
+        const size_t pointers = phased->source.capacity * sizeof(*phased->source.items);
+        admission_capture_source(phased, &basis, 2);
+        CHECK(phased->source.count == 0 && phased->source.capacity == 0 && phased->source.items == NULL);
+        CHECK(phased->source_validation == NULL);
+        CHECK(physicality_descriptor_capture_plan(phased->capture) == NULL);
+        const size_t decoded = physicality_descriptor_capture_bytes(phased->capture);
+        CHECK(phased->bytes == before - encoded - pointers + decoded);
+        CHECK(phased->peak_bytes >= before + decoded);
+        CHECK(phased->peak_bytes <= phased->maximum_bytes);
+        size_t phased_count = 0;
+        const physicality_descriptor_observation_t *retained =
+            physicality_descriptor_capture_observations(phased->capture, &phased_count);
+        CHECK(phased_count == observed_count);
+        for (size_t i = 0; i < phased_count; ++i) {
+            CHECK(hash128_equals(&retained[i].placement_id, &observations[i].placement_id));
+            CHECK(retained[i].source_stage_index == observations[i].source_stage_index);
+            CHECK(retained[i].source_row_index == observations[i].source_row_index);
+            CHECK(retained[i].observed_at_unix_us == observations[i].observed_at_unix_us);
+        }
+        CHECK(intent_stage_physicality_count(original) == 2);
+        /* Invoke the actual native refused allocation, then verify SQL reports
+         * its bounded fields without relabeling it as a successful admission. */
+        physicality_descriptor_plan_diagnostics_t diagnostic;
+        physicality_descriptor_plan_t *refused_plan = NULL;
+        const physicality_descriptor_limits_t no_plan_payload = {0};
+        const physicality_descriptor_input_t *decoded_inputs =
+            physicality_descriptor_capture_inputs(phased->capture, NULL);
+        const physicality_descriptor_status_t refused =
+            physicality_descriptor_plan_build_diagnosed_cancelable(decoded_inputs, phased_count,
+                &basis, &no_plan_payload, NULL, &diagnostic, &refused_plan);
+        CHECK(refused == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED && refused_plan == NULL);
+        CHECK(diagnostic.allocation == PHYSICALITY_DESCRIPTOR_PLAN_INITIAL);
+        CHECK(diagnostic.refusal == PHYSICALITY_DESCRIPTOR_PLAN_GRANT_REFUSED);
+        CHECK(diagnostic.requested_bytes > 0 && diagnostic.retained_bytes == 0);
+        REFUSES(admission_capture_status(phased, refused, "original-form descriptor validation",
+            phased_count, &diagnostic), "original-form capture");
+        CHECK(error_code == ERRCODE_PROGRAM_LIMIT_EXCEEDED);
+        CHECK(strstr(error_detail, "plan_allocation=1 plan_refusal=1 ") != NULL);
+        char expected_request[96];
+        snprintf(expected_request, sizeof(expected_request), "plan_requested_bytes=%zu ", diagnostic.requested_bytes);
+        CHECK(strstr(error_detail, expected_request) != NULL);
+        CHECK(strstr(error_detail, "plan_grant_bytes=0 plan_retained_bytes=0 plan_peak_bytes=0 ") != NULL);
+        CHECK(strstr(error_detail, "plan_input_count=2 plan_completed_inputs=0 ") != NULL);
+        /* Controlled SQL error-format fixture, not a backend execution:
+         * native admission tests own the actual subowner refusal evidence. */
+        physicality_descriptor_materialization_diagnostics_t native_failure = {0};
+        native_failure.status = PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
+        native_failure.phase = PHYSICALITY_MATERIALIZATION_COMBINED_PLAN;
+        native_failure.refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_PLAN;
+        native_failure.materialization_grant_bytes = 700;
+        native_failure.maximum_bytes = 500;
+        native_failure.retained_bytes = 300;
+        native_failure.peak_bytes = 400;
+        native_failure.requested_bytes = 250;
+        native_failure.released_before_serialization_bytes = 0;
+        native_failure.serialization_entry_bytes = 0;
+        native_failure.plan = diagnostic;
+        REFUSES(admission_materialization_status(phased, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED,
+            phased_count, &native_failure), "native materialization");
+        CHECK(error_code == ERRCODE_PROGRAM_LIMIT_EXCEEDED);
+        CHECK(strstr(error_detail, "native_phase=3 native_refusal=3 materialization_grant_bytes=700 ") != NULL);
+        CHECK(strstr(error_detail, "subowner_grant_bytes=500 subowner_retained_bytes=300 subowner_peak_bytes=400 ") != NULL);
+        CHECK(strstr(error_detail, "subowner_requested_bytes=250 ") != NULL);
+        CHECK(strstr(error_detail, expected_request) != NULL);
+        admission_cleanup(phased);
+        CHECK(phased->capture == NULL && phased->source_validation == NULL);
+        probe_stages_free(phased);
+    }
+    {
+        /* A framed, identity-consistent tuple can still contain an invalid
+         * descriptor scalar. Full validation must refuse it after retirement
+         * of the owned encoded copy; transport-only acceptance would fail this. */
+        size_t original_bytes = 0;
+        uint8_t *tuples = (uint8_t *)intent_stage_tuple_ptr(original,
+            INTENT_STAGE_TABLE_PHYSICALITIES, &original_bytes);
+        const size_t coordinate_x = 2u + 20u + 20u + 6u + 4u + 5u;
+        CHECK(original_bytes > coordinate_x + 8u);
+        uint8_t saved[8]; memcpy(saved, tuples + coordinate_x, sizeof(saved));
+        const uint64_t nan = UINT64_C(0x7ff8000000000001);
+        for (size_t axis = 0; axis < 8u; ++axis)
+            tuples[coordinate_x + axis] = (uint8_t)(nan >> (axis * 8u));
+        admission_state *invalid = probe_state(&snapshot);
+        const intent_stage_t *source_copy[] = {original};
+        admission_clone_stages(invalid, source_copy, 1, &invalid->source);
+        memcpy(tuples + coordinate_x, saved, sizeof(saved));
+        REFUSES(admission_capture_source(invalid, &basis, 2), "original-form capture");
+        CHECK(error_code == ERRCODE_INVALID_PARAMETER_VALUE);
+        CHECK(strstr(error_detail, "phase=original-form descriptor validation ") != NULL);
+        CHECK(strstr(error_detail, "plan_allocation=0 plan_refusal=0 ") != NULL);
+        CHECK(invalid->source.count == 0 && invalid->source.items == NULL);
+        CHECK(invalid->capture != NULL && invalid->source_validation == NULL);
+        admission_cleanup(invalid);
+        CHECK(invalid->capture == NULL && invalid->source_validation == NULL);
+        probe_stages_free(invalid);
+    }
     physicality_descriptor_capture_free(capture); intent_stage_free(original);
     parts[2].count = 0;
     REFUSES(admission_import(s, parts, &s->source), "must align");

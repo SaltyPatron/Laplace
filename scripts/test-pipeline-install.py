@@ -109,6 +109,8 @@ phase_chess_lab
         self.assertEqual(1, len(checks), checks)
         self.assertIn("--binary " + str(self.base / "install/bin/cutechess"), checks[0])
         self.assertIn("--verify-receipt " + str(self.base / "cutechess-gui-build.json"), checks[0])
+        self.assertIn("--install-desktop " + str(self.base / "install"), checks[0])
+        self.assertIn("--desktop-stockfish " + str(sources[0] / "src/stockfish"), checks[0])
 
     def test_chess_unchanged_stamp_requires_gui_artifacts_and_successful_reverification(self):
         _, script = self.chess_publication_fixture()
@@ -162,7 +164,11 @@ GUI_VERIFICATION_FAILURE=1 phase_chess_lab
         modules.mkdir(parents=True)
         core = self.base / "install/lib/liblaplace_core.so"
         dynamics = self.base / "install/lib/liblaplace_dynamics.so"
-        for artifact in (modules / "laplace_substrate.so", modules / "laplace_geom.so", core, dynamics):
+        floors = self.base / "install/share/laplace"
+        floors.mkdir(parents=True)
+        position = floors / "laplace_chess_position_perfcache.bin"
+        transition = floors / "laplace_chess_transition_perfcache.bin"
+        for artifact in (modules / "laplace_substrate.so", modules / "laplace_geom.so", core, dynamics, position, transition):
             artifact.write_bytes(b"installed image")
 
         def digest():
@@ -173,8 +179,8 @@ GUI_VERIFICATION_FAILURE=1 phase_chess_lab
         before = digest()
         self.assertEqual(before, digest())
         # An execution module can need new exports even when neither preload
-        # module changed. Each engine dependency independently requires reload.
-        for artifact in (core, dynamics):
+        # module changed. Each engine dependency and mapped chess floor independently requires reload.
+        for artifact in (core, dynamics, position, transition):
             with self.subTest(library=artifact.name):
                 artifact.write_bytes(b"new engine image")
                 self.assertNotEqual(before, digest())
@@ -348,12 +354,14 @@ if postgresql_restart_required; then exit 0; else exit $?; fi
         (source / "scripts/lib").mkdir(parents=True)
         (source / "deploy").mkdir()
         shutil.copy2(ROOT / "scripts/lib/fp.sh", source / "scripts/lib/fp.sh")
+        shutil.copy2(ROOT / "scripts/chess-floor-artifacts.py", source / "scripts/chess-floor-artifacts.py")
         release = source / "deploy/postgresql-release.json"
         release.write_bytes((ROOT / "deploy/postgresql-release.json").read_bytes())
         subprocess.run(["git", "init", "--quiet", str(source)], check=True, timeout=10)
         subprocess.run(["git", "-C", str(source), "add", "."], check=True, timeout=10)
         body = 'source "$ROOT/scripts/lib/fp.sh"\nfp_native\nfp_runtime\n'
-        env = {"ROOT": str(source), "LAPLACE_CHESS_OPENINGS": str(source / "absent-openings")}
+        env = {"ROOT": str(source), "LAPLACE_CHESS_OPENINGS": str(source / "absent-openings"),
+               "LAPLACE_CHESS_CORPUS_EXPORT": ""}
         before = self.run_shell(body, **env)
         self.assertEqual(0, before.returncode, before.stderr)
         self.assertEqual(before.stdout, self.run_shell(body, **env).stdout)

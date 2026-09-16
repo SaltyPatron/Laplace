@@ -35,6 +35,11 @@ ucd="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan
 endsection
 
 section "Pinned external cache"
+# Normal dependencies converge the tracked release through the existing source
+# owner before validating the mutable host pins. Read-only checks never provision.
+if [[ "$CHECK_ONLY" -eq 0 ]]; then
+  python3 scripts/postgresql-release.py prepare-source --external "$CACHE"
+fi
 if [[ "$CHECK_ONLY" -eq 0 ]]; then
   for directory in tree-sitter geos proj gdal pgsql-18 include lib share bin; do
     mkdir -p "$PREFIX/$directory"

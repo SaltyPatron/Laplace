@@ -84,6 +84,11 @@ source "$ROOT/scripts/lib/fp.sh"
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+# Select one authenticated CMake/CTest/CPack generation before fingerprinted work.
+cmake_bin=$(python3 "$ROOT/scripts/provision-cmake.py" \
+  --root "$LAPLACE_INSTALL_PREFIX/tools/cmake" \
+  --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" --ensure)
+export PATH="$cmake_bin:$PATH"
 # The substrate runs the PostgreSQL build under LAPLACE_PG_PREFIX.  Never let a
 # distro client or pg_config win merely because /usr/bin appears first in the
 # runner's inherited PATH: build, install, migrate, tune, regress and benchmark
@@ -186,7 +191,9 @@ preloaded_so_digest() {
   local library
   for library in "$d/laplace_substrate.so" "$d/laplace_geom.so" \
     "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" \
-    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_dynamics.so"; do
+    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_dynamics.so" \
+    "$LAPLACE_INSTALL_PREFIX/share/laplace/laplace_chess_position_perfcache.bin" \
+    "$LAPLACE_INSTALL_PREFIX/share/laplace/laplace_chess_transition_perfcache.bin"; do
     if [[ -f "$library" ]]; then
       sha256sum "$library" || return
     fi
@@ -391,8 +398,10 @@ phase_build() {
   # is an `if(LAPLACE_CHESS_OPENINGS ...)` whose else branch is only a message(STATUS).
   # That is why the blob in share/laplace was a hand copy (owner ahart:ahart) instead of an
   # install product (laplace-runner group, install perms) like t0 and highway.
-  local chess_openings
+  local chess_openings chess_corpus_export
   chess_openings=$(fp_chess_openings_path)
+  chess_corpus_export=$("$PYTHON" "$ROOT/scripts/chess-floor-artifacts.py" selected-export \
+    --prefix "$LAPLACE_INSTALL_PREFIX" --path-only)
   if [[ "$CLEAN_FIRST" -eq 0 && -d "$ROOT/build" ]] && fp_check build-native "$native_fp"; then
     echo "engine up-to-date — cmake configure/build skipped (fp ${native_fp:0:12})"
   else
@@ -409,7 +418,8 @@ phase_build() {
       -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.nounihan.flat.zip" \
       -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
       -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
-      -DLAPLACE_CHESS_OPENINGS="$chess_openings"
+      -DLAPLACE_CHESS_OPENINGS="$chess_openings" \
+      -DLAPLACE_CHESS_CORPUS_EXPORT="$chess_corpus_export"
     LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
       cmake --build "$LAPLACE_BUILD_DIRECTORY" "${build_flags[@]}"
     fp_record build-native "$native_fp"
@@ -456,6 +466,10 @@ phase_build() {
       exit 1
     fi
     echo "chess transition perfcache ready: $chess_transition_bin"
+    test -s "$ROOT/build/engine/core/perfcache/chess-floor-pair.json" || {
+      echo "::error::complete chess floor pair receipt missing after native build" >&2
+      exit 1
+    }
     if [[ -d "$chess_openings" ]]; then
       echo "chess catalog coverage: openings corpus $chess_openings"
     else
@@ -592,6 +606,8 @@ phase_install() (
   # and their Laplace dependencies across the install instead: same bytes,
   # same loaded images, no restart. A new execution module may reference new
   # core exports even when the preload module itself is byte-identical.
+  # Chess floors are also pinned by application/postmaster mappings. Their pair
+  # hashes participate even when the native libraries are byte-identical.
   local postgres_activation_required="$server_release_changed"
   if [[ "$so_before" != "$so_after" || "$library_path_changed" -eq 1 ]]; then
     local preload
@@ -602,9 +618,9 @@ phase_install() (
     fi
   fi
   if [[ "$postgres_activation_required" -eq 1 ]]; then
-    restart_postgres "install: PostgreSQL release, staged extension image or resolution path changed"
+    restart_postgres "install: PostgreSQL release, staged native image, chess floor pair, or resolution path changed"
   else
-    echo "install: PostgreSQL release and preloaded images unchanged — no PG bounce needed"
+    echo "install: PostgreSQL release, preloaded native images and chess floors unchanged — no PG bounce needed"
   fi
   if postgresql_restart_required; then
     echo "::error::running PostgreSQL release still differs after native activation" >&2
@@ -1020,7 +1036,7 @@ phase_chess_lab() {
   local gui="${LAPLACE_CUTECHESS_GUI:-${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/bin/cutechess}"
   local gui_receipt="${LAPLACE_CUTECHESS_GUI_RECEIPT:-${LAPLACE_CUTECHESS_BUILD:-/build/cutechess}/laplace-cutechess-gui-build.json}"
   sf="$(python3 "$ROOT/scripts/install-stockfish.py" --print-path)" || return 1
-  fp=$(fp_compute scripts/bootstrap-chess-lab.sh scripts/provision-chess-qt.py scripts/provision-cutechess.py deploy/cutechess-release.json scripts/install-stockfish.py deploy/linux/stockfish-release.json scripts/install-zstd.py scripts/check-zstd-runtime.py deploy/zstd-release.json)
+  fp=$(fp_compute scripts/bootstrap-chess-lab.sh scripts/provision-chess-qt.py scripts/provision-cutechess.py scripts/cutechess-user-engines.py deploy/cutechess-release.json scripts/install-stockfish.py deploy/linux/stockfish-release.json scripts/install-zstd.py scripts/check-zstd-runtime.py deploy/zstd-release.json)
   # A different selected source/installation is a different publish input even
   # when source files are unchanged; refresh the service's actual launch paths.
   fp=$(printf '%s\0' "$fp" "${LAPLACE_EXTERNAL:-/build/external}" "$sf" \
@@ -1032,7 +1048,8 @@ phase_chess_lab() {
     python3 "$ROOT/scripts/install-stockfish.py" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --source-dir "${LAPLACE_EXTERNAL:-/build/external}/cutechess" || return 1
     python3 "$ROOT/scripts/provision-cutechess.py" --binary "${LAPLACE_CUTECHESS:-$bin}" || return 1
-    python3 "$ROOT/scripts/provision-cutechess.py" --gui --binary "$gui" --verify-receipt "$gui_receipt" || return 1
+    python3 "$ROOT/scripts/provision-cutechess.py" --gui --binary "$gui" --verify-receipt "$gui_receipt" \
+      --install-desktop "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --desktop-stockfish "${LAPLACE_STOCKFISH:-$sf}" || return 1
     python3 "$ROOT/scripts/install-stockfish.py" --check-binary "${LAPLACE_STOCKFISH:-$sf}" || return 1
     python3 "$ROOT/scripts/install-zstd.py" --print-path >/dev/null || return 1
     zstd_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/deploy/zstd-release.json")"

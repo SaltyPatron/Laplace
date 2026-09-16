@@ -113,7 +113,8 @@ public sealed class ChessStartingSideInventoryTests
         Assert.Equal(nameof(InvalidDataException), report.FailureType);
         Assert.Contains("Incomplete replay", report.FailureDetail);
         Assert.DoesNotContain("budget", report.FailureDetail!);
-        Assert.Equal(1024, report.HydrationReplayMaximumPlies);
+        Assert.Null(report.HydrationReplayMaximumPlies);
+        Assert.Equal("preflighted-materialization-bytes", report.HydrationReplayBound);
         Assert.Empty(File.ReadAllBytes(directory.Inputs));
         Assert.Equal("partial", ReadStatus(directory));
     }

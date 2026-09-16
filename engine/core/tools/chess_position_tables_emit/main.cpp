@@ -8,7 +8,8 @@
  * additional tier-2 boards from catalog interchange surfaces; the surface itself
  * never participates in identity.
  *
- * Inputs:  --output (required) + optional --surfaces
+ * Inputs:  --output + optional --surfaces/--additional-surfaces; bounded memory/spill
+ * Verification: --verify-existing checks the same inputs and complete blob without writing
  * Output:  sorted id → coord/hilbert/n/tier + BLAKE3 trailer
  *
  * Runtime load: chess_position_table_load. Not a managed catalog walker.
@@ -16,6 +17,11 @@
  */
 
 #include <algorithm>
+#include <array>
+#include <filesystem>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -23,9 +29,9 @@
 #include <fstream>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
+#include "producer.hpp"
 #include "laplace/core/chess_perfcache_format.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/hilbert4d.h"
@@ -54,76 +60,55 @@ static const uint16_t kMovePromotion = 8;
 static double g_byte_coords[128 * 4];
 
 struct Cli {
-    std::string surfaces; /* optional tier-2 catalog surfaces */
+    std::string surfaces;
+    std::string additional_surfaces;
     std::string output;
+    std::string scratch;
+    bool verify_existing = false;
+    size_t memory_bytes = 64u * 1024u * 1024u;
+    uint64_t maximum_spill_bytes = 0; // Unspecified: derive a finite bound from observed input occurrences.
 };
-
+struct CliError : std::runtime_error {
+    int code;
+    CliError(int value, const std::string& message) : std::runtime_error(message), code(value) {}
+};
+static uint64_t positive_integer(std::string_view value) {
+    if (value.empty()) throw CliError(2, "resource bound needs a positive decimal integer");
+    uint64_t result = 0;
+    for (char digit : value) {
+        if (digit < '0' || digit > '9' || result > (UINT64_MAX - static_cast<unsigned>(digit - '0')) / 10u)
+            throw CliError(2, "resource bound is not a representable positive decimal integer");
+        result = result * 10u + static_cast<unsigned>(digit - '0');
+    }
+    if (!result) throw CliError(2, "resource bound must be positive");
+    return result;
+}
 static Cli parse_cli(int argc, char** argv) {
     Cli c;
     for (int i = 1; i < argc; ++i) {
         std::string_view a = argv[i];
         auto nx = [&]() -> std::string {
-            if (i + 1 >= argc) {
-                std::fprintf(stderr, "%s needs value\n", argv[i]);
-                std::exit(2);
-            }
+            if (i + 1 >= argc) throw CliError(2, std::string(argv[i]) + " needs value");
             return argv[++i];
         };
         if (a == "--surfaces") c.surfaces = nx();
+        else if (a == "--additional-surfaces") c.additional_surfaces = nx();
         else if (a == "--output") c.output = nx();
-        else if (a == "--from-db") {
-            std::fprintf(stderr,
-                "REFUSED: --from-db dumps substrate testimony geometry; that is "
-                "not the compose floor (GH #822). This blob "
-                "is deterministic tier-1 vocab (+ catalog tier-2 positions).\n");
-            std::exit(3);
-        } else {
-            std::fprintf(stderr, "unknown arg %s\n", argv[i]);
-            std::exit(2);
-        }
+        else if (a == "--scratch-dir") c.scratch = nx();
+        else if (a == "--verify-existing") c.verify_existing = true;
+        else if (a == "--memory-bytes") {
+            const uint64_t value = positive_integer(nx());
+            if (value > SIZE_MAX) throw CliError(2, "memory bound exceeds this native address window");
+            c.memory_bytes = static_cast<size_t>(value);
+        } else if (a == "--maximum-spill-bytes") c.maximum_spill_bytes = positive_integer(nx());
+        else if (a == "--from-db")
+            throw CliError(3, "--from-db testimony geometry is not the deterministic typed compose floor");
+        else throw CliError(2, "unknown arg " + std::string(a));
     }
-    if (c.output.empty()) {
-        std::fprintf(stderr, "required: --output [--surfaces]\n");
-        std::exit(2);
-    }
+    if (c.output.empty()) throw CliError(2, "required: --output [--surfaces] [--additional-surfaces]");
+    if (c.memory_bytes < chess_emit::fixed_memory_bytes + 176u)
+        throw CliError(2, "memory grant must hold fixed producer buffers and at least two sort records");
     return c;
-}
-
-static bool read_file_bytes(const std::string& path, std::vector<uint8_t>& out) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
-    out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-    return true;
-}
-
-static void put_u32(std::vector<uint8_t>& b, uint32_t v) {
-    for (int i = 0; i < 4; ++i) b.push_back((uint8_t)(v >> (i * 8)));
-}
-static void put_u64(std::vector<uint8_t>& b, uint64_t v) {
-    for (int i = 0; i < 8; ++i) b.push_back((uint8_t)(v >> (i * 8)));
-}
-static void put_h128(std::vector<uint8_t>& b, const hash128_t& h) {
-    const uint8_t* p = (const uint8_t*)&h;
-    for (int i = 0; i < 16; ++i) b.push_back(p[i]);
-}
-
-static void compute_source_hash(const std::vector<uint8_t>& surfaces_bytes,
-                                hash128_t* out) {
-    hash128_t hs;
-    hash128_blake3(surfaces_bytes.data(), surfaces_bytes.size(), &hs);
-    std::vector<uint8_t> mix;
-    put_h128(mix, hs);
-    for (const char* t = LAPLACE_CHESS_PERFCACHE_GENERATOR_TAG; *t; ++t)
-        mix.push_back((uint8_t)*t);
-    mix.push_back(0);
-    /* Finite tier-1 alphabet is always in the blob; tag it so skipping surfaces
-     * still fingerprints a real product. */
-    const char* t1 = "typed-board-and-move-alphabet/v3";
-    for (const char* t = t1; *t; ++t) mix.push_back((uint8_t)*t);
-    mix.push_back(0);
-    const char* scope = "catalog";
-    for (const char* t = scope; *t; ++t) mix.push_back((uint8_t)*t);
-    hash128_blake3(mix.data(), mix.size(), out);
 }
 
 struct atom_t {
@@ -133,37 +118,35 @@ struct atom_t {
     bool has_digest{};
 };
 
-static void append_encoded_byte(std::vector<uint8_t>& atoms, uint8_t b) {
-    atoms.push_back((uint8_t)(0xA0u | (b >> 4)));
-    atoms.push_back((uint8_t)(0xB0u | (b & 0x0Fu)));
-}
-
 static void compose_atom(const atom_t& atom, hash128_t* out_id, double out_coord[4]) {
-    std::vector<uint8_t> bytes;
-    bytes.reserve(atom.has_digest ? 33 : 5);
-    bytes.push_back((uint8_t)(0x80u + atom.domain));
+    std::array<uint8_t, 33> bytes{};
+    size_t count = 0;
+    bytes[count++] = static_cast<uint8_t>(0x80u + atom.domain);
+    auto append = [&](uint8_t value) {
+        bytes[count++] = static_cast<uint8_t>(0xA0u | (value >> 4));
+        bytes[count++] = static_cast<uint8_t>(0xB0u | (value & 0x0Fu));
+    };
     if (atom.has_digest) {
-        const uint8_t* p = (const uint8_t*)&atom.digest;
-        for (size_t i = 0; i < 16; ++i) append_encoded_byte(bytes, p[i]);
+        const auto* data = reinterpret_cast<const uint8_t*>(&atom.digest);
+        for (size_t i = 0; i < sizeof(atom.digest); ++i) append(data[i]);
     } else {
-        append_encoded_byte(bytes, (uint8_t)atom.value);
-        append_encoded_byte(bytes, (uint8_t)(atom.value >> 8));
+        append(static_cast<uint8_t>(atom.value));
+        append(static_cast<uint8_t>(atom.value >> 8));
     }
-
-    std::vector<hash128_t> ids(bytes.size());
-    std::vector<double> coords(bytes.size() * 4);
-    for (size_t i = 0; i < bytes.size(); ++i) {
+    std::array<hash128_t, 33> ids{};
+    std::array<double, 33 * 4> coords{};
+    for (size_t i = 0; i < count; ++i) {
         hash128_blake3(&bytes[i], 1, &ids[i]);
-        const double* c = g_byte_coords + ((bytes[i] - 0x80u) * 4u);
-        std::memcpy(coords.data() + i * 4, c, 4 * sizeof(double));
+        const double* coord = g_byte_coords + ((bytes[i] - 0x80u) * 4u);
+        std::memcpy(coords.data() + i * 4, coord, 4 * sizeof(double));
     }
-    hash128_merkle(kSubstructureTier, ids.data(), ids.size(), out_id);
-    math4d_karcher_mean(coords.data(), ids.size(), nullptr, 1e-12, 64, out_coord);
+    hash128_merkle(kSubstructureTier, ids.data(), count, out_id);
+    math4d_karcher_mean(coords.data(), count, nullptr, 1e-12, 64, out_coord);
 }
 
 static int piece_ordinal(char p) {
     const char* found = std::strchr("PNBRQKpnbrqk", p);
-    return found ? (int)(found - "PNBRQKpnbrqk") : -1;
+    return found && *found ? (int)(found - "PNBRQKpnbrqk") : -1;
 }
 
 static int square_bit(char file, char rank) {
@@ -173,45 +156,52 @@ static int square_bit(char file, char rank) {
 
 /* Interchange surface -> typed binary state-atom trajectory. The surface is parsed input,
  * never hashed or admitted as chess content. */
-static int compose_position(const std::string& surface,
+static int compose_position(std::string_view surface,
                             laplace_chess_perfcache_record_t* out) {
-    std::vector<std::string_view> tokens;
+    std::array<std::string_view, 68> tokens{};
+    size_t token_count = 0;
     size_t i = 0;
     while (i < surface.size()) {
         while (i < surface.size() && surface[i] == ' ') ++i;
         size_t j = i;
         while (j < surface.size() && surface[j] != ' ') ++j;
-        if (j > i) tokens.emplace_back(surface.data() + i, j - i);
+        if (j > i) {
+            if (token_count == tokens.size()) return -1;
+            tokens[token_count++] = surface.substr(i, j - i);
+        }
         i = j;
     }
-    if (tokens.size() < 3) return -1;
+    if (token_count < 3) return -1;
 
     size_t at = 0;
     std::vector<atom_t> atoms;
+    atoms.reserve(69u);
     if (tokens[at].starts_with("rules:")) {
         std::string_view rules = tokens[at++].substr(6);
+        if (rules.empty()) return -1;
         atom_t a{}; a.domain = kRulesDomain; a.has_digest = true;
         hash128_blake3(reinterpret_cast<const uint8_t*>(rules.data()), rules.size(), &a.digest);
         atoms.push_back(a);
     }
-    if (at + 3 > tokens.size() || !tokens[at].starts_with("stm:")
+    if (at + 3 > token_count || !tokens[at].starts_with("stm:")
         || !tokens[at + 1].starts_with("cr:") || !tokens[at + 2].starts_with("ep:"))
         return -1;
 
     std::string_view stm = tokens[at++].substr(4);
     std::string_view castle = tokens[at++].substr(3);
     std::string_view ep = tokens[at++].substr(3);
-    if (stm != "w" && stm != "b") return -1;
+    if ((stm != "w" && stm != "b") || castle.empty()) return -1;
 
     char board[64]{};
     struct piece_at_t { uint16_t packed; int bit; };
     std::vector<piece_at_t> pieces;
-    for (; at < tokens.size(); ++at) {
+    pieces.reserve(64u);
+    for (; at < token_count; ++at) {
         std::string_view t = tokens[at];
-        if (t.size() != 3) continue;
+        if (t.size() != 3) return -1;
         int po = piece_ordinal(t[0]);
         int bit = square_bit(t[1], t[2]);
-        if (po < 0 || bit < 0) return -1;
+        if (po < 0 || bit < 0 || board[bit] != 0) return -1;
         board[bit] = t[0];
         pieces.push_back({(uint16_t)((po << 6) | bit), bit});
     }
@@ -287,7 +277,8 @@ static int compose_position(const std::string& surface,
     return 0;
 }
 
-static void emit_scalar_atom(std::vector<laplace_chess_perfcache_record_t>& out,
+template<class Sink>
+static void emit_scalar_atom(Sink& out,
                              uint8_t domain, uint16_t value) {
     atom_t atom{domain, value, {}, false};
     laplace_chess_perfcache_record_t rec{};
@@ -298,7 +289,8 @@ static void emit_scalar_atom(std::vector<laplace_chess_perfcache_record_t>& out,
     out.push_back(rec);
 }
 
-static void emit_move(std::vector<laplace_chess_perfcache_record_t>& out,
+template<class Sink>
+static void emit_move(Sink& out,
                       uint16_t piece, uint16_t from, uint16_t to,
                       uint16_t flags, uint16_t promotion) {
     atom_t atoms[5] = {
@@ -323,7 +315,8 @@ static void emit_move(std::vector<laplace_chess_perfcache_record_t>& out,
 
 /* Finite typed state atoms. Rare ambiguous-rook overrides and rule digests are composed
  * on demand; the ordinary board alphabet is closed and belongs in ROM. */
-static int emit_tier1_alphabet(std::vector<laplace_chess_perfcache_record_t>& out) {
+template<class Sink>
+static int emit_tier1_alphabet(Sink& out) {
     for (uint16_t side = 0; side < 2; ++side)
         emit_scalar_atom(out, kSideDomain, side);
     for (uint16_t rights = 0; rights < 16; ++rights)
@@ -350,7 +343,8 @@ static int emit_tier1_alphabet(std::vector<laplace_chess_perfcache_record_t>& ou
     return 0;
 }
 
-static int emit_move_alphabet(std::vector<laplace_chess_perfcache_record_t>& out) {
+template<class Sink>
+static int emit_move_alphabet(Sink& out) {
     static constexpr uint16_t ordinary_flags[] = {
         0, kMoveDoublePush, kMoveEnPassant, kMoveCastle
     };
@@ -368,134 +362,97 @@ static int emit_move_alphabet(std::vector<laplace_chess_perfcache_record_t>& out
     return 0;
 }
 
-static int id_less(const laplace_chess_perfcache_record_t& a,
-                   const laplace_chess_perfcache_record_t& b) {
-    return hash128_compare(&a.id, &b.id) < 0;
+struct RecordSink {
+    chess_emit::Producer& producer;
+    uint8_t origin;
+    uint64_t count = 0;
+    void push_back(const chess_emit::Record& record) {
+        if (count == UINT64_MAX) throw std::runtime_error("emitted record count overflow");
+        producer.add(record, origin); ++count;
+    }
+};
+static void compose_surface(std::string_view line, void* context) {
+    laplace_chess_perfcache_record_t record{};
+    if (compose_position(line, &record) != 0) throw std::runtime_error("malformed chess position surface");
+    static_cast<chess_emit::Producer*>(context)->add(record, chess_emit::board_origin);
 }
-
-int main(int argc, char** argv) {
-    Cli cli = parse_cli(argc, argv);
-
+static std::string hex_hash(const hash128_t& value) {
+    constexpr char digits[] = "0123456789abcdef";
+    const auto* bytes = reinterpret_cast<const uint8_t*>(&value);
+    std::string result(32u, '0');
+    for (size_t i = 0; i < sizeof(value); ++i) {
+        result[2u * i] = digits[bytes[i] >> 4];
+        result[2u * i + 1u] = digits[bytes[i] & 15u];
+    }
+    return result;
+}
+static void report(const chess_emit::Input& primary, const chess_emit::Input& additional,
+                   const hash128_t& source, bool skipped, const chess_emit::Statistics& stats,
+                   size_t memory, uint64_t spill, bool verification_only) {
+    std::ostringstream json;
+    json << "{\"schema\":\"laplace.chess-position-producer/v1\",\"artifact_verified\":true"
+         << ",\"verification_only\":" << (verification_only ? "true" : "false")
+         << ",\"source_hash\":\"" << hex_hash(source) << "\",\"skipped\":" << (skipped ? "true" : "false")
+         << ",\"primary_bytes\":" << primary.bytes << ",\"additional_bytes\":" << additional.bytes
+         << ",\"primary_occurrences\":" << primary.occurrences
+         << ",\"additional_occurrences\":" << additional.occurrences
+         << ",\"finite_atoms\":1001,\"finite_moves\":229376"
+         << ",\"distinct_board_ids\":";
+    if (skipped) json << "null"; else json << stats.board_ids;
+    json << ",\"total_records\":" << stats.records << ",\"memory_limit_bytes\":" << memory
+         << ",\"controlled_memory_bytes\":" << stats.controlled_memory_bytes
+         << ",\"maximum_line_bytes\":" << chess_emit::maximum_line_bytes
+         << ",\"spill_limit_bytes\":" << spill << ",\"spill_peak_bytes\":" << stats.spill_peak_bytes
+         << ",\"runs_written\":" << stats.runs_written << "}";
+    std::fprintf(stderr, "%s\n", json.str().c_str());
+}
+static int emit(const Cli& cli) {
+    namespace fs = std::filesystem;
+    const auto primary = chess_emit::scan(cli.surfaces);
+    const auto additional = chess_emit::scan(cli.additional_surfaces);
+    const auto source = chess_emit::source_hash(primary, cli.additional_surfaces.empty() ? nullptr : &additional);
+    if (additional.occurrences > UINT64_MAX - 230377u ||
+        primary.occurrences > UINT64_MAX - 230377u - additional.occurrences)
+        throw std::runtime_error("source occurrence count exceeds producer window");
+    const uint64_t spill = cli.maximum_spill_bytes ? cli.maximum_spill_bytes :
+        chess_emit::default_spill_bytes(primary.occurrences + additional.occurrences + 230377u);
+    chess_emit::Statistics stats;
+    if (chess_emit::validate_blob(cli.output, source, &stats.records)) {
+        stats.controlled_memory_bytes = chess_emit::fixed_memory_bytes;
+        report(primary, additional, source, true, stats, cli.memory_bytes, spill, cli.verify_existing);
+        return 0;
+    }
+    if (cli.verify_existing)
+        throw std::runtime_error("existing chess blob does not match the selected source inputs and full checksum");
+    const fs::path output(cli.output);
+    const fs::path scratch = cli.scratch.empty() ?
+        (output.has_parent_path() ? output.parent_path() : fs::path(".")) : fs::path(cli.scratch);
+    chess_emit::Producer producer(cli.memory_bytes, spill, scratch);
     super_fibonacci(128, g_byte_coords);
-
-    std::vector<uint8_t> surfaces_bytes;
-    if (!cli.surfaces.empty()) {
-        if (!read_file_bytes(cli.surfaces, surfaces_bytes)) {
-            std::fprintf(stderr, "cannot open surfaces %s\n", cli.surfaces.c_str());
-            return 4;
-        }
-    }
-
-    hash128_t source_hash;
-    compute_source_hash(surfaces_bytes, &source_hash);
-
-    {
-        std::ifstream prev(cli.output, std::ios::binary);
-        if (prev) {
-            laplace_chess_perfcache_header_t hdr{};
-            prev.read((char*)&hdr, sizeof(hdr));
-            if (prev.gcount() == (std::streamsize)sizeof(hdr)
-                && hdr.magic == LAPLACE_CHESS_PERFCACHE_MAGIC
-                && hdr.format_version == LAPLACE_CHESS_PERFCACHE_VERSION
-                && std::memcmp(&hdr.source_hash, &source_hash, sizeof(hash128_t)) == 0) {
-                std::fprintf(stderr,
-                    "chess_position_perfcache: sources unchanged — emit skipped\n");
-                return 0;
-            }
-        }
-    }
-
-    std::vector<laplace_chess_perfcache_record_t> records;
-    records.reserve(230000 + 8192);
-    if (emit_tier1_alphabet(records) != 0) {
-        std::fprintf(stderr, "tier-1 alphabet compose failed\n");
-        return 4;
-    }
-    const size_t tier1_n = records.size();
-    if (emit_move_alphabet(records) != 0) {
-        std::fprintf(stderr, "move alphabet compose failed\n");
-        return 4;
-    }
-    const size_t move_n = records.size() - tier1_n;
-
-    size_t surface_n = 0;
-    if (!surfaces_bytes.empty()) {
-        std::unordered_map<std::string, laplace_chess_perfcache_record_t> by_surface;
-        std::string line;
-        std::string text(surfaces_bytes.begin(), surfaces_bytes.end());
-        size_t start = 0;
-        while (start <= text.size()) {
-            size_t nl = text.find('\n', start);
-            if (nl == std::string::npos) nl = text.size();
-            line = text.substr(start, nl - start);
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (!line.empty() && by_surface.find(line) == by_surface.end()) {
-                laplace_chess_perfcache_record_t rec{};
-                if (compose_position(line, &rec) != 0) {
-                    std::fprintf(stderr, "compose failed: %s\n", line.c_str());
-                    return 4;
-                }
-                by_surface.emplace(line, rec);
-            }
-            if (nl == text.size()) break;
-            start = nl + 1;
-        }
-        surface_n = by_surface.size();
-        for (auto& kv : by_surface) records.push_back(kv.second);
-    }
-
-    std::sort(records.begin(), records.end(), id_less);
-    records.erase(std::unique(records.begin(), records.end(),
-                              [](const laplace_chess_perfcache_record_t& a,
-                                 const laplace_chess_perfcache_record_t& b) {
-                                  return hash128_equals(&a.id, &b.id) != 0;
-                              }),
-                  records.end());
-
-    std::vector<uint8_t> blob;
-    blob.reserve(LAPLACE_CHESS_PERFCACHE_HEADER_SIZE
-                 + records.size() * LAPLACE_CHESS_PERFCACHE_RECORD_SIZE
-                 + LAPLACE_CHESS_PERFCACHE_TRAILER_BYTES);
-
-    put_u32(blob, LAPLACE_CHESS_PERFCACHE_MAGIC);
-    put_u32(blob, LAPLACE_CHESS_PERFCACHE_VERSION);
-    put_u64(blob, records.size());
-    put_u64(blob, LAPLACE_CHESS_PERFCACHE_RECORD_SIZE);
-    put_u64(blob, LAPLACE_CHESS_PERFCACHE_HEADER_SIZE);
-    put_h128(blob, source_hash);
-    {
-        char scope[16] = {0};
-        std::memcpy(scope, "catalog", 7);
-        for (int i = 0; i < 16; ++i) blob.push_back((uint8_t)scope[i]);
-    }
-    for (int i = 0; i < 64; ++i) blob.push_back(0);
-
-    if (blob.size() != LAPLACE_CHESS_PERFCACHE_HEADER_SIZE) {
-        std::fprintf(stderr, "header size bug: %zu\n", blob.size());
-        return 5;
-    }
-
-    for (const auto& r : records) {
-        const uint8_t* p = (const uint8_t*)&r;
-        for (size_t i = 0; i < sizeof(r); ++i) blob.push_back(p[i]);
-    }
-
-    hash128_t crc;
-    hash128_blake3(blob.data(), blob.size(), &crc);
-    put_h128(blob, crc);
-
-    std::ofstream out(cli.output, std::ios::binary);
-    if (!out) {
-        std::fprintf(stderr, "cannot write %s\n", cli.output.c_str());
-        return 5;
-    }
-    out.write((const char*)blob.data(), (std::streamsize)blob.size());
-    out.close();
-
-    std::fprintf(stderr,
-        "chess_position_perfcache: tier1=%zu moves=%zu catalog_surfaces=%zu unique_ids=%zu "
-        "-> %s (%.1f KiB)\n",
-        tier1_n, move_n, surface_n, records.size(), cli.output.c_str(),
-        blob.size() / 1024.0);
+    RecordSink atoms{producer, chess_emit::atom_origin}, moves{producer, chess_emit::move_origin};
+    if (emit_tier1_alphabet(atoms) != 0 || emit_move_alphabet(moves) != 0)
+        throw std::runtime_error("finite chess alphabet compose failed");
+    if (atoms.count != 1001u || moves.count != 229376u)
+        throw std::runtime_error("finite chess alphabet count differs from producer contract");
+    const auto repeated_primary = chess_emit::scan(cli.surfaces, compose_surface, &producer);
+    const auto repeated_additional = chess_emit::scan(cli.additional_surfaces, compose_surface, &producer);
+    auto same = [](const chess_emit::Input& a, const chess_emit::Input& b) {
+        return a.bytes == b.bytes && a.occurrences == b.occurrences && hash128_equals(&a.hash, &b.hash);
+    };
+    if (!same(primary, repeated_primary) || !same(additional, repeated_additional))
+        throw std::runtime_error("surface input changed between fingerprint and composition");
+    stats = producer.publish(output, source);
+    report(primary, additional, source, false, stats, cli.memory_bytes, spill, false);
     return 0;
 }
+
+#ifndef LAPLACE_CHESS_PRODUCER_TESTING
+int main(int argc, char** argv) {
+    try { return emit(parse_cli(argc, argv)); }
+    catch (const CliError& error) {
+        std::fprintf(stderr, "chess_position_perfcache: %s\n", error.what()); return error.code;
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "chess_position_perfcache: %s\n", error.what()); return 4;
+    }
+}
+#endif

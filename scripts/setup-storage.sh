@@ -10,9 +10,15 @@ umask 0002
 for volume in /build /opt/laplace/pgdata /var/lib/pgwal /pgtemp; do
     mountpoint -q "$volume" || { echo "Missing storage mount: $volume" >&2; exit 1; }
 done
+
+# Active Laplace storage is named for Laplace. Preserve an existing scratch tree
+# during repair, but stop creating or advertising the old product label.
+if [[ "$mode" == --repair && -d /build/laplace/work/legacy-scratch && ! -e /build/laplace/work/scratch ]]; then
+    mv /build/laplace/work/legacy-scratch /build/laplace/work/scratch
+fi
+
 paths=(/build/laplace /build/laplace/build /build/laplace/work
-       /build/laplace/work/legacy-scratch /build/laplace/worktrees
-       /build/laplace/work/refactor-scratch
+       /build/laplace/work/scratch /build/laplace/work/runner /build/laplace/worktrees
        /build/laplace/recovery /build/laplace/runner
        /opt/laplace/pgdata /var/lib/pgwal /pgtemp)
 failed=0
@@ -44,7 +50,7 @@ if [[ "$mode" == --repair ]]; then
     while read -r unit _; do
         [[ "$unit" == actions.runner.SaltyPatron-Laplace.hart-server.service ]] || continue
         [[ $(systemctl show "$unit" -p User --value) == laplace-runner ]] || continue
-        scratch=/build/laplace/work/legacy-scratch
+        scratch=/build/laplace/work/scratch
         dropin="/etc/systemd/system/$unit.d"
         install -d -m 0755 "$dropin"
         cat > "$dropin/50-laplace-storage.conf" <<EOF

@@ -11,7 +11,7 @@ laplace_storage_init() {
     esac
     base=/build/laplace/work
     mountpoint -q /build || { echo 'Laplace requires the /build volume' >&2; return 1; }
-    scratch="${LAPLACE_SCRATCH_ROOT:-$base/legacy-scratch}"
+    scratch="${LAPLACE_SCRATCH_ROOT:-$base/scratch}"
     resolved=$(realpath -m -- "$scratch") || return
     case "$resolved" in
         /build/laplace/*) ;;

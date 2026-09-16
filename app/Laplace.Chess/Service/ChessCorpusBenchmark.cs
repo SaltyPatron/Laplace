@@ -14,7 +14,17 @@ public static class ChessCorpusBenchmark
         double MinimumSeconds = 30, int Replays = 1, int DeadlineSeconds = 3600,
         string? ExpectedSha256 = null);
     public sealed record Result(bool Completed, int NewlyRecordedGames, double ElapsedSeconds,
-        double GamesPerSecond, bool QualifiedWindow, bool TargetMet, string ReceiptPath);
+        double? GamesPerSecond, bool QualifiedWindow, bool TargetMet, string ReceiptPath);
+
+    // A failed/cancelled run can retain sealed partial work, but has no measured rate.
+    // One result owner supplies both the retained receipt and the CLI summary.
+    internal static Result CreateResult(string status, int newlyRecordedGames, double elapsedSeconds,
+        double rate, bool qualifiedWindow, bool targetMet, string receiptPath)
+    {
+        bool completed = status == "completed";
+        return new(completed, newlyRecordedGames, elapsedSeconds, completed ? rate : null,
+            completed && qualifiedWindow, completed && targetMet, receiptPath);
+    }
 
     internal static void ValidateOptions(Options options)
     {
@@ -155,6 +165,8 @@ public static class ChessCorpusBenchmark
         errorType = failure?.ErrorType;
         if (failure is not null) { qualified = false; targetMet = false; }
         int confirmedNewlyRecorded = fresh?.CorpusEvidence?.NewlyRecordedGames ?? 0;
+        var result = CreateResult(status, confirmedNewlyRecorded, admissionSeconds, rate,
+            qualified, targetMet, receiptPath);
         {
             var receipt = new
             {
@@ -165,6 +177,9 @@ public static class ChessCorpusBenchmark
                 timingScope = "One contiguous warmed admission window: original source reading/framing, native parsing/normalization, ordinary shared composition and writer, synchronous WAL acknowledgement, complete exact native readback, per-chunk evidence and final exact scope manifest. Source selection/bootstrap occur before it; exact replay follows separately.",
                 source = preparation,
                 configuration = new { resolvedGamesPerChunk = ChessPgnIngestor.ResolvedGamesPerChunk,
+                    resolvedGamesPerChunkRole = "Nominal source parse/novelty-probe width; actual admission chunks close by complete-game staged payload.",
+                    resolvedChunkStagedBytes = ChessPgnIngestor.ResolvedChunkStagedBytes,
+                    chunkMemoryScope = "Producer staged-payload threshold, not measured process RSS or a downstream allocation grant. A complete game may cross the threshold; native capture/materialization retain their actual finite grants. Batch grouping determines intent/source-unit context IDs; canonical game/object IDs and raw source-body multiplicity are preserved, without claiming identical generated entity/physicality/attestation sets across different fresh groupings. Fresh corpusEvidence.chunkManifest retains actual sealed chunk sizes; replay reuses those boundaries.",
                     logicalProcessors = Environment.ProcessorCount,
                     runtime = RuntimeInformation.FrameworkDescription,
                     operatingSystem = RuntimeInformation.OSDescription,
@@ -175,8 +190,9 @@ public static class ChessCorpusBenchmark
                 parsedGamesWithoutCompleteChunkEvidence = fresh is null ? 0
                     : fresh.ParsedGames - (fresh.CorpusEvidence?.ReadbackGames ?? 0),
                 readbackGames = fresh?.ReadbackGames ?? 0,
-                recordedGamesPerSecond = status == "completed" ? (double?)rate : null,
-                qualifiedWindow = qualified, targetGamesPerSecond = 2500, targetMet,
+                recordedGamesPerSecond = result.GamesPerSecond,
+                qualifiedWindow = result.QualifiedWindow, targetGamesPerSecond = 2500,
+                targetMet = result.TargetMet,
                 targetVerdict = status != "completed" ? "unqualified-failed"
                     : !qualified ? "unqualified-duration-or-content-variation"
                     : targetMet ? "established-for-this-workload" : "below-target-for-this-workload",
@@ -185,8 +201,7 @@ public static class ChessCorpusBenchmark
             };
             await WriteJsonAsync(receiptPath, receipt);
         }
-        return new(status == "completed", confirmedNewlyRecorded, admissionSeconds,
-            status == "completed" ? rate : 0, qualified, targetMet, receiptPath);
+        return result;
     }
 
     private static async Task WriteJsonAsync<T>(string path, T value)

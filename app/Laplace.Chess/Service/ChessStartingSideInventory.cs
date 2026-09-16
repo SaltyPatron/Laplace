@@ -39,8 +39,9 @@ internal static class ChessStartingSideInventory
         public bool Snapshot => false;
         public bool ProvesHistoricalCoverage => false;
         public string[] SelectedSources => ["ChessPgn", "ChessBook", "ChessSelfPlay"];
-        public int HydrationReplayMaximumPlies => 1024;
-        public string Limitation => "Strict hydration refuses incomplete replay, including lines beyond its 1024-ply window. "
+        public int? HydrationReplayMaximumPlies => null;
+        public string HydrationReplayBound => "preflighted-materialization-bytes";
+        public string Limitation => "Strict hydration admits complete replay under its explicit materialization byte allowance. "
             + "Unverified playings remain unclassified. Independent reads do not establish an MVCC snapshot or prior database contents.";
         public required Options Bounds { get; init; }
         public DateTimeOffset StartedUtc { get; init; } = DateTimeOffset.UtcNow;
@@ -137,7 +138,8 @@ internal static class ChessStartingSideInventory
         return state.Initial.Board.WhiteToMove ? "white" : "black";
     }
 
-    internal static async Task<Summary> CollectAsync(Options options, IReadSource source, CancellationToken ct)
+    internal static async Task<Summary> CollectAsync(Options options, IReadSource source, CancellationToken ct,
+        Func<ChessWitnessedGame, IReadOnlyList<SourceBinding>, CancellationToken, Task>? verifiedGameSink = null)
     {
         if (Directory.Exists(options.OutputDirectory) || File.Exists(options.OutputDirectory))
             throw new IOException("Inventory output directory already exists.");
@@ -190,6 +192,11 @@ internal static class ChessStartingSideInventory
                         if (!inputs.Sources.TryGetValue(game.PlayingId, out var owners) || owners.Count == 0
                             || owners.Any(owner => owner.LineId != game.LineId.ToString()))
                             throw new InvalidDataException("Hydrated line does not match its witnessed source ownership.");
+                        if (verifiedGameSink is not null)
+                        {
+                            summary.Stage = "export-verified-game";
+                            await verifiedGameSink(game, owners, ct).ConfigureAwait(false);
+                        }
                         // Explicit string identities preserve the exact native input ids in transport JSON.
                         byte[] record = JsonSerializer.SerializeToUtf8Bytes(new
                         {
@@ -260,7 +267,7 @@ internal static class ChessStartingSideInventory
         return summary;
     }
 
-    private sealed class DatabaseSource(NpgsqlDataSource ds) : IReadSource
+    internal sealed class DatabaseSource(NpgsqlDataSource ds) : IReadSource
     {
         public async Task<DatabaseIdentity> IdentityAsync(CancellationToken ct)
         {

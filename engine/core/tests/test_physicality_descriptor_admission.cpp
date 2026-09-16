@@ -129,6 +129,241 @@ protected:
     }
 };
 
+
+struct DescriptorCancellationProbe {
+    size_t calls = 0;
+    size_t stop = std::numeric_limits<size_t>::max();
+    static int requested(void* opaque) {
+        auto& probe = *static_cast<DescriptorCancellationProbe*>(opaque);
+        return ++probe.calls >= probe.stop;
+    }
+};
+
+TEST_F(PhysicalityDescriptorAdmission, PhasedCaptureRetiresEncodedSourceBeforeCompleteValidation) {
+    const auto body = composition({atom('A'), atom('B')});
+    std::vector<Body> bodies(4096, body);
+    auto original = stage(bodies);
+    ASSERT_NE(original, nullptr);
+    const intent_stage_t* source = original.get();
+    const size_t encoded_bytes = intent_stage_memory_bytes(source);
+    auto legacy = capture(source);
+    ASSERT_NE(legacy, nullptr);
+
+    physicality_descriptor_capture_t* decoded_raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_capture_stage_rows_cancelable(
+        &source, 1, kBudget, nullptr, &decoded_raw), PHYSICALITY_DESCRIPTOR_OK);
+    Capture decoded(decoded_raw, physicality_descriptor_capture_free);
+    const size_t decoded_bytes = physicality_descriptor_capture_bytes(decoded.get());
+    const size_t required_occurrence_bytes = bodies.size() *
+        (sizeof(hash128_t) + 3u * sizeof(physicality_descriptor_reference_t));
+    const size_t aggregate = encoded_bytes + decoded_bytes + required_occurrence_bytes - 1u;
+    ASSERT_LE(encoded_bytes + physicality_descriptor_capture_peak_bytes(decoded.get()), aggregate);
+    // Even mandatory roots/reference arrays cannot coexist with the encoded
+    // source under this grant. This refusal does not depend on growth slack.
+    physicality_descriptor_capture_t* refused = nullptr;
+    physicality_descriptor_limits_t limits{aggregate - encoded_bytes};
+    EXPECT_EQ(physicality_descriptor_capture_stages(&source, 1,
+        physicality_descriptor_vocabulary_basis(vocabulary.get()), &limits,
+        aggregate - encoded_bytes, &refused), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(refused, nullptr);
+
+    original.reset(); // only the imported encoded copy is retired
+    size_t input_count = 0;
+    const auto* inputs = physicality_descriptor_capture_inputs(decoded.get(), &input_count);
+    ASSERT_EQ(input_count, bodies.size());
+    limits.maximum_plan_bytes = aggregate - decoded_bytes;
+    physicality_descriptor_plan_t* validation_raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_plan_build_cancelable(inputs, input_count,
+        physicality_descriptor_vocabulary_basis(vocabulary.get()), &limits,
+        nullptr, &validation_raw), PHYSICALITY_DESCRIPTOR_OK);
+    std::unique_ptr<physicality_descriptor_plan_t, decltype(&physicality_descriptor_plan_free)>
+        validation(validation_raw, physicality_descriptor_plan_free);
+    ASSERT_LE(decoded_bytes + physicality_descriptor_plan_peak_bytes(validation.get()), aggregate);
+    const auto* expected_plan = physicality_descriptor_capture_plan(legacy.get());
+    size_t expected_count = 0, actual_count = 0;
+    const auto* expected_roots = physicality_descriptor_plan_roots(expected_plan, &expected_count);
+    const auto* actual_roots = physicality_descriptor_plan_roots(validation.get(), &actual_count);
+    ASSERT_EQ(actual_count, expected_count);
+    for (size_t i = 0; i < actual_count; ++i)
+        EXPECT_TRUE(hash128_equals(&actual_roots[i], &expected_roots[i]));
+    const auto* expected_nodes = physicality_descriptor_plan_nodes(expected_plan, &expected_count);
+    const auto* actual_nodes = physicality_descriptor_plan_nodes(validation.get(), &actual_count);
+    ASSERT_EQ(actual_count, expected_count);
+    for (size_t i = 0; i < actual_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&actual_nodes[i].id, &expected_nodes[i].id));
+        EXPECT_EQ(actual_nodes[i].first_child, expected_nodes[i].first_child);
+        EXPECT_EQ(actual_nodes[i].child_count, expected_nodes[i].child_count);
+    }
+    const auto* expected_children = physicality_descriptor_plan_children(expected_plan, &expected_count);
+    const auto* actual_children = physicality_descriptor_plan_children(validation.get(), &actual_count);
+    ASSERT_EQ(actual_count, expected_count);
+    for (size_t i = 0; i < actual_count; ++i)
+        EXPECT_TRUE(hash128_equals(&actual_children[i], &expected_children[i]));
+    const auto* expected_refs = physicality_descriptor_plan_references(expected_plan, &expected_count);
+    const auto* actual_refs = physicality_descriptor_plan_references(validation.get(), &actual_count);
+    ASSERT_EQ(actual_count, expected_count);
+    for (size_t i = 0; i < actual_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&actual_refs[i].entity_id, &expected_refs[i].entity_id));
+        EXPECT_EQ(actual_refs[i].input_index, expected_refs[i].input_index);
+        EXPECT_EQ(actual_refs[i].vertex_index, expected_refs[i].vertex_index);
+        EXPECT_EQ(actual_refs[i].kind, expected_refs[i].kind);
+    }
+    validation.reset();
+    const auto* expected_observations = physicality_descriptor_capture_observations(legacy.get(), &expected_count);
+    const auto* actual_observations = physicality_descriptor_capture_observations(decoded.get(), &actual_count);
+    ASSERT_EQ(actual_count, expected_count);
+    for (size_t i = 0; i < actual_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&actual_observations[i].placement_id, &expected_observations[i].placement_id));
+        EXPECT_EQ(actual_observations[i].source_stage_index, expected_observations[i].source_stage_index);
+        EXPECT_EQ(actual_observations[i].source_row_index, expected_observations[i].source_row_index);
+        EXPECT_EQ(actual_observations[i].observed_at_unix_us, expected_observations[i].observed_at_unix_us);
+    }
+    Materialization before(nullptr, physicality_descriptor_materialization_free);
+    Materialization after(nullptr, physicality_descriptor_materialization_free);
+    const auto sources = witnesses(bodies.size());
+    ASSERT_EQ(run(legacy, {}, {}, {}, sources, before), PHYSICALITY_DESCRIPTOR_OK);
+    ASSERT_EQ(run(decoded, {}, {}, {}, sources, after), PHYSICALITY_DESCRIPTOR_OK);
+    const auto* before_forms = physicality_descriptor_materialization_forms(before.get(), &expected_count);
+    const auto* after_forms = physicality_descriptor_materialization_forms(after.get(), &actual_count);
+    ASSERT_EQ(actual_count, bodies.size());
+    ASSERT_EQ(actual_count, expected_count);
+    for (size_t i = 0; i < actual_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&after_forms[i].descriptor_id, &before_forms[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&after_forms[i].view_id, &before_forms[i].view_id));
+        EXPECT_EQ(after_forms[i].view_state, before_forms[i].view_state);
+        EXPECT_EQ(after_forms[i].missing_first, before_forms[i].missing_first);
+        EXPECT_EQ(after_forms[i].missing_count, before_forms[i].missing_count);
+    }
+    Stage before_stage(physicality_descriptor_materialization_take_stage(before.get()), intent_stage_free);
+    Stage after_stage(physicality_descriptor_materialization_take_stage(after.get()), intent_stage_free);
+    for (int table = 1; table <= 3; ++table) {
+        size_t before_bytes = 0, after_bytes = 0;
+        const auto* want = intent_stage_tuple_ptr(before_stage.get(), static_cast<intent_stage_table_t>(table), &before_bytes);
+        const auto* got = intent_stage_tuple_ptr(after_stage.get(), static_cast<intent_stage_table_t>(table), &after_bytes);
+        ASSERT_EQ(after_bytes, before_bytes);
+        if (after_bytes != 0) {
+            EXPECT_EQ(std::memcmp(got, want, after_bytes), 0);
+        }
+    }
+}
+
+TEST_F(PhysicalityDescriptorAdmission, CancelledCapturePublishesNothingAndPreservesBorrowedRows) {
+    std::vector<Body> bodies;
+    for (size_t i = 0; i < 64; ++i)
+        bodies.push_back(composition({atom('a' + static_cast<uint32_t>(i % 26)),
+                                      atom('A' + static_cast<uint32_t>(i / 26))}));
+    auto original = stage(bodies);
+    ASSERT_NE(original, nullptr);
+    const intent_stage_t* source = original.get();
+    const physicality_descriptor_limits_t limits{kBudget};
+    DescriptorCancellationProbe count;
+    physicality_descriptor_cancel_t cancellation{DescriptorCancellationProbe::requested, &count};
+    physicality_descriptor_capture_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_capture_stages_cancelable(&source, 1,
+        physicality_descriptor_vocabulary_basis(vocabulary.get()), &limits, kBudget,
+        &cancellation, &raw), PHYSICALITY_DESCRIPTOR_OK);
+    Capture completed(raw, physicality_descriptor_capture_free);
+    ASSERT_GT(count.calls, 100u);
+    const size_t full_calls = count.calls;
+    for (size_t stop : {size_t{1}, size_t{2}, bodies.size() + 4u, full_calls / 2, full_calls}) {
+        SCOPED_TRACE(stop);
+        DescriptorCancellationProbe probe{0, stop};
+        cancellation.context = &probe;
+        raw = nullptr;
+        EXPECT_EQ(physicality_descriptor_capture_stages_cancelable(&source, 1,
+            physicality_descriptor_vocabulary_basis(vocabulary.get()), &limits, kBudget,
+            &cancellation, &raw), PHYSICALITY_DESCRIPTOR_CANCELLED);
+        EXPECT_EQ(raw, nullptr);
+        EXPECT_EQ(probe.calls, stop);
+    }
+    for (size_t stop : {size_t{3}, size_t{8}}) {
+        DescriptorCancellationProbe preflight{0, stop};
+        cancellation.context = &preflight;
+        size_t rows = 91, vertices = 92, logical = 93;
+        EXPECT_EQ(physicality_descriptor_stages_preflight_cancelable(&source, 1, kBudget,
+            &cancellation, &rows, &vertices, &logical), PHYSICALITY_DESCRIPTOR_CANCELLED);
+        EXPECT_EQ(preflight.calls, stop);
+        EXPECT_EQ(rows, 91u);
+        EXPECT_EQ(vertices, 92u);
+        EXPECT_EQ(logical, 93u);
+    }
+    auto retry = capture(source); // ordinary API still owns the same complete rows
+    ASSERT_NE(retry, nullptr);
+    size_t expected_count = 0, actual_count = 0;
+    const auto* expected = physicality_descriptor_capture_inputs(completed.get(), &expected_count);
+    const auto* actual = physicality_descriptor_capture_inputs(retry.get(), &actual_count);
+    ASSERT_EQ(actual_count, bodies.size());
+    ASSERT_EQ(actual_count, expected_count);
+    const auto* observations = physicality_descriptor_capture_observations(retry.get(), nullptr);
+    for (size_t i = 0; i < actual_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&actual[i].entity_id, &expected[i].entity_id));
+        EXPECT_EQ(actual[i].trajectory_vertices, expected[i].trajectory_vertices);
+        EXPECT_EQ(std::memcmp(actual[i].trajectory_xyzm, expected[i].trajectory_xyzm,
+            actual[i].trajectory_vertices * 4 * sizeof(double)), 0);
+        EXPECT_EQ(observations[i].observed_at_unix_us, 100 + static_cast<int64_t>(i));
+    }
+}
+
+TEST_F(PhysicalityDescriptorAdmission, CancellationUnwindsMaterializationIncludingLateOutputThenRetryMatchesLegacy) {
+    std::vector<Body> bodies;
+    for (size_t i = 0; i < 64; ++i)
+        bodies.push_back(composition({atom('a' + static_cast<uint32_t>(i % 26)),
+                                      atom('A' + static_cast<uint32_t>(i / 26))}));
+    auto original = stage(bodies);
+    auto captured = capture(original.get());
+    ASSERT_NE(captured, nullptr);
+    const intent_stage_t* provider = original.get();
+    const auto sources = witnesses(bodies.size());
+    DescriptorCancellationProbe count;
+    physicality_descriptor_cancel_t cancellation{DescriptorCancellationProbe::requested, &count};
+    physicality_descriptor_materialization_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_materialize_cancelable(captured.get(), vocabulary.get(),
+        &provider, 1, &provider, 1, nullptr, 0, sources.data(), sources.size(),
+        &kSource, 200, kBudget, &cancellation, &raw), PHYSICALITY_DESCRIPTOR_OK);
+    Materialization completed(raw, physicality_descriptor_materialization_free);
+    const size_t full_calls = count.calls;
+    ASSERT_GT(full_calls, 100u);
+    // The last checkpoint is after the generated stage is attached to its
+    // result owner. CANCELLED must destroy that stage as well as transient RAII.
+    for (size_t stop : {size_t{1}, size_t{100}, full_calls / 2, full_calls}) {
+        SCOPED_TRACE(stop);
+        DescriptorCancellationProbe probe{0, stop};
+        cancellation.context = &probe;
+        raw = nullptr;
+        EXPECT_EQ(physicality_descriptor_materialize_cancelable(captured.get(), vocabulary.get(),
+            &provider, 1, &provider, 1, nullptr, 0, sources.data(), sources.size(),
+            &kSource, 200, kBudget, &cancellation, &raw), PHYSICALITY_DESCRIPTOR_CANCELLED);
+        EXPECT_EQ(raw, nullptr);
+        EXPECT_EQ(probe.calls, stop);
+    }
+    Materialization retry(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {provider}, {provider}, {}, sources, retry), PHYSICALITY_DESCRIPTOR_OK);
+    size_t expected_count = 0, actual_count = 0;
+    const auto* expected = physicality_descriptor_materialization_forms(completed.get(), &expected_count);
+    const auto* actual = physicality_descriptor_materialization_forms(retry.get(), &actual_count);
+    ASSERT_EQ(actual_count, expected_count);
+    ASSERT_EQ(actual_count, bodies.size());
+    for (size_t i = 0; i < actual_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&actual[i].descriptor_id, &expected[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&actual[i].view_id, &expected[i].view_id));
+        EXPECT_EQ(actual[i].view_state, expected[i].view_state);
+        EXPECT_EQ(actual[i].missing_first, expected[i].missing_first);
+        EXPECT_EQ(actual[i].missing_count, expected[i].missing_count);
+    }
+    Stage expected_stage(physicality_descriptor_materialization_take_stage(completed.get()), intent_stage_free);
+    Stage actual_stage(physicality_descriptor_materialization_take_stage(retry.get()), intent_stage_free);
+    ASSERT_NE(expected_stage, nullptr);
+    ASSERT_NE(actual_stage, nullptr);
+    for (const auto table : {INTENT_STAGE_TABLE_ENTITIES, INTENT_STAGE_TABLE_PHYSICALITIES,
+                             INTENT_STAGE_TABLE_ATTESTATIONS}) {
+        size_t expected_bytes = 0, actual_bytes = 0;
+        const auto* want = intent_stage_tuple_ptr(expected_stage.get(), table, &expected_bytes);
+        const auto* got = intent_stage_tuple_ptr(actual_stage.get(), table, &actual_bytes);
+        ASSERT_EQ(actual_bytes, expected_bytes);
+        if (actual_bytes != 0) EXPECT_EQ(std::memcmp(got, want, actual_bytes), 0);
+    }
+}
+
 TEST_F(PhysicalityDescriptorAdmission, ActualByteCarriersUsePinnedBasisAndStoredContentTakesPrecedence) {
     const auto& byte_basis = vocabulary->byte_basis;
     std::vector<Body> bytes(2);
@@ -340,9 +575,39 @@ TEST_F(PhysicalityDescriptorAdmission, ReleasedCaptureKeepsExactMaterializationA
         // no assertion assumes that old peak-minus-one must fail after growth.
         ASSERT_LE(native_peak, kBudget - capture_bytes);
         const size_t grant = std::max(capture_peak, capture_bytes + native_peak);
-        ASSERT_EQ(run(released, selected.current, selected.admitted, selected.missing, sources, after,
-            grant - capture_bytes), selected.status);
+        physicality_descriptor_materialization_diagnostics_t diagnostics{};
+        physicality_descriptor_materialization_t* after_raw = nullptr;
+        const auto diagnosed_status = physicality_descriptor_materialize_diagnosed_cancelable(
+            released.get(), vocabulary.get(), selected.current.data(), selected.current.size(),
+            selected.admitted.data(), selected.admitted.size(),
+            selected.missing.data(), selected.missing.size(), sources.data(), sources.size(),
+            &kSource, 200, grant - capture_bytes, nullptr, &diagnostics, &after_raw);
+        after.reset(after_raw);
+        ASSERT_EQ(diagnosed_status, selected.status);
+        EXPECT_EQ(diagnostics.status, selected.status);
+        EXPECT_EQ(diagnostics.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_NONE);
+        if (selected.status == PHYSICALITY_DESCRIPTOR_OK) {
+            EXPECT_EQ(diagnostics.phase, PHYSICALITY_MATERIALIZATION_COMPLETE);
+            // The combined plan was fully authenticated before its owners
+            // retired; copied forms and complete E/P/A bytes are checked below.
+            EXPECT_GT(diagnostics.plan.node_count, 0u);
+            EXPECT_GE(diagnostics.released_before_serialization_bytes,
+                diagnostics.plan.retained_bytes);
+            EXPECT_GT(diagnostics.serialization_entry_bytes, 0u);
+            EXPECT_LE(diagnostics.peak_bytes, diagnostics.maximum_bytes);
+        } else {
+            EXPECT_EQ(diagnostics.phase, PHYSICALITY_MATERIALIZATION_PROVIDER_INDEX);
+            EXPECT_EQ(diagnostics.released_before_serialization_bytes, 0u);
+        }
         ASSERT_NE(after, nullptr);
+        // Both OK and NEEDS_PROVIDER diagnostics describe the published owner
+        // after local temporaries retire, in the documented header-free scope.
+        const size_t result_header = (grant - capture_bytes) - diagnostics.maximum_bytes;
+        EXPECT_GT(result_header, 0u);
+        EXPECT_EQ(diagnostics.retained_bytes + result_header,
+            physicality_descriptor_materialization_bytes(after.get()));
+        EXPECT_EQ(diagnostics.peak_bytes + result_header,
+            physicality_descriptor_materialization_peak_bytes(after.get()));
         EXPECT_LE(capture_bytes + physicality_descriptor_materialization_peak_bytes(after.get()), grant);
         EXPECT_LE(capture_peak, grant);
         EXPECT_EQ(physicality_descriptor_capture_peak_bytes(released.get()), capture_peak);
@@ -721,6 +986,104 @@ TEST_F(PhysicalityDescriptorAdmission, ExactBodyReadsBackFromActualGeneratedComp
     EXPECT_TRUE(std::signbit(got->alignment_residual));
     EXPECT_EQ(got->source_dim_is_null, 0);
     EXPECT_EQ(got->source_dim, expected.source_dim);
+}
+
+TEST_F(PhysicalityDescriptorAdmission, DiagnosedRefusalsRetainExactOwnerAndRetryPublishesCompleteRows) {
+    const auto body = composition({atom('A'), atom('B')});
+    std::vector<Body> bodies(4096, body);
+    auto original = stage(bodies);
+    auto captured = capture(original.get());
+    ASSERT_NE(captured, nullptr);
+    auto sources = witnesses(bodies.size());
+    const auto execute = [&](size_t grant,
+        physicality_descriptor_materialization_diagnostics_t& diagnostics,
+        Materialization& output) {
+        physicality_descriptor_materialization_t* raw = nullptr;
+        const auto status = physicality_descriptor_materialize_diagnosed_cancelable(
+            captured.get(), vocabulary.get(), nullptr, 0, nullptr, 0, nullptr, 0,
+            sources.data(), sources.size(), &kSource, 200, grant, nullptr, &diagnostics, &raw);
+        output.reset(raw);
+        return status;
+    };
+    Materialization full(nullptr, physicality_descriptor_materialization_free);
+    physicality_descriptor_materialization_diagnostics_t full_diagnostics{};
+    ASSERT_EQ(execute(kBudget, full_diagnostics, full), PHYSICALITY_DESCRIPTOR_OK);
+    ASSERT_NE(full, nullptr);
+    EXPECT_EQ(full_diagnostics.status, PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(full_diagnostics.phase, PHYSICALITY_MATERIALIZATION_COMPLETE);
+    EXPECT_EQ(full_diagnostics.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_NONE);
+    EXPECT_EQ(full_diagnostics.plan.input_count, bodies.size());
+    EXPECT_EQ(full_diagnostics.plan.completed_inputs, bodies.size());
+    EXPECT_GE(full_diagnostics.released_before_serialization_bytes,
+        full_diagnostics.plan.retained_bytes);
+    const size_t peak = physicality_descriptor_materialization_peak_bytes(full.get());
+    ASSERT_LE(peak, kBudget);
+
+    Materialization refused(nullptr, physicality_descriptor_materialization_free);
+    physicality_descriptor_materialization_diagnostics_t refusal{};
+    // Too small for the existing fixed basis validation scratch, while large
+    // enough to create the result owner. No generated rows may escape.
+    ASSERT_EQ(execute(2048u, refusal, refused), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(refused, nullptr);
+    EXPECT_EQ(refusal.status, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(refusal.phase, PHYSICALITY_MATERIALIZATION_ENTRY);
+    EXPECT_EQ(refusal.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_MEMORY_GRANT);
+    ASSERT_LE(refusal.retained_bytes, refusal.maximum_bytes);
+    EXPECT_GT(refusal.requested_bytes, refusal.maximum_bytes - refusal.retained_bytes);
+    EXPECT_LE(refusal.peak_bytes, refusal.maximum_bytes);
+
+    // Derive this refusal from the actual nested planner's grant and mandatory
+    // occurrence arrays. It does not guess unique graph counts or hash slack.
+    const size_t before_plan = kBudget - full_diagnostics.plan.maximum_bytes;
+    const size_t mandatory = bodies.size() *
+        (sizeof(hash128_t) + 3u * sizeof(physicality_descriptor_reference_t));
+    ASSERT_GT(mandatory, 0u);
+    const size_t plan_refusal_grant = before_plan + mandatory - 1u;
+    ASSERT_EQ(execute(plan_refusal_grant, refusal, refused), PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+    EXPECT_EQ(refused, nullptr);
+    EXPECT_EQ(refusal.phase, PHYSICALITY_MATERIALIZATION_COMBINED_PLAN);
+    EXPECT_EQ(refusal.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_PLAN);
+    EXPECT_EQ(refusal.plan.allocation, PHYSICALITY_DESCRIPTOR_PLAN_INITIAL);
+    EXPECT_EQ(refusal.plan.refusal, PHYSICALITY_DESCRIPTOR_PLAN_GRANT_REFUSED);
+    EXPECT_EQ(refusal.maximum_bytes, refusal.plan.maximum_bytes);
+    EXPECT_EQ(refusal.requested_bytes, refusal.plan.requested_bytes);
+    EXPECT_GT(refusal.requested_bytes, refusal.maximum_bytes);
+    EXPECT_EQ(refusal.plan.input_count, bodies.size());
+
+    Materialization retry(nullptr, physicality_descriptor_materialization_free);
+    physicality_descriptor_materialization_diagnostics_t retry_diagnostics{};
+    ASSERT_EQ(execute(peak, retry_diagnostics, retry), PHYSICALITY_DESCRIPTOR_OK);
+    ASSERT_NE(retry, nullptr);
+    EXPECT_LE(physicality_descriptor_materialization_peak_bytes(retry.get()), peak);
+    EXPECT_EQ(retry_diagnostics.status, PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(retry_diagnostics.refusal_kind, PHYSICALITY_MATERIALIZATION_REFUSAL_NONE);
+    size_t full_count = 0, retry_count = 0;
+    const auto* full_forms = physicality_descriptor_materialization_forms(full.get(), &full_count);
+    const auto* retry_forms = physicality_descriptor_materialization_forms(retry.get(), &retry_count);
+    ASSERT_EQ(full_count, bodies.size());
+    ASSERT_EQ(retry_count, full_count);
+    for (size_t i = 0; i < full_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&full_forms[i].descriptor_id, &retry_forms[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&full_forms[i].view_id, &retry_forms[i].view_id));
+        EXPECT_EQ(full_forms[i].view_state, retry_forms[i].view_state);
+        EXPECT_EQ(full_forms[i].missing_first, retry_forms[i].missing_first);
+        EXPECT_EQ(full_forms[i].missing_count, retry_forms[i].missing_count);
+    }
+    Stage full_stage(physicality_descriptor_materialization_take_stage(full.get()), intent_stage_free);
+    Stage retry_stage(physicality_descriptor_materialization_take_stage(retry.get()), intent_stage_free);
+    ASSERT_NE(full_stage, nullptr);
+    ASSERT_NE(retry_stage, nullptr);
+    for (const auto table : {INTENT_STAGE_TABLE_ENTITIES, INTENT_STAGE_TABLE_PHYSICALITIES,
+                            INTENT_STAGE_TABLE_ATTESTATIONS}) {
+        size_t full_bytes = 0, retry_bytes = 0;
+        const auto* full_data = intent_stage_tuple_ptr(full_stage.get(), table, &full_bytes);
+        const auto* retry_data = intent_stage_tuple_ptr(retry_stage.get(), table, &retry_bytes);
+        ASSERT_GT(full_bytes, 0u);
+        ASSERT_EQ(retry_bytes, full_bytes);
+        EXPECT_EQ(std::memcmp(full_data, retry_data, full_bytes), 0);
+    }
+    // Both refusals left the caller's borrowed source intact.
+    EXPECT_EQ(intent_stage_physicality_count(original.get()), bodies.size());
 }
 
 } // namespace

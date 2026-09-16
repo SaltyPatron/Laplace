@@ -18,5 +18,34 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 1
-      - name: Enforce source-tree hygiene and strong secret signatures
-        run: python3 scripts/repo-hygiene-gate.py
+      - run: python3 scripts/repo-hygiene-gate.py
+  integrated-branches:
+    name: Preserve all history and consolidate branches
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: repository-branch-consolidation
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Preserve original histories and reconcile exact branch tips
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 .github/scripts/consolidate-branches.py
+      - name: Retain full recovery bundle and unresolved implementation diffs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: branch-consolidation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/branch-consolidation/
+          if-no-files-found: error
+          retention-days: 90

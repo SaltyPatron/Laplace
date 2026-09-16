@@ -189,6 +189,22 @@ A new user message does not silently discard already accepted work. Treat correc
 - A useful partial commit may exist during implementation, but it is not the finish line and must not be allowed to become the new specification.
 - When a user correction exposes a broader class of the same defect, repair the governing contract/issue and continue the same workstream rather than defending the narrower interpretation.
 
+## Mainline development and branch continuity
+
+`Laplace/main` and `Laplace-Refactor/main` are the two authoritative development
+lines. CI/CD attached to them is a development capability, not evidence that the
+projects are production or legacy systems. Do not impose release ceremony or
+substitute reviews, tests, receipts, or a parked branch for implementing the
+accepted work and integrating it into cumulative main.
+
+Do not create a new branch for each diagnostic or qualification run. Reuse the
+existing tools and workflows. When repository rules require a PR, use a
+short-lived integration path, resolve its conflicts, land it, and retire it.
+Before removing a branch, preserve its exact history and reconcile its actual
+source changes; ancestry alone is not evidence that later merges retained them.
+Keep genuinely unfinished implementation explicit rather than describing an
+archive, an empty PR list, or a small intermediate fix as completion.
+
 ## Delivery accountability
 
 Work accepted by an implementation agent remains that agent's implementation obligation until the accepted behavior is delivered or the user explicitly changes/stops the scope.

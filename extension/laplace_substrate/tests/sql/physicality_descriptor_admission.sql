@@ -163,6 +163,71 @@ BEGIN
     RAISE NOTICE 'physicality admission: absent selected Content preserves exact descriptor and reports null view with exact AB frontier';
 END
 $unavailable$;
+-- Build the bounded workload before arming PostgreSQL's real statement timer.
+-- Every tuple is the existing native AB fixture; the aligned entries represent
+-- repeated observations. No test-only native callback or synthetic signal is used.
+CREATE TEMP TABLE descriptor_timeout_input ON COMMIT DROP AS
+SELECT decode(repeat(encode(f.tuples,'hex'),65536),'hex') AS raw,
+    f.tuples AS winner,
+    array_fill(s.source_id,ARRAY[65536]) AS sources,
+    array_fill(s.unit_id,ARRAY[65536]) AS units,
+    array_fill(0.8::float8,ARRAY[65536]) AS priors
+FROM descriptor_source s CROSS JOIN descriptor_frames f WHERE f.variant=0;
+SET LOCAL statement_timeout = '100ms';
+DO $cancel$
+DECLARE request record; cancelled boolean := false; context text;
+BEGIN
+    SELECT * INTO STRICT request FROM descriptor_timeout_input;
+    BEGIN
+        PERFORM * FROM pg_temp.descriptor_call(
+            request.raw,request.winner,request.sources,request.units,request.priors);
+    EXCEPTION WHEN query_canceled THEN
+        GET STACKED DIAGNOSTICS context = PG_EXCEPTION_CONTEXT;
+        -- A timeout during SQL preparation or some unrelated provider query
+        -- cannot stand in for the real native checkpoint/unwind boundary.
+        IF strpos(context,'physicality descriptor native ') = 0
+           OR strpos(context,' returned cancelled') = 0 THEN
+            RAISE EXCEPTION 'statement timeout did not return through a native cancellation checkpoint'
+                USING DETAIL=context;
+        END IF;
+        cancelled := true;
+    END;
+    IF NOT cancelled THEN
+        RAISE EXCEPTION 'native admission completed instead of observing statement timeout';
+    END IF;
+END
+$cancel$;
+SET LOCAL statement_timeout = 0;
+DO $retry$
+DECLARE actual pg_temp.descriptor_result; expected pg_temp.descriptor_result; s record;
+BEGIN
+    SELECT * INTO STRICT s FROM descriptor_source;
+    SELECT * INTO STRICT expected FROM descriptor_admitted;
+    SELECT * INTO STRICT actual FROM pg_temp.descriptor_call(
+        (SELECT string_agg(tuples,decode('','hex') ORDER BY variant) FROM descriptor_frames),
+        (SELECT tuples FROM descriptor_frames WHERE variant=0),
+        ARRAY[s.source_id,s.source_id],ARRAY[s.unit_id,s.unit_id],ARRAY[0.8,0.8]);
+    -- Same backend, after the failed subtransaction's normal context cleanup.
+    -- Snapshot text belongs to this statement; every emitted tuple and exact
+    -- immutable descriptor/view identity must match the pre-cancel admission.
+    IF actual.entities IS DISTINCT FROM expected.entities
+       OR actual.physicalities IS DISTINCT FROM expected.physicalities
+       OR actual.attestations IS DISTINCT FROM expected.attestations
+       OR actual.descriptor_ids IS DISTINCT FROM expected.descriptor_ids
+       OR actual.view_ids IS DISTINCT FROM expected.view_ids
+       OR actual.view_states IS DISTINCT FROM expected.view_states
+       OR actual.view_missing_first IS DISTINCT FROM expected.view_missing_first
+       OR actual.view_missing_count IS DISTINCT FROM expected.view_missing_count
+       OR actual.view_missing_ids IS DISTINCT FROM expected.view_missing_ids
+       OR actual.generated_source_id IS DISTINCT FROM expected.generated_source_id
+       OR actual.source_form_count<>expected.source_form_count
+       OR actual.raw_logical_work<>expected.raw_logical_work
+       OR actual.tuple_bytes<>expected.tuple_bytes THEN
+        RAISE EXCEPTION 'native cancellation changed the exact successful retry';
+    END IF;
+    RAISE NOTICE 'physicality admission: real statement timeout returns through native cancellation and exact same-backend retry succeeds';
+END
+$retry$;
 DO $refusals$
 DECLARE failures integer := 0; s record; raw bytea; winner bytea;
 BEGIN

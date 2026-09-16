@@ -210,6 +210,72 @@ TEST(PhysicalityDescriptorStageAllocation, BufferGrowthChargesOldAndNewStorageAt
     EXPECT_LE(intent_stage_memory_peak_bytes(insufficient.get()), retained);
 }
 
+
+TEST(PhysicalityDescriptorStageAllocation, MixedTableGrowthPreservesPublicBytesAndRefusedPrefix) {
+    Stage empty(intent_stage_new(0), intent_stage_free);
+    ASSERT_NE(empty, nullptr);
+    const size_t overhead = intent_stage_memory_bytes(empty.get());
+    const std::array<size_t, 10> payload_grants{0, 255, 512, 768, 1024, 1536, 2048, 4096, 8192, 32768};
+    const auto counts = [](const intent_stage_t* stage) {
+        return std::array<size_t, 3>{
+            intent_stage_entity_count(stage), intent_stage_physicality_count(stage),
+            intent_stage_attestation_count(stage)};
+    };
+    for (const size_t payload_grant : payload_grants) {
+        SCOPED_TRACE(payload_grant);
+        const size_t grant = overhead + payload_grant;
+        Stage bounded(intent_stage_new_bounded(0, grant), intent_stage_free);
+        Stage reference(intent_stage_new(0), intent_stage_free);
+        ASSERT_NE(bounded, nullptr);
+        ASSERT_NE(reference, nullptr);
+        bool refused = false;
+        for (size_t operation = 0; operation < 8192; ++operation) {
+            const size_t selected = operation % 3;
+            const auto append = [selected](intent_stage_t* stage) {
+                if (selected == 0) return add_entity(stage);
+                if (selected == 1) return add_body(stage, body());
+                return add_attestation(stage);
+            };
+            ASSERT_EQ(append(reference.get()), 0);
+            const int actual_status = append(bounded.get());
+            const auto actual_counts = counts(bounded.get());
+            const auto reference_counts = counts(reference.get());
+            EXPECT_LE(intent_stage_memory_bytes(bounded.get()), grant);
+            EXPECT_LE(intent_stage_memory_peak_bytes(bounded.get()), grant);
+            EXPECT_GE(intent_stage_memory_peak_bytes(bounded.get()),
+                      intent_stage_memory_bytes(bounded.get()));
+            for (size_t index = 0; index < 3; ++index) {
+                const auto table = static_cast<intent_stage_table_t>(index + 1);
+                size_t actual_bytes = 0, reference_bytes = 0;
+                const auto* actual = intent_stage_tuple_ptr(bounded.get(), table, &actual_bytes);
+                const auto* expected = intent_stage_tuple_ptr(reference.get(), table, &reference_bytes);
+                ASSERT_LE(actual_bytes, reference_bytes);
+                if (actual_bytes != 0)
+                    EXPECT_EQ(std::memcmp(actual, expected, actual_bytes), 0);
+                const size_t uncompleted = actual_status != 0 && index == selected ? 1u : 0u;
+                EXPECT_EQ(actual_counts[index] + uncompleted, reference_counts[index]);
+                if (actual_status == 0) {
+                    ASSERT_EQ(actual_bytes, reference_bytes);
+                    const size_t required = intent_stage_emit_copy_binary(reference.get(), table, nullptr, 0);
+                    std::vector<uint8_t> want(required), got(required);
+                    ASSERT_EQ(intent_stage_emit_copy_binary(reference.get(), table, want.data(), required), required);
+                    ASSERT_EQ(intent_stage_emit_copy_binary(bounded.get(), table, got.data(), required), required);
+                    EXPECT_EQ(got, want);
+                }
+            }
+            if (actual_status != 0) {
+                EXPECT_TRUE(intent_stage_allocation_failed(bounded.get()));
+                refused = true;
+                break;
+            }
+            EXPECT_FALSE(intent_stage_allocation_failed(bounded.get()));
+        }
+        EXPECT_TRUE(refused);
+        // The partial final tuple is compared only as bytes above. As required
+        // by the batch owner, a refused stage is discarded and never deposited.
+    }
+}
+
 TEST(PhysicalityDescriptorVocabulary, GeneratedSourceIsOrdinarySelfWitnessedContentUnderItsBudget) {
     ASSERT_TRUE(codepoint_table_is_loaded());
     const char* name = physicality_descriptor_generated_source_name();

@@ -25,6 +25,9 @@ FP_NATIVE_PATHS=(
   # A PostgreSQL release changes the headers and server used by native extensions.
   deploy/postgresql-release.json
   scripts/codegen-attestation-law.py
+  deploy/cmake-release.json
+  scripts/provision-cmake.py
+  scripts/chess-floor-artifacts.py
   # engine/core invokes ChessCatalogSurfaces to produce two installed ROMs.
   # Without these inputs the outer pipeline skips CMake entirely, so even a
   # perfect DEPENDS graph inside CMake never gets a chance to invalidate them.
@@ -62,10 +65,18 @@ fp_compute() {
 }
 
 fp_native() {
+  local corpus_inputs
+  corpus_inputs=$(fp_chess_corpus_inputs) || return
   {
     fp_compute "${FP_NATIVE_PATHS[@]}"
     fp_chess_openings_inputs
+    printf '%s\n' "$corpus_inputs"
   } | sha256sum | cut -d' ' -f1
+}
+
+fp_chess_corpus_inputs() {
+  python3 "$ROOT/scripts/chess-floor-artifacts.py" selected-export \
+    --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 }
 
 fp_chess_openings_path() {
@@ -100,12 +111,15 @@ fp_chess_openings_inputs() {
 }
 
 fp_runtime() {
+  local corpus_inputs
+  corpus_inputs=$(fp_chess_corpus_inputs) || return
   # Salt for dotnet test staleness: app tests exercise the native .so, the
   # installed extension, and the migrated schema — any of those moving must
   # re-run tests even when no C# changed.
   {
     fp_compute "${FP_NATIVE_PATHS[@]}" app/Laplace.Migrations
     fp_chess_openings_inputs
+    printf '%s\n' "$corpus_inputs"
   } | sha256sum | cut -d' ' -f1
 }
 

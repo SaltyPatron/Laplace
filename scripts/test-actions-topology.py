@@ -873,6 +873,57 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
         job = next(iter(workflows[filename]["jobs"].values()))
         return next(step for step in job["steps"] if step.get(key) == value)
 
+    def test_floor_export_remains_explicit_and_read_only(self):
+        self.check_audit(lambda ws: ws["chess-floor-export.yml"]["on"]["push"].update(
+            {"branches": ["main"]}), "floor export must use explicit operator branches")
+        self.check_audit(lambda ws: ws["chess-floor-export.yml"]["on"].update(
+            {"pull_request": {}}), "floor export must use explicit operator branches")
+        self.check_audit(lambda ws: ws["chess-floor-export.yml"]["permissions"].update(
+            {"actions": "write"}), "read-only repository and proof access")
+
+    def test_floor_export_retains_shared_lock_and_finite_owner(self):
+        self.check_audit(lambda ws: ws["chess-floor-export.yml"]["concurrency"].update(
+            {"cancel-in-progress": "true"}), "floor export must retain shared workspace serialization")
+        for mutation in ({"timeout-minutes": "0"}, {"needs": "product"}):
+            with self.subTest(mutation=mutation):
+                self.check_audit(lambda ws: ws["chess-floor-export.yml"]["jobs"]["export"].update(
+                    mutation), "floor export must remain independent and finitely bounded")
+        for token in ("flock --exclusive --no-fork --timeout 1800",
+                      "timeout --signal=TERM --kill-after=15s 9300s"):
+            with self.subTest(token=token):
+                def remove_owner(ws):
+                    step = self.step(ws, "chess-floor-export.yml", "id", "export")
+                    step["run"] = step["run"].replace(token, "bash")
+                self.check_audit(remove_owner, "floor export owner lost " + token)
+
+    def test_floor_export_preserves_explicit_source_selection(self):
+        self.check_audit(lambda ws: self.step(ws, "chess-floor-export.yml", "id", "export")["env"].update(
+            {"TARGET_SHA": "main"}), "selected immutable workflow source")
+        for token in ('test -f "$selection"', "scripts/export-qualified-chess-floors.py",
+                      'git worktree add --detach "$candidate_root" "$candidate_sha"'):
+            with self.subTest(token=token):
+                def remove_selection(ws):
+                    step = self.step(ws, "chess-floor-export.yml", "id", "export")
+                    step["run"] = step["run"].replace(token, "")
+                self.check_audit(remove_selection, "floor export owner lost " + token)
+
+    def test_floor_export_retains_failure_result_and_evidence(self):
+        self.check_audit(lambda ws: self.step(ws, "chess-floor-export.yml", "name",
+            "Retain explicit export result").update({"if": "success()"}),
+            "explicit export outcome must survive failure")
+        self.check_audit(lambda ws: self.step(ws, "chess-floor-export.yml", "name",
+            "Upload bounded qualification evidence").update({"if": "success()"}),
+            "bounded export evidence must upload after failure")
+        self.check_audit(lambda ws: self.step(ws, "chess-floor-export.yml", "name",
+            "Upload bounded qualification evidence")["with"].update({"if-no-files-found": "ignore"}),
+            "bounded export evidence must upload after failure")
+
+    def test_floor_export_cannot_acquire_activation_authority(self):
+        def add_activation(ws):
+            step = self.step(ws, "chess-floor-export.yml", "id", "export")
+            step["run"] += "\npython3 scripts/publish-applications.sh\n"
+        self.check_audit(add_activation, "floor export cannot activate product changes")
+
     def test_corpus_measurement_remains_explicit_and_preserves_host_ownership(self):
         self.check_audit(lambda ws: ws["chess-corpus-evidence.yml"]["on"]["push"].update(
             {"branches": ["main"]}), "corpus work must use explicit operator branches")

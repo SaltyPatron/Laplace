@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -84,7 +85,7 @@ class HostTests(unittest.TestCase):
             self.assertEqual(("-q", "/build"), argv[1:])
         elif argv[0] == "/usr/bin/install":
             destination = Path(argv[-1])
-            if destination.parent == Path("/build/laplace/work") and destination.name in ("legacy-mcp", "legacy-lichess"):
+            if destination.parent == Path("/build/laplace/work") and destination.name in ("mcp", "lichess"):
                 self.assertIn("laplace-runner", argv)
                 self.assertIn("2770", argv)
                 destination = self.base / "scratch" / destination.name
@@ -416,7 +417,24 @@ class EntryPointTests(unittest.TestCase):
     def test_native_install_cleanup_preserves_root_managed_public_ca(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()
         cleanup = cmake.split('message(STATUS \\"Laplace pre-install cleanup', 1)[1].split('add_subdirectory(engine)', 1)[0]
-        self.assertIn("-maxdepth 1 -type f -name 'laplace_*.bin' -delete", cleanup)
+        predicate = next(line.split("-maxdepth", 1)[1].strip()
+                         for line in cleanup.splitlines() if "-name 'laplace_*.bin'" in line)
+        temporary = tempfile.TemporaryDirectory(prefix="laplace-rom-cleanup-")
+        self.addCleanup(temporary.cleanup)
+        share = Path(temporary.name) / "rom-cleanup"
+        share.mkdir()
+        kept = ("managed-services-ca.crt", "laplace_chess_position_perfcache.bin",
+                "laplace_chess_transition_perfcache.bin")
+        for name in (*kept, "laplace_old_perfcache.bin"):
+            (share / name).write_text(name)
+        nested = share / "chess-floor/generations/prior"
+        nested.mkdir(parents=True)
+        (nested / "laplace_chess_position_perfcache.bin").write_text("retained")
+        subprocess.run(["find", str(share), "-maxdepth", *shlex.split(predicate)], check=True)
+        for name in kept:
+            self.assertEqual(name, (share / name).read_text())
+        self.assertFalse((share / "laplace_old_perfcache.bin").exists())
+        self.assertEqual("retained", (nested / "laplace_chess_position_perfcache.bin").read_text())
         self.assertNotIn("managed-services-ca.crt", cleanup)
         self.assertNotIn("find \\\"\\$share\\\" -mindepth 1", cleanup)
 

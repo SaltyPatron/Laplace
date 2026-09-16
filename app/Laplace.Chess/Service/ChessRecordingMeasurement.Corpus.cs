@@ -12,6 +12,7 @@ internal sealed partial class ChessRecordingMeasurement
     private bool _corpusScopesUnchanged = true;
 
     internal bool IsCorpus => _corpusSource is not null;
+    internal int? NextReplayChunkGames => _corpusEvidence?.NextReplayChunkGames;
     public ChessCorpusPreparation? CorpusSource => _corpusSource;
     public ChessCorpusEvidence.Receipt? CorpusEvidence => _corpusEvidence?.Summary;
     public string CompletionScope => IsCorpus

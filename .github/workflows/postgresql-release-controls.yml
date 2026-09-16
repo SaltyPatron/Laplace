@@ -1,4 +1,4 @@
-name: PostgreSQL release activation controls
+name: PostgreSQL normal dependency preparation controls
 on:
   push:
     branches: [verify/postgresql-activation-20260916]
@@ -10,7 +10,8 @@ jobs:
     timeout-minutes: 12
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      SOURCE_SHA: ${{ github.sha }}
+      SOURCE_SHA: cbd659562a71fa20f5e68eecb1f65e9485214c26
+      SOURCE_TREE: d519f75626bef33b028550145894707a60c28c95
       TMPDIR: /build/laplace/work/postgresql-release/tmp
       TMP: /build/laplace/work/postgresql-release/tmp
       TEMP: /build/laplace/work/postgresql-release/tmp
@@ -25,9 +26,9 @@ jobs:
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
           mkdir -p "$TMPDIR" "$EVIDENCE" /build/laplace/worktrees
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$SOURCE_TREE"
           git worktree add --detach /build/laplace/worktrees/postgresql-release "$SOURCE_SHA"
-          printf '%s\n' "$SOURCE_SHA $(git rev-parse HEAD^{tree})" > "$EVIDENCE/source.txt"
+          printf '%s\n' "$SOURCE_SHA $SOURCE_TREE" > "$EVIDENCE/source.txt"
       - name: Execute dependency and existing owner controls
         run: |
           set -euo pipefail

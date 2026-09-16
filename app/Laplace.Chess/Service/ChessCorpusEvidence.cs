@@ -20,6 +20,19 @@ internal sealed class ChessCorpusEvidence
     private readonly List<Chunk> _chunks = [];
     internal bool Completed { get; private set; }
     internal int ChunkCount => _chunks.Count;
+
+    // Replay uses the actual sealed fresh boundaries. Its zero-novel composition has
+    // a different memory shape and must not independently regroup exact scope evidence.
+    internal int? NextReplayChunkGames
+    {
+        get
+        {
+            if (_fresh is null) return null;
+            if (!_fresh.Completed)
+                throw new InvalidDataException("corpus replay requires a sealed original chunk sequence");
+            return _chunks.Count < _fresh._chunks.Count ? _fresh._chunks[_chunks.Count].Games : 0;
+        }
+    }
     internal int ReadbackGames { get; private set; }
     internal int NewlyRecordedGames { get; private set; }
     private ChessCorpusPreparation.FileIdentity? _manifestIdentity;

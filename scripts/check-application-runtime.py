@@ -193,6 +193,19 @@ def snapshot(root, prefix, database, fingerprint):
         if digest(build / "engine/core/perfcache" / filename) != actual:
             raise ValueError(f"installed ROM differs from tested build: {filename}")
         hashes[filename] = actual
+    pair = build / "engine/core/perfcache/chess-floor-pair.json"
+    installed_pair = prefix / "share/laplace/chess-floor/current/receipt.json"
+    if pair.is_file() or installed_pair.exists():
+        expected_pair = json.loads(pair.read_text())
+        actual_pair = json.loads(installed_pair.read_text())
+        if expected_pair != actual_pair:
+            raise ValueError("installed chess floor generation differs from the sealed build pair")
+        for filename, field in (
+                ("laplace_chess_position_perfcache.bin", "laplace_substrate.chess_position_perfcache_path"),
+                ("laplace_chess_transition_perfcache.bin", "laplace_chess_transition_perfcache.bin")):
+            if actual_pair["files"][filename]["sha256"] != hashes[field]:
+                raise ValueError("installed chess floor generation receipt differs from installed-file bytes")
+        hashes["chess_floor_pair_receipt"] = digest(installed_pair)
     return {"format": 1, "native_fingerprint": fingerprint, "artifacts": hashes,
             "database": copy.deepcopy(database)}
 

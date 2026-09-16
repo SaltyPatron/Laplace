@@ -204,6 +204,7 @@ public sealed class IngestRunner
         long applyEnvelope = Math.Min(
             IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
             Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
+        var admissionWindow = new IngestAdmissionWindow(applyEnvelope);
         long boundaryCommitFloor = applyEnvelope
             / Math.Max(1, topo.ApplyPartitions);
 
@@ -214,7 +215,20 @@ public sealed class IngestRunner
         bool ShouldFlushWithCap(int intents, int rows) =>
             workingSet
                 ? ShouldFlushWorkingSet(wsBytes, applyEnvelope)
+                    || admissionWindow.ModeledSourcePayloadBytes >= applyEnvelope
                 : ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
+
+        void LogAdmissionWindow(int count)
+        {
+            if (workingSet)
+                log.LogInformation(
+                    "INGEST_ADMISSION_WINDOW source={Source} intents={Intents} source_forms_upper={Forms} "
+                    + "source_vertices_upper={Vertices} modeled_source_payload_bytes={Modeled} grant_bytes={Grant} "
+                    + "over_bound_singleton={OverBound} scope=source-local-provider-expansion-unmodeled",
+                    decomposer.SourceName, count, admissionWindow.Sizing.Source.Forms,
+                    admissionWindow.Sizing.Source.StoredVertices, admissionWindow.ModeledSourcePayloadBytes,
+                    applyEnvelope, count == 1 && admissionWindow.ModeledSourcePayloadBytes > applyEnvelope);
+        }
 
         bool syncIngest = false;
 
@@ -255,26 +269,35 @@ public sealed class IngestRunner
                         continue;
                     }
                     long sib = BytesOf(intent);
+                    var admission = workingSet
+                        ? IngestAdmissionSizing.Measure(intent, sib, runCt)
+                        : default;
                     if (workingSet && ShouldFlushWorkingSetSourceBoundary(
                             sbatchSource, intent.Metadata.SourceId))
                     {
+                        LogAdmissionWindow(sbatch.Count);
                         await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
                                                 counters, failures, log, workingSet, runCt);
                         sbatch.Clear();
                         sbatchRows = 0;
                         wsBytes = 0;
+                        admissionWindow.Reset();
                         sbatchSource = null;
                     }
                     if (workingSet && sbatch.Count > 0
-                        && wsBytes + sib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes)
+                        && (wsBytes + sib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
+                            || admissionWindow.ShouldFlushBefore(admission)))
                     {
+                        LogAdmissionWindow(sbatch.Count);
                         await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
                                                 counters, failures, log, workingSet, runCt);
                         sbatch.Clear();
                         sbatchRows = 0;
                         wsBytes = 0;
+                        admissionWindow.Reset();
                         sbatchSource = null;
                     }
+                    if (workingSet) admissionWindow.Add(admission);
                     sbatch.Add(intent);
                     transfer.Complete();
                     sbatchSource ??= intent.Metadata.SourceId;
@@ -283,17 +306,22 @@ public sealed class IngestRunner
                     if (ShouldFlushWithCap(sbatch.Count, sbatchRows)
                         || (IsPeriodBoundary(intent) && wsBytes >= boundaryCommitFloor))
                     {
+                        LogAdmissionWindow(sbatch.Count);
                         await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
                                                 counters, failures, log, workingSet, runCt);
                         sbatch.Clear();
                         sbatchRows = 0;
                         wsBytes = 0;
+                        admissionWindow.Reset();
                         sbatchSource = null;
                     }
                 }
                 if (sbatch.Count > 0)
+                {
+                    LogAdmissionWindow(sbatch.Count);
                     await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
                                             counters, failures, log, workingSet, runCt);
+                }
             }
             else
             {
@@ -305,7 +333,7 @@ public sealed class IngestRunner
                 using var drained = new SemaphoreSlim(0, channelCap);
                 using var pipelineCts = CancellationTokenSource.CreateLinkedTokenSource(runCt);
 
-                var channel = Channel.CreateBounded<SubstrateChange>(
+                var channel = Channel.CreateBounded<QueuedIntent>(
                     new BoundedChannelOptions(channelCap)
                     {
                         SingleReader = true,
@@ -328,6 +356,9 @@ public sealed class IngestRunner
                             options.Progress?.Report(MakeProgress(counters));
                             int r = RowsOf(intent);
                             long b = BytesOf(intent);
+                            var admission = workingSet
+                                ? IngestAdmissionSizing.Measure(intent, b, producerCt)
+                                : default;
                             while ((Interlocked.Read(ref bufferedRows) + r > rowBudget
                                     || Interlocked.Read(ref bufferedBytes) + b > byteBudget)
                                    && Volatile.Read(ref bufferedRows) > 0)
@@ -336,7 +367,7 @@ public sealed class IngestRunner
                             }
                             Interlocked.Add(ref bufferedRows, r);
                             Interlocked.Add(ref bufferedBytes, b);
-                            await channel.Writer.WriteAsync(intent, producerCt);
+                            await channel.Writer.WriteAsync(new QueuedIntent(intent, r, b, admission), producerCt);
                             transfer.Complete();
                         }
                         channel.Writer.TryComplete();
@@ -350,6 +381,7 @@ public sealed class IngestRunner
                 async Task FlushBatchAsync(List<SubstrateChange> b)
                 {
                     if (b.Count == 0) return;
+                    LogAdmissionWindow(b.Count);
                     await ProcessOwnedBatchAsync(b, decomposer, options, rng,
                         counters, failures, log, workingSet, runCt).ConfigureAwait(false);
                     b.Clear();
@@ -362,12 +394,13 @@ public sealed class IngestRunner
                 Hash128? batchSource = null;
                 while (await channel.Reader.WaitToReadAsync(runCt))
                 {
-                    while (channel.Reader.TryRead(out var intent))
+                    while (channel.Reader.TryRead(out var queued))
                     {
+                        var intent = queued.Intent;
                         using var transfer = new ApplyEnvelopeTransfer(intent);
                         runCt.ThrowIfCancellationRequested();
-                        Interlocked.Add(ref bufferedRows, -RowsOf(intent));
-                        Interlocked.Add(ref bufferedBytes, -BytesOf(intent));
+                        Interlocked.Add(ref bufferedRows, -queued.Rows);
+                        Interlocked.Add(ref bufferedBytes, -queued.SerializedBytes);
                         try { drained.Release(); } catch (SemaphoreFullException) { }
 
                         if (!workingSet && batchSize == 1 && commitRows == 0)
@@ -377,23 +410,28 @@ public sealed class IngestRunner
                                                          counters, failures, log, runCt);
                             continue;
                         }
-                        long ib = BytesOf(intent);
+                        long ib = queued.SerializedBytes;
+                        var admission = queued.Admission;
                         if (workingSet && ShouldFlushWorkingSetSourceBoundary(
                                 batchSource, intent.Metadata.SourceId))
                         {
                             await FlushBatchAsync(batch);
                             batchRows = 0;
                             wsBytes = 0;
+                            admissionWindow.Reset();
                             batchSource = null;
                         }
                         if (workingSet && batch.Count > 0
-                            && wsBytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes)
+                            && (wsBytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
+                                || admissionWindow.ShouldFlushBefore(admission)))
                         {
                             await FlushBatchAsync(batch);
                             batchRows = 0;
                             wsBytes = 0;
+                            admissionWindow.Reset();
                             batchSource = null;
                         }
+                        if (workingSet) admissionWindow.Add(admission);
                         batch.Add(intent);
                         transfer.Complete();
                         batchSource ??= intent.Metadata.SourceId;
@@ -405,6 +443,7 @@ public sealed class IngestRunner
                             await FlushBatchAsync(batch);
                             batchRows = 0;
                             wsBytes = 0;
+                            admissionWindow.Reset();
                             batchSource = null;
                         }
                     }
@@ -1112,6 +1151,9 @@ public sealed class IngestRunner
             fold?.HighwayMaskPairs ?? 0);
     }
 
+    private readonly record struct QueuedIntent(
+        SubstrateChange Intent, int Rows, long SerializedBytes, IngestAdmissionSizing Admission);
+
     private sealed class ApplyEnvelopeTransfer(SubstrateChange change) : IDisposable
     {
         private bool _completed;
@@ -1133,7 +1175,7 @@ public sealed class IngestRunner
         CancellationTokenSource cancellation,
         Task producer,
         IReadOnlyList<SubstrateChange> batch,
-        ChannelReader<SubstrateChange> reader) : IAsyncDisposable
+        ChannelReader<QueuedIntent> reader) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {
@@ -1141,8 +1183,8 @@ public sealed class IngestRunner
             try { await producer.ConfigureAwait(false); }
             catch (OperationCanceledException) { }
             SubstrateApplyEnvelope.Release(batch);
-            while (reader.TryRead(out SubstrateChange? abandoned))
-                abandoned.ApplyEnvelope?.Dispose();
+            while (reader.TryRead(out QueuedIntent abandoned))
+                abandoned.Intent.ApplyEnvelope?.Dispose();
         }
     }
 

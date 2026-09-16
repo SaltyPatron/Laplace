@@ -24,6 +24,12 @@ registry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(registry)
 
 POLICY_IDS = {
+    "policy-qualified-chess-floor-export",
+    "policy-cutechess-user-engines",
+    "policy-cutechess-gui-game",
+    "policy-cmake-release",
+    "policy-chess-floor-serving",
+    "policy-chess-floor-artifacts",
     "policy-source-contract", "policy-registry", "policy-sql-catalog", "policy-actions-topology",
     "policy-actions-audit", "policy-shellcheck-gate", "policy-deploy-payload-sync",
     "policy-pipeline-install", "policy-application-runtime", "policy-native-library-closure", "policy-stockfish-release", "policy-zstd-release", "policy-postgresql-release",

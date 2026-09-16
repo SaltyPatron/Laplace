@@ -194,6 +194,73 @@ public class SubstrateChangeTests
     }
 
     [Fact]
+    public void BuilderDisposeReleasesOnlyUntransferredNativeStagesAndIsIdempotent()
+    {
+        var source = H(960);
+        var builder = new SubstrateChangeBuilder(source, "transferred-native-owner");
+        var transferred = builder.ContentStage;
+        transferred.AddEntity(H(961), 1, H(962), source);
+        var built = builder.Build();
+        var stillOwned = builder.ContentStage;
+        stillOwned.AddEntity(H(963), 1, H(962), source);
+        builder.Dispose();
+        builder.Dispose();
+        try
+        {
+            Assert.True(stillOwned.IsClosed);
+            Assert.False(transferred.IsClosed);
+            Assert.True(transferred.TotalTupleBytes > 0);
+            Assert.Same(transferred, Assert.Single(built.IntentStages));
+            Assert.Throws<ObjectDisposedException>(() => builder.Build());
+            Assert.Throws<ObjectDisposedException>(() => { _ = builder.ContentStage; });
+        }
+        finally { foreach (var stage in built.IntentStages) stage.Dispose(); }
+        Assert.True(transferred.IsClosed);
+    }
+
+    [Fact]
+    public void Builder_ObservationByteEstimateTracksAppendAndNativeOwnershipTransfer()
+    {
+        var source = H(950);
+        var entity = H(951);
+        var builder = new SubstrateChangeBuilder(source, "incremental-observations");
+        builder.AddEntity(entity, 1, H(952), source);
+        var row = new PhysicalityRow(
+            PhysicalityId.Compute(entity, PhysicalityType.Content), entity, source,
+            PhysicalityType.Content, .1, .2, .3, .4, default, null, 0, null, null, 10);
+        long trajectoryBytes = 0;
+        for (int i = 0; i < 128; i++)
+        {
+            double[]? trajectory = i % 3 == 0 ? null : Trajectory.Build([H(i + 1000), H(i + 2000)]);
+            var observed = row with { TrajectoryXyzm = trajectory, ObservedAtUnixUs = i + 10 };
+            builder.AddPhysicality(observed);
+            trajectoryBytes += (long)(trajectory?.Length ?? 0) * sizeof(double);
+            long expected = 72L + (i + 1L) * 160 + IntPtr.Size + trajectoryBytes;
+            Assert.Equal(expected, builder.StagedBytesEstimate);
+            Assert.Equal(expected, builder.StagedBytesEstimate);
+        }
+        long managedBytes = builder.StagedBytesEstimate;
+        var stage = builder.ContentStage;
+        stage.AddEntity(H(5000), 1, H(952), source);
+        long nativeBytes = stage.TotalTupleBytes;
+        Assert.True(nativeBytes > 0);
+        Assert.Equal(managedBytes + nativeBytes, builder.StagedBytesEstimate);
+        var built = builder.Build();
+        try
+        {
+            Assert.Equal(managedBytes, builder.StagedBytesEstimate);
+            Assert.Equal(128, built.PhysicalityObservations.Length);
+            Assert.Single(built.Physicalities);
+            Assert.Single(built.IntentStages);
+            Assert.Equal(nativeBytes, built.IntentStages[0].TotalTupleBytes);
+            builder.AddPhysicality(row);
+            Assert.Equal(managedBytes + 160, builder.StagedBytesEstimate);
+            Assert.Equal(128, built.PhysicalityObservations.Length);
+        }
+        finally { foreach (var retained in built.IntentStages) retained.Dispose(); }
+    }
+
+    [Fact]
     public void Builder_AlreadyStagedPlacementCannotDiscardAnotherObservedForm()
     {
         var entity = H(910);
