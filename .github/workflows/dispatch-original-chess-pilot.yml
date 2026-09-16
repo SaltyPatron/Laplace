@@ -82,8 +82,51 @@ jobs:
               "pilotScope": "Existing source-built CLI against independently proved exact installed native/extension/DB generation; full deployment remains failed, and recording/replay success is unmeasured",
           }
           print("RETAINED_INSTALLATION_STAGE_EVIDENCE " + json.dumps(lifecycle_evidence), flush=True)
-          if api("/git/ref/heads/main")["object"]["sha"] != EXPECTED_INSTALLED_SHA:
-              raise ValueError("main advanced after the selected installation")
+          EXPECTED_CURRENT_MAIN = "87d128e563d5f670f6c7e73cb340683a02949844"
+          if api("/git/ref/heads/main")["object"]["sha"] != EXPECTED_CURRENT_MAIN:
+              raise ValueError("main differs from the explicitly observed workflow-only successor")
+          successor = api("/commits/" + EXPECTED_CURRENT_MAIN)
+          if ([parent["sha"] for parent in successor["parents"]] != [EXPECTED_INSTALLED_SHA]
+                  or successor["commit"]["tree"]["sha"] != "f5c21bfc730fbbe6dcdcbf1b720cc0cb4784a608"):
+              raise ValueError("observed main successor ancestry or tree changed")
+          comparison = api("/compare/" + EXPECTED_INSTALLED_SHA + "..." + EXPECTED_CURRENT_MAIN)
+          changed = comparison.get("files", [])
+          if (comparison.get("status") != "ahead" or comparison.get("ahead_by") != 1
+                  or comparison.get("behind_by") != 0 or len(changed) != 1
+                  or changed[0].get("filename") != ".github/workflows/repo-hygiene.yml"
+                  or changed[0].get("sha") != "e9e67c7d76f23dcd6ff59adbb2d4f25b2533055a"
+                  or changed[0].get("status") != "modified"):
+              raise ValueError("later main includes unreviewed product changes")
+          later = api("/actions/runs/35122210762")
+          if (later["head_sha"] != EXPECTED_CURRENT_MAIN or later["run_attempt"] != 1
+                  or later["status"] != "completed" or later["conclusion"] != "failure"
+                  or later["event"] != "push" or later["head_branch"] != "main"
+                  or later["path"] != ".github/workflows/laplace.yml"):
+              raise ValueError("later main lifecycle differs from observed source-policy failure")
+          later_jobs = api("/actions/runs/35122210762/jobs?filter=latest&per_page=100")
+          if later_jobs["total_count"] != 1 or len(later_jobs["jobs"]) != 1:
+              raise ValueError("later main job is absent or ambiguous")
+          later_job = later_jobs["jobs"][0]
+          if (later_job["id"] != 104882518730 or later_job["status"] != "completed"
+                  or later_job["conclusion"] != "failure"):
+              raise ValueError("later main job identity changed")
+          later_steps = later_job["steps"]
+          if [step["name"] for step in later_steps if step["conclusion"] == "failure"] != [
+                  "Fast source/tooling proof and installed-product reconciliation"]:
+              raise ValueError("later main failure boundary changed")
+          for name in ("Reserve host for product phases", "Resolve build dependencies",
+                       "Build native and managed artifacts", "Install native artifacts",
+                       "Migrate and reconcile installed database", "Admit required lexical foundation",
+                       "Admit operational memory", "Publish applications"):
+              matches = [step for step in later_steps if step["name"] == name]
+              if len(matches) != 1 or matches[0]["conclusion"] != "skipped":
+                  raise ValueError("later lifecycle reached an unreviewed generation boundary: " + name)
+          print("OBSERVED_WORKFLOW_ONLY_MAIN_ADVANCE " + json.dumps({
+              "currentMain": EXPECTED_CURRENT_MAIN, "installedSource": EXPECTED_INSTALLED_SHA,
+              "changedPath": changed[0]["filename"], "laterRun": 35122210762,
+              "laterStatus": "failure", "laterFailureScope": "source-policy unpinned action",
+              "productSourceDelta": False,
+              "runtimeIdentityAuthority": "pilot native/extension/database and CLI before-after checks"}), flush=True)
           if api("/git/ref/heads/" + TARGET_REF)["object"]["sha"] != EXPECTED_INSTALLED_SHA:
               raise ValueError("pilot reference is not pinned to the installed main revision")
           request_body = {"ref": TARGET_REF, "inputs": {"mode": "measure", "pgn": OBSERVED_PGN,
