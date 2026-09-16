@@ -105,9 +105,10 @@ failed; only this completed attempt supports these provisional settings.
 
 ## Official Stockfish source as a Laplace corpus
 
-The product lifecycle now runs `scripts/ingest-stockfish-corpus.py` after successful
-activation. It uses the same installed configuration and explicit source override as
-the dependency doctor and installer. An explicit executable must be the direct
+Stockfish source admission is an explicit operator operation, not a dependency of
+ordinary build or application delivery. `scripts/ingest-stockfish-corpus.py` uses
+the same installed configuration and explicit source override as the dependency
+doctor and installer. An explicit executable must be the direct
 `src/stockfish` build of that checkout. The selected Git commit comes from
 `deploy/linux/stockfish-release.json`; the existing private build receipt must bind
 that commit to the executable's actual SHA-256.
@@ -153,22 +154,32 @@ that stronger source-to-binary claim requires a build receipt. Missing or ambigu
 inventory remains explicit. The final proof binds the inventory file's SHA-256 and
 requires the observed loaded core file to still match the admission receipt.
 
-Run the same proof against an already built, matching CLI:
+Run the same proof against an already built, matching CLI, holding the existing
+host reservation while the admission runs:
 
 ```sh
 LAPLACE_STOCKFISH_SOURCE=/vault/External/Stockfish/SF_19 \
-python3 scripts/ingest-stockfish-corpus.py \
-  --prefix /opt/laplace \
-  --cli /path/to/the/matching/Laplace.Cli \
-  --output /build/laplace/work/stockfish-corpus-proof-001
+flock --exclusive --close /build/laplace/work/host-resource.lock \
+  python3 scripts/ingest-stockfish-corpus.py \
+    --prefix /opt/laplace \
+    --cli /path/to/the/matching/Laplace.Cli \
+    --output /build/laplace/work/stockfish-corpus-proof-001
 ```
 
 The output directory must be fresh and outside the upstream repository. `receipt.json`
 exists only after both actual database readbacks and the no-amplification check pass;
-partial runs retain their logs and completed observations. The lifecycle holds the
-existing shared host lock during this proof, while the CLI uses the canonical ingest
-lane. Source-corpus readiness is distinct from PGN/opening/evaluation ingestion,
+partial runs retain their logs and completed observations. The command above holds
+the existing shared host lock, while the CLI uses the canonical ingest lane.
+Source-corpus readiness is distinct from PGN/opening/evaluation ingestion,
 external engine benchmarks, and any playing-strength result.
+
+For measurements, dispatch the existing **Laplace — benchmark evidence** workflow
+(`.github/workflows/benchmark-evidence.yml`) against the selected installed revision.
+Its `chess`, `recorded`, and `geometry` suites remain independently selectable.
+Ordinary delivery does not dispatch that workflow or require those measurements to
+finish. Delivery still admits its operational bundle, publishes applications, and
+verifies ordinary operational execution; removing the chess workload is not a
+claim that general instruction grounding or playing-strength targets are complete.
 
 ## Data and online requirements
 
