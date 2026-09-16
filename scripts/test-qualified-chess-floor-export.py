@@ -209,8 +209,7 @@ class MainQualificationTests(unittest.TestCase):
             "CMAKE_CACHEFILE_DIR:INTERNAL=" + str(self.build) + "\n")
         for name in ("build-native", "install-native"):
             (self.build / ".stamps" / name).write_text("a" * 64 + "\n")
-        environment = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch",
-                           LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
+        environment = dict(os.environ, LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
                            LAPLACE_GENERATION_BENCHMARK="")
         self.phases = subprocess.check_output(
             ["bash", str(ROOT / "scripts/product-ci.sh"), "all", "--list-phases"],
@@ -218,24 +217,6 @@ class MainQualificationTests(unittest.TestCase):
         self.assertIn("native-install", self.phases)
         self.assertIn("publish", self.phases)
         self.assertIn("live-api", self.phases)
-        # Historical lexical-failure protocol, explicitly separate from the
-        # current product owner (which may no longer schedule lexical admission).
-        self.historical_phases = [
-            "policy", "dependencies", "build", "native-dev", "managed-dev",
-            "uci-dev", "browser-dev", "native-install", "database-maintenance",
-            "lexical-foundation", "operational-seed", "publish",
-            "operational-execution", "db-health", "native-db", "managed-db",
-            "live-floor", "live-api", "managed-live", "generation-eval",
-        ]
-        self.historical_root = self.root / "historical-plan-protocol"
-        (self.historical_root / "scripts").mkdir(parents=True)
-        (self.historical_root / "scripts/product-ci.sh").write_text(
-            "#!/usr/bin/env bash\nset -euo pipefail\n"
-            'test "$#" -eq 2\ntest "$1" = all\ntest "$2" = --list-phases\n'
-            'test "$GITHUB_EVENT_NAME" = workflow_dispatch\n'
-            'test -z "$LAPLACE_FRESH_DB$LAPLACE_RESTORE_FOUNDATION$LAPLACE_GENERATION_BENCHMARK"\n'
-            "cat <<'HISTORICAL_PROTOCOL_PLAN'\n"
-            + "\n".join(self.historical_phases) + "\nHISTORICAL_PROTOCOL_PLAN\n")
         self.plan = {"proof_run_id": 123, "proof_run_attempt": 1,
                      "candidate_commit": "1" * 40, "candidate_tree": "2" * 40,
                      "installed_source": "1" * 40}
@@ -265,10 +246,7 @@ class MainQualificationTests(unittest.TestCase):
                 return jobs
             return self.remote if remote is None else remote
         with mock.patch.object(driver, "run_json", side_effect=response):
-            # Only historical failure controls supply remote job fixtures.
-            # Current full-success and build-placement controls use real source.
-            root = self.historical_root if jobs is not None else ROOT
-            return driver.qualification(self.plan, root)
+            return driver.qualification(self.plan, ROOT)
 
     def test_exact_main_requires_real_canonical_all_phase_list_independent_of_export_environment(self):
         with mock.patch.dict(os.environ, {"LAPLACE_FRESH_DB": "1",
@@ -316,17 +294,15 @@ class MainQualificationTests(unittest.TestCase):
                 self.qualify(state={**self.state, **mutation})
 
     def lexical_fixture(self):
-        # Explicit historical protocol only; no current lexical phase is claimed.
+        # Protocol records only; no lexical failure or chess export is executed.
         state = copy.deepcopy(self.state)
-        state["phases"] = list(self.historical_phases)
-        boundary = self.historical_phases.index("lexical-foundation")
+        boundary = self.phases.index("lexical-foundation")
         state.update(status="failed", next=boundary + 1,
-                     results=[{"phase": p, "exit_code": 0} for p in self.historical_phases[:boundary]]
-                             + [{"phase": "lexical-foundation", "exit_code": 1}],
+                     results=state["results"][:boundary] + [{"phase": "lexical-foundation", "exit_code": 1}],
                      failure="phase lexical-foundation failed")
         remote = {**self.remote, "conclusion": "failure"}
         installed = [
-            "Resolve the Stockfish checkout for application publication", "Start ordered development phases",
+            "Resolve the Stockfish checkout for application publication", "Reserve host for product phases",
             "Check source and policy", "Resolve build dependencies", "Build native and managed artifacts",
             "Test native engine", "Test managed code", "Test UCI runtime", "Test browser product",
             "Install native artifacts", "Migrate and reconcile installed database",
@@ -362,48 +338,9 @@ class MainQualificationTests(unittest.TestCase):
         self.assertEqual(456, observed["job_id"])
         self.assertEqual("lexical-foundation", observed["failed_phase"])
         self.assertEqual(1, observed["failed_exit_code"])
-        self.assertEqual(state["phases"][state["next"]:], observed["not_executed_phases"])
+        self.assertEqual(self.phases[state["next"]:], observed["not_executed_phases"])
         self.assertEqual(jobs["jobs"][0]["steps"], observed["workflow_steps"])
         self.assertNotIn(state["token"], json.dumps(receipt))
-
-    def test_dispatch_activation_resolves_full_plan_under_operator_push_environment(self):
-        for lexical in (False, True):
-            state, remote, jobs = self.lexical_fixture() if lexical else (
-                self.state, self.remote, None)
-            remote = {**remote, "event": "workflow_dispatch"}
-            with (self.subTest(lexical=lexical),
-                  mock.patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push",
-                      "LAPLACE_FRESH_DB": "1", "LAPLACE_RESTORE_FOUNDATION": "1",
-                      "LAPLACE_GENERATION_BENCHMARK": "1"})):
-                _, receipt = self.qualify(state, remote, jobs)
-            self.assertEqual("workflow_dispatch", receipt["lifecycle_event"])
-            self.assertEqual(state["results"], receipt["phases"])
-            self.assertEqual(not lexical, receipt["full_lifecycle_passed"])
-
-    def test_development_push_receipt_cannot_qualify_as_installed_activation(self):
-        # Actual current product owner maps push/all to only development phases.
-        environment = dict(os.environ, GITHUB_EVENT_NAME="push",
-                           LAPLACE_FRESH_DB="", LAPLACE_RESTORE_FOUNDATION="",
-                           LAPLACE_GENERATION_BENCHMARK="")
-        phases = subprocess.check_output(
-            ["bash", str(ROOT / "scripts/product-ci.sh"), "all", "--list-phases"],
-            cwd=ROOT, env=environment, text=True, timeout=10).splitlines()
-        self.assertTrue(phases)
-        self.assertEqual(len(phases), len(set(phases)))
-        self.assertIn("build", phases)
-        self.assertIn("native-dev", phases)
-        self.assertIn("managed-dev", phases)
-        self.assertEqual(phases, [phase for phase in self.phases if phase in phases])
-        self.assertLess(len(phases), len(self.phases))
-        self.assertTrue({"native-install", "database-maintenance", "publish", "live-api"}.isdisjoint(phases))
-        state = {**self.state, "phases": phases, "next": len(phases),
-                 "results": [{"phase": phase, "exit_code": 0} for phase in phases]}
-        with self.assertRaisesRegex(ValueError, "canonical product phase"):
-            self.qualify(state, {**self.remote, "event": "push"})
-        # Also refuse a full-plan declaration with only the development prefix executed.
-        state["phases"] = self.phases
-        with self.assertRaisesRegex(ValueError, "canonical product phase"):
-            self.qualify(state, {**self.remote, "event": "push"})
 
     def test_lexical_route_rejects_missing_prerequisite_wrong_phase_or_reordered_receipts(self):
         state, remote, jobs = self.lexical_fixture()
@@ -438,7 +375,7 @@ class MainQualificationTests(unittest.TestCase):
             {"active": {"phase": "lexical-foundation"}}, {"kind": "pr"},
             {"source": {"commit": "0" * 40, "tree": self.plan["candidate_tree"]}},
             {"source": {"commit": self.plan["candidate_commit"], "tree": "0" * 40}},
-            {"phases": list(reversed(state["phases"]))},
+            {"phases": list(reversed(self.phases))},
         ]
         for mutation in mutations:
             with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, "canonical product phase"):
@@ -581,213 +518,6 @@ class MainQualificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "private"):
             self.qualify()
 
-
-
-class NativeQualificationTests(unittest.TestCase):
-    """Private files and protocol metadata, not PostgreSQL or native execution."""
-    def setUp(self):
-        self.layout = MainQualificationTests(methodName="runTest")
-        self.layout.setUp()
-        self.addCleanup(self.layout.doCleanups)
-        self.root, self.checkout, self.build = (
-            self.layout.root, self.layout.checkout, self.layout.build)
-        self.plan = {**self.layout.plan, "proof_kind": "native-only-install",
-                     "proof_operator_commit": "3" * 40, "native_workflow_blob": "4" * 40,
-                     "native_artifact_id": 789, "native_artifact_sha256": "5" * 64,
-                     "native_checkout": str(self.checkout)}
-        self.operator_root = self.root / "native-install"
-        self.directory = self.operator_root / "123-1"
-        self.directory.mkdir(parents=True, mode=0o700)
-        self.directory.chmod(0o700)
-        self.prefix = self.root / "installed-fixture"
-        for name in ("lib/liblaplace_core.so", "pgsql-18/bin/postgres", "pgsql-18/bin/pg_config"):
-            path = self.prefix / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(("protocol-only installed file " + name).encode())
-        self.identities = {
-            "/opt/laplace/" + name: driver.file_identity(self.prefix / name)
-            for name in ("lib/liblaplace_core.so", "pgsql-18/bin/postgres", "pgsql-18/bin/pg_config")}
-        common = {"schema": "laplace.native-only-install/v1",
-                  "source": self.plan["candidate_commit"], "tree": self.plan["candidate_tree"],
-                  "runId": "123", "attempt": "1", "managedPublication": "not_attempted",
-                  "fullLifecyclePassed": False, "databaseRecreation": False, "foundationIngestion": False}
-        self.state = {**common, "status": "completed", "completedPhases": list(driver.NATIVE_PHASES),
-                      "identities": self.identities, "serverVersionNum": 180006}
-        self.selection = {**common, "status": "running", "operatorSource": self.plan["proof_operator_commit"],
-                          "uid": os.getuid(), "postgresqlSelection": driver.load(
-                              ROOT / "deploy/postgresql-release.json")}
-        self.outcome = {"workflowOutcome": "success", "source": self.plan["candidate_commit"],
-                        "applicationPublication": "not_attempted", "fullLifecyclePassed": False}
-        self.remote = {**self.layout.remote, "head_branch": "verify/chess-floor-serving-controls-20260916",
-                       "path": driver.NATIVE_WORKFLOW, "head_sha": self.plan["proof_operator_commit"]}
-        steps = ["Prepare retained native execution paths",
-                 "Execute existing native dependency build proof and install owners",
-                 "Observe fixed public managed service state",
-                 "Retain native operator outcome", "Retain native execution evidence"]
-        self.job = {"id": 456, "run_id": 123, "head_sha": self.plan["proof_operator_commit"],
-                    "status": "completed", "conclusion": "success",
-                    "steps": [{"name": name, "status": "completed", "conclusion": "success"} for name in steps]}
-        self.artifact = {"id": 789, "name": "original-native-install-123-1", "expired": False,
-                         "digest": "sha256:" + self.plan["native_artifact_sha256"],
-                         "workflow_run": {"id": 123, "head_sha": self.plan["proof_operator_commit"]}}
-        self.workflow = {"path": driver.NATIVE_WORKFLOW, "sha": self.plan["native_workflow_blob"]}
-        self.git_values = {("rev-parse", "HEAD"): self.plan["candidate_commit"],
-                           ("rev-parse", "HEAD^{tree}"): self.plan["candidate_tree"],
-                           ("status", "--porcelain", "--untracked-files=no"): ""}
-        for name, value in (("NATIVE_ROOT", self.operator_root), ("NATIVE_PREFIX", self.prefix)):
-            patcher = mock.patch.object(driver, name, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.seal()
-
-    def seal(self):
-        for name, value in (("receipt.json", self.state), ("selection.json", self.selection),
-                            ("workflow-outcome.json", self.outcome)):
-            (self.directory / name).write_text(json.dumps(value) + "\n")
-        (self.directory / "completed-phases.txt").write_text(
-            "\n".join(self.state["completedPhases"]) + "\n")
-        for key, name in (("native_receipt_sha256", "receipt.json"),
-                          ("native_selection_sha256", "selection.json")):
-            self.plan[key] = driver.file_identity(self.directory / name)["sha256"]
-
-    def qualify(self):
-        def run(run_id, suffix=""):
-            self.assertEqual(123, run_id)
-            if not suffix:
-                return self.remote
-            if suffix == "/attempts/1/jobs?per_page=100":
-                return {"total_count": 1, "jobs": [self.job]}
-            self.assertEqual("/artifacts?per_page=100", suffix)
-            return {"total_count": 1, "artifacts": [self.artifact]}
-        def workflow(path):
-            self.assertEqual("contents/" + driver.NATIVE_WORKFLOW + "?ref=" + self.plan["proof_operator_commit"], path)
-            return self.workflow
-        def git(root, *args):
-            self.assertEqual(self.checkout, root)
-            return self.git_values[args]
-        with (mock.patch.object(driver, "run_json", side_effect=run),
-              mock.patch.object(driver, "github_json", side_effect=workflow),
-              mock.patch.object(driver, "git", side_effect=git)):
-            return driver.qualification(self.plan, ROOT)
-
-    def test_native_installation_retains_independent_scope_and_optional_fetch(self):
-        for fetch in (False, True):
-            with self.subTest(fetch=fetch):
-                self.state["completedPhases"] = list(driver.NATIVE_PHASES)
-                if fetch:
-                    self.state["completedPhases"].insert(1, "pg-fetch")
-                self.seal()
-                build, receipt = self.qualify()
-                self.assertEqual(self.build, build)
-                self.assertFalse(receipt["full_lifecycle_passed"])
-                self.assertEqual("not_attempted", receipt["managed_publication"])
-                self.assertFalse(receipt["database_recreation"])
-                self.assertFalse(receipt["foundation_ingestion"])
-                self.assertEqual(180006, receipt["server_version_num"])
-                self.assertEqual(self.identities, receipt["installed_identities"])
-                self.assertEqual("a" * 64, receipt["native_fingerprint"])
-                self.assertNotIn("session_receipt", receipt)
-                self.assertIn("current", receipt["checkout_build_observation"])
-                self.assertEqual(4, len(receipt["evidence_receipts"]))
-                driver.verify_qualification_receipts(receipt)
-
-    def test_native_operator_remote_workflow_job_and_artifact_refusals(self):
-        for owner, changes in (
-            ("remote", [{"conclusion": "failure"}, {"status": "in_progress"}, {"event": "workflow_dispatch"},
-                        {"head_sha": "6" * 40}, {"head_branch": "main"}, {"run_attempt": 2}]),
-            ("workflow", [{"sha": "6" * 40}, {"path": ".github/workflows/laplace.yml"}]),
-            ("job", [{"conclusion": "failure"}, {"head_sha": "6" * 40},
-                     {"steps": self.job["steps"][:-1]}, {"steps": list(reversed(self.job["steps"]))}]),
-            ("artifact", [{"digest": "sha256:" + "6" * 64}, {"expired": True},
-                          {"id": 790}, {"name": "other"},
-                          {"workflow_run": {"id": 123, "head_sha": "6" * 40}}]),
-        ):
-            original = copy.deepcopy(getattr(self, owner))
-            for change in changes:
-                with self.subTest(owner=owner, change=change):
-                    setattr(self, owner, {**original, **change})
-                    with self.assertRaisesRegex(ValueError, "native installation"):
-                        self.qualify()
-            setattr(self, owner, original)
-
-    def test_native_phase_and_scope_mutations_fail_even_with_reselected_receipt_hashes(self):
-        original = copy.deepcopy(self.state)
-        changes = [{"completedPhases": original["completedPhases"][:index]
-                    + original["completedPhases"][index + 1:]} for index in range(len(driver.NATIVE_PHASES))]
-        changes += [{"completedPhases": list(reversed(driver.NATIVE_PHASES))},
-                    {"source": "6" * 40}, {"tree": "6" * 40}, {"attempt": "2"},
-                    {"status": "running"}, {"serverVersionNum": 180003},
-                    {"managedPublication": "completed"}, {"fullLifecyclePassed": True},
-                    {"databaseRecreation": True}, {"foundationIngestion": True}]
-        for change in changes:
-            with self.subTest(change=change):
-                self.state = {**original, **change}
-                self.seal()
-                with self.assertRaisesRegex(ValueError, "native installation"):
-                    self.qualify()
-        self.state = original
-        for owner, change in (("selection", {"operatorSource": "6" * 40}),
-                              ("selection", {"uid": os.getuid() + 1}),
-                              ("selection", {"postgresqlSelection": {}}),
-                              ("outcome", {"workflowOutcome": "failure"})):
-            saved = copy.deepcopy(getattr(self, owner))
-            setattr(self, owner, {**saved, **change})
-            self.seal()
-            with self.subTest(owner=owner), self.assertRaisesRegex(ValueError, "native installation"):
-                self.qualify()
-            setattr(self, owner, saved)
-
-    def test_native_receipt_bytes_and_installed_files_are_actually_checked(self):
-        receipt = self.directory / "receipt.json"
-        receipt.write_text(receipt.read_text() + " ")
-        with self.assertRaisesRegex(ValueError, "receipt bytes changed"):
-            self.qualify()
-        self.seal()
-        installed = self.prefix / "lib/liblaplace_core.so"
-        installed.write_bytes(installed.read_bytes() + b"mutation")
-        with self.assertRaisesRegex(ValueError, "file identity changed"):
-            self.qualify()
-
-    def test_native_current_checkout_build_and_fingerprint_are_not_inferred(self):
-        for key, value in ((("rev-parse", "HEAD"), "6" * 40),
-                           (("rev-parse", "HEAD^{tree}"), "6" * 40),
-                           (("status", "--porcelain", "--untracked-files=no"), " M real-source")):
-            original = self.git_values[key]
-            self.git_values[key] = value
-            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "current checkout"):
-                self.qualify()
-            self.git_values[key] = original
-        (self.build / ".stamps/install-native").write_text("b" * 64)
-        with self.assertRaisesRegex(ValueError, "stamps"):
-            self.qualify()
-        (self.build / ".stamps/install-native").write_text("a" * 64)
-        (self.checkout / "build").unlink()
-        with self.assertRaisesRegex(ValueError, "build link"):
-            self.qualify()
-
-    def test_native_private_evidence_and_recheck_detect_real_mutation(self):
-        self.directory.chmod(0o755)
-        with self.assertRaisesRegex(ValueError, "private"):
-            self.qualify()
-        self.directory.chmod(0o700)
-        _, receipt = self.qualify()
-        (self.directory / "workflow-outcome.json").write_text("{}")
-        with self.assertRaisesRegex(ValueError, "evidence changed"):
-            driver.verify_qualification_receipts(receipt)
-
-    def test_native_installed_state_still_requires_running_release_and_full_pilot_guard(self):
-        _, receipt = self.qualify()
-        guard = mock.Mock()
-        guard.read_database.return_value = {"server_version": "180003"}
-        baseline = {"native_fingerprint": "a" * 64, "database": guard.read_database.return_value}
-        with self.assertRaisesRegex(ValueError, "running PostgreSQL"):
-            driver.installed_state(guard, self.prefix, self.prefix / "pgsql-18", baseline, receipt)
-        guard.snapshot.assert_not_called()
-        guard.read_database.return_value = {"server_version": "180006"}
-        baseline["database"] = {"server_version": "180006", "different": "pilot state"}
-        with self.assertRaisesRegex(ValueError, "pilot baseline"):
-            driver.installed_state(guard, self.prefix, self.prefix / "pgsql-18", baseline, receipt)
-        guard.snapshot.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

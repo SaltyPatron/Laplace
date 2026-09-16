@@ -92,22 +92,24 @@ class ActionsArchitectureTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("source-only syntax check passed", result.stdout)
 
-    def test_database_recreate_restores_a_usable_product(self):
+    def test_database_recreate_never_builds_installs_or_ingests_source(self):
         db = load(WORKFLOWS / "db-ops.yml")
         self.assertEqual({"workflow_dispatch"}, triggers(db))
         self.assertEqual("laplace-substrate-lifecycle", db["concurrency"]["group"])
-        inputs = db["on"]["workflow_dispatch"]["inputs"]
-        self.assertIn("restore_foundation", inputs)
+        self.assertEqual("1", db["jobs"]["db"]["env"]["LAPLACE_REQUIRE_PREBUILT_MIGRATIONS"])
         steps = db["jobs"]["db"]["steps"]
-        install = next(step for step in steps if step.get("name") == "Build and install the exact runtime used by recreation")
-        self.assertIn("pipeline.sh build install", install["run"])
-        recreate = next(step for step in steps if step.get("name") == "Recreate database structure and runtime")
+        recreate = next(step for step in steps if step.get("name") == "Recreate database structure from installed runtime")
         command = recreate["run"]
-        self.assertIn("--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env", command)
+        self.assertIn("--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc", command)
         self.assertIn("check-database-health.sh", command)
         commands = "\n".join(step.get("run", "") for step in steps)
-        self.assertIn("ensure-foundation.sh --required-lexical", commands)
-        self.assertIn("check-substrate-floor.sh", commands)
+        for forbidden in (
+            "pipeline.sh build", "pipeline.sh install", "ensure-foundation.sh",
+            "dotnet build", "dotnet publish",
+            "ingest-source.sh", "publish-applications.sh", "api-env",
+            "verify-application-release.py", "check-substrate-floor.sh",
+        ):
+            self.assertNotIn(forbidden, commands)
 
     def test_seed_workflows_are_explicit_not_source_triggered(self):
         for path in sorted(WORKFLOWS.glob("seed-*.yml")):

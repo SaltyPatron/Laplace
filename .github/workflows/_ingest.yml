@@ -127,35 +127,31 @@ jobs:
           git checkout --force "$TARGET_SHA"
       - uses: ./.github/actions/setup-laplace-env
 
-      - name: Engine present, or built
-        # THE SEED PATH NEVER BUILT THE ENGINE. It assumed a prior deploy had left
-        # build/engine/ populated in this workspace, and setup-laplace-env's
-        # LD_LIBRARY_PATH points there — so an empty build tree is not a missing
-        # variable, it is a missing directory.
-        #
-        # MEASURED 2026-08-16, run 31970409292: conceptnet aborted after 1 second with
-        # rc=134 (SIGABRT) out of MklAvailability.EnsureOrThrow at Program.cs:20 —
-        # "liblaplace_dynamics.so: cannot open shared object file". No journal row, no
-        # ingest, and a dlopen stack trace as the only diagnosis. A 31M-unit seed cannot
-        # be gated on an artifact nothing in this workflow produces.
-        #
-        # phase_build is fingerprint-gated (fp_native), so this is a no-op on a current
-        # tree and pays only when the workspace genuinely lacks the engine.
+      - name: Prepare exact ingest runtime
+        # Ingest executes app-local native libraries, not the installed PostgreSQL
+        # extension image. A mere existence check allowed an old CLI output tree to
+        # survive a native-only ABI change and fail Unicode at its first new symbol.
+        # The build owner is fingerprinted; invoking it here proves both the native
+        # engine and every managed app-local native closure match this revision.
         run: |
-          missing=0
-          for so in core/liblaplace_core.so dynamics/liblaplace_dynamics.so; do
-            [ -e "build/engine/$so" ] || { echo "::warning::build/engine/$so absent"; missing=1; }
-          done
-          if [ "$missing" -eq 1 ]; then
-            echo "::notice::engine absent in this workspace — building (fingerprint-gated)"
-            bash scripts/pipeline.sh build
+          bash scripts/pipeline.sh build
+          if [ -n "${LAPLACE_BUILD_ROOT:-}" ]; then
+            cli_dir="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0"
+          else
+            cli_dir="$PWD/app/Laplace.Cli/bin/Release/net10.0"
           fi
           for so in core/liblaplace_core.so dynamics/liblaplace_dynamics.so; do
             [ -e "build/engine/$so" ] || {
-              echo "::error::build/engine/$so still absent after build — the CLI will SIGABRT in MklAvailability.EnsureOrThrow before any ingest starts"
+              echo "::error::build/engine/$so absent after exact-runtime build"
               exit 1; }
           done
-          echo "engine present: $(ls build/engine/core/liblaplace_core.so build/engine/dynamics/liblaplace_dynamics.so)"
+          nm -D "$cli_dir/liblaplace_core.so" \
+            | grep -q ' physicality_descriptor_stages_shape$' || {
+              echo "::error::CLI native closure lacks physicality_descriptor_stages_shape"; exit 1; }
+          cmp -s build/engine/core/liblaplace_core.so \
+            "$cli_dir/liblaplace_core.so" || {
+              echo "::error::CLI native closure differs from the exact engine build"; exit 1; }
+          echo "LAPLACE_INGEST_RUNTIME_PREPARED=1" >> "$GITHUB_ENV"
 
       - name: Ingest log directory is writable
         # THE S1 CLASS, RECURRING. S1 was logs/ at ahart:ahart 755 inside the runner

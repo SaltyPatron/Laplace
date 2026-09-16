@@ -285,17 +285,23 @@ string(APPEND _geom_sql_hashes "module_pathname=${EXT_MODULE_PATHNAME}")
 string(SHA256 _geom_sql_hash "${_geom_sql_hashes}")
 string(SUBSTRING ${_geom_sql_hash} 0 16 EXT_VERSION)
 
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in
-    ${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control
-    @ONLY
-)
-
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in
-    ${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h
-    @ONLY
-)
+# Preserve unchanged mtimes and an existing shared output's mode instead of
+# configure_file's unconditional chmod, which another group member cannot do.
+function(laplace_configure_shared input output)
+    file(READ "${input}" _template)
+    string(CONFIGURE "${_template}" _configured @ONLY)
+    set(_existing "")
+    if(EXISTS "${output}")
+        file(READ "${output}" _existing)
+    endif()
+    if(NOT _existing STREQUAL _configured)
+        file(WRITE "${output}" "${_configured}")
+    endif()
+endfunction()
+laplace_configure_shared("${CMAKE_CURRENT_SOURCE_DIR}/${EXT_NAME}.control.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/${EXT_NAME}.control")
+laplace_configure_shared("${CMAKE_CURRENT_SOURCE_DIR}/sql/sqldefines.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/sql/sqldefines.h")
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../laplace_substrate/cmake/SqlManifest.cmake)
 laplace_write_sql_chain(
