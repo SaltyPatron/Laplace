@@ -186,7 +186,9 @@ preloaded_so_digest() {
   local library
   for library in "$d/laplace_substrate.so" "$d/laplace_geom.so" \
     "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" \
-    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_dynamics.so"; do
+    "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_dynamics.so" \
+    "$LAPLACE_INSTALL_PREFIX/share/laplace/laplace_chess_position_perfcache.bin" \
+    "$LAPLACE_INSTALL_PREFIX/share/laplace/laplace_chess_transition_perfcache.bin"; do
     if [[ -f "$library" ]]; then
       sha256sum "$library" || return
     fi
@@ -372,8 +374,10 @@ phase_build() {
   # is an `if(LAPLACE_CHESS_OPENINGS ...)` whose else branch is only a message(STATUS).
   # That is why the blob in share/laplace was a hand copy (owner ahart:ahart) instead of an
   # install product (laplace-runner group, install perms) like t0 and highway.
-  local chess_openings
+  local chess_openings chess_corpus_export
   chess_openings=$(fp_chess_openings_path)
+  chess_corpus_export=$("$PYTHON" "$ROOT/scripts/chess-floor-artifacts.py" selected-export \
+    --prefix "$LAPLACE_INSTALL_PREFIX" --path-only)
   if [[ "$CLEAN_FIRST" -eq 0 && -d "$ROOT/build" ]] && fp_check build-native "$native_fp"; then
     echo "engine up-to-date — cmake configure/build skipped (fp ${native_fp:0:12})"
   else
@@ -390,7 +394,8 @@ phase_build() {
       -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.nounihan.flat.zip" \
       -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
       -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
-      -DLAPLACE_CHESS_OPENINGS="$chess_openings"
+      -DLAPLACE_CHESS_OPENINGS="$chess_openings" \
+      -DLAPLACE_CHESS_CORPUS_EXPORT="$chess_corpus_export"
     LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
       cmake --build "$LAPLACE_BUILD_DIRECTORY" "${build_flags[@]}"
     fp_record build-native "$native_fp"
@@ -437,6 +442,10 @@ phase_build() {
       exit 1
     fi
     echo "chess transition perfcache ready: $chess_transition_bin"
+    test -s "$ROOT/build/engine/core/perfcache/chess-floor-pair.json" || {
+      echo "::error::complete chess floor pair receipt missing after native build" >&2
+      exit 1
+    }
     if [[ -d "$chess_openings" ]]; then
       echo "chess catalog coverage: openings corpus $chess_openings"
     else
@@ -567,15 +576,17 @@ phase_install() (
   # and their Laplace dependencies across the install instead: same bytes,
   # same loaded images, no restart. A new execution module may reference new
   # core exports even when the preload module itself is byte-identical.
+  # Chess floors are also pinned by application/postmaster mappings. Their pair
+  # hashes participate even when the native libraries are byte-identical.
   if [[ "$so_before" != "$so_after" || "$library_path_changed" -eq 1 ]]; then
     local preload
     preload=$(psql -d postgres -U laplace_admin -tAc "SHOW shared_preload_libraries")
     if [[ ",${preload// /}," == *",laplace_substrate,"* ]] \
        || [[ ",${preload// /}," == *",laplace_geom,"* ]]; then
-      restart_postgres "install: staged extension image or resolution path changed"
+      restart_postgres "install: staged native image, chess floor pair, or resolution path changed"
     fi
   else
-    echo "install: preloaded .so unchanged — no PG bounce needed (SQL-only change)"
+    echo "install: preloaded native images and chess floors unchanged — no PG bounce needed"
   fi
   if [[ "$api_was_active" -eq 1 ]]; then
     sudo -n systemctl start laplace-api
