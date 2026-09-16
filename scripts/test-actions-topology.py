@@ -709,6 +709,7 @@ bash() { if [[ "$1" == scripts/test-parallel.sh ]]; then step performance; else 
         self.assertIn("ensure-foundation.sh --force", restore["run"])
         self.assertEqual("inputs.operation == 'recreate' && inputs.restore_foundation", restore["if"])
 
+
     def test_seed_workflows_are_manual_or_reusable_not_source_triggered(self):
         for path in sorted(WORKFLOWS.glob("seed-*.yml")):
             trigger = load(path)["on"]
@@ -761,6 +762,40 @@ class ActionsAuditFailurePropagationTests(unittest.TestCase):
     def step(workflows, filename, key, value):
         job = next(iter(workflows[filename]["jobs"].values()))
         return next(step for step in job["steps"] if step.get(key) == value)
+
+    def test_explicit_chess_acceptance_cannot_become_main_push_work(self):
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["on"]["push"].update(
+            {"branches": ["main"]}), "explicitly named operator branch")
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["acceptance"].update(
+            {"if": "always()"}), "acceptance must remain explicitly selected")
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["benchmark"].update(
+            {"if": "always()"}), "ordinary suites must exclude")
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["acceptance"].update(
+            {"needs": "product"}), "independent from deployment")
+
+    def test_acceptance_selector_distinguishes_reusable_main_push_from_operator_push(self):
+        workflow = load(WORKFLOWS / "benchmark-evidence.yml")
+        self.assertEqual(
+            "(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/verify/chess-acceptance-')) || inputs.suite == 'acceptance'",
+            workflow["jobs"]["acceptance"]["if"])
+        self.assertEqual(
+            "inputs.suite != 'acceptance' && (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/verify/chess-acceptance-'))",
+            workflow["jobs"]["benchmark"]["if"])
+        self.check_audit(lambda ws: ws["benchmark-evidence.yml"]["jobs"]["acceptance"].update(
+            {"if": "github.event_name == 'push' || inputs.suite == 'acceptance'"}),
+            "acceptance must remain explicitly selected")
+
+    def test_explicit_acceptance_retains_lock_owner_and_failed_evidence(self):
+        def edit_execution(ws):
+            steps = ws["benchmark-evidence.yml"]["jobs"]["acceptance"]["steps"]
+            step = next(s for s in steps if s.get("id") == "chess_acceptance")
+            step["run"] = step["run"].replace("flock --exclusive --close", "true")
+        self.check_audit(edit_execution, "canonical locked owner")
+        def suppress_evidence(ws):
+            steps = ws["benchmark-evidence.yml"]["jobs"]["acceptance"]["steps"]
+            step = next(s for s in steps if s.get("name") == "Upload complete chess acceptance evidence")
+            step["if"] = "success()"
+        self.check_audit(suppress_evidence, "acceptance evidence must upload on failure")
 
     def test_deferred_readiness_and_optional_baseline_are_accepted(self):
         self.check_audit()

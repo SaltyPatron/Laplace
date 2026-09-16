@@ -126,9 +126,37 @@ def visible_phases(job: dict, kind: str) -> tuple[list[str], int, int]:
 def result_authority(name: str, workflow: dict) -> None:
     """Optional diagnostics never acquire proof authority; readiness is deferred."""
     if name == "benchmark-evidence.yml":
-        if set(workflow.get("jobs") or {}) != {"benchmark"}:
-            fail("benchmark-evidence.yml: the reusable workflow may expose only its measurement job")
-        for job in (workflow.get("jobs") or {}).values():
+        jobs = workflow.get("jobs") or {}
+        if set(jobs) != {"benchmark", "acceptance"}:
+            fail("benchmark-evidence.yml: the reusable workflow may expose only its measurement job and explicit acceptance job")
+        if (workflow.get("on") or {}).get("push") != {"branches": ["verify/chess-acceptance-*"]}:
+            fail("benchmark-evidence.yml: acceptance push trigger must remain an explicitly named operator branch")
+        if jobs.get("benchmark", {}).get("if") != "inputs.suite != 'acceptance' && (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/verify/chess-acceptance-'))":
+            fail("benchmark-evidence.yml: ordinary suites must exclude explicit acceptance selection")
+        acceptance = jobs.get("acceptance", {})
+        if acceptance.get("if") != "(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/verify/chess-acceptance-')) || inputs.suite == 'acceptance'":
+            fail("benchmark-evidence.yml: acceptance must remain explicitly selected")
+        if "needs" in acceptance:
+            fail("benchmark-evidence.yml: acceptance must remain independent from deployment")
+        if acceptance.get("timeout-minutes") != "360":
+            fail("benchmark-evidence.yml: acceptance must retain its finite whole-job envelope")
+        acceptance_steps = acceptance.get("steps") or []
+        execution = unique_step(acceptance_steps, "id", "chess_acceptance", "benchmark-evidence.yml:acceptance")
+        evidence = unique_step(acceptance_steps, "name", "Upload complete chess acceptance evidence", "benchmark-evidence.yml:acceptance")
+        if execution:
+            for token in ("set -euo pipefail", "flock --exclusive --close /build/laplace/work/host-resource.lock",
+                          "python3 scripts/accept-chess-environment.py", '--output-dir "$LAPLACE_BENCH_RECEIPT/acceptance"'):
+                if token not in execution[1].get("run", ""):
+                    fail(f"benchmark-evidence.yml: acceptance lost its canonical locked owner: {token}")
+        if evidence:
+            upload = evidence[1]
+            if upload.get("if") != "always()" or not upload.get("uses", "").startswith("actions/upload-artifact@"):
+                fail("benchmark-evidence.yml: acceptance evidence must upload on failure")
+            if (upload.get("with") or {}).get("if-no-files-found") != "error":
+                fail("benchmark-evidence.yml: missing acceptance evidence must fail")
+            if "selection.private.json" not in (upload.get("with") or {}).get("path", ""):
+                fail("benchmark-evidence.yml: private corpus selection must remain excluded")
+        for job in jobs.values():
             for token in ("product-ci.sh", "ci-session.py", "pipeline.sh install", "pipeline.sh migrate", "publish-applications.sh", "systemctl ", "sudo "):
                 if token in runs(job):
                     fail(f"benchmark-evidence.yml: measurement may not acquire product mutation authority: {token}")
@@ -442,7 +470,7 @@ for name, workflow in workflows.items():
             fail(f"{name}: seed mutation lacks explicit invocation")
 
 push = {name for name, workflow in workflows.items() if "push" in triggers(workflow)}
-if push != {"laplace.yml", "repo-hygiene.yml"}:
+if push != {"laplace.yml", "repo-hygiene.yml", "benchmark-evidence.yml"}:
     fail(f"automatic push workflows drifted: {sorted(push)}")
 
 runner = (ROOT / "scripts" / "bootstrap-laplace-runner.sh").read_text(encoding="utf-8")

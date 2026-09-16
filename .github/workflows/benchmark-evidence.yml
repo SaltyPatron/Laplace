@@ -1,13 +1,15 @@
 name: Laplace — benchmark evidence
 
-# Benchmarks run on explicit dispatch or after a successful product activation
-# through workflow_call. The measured host is shared with delivery, so this
+# Benchmarks run on explicit dispatch or workflow_call. Full chess acceptance
+# also has a deliberately named operator branch trigger; main pushes do not select it. The measured host is shared with delivery, so this
 # workflow uses the product job's workspace lock and cannot overlap activation.
 # Scaling defaults preserve host headroom; destructive all-logical-CPU saturation
 # requires an explicit opt-in. The query suite is read-only but additionally
 # requires the installed content-versioned extension/execution binding to match
 # the exact source revision built by this run.
 on:
+  push:
+    branches: [verify/chess-acceptance-*]
   workflow_call:
     inputs:
       target_ref:
@@ -67,7 +69,7 @@ on:
         type: choice
         required: true
         default: quick
-        options: [quick, throughput, core, scale, moby, query, chess, geometry, recorded, all]
+        options: [quick, throughput, core, scale, moby, query, chess, geometry, recorded, all, acceptance]
       repeats:
         description: "repeats per selected benchmark case/scaling point; all runs retained"
         type: string
@@ -119,6 +121,7 @@ env:
 
 jobs:
   benchmark:
+    if: inputs.suite != 'acceptance' && (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/verify/chess-acceptance-'))
     name: Measured host — versioned benchmark suite
     runs-on: [self-hosted, laplace]
     timeout-minutes: ${{ inputs.suite == 'chess' && 45 || 180 }}
@@ -488,7 +491,7 @@ jobs:
           elif [[ "$SUITE" == geometry ]]; then
             export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
           elif [[ "$SUITE" == recorded ]]; then
-            args+=(--recorded-duration-seconds 30 --recorded-total-timeout 1800)
+            args+=(--recorded-duration-seconds 30 --recorded-total-timeout 7200)
           else
             args+=(--core "$LAPLACE_CORE" --t0 "$LAPLACE_T0")
             [[ -z "$scale_workers" ]] || args+=(--scale-workers "$scale_workers")
@@ -695,3 +698,98 @@ jobs:
         run: |
           echo '::error::Required chess dependency checks failed; inspect chess-dependency-readiness.json and chess-readiness-execution.json in the uploaded evidence.'
           exit 1
+
+  acceptance:
+    name: Installed chess — complete explicit acceptance
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/verify/chess-acceptance-')) || inputs.suite == 'acceptance'
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 360
+    steps:
+      - name: Create acceptance evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/laplace-chess-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir "$receipt"
+          printf 'LAPLACE_BENCH_RECEIPT=%s\n' "$receipt" >> "$GITHUB_ENV"
+
+      - name: Resolve exact acceptance revision
+        shell: bash
+        env:
+          TRIGGER_SHA: ${{ github.sha }}
+          REQUESTED_REF: ${{ inputs.target_ref }}
+        run: |
+          set -euo pipefail
+          target="${REQUESTED_REF:-$TRIGGER_SHA}"
+          git fetch --no-tags --prune origin "$target"
+          resolved="$(git rev-parse FETCH_HEAD)"
+          git checkout --force "$resolved"
+          printf 'LAPLACE_BENCH_SHA=%s\n' "$resolved" >> "$GITHUB_ENV"
+          printf 'requested_ref=%s\nresolved_sha=%s\n' "$target" "$resolved" \
+            > "$LAPLACE_BENCH_RECEIPT/request.env"
+
+      - name: Execute complete installed chess acceptance
+        id: chess_acceptance
+        shell: bash
+        env:
+          LAPLACE_LICHESS_STATUS_BASE: ${{ vars.LAPLACE_LICHESS_STATUS_BASE || 'http://127.0.0.1:5189' }}
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          export TMPDIR=/build/laplace/work TMP=/build/laplace/work TEMP=/build/laplace/work
+          export PATH="$LAPLACE_PG_PREFIX/bin:$PATH"
+          # One lock spans provisioning, source/runtime binding and every measured
+          # interval. Independent failures retain their own receipts.
+          flock --exclusive --close /build/laplace/work/host-resource.lock \
+            python3 scripts/accept-chess-environment.py \
+              --prefix "$LAPLACE_INSTALL_PREFIX" --work /build/laplace/work \
+              --output-dir "$LAPLACE_BENCH_RECEIPT/acceptance" \
+            2>&1 | tee "$LAPLACE_BENCH_RECEIPT/acceptance.log"
+
+      - name: Seal acceptance evidence and summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path(os.environ["LAPLACE_BENCH_RECEIPT"])
+          manifest = []
+          for path in sorted(root.rglob("*")):
+              if not path.is_file() or path.name in ("selection.private.json", "artifact-sha256.json"):
+                  continue
+              digest = hashlib.sha256()
+              with path.open("rb") as stream:
+                  for chunk in iter(lambda: stream.read(1 << 20), b""):
+                      digest.update(chunk)
+              manifest.append({"path": str(path.relative_to(root)), "bytes": path.stat().st_size,
+                               "sha256": digest.hexdigest()})
+          (root / "artifact-sha256.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          receipt = root / "acceptance/receipt.json"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## Explicit installed chess acceptance\n\n")
+              summary.write("Source: " + os.environ.get("LAPLACE_BENCH_SHA", "unresolved") + "\n\n")
+              if receipt.is_file():
+                  proof = json.loads(receipt.read_text())
+                  summary.write("Acceptance status: " + proof["status"] + "\n\n")
+                  for phase in proof["phases"]:
+                      summary.write("- " + phase["name"] + ": " + phase["status"] + "\n")
+              else:
+                  summary.write("No completed acceptance receipt; inspect failure logs.\n")
+              summary.write("\nGame rates require the complete recorded collector receipt. "
+                            "Geometry rows and retained replay rates remain separate. "
+                            "Current service response latency is not cold boot time.\n")
+          PY
+
+      - name: Upload complete chess acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-chess-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/laplace-chess-acceptance-${{ github.run_id }}-${{ github.run_attempt }}/
+            !${{ runner.temp }}/laplace-chess-acceptance-${{ github.run_id }}-${{ github.run_attempt }}/**/selection.private.json
+          if-no-files-found: error
+          retention-days: 90
