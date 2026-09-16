@@ -38,12 +38,12 @@ if [[ "$FORCE_NPM" -eq 0 && -d node_modules && -f package-lock.json && -f "$stam
   lock_hash=$(sha256sum package-lock.json | awk '{print $1}')
   prev=$(cat "$stamp" 2>/dev/null || true)
   if [[ "$prev" == "$lock_hash" ]]; then
-    echo "    npm ci skipped (package-lock stamp fresh; pass --force-npm to override)"
+    echo "    npm ci skipped (package-lock unchanged)"
     need_ci=0
   fi
 fi
 if [[ "$need_ci" -eq 1 ]]; then
-  npm ci --no-audit --no-fund
+  npm ci --no-audit --no-fund --prefer-offline
   mkdir -p node_modules
   sha256sum package-lock.json | awk '{print $1}' > "$stamp"
 fi
@@ -61,24 +61,24 @@ trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE"' EXIT
 publish_api() {
   echo "==> publish API -> staging ($STAGE)"
   dotnet publish "$REPO_ROOT/app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" \
-    -c Release --no-self-contained -o "$STAGE"
+    -c Release --no-build --no-self-contained -o "$STAGE"
 }
 
 publish_uci() {
   echo "==> publish laplace-uci -> $UCI_STAGE"
   dotnet publish "$REPO_ROOT/app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj" \
-    -c Release --no-self-contained -o "$UCI_STAGE"
+    -c Release --no-build --no-self-contained -o "$UCI_STAGE"
 }
 
 publish_mcp() {
   echo "==> publish laplace-mcp -> $MCP_STAGE"
   dotnet publish "$REPO_ROOT/app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" \
-    -c Release --no-self-contained -o "$MCP_STAGE"
+    -c Release --no-build --no-self-contained -o "$MCP_STAGE"
 }
 
 publish_lichess() {
   dotnet publish "$REPO_ROOT/app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj" \
-    -c Release --no-self-contained -o "$LICHESS_STAGE"
+    -c Release --no-build --no-self-contained -o "$LICHESS_STAGE"
 }
 
 if [[ "$SERIAL" -eq 1 ]]; then
@@ -120,9 +120,6 @@ test -x "$UCI_STAGE/laplace-uci"
 test -f "$MCP_STAGE/Laplace.Endpoints.Mcp"
 test -f "$LICHESS_STAGE/Laplace.Endpoints.Lichess"
 chmod 0755 "$MCP_STAGE/Laplace.Endpoints.Mcp" "$LICHESS_STAGE/Laplace.Endpoints.Lichess"
-# Retain the original mcp-runtime directory AND prior releases: running STDIO
-# clients resolve managed/native dependencies relative to their original apphost.
-# No rsync is ever allowed to overwrite those directories on a later publish.
 release="$(laplace_stage_managed_runtimes "$APP_DIR" "$MCP_STAGE" "$LICHESS_STAGE" "$UCI_STAGE")"
 release_name="$(basename "$release")"
 ln -s "releases/$release_name/uci/laplace-uci" "$STAGE/laplace-uci"
@@ -132,8 +129,6 @@ mkdir "$STAGE/managed-services"
 cp "$REPO_ROOT/deploy/linux/managed-services/"*.service "$STAGE/managed-services/"
 cp "$REPO_ROOT/deploy/linux/laplace-managed-deploy" "$STAGE/managed-services/"
 
-# Exercise the copied runtime before stopping/replacing the API. File existence
-# alone accepted an apphost whose managed assembly was entirely absent.
 python3 "$REPO_ROOT/scripts/check-uci-runtime.py" "$release/uci/laplace-uci"
 
 echo "==> [4/4] sync isolated MCP runtime + app into $APP_DIR"
@@ -149,10 +144,6 @@ test -x "$APP_DIR/laplace-mcp" || { echo "::error::laplace-mcp missing from $APP
 test -f "$release/mcp/Laplace.Endpoints.Mcp.dll"
 test -x "$APP_DIR/laplace-lichess"
 
-# The launcher inode being executable is not enough: #920 was exactly a launcher
-# that survived while its runtime target was absent/stale. Resolve the deployed
-# symlink and require it to be THIS publish's immutable release before exercising
-# the product protocol against it.
 mcp_target="$(readlink -f "$APP_DIR/laplace-mcp" 2>/dev/null || true)"
 expected_mcp="$(readlink -f "$release/mcp/Laplace.Endpoints.Mcp" 2>/dev/null || true)"
 test -n "$mcp_target" && test -x "$mcp_target" || {
