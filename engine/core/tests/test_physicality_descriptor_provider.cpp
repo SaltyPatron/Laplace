@@ -352,10 +352,14 @@ TEST(PhysicalityDescriptorVocabulary, GeneratedStageMatchesOrdinaryWitnessEmissi
     };
     for (const auto* tag : kTags) emit(tag);
     for (uint32_t value = 0; value < 256u; ++value) emit(std::to_string(value));
-    for (const auto* tag : {"PhysicalityViewV1", "PhysicalityCurrentFloorAdmittedWinnerRecipeV1",
+    // The declared retention recipe uses literal reference identifiers; selected
+    // byte geometry has its own basis receipt. Construct those public schemas
+    // through the ordinary owner, alongside the version-2 selected-view recipe.
+    for (const auto* tag : {"PhysicalityViewV1", "PhysicalityRetainedDescriptorSelectedGeometryRecipeV2",
              "PhysicalityFloorReceiptV1", "PhysicalityReferenceSelectionV1",
              "PhysicalitySelectionScopeV1", "PhysicalitySourceUnitContextV1",
-             "PhysicalitySourceIdentifierV1", "PhysicalitySourceUnitReceiptV1"}) emit(tag);
+             "PhysicalitySourceIdentifierV1", "PhysicalitySourceUnitReceiptV1",
+             "PhysicalityByteBasisReceiptV1", "PhysicalityRetentionReferenceIdentifierV1"}) emit(tag);
     hash128_t expected_digest{}, actual_digest{};
     ASSERT_EQ(intent_stage_semantic_digest(expected.get(), &expected_digest), 0);
     ASSERT_EQ(intent_stage_semantic_digest(actual.get(), &actual_digest), 0);

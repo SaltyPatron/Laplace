@@ -282,10 +282,10 @@ TEST(LaplaceGraphemeFloorLaw, MultiCpClusterStillMintsTier1) {
     intent_stage_free(stage);
 }
 
-TEST(LaplaceGraphemeFloorLaw, SingleCharContentEmitsNothingAndIsTheCodepoint) {
-    /* "a" collapses to the tier-0 codepoint at every tier ("Fine" as a
-       one-word reply IS the sentence IS the word -- one id): no new rows,
-       and the returned root id is the codepoint's id. */
+TEST(LaplaceGraphemeFloorLaw, SingleCharReusesCodepointAndRetainsAtomicObservation) {
+    /* "a" collapses to the tier-0 codepoint at every tier: no new entity or
+       scaffold wrapper is emitted, and the root id remains the codepoint's id.
+       Observing this root still retains its existing atomic physicality body. */
     intent_stage_t* stage = intent_stage_new(64);
     ASSERT_NE(nullptr, stage);
     hash128_t source;
@@ -294,7 +294,7 @@ TEST(LaplaceGraphemeFloorLaw, SingleCharContentEmitsNothingAndIsTheCodepoint) {
     ASSERT_EQ(0, content_witness_batch_add(
         stage, (const uint8_t*)"a", 1, &source, &root));
     EXPECT_EQ(0u, intent_stage_entity_count(stage));
-    EXPECT_EQ(0u, intent_stage_physicality_count(stage));
+    EXPECT_EQ(1u, intent_stage_physicality_count(stage));
     hash128_t expect = t0_id('a');
     EXPECT_TRUE(hash128_equals(&root, &expect));
     intent_stage_free(stage);
