@@ -1,6 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button, ErrorText, Field, Input, Modal, Muted, Panel, ReadStatus, TextArea, useReadResource } from '@ui';
 import { OperationFields } from '../ui/composites/OperationFields/OperationFields';
+import { ResultWorkspace } from '../ui/composites/ResultWorkspace/ResultWorkspace';
+import { captureRows, type RowSnapshot } from '../ui/lib/resultRows';
 import { initialOperationDraft, operationArguments, type OperationDraft } from '../ui/lib/operationFields';
 import { useAppStore } from '../store';
 import type { OpResult } from './api';
@@ -8,14 +10,12 @@ import { apiPostJson } from '../api/client';
 import { readOperationCatalog, type OperationDescription } from './operationCatalog';
 import styles from './Admin.module.css';
 
-interface Invocation { name: string; argsJson: string; maxRows: number; writable: boolean; destructive: boolean }
-interface CompletedInvocation { invocation: Invocation; result: OpResult<Record<string, unknown>>; at: string }
-
+interface Invocation { name: string; argsJson: string; maxRows: number; timeoutSeconds?: number; writable: boolean; destructive: boolean }
+interface CompletedInvocation { invocation: Invocation; result: OpResult<Record<string, unknown>>; snapshot: RowSnapshot<Record<string, unknown>> }
 export function OpConsole() {
-  const tenant = useAppStore((state) => state.tenant);
-  return <OperationWorkspace key={tenant} tenant={tenant} />;
+  const { tenant, authUser } = useAppStore();
+  return <OperationWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} />;
 }
-
 function OperationWorkspace({ tenant }: { tenant: string }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('');
@@ -26,6 +26,7 @@ function OperationWorkspace({ tenant }: { tenant: string }) {
   const [advancedInitialized, setAdvancedInitialized] = useState(false);
   const [argsText, setArgsText] = useState('{}');
   const [maxRows, setMaxRows] = useState('50');
+  const [timeout, setTimeoutValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Invocation | null>(null);
   const [pending, setPending] = useState<Invocation | null>(null);
@@ -39,9 +40,6 @@ function OperationWorkspace({ tenant }: { tenant: string }) {
   const pageCount = Math.max(1, Math.ceil(operations.length / 50));
   const currentPage = Math.min(page, pageCount - 1);
   const shown = operations.slice(currentPage * 50, (currentPage + 1) * 50);
-  const rows = completed?.result.rows;
-  const columns = useMemo(() => rows ? [...new Set(rows.flatMap((row) => Object.keys(row)))] : [], [rows]);
-
   function choose(operation: OperationDescription) {
     setSelected(operation); setDraft(initialOperationDraft(operation.parameters));
     setArgsText('{}'); setAdvanced(false); setAdvancedInitialized(false); setError(null);
@@ -50,36 +48,38 @@ function OperationWorkspace({ tenant }: { tenant: string }) {
     if (!selected || executing.current) return;
     try {
       if (!/^\d+$/.test(maxRows) || Number(maxRows) > 2147483647) throw new Error('Response row limit must be an integer from 0 to 2147483647.');
+      if (timeout !== '' && (!/^\d+$/.test(timeout) || Number(timeout) > 2147483647)) throw new Error('Execution timeout must be blank or an integer from 0 to 2147483647.');
       let argsJson: string;
       if (advanced) {
         const parsed: unknown = JSON.parse(argsText); // Validate shape only; transmit the original JSON text.
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Advanced arguments must be a JSON object.');
         argsJson = argsText;
       } else argsJson = JSON.stringify(operationArguments(selected.parameters, draft));
-      const invocation = { name: selected.name, argsJson, maxRows: Number(maxRows), writable: selected.writable, destructive: selected.destructive };
+      const invocation: Invocation = { name: selected.name, argsJson, maxRows: Number(maxRows), timeoutSeconds: timeout === '' ? undefined : Number(timeout), writable: selected.writable, destructive: selected.destructive };
       setError(null);
-      if (invocation.writable || invocation.destructive) setConfirm(invocation);
-      else void execute(invocation);
+      if (invocation.writable || invocation.destructive) setConfirm(invocation); else void execute(invocation);
     } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
   async function execute(invocation: Invocation) {
     if (executing.current) return;
     executing.current = true; setPending(invocation); setConfirm(null); setError(null);
     try {
-      const payload = `{"name":${JSON.stringify(invocation.name)},"args":${invocation.argsJson},"max_rows":${invocation.maxRows}}`;
+      const payload = `{"name":${JSON.stringify(invocation.name)},"args":${invocation.argsJson},"max_rows":${invocation.maxRows}${invocation.timeoutSeconds === undefined ? '' : `,"timeout_seconds":${invocation.timeoutSeconds}`}}`;
       const result = await apiPostJson<OpResult<Record<string, unknown>>>('/v1/op', payload, { tenant });
-      setCompleted({ invocation, result, at: new Date().toISOString() });
+      const snapshot = captureRows(result.rows,
+        `Rows returned by ${invocation.name}${result.truncated_at != null ? `; response truncated at ${result.truncated_at} rows` : ''}. Operation arguments may further bound the result.`,
+        { operation: invocation.name, args_json: invocation.argsJson, response_row_limit: invocation.maxRows, timeout_seconds: invocation.timeoutSeconds });
+      setCompleted({ invocation, result, snapshot });
     } catch (failure) {
       setError(`${invocation.name}: ${failure instanceof Error ? failure.message : String(failure)}${invocation.writable ? ' A transport failure can leave the outcome unknown; inspect the current state before submitting again.' : ''}`);
     } finally { executing.current = false; setPending(null); }
   }
-
   return <div className={styles.opGrid}>
     <Panel title="Installed operations" expandable>
       <form onSubmit={(event) => { event.preventDefault(); setFilter(search); setPage(0); }}>
         <Field label="Find operations" htmlFor="operation-search" help="Search the installed catalog by name, including operations outside the current response window.">
           <Input id="operation-search" value={search} onChange={(event) => setSearch(event.target.value)} />
-        </Field><Button type="submit">Search catalog</Button>{' '}<Button variant="ghost" onClick={() => void catalog.reload()}>Refresh catalog</Button>
+        </Field><Button type="submit">Search catalog</Button>{' '}<Button variant="ghost" onClick={() => void catalog.refresh()}>Refresh catalog</Button>
       </form>
       <ReadStatus label="Operation catalog" resource={catalog} />
       {catalog.data && <>
@@ -93,8 +93,7 @@ function OperationWorkspace({ tenant }: { tenant: string }) {
             </button>
           </li>)}
         </ul>}
-        <div className={styles.rowActions}><Button variant="ghost" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous signatures</Button>
-          <Button variant="ghost" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>Next signatures</Button></div>
+        <div className={styles.rowActions}><Button variant="ghost" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous signatures</Button><Button variant="ghost" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>Next signatures</Button></div>
       </>}
     </Panel>
     <Panel title={selected ? selected.name : 'Operation detail'} expandable>
@@ -114,27 +113,23 @@ function OperationWorkspace({ tenant }: { tenant: string }) {
         <Field label="Response row limit" htmlFor="operation-limit" help="Limits returned rows, not execution work. Zero requests no returned rows; omitted results are reported.">
           <Input id="operation-limit" inputMode="numeric" value={maxRows} onChange={(event) => setMaxRows(event.target.value)} />
         </Field>
+        <Field label="Execution timeout (seconds)" htmlFor="operation-timeout" help="Blank uses the server default. Zero requests no command timeout; it is not the same as omission. A timeout or leaving the page does not prove a write was rolled back.">
+          <Input id="operation-timeout" inputMode="numeric" value={timeout} onChange={(event) => setTimeoutValue(event.target.value)} placeholder="Server default" />
+        </Field>
         <Button type="submit" loading={pending != null}>{selected.writable ? 'Review operation' : 'Run operation'}</Button>
       </form>}
       {pending && <Muted role="status">Waiting for {pending.name}. Leaving this view does not prove server work stopped.</Muted>}
       {error && <ErrorText role="alert" className={styles.runErrBox}>{error}</ErrorText>}
       {completed && <section aria-label="Operation result">
-        <h4>Result: {completed.invocation.name}</h4><Muted>Received at {new Date(completed.at).toLocaleTimeString()}.</Muted>
+        <h4>Result: {completed.invocation.name}</h4>
         <details><summary>Executed inputs</summary><pre className={styles.sig}>{completed.invocation.argsJson}</pre></details>
         {completed.result.truncated_at != null && <Muted>Response truncated at {completed.result.truncated_at} rows. This is not the complete result.</Muted>}
-        {rows?.length === 0 ? <Muted>The operation returned no rows.</Muted> : <div className={styles.tableWrap}><table className={styles.table}>
-          <thead><tr>{columns.map((column) => <th key={column} scope="col">{column}</th>)}</tr></thead>
-          <tbody>{rows?.map((row, index) => <tr key={index}>{columns.map((column) => {
-            const value = row[column];
-            const text = value == null ? (column in row ? 'NULL' : 'Not returned') : typeof value === 'object' ? JSON.stringify(value) : String(value);
-            return <td key={column}>{text.length > 120 ? <details><summary>{text.slice(0, 119)}…</summary><pre className={styles.sig}>{text}</pre></details> : text}</td>;
-          })}</tr>)}</tbody>
-        </table></div>}
+        <ResultWorkspace scopeKey={JSON.stringify(['operation-result', tenant])} label="Operation result rows" snapshot={completed.snapshot} />
       </section>}
       <Modal open={confirm != null} onClose={() => setConfirm(null)} title={confirm?.destructive ? 'Confirm destructive operation' : 'Confirm state-changing operation'}
         actions={<><Button variant="ghost" onClick={() => setConfirm(null)}>Go back</Button><Button onClick={() => confirm && void execute(confirm)}>Confirm and run</Button></>}>
-        <p>{confirm?.name} on tenant {tenant}. {confirm?.destructive ? 'This destroys stored testimony.' : 'This may change stored state.'}</p>
-        <pre className={styles.sig}>{confirm?.argsJson ?? '{}' }</pre><p>Response row limit: {confirm?.maxRows}. The server revalidates the named call.</p>
+        <p>{confirm?.name}. Selected tenant: {tenant}; shared administrative operations are not necessarily tenant-local. {confirm?.destructive ? 'This destroys stored testimony.' : 'This may change stored state.'}</p>
+        <pre className={styles.sig}>{confirm?.argsJson ?? '{}'}</pre><p>Response row limit: {confirm?.maxRows}. Execution timeout: {confirm?.timeoutSeconds === undefined ? 'server default' : confirm.timeoutSeconds === 0 ? 'unbounded command' : `${confirm.timeoutSeconds} seconds`}. The server revalidates the named call.</p>
       </Modal>
     </Panel>
   </div>;
