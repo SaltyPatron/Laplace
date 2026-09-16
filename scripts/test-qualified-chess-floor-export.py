@@ -439,7 +439,7 @@ class NativeQualificationTests(unittest.TestCase):
                         "applicationPublication": "not_attempted", "fullLifecyclePassed": False}
         self.remote = {"id": 123, "status": "completed", "conclusion": "success",
                        "event": "push", "run_attempt": 1,
-                       "head_branch": "verify/chess-floor-serving-controls-20260916",
+                       "head_branch": "verify/chess-corpus-pilot-20260916-4fa186e",
                        "path": driver.NATIVE_WORKFLOW, "head_sha": self.plan["proof_operator_commit"]}
         steps = ["Prepare retained native execution paths",
                  "Execute existing native dependency build proof and install owners",
@@ -518,7 +518,7 @@ class NativeQualificationTests(unittest.TestCase):
         for owner, changes in (
             ("remote", [{"conclusion": "failure"}, {"status": "in_progress"}, {"event": "workflow_dispatch"},
                         {"head_sha": "6" * 40}, {"head_branch": "main"}, {"run_attempt": 2}]),
-            ("workflow", [{"sha": "6" * 40}, {"path": ".github/workflows/laplace.yml"}]),
+            ("workflow", [{"sha": "6" * 40}, {"path": ".github/workflows/chess-floor-serving-controls.yml"}]),
             ("job", [{"conclusion": "failure"}, {"head_sha": "6" * 40},
                      {"steps": self.job["steps"][:-1]}, {"steps": list(reversed(self.job["steps"]))}]),
             ("artifact", [{"digest": "sha256:" + "6" * 64}, {"expired": True},

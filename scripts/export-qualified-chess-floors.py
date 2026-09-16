@@ -26,7 +26,7 @@ DURABLE_ROOT = Path("/build/laplace/corpus-exports/chess")
 BUILD_ROOT = Path("/build/laplace/build")
 NATIVE_ROOT = Path("/build/laplace/recovery/native-install")
 NATIVE_PREFIX = Path("/opt/laplace")
-NATIVE_WORKFLOW = ".github/workflows/chess-floor-serving-controls.yml"
+NATIVE_WORKFLOW = ".github/workflows/laplace.yml"
 NATIVE_PHASES = [
     "pg-pin", "pg-checkout", "pg-source", "dependency-build",
     "dependency-identity", "native-managed-build", "native-tests",
@@ -155,7 +155,7 @@ def native_qualification(plan, root):
     if (remote.get("id") != run_id or remote.get("run_attempt") != attempt
             or remote.get("status") != "completed" or remote.get("conclusion") != "success"
             or remote.get("event") != "push"
-            or remote.get("head_branch") != "verify/chess-floor-serving-controls-20260916"
+            or remote.get("head_branch") != "verify/chess-corpus-pilot-20260916-4fa186e"
             or remote.get("path") != NATIVE_WORKFLOW
             or remote.get("head_sha") != plan["proof_operator_commit"]):
         raise ValueError("native installation run does not match the exact completed operator")
