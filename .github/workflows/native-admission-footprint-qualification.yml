@@ -1,331 +1,86 @@
-name: Compare native source context reuse
+name: Read retained native source context results
 on:
   push:
     branches: [qualify/native-admission-footprint-o1-20260916]
 permissions:
   contents: read
+  actions: read
 jobs:
-  ordinary-native-controls:
+  retained-results:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 5
     env:
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Prepare permanent owned qualification paths
+      - name: Read authenticated completed comparison artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          umask 0002
-          for parent in /build/laplace/work /build/laplace/build /build/laplace/worktrees; do
-            if [[ ! -d "$parent" ]]; then
-              sudo install -d -m 2775 -o "$(id -u)" -g "$(id -g)" "$parent"
-            fi
-            test -w "$parent"
-          done
-          qualification_dir="/build/laplace/work/source-context-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          build_dir="/build/laplace/build/source-context-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          source_dir="/build/laplace/worktrees/source-context-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if [[ ! -d /build/laplace/work ]]; then
+            sudo install -d -m 2775 -o "$(id -u)" -g "$(id -g)" /build/laplace/work
+          fi
+          qualification_dir="/build/laplace/work/source-context-read-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           test ! -e "$qualification_dir"
-          test ! -e "$build_dir"
-          test ! -e "$source_dir"
-          mkdir -m 0700 "$qualification_dir" "$build_dir"
-          mkdir -m 0700 "$qualification_dir/evidence" "$qualification_dir/tmp"
-          printf 'QUALIFICATION_DIR=%s\nQUALIFICATION_BUILD=%s\nQUALIFICATION_SOURCE=%s\n' "$qualification_dir" "$build_dir" "$source_dir" >> "$GITHUB_ENV"
-          printf 'TMPDIR=%s/tmp\nTMP=%s/tmp\nTEMP=%s/tmp\n' "$qualification_dir" "$qualification_dir" "$qualification_dir" >> "$GITHUB_ENV"
-      - name: Read exact ordinary native sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          fetch-depth: 4
-      - name: Bind preserved history and identical baseline fixture
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'VALIDATE'
-          import ast,re,subprocess
-          from pathlib import Path
-          lines=Path(".github/workflows/native-admission-footprint-qualification.yml").read_text().splitlines()
-          blocks=[];index=0
-          while index<len(lines):
-              if lines[index]=="        run: |":
-                  index+=1;body=[]
-                  while index<len(lines) and (not lines[index].strip() or lines[index].startswith("          ")):
-                      body.append(lines[index][10:]);index+=1
-                  blocks.append("\n".join(body)+"\n")
-              else:index+=1
-          parsed=0
-          for block in blocks:
-              subprocess.run(["bash","-n"],input=block,text=True,check=True,timeout=10)
-              for match in re.finditer(r"python3 - <<'PY'[^\n]*\n(.*?)^PY$",block,re.M|re.S):
-                  ast.parse(match.group(1));parsed+=1
-          assert len(blocks)==5 and parsed==2,(len(blocks),parsed)
-          print("actual workflow syntax:",len(blocks),"Bash blocks,",parsed,"Python bodies")
-          VALIDATE
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^^)" = 5e5c3250b11eca2e7b7f85dccff23497f4a24f6c
-          test "$(git rev-parse HEAD^^^)" = 1404ff7f52817980ab61403a6df7fdb79955f523
-          test "$(git rev-parse HEAD:engine)" = 40fe1580bf39dc2f96c7602a06673a7ccbc6f189
-          test "$(git rev-parse HEAD^:engine)" = 6d9e6d44eb53b1544f5923fc53ab593c06535570
-          test "$(git diff --name-only HEAD^ HEAD)" = engine/core/src/physicality_descriptor_admission.cpp
-          baseline=$(git rev-parse HEAD^)
-          git worktree add --detach "$QUALIFICATION_SOURCE" "$baseline"
-          cd "$QUALIFICATION_SOURCE"
-          test "$(git hash-object engine/core/src/physicality_descriptor_admission.cpp)" = 368d3a012dd35d9ef603db0f6822d915f61fa1ef
-          test "$(git hash-object engine/core/tests/test_physicality_descriptor_admission.cpp)" = 97d446aabf2ad6323fda06ce7795cb7b3754f16b
-          printf 'baseline_with_identical_tests=%s\ncandidate_diagnostic=%s\nbaseline_product=%s\ncandidate_product=%s\n' "$baseline" "$GITHUB_SHA" 1404ff7f52817980ab61403a6df7fdb79955f523 4eda46cc178bf597fe84e9c00c6def75730a5b8c > "$QUALIFICATION_DIR/evidence/source.txt"
-      - name: Acquire existing pinned native build inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          qualification_dir="$QUALIFICATION_DIR"
-          timeout --signal=TERM --kill-after=15s 300s sudo apt-get update 2>&1 | tee "$qualification_dir/evidence/apt-update.log"
-          timeout --signal=TERM --kill-after=15s 300s sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libicu-dev libxml2-dev zlib1g-dev bison flex 2>&1 | tee "$qualification_dir/evidence/apt-install.log"
-          cc --version | tee "$qualification_dir/evidence/compiler.txt"
-          cmake --version | tee "$qualification_dir/evidence/cmake.txt"
-          python3 - <<'PY' 2>&1 | tee "$qualification_dir/evidence/acquire.log"
-          import concurrent.futures, hashlib, json, os, subprocess, zipfile
+          mkdir -m 0700 "$qualification_dir"
+          mkdir -m 0700 "$qualification_dir/tmp"
+          export QUALIFICATION_DIR="$qualification_dir" TMPDIR="$qualification_dir/tmp" TMP="$qualification_dir/tmp" TEMP="$qualification_dir/tmp"
+          printf 'QUALIFICATION_DIR=%s\n' "$qualification_dir" >> "$GITHUB_ENV"
+          timeout --signal=TERM --kill-after=5s 240s python3 - <<'PY'
+          import hashlib,json,os,subprocess,zipfile,xml.etree.ElementTree as ET
           from pathlib import Path
           root=Path(os.environ["QUALIFICATION_DIR"])
-          external=root/"external";external.mkdir()
-          ucd=root/"unicode";ucd.mkdir()
-          evidence=root/"evidence"
-          dependencies=[{"archive_sha256":"b8352186f14559127a324333c3378f4208a2de9aea855746bf2fcd1f883efef1","name":"blake3","revision":"f3149ec5bb5449af877ba20377a11008ff499fa2","url":"https://github.com/BLAKE3-team/BLAKE3.git"},{"archive_sha256":"5f1252d70f39d43243b1346f3cdeb944178d6d28cd18c44ed3614625d371e6f0","name":"eigen","revision":"bc3b39870ecb690a623a3f49149a358b95c5781d","url":"https://gitlab.com/libeigen/eigen.git"},{"archive_sha256":"61bd3406aceed3ae5304fa7d37b346aa0e0a896a6be5b0c0db50ec2db0544663","name":"fathom","revision":"c9c6fef0dddc05d2e242c183acf5833149ab676d","url":"https://github.com/jdart1/Fathom"},{"archive_sha256":"080653414b45e6dbe93380c3a65a2c6a6cbf376f9dbc488587c78d73d1b05b77","name":"googletest","revision":"063de7e9578f82b369302001269680b4b1553359","url":"https://github.com/google/googletest.git"},{"archive_sha256":"166ec535ee8908bdec1f03a9a6c71e9621cae881a820396a2cd1386e035dd7be","name":"spectra","revision":"6841bcbacaa0f0a8446210314e682057a084be4e","url":"https://github.com/yixuan/spectra.git"},{"archive_sha256":"033a2ceab11bd6cebbcddba8d5e1d8127bc9e49446d0cd74bf10f991fa80ade3","name":"tree-sitter","revision":"d97971e24500218865c05ed1febdee2acf41bae1","url":"https://github.com/tree-sitter/tree-sitter.git"},{"archive_sha256":"c54b7a5fc55b530887a7e8939575da79a8a6490c124727f836cea7ebeba4ac00","name":"tree-sitter-grammars/tree-sitter-python","revision":"26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64","url":"https://github.com/tree-sitter/tree-sitter-python"},{"archive_sha256":"9194799a7a7dcedf020ba2558fc92fc430633d73680243ae1f1d9de78c719528","name":"tree-sitter-grammars/tree-sitter-c","revision":"b780e47fc780ddc8da13afa35a3f4ed5c157823d","url":"https://github.com/tree-sitter/tree-sitter-c"},{"archive_sha256":"a162edeecfebe736bc561d826dd6d694b78ac970f70a1d4b6dbf5f07429a768a","name":"tree-sitter-grammars/tree-sitter-cpp","revision":"8b5b49eb196bec7040441bee33b2c9a4838d6967","url":"https://github.com/tree-sitter/tree-sitter-cpp"},{"archive_sha256":"291c9b0efda9cdb0a92b491898ba06b914d8d2978a2799f95e66d0f6147405ff","name":"tree-sitter-grammars/tree-sitter-javascript","revision":"58404d8cf191d69f2674a8fd507bd5776f46cb11","url":"https://github.com/tree-sitter/tree-sitter-javascript"},{"archive_sha256":"fef700984cd8d3310f4cf16256fcf73f558b616c8b5ef2b0dabe8638d664e949","name":"tree-sitter-grammars/tree-sitter-rust","revision":"77a3747266f4d621d0757825e6b11edcbf991ca5","url":"https://github.com/tree-sitter/tree-sitter-rust"},{"archive_sha256":"940f56cf414c593d1407681865b24c45b6db27183dcbd749a0b5b22c9f8cf926","name":"tree-sitter-grammars/tree-sitter-go","revision":"2346a3ab1bb3857b48b29d779a1ef9799a248cd7","url":"https://github.com/tree-sitter/tree-sitter-go"},{"archive_sha256":"a912894237b675c773281f1ba6585e01976461092ece7425ebe8d357649b39a8","name":"tree-sitter-grammars/tree-sitter-c-sharp","revision":"cac6d5fb595f5811a076336682d5d595ac1c9e85","url":"https://github.com/tree-sitter/tree-sitter-c-sharp"},{"archive_sha256":"139a5aa58dfa25aea0f35af6b6099e80cf71a06675d7ca25a5a3ece840d86ec6","name":"tree-sitter-grammars/tree-sitter-bash","revision":"a06c2e4415e9bc0346c6b86d401879ffb44058f7","url":"https://github.com/tree-sitter/tree-sitter-bash"},{"archive_sha256":"d1300929944d2bb3b65b9cb83b1e347d0ddc343c80f0ebf8e9bdeef792b3c243","name":"tree-sitter-grammars/tree-sitter-json","revision":"001c28d7a29832b06b0e831ec77845553c89b56d","url":"https://github.com/tree-sitter/tree-sitter-json"},{"archive_sha256":"31f53c7ad2fd385b758ed00766979934fbd3353313aa48dd70342753f2aadd4b","name":"tree-sitter-grammars/tree-sitter-markdown","revision":"c3570720f7f7bbad22fe96603f106276618e0cf5","url":"https://github.com/MDeiml/tree-sitter-markdown"},{"archive_sha256":"b0e8d34a6391af9a7a813b3c278e7f0da16820546500c886388c268852945d61","name":"tree-sitter-grammars/tree-sitter-csv","revision":"f6bf6e35eb0b95fbadea4bb39cb9709507fcb181","url":"https://github.com/amaanq/tree-sitter-csv"},{"archive_sha256":"a9374de60e45d6506bb74d13696729fb8fd8b858961e583a86af50280ff5978d","name":"tree-sitter-grammars/tree-sitter-turtle","revision":"7f789ea7ef765080f71a298fc96b7c957fa24422","url":"https://github.com/GordianDziwis/tree-sitter-turtle"},{"archive_sha256":"5b82017b3bcc79af503e04eb561501487fe8cd89f6b037589d5e9dc1f34d4b05","name":"tree-sitter-grammars/tree-sitter-xml","revision":"5000ae8f22d11fbe93939b05c1e37cf21117162d","url":"https://github.com/tree-sitter-grammars/tree-sitter-xml"},{"archive_sha256":"d237a4a7972374a46ac677c7974cd1b71a96ffa286c93c040c91303441fe7d88","name":"tree-sitter-grammars/tree-sitter-typescript","revision":"75b3874edb2dc714fb1fd77a32013d0f8699989f","url":"https://github.com/tree-sitter/tree-sitter-typescript"},{"archive_sha256":"261f7341de183847ebb04720990c8f55d094a28557b4aef0340dfe86148f9df2","name":"tree-sitter-grammars/tree-sitter-java","revision":"e10607b45ff745f5f876bfa3e94fbcc6b44bdc11","url":"https://github.com/tree-sitter/tree-sitter-java"},{"archive_sha256":"17dced7665a9a6555d9c56dcdb409acdab3f63bd3571081f94598e161b696298","name":"tree-sitter-grammars/tree-sitter-ruby","revision":"ad907a69da0c8a4f7a943a7fe012712208da6dee","url":"https://github.com/tree-sitter/tree-sitter-ruby"},{"archive_sha256":"9ab54123e5fdc27fd43d4877c97a65c4b32c4f35e71809f395900ae77c50a065","name":"tree-sitter-grammars/tree-sitter-julia","revision":"e0f9dcd180fdcfcfa8d79a3531e11d99e79321d3","url":"https://github.com/tree-sitter/tree-sitter-julia"},{"archive_sha256":"5afd3460e186ff08ff8759268e598442c0b90d61e48a432eecd9fcca9965c2d8","name":"tree-sitter-grammars/tree-sitter-kotlin","revision":"f66d2908542e93c0204c6c241f794afe4e9cd5d1","url":"https://github.com/fwcd/tree-sitter-kotlin"},{"archive_sha256":"b47383d2f7ad78e1a84f5670f9379d8dc963141013ae34ecbc0ec624afb85b9f","name":"tree-sitter-grammars/tree-sitter-php","revision":"3f2465c217d0a966d41e584b42d75522f2a3149e","url":"https://github.com/tree-sitter/tree-sitter-php"},{"archive_sha256":"8df9206728f976ed73a7c89c996434d712ea8fd37a81593fef84d446f8b826eb","name":"tree-sitter-grammars/tree-sitter-cuda","revision":"48b066f334f4cf2174e05a50218ce2ed98b6fd01","url":"https://github.com/theHamsta/tree-sitter-cuda"},{"archive_sha256":"9ee2adf4cd9d89ffe6b30667840e8bc8c93d4779a3d469343160ae566bf6fac0","name":"tree-sitter-grammars/tree-sitter-glsl","revision":"24a6c8ef698e4480fecf8340d771fbcb5de8fbb4","url":"https://github.com/theHamsta/tree-sitter-glsl"},{"archive_sha256":"acaec9fc582ecb0f5ee2edd5d5a05faddf21d06f3e57e8e6d3fff36fbfcec8eb","name":"tree-sitter-grammars/tree-sitter-hlsl","revision":"bab9111922d53d43668fabb61869bec51bbcb915","url":"https://github.com/theHamsta/tree-sitter-hlsl"},{"archive_sha256":"cee8be578765d4c082824869d521d5e9f075bc5c0a27680690431c1d9f8c09d7","name":"tree-sitter-grammars/tree-sitter-wgsl","revision":"40259f3c77ea856841a4e0c4c807705f3e4a2b65","url":"https://github.com/szebniok/tree-sitter-wgsl"},{"archive_sha256":"883146ffc05a42a70c2183f09676a061183c4f8af134b1628547dc8e045b41a1","name":"tree-sitter-grammars/tree-sitter-fortran","revision":"7edacd2b21aa80057d9725384a1304a1c758e0f8","url":"https://github.com/stadelmanma/tree-sitter-fortran"},{"archive_sha256":"70c098fca7cfd5d8b6f085ead2241bd752ccf84f6e4bee5913f0dd445fff6e39","name":"tree-sitter-grammars/tree-sitter-asm","revision":"839741fef4dab5128952334624905c82b40c7133","url":"https://github.com/RubixDev/tree-sitter-asm"},{"archive_sha256":"55aff257f5ba972e22afc77d323dbcce226bad70911e56b5c554b5ce83620b54","name":"tree-sitter-grammars/tree-sitter-nasm","revision":"d1b3638d017f2a8585e26dcfc66fe1df94185e30","url":"https://github.com/naclsn/tree-sitter-nasm"},{"archive_sha256":"dfb2d777259df8ad130b5a92af1944133e33fb93309f599b8e2125229ec49189","name":"tree-sitter-grammars/tree-sitter-llvm","revision":"2914786ae6774d4c4e25a230f4afe16aa68fe1c1","url":"https://github.com/benwilliamgraham/tree-sitter-llvm"},{"archive_sha256":"2ccb2012891665dfb71c7c46f4b5233cda31c3c71075932bd0ab106422ade47c","name":"tree-sitter-grammars/tree-sitter-mlir","revision":"f234edcdab9a10ee7444c172f19f41a8d4afba56","url":"https://github.com/artagnon/tree-sitter-mlir"},{"archive_sha256":"17c79d2fa23b75d2352d06bd14648455176456a8efb774e26866e7932ca7c9b4","name":"tree-sitter-grammars/tree-sitter-cmake","revision":"c7b2a71e7f8ecb167fad4c97227c838439280175","url":"https://github.com/uyha/tree-sitter-cmake"},{"archive_sha256":"67c933597586ecf5d388324ea0514c0eb0a01e6626b701611427a0b7b93f5812","name":"tree-sitter-grammars/tree-sitter-ispc","revision":"ba1bb38ac8ddfa6aa7571cbfe9b4d029f7f77447","url":"https://github.com/fab4100/tree-sitter-ispc"},{"archive_sha256":"8151e172d065e981655663b5380c6354811bdd770b937a5ea8269ea3b9e20646","name":"tree-sitter-grammars/tree-sitter-zig","revision":"6479aa13f32f701c383083d8b28360ebd682fb7d","url":"https://github.com/tree-sitter-grammars/tree-sitter-zig"},{"archive_sha256":"ff0acd10a039d391454f4ea6941184f56a8564e2e5010099f93f438082c900cc","name":"postgresql","revision":"724edf9bde9d356724ad384a2e196edc3c9f80f7","url":"https://git.postgresql.org/git/postgresql.git"}]
-          unicode_files=[{"bytes":2827429,"path":"ucd/NormalizationTest.txt","role":"uax15-conformance","sha256":"5019ffd530751a741900c849c0e010332f142a3612234639bd200b82138a87db","url":"https://www.unicode.org/Public/17.0.0/ucd/NormalizationTest.txt"},{"bytes":126570,"path":"ucd/auxiliary/GraphemeBreakTest.txt","role":"uax29-grapheme-conformance","sha256":"e2d134d2c52919bace503ebb6a551c1855fe1a1faec18478c78fff254a1793ec","url":"https://www.unicode.org/Public/17.0.0/ucd/auxiliary/GraphemeBreakTest.txt"},{"bytes":322136,"path":"ucd/auxiliary/WordBreakTest.txt","role":"uax29-word-conformance","sha256":"1de23a75f37904abc7d206239ee8d34f8fdf0fb4ab32a7174dfbabbde25419b2","url":"https://www.unicode.org/Public/17.0.0/ucd/auxiliary/WordBreakTest.txt"},{"bytes":87946,"path":"ucd/auxiliary/SentenceBreakTest.txt","role":"uax29-sentence-conformance","sha256":"12cb47d028ded0c1cb8a28558f95479cbcd24559c46977015c82f3b50a1cc6e4","url":"https://www.unicode.org/Public/17.0.0/ucd/auxiliary/SentenceBreakTest.txt"},{"bytes":2304434,"path":"uca/allkeys.txt","role":"ducet-explicit-and-implicit-collation-elements","sha256":"2503d09367c2639a4fb8fd55e81aaacb0d9fb4ea26600333329bd12456b99ecd","url":"https://www.unicode.org/Public/17.0.0/uca/allkeys.txt"}]
-          def command(args,timeout=180):
-              try:
-                  return subprocess.run(args,check=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=timeout).stdout
-              except subprocess.CalledProcessError as error:
-                  print(error.stdout.decode(errors="replace"),flush=True)
-                  raise
-          def acquire(item):
-              path=external/item["name"];path.mkdir(parents=True)
-              command(["git","init","-q",str(path)])
-              command(["git","-C",str(path),"-c","protocol.version=2","fetch","--no-tags","--depth=1",item["url"],item["revision"]])
-              observed=command(["git","-C",str(path),"rev-parse","FETCH_HEAD"]).decode().strip()
-              if observed!=item["revision"]:raise RuntimeError("immutable upstream revision mismatch")
-              archive=path/"qualification.tar"
-              with archive.open("xb") as stream:
-                  subprocess.run(["git","-C",str(path),"archive","--format=tar",observed],check=True,stdout=stream,timeout=120)
-              digest=hashlib.file_digest(archive.open("rb"),"sha256").hexdigest()
-              if digest!=item["archive_sha256"]:raise RuntimeError("upstream Git archive digest mismatch: "+item["name"])
-              archive.unlink()
-              command(["git","-C",str(path),"checkout","--detach","-q",observed])
-              print("qualified dependency",item["name"],observed,flush=True)
-              return item
-          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-              acquired=list(pool.map(acquire,dependencies))
-          for item in unicode_files:
-              path=ucd/item["path"];path.parent.mkdir(parents=True,exist_ok=True)
-              command(["curl","--fail","--location","--proto","=https","--connect-timeout","20","--max-time","120","--max-filesize","10000000",item["url"],"--output",str(path)])
-              if path.stat().st_size!=item["bytes"] or hashlib.file_digest(path.open("rb"),"sha256").hexdigest()!=item["sha256"]:
-                  raise RuntimeError("pinned Unicode input mismatch: "+item["path"])
-          xml=ucd/"ucdxml/ucd.nounihan.flat.zip";xml.parent.mkdir()
-          xml_url="https://www.unicode.org/Public/17.0.0/ucdxml/ucd.nounihan.flat.zip"
-          command(["curl","--fail","--location","--proto","=https","--connect-timeout","20","--max-time","120","--max-filesize","25000000",xml_url,"--output",str(xml)])
-          with zipfile.ZipFile(xml) as archive:
-              members=archive.infolist()
-              if len(members)!=1 or members[0].filename!="ucd.nounihan.flat.xml" or members[0].file_size>200000000:
-                  raise RuntimeError("unexpected official UCDXML archive")
-              with archive.open(members[0]) as stream:
-                  member_hash=hashlib.file_digest(stream,"sha256").hexdigest()
-          receipt={"schema":"laplace.hosted-native-qualification-inputs/v1",
-                   "scope":"isolated upstream build inputs; not installed Original dependency provenance",
-                   "pin_source":{"repository":"SaltyPatron/Laplace-Refactor","commit":"e5fb773c3c5758679eb13c3dd228a0ba2aab27af",
-                                 "dependency_lock_blob":"ebdeb881c389a00f6b8a52fd069c1049e886058c",
-                                 "grammar_lock_blob":"da364f3938a9d23fd54a1857431817c9b14a7453",
-                                 "unicode_source_contract_blob":"ea504d53c83d0820b9cfb02be7d6cf278db8c4e3"},
-                   "dependencies":acquired,"pinned_unicode_files":unicode_files,
-                   "official_ucdxml_observation":{"url":xml_url,"bytes":xml.stat().st_size,
-                       "sha256":hashlib.file_digest(xml.open("rb"),"sha256").hexdigest(),
-                       "member_sha256":member_hash,"identity_kind":"observed official versioned HTTPS download"}}
-          (evidence/"inputs.json").write_text(json.dumps(receipt,sort_keys=True,indent=2)+"\n")
-          print(json.dumps(receipt,sort_keys=True))
-          PY
-      - name: Build the ordinary baseline target with the comparison tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          qualification_dir="$QUALIFICATION_DIR"
-          build_dir="$QUALIFICATION_BUILD"
-          cd "$QUALIFICATION_SOURCE"
-          timeout --signal=TERM --kill-after=15s 120s cmake -S engine -B "$build_dir" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DLAPLACE_EXTERNAL="$qualification_dir/external" -DLAPLACE_UCD_PATH="$qualification_dir/unicode" \
-            -DLAPLACE_REQUIRE_MKL=OFF -DLAPLACE_SYNTHESIS_REQUIRE_MKL=OFF \
-            '-DLAPLACE_INSTALL_FILE_PERMS=OWNER_READ;OWNER_WRITE;GROUP_READ;WORLD_READ' \
-            '-DLAPLACE_INSTALL_EXEC_PERMS=OWNER_READ;OWNER_WRITE;OWNER_EXECUTE;GROUP_READ;GROUP_EXECUTE;WORLD_READ;WORLD_EXECUTE' \
-            '-DLAPLACE_INSTALL_DIR_PERMS=OWNER_READ;OWNER_WRITE;OWNER_EXECUTE;GROUP_READ;GROUP_EXECUTE;WORLD_READ;WORLD_EXECUTE' \
-            2>&1 | tee "$qualification_dir/evidence/configure.log"
-          timeout --signal=TERM --kill-after=15s 1500s cmake --build "$build_dir" --target laplace_core_tests --parallel 2 \
-            2>&1 | tee "$qualification_dir/evidence/build.log"
-      - name: Run ordinary baseline and candidate controls and alternating timing samples
-        shell: bash
-        run: |
-          set -euo pipefail
-          timeout --signal=TERM --kill-after=15s 1200s python3 - <<'PY' 2>&1 | tee "$QUALIFICATION_DIR/evidence/comparison.log"
-          import hashlib,json,os,resource,shutil,signal,statistics,subprocess,time,xml.etree.ElementTree as ET
-          from pathlib import Path
-          root=Path(os.environ["QUALIFICATION_DIR"]);evidence=root/"evidence"
-          build=Path(os.environ["QUALIFICATION_BUILD"]);source=Path(os.environ["QUALIFICATION_SOURCE"])
-          expected=["PhysicalityDescriptorAdmission.PhasedCaptureRetiresEncodedSourceBeforeCompleteValidation","PhysicalityDescriptorAdmission.CancelledCapturePublishesNothingAndPreservesBorrowedRows","PhysicalityDescriptorAdmission.CancellationUnwindsMaterializationIncludingLateOutputThenRetryMatchesLegacy","PhysicalityDescriptorAdmission.ActualByteCarriersUsePinnedBasisAndStoredContentTakesPrecedence","PhysicalityDescriptorAdmission.TransitiveProviderChangeKeepsExactDescriptorAndChangesRootView","PhysicalityDescriptorAdmission.RootIdentityAndViewIgnoreUnrelatedBatchNeighborsAndStageOrder","PhysicalityDescriptorAdmission.FrontierRequiresCheckedAbsenceAndTheExplicitAdmittedWinner","PhysicalityDescriptorAdmission.MixedWriterStagesSelectFirstContentPlacementAndRetainAllRawForms","PhysicalityDescriptorAdmission.ReleasedCaptureKeepsExactMaterializationAndFiniteCoexistence","PhysicalityDescriptorAdmission.ProvidersAuthenticateEveryBodyAndCurrentSelectionRemainsStrict","PhysicalityDescriptorAdmission.RepeatedCompositeCarrierRequiresProviderAndReusesAdmittedBodyAsCurrent","PhysicalityDescriptorAdmission.ExactSelfReferenceCycleTerminatesWithoutGeneratedFeedback","PhysicalityDescriptorAdmission.DuplicateSourceUnitWitnessesKeepOneObservationAndLatestTime","PhysicalityDescriptorAdmission.RejectsInvalidOrConflictingSourcePriorWithoutPublishingStage","PhysicalityDescriptorAdmission.RetainedReceiptTracksStageTransferAndBudgetFailurePublishesNothing","PhysicalityDescriptorAdmission.ExactBodyReadsBackFromActualGeneratedCompositionTrajectories","PhysicalityDescriptorAdmission.DiagnosedRefusalsRetainExactOwnerAndRetryPublishesCompleteRows","PhysicalityDescriptorAdmission.SourceContextRunsMatchScalarOwnersAcrossBothIdentifiersAndTimes","PhysicalityDescriptorAdmission.CachedObservationContextsKeepCancellationAndPriorConflictChecks","PhysicalityDescriptorAdmission.SourceContextObservationWorkload"]
-          patterns=("contiguous","blocks64","alternating")
-          candidate=os.environ["GITHUB_SHA"];baseline=subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()
+          repo="SaltyPatron/Laplace"
+          run=35129860405
+          artifact=10460429890
+          expected_sha="73512a35ec4151c6b1ee08a033ab0ed6c70877a1"
+          expected_zip="5a4410525249c70b866b62111a20da0013cb71ebd672dabbeb0ae6b0c05000e4"
           def require(ok,message):
-              if not ok:raise RuntimeError(message)
-          def sha(path):
-              with path.open("rb") as stream:return hashlib.file_digest(stream,"sha256").hexdigest()
-          def cmd(argv,timeout=30):
-              return subprocess.run(argv,check=True,timeout=timeout,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True).stdout
-          def git(*args):return cmd(["git","-C",str(source),*args]).strip()
-          cpu=min(os.sched_getaffinity(0))
-          (evidence/"host.json").write_text(json.dumps({"affinity":sorted(os.sched_getaffinity(0)),"selected_cpu":cpu,
-              "uname":cmd(["uname","-a"]),"lscpu":cmd(["lscpu"]),"compiler":cmd(["c++","--version"]),
-              "cmake":cmd(["cmake","--version"]),"OMP_NUM_THREADS":"1","scope":"one hosted runner; no installed-machine or game-rate claim"},sort_keys=True,indent=2)+"\n")
-          identities={}
-          def snapshot(label):
-              destination=root/label;destination.mkdir()
-              shutil.copy2(build/"core/tests/laplace_core_tests",destination/"laplace_core_tests")
-              for path in sorted((build/"core").glob("liblaplace_core.so*")):
-                  target=destination/path.name
-                  if path.is_symlink():
-                      link=os.readlink(path)
-                      require(Path(link).name==link,"unexpected core link")
-                      target.symlink_to(link)
-                  else:shutil.copy2(path,target)
-              require((destination/"liblaplace_core.so").is_file(),"ordinary core output absent")
-              closure=[{"path":str(p),"bytes":p.stat().st_size,"sha256":sha(p)} for p in (
-                  destination/"laplace_core_tests",destination/"liblaplace_core.so",
-                  build/"core/perfcache/laplace_t0_perfcache.bin",build/"core/perfcache/laplace_modality_number_perfcache.bin")]
-              commands=json.loads((build/"compile_commands.json").read_text())
-              selected=[x for x in commands if x["file"].endswith("/physicality_descriptor_admission.cpp")]
-              require(len(selected)==1,"ordinary materializer compile command missing")
-              identities[label]={"commit":git("rev-parse","HEAD"),"tree":git("rev-parse","HEAD^{tree}"),
-                  "engine_tree":git("rev-parse","HEAD:engine"),"core_cpp":git("hash-object","engine/core/src/physicality_descriptor_admission.cpp"),
-                  "same_test_blob":git("hash-object","engine/core/tests/test_physicality_descriptor_admission.cpp"),
-                  "compile_command":selected[0],"files":closure}
-              shutil.copy2(build/"CMakeCache.txt",evidence/(label+"-CMakeCache.txt"))
-              (evidence/"build-identities.json").write_text(json.dumps(identities,sort_keys=True,indent=2)+"\n")
-          def stop(process):
-              if process.poll() is None:
-                  os.killpg(process.pid,signal.SIGTERM)
-                  try:process.wait(timeout=3)
-                  except subprocess.TimeoutExpired:
-                      os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=3)
-          def execute(label,tag,all_cases):
-              destination=root/label
-              library=(destination/"liblaplace_core.so").resolve()
-              selected_stat=library.stat()
-              env=os.environ.copy()
-              env.update(LD_LIBRARY_PATH=str(destination),OMP_NUM_THREADS="1",OPENBLAS_NUM_THREADS="1",MKL_NUM_THREADS="1")
-              loader=subprocess.run(["ldd",str(destination/"laplace_core_tests")],check=True,env=env,
-                  stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=20).stdout
-              (evidence/(tag+"-loader.txt")).write_text(loader)
-              require("not found" not in loader and str(destination)+"/liblaplace_core.so" in loader,"wrong ordinary core loader route")
-              test_filter="PhysicalityDescriptorAdmission.*" if all_cases else "PhysicalityDescriptorAdmission.SourceContextObservationWorkload"
-              xml=evidence/(tag+".xml");log=evidence/(tag+".log")
-              argv=["taskset","-c",str(cpu),str(destination/"laplace_core_tests"),"--gtest_filter="+test_filter,"--gtest_output=xml:"+str(xml)]
-              observed=[];started=time.monotonic()
-              def limit():resource.setrlimit(resource.RLIMIT_FSIZE,(64<<20,64<<20))
-              with log.open("xb") as output:
-                  process=subprocess.Popen(argv,env=env,stdout=output,stderr=subprocess.STDOUT,stdin=subprocess.DEVNULL,
-                      start_new_session=True,preexec_fn=limit)
-                  try:
-                      while process.poll() is None:
-                          try:
-                              maps=Path(f"/proc/{process.pid}/maps").read_text()
-                              for line in maps.splitlines():
-                                  pieces=line.split(maxsplit=5)
-                                  if len(pieces)==6 and Path(pieces[5]).name.startswith("liblaplace_core.so"):
-                                      require(int(pieces[4])==selected_stat.st_ino and Path(pieces[5]).resolve()==library,
-                                          "actual process loaded another native core")
-                                      if not observed:observed.append(line)
-                          except FileNotFoundError:pass
-                          if time.monotonic()-started>300:raise TimeoutError("bounded native comparison exceeded 300 seconds")
-                          time.sleep(.01)
-                      require(process.returncode==0,"native controls failed: "+tag)
-                  finally:stop(process)
-              require(observed,"actual native process mapping was not witnessed")
-              (evidence/(tag+"-process.json")).write_text(json.dumps({"argv":argv,"pid":process.pid,
-                  "library":str(library),"library_sha256":sha(library),"mapped":observed,"elapsed_seconds":time.monotonic()-started},sort_keys=True,indent=2)+"\n")
-              document=ET.parse(xml);cases=document.findall(".//testcase")
-              names=[c.attrib["classname"]+"."+c.attrib["name"] for c in cases]
-              require(sorted(names)==sorted(expected if all_cases else [expected[-1]]),"selected control set differs")
-              require(all(c.find("failure") is None and c.find("skipped") is None
-                  and c.attrib.get("status")=="run" and c.attrib.get("result")=="completed" for c in cases),"failed/skipped native control")
-              case=next(c for c in cases if c.attrib["name"]=="SourceContextObservationWorkload")
-              properties={p.attrib["name"]:p.attrib["value"] for p in case.findall("./properties/property")}
-              require(properties["observation_rows"]=="16384" and properties["finite_grant_bytes"]=="67108864","workload changed")
-              return properties
-          snapshot("baseline")
-          baseline_properties=execute("baseline","baseline-controls",True)
-          require(git("status","--porcelain","--untracked-files=all")=="","baseline source changed")
-          git("checkout","--detach",candidate)
-          require(git("rev-parse","HEAD:engine")=="40fe1580bf39dc2f96c7602a06673a7ccbc6f189","candidate source mismatch")
-          with (evidence/"candidate-incremental-build.log").open("xb") as output:
-              subprocess.run(["timeout","--signal=TERM","--kill-after=15s","900s","cmake","--build",str(build),
-                  "--target","laplace_core_tests","--parallel","2"],stdout=output,stderr=subprocess.STDOUT,check=True,timeout=925)
-          snapshot("candidate")
-          candidate_properties=execute("candidate","candidate-controls",True)
-          require(identities["baseline"]["compile_command"]==identities["candidate"]["compile_command"],"materializer compiler arguments differ")
-          require(identities["baseline"]["same_test_blob"]==identities["candidate"]["same_test_blob"]=="97d446aabf2ad6323fda06ce7795cb7b3754f16b","fixture differs")
-          require(identities["baseline"]["core_cpp"]=="368d3a012dd35d9ef603db0f6822d915f61fa1ef"
-              and identities["candidate"]["core_cpp"]=="a85da4672293d7ca41e89789de64df62c38155e4","production comparison differs")
-          require(identities["baseline"]["files"][1]["sha256"]!=identities["candidate"]["files"][1]["sha256"],"core library did not change")
-          require(identities["baseline"]["files"][2:]==identities["candidate"]["files"][2:],"actual floor identity changed")
-          def equivalent(left,right):
-              for pattern in patterns:
-                  for table in (1,2,3):
-                      for field in ("hash128","bytes"):
-                          key=f"{pattern}_table{table}_{field}"
-                          require(left[key]==right[key],"full tuple identity differs: "+key)
-                  for field in ("peak_bytes","retained_bytes"):
-                      key=pattern+"_"+field
-                      require(left[key]==right[key],"native owner accounting differs: "+key)
-          equivalent(baseline_properties,candidate_properties)
-          runs=[]
-          for index,label in enumerate(("baseline","candidate","candidate","baseline"),1):
-              properties=execute(label,f"comparison-{index}-{label}",False)
-              equivalent(baseline_properties,properties)
-              runs.append({"label":label,"properties":properties})
-          timings={}
-          for pattern in patterns:
-              timings[pattern]={}
-              for metric in ("observations_to_serialization_checkpoint_ns","uninstrumented_materialization_ns"):
-                  values={}
-                  for label in ("baseline","candidate"):
-                      values[label]=[int(run["properties"][f"{pattern}_sample{sample}_{metric}"])
-                          for run in runs if run["label"]==label for sample in range(1,6)]
-                      require(len(values[label])==10 and min(values[label])>0,"timing sample coverage")
-                  timings[pattern][metric]={"samples_ns":values,
-                      "baseline_median_ns":statistics.median(values["baseline"]),
-                      "candidate_median_ns":statistics.median(values["candidate"]),
-                      "ratio_baseline_over_candidate":statistics.median(values["baseline"])/statistics.median(values["candidate"])}
-          require(git("status","--porcelain","--untracked-files=all")=="","candidate source changed")
-          for label in identities:
-              require(sha(root/label/"liblaplace_core.so")==identities[label]["files"][1]["sha256"],"retained core changed")
-          report={"schema":"laplace.native-source-context-comparison/v1","status":"passed",
-              "baseline_product":"1404ff7f52817980ab61403a6df7fdb79955f523","candidate_product":"4eda46cc178bf597fe84e9c00c6def75730a5b8c",
-              "diagnostic_commit":candidate,"same_fixture_blob":"97d446aabf2ad6323fda06ce7795cb7b3754f16b",
-              "baseline_controls_passed":len(expected),"candidate_controls_passed":len(expected),"failed":0,"skipped":0,
-              "rows_per_fixture":16384,"finite_owner_grant_bytes":67108864,"timing_order":["baseline","candidate","candidate","baseline"],
-              "timings":timings,"tuple_and_peak_parity":True,"identities":identities,
-              "scope":"Same-runner pinned-CPU actual native materialization. Instrumented phase includes observation work, dead-owner retirement and serializer entry until its first checkpoint; full-call samples have no callback. Complete ordinary E/P/A tuples, finite grant, peak and retained bytes match. No PostgreSQL/backend/installed or recorded-game throughput claim."}
-          (evidence/"result.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
-          print(json.dumps(report,sort_keys=True))
+              if not ok: raise RuntimeError(message)
+          def api(path):
+              result=subprocess.run(["gh","api",path],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+              return json.loads(result.stdout)
+          run_info=api(f"repos/{repo}/actions/runs/{run}")
+          require(run_info["head_sha"]==expected_sha and run_info["conclusion"]=="success","unexpected successful source run")
+          meta=api(f"repos/{repo}/actions/artifacts/{artifact}")
+          require(meta["workflow_run"]["id"]==run and meta["workflow_run"]["head_sha"]==expected_sha and not meta["expired"],"artifact binding")
+          require(meta["size_in_bytes"]==120015345 and meta["digest"]=="sha256:"+expected_zip,"artifact identity")
+          archive=root/"retained.zip"
+          with archive.open("xb") as output:
+              subprocess.run(["gh","api",f"repos/{repo}/actions/artifacts/{artifact}/zip"],check=True,stdout=output,timeout=120)
+          with archive.open("rb") as stream:
+              require(hashlib.file_digest(stream,"sha256").hexdigest()==expected_zip,"archive hash mismatch")
+          require(archive.stat().st_size==meta["size_in_bytes"],"archive size mismatch")
+          prefix="work/source-context-35129860405-1/evidence/"
+          with zipfile.ZipFile(archive) as z:
+              def read(name):
+                  info=z.getinfo(prefix+name)
+                  require(not info.is_dir() and info.file_size<=2*1024*1024,"bounded member invalid")
+                  return z.read(info)
+              result=json.loads(read("result.json"))
+              require(result["status"]=="passed" and result["baseline_controls_passed"]==20 and result["candidate_controls_passed"]==20,"comparison result")
+              properties={}
+              for label in ("baseline","candidate"):
+                  doc=ET.fromstring(read(label+"-controls.xml"))
+                  cases=doc.findall(".//testcase")
+                  require(len(cases)==20 and all(c.find("failure") is None and c.find("skipped") is None for c in cases),"controls XML")
+                  case=next(c for c in cases if c.attrib["name"]=="SourceContextObservationWorkload")
+                  values={p.attrib["name"]:p.attrib["value"] for p in case.findall("./properties/property")}
+                  properties[label]={k:v for k,v in values.items() if "_sample" not in k}
+              require(properties["baseline"]==properties["candidate"],"concrete tuple/owner values differ")
+              host=json.loads(read("host.json"))
+              evidence={"schema":"laplace.native-source-context-retained-fields/v1","run":run,"artifact":artifact,
+                  "zip_sha256":expected_zip,"properties":properties,"host":host}
+          (root/"retained-fields.json").write_text(json.dumps(evidence,indent=2,sort_keys=True)+"\n")
+          print(json.dumps(evidence,sort_keys=True))
           
           PY
-      - name: Retain compared native binaries, exact floors, timings and failure evidence
+      - name: Retain extracted concrete counters
         if: always() && env.QUALIFICATION_DIR != ''
-        id: artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: native-source-context-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ env.QUALIFICATION_DIR }}/evidence/
-            ${{ env.QUALIFICATION_DIR }}/baseline/
-            ${{ env.QUALIFICATION_DIR }}/candidate/
-            ${{ env.QUALIFICATION_BUILD }}/core/perfcache/laplace_t0_perfcache.bin
-            ${{ env.QUALIFICATION_BUILD }}/core/perfcache/laplace_modality_number_perfcache.bin
+          name: native-source-context-fields-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.QUALIFICATION_DIR }}/retained-fields.json
           if-no-files-found: error
           retention-days: 90
