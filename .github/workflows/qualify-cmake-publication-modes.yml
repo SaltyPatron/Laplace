@@ -1,0 +1,77 @@
+name: Qualify CMake publication access
+on:
+  push:
+    branches: ['qualify/cmake-publication-modes-20260916']
+permissions:
+  contents: read
+jobs:
+  modes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 3a2b09383a19fc429a014c8b0f354d9082b910d1
+      - name: Verify exact source and execute existing and new publication controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 3a2b09383a19fc429a014c8b0f354d9082b910d1
+          test "$(git write-tree)" = 2daf54b1a99e45d5313b734358508d9aaa71abcc
+          mkdir -p "$RUNNER_TEMP/cmake-mode-controls"
+          export TMPDIR="$RUNNER_TEMP/cmake-mode-controls"
+          export PYTHONDONTWRITEBYTECODE=1
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in ("scripts/provision-cmake.py", "scripts/test-cmake-release.py"):
+              ast.parse(Path(name).read_text(), filename=name)
+          PY
+          python3 scripts/test-cmake-release.py -v
+      - name: Acquire a fixture as root under umask 077 and select it as the runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TMPDIR="$RUNNER_TEMP/cmake-mode-controls"
+          export PYTHONDONTWRITEBYTECODE=1
+          fixture_root=$(mktemp -d "$RUNNER_TEMP/cmake-cross-uid.XXXXXX")
+          chmod 755 "$fixture_root"
+          export FIXTURE_ROOT="$fixture_root"
+          trap 'sudo -n rm -rf -- "$FIXTURE_ROOT"' EXIT
+          sudo -n env TMPDIR="$FIXTURE_ROOT" FIXTURE_ROOT="$FIXTURE_ROOT" PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
+          import importlib.util, json, os
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location("cmake_tests", "scripts/test-cmake-release.py")
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          case = module.CMakeProvisionTests()
+          case.setUp()
+          case.base.chmod(0o755)
+          case.root = case.base / "prefix" / "tools" / "cmake"
+          raw = case.archive()
+          previous = os.umask(0o077)
+          try:
+              selected = case.select(raw)
+          finally:
+              os.umask(previous)
+          assert os.geteuid() == 0
+          assert selected.parent.stat().st_uid == 0
+          output = Path(os.environ["FIXTURE_ROOT"]) / "selection.json"
+          output.write_text(json.dumps({"root": str(case.root), "work": str(case.work),
+              "lock": case.lock, "bin": str(selected), "acquisitionUid": os.geteuid()}))
+          output.chmod(0o644)
+          PY
+          python3 - <<'PY'
+          import importlib.util, json, os
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location("cmake_owner", "scripts/provision-cmake.py")
+          owner = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(owner)
+          document = json.loads((Path(os.environ["FIXTURE_ROOT"]) / "selection.json").read_text())
+          assert document["acquisitionUid"] == 0 and os.geteuid() != 0
+          selected = owner.select(Path(document["root"]), Path(document["work"]), document["lock"])
+          assert str(selected) == document["bin"]
+          assert selected.parent.stat().st_uid == 0
+          print(json.dumps({"status": "passed", "acquisitionUid": 0,
+              "selectionUid": os.geteuid(), "scope": "Fixture archive only; actual cross-UID filesystem access and three fixture tool executions. No official archive or compiler qualification."}))
+          PY
