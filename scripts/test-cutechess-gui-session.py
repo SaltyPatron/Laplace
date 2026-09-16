@@ -69,8 +69,9 @@ class Protocol:
             key = arguments[3]
             if key == "ctrl+n":
                 self.visible.append(202)
-            elif key == "Escape" and self.cancel_works:
-                self.visible.remove(202)
+            elif key == "Escape":
+                if self.cancel_works:
+                    self.visible.remove(202)
             elif key != "ctrl+q":
                 raise AssertionError("unexpected key " + key)
             value = ""
