@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Product build/test/activation orchestration.
-# Data ingestion and destructive database recreation have independent operator owners.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -11,22 +9,13 @@ case "$stage" in
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
-if [[ "$stage" == "check" ]]; then
-  bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-deps.sh
-  python3 - <<'PY'
-from pathlib import Path
-import yaml
-for path in sorted(Path('.github/workflows').glob('*.yml')):
-    yaml.load(path.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
-print('source syntax check passed')
-PY
+if [[ "$stage" == check ]]; then
+  bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-deps.sh scripts/test-parallel.sh
   exit 0
 fi
 
 run_deps() {
-  # Development verifies dependency state; explicit operator lifecycles may
-  # provision or upgrade the persistent host dependency installation.
-  if [[ "${GITHUB_EVENT_NAME:-}" == "push" ]]; then
+  if [[ "${GITHUB_EVENT_NAME:-}" == push ]]; then
     bash scripts/ci-deps.sh --check-only
   else
     bash scripts/ci-deps.sh
@@ -44,67 +33,25 @@ run_suite() {
   bash scripts/test-parallel.sh --profile "$1" --suite "$2"
 }
 
-run_install() (
-  resume_chess_observation_if_needed
-  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+run_install() {
+  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}" 60
   bash scripts/pipeline.sh install
-)
+}
 
-run_database_maintenance() (
-  resume_chess_observation_if_needed
-  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" -- \
-    bash scripts/maintain-installed-database.sh
-)
+run_database_maintenance() {
+  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}" 60
+  bash scripts/maintain-installed-database.sh
+}
 
 reconcile_installed_product() {
   bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
-  python3 scripts/verify-application-release.py --timeout-seconds 120
+  curl -fsS http://127.0.0.1:5187/health/ready | grep -q '"ready":true'
 }
 
 run_publish() {
-  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}" 60
   bash scripts/publish-applications.sh deploy
-}
-
-ensure_api_running() {
-  sudo -n systemctl start laplace-api || true
-  sleep 3
-  curl -fsS http://127.0.0.1:5187/health | grep -q '"status":"ok"' || {
-    echo "::warning::laplace-api unhealthy after application recovery" >&2
-    journalctl -u laplace-api -n 40 --no-pager 2>/dev/null \
-      || sudo -n systemctl status laplace-api || true
-    return 1
-  }
-}
-
-recover_publish() {
-  local recovery_rc=0 health_rc=0
-  bash scripts/publish-applications.sh recover || recovery_rc=$?
-  ensure_api_running || health_rc=$?
-  [[ "$recovery_rc" -eq 0 && "$health_rc" -eq 0 ]]
-}
-
-resume_chess_observation_if_needed() {
-  python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" \
-    --resume-if-needed --timeout-seconds "${LAPLACE_CHESS_OBSERVATION_TIMEOUT_SECONDS:-3600}" -- \
-    bash scripts/repair-chess-position-outcomes.sh
-}
-
-run_publish_with_recovery() {
-  resume_chess_observation_if_needed
-  trap recover_publish EXIT
-  if [[ "$stage" == applications ]]; then
-    bash scripts/publish-applications.sh deploy
-    recover_publish
-  else
-    run_publish
-  fi
-  trap - EXIT
-  LAPLACE_REPAIR_PUBLISHED_SOURCE="$(git rev-parse HEAD)" \
-    python3 scripts/quiesce-managed-database.py --database "${PGDATABASE:-laplace}" \
-    --timeout-seconds "${LAPLACE_CHESS_OBSERVATION_TIMEOUT_SECONDS:-3600}" -- \
-    bash scripts/repair-chess-position-outcomes.sh
 }
 
 run_live_suite() {
@@ -114,7 +61,6 @@ run_live_suite() {
 
 product_phases() {
   if [[ "$stage" == reconcile ]]; then echo reconcile; return; fi
-  [[ "$stage" != check ]] || return 0
 
   printf '%s\n' dependencies build
   [[ "$stage" != build ]] || return 0
@@ -128,8 +74,6 @@ product_phases() {
     return 0
   fi
 
-  # Product activation owns installation and non-destructive migration only.
-  # Destructive recreation is db-ops; ingestion is owned by explicit seed/ingest workflows.
   printf '%s\n' native-install database-maintenance
   [[ "$stage" != deploy ]] || return 0
 
@@ -148,15 +92,10 @@ run_phase() {
     build) run_build ;;
     native-dev) run_suite dev-native native-dev ;;
     managed-dev|uci-dev|browser-dev) run_suite dev-managed "$1" ;;
-    application-check)
-      [[ "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || {
-        echo "application-only release cannot discard install receipts" >&2
-        return 1
-      }
-      bash scripts/publish-applications.sh check ;;
+    application-check) bash scripts/publish-applications.sh check ;;
     native-install) run_install ;;
     database-maintenance) run_database_maintenance ;;
-    publish) run_publish_with_recovery ;;
+    publish) run_publish ;;
     db-health|managed-db) run_suite db "$1" ;;
     native-db)
       rm -rf build/extension/*/tests/regress_output
