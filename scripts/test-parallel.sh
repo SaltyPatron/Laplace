@@ -39,7 +39,8 @@ done
 if [[ "$SERIAL" == 1 ]]; then
   export CTEST_PARALLEL_LEVEL=1
 elif [[ -z "${CTEST_PARALLEL_LEVEL:-}" ]]; then
-  export CTEST_PARALLEL_LEVEL="$(nproc 2>/dev/null || echo 1)"
+  CTEST_PARALLEL_LEVEL="$(nproc 2>/dev/null || echo 1)"
+  export CTEST_PARALLEL_LEVEL
 fi
 
 bash scripts/sync-managed-native-artifacts.sh
