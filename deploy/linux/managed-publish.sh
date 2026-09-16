@@ -6,22 +6,45 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_DIR="${LAPLACE_APP_DIR:-/opt/laplace/app}"
 HELPER=/usr/local/libexec/laplace-managed-deploy
+TRUSTED_POLICY_UID=0
 RECEIPT="$ROOT/build/.managed-publish-backup"
 BACKUP_ROOT=/opt/laplace/app-backups
 source "$ROOT/deploy/linux/payload-sync.sh"
 
 installed_policy() {
-  [[ -x "$HELPER" ]] || {
-    echo "::error::managed host policy missing; provision through sudo bash scripts/setup-host.sh managed-services after CI safety checks" >&2
-    return 1
-  }
-  local name
+  local name installed
   for name in laplace-managed-deploy laplace-service-control; do
-    cmp -s "$ROOT/deploy/linux/$name" "/usr/local/libexec/$name" || {
+    installed="${HELPER%/*}/$name"
+    if [[ ! -f "$installed" || -L "$installed" ]] \
+       || [[ "$(stat -c '%u:%a' -- "$installed")" != "$TRUSTED_POLICY_UID:755" ]]; then
+      echo "::error::managed policy must be a regular root-owned mode-0755 file: $installed" >&2
+      return 1
+    fi
+    cmp -s "$ROOT/deploy/linux/$name" "$installed" || {
       echo "::error::managed root policy version differs; update through sudo bash scripts/setup-host.sh managed-services" >&2
       return 1
     }
   done
+}
+
+prepare_policy() {
+  if installed_policy; then
+    return 0
+  fi
+  local name
+  local -a command=(timeout --signal=TERM --kill-after=10s 600s env)
+  for name in TMPDIR TMP TEMP; do
+    if [[ -v "$name" ]]; then command+=("$name=${!name}"); fi
+  done
+  command+=(bash "$ROOT/scripts/setup-host.sh" managed-services)
+  # Keep provisioning with the existing targeted owner. The installed policy
+  # still owns all reconciliation/refusal and operator-stop behavior afterward.
+  if [[ "$EUID" -eq 0 ]]; then
+    "${command[@]}" || return $?
+  else
+    sudo -n -- "${command[@]}" || return $?
+  fi
+  installed_policy
 }
 
 preflight() {
@@ -106,6 +129,8 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 
 case "${1:-}" in
+  check-policy) installed_policy ;;
+  prepare-policy) prepare_policy ;;
   preflight) ensure_host ;;
   begin)
     ensure_host
@@ -198,5 +223,5 @@ case "${1:-}" in
       sudo -n "$HELPER" rollback
     fi
     ;;
-  *) echo "usage: managed-publish.sh preflight|begin|reconcile|activate|verify|commit|rollback" >&2; exit 2 ;;
+  *) echo "usage: managed-publish.sh check-policy|prepare-policy|preflight|begin|reconcile|activate|verify|commit|rollback" >&2; exit 2 ;;
 esac
