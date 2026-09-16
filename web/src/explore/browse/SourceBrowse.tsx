@@ -1,106 +1,74 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ErrorText, Input, LoadingText, Muted, Panel, Stack } from '@ui';
+import { Button, ErrorText, Muted, Panel, ReadStatus, Stack, useReadResource } from '@ui';
+import { ResultWorkspace, type ResultColumn } from '../../ui/composites/ResultWorkspace/ResultWorkspace';
+import { captureRows } from '../../ui/lib/resultRows';
+import { useAppStore } from '../../store';
 import { exploreCatalog, exploreSourceRoster } from '../api';
 import { StatCard } from '../components/StatCard';
 import { useExploreStore } from '../store';
 import type { ExploreSourceRow, SourceRosterRow } from '../types';
 import styles from '../catalog/WarehouseHome.module.css';
-import browse from './Browse.module.css';
 
-/**
- * A source as a franchise page: who this witness is (stage, layer, role), its
- * scale, and its roster — a bounded sample of what it actually witnessed, every
- * name a drill into that entity. A franchise page without a roster was the gap:
- * you could see a source's row count but not one thing it said.
- */
+/** Catalog, selected source and sampled testimony have separate read scopes. */
 export function SourceBrowse() {
-  const { sourceKey } = useParams();
-  const [params, setParams] = useSearchParams();
-  const setBreadcrumb = useExploreStore((s) => s.setBreadcrumb);
-  const [source, setSource] = useState<ExploreSourceRow | null>(null);
-  const [missing, setMissing] = useState(false);
-  const [roster, setRoster] = useState<SourceRosterRow[] | null>(null);
-  const [rosterError, setRosterError] = useState<string | null>(null);
-  const rosterQuery = params.get('q') ?? '';
-
+  const { sourceKey = '' } = useParams(); // Router already decoded this segment.
+  const { tenant, quoteId, authUser } = useAppStore();
+  return <SourceWorkspace key={JSON.stringify([tenant, authUser?.id, sourceKey])} sourceKey={sourceKey} tenant={tenant} quoteId={quoteId} />;
+}
+function SourceWorkspace({ sourceKey, tenant, quoteId }: { sourceKey: string; tenant: string; quoteId: string }) {
+  const setBreadcrumb = useExploreStore((state) => state.setBreadcrumb);
+  const catalog = useReadResource({
+    key: JSON.stringify(['source-catalog', tenant, quoteId]),
+    read: (signal) => exploreCatalog({ tenant, quoteId, signal }),
+  });
+  const source = catalog.data?.sources.find((item) => item.key === sourceKey);
   useEffect(() => {
-    const key = decodeURIComponent(sourceKey ?? '');
-    let stale = false;
-    exploreCatalog().then((c) => {
-      if (stale) return;
-      const hit = c.sources.find((s) => s.key === key) ?? null;
-      setSource(hit);
-      setMissing(!hit);
-      if (hit?.stage) setBreadcrumb({ stage: hit.stage, source: hit.key });
-      if (hit?.id_hex) {
-        exploreSourceRoster(hit.id_hex, 200)
-          .then((r) => { if (!stale) setRoster(r.rows); })
-          .catch((e) => { if (!stale) setRosterError(e instanceof Error ? e.message : String(e)); });
-      }
-    });
-    return () => { stale = true; };
-  }, [sourceKey, setBreadcrumb]);
-
-  if (missing) return <ErrorText>No live source named “{decodeURIComponent(sourceKey ?? '')}”.</ErrorText>;
-  if (!source) return <LoadingText>Loading source…</LoadingText>;
-
-  const needle = rosterQuery.trim().toLocaleLowerCase();
-  const filteredRoster = roster?.filter((row) =>
-    !needle || [row.subject, row.relation, row.object]
-      .some((value) => value.toLocaleLowerCase().includes(needle))) ?? null;
-
-  function setRosterQuery(value: string) {
-    const next = new URLSearchParams(params);
-    if (value) next.set('q', value); else next.delete('q');
-    setParams(next, { replace: true });
-  }
-
-  return (
-    <Stack gap={4}>
-      <Panel title={source.key}>
-        <Muted>Stage {source.stage ?? '—'} · Layer {source.layer ?? '—'}</Muted>
-        <div className={styles.statGrid} style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginTop: '0.75rem' }}>
+    setBreadcrumb({ stage: source?.stage ?? undefined, source: sourceKey });
+  }, [source?.stage, sourceKey, setBreadcrumb]);
+  return <Stack gap={4}>
+    <Panel title={sourceKey || 'Source'} actions={<Button variant="ghost" onClick={() => void catalog.refresh()}>Refresh source</Button>}>
+      <ReadStatus label="Source catalog" resource={catalog} />
+      {catalog.data && !source && <><ErrorText>No source named “{sourceKey}” was returned by this catalog.</ErrorText><Link to="/explore/warehouse">Browse available sources</Link></>}
+      {source && <>
+        <Muted>Stage {source.stage ?? 'Not recorded'} · Layer {source.layer ?? 'Not recorded'}</Muted>
+        <div className={styles.statGrid}>
           <StatCard label="Attestations" value={source.evidence.toLocaleString()} />
-          <StatCard label="Content entities" value={source.content?.toLocaleString() ?? "—"} />
+          <StatCard label="Content entities" value={source.content?.toLocaleString() ?? 'Not recorded'} />
         </div>
-        {source.role ? <Muted>{source.role}</Muted> : null}
-      </Panel>
-
-      <Panel title="Roster — what this witness asserts">
-        <Muted style={{ marginBottom: '0.5rem' }}>
-          up to 200 sampled assertions; filter subjects, relations, and objects below
-        </Muted>
-        <Input
-          value={rosterQuery}
-          onChange={(event) => setRosterQuery(event.target.value)}
-          placeholder={`Filter ${source.key}'s roster…`}
-          aria-label={`Filter ${source.key}'s roster`}
-          className={browse.rosterFilter}
-        />
-        {rosterError ? (
-          <ErrorText>{rosterError}</ErrorText>
-        ) : !source.id_hex ? (
-          <Muted>No live id for this source — roster unavailable.</Muted>
-        ) : roster === null ? (
-          <LoadingText>Sampling testimony…</LoadingText>
-        ) : roster.length === 0 ? (
-          <Muted>Nothing witnessed by this source yet.</Muted>
-        ) : filteredRoster?.length === 0 ? (
-          <Muted>No sampled assertions match “{rosterQuery}”.</Muted>
-        ) : (
-          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-            {filteredRoster?.map((r, i) => (
-              <li key={i} className={browse.rosterRow}>
-                <Link className={browse.rosterSubject} to={`/explore/entity/${r.subject_id}`}>{r.subject}</Link>
-                <span className={browse.rosterRel}>{r.relation.replace(/_/g, ' ').toLowerCase()}</span>
-                <Link className={browse.rosterObject} to={`/explore/entity/${r.object_id}`}>{r.object}</Link>
-                <span className={browse.rosterObs}>{r.observations}×</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
-    </Stack>
-  );
+        {source.role && <Muted>{source.role}</Muted>}
+        <p><Link to={`/operator?section=ingest&source=${encodeURIComponent(source.key)}`}>View ingestion receipts</Link>
+          {source.id_hex && <> · <Link to={`/explore/entity/${source.id_hex}`}>Inspect source entity</Link></>}</p>
+      </>}
+    </Panel>
+    {source && <SourceRows key={JSON.stringify([source.id_hex, tenant, quoteId])} source={source} tenant={tenant} quoteId={quoteId} />}
+  </Stack>;
+}
+function SourceRows({ source, tenant, quoteId }: { source: ExploreSourceRow; tenant: string; quoteId: string }) {
+  const [params, setParams] = useSearchParams();
+  const [limit, setLimit] = useState(200);
+  const roster = useReadResource({
+    key: JSON.stringify(['source-roster', tenant, quoteId, source.id_hex, limit]), enabled: !!source.id_hex,
+    read: async (signal) => {
+      const result = await exploreSourceRoster(source.id_hex!, limit, { tenant, quoteId, signal });
+      return captureRows(result.rows, `A bounded sample of up to ${limit} assertions from ${source.key}; not the complete source or a global search.`, { source_id: source.id_hex, source_name: source.key, requested_limit: limit });
+    },
+  });
+  const columns: ResultColumn<SourceRosterRow>[] = [
+    { key: 'subject', label: 'Subject', render: (row) => row.subject_id ? <Link to={`/explore/entity/${row.subject_id}`}>{row.subject || row.subject_id}</Link> : row.subject },
+    { key: 'relation', label: 'Relation' },
+    { key: 'object', label: 'Object', render: (row) => row.object_id ? <Link to={`/explore/entity/${row.object_id}`}>{row.object || row.object_id}</Link> : row.object },
+    { key: 'observations', label: 'Observations' },
+  ];
+  return <Panel title="What this source asserts" expandable actions={<Button variant="ghost" disabled={!source.id_hex} onClick={() => void roster.refresh()}>Refresh assertions</Button>}>
+    {!source.id_hex ? <Muted>No source ID was returned. The testimony read is unavailable.</Muted> : <>
+      <label>Requested assertion sample <select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[40, 100, 200].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <ReadStatus label="Source assertions" resource={roster} />
+      {roster.data && <ResultWorkspace scopeKey={JSON.stringify([tenant, source.id_hex])} label="Source assertions" snapshot={roster.data} columns={columns}
+        rowLabel={(row, index) => `${row.subject} · ${row.relation} · ${row.object} (row ${index + 1})`}
+        filterText={params.get('q') ?? ''} onFilterTextChange={(value) => {
+          const next = new URLSearchParams(params); if (value) next.set('q', value); else next.delete('q'); setParams(next, { replace: true });
+        }} />}
+    </>}
+  </Panel>;
 }

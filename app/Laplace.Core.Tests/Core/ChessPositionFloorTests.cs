@@ -100,7 +100,8 @@ public sealed class ChessPositionFloorTests
         try
         {
             ChessPositionFloor.Load(path);
-            Task[] readers = Enumerable.Range(0, 4).Select(worker => Task.Run(() =>
+            // Keep dedicated readers from main so a saturated pool cannot starve the barrier.
+            Task[] readers = Enumerable.Range(0, 4).Select(worker => Task.Factory.StartNew(() =>
             {
                 Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(30)),
                     "Concurrent readers did not reach the start barrier.");
@@ -121,7 +122,7 @@ public sealed class ChessPositionFloorTests
                     Assert.InRange(ChessPositionFloor.Observe().RecordCount, 0, 1);
                     Interlocked.Increment(ref reads);
                 }
-            })).ToArray();
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
             bool finalObserved = false;
             try
             {

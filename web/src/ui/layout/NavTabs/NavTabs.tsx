@@ -7,28 +7,34 @@ export interface NavTab {
   id: string;
   label: ReactNode;
   active?: boolean;
-  onClick: () => void;
+  /** Real destinations remain copyable and support new-tab/middle-click navigation. */
+  href?: string;
+  onClick?: () => void;
 }
 
 export interface NavTabsProps {
   tabs: NavTab[];
   className?: string;
+  label?: string;
 }
 
-export function NavTabs({ tabs, className }: NavTabsProps) {
+export function NavTabs({ tabs, className, label = 'Primary navigation' }: NavTabsProps) {
   return (
-    <div className={cn(styles.tabs, className)} role="navigation">
-      {tabs.map((tab) => (
-        <Button
-          key={tab.id}
-          type="button"
-          variant="nav"
-          active={tab.active}
-          onClick={tab.onClick}
-        >
+    <nav className={cn(styles.tabs, className)} aria-label={label}>
+      {tabs.map((tab) => tab.href ? (
+        <Button key={tab.id} asChild variant="nav" active={tab.active}>
+          <a href={tab.href} onClick={(event) => {
+            if (!tab.onClick || event.defaultPrevented || event.button !== 0 ||
+                event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            tab.onClick();
+          }}>{tab.label}</a>
+        </Button>
+      ) : (
+        <Button key={tab.id} type="button" variant="nav" active={tab.active} onClick={tab.onClick}>
           {tab.label}
         </Button>
       ))}
-    </div>
+    </nav>
   );
 }

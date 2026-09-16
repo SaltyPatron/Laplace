@@ -1,0 +1,10 @@
+@layer components {
+  .page { display: flex; flex-direction: column; gap: var(--space-4, 1rem); width: min(100%, 1500px); min-width: 0; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2rem); overflow-y: auto; }
+  .inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4, 1rem); }
+  .stack { display: flex; flex-direction: column; gap: var(--space-3, .75rem); min-width: 0; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  .receipt { display: block; overflow-wrap: anywhere; }
+  .preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30rem; overflow: auto; }
+  .page input, .page select { max-width: 100%; }
+  @media (max-width: 850px) { .inputs { grid-template-columns: minmax(0, 1fr); } }
+}
