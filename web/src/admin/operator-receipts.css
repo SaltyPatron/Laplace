@@ -1,0 +1,14 @@
+/* Ingest run/file receipts are operational journals, not ad-hoc query result sets.
+   Keep inspection/filter/export controls, but remove generic working-selection UI
+   that adds checkbox/compare noise without an operator action behind it. */
+section[aria-label="Ingestion run receipts"] [aria-label="Working selection"],
+section[aria-label="Ingested file receipts"] [aria-label="Working selection"] {
+  display: none;
+}
+
+section[aria-label="Ingestion run receipts"] table > thead > tr > th:first-child,
+section[aria-label="Ingestion run receipts"] table > tbody > tr > td:first-child,
+section[aria-label="Ingested file receipts"] table > thead > tr > th:first-child,
+section[aria-label="Ingested file receipts"] table > tbody > tr > td:first-child {
+  display: none;
+}

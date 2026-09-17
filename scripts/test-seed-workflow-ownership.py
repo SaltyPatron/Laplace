@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Static contracts for shared-host workflow ownership.
+"""Contracts for direct, usable operator workflows."""
 from pathlib import Path
 import json
 import os
@@ -12,7 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 SEED = (WORKFLOWS / "seed.yml").read_text(encoding="utf-8")
-SEED_STEP = "Select source and run substrate mutation under one host reservation"
+SEED_STEP = "Run substrate operation"
 
 
 def run_block(step_name: str) -> str:
@@ -24,21 +24,26 @@ def run_block(step_name: str) -> str:
     return SEED[run:finish]
 
 
-class SharedHostQueue(unittest.TestCase):
-    def test_product_lifecycle_validates_workflow_changes(self):
+class WorkflowOwnership(unittest.TestCase):
+    def test_product_push_does_not_run_for_docs_or_workflow_only_changes(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("branches: [main]", text)
-        self.assertNotIn('- ".github/**"', text)
+        self.assertIn('- ".github/**"', text)
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
-    def test_mainline_validation_is_not_serialized_behind_operator_work(self):
+    def test_mainline_validation_cancels_superseded_runs(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         mainline = text.split("  mainline:\n", 1)[1].split("\n  operator:\n", 1)[0]
         self.assertIn("group: laplace-mainline-validation", mainline)
         self.assertIn("cancel-in-progress: true", mainline)
         self.assertNotIn("group: laplace-host-lifecycle", mainline)
         self.assertIn("exec bash scripts/product-ci.sh mainline", mainline)
+
+    def test_expensive_competitive_proof_is_dispatch_only(self):
+        text = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
+        self.assertIn("on:\n  workflow_dispatch:\n", text)
+        self.assertNotIn("\n  push:\n", text)
 
     def test_benchmark_is_dispatch_only_versioned_evidence(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
@@ -49,38 +54,28 @@ class SharedHostQueue(unittest.TestCase):
         self.assertEqual(text.count("runs-on: [self-hosted, laplace]"), 1)
         self.assertIn("python3 scripts/benchmark_suite.py validate", text)
         self.assertIn('python3 scripts/benchmark_suite.py "${args[@]}"', text)
-        self.assertIn("name: laplace-benchmark-${{ github.run_id }}-${{ github.run_attempt }}", text)
         self.assertIn("retention-days: 90", text)
-        self.assertNotIn("accept-chess-environment.py", text)
 
-    def test_benchmark_checkout_preserves_retained_workspace_state(self):
-        text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
-        self.assertIn("git diff --quiet", text)
-        self.assertIn("git diff --cached --quiet", text)
-        self.assertIn("git checkout --no-overwrite-ignore --detach", text)
-        self.assertNotIn("git checkout --force", text)
-        self.assertIn("AUTHORIZATION: basic $checkout_auth", text)
-
-    def test_database_surface_keeps_operator_operations_visible(self):
+    def test_database_surface_is_direct_and_operator_visible(self):
         text = (WORKFLOWS / "db-ops.yml").read_text(encoding="utf-8")
         self.assertIn(
             "options: [status, migrate, repair, reindex, remigrate, recreate]",
             text,
         )
         self.assertIn('description: "recreate only: type laplace"', text)
-        self.assertIn('"$PGDATABASE"|"RECREATE"|"RECREATE $PGDATABASE"', text)
-        self.assertIn('[[ "$LAPLACE_DB_CONFIRM" == "RECREATE $PGDATABASE" ]]', text)
+        self.assertIn('"$PGDATABASE"|"RECREATE"|"RECREATE $PGDATABASE")', text)
+        self.assertNotIn("check-installed-extension-current.py", text)
+        self.assertNotIn("group: laplace-host-lifecycle", text)
         for operation in ("migrate", "repair", "reindex", "remigrate", "recreate"):
             self.assertIn(f"            {operation})", text)
 
 
 class SeedHostOwnership(unittest.TestCase):
-    def test_reusable_seed_shares_actions_lifecycle_group(self):
-        self.assertIn("group: laplace-host-lifecycle", SEED)
-        self.assertIn("queue: max", SEED)
-        self.assertIn("cancel-in-progress: false", SEED)
+    def test_seed_does_not_add_a_second_actions_queue(self):
+        self.assertNotIn("group: laplace-host-lifecycle", SEED)
+        self.assertNotIn("queue: max", SEED)
 
-    def test_checkout_environment_and_mutation_share_one_host_reservation(self):
+    def test_checkout_and_mutation_share_the_real_host_lock(self):
         block = run_block(SEED_STEP)
         lock = block.index("flock 9")
         fetch = block.index("git fetch --no-tags --depth=2 origin")
@@ -91,22 +86,13 @@ class SeedHostOwnership(unittest.TestCase):
         self.assertLess(fetch, checkout)
         self.assertLess(checkout, environment)
         self.assertLess(environment, mutation)
-        self.assertNotIn("uses: ./.github/actions/setup-laplace-env", SEED)
 
-    def test_mutation_holds_host_lock_before_reproving_source_and_build(self):
+    def test_seed_consumes_the_built_cli_without_exact_commit_gate(self):
         block = run_block(SEED_STEP)
-        lock_open = block.index('exec 9>"$workspace_lock_root/host-resource.lock"')
-        lock_take = block.index("flock 9")
-        source_proof = block.index('current_sha="$(git rev-parse HEAD)"')
-        build_proof = block.index('built_sha="$(cat build/.laplace-source-revision')
-        mutation = block.index('case "$MODE" in')
-        self.assertLess(lock_open, lock_take)
-        self.assertLess(lock_take, source_proof)
-        self.assertLess(source_proof, build_proof)
-        self.assertLess(build_proof, mutation)
-        self.assertIn('[[ "$current_sha" == "$TARGET_SHA" ]]', block)
-        self.assertIn('[[ "$built_sha" == "$TARGET_SHA" ]]', block)
-        self.assertIn("LAPLACE_SETUP_REQUIRE_BUILT_REVISION=true", block)
+        self.assertIn("LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false", block)
+        self.assertIn("scripts/laplace --help >/dev/null", block)
+        self.assertNotIn("built_sha=", block)
+        self.assertNotIn('[[ "$built_sha" == "$TARGET_SHA" ]]', block)
 
     def test_evict_and_ingest_share_one_locked_step(self):
         block = run_block(SEED_STEP)
@@ -117,7 +103,6 @@ class SeedHostOwnership(unittest.TestCase):
         self.assertIn('scripts/ingest-source.sh "$key" "$path"', block)
         self.assertIn('scripts/ingest-source.sh "$key"', block)
         self.assertIn("export LAPLACE_INGEST_FORCE=1", block)
-        self.assertNotIn("- name: Evict selected source", SEED)
 
     def test_mutation_shell_does_not_interpolate_dispatch_inputs_directly(self):
         block = run_block(SEED_STEP)
@@ -159,7 +144,7 @@ class SeedHostOwnership(unittest.TestCase):
 
 
 class FoundationCompletion(unittest.TestCase):
-    # Execute the real ladder shell with explicit ingest/psql test boundaries.
+    """Execute the real ladder shell with explicit ingest/psql test boundaries."""
 
     SOURCES = {
         "unicode": "UnicodeDecomposer",

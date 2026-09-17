@@ -32,10 +32,6 @@ jobs:
     name: DB — ${{ inputs.operation }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
-    concurrency:
-      group: laplace-host-lifecycle
-      queue: max
-      cancel-in-progress: false
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}
       LAPLACE_DB_CONFIRM: ${{ inputs.confirm }}
@@ -73,37 +69,19 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
 
-          # Database lifecycle owns database state, not compilation.
+          # This is a developer/operator database surface. It operates on the
+          # already-installed runtime and does not turn a recreate into a build,
+          # deploy, corpus restore, or release-qualification ceremony.
           export LAPLACE_SETUP_USE_CMAKE=false
           export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
           source scripts/ci-environment.sh
 
-          # Keep the destructive gate readable in the UI. The database name is the
-          # canonical confirmation. The previous verbose tokens remain accepted so
-          # existing callers are not broken by this UX repair.
-          if [[ -v LAPLACE_DB_CONFIRM ]]; then
-            case "$LAPLACE_DB_OPERATION" in
-              drop)
-                case "$LAPLACE_DB_CONFIRM" in
-                  "$PGDATABASE"|"DROP"|"DROP $PGDATABASE")
-                    LAPLACE_DB_CONFIRM="DROP $PGDATABASE"
-                    ;;
-                esac
-                [[ "$LAPLACE_DB_CONFIRM" == "DROP $PGDATABASE" ]] || {
-                  echo "::error::drop requires confirmation: type $PGDATABASE" >&2
-                  exit 2
-                }
-                ;;
-              recreate)
-                case "$LAPLACE_DB_CONFIRM" in
-                  "$PGDATABASE"|"RECREATE"|"RECREATE $PGDATABASE")
-                    LAPLACE_DB_CONFIRM="RECREATE $PGDATABASE"
-                    ;;
-                esac
-                [[ "$LAPLACE_DB_CONFIRM" == "RECREATE $PGDATABASE" ]] || {
-                  echo "::error::recreate requires confirmation: type $PGDATABASE" >&2
-                  exit 2
-                }
+          if [[ "$LAPLACE_DB_OPERATION" == recreate ]]; then
+            case "$LAPLACE_DB_CONFIRM" in
+              "$PGDATABASE"|"RECREATE"|"RECREATE $PGDATABASE") ;;
+              *)
+                echo "::error::recreate requires confirmation: type $PGDATABASE" >&2
+                exit 2
                 ;;
             esac
           fi
@@ -138,10 +116,12 @@ jobs:
 
           case "$LAPLACE_DB_OPERATION" in
             status)
-              exec bash scripts/db-migrations.sh status
+              bash scripts/db-migrations.sh status
+              exec bash scripts/check-database-health.sh "$PGDATABASE"
               ;;
             migrate)
-              exec bash scripts/db-migrations.sh up
+              bash scripts/db-migrations.sh up
+              exec bash scripts/check-database-health.sh "$PGDATABASE"
               ;;
             repair)
               bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
@@ -149,6 +129,7 @@ jobs:
               ;;
             reindex)
               reindex_invalid
+              exec bash scripts/check-database-health.sh "$PGDATABASE"
               ;;
             remigrate)
               bash scripts/db-migrations.sh reset --yes
@@ -156,30 +137,9 @@ jobs:
               exec bash scripts/check-database-health.sh "$PGDATABASE"
               ;;
             recreate)
-              python3 scripts/check-installed-extension-current.py
               bash scripts/db-migrations.sh nuke --yes
               bash scripts/db-migrations.sh up
               bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
-              exec bash scripts/check-database-health.sh "$PGDATABASE"
-              ;;
-
-            # Backward-compatible internal aliases for scripts/tests created while
-            # the operator surface had been replaced. They are deliberately absent
-            # from workflow_dispatch so they do not displace the operator commands.
-            create)
-              python3 scripts/check-installed-extension-current.py
-              bash scripts/db-migrations.sh up
-              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
-              exec bash scripts/check-database-health.sh "$PGDATABASE"
-              ;;
-            drop)
-              exec bash scripts/db-migrations.sh nuke --yes
-              ;;
-            update)
-              python3 scripts/check-installed-extension-current.py
-              exec bash scripts/maintain-installed-database.sh
-              ;;
-            verify)
               exec bash scripts/check-database-health.sh "$PGDATABASE"
               ;;
             *)
