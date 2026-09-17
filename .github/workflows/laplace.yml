@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - "docs/**"
       - "**/*.md"
+      - ".github/**"
   workflow_dispatch:
     inputs:
       stage:
@@ -101,10 +102,6 @@ jobs:
     name: Operator — ${{ inputs.stage }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
-    concurrency:
-      group: laplace-host-lifecycle
-      queue: max
-      cancel-in-progress: false
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}
       LAPLACE_PROVISION_TOOLS: ${{ inputs.stage == 'provision' && '1' || '0' }}
