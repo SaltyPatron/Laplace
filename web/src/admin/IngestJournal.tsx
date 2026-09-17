@@ -1,22 +1,36 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Modal, Muted, Panel, ReadStatus, Toggle, useReadResource } from '@ui';
 import { ResultWorkspace, type ResultColumn } from '../ui/composites/ResultWorkspace/ResultWorkspace';
 import { captureRows } from '../ui/lib/resultRows';
 import { useAppStore } from '../store';
 import { closeIngestRun, ingestFiles, ingestRuns, type IngestFile, type IngestRun } from './api';
-import { countText, ingestDuration, ingestStatusTone, OPEN_INGEST_STATES } from './ingestPresentation';
+import { countText, ingestDuration, ingestStatusTone, OPEN_INGEST_STATES, progressText } from './ingestPresentation';
 import styles from './Admin.module.css';
 
 const REFRESH_MS = 5000;
 function Status({ value }: { value: string | null }) {
   return value ? <span className={`${styles.badge} ${styles[ingestStatusTone(value)]}`}>{value}</span> : <span>Not recorded</span>;
 }
-export function IngestJournal() {
-  const { tenant, authUser } = useAppStore();
-  return <RunWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} />;
+function RunProgress({ run }: { run: IngestRun }) {
+  const done = run.input_units_done ?? 0;
+  const total = run.input_units_total ?? 0;
+  const determinate = total > 0 && done <= total;
+  const pct = determinate ? Math.max(0, Math.min(100, (done / total) * 100)) : null;
+  return <div className={styles.runProgress}>
+    <div className={styles.progressHeading}>
+      <strong>{progressText(run.input_units_done, run.input_units_total)}</strong>
+      {pct != null && <span>{pct.toFixed(pct >= 10 ? 0 : 1)}%</span>}
+    </div>
+    {determinate && <progress className={styles.progressBar} max={total} value={done} aria-label="Input progress" />}
+    <span className={styles.progressPct}>Files {progressText(run.files_done, run.files_total)}</span>
+  </div>;
 }
-function RunWorkspace({ tenant }: { tenant: string }) {
+export function IngestJournal({ refreshSignal = 0 }: { refreshSignal?: number }) {
+  const { tenant, authUser } = useAppStore();
+  return <RunWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} refreshSignal={refreshSignal} />;
+}
+function RunWorkspace({ tenant, refreshSignal }: { tenant: string; refreshSignal: number }) {
   const [params, setParams] = useSearchParams();
   const [live, setLive] = useState(true);
   const [limit, setLimit] = useState(25);
@@ -33,6 +47,9 @@ function RunWorkspace({ tenant }: { tenant: string }) {
       return captureRows(result.rows, `Up to ${limit} requested run receipts${result.truncated_at != null ? `; transport truncated at ${result.truncated_at}` : ''}. Older runs may exist.`, { operation: 'ops.ingest_runs', requested_limit: limit });
     },
   });
+  useEffect(() => {
+    if (refreshSignal > 0) void runsRead.refresh();
+  }, [refreshSignal]);
   function setParam(name: string, value: string | null, replace = false) {
     const next = new URLSearchParams(params);
     if (value) next.set(name, value); else next.delete(name);
@@ -49,36 +66,56 @@ function RunWorkspace({ tenant }: { tenant: string }) {
     } finally { closingRef.current = false; setClosing(false); }
   }
   const columns: ResultColumn<IngestRun>[] = [
-    { key: 'status', label: 'Run status', render: (run) => <><Status value={run.status} />{run.phase && <div>{run.phase}</div>}{run.error && <details><summary>Run error</summary><pre className={styles.sig}>{run.error}</pre></details>}</> },
-    { key: 'source_name', label: 'Source', render: (run) => <Link to={`/explore/source/${encodeURIComponent(run.source_name)}`}>{run.source_name}</Link> },
-    { key: 'run_id', label: 'Files and run', render: (run) => <><code>{run.run_id}</code><Button variant="ghost" aria-expanded={expandedRun === run.run_id} onClick={() => setParam('run', expandedRun === run.run_id ? null : run.run_id)}>{expandedRun === run.run_id ? 'Hide file receipts' : 'Open file receipts'}</Button></> },
-    { key: 'layer', label: 'Layer' },
-    { key: 'input_units_done', label: 'Input processed / total', render: (run) => <><span>{countText(run.input_units_done)} / {countText(run.input_units_total)}</span><div className={styles.progressPct}>Processed input can exclude already-complete files.</div></> },
-    { key: 'files_done', label: 'Files complete / total', render: (run) => <span>{countText(run.files_done)} / {countText(run.files_total)}</span> },
-    { key: 'entities', label: 'Staged entities / physicalities / attestations', render: (run) => <><span>{countText(run.entities)} / {countText(run.physicalities)} / {countText(run.attestations)}</span>{run.entities === 0 && run.physicalities === 0 && run.attestations === 0 && <div className={styles.progressPct}>No staged writes reported; inspect file dispositions.</div>}</> },
-    { key: 'throughput_status', label: 'Throughput measurement', render: (run) => <><Status value={run.throughput_status} /><div className={styles.progressPct}>{run.throughput_rows_per_s == null ? 'No rate recorded' : `${countText(run.throughput_rows_per_s)} rows/s`}{run.throughput_compared ? ' · compared with baseline' : ' · no baseline comparison'}</div></> },
-    { key: 'started_at', label: 'Started / elapsed', render: (run) => <><time dateTime={run.started_at ?? undefined}>{run.started_at ? new Date(run.started_at).toLocaleString() : 'Not recorded'}</time><div>{ingestDuration(run.started_at, run.ended_at)}</div></> },
-    { key: 'ended_at', label: 'Receipt control', render: (run) => <Button variant="ghost" disabled={closing || !OPEN_INGEST_STATES.has(run.status.toLowerCase())} onClick={() => { setConfirming(run); setActionError(null); }}>Close run receipt…</Button> },
+    { key: 'source_name', label: 'Run', render: (run) => <div className={styles.runIdentity}>
+      <Link className={styles.source} to={`/explore/source/${encodeURIComponent(run.source_name)}`}>{run.source_name}</Link>
+      <span className={styles.progressPct}>Layer {run.layer ?? '—'}</span>
+      <code className={styles.runId} title={run.run_id}>{run.run_id}</code>
+    </div> },
+    { key: 'status', label: 'State', render: (run) => <div className={styles.runState}>
+      <Status value={run.status} />
+      {run.phase && <strong>{run.phase}</strong>}
+      {run.error && <details className={styles.runErr}><summary>Run error</summary><pre className={styles.sig}>{run.error}</pre></details>}
+    </div> },
+    { key: 'input_units_done', label: 'Progress', render: (run) => <RunProgress run={run} /> },
+    { key: 'entities', label: 'Staged output', render: (run) => <div className={styles.outputCounts}>
+      <span><strong>{countText(run.entities)}</strong><small>entities</small></span>
+      <span><strong>{countText(run.physicalities)}</strong><small>physicalities</small></span>
+      <span><strong>{countText(run.attestations)}</strong><small>attestations</small></span>
+      {run.entities === 0 && run.physicalities === 0 && run.attestations === 0 && <em>No staged writes reported</em>}
+    </div> },
+    { key: 'throughput_status', label: 'Performance', render: (run) => <div className={styles.runPerformance}>
+      <div><Status value={run.throughput_status} /></div>
+      <strong>{run.throughput_rows_per_s == null ? 'Rate not recorded' : `${countText(run.throughput_rows_per_s)} rows/s`}</strong>
+      <span className={styles.progressPct}>{run.throughput_compared ? 'Compared with baseline' : 'No baseline comparison'}</span>
+      <span>{ingestDuration(run.started_at, run.ended_at)}</span>
+      <time className={styles.progressPct} dateTime={run.started_at ?? undefined}>{run.started_at ? new Date(run.started_at).toLocaleString() : 'Start not recorded'}</time>
+    </div> },
+    { key: 'ended_at', label: 'Actions', render: (run) => <div className={styles.runActions}>
+      <Button variant="ghost" aria-expanded={expandedRun === run.run_id} onClick={() => setParam('run', expandedRun === run.run_id ? null : run.run_id)}>{expandedRun === run.run_id ? 'Hide files' : 'File receipts'}</Button>
+      {OPEN_INGEST_STATES.has(run.status.toLowerCase())
+        ? <Button variant="ghost" disabled={closing} onClick={() => { setConfirming(run); setActionError(null); }}>Close receipt…</Button>
+        : <span className={styles.progressPct}>{run.ended_at ? `Ended ${new Date(run.ended_at).toLocaleString()}` : 'Closed'}</span>}
+    </div> },
   ];
   const open = runsRead.data?.rows.filter((run) => OPEN_INGEST_STATES.has(run.status.toLowerCase())).length;
   return <>
     <Panel title="Ingestion runs" expandable>
       <div className={styles.toolbar}>
-        <label className={styles.liveLabel}><Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />Refresh after each completed read ({REFRESH_MS / 1000}s)</label>
-        <label className={styles.limitLabel}>Requested run window<select className={styles.limitSelect} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[10, 25, 50, 100, 500].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-        <Button variant="ghost" onClick={() => void runsRead.refresh()}>Refresh runs</Button>
+        <label className={styles.liveLabel}><Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />Live refresh · {REFRESH_MS / 1000}s</label>
+        <label className={styles.limitLabel}>Runs<select className={styles.limitSelect} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[10, 25, 50, 100, 500].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+        <Button variant="ghost" onClick={() => void runsRead.refresh()}>Refresh now</Button>
       </div>
       <ReadStatus label="Ingestion runs" resource={runsRead} />
-      {open != null && <Muted>{open} open runs in the received window. This is not a global readiness verdict.</Muted>}
+      {open != null && <Muted>{open} open in this {runsRead.data?.rows.length ?? 0}-run response. Older runs may exist.</Muted>}
       {runsRead.data && <ResultWorkspace scopeKey={JSON.stringify(['ingest-runs', tenant])} label="Ingestion run receipts" snapshot={runsRead.data} columns={columns}
         rowLabel={(run) => `${run.source_name} run ${run.run_id}`} filterText={filter} onFilterTextChange={(value) => setParam('source', value, true)} />}
-      <Muted>The journal shows executions, not distinct content entities. A completed file may have been processed or skipped because its completion was already recorded.</Muted>
+      <Muted>Run receipts report execution state. File receipts show per-file dispositions, including already-complete files.</Muted>
     </Panel>
     {expandedRun && <RunFiles key={JSON.stringify([tenant, expandedRun])} runId={expandedRun} tenant={tenant} live={live} onClose={() => setParam('run', null)} />}
     <Modal open={confirming != null} onClose={() => { if (!closingRef.current) setConfirming(null); }} title="Close this run receipt?"
       actions={<><Button variant="ghost" disabled={closing} onClick={() => setConfirming(null)}>Go back</Button><Button loading={closing} onClick={() => confirming && void closeReceipt(confirming)}>Mark receipt cancelled</Button></>}>
       <p>Source: {confirming?.source_name}. Run: <code>{confirming?.run_id}</code>.</p>
-      <p>This changes the shared journal status. It is not confirmation that the ingest process or its database backends stopped. Stop active work first; use Activity to inspect running backends.</p>
+      <p>This closes the shared journal receipt only. It does not stop a CLI process or database backend. Use Activity to inspect and stop active backend work before closing its receipt.</p>
       <Link to="/operator?section=activity">Open Activity</Link>
       <details><summary>Equivalent journal-only SQL</summary><pre className={styles.sig}>{confirming ? `SELECT * FROM ops.ingest_run_close('${confirming.run_id}'::uuid, 'cancelled');` : ''}</pre></details>
       {actionError && <ErrorText role="alert">{actionError}</ErrorText>}
@@ -104,8 +141,8 @@ function RunFiles({ runId, tenant, live, onClose }: { runId: string; tenant: str
   ];
   return <Panel title="File receipts" expandable actions={<Button variant="ghost" onClick={onClose}>Close file receipts</Button>}>
     <code>{runId}</code>
-    <div className={styles.toolbar}><label>Requested file window<select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[250, 500, 1000, 5000].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-      <Button variant="ghost" disabled={!valid} onClick={() => void filesRead.refresh()}>Refresh file receipts</Button></div>
+    <div className={styles.toolbar}><label className={styles.limitLabel}>Files<select className={styles.limitSelect} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[250, 500, 1000, 5000].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <Button variant="ghost" disabled={!valid} onClick={() => void filesRead.refresh()}>Refresh files</Button></div>
     {!valid ? <ErrorText>The run address is not a UUID. Choose a run from the journal.</ErrorText> : <ReadStatus label="File receipts" resource={filesRead} />}
     {filesRead.data && <ResultWorkspace scopeKey={JSON.stringify(['ingest-files', tenant, runId])} label="Ingested file receipts" snapshot={filesRead.data} columns={columns} rowLabel={(file) => file.file_label} />}
   </Panel>;
