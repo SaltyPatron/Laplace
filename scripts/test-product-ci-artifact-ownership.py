@@ -29,16 +29,10 @@ def publish_function(name: str) -> str:
 
 
 class ProductStageOwnershipContract(unittest.TestCase):
-    def test_every_build_consumer_requires_the_selected_revision(self):
-        for name in (
-            "run_dev_tests",
-            "run_install",
-            "run_db_tests",
-            "run_live_tests",
-        ):
+    def test_build_consumers_require_the_selected_revision(self):
+        for name in ("run_dev_tests", "run_install", "run_db_tests", "run_live_tests"):
             with self.subTest(function=name):
-                owner = function(name)
-                self.assertIn("require_built_revision", owner)
+                self.assertIn("require_built_revision", function(name))
 
     def test_live_and_reconcile_prove_the_installed_application_revision(self):
         live = function("run_live_tests")
@@ -112,24 +106,41 @@ class ProductStageOwnershipContract(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertIn(command, owner)
-
-    def test_operator_check_runs_the_repository_ci_contracts(self):
         source = PRODUCT.read_text(encoding="utf-8")
         check_case = source.split('  check)\n', 1)[1].split('    ;;', 1)[0]
         self.assertIn("run_ci_contract_checks", check_case)
-        self.assertNotIn("bash -n scripts/product-ci.sh", check_case)
 
-    def test_mainline_runs_repository_contracts_before_build_and_install(self):
+    def test_deploy_is_product_work_not_policy_work(self):
         owner = function("run_deploy")
-        dependencies = owner.index("check_deps")
-        contracts = owner.index("run_ci_contract_checks")
-        build = owner.index("run_build")
-        development = owner.index("run_dev_tests")
-        install = owner.index("run_install")
-        self.assertLess(dependencies, contracts)
-        self.assertLess(contracts, build)
-        self.assertLess(build, development)
-        self.assertLess(development, install)
+        self.assertNotIn("run_ci_contract_checks", owner)
+        order = [
+            "check_deps",
+            "run_build",
+            "run_dev_tests",
+            "run_install",
+            "run_database_maintenance --prepare",
+            "run_db_tests",
+            "run_publish",
+            "reconcile_installed_product",
+            "run_live_tests",
+        ]
+        positions = [owner.index(token) for token in order]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_mainline_is_only_build_and_development_tests(self):
+        owner = function("run_mainline")
+        self.assertIn("check_deps", owner)
+        self.assertIn("run_build", owner)
+        self.assertIn("run_dev_tests", owner)
+        for forbidden in ("run_install", "run_database_maintenance", "run_db_tests", "run_publish", "run_live_tests"):
+            self.assertNotIn(forbidden, owner)
+
+    def test_database_maintenance_never_recreates_or_seeds_implicitly(self):
+        source = (ROOT / "scripts/maintain-installed-database.sh").read_text(encoding="utf-8")
+        self.assertNotIn("ensure-foundation.sh", source)
+        self.assertNotIn("needs_identity_reseed", source)
+        self.assertIn("recreate is destructive and must be requested explicitly", source)
+        self.assertIn('[[ "${LAPLACE_FRESH_DB:-}" != 1 ]] || args+=(--fresh-db)', source)
 
 
 class ProductRevisionProofExecution(unittest.TestCase):
@@ -137,8 +148,7 @@ class ProductRevisionProofExecution(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="laplace-product-revision-")
         self.addCleanup(self.temp.cleanup)
         self.repo = Path(self.temp.name)
-        env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1")
-        self.env = env
+        self.env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1")
         self.command("git", "init")
         self.command("git", "config", "user.name", "CI fixture")
         self.command("git", "config", "user.email", "fixture@example.invalid")
@@ -149,24 +159,15 @@ class ProductRevisionProofExecution(unittest.TestCase):
 
     def command(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            list(arguments),
-            cwd=self.repo,
-            env=self.env,
-            text=True,
-            capture_output=True,
-            check=check,
-            timeout=10,
+            list(arguments), cwd=self.repo, env=self.env, text=True,
+            capture_output=True, check=check, timeout=10,
         )
 
     def prove(self) -> subprocess.CompletedProcess[str]:
         script = "set -euo pipefail\n" + function("require_built_revision") + "\nrequire_built_revision\n"
         return subprocess.run(
-            ["bash", "-c", script],
-            cwd=self.repo,
-            env=self.env,
-            text=True,
-            capture_output=True,
-            timeout=10,
+            ["bash", "-c", script], cwd=self.repo, env=self.env,
+            text=True, capture_output=True, timeout=10,
         )
 
     def test_missing_marker_is_rejected(self):
