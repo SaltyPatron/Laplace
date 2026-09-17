@@ -1,7 +1,8 @@
 name: Laplace — UI observability
 
-# Evidence-only workflow. It does not build, deploy, seed, mutate substrate state,
-# or participate in the product lifecycle/required checks.
+# Explicit evidence lane. Browser preparation and capture run under the same host
+# reservation as other self-hosted operations. Evidence is uploaded even when the
+# collector fails, then the workflow reports that failure truthfully.
 on:
   workflow_dispatch:
     inputs:
@@ -20,8 +21,8 @@ permissions:
   contents: read
 
 env:
-  LAPLACE_UI_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || 'http://127.0.0.1:5187' }}
-  LAPLACE_UI_ROUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.routes || '' }}
+  LAPLACE_UI_URL: ${{ inputs.base_url }}
+  LAPLACE_UI_ROUTES: ${{ inputs.routes }}
 
 jobs:
   capture:
@@ -38,13 +39,19 @@ jobs:
           mkdir -p "$receipt"
           printf 'LAPLACE_UI_DIAGNOSTICS_DIR=%s\n' "$receipt" >> "$GITHUB_ENV"
 
-      - name: Select exact diagnostic source without lifecycle work
+      - name: Prepare and capture UI evidence under the host reservation
         shell: bash
         env:
           TARGET_SHA: ${{ github.sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          umask 0002
+          lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          mkdir -p "$lock_root"
+          exec 9>"$lock_root/host-resource.lock"
+          flock 9
+
           cd "$GITHUB_WORKSPACE"
           if [[ ! -e .git ]]; then
             [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
@@ -64,11 +71,9 @@ jobs:
           unset checkout_auth CHECKOUT_TOKEN
           git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+          git diff --quiet
+          git diff --cached --quiet
 
-      - name: Prepare browser tooling only when cache is stale
-        shell: bash
-        run: |
-          set -euo pipefail
           mkdir -p build/.stamps
           current="$(sha256sum web/package-lock.json | awk '{print $1}')"
           previous="$(cat build/.stamps/npm-lock 2>/dev/null || true)"
@@ -78,17 +83,14 @@ jobs:
           fi
           (cd web && npx playwright install chromium)
 
-      - name: Capture screenshots, DOM, console and network evidence
-        shell: bash
-        run: |
           set +e
           (cd web && node scripts/capture-ui-diagnostics.mjs)
           rc=$?
+          set -e
           printf '%s\n' "$rc" > "$LAPLACE_UI_DIAGNOSTICS_DIR/collector-exit-code.txt"
           if (( rc != 0 )); then
-            echo "::warning::UI evidence collector exited $rc; artifact upload will still run"
+            echo "::error::UI evidence collector exited $rc; receipt will be uploaded before the job fails"
           fi
-          exit 0
 
       - name: Publish evidence summary
         if: always()
@@ -104,10 +106,20 @@ jobs:
 
       - name: Upload UI evidence
         if: always()
-        # actions/upload-artifact v4.6.2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: laplace-ui-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.LAPLACE_UI_DIAGNOSTICS_DIR }}/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
+
+      - name: Enforce collector result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$LAPLACE_UI_DIAGNOSTICS_DIR/collector-exit-code.txt"
+          [[ -f "$receipt" ]] || { echo "::error::collector exit receipt missing"; exit 1; }
+          rc="$(cat "$receipt")"
+          [[ "$rc" =~ ^[0-9]+$ ]] || { echo "::error::invalid collector exit receipt: $rc"; exit 1; }
+          exit "$rc"
