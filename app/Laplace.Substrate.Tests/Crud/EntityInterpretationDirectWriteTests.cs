@@ -1,7 +1,6 @@
 using global::Npgsql;
 using NpgsqlTypes;
 using System.Diagnostics;
-using System.Data;
 using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
@@ -83,321 +82,331 @@ public sealed class EntityInterpretationDirectWriteTests(LocalPgFixture pg)
         }
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ConcurrentOrdinaryInsertOrCopyRetainsBothFacetsAndTheirSummary(bool copy)
+    [Fact]
+    public async Task MultirowDirectInsertPublishesFacetsSetwiseWithoutAdvisoryMutex()
     {
-        byte[] Id(byte value) => Enumerable.Repeat(value,16).ToArray();
-        byte[] id = Guid.NewGuid().ToByteArray();
-        byte[] high = Id(0xee), low = Id(0x11);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        byte[] type = Fill(0x47);
+        byte[][] ids = Enumerable.Range(0,512).Select(_ => Guid.NewGuid().ToByteArray()).ToArray();
+        await using var connection = await pg.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
         try
         {
-            await using var first = await pg.DataSource.OpenConnectionAsync(stop.Token);
-            await using var second = await pg.DataSource.OpenConnectionAsync(stop.Token);
-            async Task<int> IdentityAsync(NpgsqlConnection connection)
+            await using (var insert = connection.CreateCommand())
             {
-                await using var identity = connection.CreateCommand();
-                identity.CommandText = "SELECT pg_backend_pid(),current_setting('session_replication_role')";
-                await using var row = await identity.ExecuteReaderAsync(stop.Token);
-                Assert.True(await row.ReadAsync(stop.Token));
-                Assert.Equal("origin",row.GetString(1));
-                return row.GetInt32(0);
+                insert.Transaction = transaction;
+                insert.CommandText = """
+                    INSERT INTO laplace.entities(id,tier,type_id)
+                    SELECT id,3,$2 FROM unnest($1::bytea[]) AS rows(id)
+                    """;
+                insert.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,ids);
+                insert.Parameters.AddWithValue(type);
+                Assert.Equal(ids.Length,await insert.ExecuteNonQueryAsync());
             }
-            int firstPid = await IdentityAsync(first), secondPid = await IdentityAsync(second);
-            await using var tx1 = await first.BeginTransactionAsync(stop.Token);
-            await using var tx2 = await second.BeginTransactionAsync(stop.Token);
-            await using (var insert = first.CreateCommand())
+
+            await using var inspect = connection.CreateCommand();
+            inspect.Transaction = transaction;
+            inspect.CommandText = """
+                SELECT (SELECT count(*) FROM laplace.entities WHERE id=ANY($1)),
+                       (SELECT count(*) FROM laplace.entity_interpretations
+                        WHERE entity_id=ANY($1) AND tier=3 AND type_id=$2),
+                       (SELECT count(*) FROM pg_locks
+                        WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted)
+                """;
+            inspect.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,ids);
+            inspect.Parameters.AddWithValue(type);
+            await using var rows = await inspect.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal((long)ids.Length,rows.GetInt64(0));
+            Assert.Equal((long)ids.Length,rows.GetInt64(1));
+            Assert.Equal(0L,rows.GetInt64(2));
+        }
+        finally
+        {
+            await transaction.RollbackAsync();
+        }
+    }
+
+    [Fact]
+    public async Task DuplicateCanonicalIdIsAUniqueViolationAndCannotInventAnotherFacet()
+    {
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] firstType = Fill(0x51);
+        byte[] secondType = Fill(0x11);
+        try
+        {
+            await using (var insert = pg.DataSource.CreateCommand(
+                "INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,5,$2)"))
             {
-                insert.Transaction = tx1;
-                insert.CommandText = "INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,3,$2)";
                 insert.Parameters.AddWithValue(id);
-                insert.Parameters.AddWithValue(high);
-                await insert.ExecuteNonQueryAsync(stop.Token);
+                insert.Parameters.AddWithValue(firstType);
+                Assert.Equal(1,await insert.ExecuteNonQueryAsync());
             }
 
-            async Task WriteSecondAsync()
+            await using (var connection = await pg.DataSource.OpenConnectionAsync())
+            await using (var transaction = await connection.BeginTransactionAsync())
             {
-                if (copy)
-                {
-                    await using var importer = await second.BeginBinaryImportAsync(
-                        "COPY laplace.entities(id,tier,type_id) FROM STDIN (FORMAT BINARY)", stop.Token);
-                    await importer.StartRowAsync(stop.Token);
-                    await importer.WriteAsync(id,NpgsqlDbType.Bytea,stop.Token);
-                    await importer.WriteAsync((short)5,NpgsqlDbType.Smallint,stop.Token);
-                    await importer.WriteAsync(low,NpgsqlDbType.Bytea,stop.Token);
-                    await importer.CompleteAsync(stop.Token);
-                }
-                else
-                {
-                    await using var insert = second.CreateCommand();
-                    insert.Transaction = tx2;
-                    insert.CommandText = """
-                        INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,5,$2)
-                        ON CONFLICT(id) DO NOTHING
-                        """;
-                    insert.Parameters.AddWithValue(id);
-                    insert.Parameters.AddWithValue(low);
-                    await insert.ExecuteNonQueryAsync(stop.Token);
-                }
-            }
-            Task pending = WriteSecondAsync();
-            try
-            {
-                // The first E is still uncommitted and absent to the second caller.
-                // Observe an actual backend wait before releasing it; no sleep-based
-                // claim about the race's ordering or a particular lock implementation.
-                await using var observe = await pg.DataSource.OpenConnectionAsync(stop.Token);
-                var wait = Stopwatch.StartNew();
-                bool blocked = false;
-                while (wait.Elapsed < TimeSpan.FromSeconds(20))
-                {
-                    await using var query = observe.CreateCommand();
-                    query.CommandText = "SELECT $1=ANY(pg_blocking_pids($2))";
-                    query.Parameters.AddWithValue(firstPid);
-                    query.Parameters.AddWithValue(secondPid);
-                    blocked = (bool)(await query.ExecuteScalarAsync(stop.Token))!;
-                    if (blocked) break;
-                    Assert.False(pending.IsCompleted, "second writer returned before first E committed");
-                    await Task.Delay(20,stop.Token);
-                }
-                Assert.True(blocked,"second backend did not block behind the first writer");
-                await tx1.CommitAsync(stop.Token);
-                await pending;
-                await tx2.CommitAsync(stop.Token);
-            }
-            finally
-            {
-                if (!pending.IsCompleted) stop.Cancel();
-                try { await pending; } catch { /* preserve the primary failure */ }
+                await using var duplicate = connection.CreateCommand();
+                duplicate.Transaction = transaction;
+                duplicate.CommandText =
+                    "INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,3,$2)";
+                duplicate.Parameters.AddWithValue(id);
+                duplicate.Parameters.AddWithValue(secondType);
+                var error = await Assert.ThrowsAsync<PostgresException>(
+                    () => duplicate.ExecuteNonQueryAsync());
+                Assert.Equal(PostgresErrorCodes.UniqueViolation,error.SqlState);
+                await transaction.RollbackAsync();
             }
 
-            await using var state = pg.DataSource.CreateCommand("""
+            await using var inspect = pg.DataSource.CreateCommand("""
                 SELECT e.tier,e.type_id,
                        (SELECT count(*) FROM laplace.entities WHERE id=$1),
                        (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=$1),
-                       EXISTS (SELECT FROM laplace.entity_interpretations
-                               WHERE entity_id=$1 AND tier=3 AND type_id=$2),
-                       EXISTS (SELECT FROM laplace.entity_interpretations
-                               WHERE entity_id=$1 AND tier=5 AND type_id=$3),
-                       EXISTS (SELECT FROM laplace.entity_interpretations
-                               WHERE entity_id=$1 AND tier=3 AND type_id=$3)
+                       EXISTS(SELECT FROM laplace.entity_interpretations
+                              WHERE entity_id=$1 AND tier=3 AND type_id=$3)
                 FROM laplace.entities e WHERE e.id=$1
                 """);
-            state.Parameters.AddWithValue(id);
-            state.Parameters.AddWithValue(high);
-            state.Parameters.AddWithValue(low);
-            await using var rows = await state.ExecuteReaderAsync(stop.Token);
-            Assert.True(await rows.ReadAsync(stop.Token));
+            inspect.Parameters.AddWithValue(id);
+            inspect.Parameters.AddWithValue(firstType);
+            inspect.Parameters.AddWithValue(secondType);
+            await using var rows = await inspect.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal(5,rows.GetInt16(0));
+            Assert.Equal(firstType,rows.GetFieldValue<byte[]>(1));
+            Assert.Equal(1L,rows.GetInt64(2));
+            Assert.Equal(1L,rows.GetInt64(3));
+            Assert.False(rows.GetBoolean(4));
+        }
+        finally
+        {
+            await DeleteIdentityAsync(id);
+        }
+    }
+
+    [Fact]
+    public async Task PublisherAddsObservedFacetWithoutChangingCanonicalIdentity()
+    {
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] high = Fill(0xee);
+        byte[] low = Fill(0x11);
+        byte[] source = Fill(0x72);
+        try
+        {
+            await using (var insert = pg.DataSource.CreateCommand(
+                "INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,5,$2)"))
+            {
+                insert.Parameters.AddWithValue(id);
+                insert.Parameters.AddWithValue(high);
+                await insert.ExecuteNonQueryAsync();
+            }
+
+            await using (var publish = pg.DataSource.CreateCommand("""
+                SELECT laplace.entity_interpretations_publish(
+                    ARRAY[$1]::bytea[],ARRAY[3::smallint],ARRAY[$2]::bytea[],
+                    ARRAY[$3]::bytea[],ARRAY[false]::boolean[])
+                """))
+            {
+                publish.Parameters.AddWithValue(id);
+                publish.Parameters.AddWithValue(low);
+                publish.Parameters.AddWithValue(source);
+                Assert.False((bool)(await publish.ExecuteScalarAsync())!);
+            }
+
+            await using var inspect = pg.DataSource.CreateCommand("""
+                SELECT e.tier,e.type_id,
+                       (SELECT count(*) FROM laplace.entities WHERE id=$1),
+                       (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=$1),
+                       EXISTS(SELECT FROM laplace.entity_interpretations
+                              WHERE entity_id=$1 AND tier=5 AND type_id=$2),
+                       EXISTS(SELECT FROM laplace.entity_interpretations
+                              WHERE entity_id=$1 AND tier=3 AND type_id=$3)
+                FROM laplace.entities e WHERE e.id=$1
+                """);
+            inspect.Parameters.AddWithValue(id);
+            inspect.Parameters.AddWithValue(high);
+            inspect.Parameters.AddWithValue(low);
+            await using var rows = await inspect.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
             Assert.Equal(3,rows.GetInt16(0));
             Assert.Equal(low,rows.GetFieldValue<byte[]>(1));
             Assert.Equal(1L,rows.GetInt64(2));
             Assert.Equal(2L,rows.GetInt64(3));
             Assert.True(rows.GetBoolean(4));
             Assert.True(rows.GetBoolean(5));
-            Assert.False(rows.GetBoolean(6)); // summary is not an invented facet
-            Assert.False(await rows.ReadAsync(stop.Token));
         }
         finally
         {
-            await using var cleanup = pg.DataSource.CreateCommand("""
-                WITH facets AS (DELETE FROM laplace.entity_interpretations WHERE entity_id=$1)
-                DELETE FROM laplace.entities WHERE id=$1
-                """);
-            cleanup.Parameters.AddWithValue(id);
-            await cleanup.ExecuteNonQueryAsync();
+            await DeleteIdentityAsync(id);
         }
     }
+
     [Fact]
-    public async Task DirectRowsShareTheNativeWriterBoundaryWithOneTransactionLock()
+    public async Task PublisherRefusesFacetForMissingCanonicalIdentityWithoutSynthesizingIt()
     {
-        byte[] type = Enumerable.Repeat((byte)0x47, 16).ToArray();
-        byte[][] batch = Enumerable.Range(0, 512).Select(_ => Guid.NewGuid().ToByteArray()).ToArray();
-        byte[] secondId = Guid.NewGuid().ToByteArray();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        await using var first = await pg.DataSource.OpenConnectionAsync(stop.Token);
-        await using var second = await pg.DataSource.OpenConnectionAsync(stop.Token);
-        await using var observer = await pg.DataSource.OpenConnectionAsync(stop.Token);
-        await using var tx1 = await first.BeginTransactionAsync(stop.Token);
-        await using var tx2 = await second.BeginTransactionAsync(stop.Token);
-        await using (var take = first.CreateCommand())
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] type = Fill(0x22);
+        byte[] source = Fill(0x73);
+        await using (var publish = pg.DataSource.CreateCommand("""
+            SELECT laplace.entity_interpretations_publish(
+                ARRAY[$1]::bytea[],ARRAY[4::smallint],ARRAY[$2]::bytea[],
+                ARRAY[$3]::bytea[],ARRAY[false]::boolean[])
+            """))
         {
-            take.Transaction = tx1;
-            // This SQL entry calls the exact C owner used by generated native writes.
-            take.CommandText = "SELECT laplace.entity_write_lock()";
-            await take.ExecuteNonQueryAsync(stop.Token);
+            publish.Parameters.AddWithValue(id);
+            publish.Parameters.AddWithValue(type);
+            publish.Parameters.AddWithValue(source);
+            Assert.True((bool)(await publish.ExecuteScalarAsync())!);
         }
-        await using var insertSecond = second.CreateCommand();
-        insertSecond.Transaction = tx2;
-        insertSecond.CommandText = "INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,5,$2)";
-        insertSecond.Parameters.AddWithValue(secondId);
-        insertSecond.Parameters.AddWithValue(type);
-        Task pending = insertSecond.ExecuteNonQueryAsync(stop.Token);
+        await using var inspect = pg.DataSource.CreateCommand("""
+            SELECT (SELECT count(*) FROM laplace.entities WHERE id=$1)
+                 + (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=$1)
+            """);
+        inspect.Parameters.AddWithValue(id);
+        Assert.Equal(0L,(long)(await inspect.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task SameIdentityPublishersSerializeOnTheCanonicalRowOnly()
+    {
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] firstType = Fill(0x61);
+        byte[] secondType = Fill(0x62);
+        byte[] source = Fill(0x74);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         try
         {
-            var wait = Stopwatch.StartNew();
-            bool blocked = false;
-            while (wait.Elapsed < TimeSpan.FromSeconds(20))
+            await using (var insert = pg.DataSource.CreateCommand(
+                "INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,7,$2)"))
             {
-                await using var observe = observer.CreateCommand();
-                observe.CommandText = "SELECT $1=ANY(pg_blocking_pids($2))";
-                observe.Parameters.AddWithValue(first.ProcessID);
-                observe.Parameters.AddWithValue(second.ProcessID);
-                blocked = (bool)(await observe.ExecuteScalarAsync(stop.Token))!;
-                if (blocked) break;
-                Assert.False(pending.IsCompleted, "ordinary insert escaped the native write boundary");
-                await Task.Delay(20, stop.Token);
+                insert.Parameters.AddWithValue(id);
+                insert.Parameters.AddWithValue(firstType);
+                await insert.ExecuteNonQueryAsync(stop.Token);
             }
-            Assert.True(blocked, "ordinary insert did not wait behind the actual native lock owner");
-            await using (var insertBatch = first.CreateCommand())
+
+            await using var first = await pg.DataSource.OpenConnectionAsync(stop.Token);
+            await using var second = await pg.DataSource.OpenConnectionAsync(stop.Token);
+            await using var observer = await pg.DataSource.OpenConnectionAsync(stop.Token);
+            await using var tx1 = await first.BeginTransactionAsync(stop.Token);
+            await using var tx2 = await second.BeginTransactionAsync(stop.Token);
+
+            await PublishAsync(first,tx1,id,3,firstType,source,stop.Token);
+            await using (var lockCheck = first.CreateCommand())
             {
-                insertBatch.Transaction = tx1;
-                insertBatch.CommandText = """
-                    INSERT INTO laplace.entities(id,tier,type_id)
-                    SELECT id,3,$2 FROM unnest($1::bytea[]) AS ids(id)
-                    """;
-                insertBatch.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, batch);
-                insertBatch.Parameters.AddWithValue(type);
-                Assert.Equal(512, await insertBatch.ExecuteNonQueryAsync(stop.Token));
+                lockCheck.Transaction = tx1;
+                lockCheck.CommandText =
+                    "SELECT count(*) FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted";
+                Assert.Equal(0L,(long)(await lockCheck.ExecuteScalarAsync(stop.Token))!);
             }
-            await using (var inspect = first.CreateCommand())
+
+            Task secondPublish = PublishAsync(second,tx2,id,5,secondType,source,stop.Token);
+            try
             {
-                inspect.Transaction = tx1;
-                inspect.CommandText = """
-                    SELECT (SELECT count(*) FROM pg_locks
-                            WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted),
-                           (SELECT count(*) FROM laplace.entities WHERE id=ANY($1)),
-                           (SELECT count(*) FROM laplace.entity_interpretations
-                            WHERE entity_id=ANY($1) AND tier=3 AND type_id=$2)
-                    """;
-                inspect.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, batch);
-                inspect.Parameters.AddWithValue(type);
-                await using var rows = await inspect.ExecuteReaderAsync(stop.Token);
-                Assert.True(await rows.ReadAsync(stop.Token));
-                Assert.Equal(1L, rows.GetInt64(0));
-                Assert.Equal(512L, rows.GetInt64(1));
-                Assert.Equal(512L, rows.GetInt64(2));
+                var wait = Stopwatch.StartNew();
+                bool blocked = false;
+                while (wait.Elapsed < TimeSpan.FromSeconds(20))
+                {
+                    await using var query = observer.CreateCommand();
+                    query.CommandText = "SELECT $1=ANY(pg_blocking_pids($2))";
+                    query.Parameters.AddWithValue(first.ProcessID);
+                    query.Parameters.AddWithValue(second.ProcessID);
+                    blocked = (bool)(await query.ExecuteScalarAsync(stop.Token))!;
+                    if (blocked) break;
+                    Assert.False(secondPublish.IsCompleted,
+                        "same canonical id publisher escaped its row serialization");
+                    await Task.Delay(20,stop.Token);
+                }
+                Assert.True(blocked,"same-id publisher did not wait on the canonical entity row");
+                await tx1.CommitAsync(stop.Token);
+                await secondPublish;
+                await tx2.CommitAsync(stop.Token);
             }
-            await tx1.RollbackAsync(stop.Token);
-            await pending;
-            await using (var inspect = second.CreateCommand())
+            finally
             {
-                inspect.Transaction = tx2;
-                inspect.CommandText = """
-                    SELECT (SELECT count(*) FROM laplace.entities WHERE id=$1),
-                           (SELECT count(*) FROM laplace.entity_interpretations
-                            WHERE entity_id=$1 AND tier=5 AND type_id=$2)
-                    """;
-                inspect.Parameters.AddWithValue(secondId);
-                inspect.Parameters.AddWithValue(type);
-                await using var rows = await inspect.ExecuteReaderAsync(stop.Token);
-                Assert.True(await rows.ReadAsync(stop.Token));
-                Assert.Equal(1L, rows.GetInt64(0));
-                Assert.Equal(1L, rows.GetInt64(1));
+                if (!secondPublish.IsCompleted) stop.Cancel();
+                try { await secondPublish; } catch { }
             }
-            await tx2.RollbackAsync(stop.Token);
-            await using var absent = observer.CreateCommand();
-            absent.CommandText = """
-                SELECT (SELECT count(*) FROM laplace.entities WHERE id=ANY($1))
-                     + (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=ANY($1))
-                """;
-            absent.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                batch.Append(secondId).ToArray());
-            Assert.Equal(0L, (long)(await absent.ExecuteScalarAsync(stop.Token))!);
+
+            await using var inspect = pg.DataSource.CreateCommand("""
+                SELECT count(*) FROM laplace.entity_interpretations
+                WHERE entity_id=$1 AND ((tier=3 AND type_id=$2) OR (tier=5 AND type_id=$3))
+                """);
+            inspect.Parameters.AddWithValue(id);
+            inspect.Parameters.AddWithValue(firstType);
+            inspect.Parameters.AddWithValue(secondType);
+            Assert.Equal(2L,(long)(await inspect.ExecuteScalarAsync())!);
         }
         finally
         {
-            if (!pending.IsCompleted) stop.Cancel();
-            try { await pending; } catch { /* Preserve the primary failure; dispose rolls back owned rows. */ }
+            await DeleteIdentityAsync(id);
         }
-    }
-
-    [Theory]
-    [InlineData(IsolationLevel.RepeatableRead)]
-    [InlineData(IsolationLevel.Serializable)]
-    public async Task TransactionSnapshotDirectWriteRefusesBeforeFacetOrEntityMutation(IsolationLevel isolation)
-    {
-        byte[] id = Guid.NewGuid().ToByteArray();
-        byte[] type = Enumerable.Repeat((byte)0x48, 16).ToArray();
-        await using var connection = await pg.DataSource.OpenConnectionAsync();
-        await using (var transaction = await connection.BeginTransactionAsync(isolation))
-        {
-            await using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,3,$2)";
-            insert.Parameters.AddWithValue(id);
-            insert.Parameters.AddWithValue(type);
-            var error = await Assert.ThrowsAsync<PostgresException>(() => insert.ExecuteNonQueryAsync());
-            Assert.Equal(PostgresErrorCodes.FeatureNotSupported, error.SqlState);
-            Assert.Contains("requires READ COMMITTED", error.MessageText);
-            await transaction.RollbackAsync();
-        }
-        await using var absent = pg.DataSource.CreateCommand("""
-            SELECT (SELECT count(*) FROM laplace.entities WHERE id=$1)
-                 + (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=$1)
-            """);
-        absent.Parameters.AddWithValue(id);
-        Assert.Equal(0L, (long)(await absent.ExecuteScalarAsync())!);
     }
 
     [Fact]
-    public async Task EntityInsertedByAnotherTriggerStillPublishesItsActualFacet()
+    public async Task DifferentIdentityPublishersDoNotShareAProcessWideLock()
     {
-        byte[] id = Guid.NewGuid().ToByteArray();
-        byte[] type = Enumerable.Repeat((byte)0x49, 16).ToArray();
-        string suffix = Guid.NewGuid().ToString("N");
-        string table = "identity_parent_" + suffix, function = "identity_emit_" + suffix;
-        await using var connection = await pg.DataSource.OpenConnectionAsync();
-        await using (var transaction = await connection.BeginTransactionAsync())
+        byte[] firstId = Guid.NewGuid().ToByteArray();
+        byte[] secondId = Guid.NewGuid().ToByteArray();
+        byte[] type = Fill(0x66);
+        byte[] source = Fill(0x75);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try
         {
-            await using (var setup = connection.CreateCommand())
+            await using (var insert = pg.DataSource.CreateCommand("""
+                INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,7,$3),($2,7,$3)
+                """))
             {
-                setup.Transaction = transaction;
-                setup.CommandText = $"""
-                    CREATE TEMP TABLE "{table}"(id bytea NOT NULL,type_id bytea NOT NULL);
-                    CREATE FUNCTION pg_temp."{function}"() RETURNS trigger LANGUAGE plpgsql AS $fixture$
-                    BEGIN
-                        INSERT INTO laplace.entities(id,tier,type_id) VALUES(NEW.id,3,NEW.type_id);
-                        RETURN NEW;
-                    END;
-                    $fixture$;
-                    CREATE TRIGGER emit_identity AFTER INSERT ON "{table}"
-                    FOR EACH ROW EXECUTE FUNCTION pg_temp."{function}"();
-                    """;
-                await setup.ExecuteNonQueryAsync();
-            }
-            await using (var insert = connection.CreateCommand())
-            {
-                insert.Transaction = transaction;
-                insert.CommandText = $"INSERT INTO \"{table}\"(id,type_id) VALUES($1,$2)";
-                insert.Parameters.AddWithValue(id);
+                insert.Parameters.AddWithValue(firstId);
+                insert.Parameters.AddWithValue(secondId);
                 insert.Parameters.AddWithValue(type);
-                Assert.Equal(1, await insert.ExecuteNonQueryAsync());
+                Assert.Equal(2,await insert.ExecuteNonQueryAsync(stop.Token));
             }
-            await using (var inspect = connection.CreateCommand())
-            {
-                inspect.Transaction = transaction;
-                inspect.CommandText = """
-                    SELECT (SELECT count(*) FROM laplace.entities WHERE id=$1 AND tier=3 AND type_id=$2),
-                           (SELECT count(*) FROM laplace.entity_interpretations
-                            WHERE entity_id=$1 AND tier=3 AND type_id=$2)
-                    """;
-                inspect.Parameters.AddWithValue(id);
-                inspect.Parameters.AddWithValue(type);
-                await using var rows = await inspect.ExecuteReaderAsync();
-                Assert.True(await rows.ReadAsync());
-                Assert.Equal(1L, rows.GetInt64(0));
-                Assert.Equal(1L, rows.GetInt64(1));
-            }
-            await transaction.RollbackAsync();
+
+            await using var first = await pg.DataSource.OpenConnectionAsync(stop.Token);
+            await using var second = await pg.DataSource.OpenConnectionAsync(stop.Token);
+            await using var tx1 = await first.BeginTransactionAsync(stop.Token);
+            await using var tx2 = await second.BeginTransactionAsync(stop.Token);
+            await PublishAsync(first,tx1,firstId,3,type,source,stop.Token);
+
+            Task other = PublishAsync(second,tx2,secondId,3,type,source,stop.Token);
+            Task finished = await Task.WhenAny(other,Task.Delay(TimeSpan.FromSeconds(5),stop.Token));
+            Assert.Same(other,finished);
+            await other;
+            await tx2.CommitAsync(stop.Token);
+            await tx1.RollbackAsync(stop.Token);
         }
-        await using var absent = pg.DataSource.CreateCommand("""
-            SELECT (SELECT count(*) FROM laplace.entities WHERE id=$1)
-                 + (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=$1)
-            """);
-        absent.Parameters.AddWithValue(id);
-        Assert.Equal(0L, (long)(await absent.ExecuteScalarAsync())!);
+        finally
+        {
+            await DeleteIdentityAsync(firstId);
+            await DeleteIdentityAsync(secondId);
+        }
     }
 
+    private static async Task PublishAsync(
+        NpgsqlConnection connection,NpgsqlTransaction transaction,byte[] id,short tier,
+        byte[] type,byte[] source,CancellationToken ct)
+    {
+        await using var publish = connection.CreateCommand();
+        publish.Transaction = transaction;
+        publish.CommandText = """
+            SELECT laplace.entity_interpretations_publish(
+                ARRAY[$1]::bytea[],ARRAY[$2]::smallint[],ARRAY[$3]::bytea[],
+                ARRAY[$4]::bytea[],ARRAY[false]::boolean[])
+            """;
+        publish.Parameters.AddWithValue(id);
+        publish.Parameters.AddWithValue(tier);
+        publish.Parameters.AddWithValue(type);
+        publish.Parameters.AddWithValue(source);
+        Assert.False((bool)(await publish.ExecuteScalarAsync(ct))!);
+    }
+
+    private async Task DeleteIdentityAsync(byte[] id)
+    {
+        await using var cleanup = pg.DataSource.CreateCommand("""
+            WITH facets AS (DELETE FROM laplace.entity_interpretations WHERE entity_id=$1)
+            DELETE FROM laplace.entities WHERE id=$1
+            """);
+        cleanup.Parameters.AddWithValue(id);
+        await cleanup.ExecuteNonQueryAsync();
+    }
+
+    private static byte[] Fill(byte value) => Enumerable.Repeat(value,16).ToArray();
 }
