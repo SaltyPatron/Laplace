@@ -19,6 +19,13 @@ def run_block(step_name: str) -> str:
 
 
 class SharedHostQueue(unittest.TestCase):
+    def test_product_lifecycle_validates_workflow_changes(self):
+        text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("branches: [main]", text)
+        self.assertNotIn('- ".github/**"', text)
+        self.assertIn('- "docs/**"', text)
+        self.assertIn('- "**/*.md"', text)
+
     def test_all_host_owners_preserve_pending_operations(self):
         expected_groups = {
             "laplace.yml": 2,
