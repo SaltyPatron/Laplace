@@ -35,10 +35,6 @@ jobs:
   resolve:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 2
-    concurrency:
-      group: laplace-host-lifecycle
-      queue: max
-      cancel-in-progress: false
     outputs:
       path: ${{ steps.pick.outputs.path }}
     steps:
