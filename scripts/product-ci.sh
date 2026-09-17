@@ -17,6 +17,16 @@ provision_deps() {
   bash scripts/ci-deps.sh
 }
 
+require_built_revision() {
+  local expected actual
+  expected="$(git rev-parse HEAD)"
+  actual="$(cat build/.laplace-source-revision 2>/dev/null || true)"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "::error::prepared build does not belong to this checkout (expected $expected, found ${actual:-missing}); run product-ci.sh build or deploy first" >&2
+    return 1
+  fi
+}
+
 run_build() {
   local args=()
   [[ "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || args+=(--force-rebuild)
@@ -31,6 +41,7 @@ run_build() {
 }
 
 run_dev_tests() {
+  require_built_revision
   # Development tests are evidence, not a reason to discard the rest of the
   # integrated lifecycle. Run every suite, remember any failure, and return it
   # after the remaining suites have had a chance to report their own state.
@@ -43,6 +54,7 @@ run_dev_tests() {
 }
 
 run_install() {
+  require_built_revision
   bash scripts/pipeline.sh install
 }
 
@@ -53,6 +65,7 @@ run_database_maintenance() {
 # Database QA includes isolated regression databases and installed-runtime checks;
 # it does not own corpus ingestion or the canonical application database contents.
 run_db_tests() {
+  require_built_revision
   bash scripts/test-parallel.sh --profile db --suite db-health
   rm -rf build/extension/*/tests/regress_output
   bash scripts/test-parallel.sh --profile db --suite native-db
@@ -60,11 +73,16 @@ run_db_tests() {
 }
 
 run_publish() {
+  # Recovery belongs to the prior publication transaction and must remain possible
+  # even when the checkout has advanced. New publication may only consume artifacts
+  # produced by this checkout.
   bash scripts/publish-applications.sh recover
+  require_built_revision
   bash scripts/publish-applications.sh deploy
 }
 
 run_live_tests() {
+  require_built_revision
   export LAPLACE_API_BASE="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
   bash scripts/test-parallel.sh --profile live --suite live-floor
   bash scripts/test-parallel.sh --profile live --suite live-api
@@ -73,6 +91,7 @@ run_live_tests() {
 }
 
 run_competitive_model_proof() {
+  require_built_revision
   # This is the executable competitive path, not a compile-only gate: a real
   # weighted checkpoint is admitted into the substrate, retained evidence is
   # read back, a GGUF is synthesized, llama.cpp loads it, and behavioral probes
