@@ -7,7 +7,7 @@ namespace Laplace.Endpoints.OpenAICompat;
 /// Operator control for the canonical CLI ingest lane. The API does not duplicate
 /// the CLI source registry or ingest implementation: it starts <c>Laplace.Cli ingest</c>
 /// and the normal ingest journal remains the authority for progress, completion and failure.
-/// Process stop is restricted to CLI children started by this server instance.
+/// Process control is restricted to CLI children started by this server instance.
 /// </summary>
 internal static class IngestAdminEndpoints
 {
@@ -20,6 +20,27 @@ internal static class IngestAdminEndpoints
 
     public static void MapIngestAdminEndpoints(this WebApplication app)
     {
+        app.MapGet("/v1/admin/ingest/processes", () =>
+        {
+            var rows = IngestProcessRunner.ActiveProcesses()
+                .Select(receipt => (JsonNode)new JsonObject
+                {
+                    ["pid"] = receipt.ProcessId,
+                    ["source"] = receipt.Source,
+                    ["path"] = receipt.Path,
+                    ["cli"] = receipt.CliPath,
+                    ["arguments"] = new JsonArray(receipt.Arguments
+                        .Select(value => (JsonNode)JsonValue.Create(value)!).ToArray()),
+                    ["started_at"] = receipt.StartedAt,
+                })
+                .ToArray();
+            return Results.Json(new JsonObject
+            {
+                ["object"] = "list",
+                ["data"] = new JsonArray(rows),
+            });
+        }).WithTags("admin");
+
         app.MapPost("/v1/admin/ingest/start", (StartRequest request) =>
         {
             try
@@ -37,6 +58,7 @@ internal static class IngestAdminEndpoints
                     ["cli"] = receipt.CliPath,
                     ["arguments"] = new JsonArray(receipt.Arguments
                         .Select(value => (JsonNode)JsonValue.Create(value)!).ToArray()),
+                    ["started_at"] = receipt.StartedAt,
                     ["status"] = "started",
                     ["note"] = "Follow the canonical ingest journal for run progress and completion.",
                 });
