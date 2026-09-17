@@ -1,0 +1,139 @@
+name: Ratchet one-descent ingest ownership
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/o-tiers-contract-repair.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Align tests and contracts with dynamic tier descent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              'app/Laplace.Substrate/Abstractions/IngestDescentFlush.cs',
+              '''    /// Working-set mode: root gate + parallel compose only — no O(tiers) descent until
+              /// <see cref="FinalizeWorkingSetAsync"/> (Rule #8 step 5 once per working set).
+''',
+              '''    /// Working-set mode: completion-receipt gate + parallel compose only — no entity
+              /// presence decision occurs before <see cref="FinalizeWorkingSetAsync"/>, which owns
+              /// Rule #8 step 5's single whole-working-set O(occupied tiers) novelty descent.
+''',
+              'compose-batch ownership comment')
+
+          replace_once(
+              'app/Laplace.Substrate/Abstractions/IngestDescentFlush.cs',
+              '''/// <summary>
+              /// P5 cross-batch O(tiers) bulk descent: one
+              /// <see cref="ContentTierSpine.BatchExistenceEmitBitmapsAsync"/> call per flush
+              /// batch regardless of record count — at most five tier rounds total.
+              /// </summary>
+''',
+              '''/// <summary>
+              /// One whole-working-set bulk novelty descent. The shared TierTreeDescent owner
+              /// derives the highest occupied tier from the actual trees and performs at most
+              /// one set-sized reader round for each occupied tier value down to the floor.
+              /// There is no semantic tier ceiling and no per-record presence probe here.
+              /// </summary>
+''',
+              'bulk-descent dynamic-tier comment')
+
+          replace_once(
+              'app/Laplace.Substrate/Abstractions/IngestPipeline.cs',
+              '''    /// Rule #8 working-set mode (06_Engineering_Ruleset.txt). One builder spans
+              /// the record stream; O(tiers) existence runs every flush interval (at most
+              /// five tier rounds per batch); one SubstrateChange per working set unless
+              /// the memory budget valve splits it. BatchSize is ignored in this mode.
+''',
+              '''    /// Rule #8 working-set mode (06_Engineering_Ruleset.txt). One builder spans
+              /// the record stream; novelty is one set-sized descent whose database crossings
+              /// scale with the tiers actually occupied by that working set, with no fixed tier
+              /// ceiling; one SubstrateChange per working set unless the memory budget valve
+              /// splits it. BatchSize is ignored in this mode.
+''',
+              'working-set dynamic-tier comment')
+
+          replace_once(
+              'app/Laplace.Substrate.Tests/Abstractions/IngestPipelineTestHelpers.cs',
+              '''    /// Upper bound on probe ROUND TRIPS for a chunked ingest under the
+              /// tier-descent architecture: per probe chunk, one existence-gate call
+              /// plus at most one call per tier round (tiers 0..4 content + margin
+              /// for the tier-0/1 flat completion), plus the batched content-anchor
+              /// probe pass at build time (roots bitmap + descent rounds) when the
+              /// builder carries witness-emitted content. The invariant that matters
+              /// is that probe calls scale with chunks × tiers plus a per-build
+              /// constant — never with row count.
+''',
+              '''    /// Conservative test-only round-trip bound for the fixture trees used here.
+              /// Production has no fixed tier count: TierTreeDescent derives maxTier from the
+              /// actual working-set trees. Completion-receipt checks are not entity novelty
+              /// probes; entity presence calls scale with working-set chunks × occupied tiers,
+              /// never with record count.
+''',
+              'probe-bound comment')
+
+          doc = Path('app/Laplace.Substrate.Tests/Abstractions/DocumentIngestPipelineTests.cs')
+          text = doc.read_text()
+          old = '        Assert.True(reader.FlatProbeCalls >= 1, "root bulk IN on present documents");'
+          new = '        Assert.True(reader.FlatProbeCalls >= 1, "tier descent proves present document content");'
+          if text.count(old) != 1:
+              raise SystemExit(f'present-document probe assertion count={text.count(old)}')
+          text = text.replace(old, new, 1)
+          marker = '''        Assert.Equal(0, reader.ScalarSourceCompletedCalls);
+                  Assert.Equal(1, reader.BatchedSourceCompletedCalls);
+              }
+
+              [Fact]
+              public async Task DocumentPipeline_ForceReObserve_BypassesMarkerSkip()
+'''
+          replacement = '''        Assert.Equal(0, reader.ScalarSourceCompletedCalls);
+                  Assert.Equal(1, reader.BatchedSourceCompletedCalls);
+                  Assert.Equal(0, reader.FlatProbeCalls);
+              }
+
+              [Fact]
+              public async Task DocumentPipeline_ForceReObserve_BypassesMarkerSkip()
+'''
+          if text.count(marker) != 1:
+              raise SystemExit(f'marker-complete assertion insertion count={text.count(marker)}')
+          doc.write_text(text.replace(marker, replacement, 1))
+          PY
+
+          git diff --check
+          grep -R "at most five tier rounds" -n app/Laplace.Substrate app/Laplace.Substrate.Tests && exit 1 || true
+          grep -n "Assert.Equal(0, reader.FlatProbeCalls)" app/Laplace.Substrate.Tests/Abstractions/DocumentIngestPipelineTests.cs
+      - name: Commit ratchets and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Laplace CI repair"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/o-tiers-contract-repair.yml
+          git add app/Laplace.Substrate/Abstractions/IngestDescentFlush.cs \
+                  app/Laplace.Substrate/Abstractions/IngestPipeline.cs \
+                  app/Laplace.Substrate.Tests/Abstractions/IngestPipelineTestHelpers.cs \
+                  app/Laplace.Substrate.Tests/Abstractions/DocumentIngestPipelineTests.cs
+          git commit -m "test: ratchet novelty to one dynamic tier descent"
+          git pull --rebase origin main
+          git push origin HEAD:main
