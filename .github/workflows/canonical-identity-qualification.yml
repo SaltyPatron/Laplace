@@ -1,4 +1,4 @@
-name: Correct canonical identity regressions and preserve current lifecycle
+name: Restore native shape case lookup and preserve canonical source ingestion
 on:
   push:
     branches: [review/canonical-identity-20260917]
@@ -11,10 +11,10 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      BASE: 88be3027d36150bc551698dae9d6a66690bb6bcd
-      EXTERNAL: 5fbcaca34fc882fa376e49fe595302dd092a098d
-      COMMON: ea4cfa7382086feddeb608723b7c72164e5e1499
-      MANIFEST: 877d4ae006362f43becbb421193716253c12e05e
+      BASE: 40ee7a676cb5944a86f8a7054454ae54d8b79556
+      EXTERNAL: 904da2e03db9f0b039d675ba7974078baa17f8d5
+      COMMON: 5fbcaca34fc882fa376e49fe595302dd092a098d
+      MANIFEST: c77926976dc6e5d6a0ecbfae778ec17e21f2538e
       CANDIDATE_REF: review/canonical-identity-20260917
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -57,38 +57,8 @@ jobs:
           from pathlib import Path
           root=Path(os.environ["EVIDENCE_ROOT"])
           def git(*args): return subprocess.check_output(["git",*args],text=True).strip()
-          conflict="scripts/test-ci-workspace.py"
-          paths=git("diff","--name-only","--diff-filter=U").splitlines()
-          assert paths in ([],[conflict]),paths
-          if os.environ["MERGE_STATUS"]!="0":
-              assert paths==[conflict],(os.environ["MERGE_STATUS"],paths)
-          if paths:
-              expected_stages={"1":"6568aef5d5f9a7e29730d2bf73c7d595a92100cc","2":"4bd4ec37f381a65dac9e671fe2447c861db6ba4a","3":"9ef6e73d87914a46ee644b53aa6fe6e1df1b6077"}
-              for line in git("ls-files","-u").splitlines():
-                  metadata,path=line.split("\t",1)
-                  mode,sha,stage=metadata.split()
-                  assert path==conflict and sha==expected_stages[stage],line
-                  (root/("workspace-stage"+stage+".py")).write_bytes(subprocess.check_output(["git","cat-file","blob",sha]))
-          assert git("rev-parse",os.environ["BASE"]+":"+conflict)=="4bd4ec37f381a65dac9e671fe2447c861db6ba4a"
-          Path(conflict).write_bytes(subprocess.check_output(["git","show",os.environ["BASE"]+":"+conflict]))
-          subprocess.run(["git","add","--",conflict],check=True)
+          assert os.environ["MERGE_STATUS"]=="0",os.environ["MERGE_STATUS"]
           assert not git("ls-files","-u")
-          expected=[".github/workflows/db-ops.yml",".github/workflows/laplace.yml",".github/workflows/seed.yml","scripts/product-ci.sh","scripts/test-parallel.sh","scripts/test-product-ci-artifact-ownership.py","scripts/test-seed-workflow-ownership.py"]
-          arrivals=git("diff","--cached","--name-only",os.environ["GITHUB_SHA"]).splitlines()
-          assert arrivals==expected,(arrivals,expected)
-          preserved=[]
-          for path in expected:
-              sha=git("rev-parse",":"+path)
-              if path=="scripts/test-parallel.sh":
-                  external=subprocess.check_output(["git","show",os.environ["EXTERNAL"]+":"+path],text=True)
-                  marker="  python3 scripts/test-cutechess-calibration.py\n"
-                  assert external.count(marker)==1 and "test-chess-x11-runtime.py" not in external
-                  assert Path(path).read_text()==external.replace(marker,marker+"  python3 scripts/test-chess-x11-runtime.py\n"),"lost incoming registration or qualified GUI control"
-              elif path=="scripts/test-product-ci-artifact-ownership.py":
-                  assert sha=="b4621b2aacf49d474c2444bd440a7556c9a33713",sha
-              else:
-                  assert sha==git("rev-parse",os.environ["EXTERNAL"]+":"+path),path
-              preserved.append({"path":path,"merged_blob":sha,"incoming_blob":git("rev-parse",os.environ["EXTERNAL"]+":"+path)})
           def blob(sha):
               request=urllib.request.Request("https://api.github.com/repos/"+os.environ["GITHUB_REPOSITORY"]+"/git/blobs/"+sha,
                   headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
@@ -100,6 +70,15 @@ jobs:
           (root/"overlay.json").write_bytes(raw)
           manifest=json.loads(raw)
           assert manifest["base"]==os.environ["BASE"] and manifest["external"]==os.environ["EXTERNAL"]
+          arrivals=git("diff","--cached","--name-only",os.environ["GITHUB_SHA"]).splitlines()
+          expected=sorted(entry["path"] for entry in manifest["preserve"])
+          assert arrivals==expected,(arrivals,expected)
+          preserved=[]
+          for entry in manifest["preserve"]:
+              path=entry["path"]
+              sha=git("rev-parse",":"+path)
+              assert sha==entry["sha"]==git("rev-parse",os.environ["EXTERNAL"]+":"+path),path
+              preserved.append({"path":path,"merged_blob":sha,"incoming_blob":entry["sha"]})
           for entry in manifest["files"]:
               path=entry["path"]
               current=subprocess.run(["git","rev-parse",":"+path],capture_output=True,text=True)
@@ -115,7 +94,6 @@ jobs:
           for path in (".github/workflows/identity-storage-proof.yml",".github/workflows/identity-working-set-patch.yml","scripts/patch-identity-working-set.py"):
               assert subprocess.run(["git","cat-file","-e",":"+path],capture_output=True).returncode!=0,path
           (root/"preserved-main.json").write_text(json.dumps(preserved,indent=2)+"\n")
-          (root/"workspace-resolution.json").write_text(json.dumps({"path":conflict,"retained_blob":git("rev-parse",":"+conflict),"scope":"preserve incoming strict prepublication gates and shared seed ownership, qualified maintenance/refusal controls and actual artifact revision proof"},indent=2)+"\n")
           PY
           git diff --cached --check
           git diff --cached --binary > "$evidence_root/reconciled.patch"
@@ -123,6 +101,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export PYTHONDONTWRITEBYTECODE=1
+          python3 scripts/test-cutechess-gui-game.py 2>&1 | tee "$EVIDENCE_ROOT/gui-controls.log"
           python3 scripts/test-ci-workspace.py 2>&1 | tee "$EVIDENCE_ROOT/workspace-controls.log"
           python3 scripts/test-product-ci-artifact-ownership.py 2>&1 | tee "$EVIDENCE_ROOT/artifact-controls.log"
           python3 scripts/test-seed-workflow-ownership.py 2>&1 | tee "$EVIDENCE_ROOT/seed-controls.log"
@@ -138,7 +118,7 @@ jobs:
           unset git_auth
           test -z "$(git diff --name-only)"
           test -z "$(git ls-files --others --exclude-standard)"
-          git commit -m "Correct canonical identity regression fixtures and preserve shared lifecycle ownership"
+          git commit -m "Restore batched native shape case lookup and preserve canonical source ingestion"
           test "$(git rev-parse HEAD^1)" = "$GITHUB_SHA"
           test "$(git rev-parse HEAD^2)" = "$EXTERNAL"
           test -z "$(git status --porcelain --untracked-files=all)"
@@ -147,7 +127,7 @@ jobs:
           import json,os,subprocess
           from pathlib import Path
           def git(*args): return subprocess.check_output(["git",*args],text=True).strip()
-          receipt={"status":"passed","scope":"real Git reconciliation and actual lifecycle, artifact, seed, PG helper controls; corrected SQL/native regression fixtures await actual private PostgreSQL execution","base":os.environ["BASE"],"external":os.environ["EXTERNAL"],"operator":os.environ["GITHUB_SHA"],"manifest":os.environ["MANIFEST"],"merged_commit":git("rev-parse","HEAD"),"tree":git("rev-parse","HEAD^{tree}"),"parents":git("show","-s","--format=%P","HEAD").split()}
+          receipt={"status":"passed","scope":"real Git reconciliation and actual GUI, lifecycle, artifact, seed and PG helper controls; native case correction and managed regressions require actual private PostgreSQL execution","base":os.environ["BASE"],"external":os.environ["EXTERNAL"],"operator":os.environ["GITHUB_SHA"],"manifest":os.environ["MANIFEST"],"merged_commit":git("rev-parse","HEAD"),"tree":git("rev-parse","HEAD^{tree}"),"parents":git("show","-s","--format=%P","HEAD").split()}
           (Path(os.environ["EVIDENCE_ROOT"])/"source.json").write_text(json.dumps(receipt,indent=2)+"\n")
           print(json.dumps(receipt,indent=2))
           PY
