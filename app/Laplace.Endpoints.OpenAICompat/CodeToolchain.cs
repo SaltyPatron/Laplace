@@ -61,8 +61,9 @@ internal static partial class CodeToolchain
             }
         }
 
-        var invocation = ResolveInvocation(source, modality)
-            ?? return new Receipt(modality, "", false, false, false, 127, "",
+        var invocation = ResolveInvocation(source, modality);
+        if (invocation is null)
+            return new Receipt(modality, "", false, false, false, 127, "",
                 $"No compile/syntax verifier is governed for modality '{modality}'.");
 
         var work = Path.Combine(Path.GetTempPath(), "laplace-code", Guid.NewGuid().ToString("N"));
