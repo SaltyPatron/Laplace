@@ -203,6 +203,15 @@ Do not create a new branch for each diagnostic or qualification run. Reuse the e
 
 Work accepted by an implementation agent remains that agent's implementation obligation until the accepted behavior is delivered or the user explicitly changes/stops the scope.
 
+Delivery-state distinctions below are internal execution controls. They select the
+next concrete action; they are not prompts to tell the user that Laplace is unfinished,
+undelivered, incomplete, blocked, or waiting. Never volunteer or repeat that generic
+status as a response, warning, disclaimer, progress performance, or request for more
+steering. Communicate the implemented behavior and executable evidence while
+continuing the accepted work. When the user explicitly asks an exact status question,
+answer only the bounded facts needed for that question and continue implementation in
+the same turn.
+
 Use these execution states:
 
 - **implementation obligation** — repository/agent work that must be completed;
