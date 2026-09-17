@@ -26,19 +26,32 @@ class SharedHostQueue(unittest.TestCase):
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
-    def test_all_host_owners_preserve_pending_operations(self):
-        expected_groups = {
-            "laplace.yml": 2,
-            "db-ops.yml": 1,
-            "seed.yml": 1,
-            "benchmark-evidence.yml": 1,
-        }
-        for name, count in expected_groups.items():
-            with self.subTest(workflow=name):
-                text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    def test_every_self_hosted_job_shares_lifecycle_concurrency(self):
+        host_jobs = 0
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            text = path.read_text(encoding="utf-8")
+            count = text.count("runs-on: [self-hosted, laplace]")
+            if count == 0:
+                continue
+            host_jobs += count
+            with self.subTest(workflow=path.name):
                 self.assertEqual(text.count("group: laplace-host-lifecycle"), count)
                 self.assertEqual(text.count("queue: max"), count)
                 self.assertEqual(text.count("cancel-in-progress: false"), count)
+        self.assertGreater(host_jobs, 0)
+
+    def test_benchmark_is_dispatch_only_versioned_evidence(self):
+        text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
+        self.assertIn("on:\n  workflow_dispatch:\n", text)
+        self.assertNotIn("\n  push:\n", text)
+        self.assertNotIn("\n  workflow_call:\n", text)
+        self.assertIn("options: [quick, throughput, core, scale, moby, all]", text)
+        self.assertEqual(text.count("runs-on: [self-hosted, laplace]"), 1)
+        self.assertIn("python3 scripts/benchmark_suite.py validate", text)
+        self.assertIn('python3 scripts/benchmark_suite.py "${args[@]}"', text)
+        self.assertIn("name: laplace-benchmark-${{ github.run_id }}-${{ github.run_attempt }}", text)
+        self.assertIn("retention-days: 90", text)
+        self.assertNotIn("accept-chess-environment.py", text)
 
     def test_benchmark_checkout_preserves_retained_workspace_state(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
@@ -86,9 +99,11 @@ class SeedHostOwnership(unittest.TestCase):
     def test_evict_and_ingest_share_one_locked_step(self):
         block = run_block(SEED_STEP)
         eviction = block.index('scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict')
-        ingest = block.index('scripts/ingest-source.sh "$SOURCE_KEY"')
+        ingest = block.index('ingest_one "$SOURCE_KEY" "$PATH_INPUT"')
         self.assertLess(block.index("flock 9"), eviction)
         self.assertLess(eviction, ingest)
+        self.assertIn('scripts/ingest-source.sh "$key" "$path"', block)
+        self.assertIn('scripts/ingest-source.sh "$key"', block)
         self.assertIn("export LAPLACE_INGEST_FORCE=1", block)
         self.assertNotIn("- name: Evict selected source", SEED)
 
