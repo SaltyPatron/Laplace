@@ -52,6 +52,7 @@ run_database_maintenance() {
 
 run_foundation() {
   bash scripts/ensure-foundation.sh
+  verify_seeded_product
 }
 
 run_db_tests() {
@@ -137,12 +138,11 @@ run_deploy() {
   run_database_maintenance --prepare
 
   # Publication proves the installed application process, not knowledge volume.
-  # Structural DB/T0 reconciliation is seed-agnostic; only after that succeeds do
-  # we admit/resume foundation data and require the full product-readiness contract.
+  # Structural DB/T0 reconciliation is seed-agnostic; the foundation owner then
+  # admits/resumes data and proves the complete seeded readiness contract.
   run_publish
   reconcile_installed_product
   run_foundation
-  verify_seeded_product
 
   if (( dev_test_rc != 0 )); then
     echo "::error::development tests failed earlier (status $dev_test_rc); integrated lifecycle continued and retained downstream evidence" >&2
