@@ -80,6 +80,32 @@ function displayRelation(type: string, entityType: string | null | undefined, di
   return type.replaceAll('_', ' ').toLowerCase();
 }
 
+function ambiguousLabels(rows: ExploreConsensusRow[]) {
+  const firstId = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  for (const row of rows) {
+    const label = row.entity_label.trim();
+    if (!label) continue;
+    const existing = firstId.get(label);
+    if (existing === undefined) firstId.set(label, row.entity_id_hex);
+    else if (existing !== row.entity_id_hex) ambiguous.add(label);
+  }
+  return ambiguous;
+}
+
+function relationEntityLabel(row: ExploreConsensusRow, ambiguous: Set<string>) {
+  const label = row.entity_label.trim();
+  if (!label) return `Entity · ${row.entity_id_hex.slice(0, 12)}`;
+  // A display projection can legitimately collapse distinct governed references to the
+  // same descriptive type/source fallback (for example every CILI WordNet mapping becoming
+  // "Source Reference · CILIDecomposer"). Never render those different graph objects as
+  // indistinguishable rows: identity stays separate from display text, but a bounded hash
+  // suffix makes the distinction visible until the source-specific reference label is retained.
+  return ambiguous.has(label)
+    ? `${label} · ${row.entity_id_hex.slice(0, 12)}`
+    : label;
+}
+
 function RelationTable({
   title,
   rows,
@@ -89,6 +115,7 @@ function RelationTable({
   rows: ExploreConsensusRow[];
   entityType?: string | null;
 }) {
+  const ambiguous = ambiguousLabels(rows);
   return (
     <>
       <h3 className={styles.sectionTitle}>{title}</h3>
@@ -104,7 +131,12 @@ function RelationTable({
           {rows.map((row) => (
             <tr key={`${row.direction}:${row.type}:${row.entity_id_hex}`}>
               <Td>{displayRelation(row.type, entityType, row.direction)}</Td>
-              <Td><EntityLink idHex={row.entity_id_hex} label={row.entity_label} /></Td>
+              <Td>
+                <EntityLink
+                  idHex={row.entity_id_hex}
+                  label={relationEntityLabel(row, ambiguous)}
+                />
+              </Td>
               <Td><ConsensusBadge mu={row.eff_mu} witnesses={row.witnesses} tone="explore" /></Td>
             </tr>
           ))}
