@@ -58,4 +58,45 @@ public sealed class ChessRecordedCorpusCommandTests
             Assert.Throws<ArgumentException>(() => ChessRecordedCorpusCommands.ParseArguments([
                 "--selection-manifest", Manifest, "--expected-sha256", bad, "--evidence-root", Evidence]));
     }
+    private static string Output => Path.Combine(Root, "recorded-selection-fixture", "selected.pgn");
+    private static string[] ExportRequired =>
+        ["--selection-manifest", Manifest, "--expected-sha256", Digest, "--output-pgn", Output];
+
+    [Fact]
+    public void PgnExportUsesTheExactSelectionIdentityAndNewAbsoluteOutput()
+    {
+        var options = ChessRecordedCorpusCommands.ParseExportArguments(ExportRequired);
+        Assert.Equal(Manifest, options.ManifestPath);
+        Assert.Equal(Digest, options.ExpectedSha256);
+        Assert.Equal(Output, options.OutputPath);
+        Assert.Throws<ArgumentException>(() => ChessRecordedCorpusCommands.ParseExportArguments([]));
+        Assert.Throws<ArgumentException>(() => ChessRecordedCorpusCommands.ParseExportArguments([
+            "--selection-manifest", Manifest, "--expected-sha256", Digest, "--output-pgn", Evidence]));
+        Assert.Throws<ArgumentException>(() => ChessRecordedCorpusCommands.ParseExportArguments([
+            "--selection-manifest", Manifest, "--expected-sha256", Digest, "--output-pgn", "relative.pgn"]));
+        Assert.Throws<ArgumentException>(() => ChessRecordedCorpusCommands.ParseExportArguments([
+            "--selection-manifest", Manifest, "--expected-sha256", new string('A', 64), "--output-pgn", Output]));
+    }
+
+    [Theory]
+    [InlineData("--selection-manifest")]
+    [InlineData("--expected-sha256")]
+    [InlineData("--output-pgn")]
+    public void PgnExportRefusesMissingAndDuplicateValues(string flag)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            ChessRecordedCorpusCommands.ParseExportArguments([.. ExportRequired, flag]));
+        Assert.Throws<ArgumentException>(() =>
+            ChessRecordedCorpusCommands.ParseExportArguments([.. ExportRequired, flag, "duplicate"]));
+    }
+
+    [Theory]
+    [InlineData("--games", "140")]
+    [InlineData("--force", "true")]
+    [InlineData("--evidence-root", "/evidence")]
+    [InlineData("--deadline-seconds", "3600")]
+    public void PgnExportDoesNotAcceptAdmissionOrProofOptions(string flag, string value)
+        => Assert.Throws<ArgumentException>(() =>
+            ChessRecordedCorpusCommands.ParseExportArguments([.. ExportRequired, flag, value]));
+
 }

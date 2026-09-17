@@ -48,6 +48,51 @@ internal static class ChessRecordedCorpusCommands
         return new ChessRecordedCorpusVerification.Options(manifest, digest, evidence, deadline);
     }
 
+    internal const string ExportUsage =
+        "usage: laplace chess export-recorded-pgn --selection-manifest /absolute/selection.json "
+        + "--expected-sha256 <lowercase-sha256> --output-pgn /absolute/new-selected.pgn\n"
+        + "  Exports the exact authenticated original game frames for ordinary admission.";
+
+    internal sealed record ExportOptions(string ManifestPath, string ExpectedSha256, string OutputPath);
+
+    internal static ExportOptions ParseExportArguments(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        var mapped = (string[])args.Clone();
+        for (int i = 0; i < mapped.Length; i += 2)
+        {
+            if (mapped[i] is not ("--selection-manifest" or "--expected-sha256" or "--output-pgn"))
+                throw new ArgumentException("Unknown export-recorded-pgn option.");
+            if (mapped[i] == "--output-pgn") mapped[i] = "--evidence-root";
+        }
+        var parsed = ParseArguments(mapped);
+        if (!parsed.EvidenceDirectory.EndsWith(".pgn", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("--output-pgn requires a .pgn file.");
+        return new(parsed.ManifestPath, parsed.ExpectedSha256, parsed.EvidenceDirectory);
+    }
+
+    internal static async Task<int> ExportAsync(string[] args)
+    {
+        ExportOptions options;
+        try { options = ParseExportArguments(args); }
+        catch (ArgumentException error) { return Fail(error.Message + "\n" + ExportUsage); }
+        using var cancellation = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancel = (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            cancellation.Cancel();
+        };
+        Console.CancelKeyPress += cancel;
+        try
+        {
+            var result = await ChessRecordedSelection.ExportPgnAsync(
+                options.ManifestPath, options.ExpectedSha256, options.OutputPath, cancellation.Token);
+            Console.WriteLine(JsonSerializer.Serialize(result, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            return 0;
+        }
+        finally { Console.CancelKeyPress -= cancel; }
+    }
+
     internal static async Task<int> RunAsync(string[] args)
     {
         ChessRecordedCorpusVerification.Options options;

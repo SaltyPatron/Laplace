@@ -35,6 +35,79 @@ public sealed class ChessRecordedSelection
         Plies = entries.Sum(e => (long)e.Plies);
     }
 
+    public sealed record PgnExportEntry(long OriginalSourceOrdinal, long ExportedSourceOrdinal,
+        string FramedGameSha256, string PlayingId, string LineId, string StartPositionId, int Plies, string Result);
+    public sealed record PgnExportResult(string Schema, FileIdentity Manifest, FileIdentity Source,
+        FileIdentity SelectionManifest, FileIdentity Pgn, int SelectedGames, long Plies,
+        IReadOnlyList<PgnExportEntry> Games);
+
+    /// <summary>Exports exact authenticated frames for ordinary fresh admission.
+    /// Retained database scopes are provenance only and are not reused as new admission proof.</summary>
+    public static async Task<PgnExportResult> ExportPgnAsync(
+        string manifestPath, string expectedSha256, string outputPath, CancellationToken ct = default)
+    {
+        if (!Path.IsPathFullyQualified(outputPath)
+            || !outputPath.EndsWith(".pgn", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("recorded PGN export requires an absolute .pgn output path");
+        outputPath = Path.GetFullPath(outputPath);
+        if (File.Exists(outputPath) || Directory.Exists(outputPath))
+            throw new IOException("recorded PGN export output must be new");
+        var selection = await LoadAsync(manifestPath, expectedSha256, ct);
+        var prepared = ChessCorpusPreparation.FromRecordedSelection(selection);
+        string pending = outputPath + ".pending-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await using (var file = new FileStream(pending, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var writer = new StreamWriter(file, new UTF8Encoding(false, true)))
+            {
+                int index = 0;
+                foreach (string text in prepared.ReadSelected(ct))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var game = ChessPgnDecomposer.TryParseGame(text, requireCompleteSource: true)
+                        ?? throw new InvalidDataException("selected export frame is not a complete legal game");
+                    prepared.ValidateParsed(index++, game);
+                    // Each canonical frame already contains its exact terminal newline.
+                    // Adding separators would change the authenticated frame hashes.
+                    await writer.WriteAsync(text.AsMemory(), ct);
+                }
+                if (index != selection.SelectedGames)
+                    throw new InvalidDataException("selected export did not produce every retained game");
+                await writer.FlushAsync(ct);
+            }
+            // Re-read through the same production framer/parser used by measure-corpus.
+            // This checks that concatenation preserves every complete game boundary.
+            int checkedGames = 0;
+            foreach (string text in PgnGames.StreamGames(pending, requireUtf8: true))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (checkedGames >= selection.Entries.Count
+                    || ChessCorpusPreparation.HashText(text) != selection.Entries[checkedGames].FramedGameSha256)
+                    throw new InvalidDataException("exported framing bytes differ from the authenticated original frame");
+                var game = ChessPgnDecomposer.TryParseGame(text, requireCompleteSource: true)
+                    ?? throw new InvalidDataException("exported frame is not a complete legal game");
+                prepared.ValidateParsed(checkedGames++, game);
+            }
+            if (checkedGames != selection.SelectedGames)
+                throw new InvalidDataException("exported PGN changed the selected game count");
+            var output = await ChessCorpusPreparation.IdentifyAsync(pending, ct);
+            await selection.VerifyUnchangedAsync(ct);
+            ct.ThrowIfCancellationRequested();
+            File.Move(pending, outputPath, overwrite: false);
+            var games = selection.Entries.Select((entry, index) => new PgnExportEntry(
+                entry.SourceOrdinal, index + 1L, entry.FramedGameSha256, entry.PlayingId,
+                entry.LineId, entry.StartPositionId, entry.Plies, entry.Result)).ToArray();
+            return new("laplace.chess-recorded-pgn-export/v1", selection.Manifest, selection.Source,
+                selection.SelectionManifest, new(outputPath, output.Bytes, output.Sha256),
+                selection.SelectedGames, selection.Plies, Array.AsReadOnly(games));
+        }
+        finally
+        {
+            if (File.Exists(pending)) File.Delete(pending);
+        }
+    }
+
     internal static ChessCorpusPreparation.FileIdentity Internal(FileIdentity value)
         => new(value.Path, value.Bytes, value.Sha256);
 

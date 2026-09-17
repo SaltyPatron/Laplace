@@ -30,6 +30,7 @@ internal static class ChessCommands
             "bench" => Bench(args[1..]),
             "measure-corpus" => await ChessCorpusCommands.RunAsync(args[1..]),
             "verify-recorded-corpus" => await ChessRecordedCorpusCommands.RunAsync(args[1..]),
+            "export-recorded-pgn" => await ChessRecordedCorpusCommands.ExportAsync(args[1..]),
             "repair-position-outcomes" => await RepairPositionOutcomesAsync(args[1..]),
             _ => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
@@ -98,7 +99,7 @@ internal static class ChessCommands
     }
 
     private const string Usage =
-        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|measure-corpus|verify-recorded-corpus>\n"
+        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|measure-corpus|verify-recorded-corpus|export-recorded-pgn>\n"
         + "  match [--rounds N] [--depth D] [--st S] [--elo E] [--no-ingest]   (engine-vs-engine, live terminal board; games stream into the substrate)\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"
@@ -112,6 +113,8 @@ internal static class ChessCommands
         + "  measure-corpus --pgn /absolute/games.pgn --evidence-root /absolute/new-directory\n"
         + "      [--games 75000] [--minimum-seconds 30] [--replays 1] [--deadline-seconds 3600]\n"
         + "      [--expected-sha256 lowercase64]   (authentic PGN recording, readback, and replay evidence)\n"
+        + "  export-recorded-pgn --selection-manifest /absolute/selection.json --expected-sha256 lowercase64\n"
+        + "      --output-pgn /absolute/new-selected.pgn   (exact original frames; ordinary measure-corpus admits them)\n"
         + "  repair-position-outcomes [--evidence-root DIR] [--maximum-retained-mib N] [--invocation NAME]\n"
         + "      retain and verify the complete playing corpus, then replace legacy observations under writer quiescence.\n"
         + "  learned-pst [--piece PNBRQK]   (what the corpus LEARNED about each piece-square — the data-driven PST)\n"

@@ -143,6 +143,73 @@ public sealed class ChessRecordedSelectionTests : IDisposable
         Assert.Equal(selection.PlayingIds[0], game.PlayingId);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ExportedPgnPreservesExactFramesAndCompleteIdentitiesForOrdinaryAdmission(int chunks)
+    {
+        var input = await SelectionAsync(completeChunks: chunks);
+        var selection = await ChessRecordedSelection.LoadAsync(input.Path, input.Sha, Ct);
+        var originalFrames = ChessCorpusPreparation.FromRecordedSelection(selection).ReadSelected(Ct).ToArray();
+        var parentBefore = await ChessCorpusPreparation.IdentifyAsync(At("original-failed-receipt.json"), Ct);
+        var result = await ChessRecordedSelection.ExportPgnAsync(input.Path, input.Sha, At("selected.pgn"), Ct);
+
+        Assert.Equal("laplace.chess-recorded-pgn-export/v1", result.Schema);
+        Assert.Equal(selection.Manifest, result.Manifest);
+        Assert.Equal(selection.Source, result.Source);
+        Assert.Equal(selection.SelectionManifest, result.SelectionManifest);
+        Assert.Equal(chunks, result.SelectedGames);
+        Assert.Equal(selection.Plies, result.Plies);
+        Assert.Equal(ChessRecordedSelection.Public(
+            await ChessCorpusPreparation.IdentifyAsync(result.Pgn.Path, Ct)), result.Pgn);
+        Assert.Equal(originalFrames, PgnGames.StreamGames(result.Pgn.Path, requireUtf8: true).ToArray());
+        Assert.Equal(Encoding.UTF8.GetBytes(string.Concat(originalFrames)), await File.ReadAllBytesAsync(result.Pgn.Path));
+        var options = new ChessCorpusBenchmark.Options(result.Pgn.Path, At("new-admission"),
+            Games: chunks, ExpectedSha256: result.Pgn.Sha256);
+        ChessCorpusBenchmark.ValidateOptions(options);
+        var expectedIds = selection.PlayingIds.ToArray();
+        var actualIds = PgnGames.StreamGames(options.PgnPath, requireUtf8: true).Select((text, index) =>
+        {
+            var game = Assert.IsType<ChessGameRecord>(
+                ChessPgnDecomposer.TryParseGame(text, requireCompleteSource: true));
+            var entry = result.Games[index];
+            Assert.Equal(index + 1L, entry.ExportedSourceOrdinal);
+            Assert.Equal(selection.Entries[index].SourceOrdinal, entry.OriginalSourceOrdinal);
+            Assert.Equal(ChessCorpusPreparation.HashText(text), entry.FramedGameSha256);
+            Assert.Equal(Hex(game.PlayingId), entry.PlayingId);
+            Assert.Equal(Hex(game.LineId), entry.LineId);
+            Assert.Equal(Hex(game.PositionIds[0]), entry.StartPositionId);
+            Assert.Equal(game.MoveIds.Length, entry.Plies);
+            Assert.Equal(game.Result.ResultToken, entry.Result);
+            return game.PlayingId;
+        }).ToArray();
+        Assert.Equal(expectedIds, actualIds);
+        await ChessCorpusPreparation.RequireUnchangedAsync(parentBefore, Ct);
+        await selection.VerifyUnchangedAsync(Ct);
+        Assert.Empty(Directory.GetFiles(_directory, "*.pending-*"));
+    }
+
+    [Fact]
+    public async Task ExportRefusesExistingOrUnboundInputsWithoutPublishingOutput()
+    {
+        var input = await SelectionAsync();
+        string output = At("selected.pgn");
+        await File.WriteAllTextAsync(output, "existing bytes");
+        await Assert.ThrowsAsync<IOException>(() =>
+            ChessRecordedSelection.ExportPgnAsync(input.Path, input.Sha, output, Ct));
+        Assert.Equal("existing bytes", await File.ReadAllTextAsync(output));
+        string absent = At("not-created.pgn");
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            ChessRecordedSelection.ExportPgnAsync(input.Path, new string('0', 64), absent, Ct));
+        Assert.False(File.Exists(absent));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            ChessRecordedSelection.ExportPgnAsync(input.Path, input.Sha, absent, cancelled.Token));
+        Assert.False(File.Exists(absent));
+        Assert.Empty(Directory.GetFiles(_directory, "*.pending-*"));
+    }
+
     [Fact]
     public async Task ImportedBaselinePreservesExactBodiesScopesAndBoundariesWithoutChangingFailedParent()
     {
