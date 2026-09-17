@@ -103,6 +103,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
             "python3 scripts/test-ci-workspace.py",
             "python3 scripts/test-product-ci-artifact-ownership.py",
             "python3 scripts/test-seed-workflow-ownership.py",
+            "python3 scripts/test-build-placement.py",
         ):
             with self.subTest(command=command):
                 self.assertIn(command, owner)
@@ -110,35 +111,67 @@ class ProductStageOwnershipContract(unittest.TestCase):
         check_case = source.split('  check)\n', 1)[1].split('    ;;', 1)[0]
         self.assertIn("run_ci_contract_checks", check_case)
 
-    def test_deploy_is_composed_from_release_modules_not_policy_work(self):
+    def test_revision_scoped_ci_build_handoff_is_explicit_and_restored(self):
+        prepare = function("prepare_revision_scoped_build")
+        self.assertIn("LAPLACE_CI_REVISION_SCOPED_BUILD", prepare)
+        self.assertIn('export LAPLACE_BUILD_KEY="$revision"', prepare)
+        self.assertIn('export LAPLACE_BUILD_ROOT="$candidate_root/$revision"', prepare)
+        self.assertIn('python3 scripts/place-build-directory.py "$ROOT"', prepare)
+        self.assertIn("trap restore_revision_scoped_build EXIT", prepare)
+
+        restore = function("restore_revision_scoped_build")
+        self.assertIn("unset LAPLACE_BUILD_KEY LAPLACE_BUILD_ROOT LAPLACE_ENGINE_BUILD", restore)
+        self.assertIn('python3 scripts/place-build-directory.py "$ROOT"', restore)
+
+    def test_deploy_has_immutable_qualification_then_atomic_shared_activation(self):
         deploy = function("run_deploy")
         self.assertNotIn("run_ci_contract_checks", deploy)
         self.assertLess(deploy.index("run_release_candidate"),
                         deploy.index("run_release_activation"))
 
         candidate = function("run_release_candidate")
-        qualification = [
-            "check_deps",
-            "run_build",
-            "run_dev_tests",
+        qualification = ["check_deps", "run_build", "run_dev_tests"]
+        positions = [candidate.index(token) for token in qualification]
+        self.assertEqual(positions, sorted(positions))
+        for forbidden in (
+            "run_install",
+            "run_database_maintenance",
+            "run_db_tests",
+            "run_publish",
+            "reconcile_installed_product",
+            "run_live_tests",
+        ):
+            self.assertNotIn(forbidden, candidate)
+
+        activation = function("run_release_activation")
+        transaction = [
             "run_install",
             "run_database_maintenance --prepare",
             "run_db_tests",
+            "run_publish",
+            "reconcile_installed_product",
+            "run_live_tests",
         ]
-        positions = [candidate.index(token) for token in qualification]
+        positions = [activation.index(token) for token in transaction]
         self.assertEqual(positions, sorted(positions))
 
-        activation = function("run_release_activation")
-        delivery = ["run_publish", "reconcile_installed_product", "run_live_tests"]
-        positions = [activation.index(token) for token in delivery]
-        self.assertEqual(positions, sorted(positions))
-
-    def test_competitive_proof_extends_the_same_release_modules(self):
+    def test_competitive_proof_keeps_all_shared_mutations_in_one_transaction(self):
         proof = function("run_proof")
         self.assertLess(proof.index("run_release_candidate"),
-                        proof.index("run_proof_model"))
-        self.assertLess(proof.index("run_proof_model"),
-                        proof.index("run_release_activation"))
+                        proof.index("run_proof_transaction"))
+
+        transaction = function("run_proof_transaction")
+        order = [
+            "run_install",
+            "run_database_maintenance --prepare",
+            "run_db_tests",
+            "run_proof_model",
+            "run_publish",
+            "reconcile_installed_product",
+            "run_live_tests",
+        ]
+        positions = [transaction.index(token) for token in order]
+        self.assertEqual(positions, sorted(positions))
 
         model = function("run_proof_model")
         self.assertLess(model.index("require_built_revision"),
