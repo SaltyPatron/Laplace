@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/canonical-generated-sink-repair.yml
+      - .github/scripts/canonical_generated_sink_repair.py
+      - .github/scripts/canonical_generated_sink_fixup.py
 
 permissions:
   contents: write
