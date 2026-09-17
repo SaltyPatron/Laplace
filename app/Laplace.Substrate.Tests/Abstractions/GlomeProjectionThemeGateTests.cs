@@ -19,7 +19,7 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.Contains("const radius4", canvas, StringComparison.Ordinal);
         Assert.Contains("const displayRadius = SHELL * Math.max(0.02, radius4)", canvas, StringComparison.Ordinal);
         Assert.Contains("<color attach=\"background\"", canvas, StringComparison.Ordinal);
-        Assert.Contains("<meshBasicMaterial vertexColors toneMapped={false} />", canvas, StringComparison.Ordinal);
+        Assert.Contains("<meshBasicMaterial vertexColors toneMapped={false} color={palette.primary} />", canvas, StringComparison.Ordinal);
         Assert.Contains("material.needsUpdate = true", canvas, StringComparison.Ordinal);
 
         Assert.DoesNotContain(
@@ -33,14 +33,19 @@ public sealed class GlomeProjectionThemeGateTests
     }
 
     [Fact]
-    public void Theme_FollowsSystemPreference_WithoutHardBlackVisualizationSurfaces()
+    public void Theme_FollowsLiveUiTokens_WithoutHardBlackVisualizationSurfaces()
     {
         var theme = Read("web", "src", "ui", "theme.css");
         var canvasCss = Read("web", "src", "explore", "glome", "GlomeCanvas.module.css");
         var tabCss = Read("web", "src", "explore", "entity", "tabs", "GlomeTab.module.css");
         var graphCss = Read("web", "src", "explore", "graph", "ConsensusGraph.module.css");
+        var canvas = Read("web", "src", "explore", "glome", "GlomeCanvas.tsx");
 
         Assert.Contains("@media (prefers-color-scheme: dark)", theme, StringComparison.Ordinal);
+        Assert.Contains("useVisualizationPalette()", canvas, StringComparison.Ordinal);
+        Assert.DoesNotContain("useSystemDarkMode", canvas, StringComparison.Ordinal);
+        Assert.DoesNotContain("LIGHT_PALETTE", canvas, StringComparison.Ordinal);
+        Assert.DoesNotContain("DARK_PALETTE", canvas, StringComparison.Ordinal);
         Assert.Contains("--color-viz-bg: #e4edf2", theme, StringComparison.Ordinal);
         Assert.Contains("--color-viz-bg: #173b50", theme, StringComparison.Ordinal);
         Assert.Contains("--color-viz-label: #16384c", theme, StringComparison.Ordinal);
