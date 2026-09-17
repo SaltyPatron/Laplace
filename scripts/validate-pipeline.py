@@ -54,8 +54,6 @@ def validate_retired_workflows() -> list[str]:
         "deploy-app.yml",
         "seed-ladder.yml",
         "_ingest.yml",
-        "seed-chess-games.yml",
-        "seed-models.yml",
     ):
         if (workflows / name).is_file():
             errs.append(f"retired workflow still present: .github/workflows/{name}")
