@@ -1,28 +1,25 @@
-name: Read retained managed publication failure
+name: Read installed managed policy authority
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
 permissions:
   contents: read
 jobs:
-  retained-managed-failure:
+  installed-policy:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 5
     steps:
-      - name: Read exact managed publication receipt and phase logs
+      - name: Read allowed commands and installed policy identities
         run: |
           python3 - <<'PY'
-          import hashlib,json,pathlib
-          root=pathlib.Path("/build/laplace/recovery/chess-followthrough/35164475800-1")
-          for path in sorted(root.rglob("*")):
-              if not path.is_file() or path.suffix not in (".json",".log",".txt"):
-                  continue
-              if "tmp" in path.relative_to(root).parts:
-                  continue
-              raw=path.read_bytes()
-              print("RETAINED_FILE "+json.dumps({"path":str(path.relative_to(root)),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()}),flush=True)
-              if len(raw)<=131072:
-                  print(raw.decode("utf-8","replace"),flush=True)
-              else:
-                  print("[bounded final 128 KiB]\n"+raw[-131072:].decode("utf-8","replace"),flush=True)
+          import hashlib,json,os,pathlib,subprocess
+          result=subprocess.run(["sudo","-n","-l"],capture_output=True,text=True,timeout=15)
+          print("SUDO_COMMAND_AUTHORITY "+json.dumps({"exitCode":result.returncode,"stdout":result.stdout,"stderr":result.stderr}),flush=True)
+          for name in ("laplace-managed-deploy","laplace-service-control"):
+              p=pathlib.Path("/usr/local/libexec")/name
+              try:
+                  raw=p.read_bytes();st=p.stat()
+                  print("INSTALLED_POLICY "+json.dumps({"path":str(p),"uid":st.st_uid,"gid":st.st_gid,"mode":oct(st.st_mode&0o7777),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),"gitBlob":hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()}),flush=True)
+                  if len(raw)<=196608:print("INSTALLED_POLICY_SOURCE "+name+"\n"+raw.decode("utf-8","replace"),flush=True)
+              except OSError as error:print("POLICY_OBSERVATION_ERROR "+json.dumps({"path":str(p),"error":type(error).__name__}),flush=True)
           PY
