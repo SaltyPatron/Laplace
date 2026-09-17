@@ -10,6 +10,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 require_source_match=1
+case "${LAPLACE_DB_HEALTH_SCOPE:-source}" in
+  source|"") ;;
+  installed) require_source_match=0 ;;
+  *)
+    echo "invalid LAPLACE_DB_HEALTH_SCOPE: ${LAPLACE_DB_HEALTH_SCOPE}" >&2
+    exit 2
+    ;;
+esac
 if [[ "${1:-}" == "--installed-runtime" ]]; then
   require_source_match=0
   shift
