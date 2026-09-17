@@ -15,15 +15,18 @@ typedef struct LaplaceContinuation
 
 /* Physicality is more than a next-token stream. One packed manifest witnesses
  * containment, membership, predecessor/successor order and co-occurrence in the
- * same exact observation. These flags stay separate from semantic testimony:
- * they are structural facts derived from a stored trajectory, not relation cells. */
+ * same exact observation. Exact whole-observation continuation is retained as a
+ * separate route because an ordered multi-constituent match is stronger state
+ * than an isolated one-hop successor. These flags stay separate from semantic
+ * testimony: they are structural facts derived from stored trajectories. */
 enum LaplaceStructuralRelation
 {
-    LAPLACE_STRUCTURAL_CONTAINER   = 1u << 0,
-    LAPLACE_STRUCTURAL_CONSTITUENT = 1u << 1,
-    LAPLACE_STRUCTURAL_PREDECESSOR = 1u << 2,
-    LAPLACE_STRUCTURAL_SUCCESSOR   = 1u << 3,
-    LAPLACE_STRUCTURAL_COOCCUR     = 1u << 4,
+    LAPLACE_STRUCTURAL_CONTAINER    = 1u << 0,
+    LAPLACE_STRUCTURAL_CONSTITUENT  = 1u << 1,
+    LAPLACE_STRUCTURAL_PREDECESSOR  = 1u << 2,
+    LAPLACE_STRUCTURAL_SUCCESSOR    = 1u << 3,
+    LAPLACE_STRUCTURAL_COOCCUR      = 1u << 4,
+    LAPLACE_STRUCTURAL_CONTINUATION = 1u << 5,
 };
 
 typedef struct LaplaceStructuralCandidate
