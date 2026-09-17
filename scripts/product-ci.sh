@@ -50,6 +50,8 @@ run_database_maintenance() {
   bash scripts/maintain-installed-database.sh "$@"
 }
 
+# Database QA includes isolated regression databases and installed-runtime checks;
+# it does not own corpus ingestion or the canonical application database contents.
 run_db_tests() {
   bash scripts/test-parallel.sh --profile db --suite db-health
   rm -rf build/extension/*/tests/regress_output
