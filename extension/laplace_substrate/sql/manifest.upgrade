@@ -6,6 +6,7 @@ schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
 schema/tables/ingest_file_journal.sql.in
+functions/identity/entity_interpretations_publish.sql.in
 indexes/entities_type_btree.sql.in
 indexes/entities_tier_type_btree.sql.in
 indexes/drop_entities_tier_btree.sql.in

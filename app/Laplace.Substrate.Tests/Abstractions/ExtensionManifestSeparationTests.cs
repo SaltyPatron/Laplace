@@ -27,6 +27,8 @@ public sealed class ExtensionManifestSeparationTests
         Assert.DoesNotContain("schema/tables/attestations.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/consensus.sql.in", upgrade);
         Assert.DoesNotContain("indexes/physicalities_entity_btree.sql.in", upgrade);
+        Assert.Contains("functions/identity/entity_interpretations_publish.sql.in", install);
+        Assert.Contains("functions/identity/entity_interpretations_publish.sql.in", upgrade);
         Assert.Contains("drop_retired_", upgrade);
     }
 

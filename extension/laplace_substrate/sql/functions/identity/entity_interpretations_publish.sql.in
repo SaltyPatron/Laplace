@@ -1,0 +1,155 @@
+-- ONE owner for interpretation publication. Callers provide the already
+-- content-identified entity ids and their observed structural facets. Canonical
+-- entity rows are locked in bytewise id order, so overlapping ids serialize while
+-- unrelated ids remain parallel. Separate statements after the lock receive a
+-- fresh READ COMMITTED snapshot; no ON CONFLICT arbitration is needed.
+CREATE OR REPLACE FUNCTION @extschema@.entity_interpretations_publish(
+    p_entity_ids bytea[],
+    p_tiers smallint[],
+    p_type_ids bytea[],
+    p_source_ids bytea[],
+    p_source_is_null boolean[])
+RETURNS boolean
+LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE
+AS $$
+DECLARE
+    n integer := COALESCE(cardinality(p_entity_ids), 0);
+BEGIN
+    IF n <> COALESCE(cardinality(p_tiers), 0)
+       OR n <> COALESCE(cardinality(p_type_ids), 0)
+       OR n <> COALESCE(cardinality(p_source_ids), 0)
+       OR n <> COALESCE(cardinality(p_source_is_null), 0) THEN
+        RAISE EXCEPTION 'entity interpretation arrays must have identical cardinality'
+            USING ERRCODE = '22023';
+    END IF;
+    IF n = 0 THEN
+        RETURN false;
+    END IF;
+
+    -- Missing canonical identity is a caller/protocol error. Report it before
+    -- mutating interpretation state; identity is never synthesized here.
+    IF EXISTS (
+        SELECT 1
+        FROM (SELECT DISTINCT entity_id FROM unnest(p_entity_ids) AS u(entity_id)) i
+        LEFT JOIN @extschema@.entities e ON e.id = i.entity_id
+        WHERE e.id IS NULL
+    ) THEN
+        RETURN true;
+    END IF;
+
+    -- Per-content-id serialization only. This is a real row lock on the
+    -- canonical identity, not a process/global advisory mutex.
+    PERFORM e.id
+    FROM @extschema@.entities e
+    JOIN (SELECT DISTINCT entity_id FROM unnest(p_entity_ids) AS u(entity_id)) i
+      ON i.entity_id = e.id
+    ORDER BY e.id
+    FOR UPDATE;
+
+    -- First update any interpretation already present. Because every touched
+    -- entity row is locked above, another publisher for the same entity cannot
+    -- race the subsequent missing-row insert.
+    WITH input AS MATERIALIZED (
+        SELECT DISTINCT ON (u.entity_id, u.tier, u.type_id)
+               u.entity_id, u.tier, u.type_id,
+               CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END AS first_observed_by
+        FROM unnest(p_entity_ids, p_tiers, p_type_ids, p_source_ids, p_source_is_null)
+             AS u(entity_id, tier, type_id, source_id, source_is_null)
+        ORDER BY u.entity_id, u.tier, u.type_id,
+                 CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END NULLS LAST
+    )
+    UPDATE @extschema@.entity_interpretations ei
+       SET first_observed_by = CASE
+             WHEN ei.first_observed_by IS NULL THEN i.first_observed_by
+             WHEN i.first_observed_by IS NULL THEN ei.first_observed_by
+             WHEN ei.first_observed_by <= i.first_observed_by THEN ei.first_observed_by
+             ELSE i.first_observed_by
+           END
+      FROM input i
+     WHERE ei.entity_id = i.entity_id
+       AND ei.tier = i.tier
+       AND ei.type_id = i.type_id
+       AND i.first_observed_by IS NOT NULL
+       AND (ei.first_observed_by IS NULL OR i.first_observed_by < ei.first_observed_by);
+
+    WITH input AS MATERIALIZED (
+        SELECT DISTINCT ON (u.entity_id, u.tier, u.type_id)
+               u.entity_id, u.tier, u.type_id,
+               CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END AS first_observed_by
+        FROM unnest(p_entity_ids, p_tiers, p_type_ids, p_source_ids, p_source_is_null)
+             AS u(entity_id, tier, type_id, source_id, source_is_null)
+        ORDER BY u.entity_id, u.tier, u.type_id,
+                 CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END NULLS LAST
+    )
+    INSERT INTO @extschema@.entity_interpretations(entity_id, tier, type_id, first_observed_by)
+    SELECT i.entity_id, i.tier, i.type_id, i.first_observed_by
+    FROM input i
+    WHERE NOT EXISTS (
+        SELECT 1 FROM @extschema@.entity_interpretations ei
+        WHERE ei.entity_id = i.entity_id
+          AND ei.tier = i.tier
+          AND ei.type_id = i.type_id)
+    ORDER BY i.entity_id, i.tier, i.type_id;
+
+    -- Compatibility columns are a projection of the complete facet relation,
+    -- never an alternate identity decision and never arrival-order dependent.
+    WITH touched AS MATERIALIZED (
+        SELECT DISTINCT entity_id FROM unnest(p_entity_ids) AS u(entity_id)
+    ), summary AS MATERIALIZED (
+        SELECT i.entity_id,
+               min(i.tier)::smallint AS tier,
+               (array_agg(i.type_id ORDER BY i.type_id))[1] AS type_id,
+               (array_agg(i.first_observed_by ORDER BY i.first_observed_by)
+                   FILTER (WHERE i.first_observed_by IS NOT NULL))[1] AS first_observed_by
+        FROM @extschema@.entity_interpretations i
+        JOIN touched t ON t.entity_id = i.entity_id
+        GROUP BY i.entity_id
+    )
+    UPDATE @extschema@.entities e
+       SET tier = s.tier,
+           type_id = s.type_id,
+           first_observed_by = s.first_observed_by
+      FROM summary s
+     WHERE e.id = s.entity_id
+       AND (e.tier, e.type_id, e.first_observed_by)
+           IS DISTINCT FROM (s.tier, s.type_id, s.first_observed_by);
+
+    RETURN false;
+END;
+$$;
+
+-- Ordinary ad-hoc INSERT/COPY may create a canonical entity exactly once. Its
+-- initial facet is forwarded set-wise to the SAME publisher above. Re-inserting
+-- an existing content id is a normal primary-key violation; direct SQL is not a
+-- second identity/admission protocol and does not silently merge or rewrite it.
+CREATE OR REPLACE FUNCTION @extschema@.entity_identity_capture_statement()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    missing boolean;
+BEGIN
+    SELECT @extschema@.entity_interpretations_publish(
+        array_agg(id ORDER BY id),
+        array_agg(tier ORDER BY id),
+        array_agg(type_id ORDER BY id),
+        array_agg(first_observed_by ORDER BY id),
+        array_agg(first_observed_by IS NULL ORDER BY id))
+      INTO missing
+      FROM inserted_entities;
+    IF missing THEN
+        RAISE EXCEPTION 'inserted entity disappeared before interpretation publication'
+            USING ERRCODE = '23503';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS entity_identity_admit ON entities;
+DROP TRIGGER IF EXISTS entity_identity_capture ON entities;
+DROP FUNCTION IF EXISTS @extschema@.entity_identity_admit();
+DROP FUNCTION IF EXISTS @extschema@.entity_write_lock();
+CREATE TRIGGER entity_identity_capture
+AFTER INSERT ON entities
+REFERENCING NEW TABLE AS inserted_entities
+FOR EACH STATEMENT EXECUTE FUNCTION @extschema@.entity_identity_capture_statement();
