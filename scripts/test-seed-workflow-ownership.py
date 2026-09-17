@@ -19,11 +19,12 @@ def run_block(step_name: str) -> str:
 
 
 class SharedHostQueue(unittest.TestCase):
-    def test_all_mutation_owners_preserve_pending_operations(self):
+    def test_all_host_owners_preserve_pending_operations(self):
         expected_groups = {
             "laplace.yml": 2,
             "db-ops.yml": 1,
             "seed.yml": 1,
+            "benchmark-evidence.yml": 1,
         }
         for name, count in expected_groups.items():
             with self.subTest(workflow=name):
@@ -31,6 +32,14 @@ class SharedHostQueue(unittest.TestCase):
                 self.assertEqual(text.count("group: laplace-host-lifecycle"), count)
                 self.assertEqual(text.count("queue: max"), count)
                 self.assertEqual(text.count("cancel-in-progress: false"), count)
+
+    def test_benchmark_checkout_preserves_retained_workspace_state(self):
+        text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
+        self.assertIn("git diff --quiet", text)
+        self.assertIn("git diff --cached --quiet", text)
+        self.assertIn("git checkout --no-overwrite-ignore --detach", text)
+        self.assertNotIn("git checkout --force", text)
+        self.assertIn("AUTHORIZATION: basic $checkout_auth", text)
 
 
 class SeedHostOwnership(unittest.TestCase):
