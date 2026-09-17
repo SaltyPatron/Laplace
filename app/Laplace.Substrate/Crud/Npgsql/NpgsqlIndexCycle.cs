@@ -1,26 +1,44 @@
 using global::Npgsql;
+using Laplace.Engine.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Recovery for secondary indexes left absent by the retired index-cycle loader.
+/// Recovery for secondary indexes left absent by an interrupted bulk-load campaign.
 ///
-/// Normal ingest never drops an index. Partitioning, COPY batching, and bulk merge must remain
-/// correct and performant with the production read surface online. The journal and recovery verb
-/// remain because databases upgraded from the old loader can still contain a committed journal
-/// entry for an index that a cancelled run removed.
+/// Ordinary ingest keeps production indexes online. The explicit foundation campaign is different:
+/// it may journal and remove plain secondaries once for the whole multi-source load, while keeping
+/// primary/unique/exclusion indexes live. Child ingests defer recovery until that campaign ends.
+/// A killed campaign loses the defer environment, so the next ordinary ingest repairs the journal
+/// before accepting new writes.
 /// </summary>
 public static class NpgsqlIndexCycle
 {
-    /// <summary>
-    /// Restore any index an older interrupted ingest left journaled before accepting new writes.
-    /// Missing indexes are already an outage; this operation repairs that state and clears each
-    /// journal entry only after PostgreSQL reports the rebuilt index valid.
-    /// </summary>
-    public static Task RecoverAsync(NpgsqlDataSource ds, ILogger log, CancellationToken ct) =>
-        RebuildJournaledAsync(ds, log, ct);
+    private static bool RecoveryDeferred => EnvFlag.IsSet("LAPLACE_INDEX_RECOVERY_DEFER");
 
+    /// <summary>
+    /// Restore any journaled index before accepting ordinary writes. An explicit bulk campaign
+    /// temporarily defers this automatic repair so every source shares one drop/load/rebuild window.
+    /// </summary>
+    public static async Task RecoverAsync(NpgsqlDataSource ds, ILogger log, CancellationToken ct)
+    {
+        if (RecoveryDeferred)
+        {
+            log.LogInformation(
+                "INDEX_RECOVERY deferred by explicit foundation bulk campaign; "
+                + "journaled secondaries remain down until campaign completion");
+            return;
+        }
+
+        await RebuildJournaledAsync(ds, log, ct);
+    }
+
+    /// <summary>
+    /// Rebuild every journaled index and prove PostgreSQL reports it valid before clearing its row.
+    /// This method deliberately ignores the defer flag: it is the explicit campaign-end/crash-repair
+    /// operation the flag is waiting for.
+    /// </summary>
     public static async Task RebuildJournaledAsync(
         NpgsqlDataSource ds, ILogger log, CancellationToken ct)
     {
@@ -36,7 +54,7 @@ public static class NpgsqlIndexCycle
 
         foreach (var (name, def) in pending)
         {
-            log.LogWarning("INDEX_RECOVERY re-creating {Index} from retired-cycle journal", name);
+            log.LogWarning("INDEX_RECOVERY re-creating {Index} from bulk-load journal", name);
             await using var conn = await ds.OpenConnectionAsync(ct);
             await RebuildOneValidAsync(conn, name, def, ct);
             await using var del = conn.CreateCommand();

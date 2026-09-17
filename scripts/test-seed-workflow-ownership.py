@@ -162,7 +162,6 @@ class SeedHostOwnership(unittest.TestCase):
                 self.assertNotIn("scripts/measure-lane.sh", text)
 
 
-
 class FoundationCompletion(unittest.TestCase):
     """Execute the real ladder shell with explicit ingest/psql test boundaries."""
 
@@ -219,6 +218,11 @@ elif "laplace.ingest_run_journal" in query:
     print("test journal: ingest returned without fabricating a completion marker")
 else:
     raise SystemExit("unexpected SQL in fixture: " + query)
+''')
+        self.write_command(scripts / "foundation-bulk-indexes.sh", r'''
+import sys
+if len(sys.argv) != 2 or sys.argv[1] not in ("begin", "end"):
+    raise SystemExit("foundation bulk-index fixture expects begin|end")
 ''')
         self.write_command(scripts / "ingest-source.sh", r'''
 import json, os, sys
