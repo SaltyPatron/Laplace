@@ -27,6 +27,12 @@ typedef struct SemanticOriginEntry
     Bitmapset *origins;
 } SemanticOriginEntry;
 
+typedef struct ProgramBindingSnapshot
+{
+    hash128_t id;
+    const Bitmapset *origins;
+} ProgramBindingSnapshot;
+
 struct LaplaceCognitionProgram
 {
     MemoryContext owner;
@@ -43,6 +49,8 @@ struct LaplaceCognitionProgram
     Bitmapset *invocation_required;
     Bitmapset *invocation_satisfied;
     hash128_t *outputs;
+    bool *output_semantic_support;
+    Bitmapset **output_origins;
     int output_count;
     int output_capacity;
     int semantic_output_count;
@@ -63,37 +71,25 @@ cognition_domain(const char *name)
     return id;
 }
 
-static void
-fingerprint_id_sequence(const char *domain, const hash128_t *root,
-                        const hash128_t *ids, int count, hash128_t *out)
-{
-    hash128_t prefix = cognition_domain(domain);
-    hash128_t *parts;
-    int total;
-
-    if (!root || !out || count < 0)
-        elog(ERROR, "cognition program: invalid fingerprint request");
-    if (count > INT_MAX - 2 ||
-        (Size) (count + 2) > MaxAllocSize / sizeof(hash128_t))
-        elog(ERROR, "cognition program: fingerprint input exceeds allocation capacity");
-
-    total = count + 2;
-    parts = palloc(sizeof(hash128_t) * total);
-    parts[0] = prefix;
-    parts[1] = *root;
-    if (count > 0)
-        memcpy(parts + 2, ids, sizeof(hash128_t) * count);
-    hash128_blake3((const uint8_t *) parts,
-                   sizeof(hash128_t) * (size_t) total, out);
-    pfree(parts);
-}
-
-/* Fingerprint the source-attributed invocation and exact input occurrences,
- * including observation identities. Integers have a portable byte order. */
+/* Fingerprint the source-attributed invocation, the complete pre-ORIENT
+ * response field, and exact input occurrences. Integers use portable byte
+ * order so receipts are content identities rather than host-layout artifacts. */
 static void
 program_fingerprint_u32(StringInfo bytes, uint32 value)
 {
     unsigned char encoded[4] = {
+        (unsigned char) (value >> 24), (unsigned char) (value >> 16),
+        (unsigned char) (value >> 8), (unsigned char) value
+    };
+    appendBinaryStringInfo(bytes, (const char *) encoded, sizeof(encoded));
+}
+
+static void
+program_fingerprint_u64(StringInfo bytes, uint64 value)
+{
+    unsigned char encoded[8] = {
+        (unsigned char) (value >> 56), (unsigned char) (value >> 48),
+        (unsigned char) (value >> 40), (unsigned char) (value >> 32),
         (unsigned char) (value >> 24), (unsigned char) (value >> 16),
         (unsigned char) (value >> 8), (unsigned char) value
     };
@@ -106,7 +102,7 @@ program_fingerprint_origins(StringInfo bytes, const Bitmapset *origins)
     int member = -1;
     program_fingerprint_u32(bytes, bms_num_members(origins));
     while ((member = bms_next_member(origins, member)) >= 0)
-        program_fingerprint_u32(bytes, member);
+        program_fingerprint_u32(bytes, (uint32) member);
 }
 
 static int
@@ -128,51 +124,218 @@ program_operation_compare(const void *left, const void *right)
     return memcmp(a_shape, b_shape, sizeof(a_shape));
 }
 
+static int
+program_binding_compare(const void *left, const void *right)
+{
+    const ProgramBindingSnapshot *a = left, *b = right;
+    return memcmp(&a->id, &b->id, sizeof(hash128_t));
+}
+
+static int
+program_structural_compare(const void *left, const void *right)
+{
+    const LaplaceStructuralCandidate *a = left, *b = right;
+    int order = memcmp(&a->source, &b->source, sizeof(hash128_t));
+    if (order) return order;
+    order = memcmp(&a->id, &b->id, sizeof(hash128_t));
+    if (order) return order;
+    if (a->relation_mask != b->relation_mask)
+        return a->relation_mask < b->relation_mask ? -1 : 1;
+    if (a->occurrences != b->occurrences)
+        return a->occurrences < b->occurrences ? -1 : 1;
+    if (a->nearest_gap != b->nearest_gap)
+        return a->nearest_gap < b->nearest_gap ? -1 : 1;
+    return 0;
+}
+
+static int
+program_channel_compare(const void *left, const void *right)
+{
+    const LaplaceQueryChannel *a = left, *b = right;
+    int order;
+    if (a->ordinal != b->ordinal) return a->ordinal < b->ordinal ? -1 : 1;
+    order = memcmp(&a->anchor, &b->anchor, sizeof(hash128_t));
+    if (order) return order;
+    order = memcmp(&a->candidate, &b->candidate, sizeof(hash128_t));
+    if (order) return order;
+    order = memcmp(&a->relation, &b->relation, sizeof(hash128_t));
+    if (order) return order;
+    if (a->outbound != b->outbound) return a->outbound ? 1 : -1;
+#define PROGRAM_CHANNEL_CMP(field) \
+    do { if (a->field != b->field) return a->field < b->field ? -1 : 1; } while (0)
+    PROGRAM_CHANNEL_CMP(rating);
+    PROGRAM_CHANNEL_CMP(rd);
+    PROGRAM_CHANNEL_CMP(witnesses);
+    PROGRAM_CHANNEL_CMP(confirm_occurrences);
+    PROGRAM_CHANNEL_CMP(draw_occurrences);
+    PROGRAM_CHANNEL_CMP(refute_occurrences);
+    PROGRAM_CHANNEL_CMP(observation_occurrences);
+    PROGRAM_CHANNEL_CMP(observation_rows);
+    PROGRAM_CHANNEL_CMP(distinct_sources);
+    PROGRAM_CHANNEL_CMP(distinct_contexts);
+#undef PROGRAM_CHANNEL_CMP
+    return 0;
+}
+
 static void
-program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values)
+program_fingerprint_bindings(StringInfo bytes, const LaplacePromptIntent *intent)
+{
+    long count = intent && intent->bindings ? hash_get_num_entries(intent->bindings) : 0;
+    if (count < 0 || count > INT_MAX ||
+        (Size) count > MaxAllocSize / sizeof(ProgramBindingSnapshot))
+        elog(ERROR, "cognition program: binding response set exceeds allocation capacity");
+    program_fingerprint_u32(bytes, (uint32) count);
+    if (count == 0) return;
+
+    ProgramBindingSnapshot *items = palloc(sizeof(*items) * (Size) count);
+    HASH_SEQ_STATUS sequence;
+    LaplacePromptIntentBinding *binding;
+    long used = 0;
+    hash_seq_init(&sequence, intent->bindings);
+    while ((binding = hash_seq_search(&sequence)) != NULL)
+    {
+        items[used].id = binding->id;
+        items[used].origins = binding->origins;
+        ++used;
+    }
+    if (used != count)
+        elog(ERROR, "cognition program: binding response set changed during fingerprint");
+    qsort(items, (size_t) count, sizeof(*items), program_binding_compare);
+    for (long i = 0; i < count; ++i)
+    {
+        appendBinaryStringInfo(bytes, (const char *) &items[i].id, sizeof(hash128_t));
+        program_fingerprint_origins(bytes, items[i].origins);
+    }
+    pfree(items);
+}
+
+static void
+program_fingerprint_structural(StringInfo bytes, const LaplacePromptIntent *intent)
+{
+    int count = intent ? intent->structural_count : 0;
+    if (count < 0 || (count > 0 && !intent->structural) ||
+        (Size) count > MaxAllocSize / sizeof(LaplaceStructuralCandidate))
+        elog(ERROR, "cognition program: structural response set is invalid");
+    program_fingerprint_u32(bytes, (uint32) count);
+    if (count == 0) return;
+
+    LaplaceStructuralCandidate *items = palloc(sizeof(*items) * (Size) count);
+    memcpy(items, intent->structural, sizeof(*items) * (Size) count);
+    qsort(items, (size_t) count, sizeof(*items), program_structural_compare);
+    for (int i = 0; i < count; ++i)
+    {
+        appendBinaryStringInfo(bytes, (const char *) &items[i].source, sizeof(hash128_t));
+        appendBinaryStringInfo(bytes, (const char *) &items[i].id, sizeof(hash128_t));
+        program_fingerprint_u32(bytes, items[i].relation_mask);
+        program_fingerprint_u64(bytes, (uint64) items[i].occurrences);
+        program_fingerprint_u64(bytes, items[i].nearest_gap);
+    }
+    pfree(items);
+}
+
+static void
+program_fingerprint_channels(StringInfo bytes,
+                             const LaplaceQueryChannel *channels, int count)
+{
+    if (count < 0 || (count > 0 && !channels) ||
+        (Size) count > MaxAllocSize / sizeof(LaplaceQueryChannel))
+        elog(ERROR, "cognition program: semantic response set is invalid");
+    program_fingerprint_u32(bytes, (uint32) count);
+    if (count == 0) return;
+
+    LaplaceQueryChannel *items = palloc(sizeof(*items) * (Size) count);
+    memcpy(items, channels, sizeof(*items) * (Size) count);
+    qsort(items, (size_t) count, sizeof(*items), program_channel_compare);
+    for (int i = 0; i < count; ++i)
+    {
+        const LaplaceQueryChannel *channel = &items[i];
+        program_fingerprint_u32(bytes, (uint32) channel->ordinal);
+        appendBinaryStringInfo(bytes, (const char *) &channel->anchor, sizeof(hash128_t));
+        appendBinaryStringInfo(bytes, (const char *) &channel->candidate, sizeof(hash128_t));
+        appendBinaryStringInfo(bytes, (const char *) &channel->relation, sizeof(hash128_t));
+        program_fingerprint_u32(bytes, channel->outbound ? 1u : 0u);
+        program_fingerprint_u64(bytes, (uint64) channel->rating);
+        program_fingerprint_u64(bytes, (uint64) channel->rd);
+        program_fingerprint_u64(bytes, (uint64) channel->witnesses);
+        program_fingerprint_u64(bytes, (uint64) channel->confirm_occurrences);
+        program_fingerprint_u64(bytes, (uint64) channel->draw_occurrences);
+        program_fingerprint_u64(bytes, (uint64) channel->refute_occurrences);
+        program_fingerprint_u64(bytes, (uint64) channel->observation_occurrences);
+        program_fingerprint_u32(bytes, (uint32) channel->observation_rows);
+        program_fingerprint_u32(bytes, (uint32) channel->distinct_sources);
+        program_fingerprint_u32(bytes, (uint32) channel->distinct_contexts);
+    }
+    pfree(items);
+}
+
+static void
+program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values,
+                    const LaplacePromptIntent *intent,
+                    const LaplaceQueryChannel *initial_channels,
+                    int initial_channel_count)
 {
     StringInfoData bytes;
-    hash128_t domain = cognition_domain("laplace:cognition-program:v4");
+    hash128_t domain = cognition_domain("laplace:cognition-program:v5");
     int member = -1;
     initStringInfo(&bytes);
     appendBinaryStringInfo(&bytes, (const char *) &domain, sizeof(domain));
     appendBinaryStringInfo(&bytes, (const char *) &program->root, sizeof(program->root));
-    program_fingerprint_u32(&bytes, program->explicit_invocation ? 1 : 0);
+    program_fingerprint_u32(&bytes, program->explicit_invocation ? 1u : 0u);
     if (program->explicit_invocation)
         appendBinaryStringInfo(&bytes, (const char *) &program->active_context, sizeof(hash128_t));
-    program_fingerprint_u32(&bytes, bms_num_members(program->required));
+    program_fingerprint_u32(&bytes, (uint32) bms_num_members(program->required));
     while ((member = bms_next_member(program->required, member)) >= 0)
     {
         hash128_t id = datum_to_hash128(context_values[member]);
-        program_fingerprint_u32(&bytes, member);
+        program_fingerprint_u32(&bytes, (uint32) member);
         appendBinaryStringInfo(&bytes, (const char *) &id, sizeof(id));
     }
-    if (program->operation_relation_count > 1)
-        qsort(program->operations, program->operation_relation_count,
-              sizeof(LaplacePromptRelationRead), program_operation_compare);
-    program_fingerprint_u32(&bytes, program->operation_relation_count);
-    for (int i = 0; i < program->operation_relation_count; ++i)
+
+    /* COUPLE is part of the executable program state, not disposable setup.
+     * Bind every exact prompt-relative identity route, every native physicality
+     * crossing and every retained typed semantic response into the program id
+     * before ORIENT/ROUTE output can be claimed. Physicality remains structural
+     * data here; it is never serialized as a semantic attestation. */
+    program_fingerprint_bindings(&bytes, intent);
+    program_fingerprint_structural(&bytes, intent);
+    program_fingerprint_channels(&bytes, initial_channels, initial_channel_count);
+
+    program_fingerprint_u32(&bytes, (uint32) program->operation_relation_count);
+    if (program->operation_relation_count > 0)
     {
-        const LaplacePromptRelationRead *operation = &program->operations[i];
-        appendBinaryStringInfo(&bytes, (const char *) &operation->result_relation,
-                               sizeof(operation->result_relation));
-        appendBinaryStringInfo(&bytes, (const char *) &operation->source, sizeof(hash128_t));
-        appendBinaryStringInfo(&bytes, (const char *) &operation->context, sizeof(hash128_t));
-        appendBinaryStringInfo(&bytes, (const char *) &operation->call_witness, sizeof(hash128_t));
-        const hash128_t shape_proof[] = {
-            operation->shape_id, operation->exemplar_parse, operation->current_parse,
-            operation->applicability_witness, operation->parse_witness,
-            operation->exemplar_parse_witness};
-        appendBinaryStringInfo(&bytes, (const char *) shape_proof, sizeof(shape_proof));
-        program_fingerprint_u32(&bytes, operation->input_count);
-        for (int j = 0; j < operation->input_count; ++j)
+        if ((Size) program->operation_relation_count >
+            MaxAllocSize / sizeof(LaplacePromptRelationRead))
+            elog(ERROR, "cognition program: operation response set exceeds allocation capacity");
+        LaplacePromptRelationRead *ordered = palloc(
+            sizeof(*ordered) * (Size) program->operation_relation_count);
+        memcpy(ordered, program->operations,
+               sizeof(*ordered) * (Size) program->operation_relation_count);
+        qsort(ordered, (size_t) program->operation_relation_count,
+              sizeof(*ordered), program_operation_compare);
+        for (int i = 0; i < program->operation_relation_count; ++i)
         {
-            const LaplacePromptOperand *input = &operation->inputs[j];
-            appendBinaryStringInfo(&bytes, (const char *) &input->id, sizeof(hash128_t));
-            appendBinaryStringInfo(&bytes, (const char *) &input->witness, sizeof(hash128_t));
-            program_fingerprint_origins(&bytes, input->origins);
+            const LaplacePromptRelationRead *operation = &ordered[i];
+            appendBinaryStringInfo(&bytes, (const char *) &operation->result_relation,
+                                   sizeof(operation->result_relation));
+            appendBinaryStringInfo(&bytes, (const char *) &operation->source, sizeof(hash128_t));
+            appendBinaryStringInfo(&bytes, (const char *) &operation->context, sizeof(hash128_t));
+            appendBinaryStringInfo(&bytes, (const char *) &operation->call_witness, sizeof(hash128_t));
+            const hash128_t shape_proof[] = {
+                operation->shape_id, operation->exemplar_parse, operation->current_parse,
+                operation->applicability_witness, operation->parse_witness,
+                operation->exemplar_parse_witness};
+            appendBinaryStringInfo(&bytes, (const char *) shape_proof, sizeof(shape_proof));
+            program_fingerprint_u32(&bytes, (uint32) operation->input_count);
+            for (int j = 0; j < operation->input_count; ++j)
+            {
+                const LaplacePromptOperand *input = &operation->inputs[j];
+                appendBinaryStringInfo(&bytes, (const char *) &input->id, sizeof(hash128_t));
+                appendBinaryStringInfo(&bytes, (const char *) &input->witness, sizeof(hash128_t));
+                program_fingerprint_origins(&bytes, input->origins);
+            }
+            program_fingerprint_origins(&bytes, operation->operand_origins);
         }
-        program_fingerprint_origins(&bytes, operation->operand_origins);
+        pfree(ordered);
     }
     hash128_blake3((const uint8_t *) bytes.data, bytes.len, &program->program_id);
     pfree(bytes.data);
@@ -187,9 +350,22 @@ program_output_fingerprint(LaplaceCognitionProgram *program)
         program->output_present = false;
         return;
     }
-    fingerprint_id_sequence("laplace:cognition-output:v1", &program->root,
-                            program->outputs, program->output_count,
-                            &program->output_fingerprint);
+
+    StringInfoData bytes;
+    hash128_t domain = cognition_domain("laplace:cognition-output:v2");
+    initStringInfo(&bytes);
+    appendBinaryStringInfo(&bytes, (const char *) &domain, sizeof(domain));
+    appendBinaryStringInfo(&bytes, (const char *) &program->root, sizeof(program->root));
+    program_fingerprint_u32(&bytes, (uint32) program->output_count);
+    for (int i = 0; i < program->output_count; ++i)
+    {
+        appendBinaryStringInfo(&bytes, (const char *) &program->outputs[i], sizeof(hash128_t));
+        program_fingerprint_u32(&bytes, program->output_semantic_support[i] ? 1u : 0u);
+        program_fingerprint_origins(&bytes, program->output_origins[i]);
+    }
+    hash128_blake3((const uint8_t *) bytes.data, bytes.len,
+                   &program->output_fingerprint);
+    pfree(bytes.data);
     program->output_present = true;
 }
 
@@ -232,11 +408,26 @@ program_reserve_output(LaplaceCognitionProgram *program)
             elog(ERROR, "cognition program: output count exceeds int capacity");
         capacity = (int) grown;
     }
-    if ((Size) capacity > MaxAllocSize / sizeof(hash128_t))
+    if ((Size) capacity > MaxAllocSize / sizeof(hash128_t) ||
+        (Size) capacity > MaxAllocSize / sizeof(bool) ||
+        (Size) capacity > MaxAllocSize / sizeof(Bitmapset *))
         elog(ERROR, "cognition program: output set exceeds allocation capacity");
-    program->outputs = program->outputs
-        ? repalloc(program->outputs, sizeof(hash128_t) * capacity)
-        : palloc(sizeof(hash128_t) * capacity);
+
+    if (program->output_capacity == 0)
+    {
+        program->outputs = palloc(sizeof(hash128_t) * (Size) capacity);
+        program->output_semantic_support = palloc(sizeof(bool) * (Size) capacity);
+        program->output_origins = palloc(sizeof(Bitmapset *) * (Size) capacity);
+    }
+    else
+    {
+        program->outputs = repalloc(program->outputs,
+                                    sizeof(hash128_t) * (Size) capacity);
+        program->output_semantic_support = repalloc(program->output_semantic_support,
+                                                     sizeof(bool) * (Size) capacity);
+        program->output_origins = repalloc(program->output_origins,
+                                           sizeof(Bitmapset *) * (Size) capacity);
+    }
     program->output_capacity = capacity;
 }
 
@@ -401,7 +592,6 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         owner, prompt_origin_count + initial_channel_count + 1);
     program->invocation_results = semantic_origin_index(owner, initial_channel_count + 1);
 
-
     if (compiled_required && operation_count > 0)
     {
         HASHCTL input_ctl = {0};
@@ -473,9 +663,10 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
         root->origins = bms_add_members(root->origins, program->required);
     }
 
-    /* Retain the witnessed naming/sense routes by which prompt operands reached
-     * their active identities. This includes reverse naming access, without
-     * granting reverse traversal to an asymmetric result operation. */
+    /* Retain every prompt-relative route established by COUPLE. Structural
+     * crossings have already populated these bindings with exact source
+     * occurrence ancestry; importing the binding does not turn that route into
+     * testimony or let it close a semantic obligation by itself. */
     if (intent && intent->bindings)
     {
         HASH_SEQ_STATUS sequence;
@@ -500,7 +691,8 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     for (int i = 0; i < initial_channel_count; ++i)
         record_semantic_channel(program, &initial_channels[i]);
 
-    program_fingerprint(program, context_values);
+    program_fingerprint(program, context_values, intent,
+                        initial_channels, initial_channel_count);
     MemoryContextSwitchTo(previous);
 
     bms_free(compiled_required);
@@ -553,12 +745,16 @@ laplace_cognition_program_note_emit(LaplaceCognitionProgram *program,
     MemoryContext previous;
     Bitmapset *semantic = NULL;
     Bitmapset *covered = NULL;
+    int output_index;
 
     if (!program || !selected)
         return;
     previous = MemoryContextSwitchTo(program->owner);
     program_reserve_output(program);
-    program->outputs[program->output_count++] = *selected;
+    output_index = program->output_count++;
+    program->outputs[output_index] = *selected;
+    program->output_semantic_support[output_index] = semantic_support;
+    program->output_origins[output_index] = bms_copy(origins);
     if (semantic_support)
     {
         if (program->semantic_output_count == INT_MAX)
