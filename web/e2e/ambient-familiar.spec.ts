@@ -3,12 +3,24 @@ import { expect, test } from '@playwright/test';
 test.describe('ambient familiar', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test('responds to explicit visit and swim signals without capturing input', async ({ page }) => {
+  test('responds to explicit visit and swim signals without capturing or covering the workspace', async ({ page }) => {
     await page.goto('/');
 
     const familiar = page.getByTestId('ambient-familiar');
+    const workspace = page.locator('#main-content');
     await expect(familiar).toBeVisible();
     await expect(familiar).toHaveCSS('pointer-events', 'none');
+
+    const stacking = await page.evaluate(() => {
+      const familiarNode = document.querySelector<HTMLElement>('[data-testid="ambient-familiar"]');
+      const workspaceNode = document.querySelector<HTMLElement>('#main-content');
+      if (!familiarNode || !workspaceNode) throw new Error('workspace or familiar missing');
+      return {
+        familiar: Number.parseInt(getComputedStyle(familiarNode).zIndex || '0', 10),
+        workspace: Number.parseInt(getComputedStyle(workspaceNode).zIndex || '0', 10),
+      };
+    });
+    expect(stacking.workspace).toBeGreaterThan(stacking.familiar);
 
     await page.evaluate(() => {
       window.dispatchEvent(new CustomEvent('laplace:familiar', { detail: 'visit' }));
