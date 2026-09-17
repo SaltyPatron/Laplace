@@ -7,9 +7,10 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// <summary>
 /// Human-facing labels for bounded visualization/result sets.
 ///
-/// Identity and display are deliberately separate: the caller keeps the canonical hash id,
-/// while this read chooses a Unicode surface that a person can inspect. It never uses a
-/// content hash as a label.
+/// Identity and display are deliberately separate: the caller keeps the complete canonical
+/// hash id, while this read chooses a Unicode/name/metadata surface a person can inspect.
+/// If friendly realization is exhausted, the shared projection includes a short canonical id
+/// in the fallback label rather than replacing a known entity with generic unresolved text.
 ///
 /// The projection law lives in the installed extension (`realize.display_label_batch`) so
 /// every client can share it and pg_regress can prove it. High-tier rendering is
