@@ -102,7 +102,10 @@ log "deposit safetensors (pass 1)"
 log "deposit safetensors (pass 2 — must short-circuit via the re-ingest guard)"
 pass2_out="$(cd "$ROOT/app" && "${CLI[@]}" ingest safetensors "$MODEL_DIR" 2>&1)"
 echo "$pass2_out"
-echo "$pass2_out" | grep -qi "already ingested" \
+# IngestSafetensorSnapshotAsync emits this diagnostic only after finding the
+# selected model source's retained completion evidence. Require that exact
+# no-op branch; unrelated "already" output must not qualify a repeated ingest.
+echo "$pass2_out" | grep -q '^Safetensor snapshot already deposited — source ' \
   || die "pass 2 did not short-circuit — idempotency broken"
 
 log "evidence/consensus gates"
