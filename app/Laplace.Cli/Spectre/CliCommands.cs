@@ -228,7 +228,7 @@ internal sealed class SourceBootstrapCommand : ForwardCommand<TailSettings>
     }
 }
 
-[Description("Run a command holding the measurement lane exclusive, so no ingest writes while it is timed. Usage: measure-lane <cmd> [args…]")]
+[Description("Run a command holding the measurement lane exclusive, so no ingest writes while it is timed. Usage: measure-lane <cmd> (args…)")]
 internal sealed class MeasureLaneCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
