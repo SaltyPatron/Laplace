@@ -1,16 +1,9 @@
 name: Laplace — competitive product proof
 
+# Expensive end-to-end product evidence is explicit operator work. It must never
+# duplicate the ordinary mainline build/test lane on every relevant push.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "app/Laplace.Endpoints.OpenAICompat/Code*.cs"
-      - "app/Laplace.Endpoints.OpenAICompat/Contracts/CodeContracts.cs"
-      - "app/Laplace.Endpoints.OpenAICompat/ModelCatalog.cs"
-      - "app/Laplace.Substrate/Crud/Npgsql/NpgsqlSubstrateReads.CodePlayer.cs"
-      - "scripts/model-synthesize-ci.sh"
-      - "scripts/test-parallel.sh"
-      - ".github/workflows/competitive-proof.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,9 +23,6 @@ jobs:
     name: Ingest, generate, witness, fold, export, external-runtime proof
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
-    concurrency:
-      group: laplace-competitive-proof
-      cancel-in-progress: true
     env:
       LICHESS_API: ${{ secrets.LICHESS_API }}
       LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
@@ -41,7 +31,7 @@ jobs:
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
     steps:
-      - name: Prove the exact mainline product under one host reservation
+      - name: Prove the exact selected product under one host reservation
         env:
           TARGET_SHA: ${{ github.sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
