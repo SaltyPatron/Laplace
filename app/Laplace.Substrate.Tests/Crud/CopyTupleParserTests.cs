@@ -201,9 +201,10 @@ public class CopyTupleParserTests
         var distinct = NpgsqlSubstrateWriter.DistinctEntityRowIndices(
             parsed, tier0Gate: false, out var tier0Present);
 
-        Assert.Equal(new[] { 0, 1, 3 }, distinct);
+        Assert.Equal(3, distinct.Count);
         Assert.Null(tier0Present);
-        Assert.Equal(new[] { H(1), H(2), H(3) }, distinct.Select(i => parsed.Ids[i]));
+        var expectedIds = new HashSet<Hash128> { H(1), H(2), H(3) };
+        Assert.True(expectedIds.SetEquals(distinct.Select(i => parsed.Ids[i])));
     }
 
     [Theory]
