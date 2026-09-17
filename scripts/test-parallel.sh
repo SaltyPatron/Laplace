@@ -154,7 +154,19 @@ run_live_api() {
   grep -q '"object":"op.result"' <<<"$inventory"
   completion=$(curl -fsS -X POST "$base/v1/chat/completions" -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
     --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')
-  grep -q '"object":"chat.completion"' <<<"$completion"
+  python3 -c '
+import json, sys
+response = json.load(sys.stdin)
+if response.get("object") != "chat.completion":
+    raise SystemExit("LIVE_CHAT_INVALID_OBJECT: expected chat.completion")
+choices = response.get("choices")
+if not isinstance(choices, list) or not choices:
+    raise SystemExit("LIVE_CHAT_NO_CHOICES: chat completion returned no choices")
+message = choices[0].get("message") if isinstance(choices[0], dict) else None
+content = message.get("content") if isinstance(message, dict) else None
+if not isinstance(content, str) or not content.strip():
+    raise SystemExit("LIVE_CHAT_EMPTY: chat completion returned no realized text")
+' <<<"$completion"
 }
 
 run_managed_live() {
