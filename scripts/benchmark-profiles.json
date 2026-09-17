@@ -29,6 +29,15 @@
       "receipt_schema": "laplace.benchmark.core-scale-streams/v1"
     },
     {
+      "id": "core-dag-scale",
+      "kind": "core-dag-scale",
+      "description": "Fixed-work internal scaling of one exact semantic content DAG across native dependency frontiers; every worker point must match the complete scalar tree fingerprint before speedup is accepted.",
+      "execution_boundary": "built-source",
+      "mutability": "none",
+      "resource_shape": "one exact semantic object per repeat; dependency-frontier native workers under explicit physical/logical CPU affinity with managed-host headroom",
+      "receipt_schema": "laplace.benchmark.core-dag-scale/v1"
+    },
+    {
       "id": "moby-roundtrip",
       "kind": "moby-roundtrip",
       "description": "Bit-perfect Moby Dick engine roundtrip with independent cmp/SHA-256 proof.",
@@ -100,9 +109,17 @@
     },
     {
       "id": "scale",
-      "description": "Aggregate independent-stream host scaling; serviceable capacity by default in the managed workflow, saturation only by explicit opt-in; fixed-work single-DAG scaling remains #1451.",
+      "description": "Fixed-work single-DAG frontier scaling plus aggregate independent-stream host scaling; managed-host workflow preserves service headroom by default and saturation remains explicit.",
       "profiles": [
+        "core-dag-scale",
         "core-scale-streams"
+      ]
+    },
+    {
+      "id": "dag",
+      "description": "One exact semantic content DAG across explicit native worker grants with complete scalar-output parity required before timing is accepted.",
+      "profiles": [
+        "core-dag-scale"
       ]
     },
     {
@@ -142,9 +159,10 @@
     },
     {
       "id": "all",
-      "description": "All source/core profiles that do not require an already-installed matching runtime: scalar floor, aggregate stream scaling, file-grain diagnostic, and Moby roundtrip. The database-backed query suite remains explicit because arbitrary target refs are not silently installed by this workflow.",
+      "description": "All source/core profiles that do not require an already-installed matching runtime: scalar floor, fixed-work single-DAG scaling, aggregate stream scaling, file-grain diagnostic, and Moby roundtrip. The database-backed query suite remains explicit because arbitrary target refs are not silently installed by this workflow.",
       "profiles": [
         "core-single",
+        "core-dag-scale",
         "core-scale-streams",
         "core-scale",
         "moby-roundtrip"
