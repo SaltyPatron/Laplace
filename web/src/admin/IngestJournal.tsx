@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Modal, Muted, Panel, ReadStatus, Toggle, useReadResource } from '@ui';
 import { ResultWorkspace, type ResultColumn } from '../ui/composites/ResultWorkspace/ResultWorkspace';
@@ -26,11 +26,11 @@ function RunProgress({ run }: { run: IngestRun }) {
     <span className={styles.progressPct}>Files {progressText(run.files_done, run.files_total)}</span>
   </div>;
 }
-export function IngestJournal() {
+export function IngestJournal({ refreshSignal = 0 }: { refreshSignal?: number }) {
   const { tenant, authUser } = useAppStore();
-  return <RunWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} />;
+  return <RunWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} refreshSignal={refreshSignal} />;
 }
-function RunWorkspace({ tenant }: { tenant: string }) {
+function RunWorkspace({ tenant, refreshSignal }: { tenant: string; refreshSignal: number }) {
   const [params, setParams] = useSearchParams();
   const [live, setLive] = useState(true);
   const [limit, setLimit] = useState(25);
@@ -47,6 +47,9 @@ function RunWorkspace({ tenant }: { tenant: string }) {
       return captureRows(result.rows, `Up to ${limit} requested run receipts${result.truncated_at != null ? `; transport truncated at ${result.truncated_at}` : ''}. Older runs may exist.`, { operation: 'ops.ingest_runs', requested_limit: limit });
     },
   });
+  useEffect(() => {
+    if (refreshSignal > 0) void runsRead.refresh();
+  }, [refreshSignal]);
   function setParam(name: string, value: string | null, replace = false) {
     const next = new URLSearchParams(params);
     if (value) next.set(name, value); else next.delete(name);
