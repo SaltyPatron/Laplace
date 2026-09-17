@@ -26,7 +26,7 @@ import xml.etree.ElementTree as ET
 MANAGED_CLASSES = {
     "EntityInterpretationTransactionTests": 8,
     "EntityInterpretationDirectWriteTests": 3,
-    "EntityInterpretationNativeReadTests": 2,
+    "EntityInterpretationNativeReadTests": 3,
     "WorkingSetAtomicReplayTests": None,
     "PhysicalityObservationWriterTests": None,
     "PhysicalityViewReceiptTests": None,

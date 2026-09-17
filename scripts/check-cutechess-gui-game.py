@@ -116,10 +116,14 @@ class Accessibility:
                 "named GUI control is disabled")
         action = item.get_action_iface()
         require(action is not None, "named GUI control has no accessible action")
-        matches = [i for i in range(action.get_n_actions())
-                   if action.get_action_name(i) in names]
-        require(len(matches) == 1 and action.do_action(matches[0]),
-                "named GUI action was not acknowledged")
+        available = [action.get_action_name(i) for i in range(action.get_n_actions())]
+        wanted = {name.casefold() for name in names}
+        matches = [i for i, name in enumerate(available) if name.casefold() in wanted]
+        require(len(matches) == 1,
+                "named GUI action is absent or ambiguous: expected " + repr(names)
+                + "; available " + repr(available))
+        require(action.do_action(matches[0]),
+                "named GUI action was not acknowledged: " + available[matches[0]])
 
     def checked(self, item):
         item.clear_cache()
@@ -379,7 +383,8 @@ def worker(args):
         pgn = output / "game.pgn"
         config = Path(os.environ["XDG_CONFIG_HOME"]) / "cutechess"
         config.mkdir(mode=0o700)
-        ini = config / "cutechess.conf"
+        # CuteChess explicitly selects QSettings::IniFormat on every platform.
+        ini = config / "cutechess.ini"
         ini.write_text(settings(pgn), encoding="utf-8")
         result["initial_settings_sha256"] = digest(ini)
         gui_binary = Path(desktop["binary"]).resolve(strict=True)

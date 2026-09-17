@@ -671,10 +671,8 @@ pg_laplace_word_case_variants(PG_FUNCTION_ARGS)
  * resolve the same grapheme mappings, render the same atoms, mint ids, and probe
  * existence. This set operator shares every stage across the complete array.
  */
-PG_FUNCTION_INFO_V1(pg_laplace_word_case_variants_batch);
-
-Datum
-pg_laplace_word_case_variants_batch(PG_FUNCTION_ARGS)
+static Datum
+word_case_batch(FunctionCallInfo fcinfo, bool classes_only)
 {
 	ReturnSetInfo   *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	ArrayType       *input;
@@ -995,6 +993,20 @@ pg_laplace_word_case_variants_batch(PG_FUNCTION_ARGS)
 
 			assemble_case_surfaces(words[w].graphemes, words[w].n_graphemes,
 								cm, rmap, surf);
+			if (classes_only)
+			{
+				/* The historical class is the witnessed lower surface, not a
+				 * locale category or a minted/existing variant identity. */
+				Datum values[2] = {
+					make_bytea16(words[w].key),
+					surf[CM_LOWER] == NULL ? (Datum) 0 :
+						CStringGetTextDatum(surf[CM_LOWER])
+				};
+				bool nulls[2] = { false, surf[CM_LOWER] == NULL };
+
+				tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+				continue;
+			}
 			for (int s = 0; s < CM_SLOTS; s++)
 				if (surf[s] != NULL &&
 					(original == NULL || strcmp(surf[s], original) != 0))
@@ -1071,6 +1083,12 @@ pg_laplace_word_case_variants_batch(PG_FUNCTION_ARGS)
 		}
 	}
 
+	if (classes_only)
+	{
+		laplace_spi_finish(need_finish);
+		return (Datum) 0;
+	}
+
 	/* First input occurrence, then the scalar function's bytewise variant order. */
 	for (int w = 0; w < n_words; w++)
 	{
@@ -1089,6 +1107,24 @@ pg_laplace_word_case_variants_batch(PG_FUNCTION_ARGS)
 
 	laplace_spi_finish(need_finish);
 	return (Datum) 0;
+}
+
+PG_FUNCTION_INFO_V1(pg_laplace_word_case_variants_batch);
+
+Datum
+pg_laplace_word_case_variants_batch(PG_FUNCTION_ARGS)
+{
+	return word_case_batch(fcinfo, false);
+}
+
+/* Share the exact lower-surface construction with variants, without minting
+ * identities or requiring that the lower-case word already exists. */
+PG_FUNCTION_INFO_V1(pg_laplace_word_case_classes_batch);
+
+Datum
+pg_laplace_word_case_classes_batch(PG_FUNCTION_ARGS)
+{
+	return word_case_batch(fcinfo, true);
 }
 
 /*

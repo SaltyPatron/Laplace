@@ -152,7 +152,7 @@ class GuiGameControls(unittest.TestCase):
             def __init__(self, name, role, children=(), pid=41, enabled=True):
                 self.name, self.role, self.children, self.pid = name, role, children, pid
                 self.enabled = enabled
-            def clear_cache_single(self): pass
+            def clear_cache(self): pass
             def get_name(self): return self.name
             def get_role(self): return self.role
             def get_child_count(self): return len(self.children)
@@ -175,6 +175,43 @@ class GuiGameControls(unittest.TestCase):
         first.children = [first]
         with self.assertRaises(ValueError):
             list(owner.walk(first))
+
+
+    def test_qt_action_names_keep_unique_acknowledged_target(self):
+        class Actions:
+            def __init__(self, names, ack=True):
+                self.names, self.ack, self.invoked = names, ack, []
+            def get_n_actions(self): return len(self.names)
+            def get_action_name(self, index): return self.names[index]
+            def do_action(self, index):
+                self.invoked.append(index)
+                return self.ack
+        class Node:
+            def __init__(self, actions, enabled=True):
+                self.actions, self.enabled = actions, enabled
+            def get_state_set(self): return self
+            def contains(self, state): return self.enabled
+            def get_action_iface(self): return self.actions
+        api = types.SimpleNamespace(StateType=types.SimpleNamespace(ENABLED=1))
+        owner = OWNER.Accessibility(api, 41, types.SimpleNamespace(remaining=lambda: 1))
+        for available, wanted in ((["Toggle", "SetFocus"], ("press", "click", "toggle")),
+                                  (["Press", "SetFocus"], ("press", "click", "toggle")),
+                                  (["ShowMenu", "SetFocus"], ("showMenu",)),
+                                  (["toggle", "setFocus"], ("press", "click", "toggle"))):
+            with self.subTest(available=available):
+                action = Actions(available)
+                owner.act(Node(action), wanted)
+                self.assertEqual([0], action.invoked)
+        for names, ack, enabled, fragment in (
+                (["Toggle", "toggle"], True, True, "ambiguous"),
+                (["SetFocus"], True, True, "available"),
+                (["Toggle"], False, True, "acknowledged: Toggle"),
+                (["Toggle"], True, False, "disabled")):
+            with self.subTest(names=names, ack=ack, enabled=enabled):
+                action = Actions(names, ack)
+                with self.assertRaisesRegex(ValueError, fragment):
+                    owner.act(Node(action, enabled))
+                self.assertEqual([0] if not ack and enabled else [], action.invoked)
 
     def package_tools(self):
         tools = self.root / "bin"
@@ -212,7 +249,7 @@ class GuiGameControls(unittest.TestCase):
         first = subprocess.run(["bash", "-euc", script], env=environment, capture_output=True,
                                text=True, timeout=10)
         self.assertEqual(0, first.returncode, first.stderr)
-        expected = ["dbus-daemon", "at-spi2-core", "gir1.2-atspi-2.0", "python3-gi"]
+        expected = ["dbus", "at-spi2-core", "gir1.2-atspi-2.0", "python3-gi"]
         self.assertEqual(expected, json.loads(state.read_text()))
         argv = calls.read_bytes()
         second = subprocess.run(["bash", "-euc", script], env=environment, capture_output=True,

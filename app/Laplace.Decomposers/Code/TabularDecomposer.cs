@@ -21,39 +21,42 @@ public sealed class TabularDecomposer
 
     private readonly string _targetColumn;
     private readonly string _positiveValue;
-    private readonly ConcurrentStringSet _canonicalNames = new(StringComparer.Ordinal);
+    private Hash128 _outcomeId;
 
     public TabularDecomposer(string targetColumn = "Exited", string positiveValue = "1", int numBins = 10)
     {
         _targetColumn = targetColumn;
         _positiveValue = positiveValue;
         _ = numBins;
-        OutcomeId = Hash128.OfCanonical($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
     }
 
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "tabular";
 
-    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
+    // Dynamic table values are content, not canonical-name registry payloads.
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 
-    private Hash128 OutcomeId { get; }
-    private static Hash128 ColumnId(string col) => Hash128.OfCanonical($"tabular/column/{col}/v1");
+    private Hash128 OutcomeId => _outcomeId;
     private static readonly Hash128 PredictsTypeId = RelationTypeRegistry.RelationTypeId("PREDICTS");
 
     protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
         var seed = new SubstrateChangeBuilder(Source, "bootstrap/tabular-vocab", null,
-            entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 2)
+            entityCapacity: 8, physicalityCapacity: 8, attestationCapacity: 2)
             .DeclareSourcePrior(SourceTrust);
-        seed.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
-        _canonicalNames.Add($"tabular/outcome/{_targetColumn}={_positiveValue}/v1");
-        if (ContentEmitter.Emit(seed, _targetColumn, Source) is { } targetNameId)
-            seed.AddAttestation(NativeAttestation.Categorical(
-                OutcomeId, "IS_INSTANCE_OF", targetNameId, Source, TC.StructuredCorpus));
-        if (ContentEmitter.Emit(seed, _positiveValue, Source) is { } posValId)
-            seed.AddAttestation(NativeAttestation.Categorical(
-                OutcomeId, "IS_INSTANCE_OF", posValId, Source, TC.StructuredCorpus));
+
+        OrderedCompositionComponent target = RequireComponent(seed, _targetColumn);
+        OrderedCompositionComponent positive = RequireComponent(seed, _positiveValue);
+        Span<OrderedCompositionResult> outcome = stackalloc OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(seed.ContentStage,
+            [new OrderedCompositionRequest([target, positive], OutcomeTypeId, Source, 0)], outcome);
+        _outcomeId = outcome[0].Id;
+
+        seed.AddAttestation(NativeAttestation.Categorical(
+            OutcomeId, "IS_INSTANCE_OF", target.Id, Source, TC.StructuredCorpus));
+        seed.AddAttestation(NativeAttestation.Categorical(
+            OutcomeId, "IS_INSTANCE_OF", positive.Id, Source, TC.StructuredCorpus));
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
@@ -87,39 +90,40 @@ public sealed class TabularDecomposer
         double witnessWeight = RelationTypeRank.Associative * TC.StructuredCorpus;
         long score = rec.Positive ? checked(2 * Glicko2.FpScale) : 0;
 
-        b.AddEntity(new EntityRow(OutcomeId, EntityTier.Word, OutcomeTypeId, Source));
-
         foreach (var (col, raw) in rec.Cells)
         {
             string tok = raw.Trim();
             if (tok.Length == 0) continue;
 
-            var columnId = ColumnId(col);
-            EnsureColumn(b, col, columnId);
+            OrderedCompositionComponent column = EnsureColumn(b, col);
+            OrderedCompositionComponent value = RequireComponent(b, tok);
+            Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
+            OrderedComposition.StageBatch(b.ContentStage,
+                [new OrderedCompositionRequest([column, value], ValueTypeId, Source, 0)], composed);
+            Hash128 valueId = composed[0].Id;
 
-            string valueCanonical = $"tabular/value/{col}={tok}/v1";
-            var valueId = Hash128.OfCanonical(valueCanonical);
-            b.AddEntity(new EntityRow(valueId, EntityTier.Word, ValueTypeId, Source));
-            _canonicalNames.Add(valueCanonical);
             b.AddAttestation(NativeAttestation.Aggregated(
-                valueId, PredictsTypeId, OutcomeId, Source, contextId: columnId,
+                valueId, PredictsTypeId, OutcomeId, Source, contextId: column.Id,
                 games: 1, sumScoreFp1e9: score, witnessWeight: witnessWeight));
             b.AddAttestation(NativeAttestation.Categorical(
-                valueId, "IS_VALUE_IN", columnId, Source, TC.StructuredCorpus));
-            if (ContentEmitter.Emit(b, tok, Source) is { } bareId)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    valueId, "IS_INSTANCE_OF", bareId, Source, TC.StructuredCorpus));
+                valueId, "IS_VALUE_IN", column.Id, Source, TC.StructuredCorpus));
+            b.AddAttestation(NativeAttestation.Categorical(
+                valueId, "IS_INSTANCE_OF", value.Id, Source, TC.StructuredCorpus));
         }
     }
 
-    private void EnsureColumn(SubstrateChangeBuilder b, string col, Hash128 columnId)
+    private static OrderedCompositionComponent EnsureColumn(SubstrateChangeBuilder b, string col)
     {
-        b.AddEntity(new EntityRow(columnId, EntityTier.Word, ColumnTypeId, Source));
-        _canonicalNames.Add($"tabular/column/{col}/v1");
-        if (ContentEmitter.Emit(b, col, Source) is { } colNameId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                columnId, "IS_INSTANCE_OF", colNameId, Source, TC.StructuredCorpus));
+        OrderedCompositionComponent column = RequireComponent(b, col);
+        // The column is the witnessed column-name content with an additional source
+        // interpretation, not a second flat-string hash that must be reverse-registered.
+        b.AddEntity(new EntityRow(column.Id, column.Tier, ColumnTypeId, Source));
+        return column;
     }
+
+    private static OrderedCompositionComponent RequireComponent(SubstrateChangeBuilder b, string value) =>
+        ContentEmitter.StageComponent(b, value, Source)
+        ?? throw new InvalidOperationException($"tabular content '{value}' has no decomposed root");
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)

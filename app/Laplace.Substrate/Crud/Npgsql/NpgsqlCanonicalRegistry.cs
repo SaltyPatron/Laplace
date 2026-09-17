@@ -1,5 +1,6 @@
 using global::Npgsql;
 using NpgsqlTypes;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
@@ -20,6 +21,10 @@ public static class NpgsqlCanonicalRegistry
     /// completed file, the CLI closeout and a parallel sibling cannot each repeat the same SQL.
     /// The database remains authoritative: names enter the process cache only after the set
     /// statement succeeds.
+    ///
+    /// This registry is a readback dictionary for governed canonical keys/labels. It is not a
+    /// payload store. JSON documents, raw multiline text and numeric scalar content belong in
+    /// the tier/content spine and must be reconstructed from their content roots instead.
     /// </summary>
     public static Task<CanonicalRegistrationResult> RegisterCanonicalsAsync(
         NpgsqlDataSource dataSource, IReadOnlyCollection<string> names, CancellationToken ct = default)
@@ -32,6 +37,7 @@ public static class NpgsqlCanonicalRegistry
         string[] normalized = names
             .Where(static name => !string.IsNullOrWhiteSpace(name))
             .Select(static name => name.Trim())
+            .Where(static name => IsCanonicalRegistryValue(name))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(static name => name, StringComparer.Ordinal)
             .ToArray();
@@ -40,6 +46,17 @@ public static class NpgsqlCanonicalRegistry
 
         return States.GetValue(dataSource, static _ => new RegistrationState())
             .RegisterAsync(dataSource, normalized, ct);
+    }
+
+    private static bool IsCanonicalRegistryValue(string value)
+    {
+        if (value.Length == 0) return false;
+        char first = value[0];
+        if (first is '{' or '[' or '"') return false;
+        if (value.IndexOfAny(['\r', '\n', '\0']) >= 0) return false;
+        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+            return false;
+        return true;
     }
 
     private sealed class RegistrationState

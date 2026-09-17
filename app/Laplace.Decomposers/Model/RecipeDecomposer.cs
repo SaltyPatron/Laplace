@@ -22,7 +22,10 @@ public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeI
         _ = recipePath ?? throw new ArgumentNullException(nameof(recipePath));
         _recipe = RecipeExtractor.Parse(recipePath);
         _sourceName = $"recipe/{_recipe.Name}";
-        _source = Hash128.OfCanonical($"substrate/source/recipe/{_recipe.Name}/v1");
+        // The witness source names the actual supplied artifact bytes. Two recipes with
+        // the same display name but different contents are different witnesses; formatting
+        // changes remain provenance-visible even when canonical recipe semantics agree.
+        _source = SourceEntityIdConventions.ContentHashSourceId("recipe", [recipePath]);
         _manifest = new RecipeRuntimeManifest(_source, _sourceName);
     }
 
@@ -64,10 +67,7 @@ public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeI
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(1);
 
-    public override IReadOnlyCollection<string> CanonicalNamesForReadback => new[]
-    {
-        RecipeExtractor.CanonicalName(_recipe),
-        _recipe.HiddenSize,
-        _recipe.NumLayers.ToString(),
-    };
+    // Source payload and scalar content are reconstructed through their witnessed
+    // tier/content roots; they are not canonical-name registry entries.
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 }

@@ -6,12 +6,6 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-
-
-
-
-
-
 public sealed class RecipeExtractor
 {
     public sealed class RecipeInfo
@@ -26,8 +20,6 @@ public sealed class RecipeExtractor
 
     public static RecipeInfo Parse(string recipeJsonPath)
         => ParseText(File.ReadAllText(recipeJsonPath), recipeJsonPath);
-
-
 
     /// <summary>Canonical BLAKE3 input — sorted JSON keys, matches ingest + export identity.</summary>
     public static byte[] CanonicalBytes(JsonElement root) => CanonicalizeJson(root);
@@ -80,7 +72,7 @@ public sealed class RecipeExtractor
         Hash128 hasNumLayersTypeId)
     {
         var b = new SubstrateChangeBuilder(sourceId, "recipe/laplace.recipe",
-            entityCapacity: 4, physicalityCapacity: 0, attestationCapacity: 4)
+            entityCapacity: 4, physicalityCapacity: 0, attestationCapacity: 5)
             .DeclareSourcePrior(SourceTrust.AiModelProbe);
         StageRecipe(b, recipe, sourceId, modelRecipeTypeId, hasHiddenSizeTypeId, hasNumLayersTypeId);
         return b.Build();
@@ -96,9 +88,22 @@ public sealed class RecipeExtractor
     {
         b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId, firstObservedBy: sourceId);
 
+        // Recipe JSON is source content, not a canonical-name side channel. Stage the
+        // canonical bytes through the same tier/content spine as every other textual
+        // artifact, then witness that this Model_Recipe encodes that content root.
+        Hash128 recipeContentId = ContentEmitter.Emit(b, recipe.CanonicalJson, sourceId)
+            ?? throw new InvalidOperationException("canonical laplace.recipe has no content root");
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            recipe.RecipeEntityId, RelationTypeRegistry.RelationTypeId("ENCODES"),
+            recipeContentId, sourceId, null, 1.0));
+
         void AddScalar(Hash128 typeId, string value)
         {
-            var valueId = ModelCoordinates.ScalarId(value);
+            // Scalar identity is the decomposed textual content root. Do not mint the
+            // same hash and then insert only a naked entity row: that creates an id that
+            // claims content identity without retaining the content hierarchy/physicality.
+            var valueId = ContentEmitter.Emit(b, Encoding.UTF8.GetBytes(value), sourceId)
+                ?? throw new InvalidOperationException($"scalar '{value}' has no content root");
             b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar, sourceId);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 recipe.RecipeEntityId, typeId, valueId, sourceId, null, 1.0));
@@ -119,8 +124,6 @@ public sealed class RecipeExtractor
         writer.Flush();
         return ms.ToArray();
     }
-
-
 
     private static void WriteCanonical(JsonElement el, Utf8JsonWriter w)
     {

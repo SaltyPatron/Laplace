@@ -19,6 +19,36 @@ public static class ContentEmitter
         return ContentTierSpine.TryStageIntoBuilder(b, canonical, sourceId, out var root) ? root : null;
     }
 
+    /// <summary>
+    /// Stage canonical text through the shared content spine and return the exact
+    /// natural-root component required by native ordered composition. This is the
+    /// common bridge for structures whose identity is made from witnessed content
+    /// constituents; callers must not replace it with a formatted-string hash.
+    /// </summary>
+    public static OrderedCompositionComponent? StageComponent(
+        SubstrateChangeBuilder b, string surface, Hash128 sourceId)
+    {
+        if (string.IsNullOrEmpty(surface)) return null;
+        return StageComponent(b, Encoding.UTF8.GetBytes(surface), sourceId);
+    }
+
+    public static unsafe OrderedCompositionComponent? StageComponent(
+        SubstrateChangeBuilder b, byte[] canonical, Hash128 sourceId)
+    {
+        if (canonical.Length == 0) return null;
+        if (!ContentTierSpine.TryStageIntoBuilder(b, canonical, sourceId, out Hash128 root))
+            return null;
+        using TierTree tree = ContentTierSpine.BuildTree(canonical)
+            ?? throw new InvalidOperationException("staged content could not rebuild its tier tree");
+        TierNodeView node = tree.GetNode(tree.NaturalUnitIndex());
+        if (node.Id != root)
+            throw new InvalidOperationException("content root changed between staging and ordered composition");
+        return new OrderedCompositionComponent(
+            node.Id, node.Tier,
+            node.Coord[0], node.Coord[1], node.Coord[2], node.Coord[3],
+            node.Atom, node.Tier == 0);
+    }
+
     public static Hash128? RootId(string surface) => ContentTierSpine.ResolveRoot(surface);
 
     public static Hash128? RootId(ReadOnlySpan<byte> canonical) => ContentTierSpine.ResolveRoot(canonical);

@@ -936,7 +936,8 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         Oid   ctypes[1] = { BYTEAOID };
         Datum cargs[1] = { p_word };
         int   crc = SPI_execute_with_args(
-            "SELECT laplace.word_case_class_surface($1)", 1, ctypes, cargs, NULL, true, 1);
+            "SELECT case_class FROM lexical.word_case_classes_batch(ARRAY[$1]::bytea[])",
+            1, ctypes, cargs, NULL, true, 1);
         if (crc == SPI_OK_SELECT && SPI_processed > 0)
         {
             bool cn;
@@ -1014,8 +1015,10 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
             cargs[0] = PointerGetDatum(id_array);
 
             crc = SPI_execute_with_args(
-                "SELECT t.idx, laplace.word_case_class_surface(t.entity_id) "
-                "FROM unnest($1::bytea[]) WITH ORDINALITY AS t(entity_id, idx)",
+                "SELECT t.idx, c.case_class "
+                "FROM unnest($1::bytea[]) WITH ORDINALITY AS t(entity_id, idx) "
+                "JOIN lexical.word_case_classes_batch($1::bytea[]) c "
+                "ON c.word_id=t.entity_id",
                 1, ctypes, cargs, NULL, true, 0);
             if (crc == SPI_OK_SELECT)
             {

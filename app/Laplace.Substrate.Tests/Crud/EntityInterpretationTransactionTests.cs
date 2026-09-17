@@ -50,7 +50,7 @@ public sealed class EntityInterpretationTransactionTests(LocalPgFixture pg, ITes
             await using var command = connection is null
                 ? pg.DataSource.CreateCommand()
                 : connection.CreateCommand();
-            command.Transaction = transaction;
+            if (connection is not null) command.Transaction = transaction;
             string key = table == "entities" ? "id" : "entity_id";
             command.CommandText = $"SELECT count(*) FROM laplace.{table} WHERE {key}=ANY($1::bytea[])"
                 + (alternateOnly ? " AND tier=5 AND type_id=$2" : "");
@@ -74,7 +74,7 @@ public sealed class EntityInterpretationTransactionTests(LocalPgFixture pg, ITes
             await using var command = connection is null
                 ? pg.DataSource.CreateCommand()
                 : connection.CreateCommand();
-            command.Transaction = transaction;
+            if (connection is not null) command.Transaction = transaction;
             command.CommandText = "SELECT type_id FROM laplace.entities WHERE id=$1";
             command.Parameters.AddWithValue(ids[0].ToBytes());
             var value = (byte[])(await command.ExecuteScalarAsync(stop.Token))!;
@@ -438,11 +438,17 @@ public sealed class EntityInterpretationTransactionTests(LocalPgFixture pg, ITes
         var type = H("type");
         var relation = H("relation");
         var witness = NativeAttestation.CategoricalResolved(id,relation,null,source,null,1.0);
-        using var stage = IntentStage.New(1);
-        stage.AddEntity(id,3,type,source);
-        stage.AddAttestation(witness.Id,id,relation,null,source,null,
-            outcome:2,lastObservedAtUnixUs:0,observationCount:1,
-            sumScoreFp1e9:1_000_000_000L,opponentRdFp1e9:30_000_000_000L);
+        IntentStage NewStage(bool extraFacet)
+        {
+            var result = IntentStage.New(1);
+            result.AddEntity(id,3,type,source);
+            result.AddAttestation(witness.Id,id,relation,null,source,null,
+                outcome:2,lastObservedAtUnixUs:0,observationCount:1,
+                sumScoreFp1e9:1_000_000_000L,opponentRdFp1e9:30_000_000_000L);
+            if (extraFacet) result.AddEntityInterpretation(id,7,H("extra-type"),source);
+            return result;
+        }
+        using var stage = NewStage(extraFacet:false);
         using var builder = new SubstrateChangeBuilder(source,scope);
         var change = builder.Build() with { IntentStages = [stage] };
         var digest = stage.SemanticDigest();
@@ -477,16 +483,22 @@ public sealed class EntityInterpretationTransactionTests(LocalPgFixture pg, ITes
             var baseline = await StateAsync();
             Assert.Equal(1,baseline.Facets);
             Assert.NotEqual("[]",baseline.Evidence);
-            stage.AddEntityInterpretation(id,7,H("extra-type"),source);
-            Assert.Equal(digest,stage.SemanticDigest());
-            var upgraded = await writer.ApplyWorkingSetAtomicAsync([change],Participant,null);
+            // Successful apply retires its native input. Recompose identical
+            // E/P/A for the later observation; only its exact facet set changes.
+            using var upgradeStage = NewStage(extraFacet:true);
+            Assert.Equal(digest,upgradeStage.SemanticDigest());
+            var upgradeChange = change with { IntentStages = [upgradeStage] };
+            var upgraded = await writer.ApplyWorkingSetAtomicAsync([upgradeChange],Participant,null);
             Assert.False(upgraded.JournalReplayHit);
             Assert.Equal(0,upgraded.EntitiesInserted);
             Assert.Equal(0,upgraded.AttestationsInserted);
             Assert.Equal(2,callbacks);
             Assert.Equal(1,acceptedSemantics);
             Assert.Equal((2L,baseline.Evidence),await StateAsync());
-            var replay = await writer.ApplyWorkingSetAtomicAsync([change],(_,_,_,_) =>
+            using var replayStage = NewStage(extraFacet:true);
+            Assert.Equal(digest,replayStage.SemanticDigest());
+            var replay = await writer.ApplyWorkingSetAtomicAsync(
+                [change with { IntentStages = [replayStage] }],(_,_,_,_) =>
                 throw new InvalidOperationException("full auxiliary replay invoked callback"),null);
             Assert.True(replay.JournalReplayHit);
 
@@ -502,7 +514,10 @@ public sealed class EntityInterpretationTransactionTests(LocalPgFixture pg, ITes
             Assert.Equal(0,applied.EntitiesInserted);
             Assert.Equal(0,applied.AttestationsInserted);
             Assert.Equal((3L,baseline.Evidence),await StateAsync());
-            Assert.True((await writer.ApplyWorkingSetAsync([only])).JournalReplayHit);
+            using var facetReplayStage = IntentStage.New(0);
+            facetReplayStage.AddEntityInterpretation(id,9,H("third-type"),source);
+            Assert.True((await writer.ApplyWorkingSetAsync(
+                [only with { IntentStages = [facetReplayStage] }])).JournalReplayHit);
         }
         finally
         {
@@ -569,11 +584,19 @@ public sealed class EntityInterpretationTransactionTests(LocalPgFixture pg, ITes
             using var actual = IntentStage.New(0);
             actual.AddEntityInterpretation(id,7,actualType,source);
             stage.ImportEntityInterpretations(actual.EmitEntityInterpretationTuples());
-            var accepted = await writer.ApplyWorkingSetAsync([change]);
+            int acceptedCallbacks = 0;
+            var accepted = await writer.ApplyWorkingSetAtomicAsync([change],(_,_,_,_) =>
+            {
+                // The source is still owned here. Apply retires it after the
+                // successful commit, so inspect immutable transport before return.
+                Assert.Equal(originalBytes,stage.EmitCopyBinary(IntentStageTable.Entities));
+                Assert.Equal(originalDigest,stage.SemanticDigest());
+                acceptedCallbacks++;
+                return Task.CompletedTask;
+            },null);
             Assert.Equal(1,accepted.EntitiesInserted);
             Assert.Equal(1,accepted.AttestationsInserted);
-            Assert.Equal(originalBytes,stage.EmitCopyBinary(IntentStageTable.Entities));
-            Assert.Equal(originalDigest,stage.SemanticDigest());
+            Assert.Equal(1,acceptedCallbacks);
             await using var state = pg.DataSource.CreateCommand("""
                 SELECT e.tier,e.type_id,
                        (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=$1),

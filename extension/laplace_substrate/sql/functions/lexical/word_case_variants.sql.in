@@ -21,3 +21,11 @@ CREATE OR REPLACE FUNCTION lexical.word_case_variants_batch(p_words bytea[])
     RETURNS TABLE(word_id bytea, variant_id bytea)
     AS 'MODULE_PATHNAME', 'pg_laplace_word_case_variants_batch'
     LANGUAGE C STABLE STRICT PARALLEL SAFE;
+
+-- The shape-peer class is its witnessed lower surface. The native set owner
+-- shares mapping selection, rendering and RLE assembly with case variants;
+-- it does not mint word IDs or filter the surface through entity existence.
+CREATE OR REPLACE FUNCTION lexical.word_case_classes_batch(p_words bytea[])
+    RETURNS TABLE(word_id bytea, case_class text)
+    AS 'MODULE_PATHNAME', 'pg_laplace_word_case_classes_batch'
+    LANGUAGE C STABLE STRICT PARALLEL SAFE;

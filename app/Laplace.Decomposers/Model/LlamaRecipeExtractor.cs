@@ -187,13 +187,23 @@ public sealed class LlamaRecipeExtractor
     {
         b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId, firstObservedBy: sourceId);
 
+        // Retain the canonical config as decomposed content rather than relying on
+        // canonical_names as a payload store. This keeps source bytes reconstructible
+        // through the ordinary tier hierarchy and explicitly witnesses their recipe.
+        Hash128 configContentId = ContentEmitter.Emit(b, recipe.CanonicalJson, sourceId)
+            ?? throw new InvalidOperationException("canonical config.json has no content root");
+        b.AddAttestation(NativeAttestation.CategoricalResolved(
+            recipe.RecipeEntityId, RelationTypeRegistry.RelationTypeId("ENCODES"),
+            configContentId, sourceId, null, 1.0));
+
         void AddAttestation(Hash128 typeId, Hash128? objectId)
             => b.AddAttestation(NativeAttestation.CategoricalResolved(
                 recipe.RecipeEntityId, typeId, objectId, sourceId, null, 1.0));
 
         void AddScalar(Hash128 typeId, string value)
         {
-            var valueId = ModelCoordinates.ScalarId(value);
+            var valueId = ContentEmitter.Emit(b, Encoding.UTF8.GetBytes(value), sourceId)
+                ?? throw new InvalidOperationException($"scalar '{value}' has no content root");
             b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar, sourceId);
             AddAttestation(typeId, valueId);
         }
@@ -209,16 +219,12 @@ public sealed class LlamaRecipeExtractor
         AddAttestation(isATypeId, architectureEntityId);
     }
 
-
-
-
     // The ONLY remaining managed JSON use: its output bytes are hashed into
     // RecipeEntityId, so moving it is an identity-affecting change (GH #552).
     private static byte[] CanonicalizeJson(byte[] rawUtf8)
     {
         using var doc = JsonDocument.Parse(rawUtf8);
         var root = doc.RootElement;
-        var opts = new JsonSerializerOptions { WriteIndented = false };
         using var ms = new System.IO.MemoryStream();
         using var writer = new Utf8JsonWriter(ms);
 

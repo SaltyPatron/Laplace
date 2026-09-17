@@ -29,11 +29,17 @@ public sealed class EntityInterpretationDirectWriteTests(LocalPgFixture pg)
                         id bytea NOT NULL, tier smallint NOT NULL, type_id bytea NOT NULL,
                         first_observed_by bytea, created_at timestamptz DEFAULT now(), highway_mask bytea,
                         PRIMARY KEY(id,tier));
-                    INSERT INTO "{schema}".entities(id,tier,type_id) VALUES($1,3,$2),($1,5,$2);
                     """;
-                setup.Parameters.AddWithValue(id);
-                setup.Parameters.AddWithValue(type);
                 await setup.ExecuteNonQueryAsync();
+            }
+            await using (var insert = connection.CreateCommand())
+            {
+                insert.CommandText = $"""
+                    INSERT INTO "{schema}".entities(id,tier,type_id) VALUES($1,3,$2),($1,5,$2)
+                    """;
+                insert.Parameters.AddWithValue(id);
+                insert.Parameters.AddWithValue(type);
+                await insert.ExecuteNonQueryAsync();
             }
             await using (var transaction = await connection.BeginTransactionAsync())
             {

@@ -58,6 +58,21 @@ public sealed class EntityInterpretationNativeReadTests(LocalPgFixture pg)
                      decode(repeat('00',16),'hex'),
                      public.ST_MakeLine(ARRAY[public.laplace_mantissa_pack(b0,1,1,0),
                                              public.laplace_mantissa_pack(b1,2,1,0)]),2);
+                -- Give both shapes the same witnessed lower surface. This
+                -- exercises the live non-NULL batched case gate as well as shape.
+                INSERT INTO laplace.consensus
+                    (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+                SELECT public.laplace_hash128_blake3(child || relation || target),
+                       child,relation,target,2500000000000,30000000000,60000000,1,now()
+                FROM (VALUES
+                    (a0,laplace.word_id('a')),(b0,laplace.word_id('a')),
+                    (a1,laplace.word_id('b')),(b1,laplace.word_id('b'))
+                ) maps(child,target)
+                CROSS JOIN (SELECT laplace.relation_type_id('HAS_LOWERCASE_MAPPING') AS relation) r;
+                IF (SELECT count(*) FROM lexical.word_case_classes_batch(ARRAY[anchor,peer])
+                    WHERE case_class='ab') <> 2 THEN
+                    RAISE EXCEPTION 'fixture must have equal witnessed lower surfaces';
+                END IF;
                 SELECT count(*) INTO physical_before FROM laplace.physicalities
                     WHERE entity_id=ANY(ARRAY[anchor,peer,a0,a1,b0,b1]);
                 before_ids := lexical.word_shape_peers_fast(anchor,0.001);
@@ -141,4 +156,98 @@ public sealed class EntityInterpretationNativeReadTests(LocalPgFixture pg)
         await command.ExecuteNonQueryAsync();
         await transaction.RollbackAsync();
     }
+    [Fact]
+    public async Task BatchedCaseSurfacesPreserveWitnessSelectionRunsNullsAndVariantParity()
+    {
+        string scope = "native-case-surfaces/" + Guid.NewGuid().ToString("N");
+        await using var connection = await pg.DataSource.OpenConnectionAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandTimeout = 30;
+        command.CommandText = $$"""
+            DO $fixture$
+            DECLARE
+                word bytea := public.laplace_hash128_blake3('{{scope}}/word');
+                lower_word bytea := laplace.word_id('aa!');
+                fallback_word bytea := public.laplace_hash128_blake3('{{scope}}/fallback-word');
+                grapheme bytea := public.laplace_hash128_blake3('{{scope}}/grapheme');
+                unmapped bytea := public.laplace_hash128_blake3('{{scope}}/unmapped');
+                absent bytea := public.laplace_hash128_blake3('{{scope}}/absent');
+                kind bytea := public.laplace_hash128_blake3('{{scope}}/kind');
+                lower_type bytea := laplace.relation_type_id('HAS_LOWERCASE_MAPPING');
+                a bytea := laplace.word_id('a');
+                z bytea := laplace.word_id('z');
+                bang bytea := laplace.word_id('!');
+                upper_q bytea := laplace.word_id('Q');
+                lower_surface text;
+                scalar_ids bytea[];
+                batch_ids bytea[];
+            BEGIN
+                INSERT INTO laplace.entities(id,tier,type_id) VALUES
+                    (word,3,kind),(lower_word,3,kind),(fallback_word,3,kind),
+                    (grapheme,2,kind),(unmapped,2,kind);
+                INSERT INTO laplace.physicalities
+                    (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
+                SELECT public.laplace_hash128_blake3(x.id || decode('0100','hex')),
+                       x.id,1,public.ST_MakePoint(0.1,0.2,0.3,0.4),
+                       decode(repeat('00',16),'hex'),x.trajectory,x.n
+                FROM (VALUES
+                    (grapheme,public.ST_MakeLine(ARRAY[
+                        public.laplace_mantissa_pack(upper_q,1,1,0),
+                        public.laplace_mantissa_pack(upper_q,2,1,0)]),2),
+                    (unmapped,public.ST_MakeLine(ARRAY[
+                        public.laplace_mantissa_pack(upper_q,1,1,0),
+                        public.laplace_mantissa_pack(upper_q,2,1,0)]),2),
+                    (word,public.ST_MakeLine(ARRAY[
+                        public.laplace_mantissa_pack(grapheme,1,2,0),
+                        public.laplace_mantissa_pack(bang,3,1,0)]),3),
+                    (lower_word,public.ST_MakeLine(ARRAY[
+                        public.laplace_mantissa_pack(a,1,2,0),
+                        public.laplace_mantissa_pack(bang,3,1,0)]),3),
+                    (fallback_word,public.ST_MakeLine(ARRAY[
+                        public.laplace_mantissa_pack(unmapped,1,1,0),
+                        public.laplace_mantissa_pack(unmapped,2,1,0)]),2)
+                ) x(id,trajectory,n)
+                ON CONFLICT(id) DO NOTHING;
+                INSERT INTO laplace.consensus
+                    (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
+                VALUES
+                    (public.laplace_hash128_blake3(grapheme || lower_type || z),
+                     grapheme,lower_type,z,1600000000000,30000000000,60000000,1,now()),
+                    (public.laplace_hash128_blake3(grapheme || lower_type || a),
+                     grapheme,lower_type,a,2500000000000,30000000000,60000000,1,now());
+                IF (SELECT count(*) FROM lexical.word_case_classes_batch(
+                        ARRAY[word,lower_word,fallback_word,absent,word])) <> 4 THEN
+                    RAISE EXCEPTION 'case batch must retain exactly one result per input identity';
+                END IF;
+                SELECT case_class INTO lower_surface
+                FROM lexical.word_case_classes_batch(ARRAY[word]);
+                IF lower_surface IS DISTINCT FROM 'aa!' THEN
+                    RAISE EXCEPTION 'winning witnessed mapping or run expansion changed: %',lower_surface;
+                END IF;
+                IF (SELECT case_class FROM lexical.word_case_classes_batch(ARRAY[lower_word]))
+                    IS DISTINCT FROM lower_surface
+                   OR (SELECT case_class FROM lexical.word_case_classes_batch(ARRAY[fallback_word]))
+                    IS DISTINCT FROM 'QQQQ'
+                   OR (SELECT case_class FROM lexical.word_case_classes_batch(ARRAY[absent]))
+                    IS NOT NULL THEN
+                    RAISE EXCEPTION 'lower equality, unmapped render fallback or absent NULL changed';
+                END IF;
+                IF EXISTS (SELECT FROM lexical.word_case_classes_batch(ARRAY[]::bytea[])) THEN
+                    RAISE EXCEPTION 'empty input must have no case rows';
+                END IF;
+                scalar_ids := lexical.word_case_variants(word);
+                SELECT array_agg(variant_id ORDER BY variant_id) INTO batch_ids
+                FROM lexical.word_case_variants_batch(ARRAY[word,word]);
+                IF NOT COALESCE(lower_word=ANY(scalar_ids),false)
+                   OR batch_ids IS DISTINCT FROM scalar_ids THEN
+                    RAISE EXCEPTION 'existing scalar and batched case variants diverged';
+                END IF;
+            END $fixture$;
+            """;
+        await command.ExecuteNonQueryAsync();
+        await transaction.RollbackAsync();
+    }
+
 }
