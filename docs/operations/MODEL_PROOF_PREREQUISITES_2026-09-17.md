@@ -37,6 +37,10 @@ These observations establish that the selected full Stack admission encounters r
 
 ## Source corrections and acceptance
 
+The proof now runs the bounded probe in a strict preliminary mode before its first database command. It passes the exact selected primary and second checkpoint paths; alternative available snapshots cannot replace either selection. The mode requires both inspected snapshots and a llama executable that passes bounded startup. When the existing code-corpus switch enables corpora, an observed missing or unreadable mandatory schema causes immediate failure before Unicode, TinyCodes, Stack, or model admission. The observed metadata-only Stack selection would therefore be rejected early.
+
+The preliminary check remains limited: three representative schemas do not establish whole-corpus validity, and bounded weight samples do not establish native full model identities. All ordinary full readers and later proof gates still run after successful preliminary checks. If the existing corpus switch disables code corpora, the preliminary mode skips their inspection and requirement as well. Runtime selection has moved from after GGUF synthesis to this early probe; the selected runnable binary is passed to the unchanged behavioral verifier.
+
 The former replay gate searched for “already ingested.” The real retained-completion branch emits “Safetensor snapshot already deposited — source ...”. The correction requires that anchored diagnostic prefix and preserves a failing command's exit status. Three replay controls passed in hosted run 35212649983.
 
 The separately proposed orchestration admits and replays two complete checkpoints, invokes the existing model-corroborate command, then runs the unchanged evidence and export gates. The existing single-model contraction scores only already-existing exact model-kind claims; it does not bootstrap those claims on a fresh database.
@@ -46,6 +50,10 @@ The joint owner nominates endpoint pairs from existing non-target graph evidence
 Both snapshot admissions retain their replay checks. The four model-evidence minima remain 1,000 each. Complete configured code-corpus admission, SQL readback, GGUF size and synthesis checks, and the external behavioral threshold remain unchanged. Source and fixture controls do not establish that a full model proof passes.
 
 ## Executed source controls
+
+The latest [run 35215794045, job 105183847377](https://github.com/SaltyPatron/Laplace/actions/runs/35215794045/job/105183847377) authenticated all six exact source/test leaves and passed Bash syntax plus all 27 controls, with no skips: three replay, six two-checkpoint orchestration, ten bounded-probe, and eight early-prerequisite controls. The eight added controls execute the real proof shell and real probe against finite model/Parquet fixtures. They verify rejection before the first database command for metadata-only Stack, missing TinyCodes columns, an invalid explicitly selected second checkpoint, and a failed llama startup. They also verify the existing disabled-corpus switch, exact model/runtime selection, required strict arguments, and rejection of a malformed success report. These fixture results do not establish full model or corpus acceptance.
+
+The four suites took 0.034, 0.095, 0.010, and 0.631 seconds. Artifact 10495535899 has SHA-256 2304ec9ad49c3d44015f52b6b519a6ebe85a25b9abf5f1d5695911c5d975ee26. The hosted operator was fe08d473d7dd1b7694bbb91a970f4a8cd2eb16dc with workflow b17b82cb7a4024e4a8a202538e0ad333c8fb1a7f. No product-host work was performed by this qualification.
 
 [Run 35213788581, job 105177323338](https://github.com/SaltyPatron/Laplace/actions/runs/35213788581/job/105177323338) authenticated the exact five source/test leaves and passed Bash syntax plus all 19 controls: three replay controls, six two-checkpoint orchestration controls, and ten prerequisite-probe controls. They ran in 0.033, 0.095, and 0.010 seconds respectively. The tests exercise shell command ordering and failures, actual fixture executable startup, bounded footer parsing, and model metadata/sample validation. They perform no real model ingestion or semantic proof.
 

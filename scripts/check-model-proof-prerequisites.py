@@ -251,7 +251,7 @@ def corpus_info(root, name):
     primary = root / name
     fallback = root.parent / "models" / name
     selected = fallback if not primary.exists() and fallback.is_dir() else primary
-    item = {"primary": str(primary), "fallback": str(fallback), "selected": str(selected),
+    item = {"source": name, "primary": str(primary), "fallback": str(fallback), "selected": str(selected),
             "exists": selected.exists(), "representative_schemas": [],
             "full_corpus_scanned": False}
     try:
@@ -293,12 +293,57 @@ def corpus_info(root, name):
     return item
 
 
+def preliminary_failures(report, primary, second, require_code_corpora):
+    """Reject observed missing inputs; never certify the full corpus/model proof."""
+    failures = []
+    for role, path in (("primary", primary), ("second", second)):
+        selected = str(path.resolve())
+        observed = next((model for model in report["models"]
+                         if str(Path(model["path"]).resolve()) == selected), None)
+        if observed is None or not observed.get("structurally_complete"):
+            failures.append(role + " selected checkpoint failed bounded structural inspection")
+    if primary.exists() and second.exists() and os.path.samefile(primary, second):
+        failures.append("selected checkpoints refer to the same directory")
+    if not report.get("selected_llama"):
+        failures.append("no selected llama-completion executable passed bounded startup")
+    if require_code_corpora:
+        by_source = {item["source"]: item for item in report["corpora"]}
+        for source in ("tiny-codes", "stack-v2"):
+            item = by_source.get(source)
+            if item is None or item.get("error") or not item.get("exists") or not item.get("shards_observed"):
+                failures.append(source + " has no inspectable selected Parquet input")
+                continue
+            schemas = item.get("representative_schemas", [])
+            if not schemas:
+                failures.append(source + " has no observed mandatory schema")
+            elif any(schema.get("error") or not schema.get("required_columns_present")
+                     for schema in schemas):
+                failures.append(source + " has an observed shard without the required readable schema")
+    return failures
+
+
+def ingest_root_choices(repo):
+    return [Path(repo.anchor) / "Data" / "Ingest",
+            (repo / ".." / ".." / "Data" / "Ingest").resolve(),
+            Path("/vault/Data")]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", type=Path, required=True)
+    ap.add_argument("--model-dir", type=Path)
+    ap.add_argument("--second-model-dir", type=Path)
+    ap.add_argument("--require-proof-ready", action="store_true",
+                    help="Fail on observed missing prerequisites; full proof still runs separately")
+    ap.add_argument("--code-corpora", choices=("0", "1"), default="1",
+                    help="Match the proof's existing code-corpus switch")
     args = ap.parse_args()
+    if args.require_proof_ready and (args.model_dir is None or args.second_model_dir is None):
+        ap.error("strict preliminary mode requires both exact selected model directories")
     report = {"schema": "laplace-model-proof-prerequisites-v1", "read_only": True,
-              "models": [], "llama": [], "corpora": [], "complete": False}
+              "models": [], "llama": [], "corpora": [], "complete": False,
+              "strict_preliminary": args.require_proof_ready,
+              "full_model_proof_performed": False}
     def deadline(_signum, _frame):
         raise PreflightDeadline("90-second preflight inspection deadline")
     signal.signal(signal.SIGALRM, deadline)
@@ -306,18 +351,22 @@ def main():
     try:
         repo = args.repo.resolve()
         candidates = []
-        primary_explicit = next((os.environ.get(k) for k in (
-            "LAPLACE_MODEL_PROOF_DIR", "LAPLACE_QWEN25_CODER_DIR", "LAPLACE_TINYLLAMA_DIR")
-            if os.environ.get(k)), None)
-        if primary_explicit:
-            candidates.append(Path(primary_explicit))
-        second_explicit = os.environ.get("LAPLACE_MODEL_CORROBORATION_DIR")
-        if second_explicit:
-            candidates.append(Path(second_explicit))
-        hub = Path(os.environ.get("LAPLACE_MODEL_HUB", "/vault/models"))
-        for family in ("models--Qwen--Qwen2.5-Coder-3B-Instruct",
-                       "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0"):
-            candidates.extend(latest_candidates(hub, family))
+        if args.require_proof_ready:
+            candidates = [args.model_dir, args.second_model_dir]
+            report["exact_selected_models"] = [str(path) for path in candidates]
+        else:
+            primary_explicit = args.model_dir or next((os.environ.get(k) for k in (
+                "LAPLACE_MODEL_PROOF_DIR", "LAPLACE_QWEN25_CODER_DIR", "LAPLACE_TINYLLAMA_DIR")
+                if os.environ.get(k)), None)
+            if primary_explicit:
+                candidates.append(Path(primary_explicit))
+            second_explicit = args.second_model_dir or os.environ.get("LAPLACE_MODEL_CORROBORATION_DIR")
+            if second_explicit:
+                candidates.append(Path(second_explicit))
+            hub = Path(os.environ.get("LAPLACE_MODEL_HUB", "/vault/models"))
+            for family in ("models--Qwen--Qwen2.5-Coder-3B-Instruct",
+                           "models--TinyLlama--TinyLlama-1.1B-Chat-v1.0"):
+                candidates.extend(latest_candidates(hub, family))
         seen = set()
         for path in candidates[:8]:
             key = str(path.resolve())
@@ -344,21 +393,24 @@ def main():
                 if item["runnable"]:
                     report["selected_llama"] = item["path"]
                     break
-        root_choices = [Path(repo.anchor) / "Data" / "Ingest",
-                        (repo / ".." / ".." / "Data" / "Ingest").resolve(),
-                        Path("/vault/Data")]
+        root_choices = ingest_root_choices(repo)
         root = next((p for p in root_choices if p.is_dir()), None)
         report["ingest_root_candidates"] = [{"path": str(p), "exists": p.is_dir()} for p in root_choices]
         report["selected_ingest_root"] = str(root) if root else None
-        if root is not None:
+        if root is not None and (not args.require_proof_ready or args.code_corpora == "1"):
             report["corpora"] = [corpus_info(root, name) for name in ("tiny-codes", "stack-v2")]
+        if args.require_proof_ready:
+            report["preliminary_failures"] = preliminary_failures(
+                report, args.model_dir, args.second_model_dir, args.code_corpora == "1")
+            report["preliminary_prerequisites_passed"] = not report["preliminary_failures"]
         report["complete"] = True
     except (Exception, PreflightDeadline) as exc:
         report["inspection_error"] = type(exc).__name__ + ": " + str(exc)
     finally:
         signal.alarm(0)
     print("MODEL_PROOF_PREFLIGHT " + json.dumps(report, sort_keys=True, allow_nan=False), flush=True)
-    return 0 if report["complete"] else 2
+    return 0 if (report["complete"] and
+                 (not args.require_proof_ready or report.get("preliminary_prerequisites_passed"))) else 2
 
 
 if __name__ == "__main__":
