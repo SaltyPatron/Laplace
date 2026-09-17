@@ -68,6 +68,11 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
 
+          # Bind evidence to both the collector source and the application actually running.
+          # Checking out source is not proof that the deployed runtime came from that source.
+          export LAPLACE_DIAGNOSTIC_SOURCE_REVISION="$TARGET_SHA"
+          export LAPLACE_DEPLOYED_RUNTIME_REVISION="$(cat "${LAPLACE_APP_DIR:-/opt/laplace/app}/.laplace-source-revision" 2>/dev/null || true)"
+
           set +e
           python3 scripts/api-diagnostics.py
           rc=$?

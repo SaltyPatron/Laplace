@@ -7,6 +7,11 @@ const baseUrl = (process.env.LAPLACE_UI_URL ?? 'http://127.0.0.1:5187').replace(
 const outputDir = resolve(process.env.LAPLACE_UI_DIAGNOSTICS_DIR ?? 'ui-diagnostics');
 const navigationTimeout = Number(process.env.LAPLACE_UI_NAVIGATION_TIMEOUT_MS ?? '15000');
 const settleTimeout = Number(process.env.LAPLACE_UI_SETTLE_TIMEOUT_MS ?? '5000');
+const diagnosticSourceRevision = (process.env.LAPLACE_DIAGNOSTIC_SOURCE_REVISION ?? '').trim() || null;
+const deployedRuntimeRevision = (process.env.LAPLACE_DEPLOYED_RUNTIME_REVISION ?? '').trim() || null;
+const revisionMatch = diagnosticSourceRevision && deployedRuntimeRevision
+  ? diagnosticSourceRevision === deployedRuntimeRevision
+  : null;
 
 const defaultRoutes = [
   ['home', '/'],
@@ -228,6 +233,9 @@ const summary = {
   schema: 'laplace.ui-diagnostics/v1',
   observedAt,
   baseUrl,
+  diagnosticSourceRevision,
+  deployedRuntimeRevision,
+  revisionMatch,
   totals,
   results,
 };
@@ -249,6 +257,9 @@ const markdown = [
   '## Laplace UI diagnostics',
   '',
   `- Target: \`${baseUrl}\``,
+  `- Diagnostic source revision: **${diagnosticSourceRevision ?? 'unknown'}**`,
+  `- Deployed runtime revision: **${deployedRuntimeRevision ?? 'unknown'}**`,
+  `- Source/runtime revision match: **${revisionMatch === null ? 'unknown' : revisionMatch ? 'yes' : 'NO'}**`,
   `- Route/viewport captures: **${totals.routes}**`,
   `- Navigation errors: **${totals.navigationErrors}**`,
   `- Browser exceptions: **${totals.pageErrors}**`,
@@ -271,5 +282,5 @@ const cards = results.map((item) => {
   const errorCount = item.pageErrors.length + item.requestFailures.length + item.httpFailures.filter((r) => r.status >= 500).length + item.consoleMessages.filter((m) => m.type === 'error').length + (item.navigationError ? 1 : 0);
   return `<article><h2>${escapeHtml(item.viewport.name)} · ${escapeHtml(item.route)}</h2><p>${escapeHtml(item.title || '(no title)')} · ${item.loadMilliseconds} ms · ${errorCount} high-signal errors</p><a href="${escapeHtml(item.artifacts.full)}"><img src="${escapeHtml(item.artifacts.viewport)}" alt="${escapeHtml(item.viewport.name)} ${escapeHtml(item.route)} screenshot"></a><details><summary>Runtime evidence</summary><pre>${escapeHtml(JSON.stringify({ navigationError: item.navigationError, settleError: item.settleError, consoleMessages: item.consoleMessages, pageErrors: item.pageErrors, requestFailures: item.requestFailures, httpFailures: item.httpFailures }, null, 2))}</pre></details></article>`;
 }).join('\n');
-const html = `<!doctype html><html><head><meta charset="utf-8"><title>Laplace UI diagnostics</title><style>body{font:14px system-ui;margin:24px;background:#111;color:#eee}header{margin-bottom:24px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:20px}article{background:#1b1b1b;border:1px solid #444;border-radius:10px;padding:14px}img{width:100%;height:auto;border:1px solid #555;background:white}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#9ecbff}</style></head><body><header><h1>Laplace UI diagnostics</h1><p>${escapeHtml(baseUrl)} · ${escapeHtml(observedAt)}</p><p>navigation=${totals.navigationErrors}, pageErrors=${totals.pageErrors}, requestFailures=${totals.requestFailures}, http5xx=${totals.http5xx}</p></header><main>${cards}</main></body></html>`;
+const html = `<!doctype html><html><head><meta charset="utf-8"><title>Laplace UI diagnostics</title><style>body{font:14px system-ui;margin:24px;background:#111;color:#eee}header{margin-bottom:24px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:20px}article{background:#1b1b1b;border:1px solid #444;border-radius:10px;padding:14px}img{width:100%;height:auto;border:1px solid #555;background:white}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#9ecbff}</style></head><body><header><h1>Laplace UI diagnostics</h1><p>${escapeHtml(baseUrl)} · ${escapeHtml(observedAt)}</p><p>source=${escapeHtml(diagnosticSourceRevision ?? 'unknown')} · deployed=${escapeHtml(deployedRuntimeRevision ?? 'unknown')} · revision-match=${escapeHtml(revisionMatch === null ? 'unknown' : revisionMatch ? 'yes' : 'NO')}</p><p>navigation=${totals.navigationErrors}, pageErrors=${totals.pageErrors}, requestFailures=${totals.requestFailures}, http5xx=${totals.http5xx}</p></header><main>${cards}</main></body></html>`;
 await writeFile(resolve(outputDir, 'index.html'), html, 'utf8');

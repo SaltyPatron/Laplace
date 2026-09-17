@@ -13,6 +13,13 @@ from urllib.request import Request, urlopen
 BASE = os.environ.get("LAPLACE_API_URL", "http://127.0.0.1:5187").rstrip("/") + "/"
 OUT = Path(os.environ.get("LAPLACE_API_DIAGNOSTICS_DIR", "api-diagnostics")).resolve()
 TIMEOUT = float(os.environ.get("LAPLACE_API_TIMEOUT_SECONDS", "10"))
+DIAGNOSTIC_SOURCE_REVISION = os.environ.get("LAPLACE_DIAGNOSTIC_SOURCE_REVISION", "").strip() or None
+DEPLOYED_RUNTIME_REVISION = os.environ.get("LAPLACE_DEPLOYED_RUNTIME_REVISION", "").strip() or None
+REVISION_MATCH = (
+    DIAGNOSTIC_SOURCE_REVISION == DEPLOYED_RUNTIME_REVISION
+    if DIAGNOSTIC_SOURCE_REVISION and DEPLOYED_RUNTIME_REVISION
+    else None
+)
 SAFE_METHODS = {"get", "head", "options"}
 HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 OUT.mkdir(parents=True, exist_ok=True)
@@ -147,7 +154,7 @@ if document:
             operations.append(entry)
 
 # These product-level probes are useful even when they are omitted from OpenAPI.
-for path in ("/health", "/health/ready", "/v1/capabilities"):
+for path in ("/health", "/health/status", "/health/ready", "/v1/capabilities"):
     if not any(item["path"] == path and item["method"] == "GET" for item in probes):
         probes.append(probe(path))
 
@@ -160,6 +167,9 @@ summary = {
     "schema": "laplace.api-diagnostics/v1",
     "observedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     "baseUrl": BASE.rstrip("/"),
+    "diagnosticSourceRevision": DIAGNOSTIC_SOURCE_REVISION,
+    "deployedRuntimeRevision": DEPLOYED_RUNTIME_REVISION,
+    "revisionMatch": REVISION_MATCH,
     "openapiPath": openapi_path,
     "openapiAttempts": openapi_attempts,
     "endpointCount": len(operations),
@@ -178,6 +188,9 @@ slowest = sorted(probes, key=lambda item: item["milliseconds"], reverse=True)[:1
 markdown = [
     "## Laplace API diagnostics", "",
     f"- Target: `{summary['baseUrl']}`",
+    f"- Diagnostic source revision: **{DIAGNOSTIC_SOURCE_REVISION or 'unknown'}**",
+    f"- Deployed runtime revision: **{DEPLOYED_RUNTIME_REVISION or 'unknown'}**",
+    f"- Source/runtime revision match: **{'unknown' if REVISION_MATCH is None else 'yes' if REVISION_MATCH else 'NO'}**",
     f"- OpenAPI: `{openapi_path or 'not discovered'}`",
     f"- Declared operations: **{len(operations)}**",
     f"- Safe live probes: **{len(probes)}**",
@@ -219,5 +232,5 @@ for operation in operations:
         f"<td>{h(live['status'] if live else '')}</td>",
         f"<td>{h(live['milliseconds'] if live else '')}</td>",
     ]) + "</tr>")
-html = f"""<!doctype html><html><head><meta charset=\"utf-8\"><title>Laplace API diagnostics</title><style>body{{font:14px system-ui;margin:24px}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccc;padding:6px;text-align:left}}th{{position:sticky;top:0;background:#eee}}code{{white-space:nowrap}}</style></head><body><h1>Laplace API diagnostics</h1><p>{h(summary['baseUrl'])} · operations={len(operations)} · probes={len(probes)} · 5xx={summary['serverErrorCount']} · network-errors={summary['networkErrorCount']}</p><table><thead><tr><th>Method</th><th>Path</th><th>Operation</th><th>Probe</th><th>Status</th><th>ms</th></tr></thead><tbody>{''.join(rows)}</tbody></table></body></html>"""
+html = f"""<!doctype html><html><head><meta charset=\"utf-8\"><title>Laplace API diagnostics</title><style>body{{font:14px system-ui;margin:24px}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccc;padding:6px;text-align:left}}th{{position:sticky;top:0;background:#eee}}code{{white-space:nowrap}}</style></head><body><h1>Laplace API diagnostics</h1><p>{h(summary['baseUrl'])} · source={h(DIAGNOSTIC_SOURCE_REVISION or 'unknown')} · deployed={h(DEPLOYED_RUNTIME_REVISION or 'unknown')} · revision-match={h('unknown' if REVISION_MATCH is None else 'yes' if REVISION_MATCH else 'NO')} · operations={len(operations)} · probes={len(probes)} · 5xx={summary['serverErrorCount']} · network-errors={summary['networkErrorCount']}</p><table><thead><tr><th>Method</th><th>Path</th><th>Operation</th><th>Probe</th><th>Status</th><th>ms</th></tr></thead><tbody>{''.join(rows)}</tbody></table></body></html>"""
 (OUT / "index.html").write_text(html, encoding="utf-8")

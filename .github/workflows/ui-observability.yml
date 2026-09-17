@@ -74,6 +74,11 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
 
+          # Bind evidence to both the collector source and the application actually running.
+          # Checking out source is not proof that the deployed runtime came from that source.
+          export LAPLACE_DIAGNOSTIC_SOURCE_REVISION="$TARGET_SHA"
+          export LAPLACE_DEPLOYED_RUNTIME_REVISION="$(cat "${LAPLACE_APP_DIR:-/opt/laplace/app}/.laplace-source-revision" 2>/dev/null || true)"
+
           tooling_state="$lock_root/ui-observability"
           mkdir -p "$tooling_state"
           current="$(sha256sum web/package-lock.json | awk '{print $1}')"
