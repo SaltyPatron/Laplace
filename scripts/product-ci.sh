@@ -93,7 +93,7 @@ run_db_tests() {
     while IFS= read -r diff; do
       echo "===== REGRESSION DIFF: $diff =====" >&2
       cat "$diff" >&2 || true
-    done < <(find build -path '*/tests/regress_output/regression.diffs' -type f -print | sort)
+    done < <(find -L build -path '*/tests/regress_output/regression.diffs' -type f -print | sort)
     return "$native_rc"
   fi
   bash scripts/test-parallel.sh --profile db --suite managed-db
