@@ -74,6 +74,7 @@ run_managed_dev() {
   python3 scripts/test-recorded-chess-selection.py
   python3 scripts/test-chess-environment-benchmark.py ChessEnvironmentTests
   python3 scripts/test-ci-workspace.py
+  python3 scripts/test-product-ci-artifact-ownership.py
   python3 scripts/test-managed-db-scheduling.py
   python3 scripts/test-codegen-configure.py
   dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \

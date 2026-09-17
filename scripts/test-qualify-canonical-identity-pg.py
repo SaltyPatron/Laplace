@@ -7,6 +7,7 @@ receipt/refusal, canonical-suite completeness and sampled library identity.
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -94,6 +95,7 @@ class CanonicalPlanTests(unittest.TestCase):
             source = self.source / "extension" / ("laplace_" + suffix) / "tests"
             source.mkdir(parents=True)
             (source / "CMakeLists.txt").write_text(
+                'set(REGRESS_DB "laplace_regress_' + suffix + '")\n'
                 "set(REGRESS_TESTS first second)\nlist(APPEND REGRESS_TESTS third)\n")
             output = self.build / "extension" / ("laplace_" + suffix) / "tests/regress_output"
             db = "laplace_unique_" + suffix
@@ -132,7 +134,7 @@ class CanonicalPlanTests(unittest.TestCase):
     def test_configure_time_other_database_refused(self):
         command = self.plan["tests"][0]["command"]
         command[command.index("--dbname=laplace_unique_geom")] = "--dbname=laplace_other_geom"
-        with self.assertRaisesRegex(RuntimeError, "missing exact argument"):
+        with self.assertRaisesRegex(RuntimeError, "neither its source default"):
             self.validate()
 
     def test_external_pg_regress_refused(self):
@@ -347,6 +349,87 @@ class ActualCTestSelectionTests(unittest.TestCase):
             "returncode": self.operator.receipt["commands"][-1]["returncode"],
             "regex": old, "strict_json_parse_rejected": True,
             "diagnostic": output.splitlines()[:2]}), flush=True)
+
+
+
+class RetainedActualCTestPlanTests(unittest.TestCase):
+    """Replay the authenticated host plan after only relocating its physical root."""
+    def setUp(self):
+        fixture = Path(__file__).with_name("testdata") / "canonical-identity-pg-ctest-plan.json"
+        raw = fixture.read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         "f9c2c2a891f1162fc0044ecfaa19b96acc572afa3b7bbb753c2a82eb6b709f1c")
+        self.original = json.loads(raw)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        prior_root = "/build/laplace/recovery/canonical-identity/35191859349-1"
+        def relocate(value):
+            if isinstance(value, str):
+                return value.replace(prior_root, str(self.root))
+            if isinstance(value, list):
+                return [relocate(item) for item in value]
+            if isinstance(value, dict):
+                return {key: relocate(item) for key, item in value.items()}
+            return value
+        self.plan = relocate(self.original)
+        self.source, self.build, self.pg = (self.root / name for name in ("source", "build", "pg"))
+        self.bindir = self.pg / "bin"
+        self.bindir.mkdir(parents=True)
+        for test in self.plan["tests"]:
+            executable = Path(test["command"][0])
+            if module.beneath(executable, self.root):
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.write_text("read-only plan fixture; never executed")
+        for suffix in ("geom", "substrate"):
+            test = next(row for row in self.plan["tests"] if row["name"] == "regress_laplace_" + suffix)
+            self.assertIn("--dbname=laplace_regress_" + suffix, test["command"])
+            cases = [item for item in test["command"][1:] if not item.startswith("-")]
+            self.assertEqual(len(cases), 4 if suffix == "geom" else 52)
+            declaration = self.source / "extension" / ("laplace_" + suffix) / "tests/CMakeLists.txt"
+            declaration.parent.mkdir(parents=True)
+            # The fixture preserves the actual registered case sequence and the
+            # exact literal default declared by the authenticated e8 CMake owner.
+            declaration.write_text('set(REGRESS_DB "laplace_regress_' + suffix + '")\n' +
+                                   "set(REGRESS_TESTS " + " ".join(cases) + ")\n")
+
+    def validate(self):
+        return module.validate_test_plan(self.plan, self.source, self.build, self.bindir,
+                                         self.pg, "laplace_identity_35191859349_1")
+
+    def test_actual_default_databases_are_valid_with_private_prefixes(self):
+        result = self.validate()
+        self.assertEqual(result["geom"]["database"], "laplace_regress_geom")
+        self.assertEqual(result["substrate"]["database"], "laplace_regress_substrate")
+        self.assertEqual(len(self.plan["tests"]), 9)
+        print("RETAINED_CTEST_DEFAULT_DATABASES_ACCEPTED " + json.dumps({
+            "plan_git_blob": "4872612d4fa6c035588e1d6d0815eff0dfd5c17a",
+            "source_commit": "e8e99359fc27c4a78a7d56779bc4f495d3bb17ff",
+            "databases": {key: value["database"] for key, value in result.items()},
+            "case_counts": {key: len(value["cases"]) for key, value in result.items()},
+            "relocation_only": True, "executed_fixture_commands": 0}), flush=True)
+
+    def test_divergent_fixture_cleanup_database_is_refused(self):
+        cleanup = next(row for row in self.plan["tests"] if row["name"] == "regress_teardown_laplace_geom")
+        cleanup["command"][-1] = "laplace_other_geom"
+        with self.assertRaisesRegex(RuntimeError, "unexpected registered fixture cleanup"):
+            self.validate()
+
+    def test_source_undeclared_database_is_refused_even_when_all_commands_agree(self):
+        for test in self.plan["tests"]:
+            test["command"] = [value.replace("laplace_regress_geom", "laplace_foreign_geom")
+                               for value in test["command"]]
+        with self.assertRaisesRegex(RuntimeError, "neither its source default"):
+            self.validate()
+
+    def test_default_database_does_not_allow_live_pg_executable(self):
+        test = next(row for row in self.plan["tests"] if row["name"] == "regress_laplace_geom")
+        foreign = self.root.parent / (self.root.name + "-foreign-pg-regress")
+        foreign.write_text("foreign executable fixture; never executed")
+        self.addCleanup(foreign.unlink)
+        test["command"][0] = str(foreign)
+        with self.assertRaisesRegex(RuntimeError, "escapes isolated PG prefix"):
+            self.validate()
 
 
 if __name__ == "__main__":

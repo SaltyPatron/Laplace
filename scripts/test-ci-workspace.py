@@ -193,10 +193,12 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
                 + '[[ "$event" != "$TEST_FAIL_EVENT" ]] || exit 23\n')
 
         (self.seed / "scripts/check-installed-extension-current.py").write_text(
-            'import os\nfrom pathlib import Path\n'
+            'import os, subprocess\nfrom pathlib import Path\n'
+            'head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()\n'
+            'if head != os.environ["TARGET_SHA"]: raise SystemExit(98)\n'
             'with Path(os.environ["TEST_EVENTS"]).open("a") as stream:\n'
-            '    stream.write("extension-check\\n")\n'
-            'raise SystemExit(23 if os.environ["TEST_FAIL_EVENT"] == "extension-check" else 0)\n')
+            '    stream.write("artifact-proof\\n")\n'
+            'raise SystemExit(23 if os.environ["TEST_FAIL_EVENT"] == "artifact-proof" else 0)\n')
 
     def setUp(self):
         super().setUp()
@@ -242,11 +244,11 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         pipeline = "pipeline:sync-extension tune-pg tune-laplace perfcache-guc api-env"
         cases = (
             ("status", ["migration:status"]),
-            ("create", ["extension-check", "migration:up", pipeline, "health:fixture_database"]),
+            ("create", ["artifact-proof", "migration:up", pipeline, "health:fixture_database"]),
             ("drop", ["migration:nuke --yes"]),
-            ("recreate", ["extension-check", "migration:nuke --yes", "migration:up", pipeline,
+            ("recreate", ["artifact-proof", "migration:nuke --yes", "migration:up", pipeline,
                            "health:fixture_database"]),
-            ("update", ["extension-check", "maintenance:"]),
+            ("update", ["artifact-proof", "maintenance:"]),
             ("verify", ["health:fixture_database"]),
         )
         for operation, expected in cases:
@@ -327,16 +329,16 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         result = self.execute_database("recreate")
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
         self.assertEqual(self.events.read_text().splitlines(),
-                         ["environment", "extension-check", "migration:nuke --yes", "migration:up"])
+                         ["environment", "artifact-proof", "migration:nuke --yes", "migration:up"])
 
     def test_artifact_mismatch_stops_before_database_changes(self):
-        self.env["TEST_FAIL_EVENT"] = "extension-check"
+        self.env["TEST_FAIL_EVENT"] = "artifact-proof"
         for operation in ("create", "recreate", "update"):
             with self.subTest(operation=operation):
                 self.events.unlink(missing_ok=True)
                 result = self.execute_database(operation)
                 self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
-                self.assertEqual(self.events.read_text().splitlines(), ["environment", "extension-check"])
+                self.assertEqual(self.events.read_text().splitlines(), ["environment", "artifact-proof"])
 
     def test_seed_and_unknown_operations_never_start_database_work(self):
         for operation in ("seed", "unknown"):
@@ -401,7 +403,10 @@ class IntegratedLifecycle(unittest.TestCase):
         owner = source[start:finish]
         with tempfile.TemporaryDirectory(prefix="laplace-dev-suite-order-") as directory:
             events = Path(directory) / "events"
+            # This control owns suite continuation; the artifact ownership suite
+            # separately executes the real revision proof against Git and its marker.
             fixture = (
+                'require_built_revision() { return 0; }\n'
                 'bash() { printf "%s\\n" "$*" >> "$TEST_EVENTS"; '
                 'case "$*" in *native-dev) return 7;; *uci-dev) return 11;; '
                 '*) return 0;; esac; }\n')
@@ -416,7 +421,7 @@ class IntegratedLifecycle(unittest.TestCase):
                 "scripts/test-parallel.sh --profile dev-managed --suite uci-dev",
                 "scripts/test-parallel.sh --profile dev-managed --suite browser-dev"])
 
-    def test_product_lifecycle_reaches_database_and_live_product_checks(self):
+    def test_product_lifecycle_reaches_database_live_and_competitive_product_checks(self):
         result, events = self.execute(0)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(events, self.expected_lifecycle())

@@ -195,9 +195,18 @@ def validate_test_plan(document, source, build, bindir, pgprefix, stem):
         executable = resolved(command[0])
         require(beneath(executable, pgprefix) and executable.name == "pg_regress",
                 f"pg_regress escapes isolated PG prefix: {executable}")
-        expected_db = stem + "_" + suffix
         expected_input = source / "extension" / ("laplace_" + suffix) / "tests"
         expected_output = build / "extension" / ("laplace_" + suffix) / "tests" / "regress_output"
+        # CMake selects its literal default when LAPLACE_REGRESS_DB was absent
+        # at configure time. A later process environment cannot rename fixtures.
+        defaults = re.findall(r'set\(REGRESS_DB\s+"(laplace_[A-Za-z0-9_]+)"\)',
+                              (expected_input / "CMakeLists.txt").read_text())
+        require(len(defaults) == 1, f"{name} lacks one canonical source-declared default database")
+        db_arguments = [argument for argument in command if argument.startswith("--dbname=")]
+        require(len(db_arguments) == 1, f"{name} must select exactly one database")
+        expected_db = db_arguments[0].split("=", 1)[1]
+        require(expected_db in (defaults[0], stem + "_" + suffix),
+                f"{name} database is neither its source default nor the explicitly requested configured stem")
         for argument in ("--bindir=" + str(bindir), "--inputdir=" + str(expected_input),
                          "--outputdir=" + str(expected_output), "--dbname=" + expected_db,
                          "--user=laplace_admin", "--use-existing"):
@@ -830,7 +839,7 @@ def parser():
         result.add_argument("--" + option, required=True, type=Path)
     result.add_argument("--source-commit", required=True)
     result.add_argument("--install-receipt-sha256", required=True)
-    result.add_argument("--regress-db", required=True, help="exact unique stem used during CMake configuration")
+    result.add_argument("--regress-db", required=True, help="requested configure-time stem; source-declared defaults are also valid in this private cluster")
     result.add_argument("--port", required=True, type=int)
     result.add_argument("--runtime-library-directory", action="append", default=[], type=Path)
     result.add_argument("--protected-file", action="append", default=[], type=Path)

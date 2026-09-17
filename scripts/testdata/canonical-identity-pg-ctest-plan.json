@@ -1,0 +1,424 @@
+{
+  "backtraceGraph": {
+    "commands": [
+      "add_test"
+    ],
+    "files": [
+      "/build/laplace/recovery/canonical-identity/35191859349-1/source/extension/laplace_geom/tests/CMakeLists.txt",
+      "/build/laplace/recovery/canonical-identity/35191859349-1/source/extension/laplace_substrate/tests/CMakeLists.txt"
+    ],
+    "nodes": [
+      {
+        "file": 0
+      },
+      {
+        "command": 0,
+        "file": 0,
+        "line": 25,
+        "parent": 0
+      },
+      {
+        "file": 0
+      },
+      {
+        "command": 0,
+        "file": 0,
+        "line": 34,
+        "parent": 2
+      },
+      {
+        "file": 0
+      },
+      {
+        "command": 0,
+        "file": 0,
+        "line": 42,
+        "parent": 4
+      },
+      {
+        "file": 1
+      },
+      {
+        "command": 0,
+        "file": 1,
+        "line": 7,
+        "parent": 6
+      },
+      {
+        "file": 1
+      },
+      {
+        "command": 0,
+        "file": 1,
+        "line": 16,
+        "parent": 8
+      },
+      {
+        "file": 1
+      },
+      {
+        "command": 0,
+        "file": 1,
+        "line": 25,
+        "parent": 10
+      },
+      {
+        "file": 1
+      },
+      {
+        "command": 0,
+        "file": 1,
+        "line": 56,
+        "parent": 12
+      },
+      {
+        "file": 1
+      },
+      {
+        "command": 0,
+        "file": 1,
+        "line": 65,
+        "parent": 14
+      },
+      {
+        "file": 1
+      },
+      {
+        "command": 0,
+        "file": 1,
+        "line": 73,
+        "parent": 16
+      }
+    ]
+  },
+  "kind": "ctestInfo",
+  "tests": [
+    {
+      "backtrace": 1,
+      "command": [
+        "/usr/bin/bash",
+        "-c",
+        "\"/build/laplace/recovery/canonical-identity/35191859349-1/pg/bin/dropdb\" -U laplace_admin --if-exists laplace_regress_geom && \"/build/laplace/recovery/canonical-identity/35191859349-1/pg/bin/createdb\" -U laplace_admin -O laplace_admin laplace_regress_geom"
+      ],
+      "name": "regress_setup_laplace_geom",
+      "properties": [
+        {
+          "name": "FIXTURES_SETUP",
+          "value": [
+            "regress_db_geom"
+          ]
+        },
+        {
+          "name": "LABELS",
+          "value": [
+            "regress",
+            "regress_fixture"
+          ]
+        },
+        {
+          "name": "WORKING_DIRECTORY",
+          "value": "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_geom/tests"
+        }
+      ]
+    },
+    {
+      "backtrace": 3,
+      "command": [
+        "/build/laplace/recovery/canonical-identity/35191859349-1/pg/bin/dropdb",
+        "-U",
+        "laplace_admin",
+        "--if-exists",
+        "laplace_regress_geom"
+      ],
+      "name": "regress_teardown_laplace_geom",
+      "properties": [
+        {
+          "name": "DEPENDS",
+          "value": [
+            "regress_laplace_geom",
+            "regress_setup_laplace_geom"
+          ]
+        },
+        {
+          "name": "FIXTURES_CLEANUP",
+          "value": [
+            "regress_db_geom"
+          ]
+        },
+        {
+          "name": "LABELS",
+          "value": [
+            "regress",
+            "regress_fixture"
+          ]
+        },
+        {
+          "name": "WORKING_DIRECTORY",
+          "value": "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_geom/tests"
+        }
+      ]
+    },
+    {
+      "backtrace": 5,
+      "command": [
+        "/build/laplace/recovery/canonical-identity/35191859349-1/pg/lib/pgxs/src/test/regress/pg_regress",
+        "--bindir=/build/laplace/recovery/canonical-identity/35191859349-1/pg/bin",
+        "--inputdir=/build/laplace/recovery/canonical-identity/35191859349-1/source/extension/laplace_geom/tests",
+        "--outputdir=/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_geom/tests/regress_output",
+        "--dbname=laplace_regress_geom",
+        "--user=laplace_admin",
+        "--use-existing",
+        "hash128",
+        "st_4d",
+        "rle_trajectory",
+        "karcher_mean_4d"
+      ],
+      "name": "regress_laplace_geom",
+      "properties": [
+        {
+          "name": "DEPENDS",
+          "value": [
+            "regress_setup_laplace_geom"
+          ]
+        },
+        {
+          "name": "FIXTURES_REQUIRED",
+          "value": [
+            "regress_db_geom"
+          ]
+        },
+        {
+          "name": "LABELS",
+          "value": [
+            "regress"
+          ]
+        },
+        {
+          "name": "WORKING_DIRECTORY",
+          "value": "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_geom/tests"
+        }
+      ]
+    },
+    {
+      "backtrace": 7,
+      "command": [
+        "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests/generated_stage_sink_pg_native_probe"
+      ],
+      "name": "generated_stage_sink_pg_native_helpers",
+      "properties": [
+        {
+          "name": "LABELS",
+          "value": [
+            "native",
+            "persistence",
+            "physicality"
+          ]
+        },
+        {
+          "name": "WORKING_DIRECTORY",
+          "value": "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests"
+        }
+      ]
+    },
+    {
+      "backtrace": 9,
+      "command": [
+        "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests/physicality_descriptor_pg_native_probe"
+      ],
+      "name": "physicality_descriptor_pg_native_helpers",
+      "properties": [
+        {
+          "name": "LABELS",
+          "value": [
+            "native",
+            "physicality",
+            "provider"
+          ]
+        },
+        {
+          "name": "WORKING_DIRECTORY",
+          "value": "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests"
+        }
+      ]
+    },
+    {
+      "backtrace": 11,
+      "command": [
+        "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests/physicality_readback_pg_native_probe"
+      ],
+      "name": "physicality_readback_pg_native_helpers",
+      "properties": [
+        {
+          "name": "LABELS",
+          "value": [
+            "native",
+            "physicality",
+            "readback"
+          ]
+        },
+        {
+          "name": "WORKING_DIRECTORY",
+          "value": "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests"
+        }
+      ]
+    },
+    {
+      "backtrace": 13,
+      "command": [
+        "/usr/bin/bash",
+        "-c",
+        "\"/build/laplace/recovery/canonical-identity/35191859349-1/pg/bin/dropdb\" -U laplace_admin --if-exists laplace_regress_substrate && \"/build/laplace/recovery/canonical-identity/35191859349-1/pg/bin/createdb\" -U laplace_admin -O laplace_admin laplace_regress_substrate"
+      ],
+      "name": "regress_setup_laplace_substrate",
+      "properties": [
+        {
+          "name": "FIXTURES_SETUP",
+          "value": [
+            "regress_db_substrate"
+          ]
+        },
+        {
+          "name": "LABELS",
+          "value": [
+            "regress",
+            "regress_fixture"
+          ]
+        },
+        {
+          "name": "WORKING_DIRECTORY",
+          "value": "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests"
+        }
+      ]
+    },
+    {
+      "backtrace": 15,
+      "command": [
+        "/build/laplace/recovery/canonical-identity/35191859349-1/pg/bin/dropdb",
+        "-U",
+        "laplace_admin",
+        "--if-exists",
+        "laplace_regress_substrate"
+      ],
+      "name": "regress_teardown_laplace_substrate",
+      "properties": [
+        {
+          "name": "DEPENDS",
+          "value": [
+            "regress_laplace_substrate",
+            "regress_setup_laplace_substrate"
+          ]
+        },
+        {
+          "name": "FIXTURES_CLEANUP",
+          "value": [
+            "regress_db_substrate"
+          ]
+        },
+        {
+          "name": "LABELS",
+          "value": [
+            "regress",
+            "regress_fixture"
+          ]
+        },
+        {
+          "name": "WORKING_DIRECTORY",
+          "value": "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests"
+        }
+      ]
+    },
+    {
+      "backtrace": 17,
+      "command": [
+        "/build/laplace/recovery/canonical-identity/35191859349-1/pg/lib/pgxs/src/test/regress/pg_regress",
+        "--bindir=/build/laplace/recovery/canonical-identity/35191859349-1/pg/bin",
+        "--inputdir=/build/laplace/recovery/canonical-identity/35191859349-1/source/extension/laplace_substrate/tests",
+        "--outputdir=/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests/regress_output",
+        "--dbname=laplace_regress_substrate",
+        "--user=laplace_admin",
+        "--use-existing",
+        "bootstrap",
+        "glicko2_aggregate",
+        "entities_exist_bitmap",
+        "entity_identity_storage",
+        "entity_interpretation_readers",
+        "physicalities_exist_bitmap",
+        "consensus_signed",
+        "consensus_upsert",
+        "consensus_bulk_write",
+        "explore_web_neighbors",
+        "attestation_merge",
+        "generation_corpus",
+        "cognition_completion",
+        "couple_ordered_continuation",
+        "couple_standing_state",
+        "couple_provenance_state",
+        "operational_memory",
+        "task_shapes",
+        "steer_semantic_precedence",
+        "converse",
+        "relation_bands_summary",
+        "chat_loop",
+        "word_law",
+        "identity_law",
+        "schema_law",
+        "structural_surface",
+        "walk_richer_forward_pass",
+        "chess_read",
+        "chess_ranked_scope",
+        "chess_player_identity_scope",
+        "chess_fold_debt_repair",
+        "ops_reads",
+        "ops_control",
+        "ingest_throughput",
+        "walk_edge_weight_parity",
+        "belief_distribution",
+        "realize_ladder_parity",
+        "perfcache_read",
+        "display_label",
+        "search_path_independence",
+        "evict_source",
+        "prompt_election",
+        "apply_epoch",
+        "walk_symmetry",
+        "highway_mask_deposit",
+        "highway_mask_recovery",
+        "text_root_placements",
+        "content_carrier_vertices",
+        "forward_seed_parity",
+        "physicality_descriptor_admission",
+        "physicality_readback",
+        "physicality_readback_cold"
+      ],
+      "name": "regress_laplace_substrate",
+      "properties": [
+        {
+          "name": "DEPENDS",
+          "value": [
+            "regress_setup_laplace_substrate"
+          ]
+        },
+        {
+          "name": "FIXTURES_REQUIRED",
+          "value": [
+            "regress_db_substrate"
+          ]
+        },
+        {
+          "name": "LABELS",
+          "value": [
+            "regress"
+          ]
+        },
+        {
+          "name": "WORKING_DIRECTORY",
+          "value": "/build/laplace/recovery/canonical-identity/35191859349-1/build/extension/laplace_substrate/tests"
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 1,
+    "minor": 0
+  }
+}
