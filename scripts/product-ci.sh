@@ -20,7 +20,11 @@ provision_deps() {
 run_build() {
   local args=()
   [[ "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || args+=(--force-rebuild)
-  [[ "${LAPLACE_FORCE_CODEGEN:-}" != 1 ]] || args+=(--force-codegen)
+  if [[ "${LAPLACE_FORCE_CODEGEN:-}" == 1 || \
+        ! -f extension/laplace_substrate/sql/generated/seed_relation_types.sql.in || \
+        ! -f extension/laplace_substrate/sql/generated/seed_pos.sql.in ]]; then
+    args+=(--force-codegen)
+  fi
   bash scripts/pipeline.sh "${args[@]}" build
   mkdir -p build
   git rev-parse HEAD > build/.laplace-source-revision
