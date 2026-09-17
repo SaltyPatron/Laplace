@@ -201,6 +201,37 @@ TEST_F(PhysicalityDescriptorRetention, UnqueriedReferencePublishesOnlyPendingFro
     EXPECT_NE(retained, nullptr);
 }
 
+TEST_F(PhysicalityDescriptorRetention, MaterializedDescriptorsStoreRunsWithoutLosingLogicalConstituents) {
+    const auto child = compose({atom('r'), atom('s')});
+    const auto parent = compose({child, child, child, child});
+    auto source = stage({parent});
+    auto captured = capture(source.get());
+    Result result(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {}, {child.value.entity_id}, result), PHYSICALITY_DESCRIPTOR_OK);
+
+    Stage generated(physicality_descriptor_materialization_take_stage(result.get()), intent_stage_free);
+    ASSERT_NE(generated, nullptr);
+    auto retained = capture(generated.get());
+    ASSERT_NE(retained, nullptr);
+
+    size_t count = 0;
+    const auto* bodies = physicality_descriptor_capture_inputs(retained.get(), &count);
+    ASSERT_GT(count, 0u);
+    bool saw_compressed_run = false;
+    for (size_t i = 0; i < count; ++i) {
+        const auto& body = bodies[i];
+        if (body.n_constituents <= 0) continue;
+        size_t logical = 0;
+        ASSERT_EQ(trajectory_constituent_count(
+            body.trajectory_xyzm, body.trajectory_vertices, &logical), 0);
+        EXPECT_EQ(logical, static_cast<size_t>(body.n_constituents));
+        if (body.trajectory_vertices < static_cast<size_t>(body.n_constituents))
+            saw_compressed_run = true;
+    }
+    EXPECT_TRUE(saw_compressed_run)
+        << "descriptor materialization must preserve repeated logical children as RLE";
+}
+
 TEST_F(PhysicalityDescriptorRetention, OpaqueReferencesUseRealTypedLiteralGeometryWithoutReplacingChildren) {
     auto original = compose({atom('l'), atom('m')});
     original.value.type = 3;

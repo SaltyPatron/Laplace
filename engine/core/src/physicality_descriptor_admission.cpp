@@ -663,11 +663,14 @@ physicality_descriptor_status_t materialize(
         checkpoint();
         hash128_t placement;
         laplace_physicality_id_compute(node.geometry.id, node.type, &placement);
-        require(trajectory_build(output_children.data() + node.first_child, node.child_count, packed.data()) == 0);
+        size_t stored_vertices = 0;
+        require(trajectory_build_rle(output_children.data() + node.first_child,
+            node.child_count, packed.data(), &stored_vertices) == 0);
+        require(stored_vertices <= UINT32_MAX, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
         stage_require(intent_stage_add_entity(stage.get(), &node.geometry.id, 4, &document_type, &generated_source) == 0 &&
             intent_stage_add_physicality(stage.get(), &placement, &node.geometry.id, node.type,
                 node.geometry.coord.data(), &node.geometry.hilbert, packed.data(),
-                static_cast<uint32_t>(node.child_count), static_cast<int32_t>(node.child_count),
+                static_cast<uint32_t>(stored_vertices), static_cast<int32_t>(node.child_count),
                 1, 0.0, 1, 0, generated_at) == 0);
     }
     // Preserve the scalar append order and complete output. Subspans only
