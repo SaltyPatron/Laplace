@@ -187,7 +187,11 @@ int hash_composer_run_workers(
     hash_composer_arrays_t arrays;
     if (hash_composer_arrays_init(tree, resolver, resolver_user_data, &arrays) != 0)
         return -1;
-    if (arrays.count < 2) return hash_composer_run(tree, resolver, resolver_user_data);
+    /* A frontier narrower than the admitted worker set has no useful internal
+     * fan-out. Keep tiny content on the scalar oracle rather than manufacturing
+     * more native threads than semantic work items. */
+    if (arrays.count <= worker_count)
+        return hash_composer_run(tree, resolver, resolver_user_data);
 
     /* The tree is built bottom-up: every parent references an already-appended
      * contiguous child range. Compute dependency depth once, then execute all
