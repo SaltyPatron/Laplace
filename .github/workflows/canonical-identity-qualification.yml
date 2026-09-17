@@ -11,10 +11,10 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      BASE: 40ee7a676cb5944a86f8a7054454ae54d8b79556
+      BASE: f30dbae1ab095600b2a17ac084e104b54219485a
       EXTERNAL: 904da2e03db9f0b039d675ba7974078baa17f8d5
       COMMON: 5fbcaca34fc882fa376e49fe595302dd092a098d
-      MANIFEST: c77926976dc6e5d6a0ecbfae778ec17e21f2538e
+      MANIFEST: 0418361ccd4917b0174e096755c3e1926379125c
       CANDIDATE_REF: review/canonical-identity-20260917
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -101,6 +101,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -m 0700 "$EVIDENCE_ROOT/scratch"
+          export TMPDIR="$EVIDENCE_ROOT/scratch" TMP="$EVIDENCE_ROOT/scratch" TEMP="$EVIDENCE_ROOT/scratch"
           export PYTHONDONTWRITEBYTECODE=1
           python3 scripts/test-cutechess-gui-game.py 2>&1 | tee "$EVIDENCE_ROOT/gui-controls.log"
           python3 scripts/test-ci-workspace.py 2>&1 | tee "$EVIDENCE_ROOT/workspace-controls.log"
