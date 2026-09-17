@@ -121,6 +121,47 @@ try {
         // A hard navigation failure may leave no evaluable document.
       }
 
+      let layout = null;
+      try {
+        layout = await page.evaluate(() => {
+          const root = document.documentElement;
+          const viewportWidth = root.clientWidth;
+          const viewportHeight = root.clientHeight;
+          const documentWidth = Math.max(root.scrollWidth, document.body?.scrollWidth ?? 0);
+          const documentHeight = Math.max(root.scrollHeight, document.body?.scrollHeight ?? 0);
+          const visibleInteractive = Array.from(document.querySelectorAll('a,button,input,select,textarea,[role="button"],[role="tab"]'));
+          const clippedInteractiveControls = visibleInteractive.flatMap((element) => {
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            if (style.display === 'none' || style.visibility === 'hidden' || rect.width <= 0 || rect.height <= 0) return [];
+            const clippedLeft = Math.max(0, -rect.left);
+            const clippedRight = Math.max(0, rect.right - viewportWidth);
+            const clippedTop = Math.max(0, -rect.top);
+            const clippedBottom = Math.max(0, rect.bottom - viewportHeight);
+            if (clippedLeft < 1 && clippedRight < 1 && clippedTop < 1 && clippedBottom < 1) return [];
+            return [{
+              tag: element.tagName.toLowerCase(),
+              text: (element.getAttribute('aria-label') || element.textContent || element.getAttribute('placeholder') || '').trim().replace(/\\s+/g, ' ').slice(0, 120),
+              clippedLeft: Math.round(clippedLeft),
+              clippedRight: Math.round(clippedRight),
+              clippedTop: Math.round(clippedTop),
+              clippedBottom: Math.round(clippedBottom),
+              rect: { left: Math.round(rect.left), top: Math.round(rect.top), right: Math.round(rect.right), bottom: Math.round(rect.bottom), width: Math.round(rect.width), height: Math.round(rect.height) },
+            }];
+          }).slice(0, 50);
+          return {
+            viewportWidth,
+            viewportHeight,
+            documentWidth,
+            documentHeight,
+            horizontalOverflowPixels: Math.max(0, documentWidth - viewportWidth),
+            clippedInteractiveControls,
+          };
+        });
+      } catch {
+        // Preserve the rendered evidence even if layout inspection fails.
+      }
+
       const stem = `${viewport.name}-${fileStem(name)}`;
       const viewportShot = `${stem}.png`;
       const fullShot = `${stem}-full.png`;
@@ -149,6 +190,7 @@ try {
         navigationError,
         settleError,
         screenshotError,
+        layout,
         consoleMessages,
         pageErrors,
         requestFailures,
@@ -177,8 +219,10 @@ const totals = results.reduce((acc, item) => {
   acc.requestFailures += item.requestFailures.length;
   acc.http4xx += item.httpFailures.filter((entry) => entry.status >= 400 && entry.status < 500).length;
   acc.http5xx += item.httpFailures.filter((entry) => entry.status >= 500).length;
+  acc.horizontalOverflowRoutes += (item.layout?.horizontalOverflowPixels ?? 0) > 0 ? 1 : 0;
+  acc.clippedInteractiveControls += item.layout?.clippedInteractiveControls?.length ?? 0;
   return acc;
-}, { routes: 0, navigationErrors: 0, consoleErrors: 0, consoleWarnings: 0, pageErrors: 0, requestFailures: 0, http4xx: 0, http5xx: 0 });
+}, { routes: 0, navigationErrors: 0, consoleErrors: 0, consoleWarnings: 0, pageErrors: 0, requestFailures: 0, http4xx: 0, http5xx: 0, horizontalOverflowRoutes: 0, clippedInteractiveControls: 0 });
 
 const summary = {
   schema: 'laplace.ui-diagnostics/v1',
@@ -211,10 +255,12 @@ const markdown = [
   `- Console errors / warnings: **${totals.consoleErrors} / ${totals.consoleWarnings}**`,
   `- Failed requests: **${totals.requestFailures}**`,
   `- HTTP 4xx / 5xx observed from rendered pages: **${totals.http4xx} / ${totals.http5xx}**`,
+  `- Routes with document-level horizontal overflow: **${totals.horizontalOverflowRoutes}**`,
+  `- Clipped interactive controls observed: **${totals.clippedInteractiveControls}**`,
   '',
   '### Highest-signal captures',
   '',
-  ...worst.slice(0, 8).map((item) => `- \`${item.viewport.name} ${item.route}\`: nav=${item.navigationError ? 'error' : 'ok'}, pageErrors=${item.pageErrors.length}, requestFailures=${item.requestFailures.length}, httpFailures=${item.httpFailures.length}, consoleErrors=${item.consoleMessages.filter((m) => m.type === 'error').length}, ${item.loadMilliseconds} ms`),
+  ...worst.slice(0, 8).map((item) => `- \`${item.viewport.name} ${item.route}\`: nav=${item.navigationError ? 'error' : 'ok'}, pageErrors=${item.pageErrors.length}, requestFailures=${item.requestFailures.length}, httpFailures=${item.httpFailures.length}, consoleErrors=${item.consoleMessages.filter((m) => m.type === 'error').length}, clippedControls=${item.layout?.clippedInteractiveControls?.length ?? 0}, horizontalOverflow=${item.layout?.horizontalOverflowPixels ?? 0}px, ${item.loadMilliseconds} ms`),
   '',
   'The artifact contains viewport screenshots, full-page screenshots, serialized DOM, network evidence, and the machine-readable summary.',
   '',
