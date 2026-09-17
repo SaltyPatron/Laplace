@@ -20,6 +20,7 @@ internal static class ModelCatalog
     [
         new ModelInfo(Converse, "model", 0, "laplace"),
         new ModelInfo(Completions, "model", 0, "laplace"),
+        new ModelInfo(Code, "model", 0, "laplace"),
         new ModelInfo(EmbedForm, "model", 0, "laplace"),
         new ModelInfo(EmbedMeaning, "model", 0, "laplace"),
     ];
@@ -29,6 +30,9 @@ internal static class ModelCatalog
 
     public static bool IsChatModel(string model) =>
         model is Converse or Completions;
+
+    public static bool IsCode(string model) =>
+        string.Equals(model, Code, StringComparison.Ordinal);
 
     public static bool IsCompletionsModel(string model) =>
         model is Completions;

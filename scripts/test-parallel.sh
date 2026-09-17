@@ -60,8 +60,6 @@ set_installed_perfcache() {
   [[ -z "$candidate" ]] || export LAPLACE_PERFCACHE_BIN="$candidate"
 }
 
-# CTest must come from the same pinned distribution that configured this tree.
-# Build and test stages run in separate shells, so pipeline's PATH is not inherited.
 run_ctest() {
   python3 "$ROOT/scripts/provision-cmake.py" \
     --root "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/tools/cmake" \
@@ -128,9 +126,6 @@ run_native_db() {
 
 run_managed_db() {
   set_installed_perfcache
-  # PostgreSQL's machine plan budgets one ingest process and its internal COPY
-  # fanout. Test projects otherwise create simultaneous independent full pools.
-  # Serialize project hosts while retaining each writer's native parallelism.
   dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
     -m:1 -p:BuildInParallel=false --filter 'Tier=db'
 }
@@ -141,11 +136,13 @@ run_live_floor() {
 }
 
 run_live_api() {
-  local base capabilities readiness inventory completion
+  local base capabilities readiness inventory completion models code_completion
   base="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
   capabilities=$(curl -fsS "$base/v1/capabilities")
   grep -q '"chat_completions"' <<<"$capabilities"
   grep -q '"op"' <<<"$capabilities"
+  models=$(curl -fsS "$base/v1/models")
+  grep -q '"laplace-code-001"' <<<"$models"
   readiness=$(curl -fsS "$base/health/ready")
   grep -q '"ready":true' <<<"$readiness"
   grep -q '"substrate_reachable":true' <<<"$readiness"
@@ -154,19 +151,21 @@ run_live_api() {
   grep -q '"object":"op.result"' <<<"$inventory"
   completion=$(curl -fsS -X POST "$base/v1/chat/completions" -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
     --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')
-  python3 -c '
-import json, sys
-response = json.load(sys.stdin)
-if response.get("object") != "chat.completion":
-    raise SystemExit("LIVE_CHAT_INVALID_OBJECT: expected chat.completion")
-choices = response.get("choices")
-if not isinstance(choices, list) or not choices:
-    raise SystemExit("LIVE_CHAT_NO_CHOICES: chat completion returned no choices")
-message = choices[0].get("message") if isinstance(choices[0], dict) else None
-content = message.get("content") if isinstance(message, dict) else None
-if not isinstance(content, str) or not content.strip():
-    raise SystemExit("LIVE_CHAT_EMPTY: chat completion returned no realized text")
-' <<<"$completion"
+  grep -q '"object":"chat.completion"' <<<"$completion"
+  if ! python3 -c 'import json,sys; d=json.load(sys.stdin); c=d["choices"][0]["message"]["content"]; p=d["metadata"]["performance"]; assert isinstance(c,str) and c.strip(); assert p["output_words"] > 0' <<<"$completion"; then
+    echo "::error::live chat returned a completion envelope without realized text" >&2
+    printf '%s\n' "$completion" >&2
+    return 1
+  fi
+
+  code_completion=$(curl -fsS -X POST "$base/v1/code/completions" \
+    -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+    --data '{"model":"laplace-code-001","prompt":"main","code_language":"python","max_tokens":256,"window":8,"temperature":0.2,"top_k":32,"max_attempts":6}')
+  if ! python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["object"]=="code.completion"; assert d["model"]=="laplace-code-001"; assert d["verified"] is True; assert isinstance(d["code"],str) and d["code"].strip(); assert d["candidate_id"]; a=d["attempts"]; assert a and a[-1]["verified"] is True' <<<"$code_completion"; then
+    echo "::error::live code player did not close generation -> AST admission -> toolchain witness -> fold" >&2
+    printf '%s\n' "$code_completion" >&2
+    return 1
+  fi
 }
 
 run_managed_live() {

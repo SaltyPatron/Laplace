@@ -61,8 +61,6 @@ builder.Services.AddRateLimiter(options =>
                     QueueLimit = 0
                 });
 
-        // Before authentication, headers and presented keys are untrusted. Rotating
-        // either must not manufacture fresh request budgets.
         var partition = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         return RateLimitPartition.GetSlidingWindowLimiter($"client:{partition}",
             _ => new SlidingWindowRateLimiterOptions
@@ -94,9 +92,6 @@ forwardedHeaders.KnownProxies.Add(IPAddress.IPv6Loopback);
 app.UseForwardedHeaders(forwardedHeaders);
 app.UseMiddleware<RefactorProxyMiddleware>();
 
-// Static assets never need a browser authentication ticket. Serve them before
-// cookie authentication so one page load does not turn every hashed JS/CSS/font
-// request into a PostgreSQL web-session lookup.
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -125,6 +120,7 @@ app.MapAdminEndpoints();
 app.MapIngestAdminEndpoints();
 app.MapServiceControlEndpoints();
 app.MapOpenAiCompatEndpoints();
+app.MapCodeEndpoints();
 app.MapFoundryEndpoints();
 app.MapBillingEndpoints();
 app.MapBillingIdentityEndpoints();
