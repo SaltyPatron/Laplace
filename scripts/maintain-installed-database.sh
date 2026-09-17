@@ -28,7 +28,7 @@ if [[ "${LAPLACE_FRESH_DB:-}" != 1 ]]; then
       "SELECT to_regclass('laplace.entity_interpretations') IS NOT NULL" 2>/dev/null || true)"
     if [[ "$entity_partition_strategy" != h || "$have_interpretations" != t ]]; then
       needs_identity_reseed=1
-      echo "::notice::installed substrate uses the pre-canonical entity storage generation; recreating the database before extension activation"
+      echo "::notice::installed substrate uses the pre-canonical entity storage generation; recreating and reseeding before activation"
     fi
   fi
 fi
@@ -38,6 +38,16 @@ if [[ "${LAPLACE_FRESH_DB:-}" == 1 || "$needs_identity_reseed" == 1 ]]; then
   args+=(--fresh-db)
 fi
 bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
+
+# The identity-storage contract explicitly makes reset+reseed the migration path.
+# Leaving the recreated canonical schema empty would make the same lifecycle fail
+# its live substrate floor later and, more importantly, would not restore a usable
+# Laplace installation. Re-admit the complete canonical foundation through the
+# normal generic ingest spine using the product runtime that the caller already built.
+if [[ "$needs_identity_reseed" == 1 ]]; then
+  bash scripts/ensure-foundation.sh
+fi
+
 if [[ "$mode" == all ]]; then
   bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
 fi
