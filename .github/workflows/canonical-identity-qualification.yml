@@ -1,0 +1,99 @@
+name: Assemble canonical identity candidate
+on:
+  push:
+    branches: [review/canonical-identity-20260917]
+    paths: [.github/workflows/canonical-identity-qualification.yml]
+permissions:
+  contents: write
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE: 3a161d0f8390d4d5c3f9309d5a08746418d13b7d
+      EXTERNAL: 1c5eb49378c5d6c698e735a0fe8e1e7260429f28
+      CANDIDATE_REF: review/canonical-identity-20260917
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reconcile exact source histories in the ordinary hosted checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 0002
+          evidence_root="/build/laplace/work/identity-merge-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          sudo install -d -m 2775 -o "$(id -u)" -g "$(id -g)" /build/laplace/work
+          test ! -e "$evidence_root"
+          mkdir -m 0700 "$evidence_root"
+          export EVIDENCE_ROOT="$evidence_root"
+          printf 'EVIDENCE_ROOT=%s\n' "$evidence_root" >> "$GITHUB_ENV"
+          cp .github/workflows/canonical-identity-qualification.yml "$evidence_root/workflow.yml"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$BASE"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git config user.name "Laplace qualification"
+          git config user.email "qualification@users.noreply.github.com"
+          git_auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $git_auth"
+          unset git_auth
+          git fetch --no-tags origin "$EXTERNAL"
+          test "$(git merge-base "$BASE" "$EXTERNAL")" = dd31256d3e8deca265a9b7861109e20273de52cb
+          set +e
+          git merge --no-commit --no-ff "$EXTERNAL" > "$evidence_root/merge.log" 2>&1
+          merge_status=$?
+          set -e
+          cat "$evidence_root/merge.log"
+          git ls-files -u > "$evidence_root/conflict-index.txt"
+          git diff --binary > "$evidence_root/worktree.patch"
+          git diff --cached --binary > "$evidence_root/index.patch"
+          if [[ "$merge_status" -ne 0 ]]; then
+            python3 - <<'PY'
+          import json,os,subprocess
+          from pathlib import Path
+          root=Path(os.environ["EVIDENCE_ROOT"])
+          records=[]
+          for line in subprocess.check_output(["git","ls-files","-u"],text=True).splitlines():
+              metadata,path=line.split("\t",1)
+              mode,sha,stage=metadata.split()
+              raw=subprocess.check_output(["git","cat-file","blob",sha])
+              name="conflict-"+str(len(records))+"-stage"+stage+".txt"
+              (root/name).write_bytes(raw)
+              records.append({"path":path,"mode":mode,"blob":sha,"stage":int(stage),"file":name})
+          (root/"conflicts.json").write_text(json.dumps(records,indent=2)+"\n")
+          PY
+            exit "$merge_status"
+          fi
+          git rm -- .github/workflows/identity-storage-proof.yml .github/workflows/identity-working-set-patch.yml scripts/patch-identity-working-set.py
+          git diff --check --cached
+          git diff --cached --binary > "$evidence_root/reconciled.patch"
+          git commit -m "Reconcile canonical identity source for isolated qualification"
+          test "$(git rev-parse HEAD^1)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^2)" = "$EXTERNAL"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git ls-tree -r HEAD > "$evidence_root/source-tree.txt"
+          python3 - <<'PY'
+          import json,os,subprocess
+          from pathlib import Path
+          def git(*args): return subprocess.check_output(["git",*args],text=True).strip()
+          receipt={"base":os.environ["BASE"],"external":os.environ["EXTERNAL"],
+              "operator":os.environ["GITHUB_SHA"],"merged_commit":git("rev-parse","HEAD"),
+              "tree":git("rev-parse","HEAD^{tree}"),"parents":git("show","-s","--format=%P","HEAD").split(),
+              "status":"source reconciliation only; corrected leaf overlay and qualification still pending",
+              "excluded":[".github/workflows/identity-storage-proof.yml",".github/workflows/identity-working-set-patch.yml","scripts/patch-identity-working-set.py"]}
+          (Path(os.environ["EVIDENCE_ROOT"])/"source.json").write_text(json.dumps(receipt,indent=2)+"\n")
+          print(json.dumps(receipt,indent=2))
+          PY
+          test "$(git ls-remote origin "refs/heads/$CANDIDATE_REF" | cut -f1)" = "$GITHUB_SHA"
+          git push origin "HEAD:refs/heads/$CANDIDATE_REF"
+      - name: Retain reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: canonical-identity-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.EVIDENCE_ROOT }}
+          if-no-files-found: error
