@@ -38,12 +38,7 @@ public static class ModelCoordinates
         SubstrateChangeBuilder builder, string value, Hash128 sourceId)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        byte[] utf8 = Encoding.UTF8.GetBytes(value);
-        if (!ContentTierSpine.TryStageIntoBuilder(builder, utf8, sourceId, out Hash128 staged))
-            throw new InvalidOperationException($"structural component '{value}' has no content root");
-        OrderedCompositionComponent component = TextComponent(value);
-        if (component.Id != staged)
-            throw new InvalidOperationException($"structural component '{value}' changed identity during staging");
-        return component;
+        return ContentEmitter.StageComponent(builder, value, sourceId)
+            ?? throw new InvalidOperationException($"structural component '{value}' has no content root");
     }
 }
