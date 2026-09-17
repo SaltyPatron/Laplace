@@ -455,6 +455,195 @@ laplace_trajectory_scope_bind_input(LaplaceTrajectoryScope *scope,
     MemoryContextDelete(work);
 }
 
+typedef struct StructuralKey
+{
+    hash128_t source;
+    hash128_t target;
+} StructuralKey;
+
+typedef struct StructuralEntry
+{
+    StructuralKey key;
+    uint32 relation_mask;
+    int64 occurrences;
+    uint64 nearest_gap;
+} StructuralEntry;
+
+static void
+structural_add(HTAB *crossings, const hash128_t *source, const hash128_t *target,
+               uint32 relation, int64 occurrences, uint64 gap)
+{
+    StructuralKey key = {*source, *target};
+    bool found;
+    StructuralEntry *entry = hash_search(crossings, &key, HASH_ENTER, &found);
+    if (!found)
+    {
+        entry->relation_mask = 0;
+        entry->occurrences = 0;
+        entry->nearest_gap = UINT64CONST(0xFFFFFFFFFFFFFFFF);
+    }
+    if (occurrences < 0 || entry->occurrences > PG_INT64_MAX - occurrences)
+        ereport(ERROR, (errmsg("trajectory structural crossings: occurrence count overflow")));
+    entry->relation_mask |= relation;
+    entry->occurrences += occurrences;
+    if (gap < entry->nearest_gap) entry->nearest_gap = gap;
+}
+
+static int
+structural_cmp(const void *left, const void *right)
+{
+    const LaplaceStructuralCandidate *a = left, *b = right;
+    int cmp = memcmp(&a->source, &b->source, sizeof(hash128_t));
+    if (cmp != 0) return cmp;
+    cmp = memcmp(&a->id, &b->id, sizeof(hash128_t));
+    if (cmp != 0) return cmp;
+    if (a->relation_mask < b->relation_mask) return -1;
+    if (a->relation_mask > b->relation_mask) return 1;
+    return 0;
+}
+
+LaplaceStructuralCandidate *
+laplace_trajectory_structural_candidates(LaplaceTrajectoryScope *scope,
+                                         ArrayType *sources,
+                                         uint32 relation_mask,
+                                         int *count)
+{
+    const uint32 supported = LAPLACE_STRUCTURAL_CONTAINER |
+                             LAPLACE_STRUCTURAL_CONSTITUENT |
+                             LAPLACE_STRUCTURAL_PREDECESSOR |
+                             LAPLACE_STRUCTURAL_SUCCESSOR |
+                             LAPLACE_STRUCTURAL_COOCCUR;
+    MemoryContext owner = CurrentMemoryContext;
+    MemoryContext work = AllocSetContextCreate(owner, "trajectory structural crossings",
+                                               ALLOCSET_DEFAULT_SIZES);
+    MemoryContext previous = MemoryContextSwitchTo(work);
+    Datum *values = NULL;
+    bool *nulls = NULL;
+    int source_count = 0;
+    HASHCTL ctl = {0};
+    LaplaceStructuralCandidate *result;
+
+    if (!count)
+        elog(ERROR, "trajectory structural crossings: count output is required");
+    *count = 0;
+    if (!scope || !sources || relation_mask == 0)
+    {
+        MemoryContextSwitchTo(owner);
+        result = palloc(sizeof(*result));
+        MemoryContextDelete(work);
+        return result;
+    }
+    if (relation_mask & ~supported)
+        ereport(ERROR, (errmsg("trajectory structural crossings: unsupported relation mask %u",
+                               relation_mask)));
+    if (ARR_NDIM(sources) > 1 || ARR_ELEMTYPE(sources) != BYTEAOID)
+        ereport(ERROR, (errmsg("trajectory structural crossings: sources must be a 1-D bytea array")));
+
+    ctl.keysize = ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = work;
+    HTAB *source_ids = hash_create("trajectory structural sources", 128, &ctl,
+                                   HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    deconstruct_array(sources, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &values, &nulls, &source_count);
+    for (int i = 0; i < source_count; ++i)
+    {
+        if (nulls[i])
+            ereport(ERROR, (errmsg("trajectory structural crossings: sources contain NULL")));
+        bytea *id = DatumGetByteaPP(values[i]);
+        if (VARSIZE_ANY_EXHDR(id) != sizeof(hash128_t))
+            ereport(ERROR, (errmsg("trajectory structural crossings: source ids must be 16 bytes")));
+        hash_search(source_ids, VARDATA_ANY(id), HASH_ENTER, NULL);
+    }
+    if (source_count > 0)
+    {
+        pfree(values);
+        pfree(nulls);
+    }
+
+    ctl.keysize = sizeof(StructuralKey);
+    ctl.entrysize = sizeof(StructuralEntry);
+    HTAB *crossings = hash_create("trajectory structural candidates", 256, &ctl,
+                                  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    for (ScopedTrajectory *trajectory = scope->trajectories;
+         trajectory; trajectory = trajectory->next)
+    {
+        uint32 npoints = 0;
+        const unsigned char *raw = laplace_trajectory_wkb_points(trajectory->wkb, &npoints);
+        if (npoints == 0) continue;
+        if ((Size)npoints > MaxAllocSize / (4 * sizeof(double)))
+            ereport(ERROR, (errmsg("trajectory structural crossings: packed trajectory exceeds allocation capacity")));
+        Size bytes = (Size)npoints * 4 * sizeof(double);
+        double *aligned = palloc(bytes);
+        memcpy(aligned, raw, bytes);
+        size_t logical = 0;
+        if (trajectory_constituent_count(aligned, npoints, &logical) != 0 ||
+            logical > INT_MAX || logical > MaxAllocSize / sizeof(hash128_t))
+            elog(ERROR, "trajectory structural crossings: invalid or oversized trajectory");
+        hash128_t *items = palloc(sizeof(*items) * Max(logical, (size_t)1));
+        int decoded = trajectory_constituents(aligned, npoints, items, logical);
+        if (decoded < 0 || (size_t)decoded != logical)
+            elog(ERROR, "trajectory structural crossings: constituent decode failed");
+
+        if ((relation_mask & LAPLACE_STRUCTURAL_CONSTITUENT) &&
+            hash_search(source_ids, &trajectory->entity, HASH_FIND, NULL))
+            for (size_t i = 0; i < logical; ++i)
+                structural_add(crossings, &trajectory->entity, &items[i],
+                               LAPLACE_STRUCTURAL_CONSTITUENT, 1, 0);
+
+        for (size_t i = 0; i < logical; ++i)
+        {
+            const hash128_t *source = &items[i];
+            if (!hash_search(source_ids, source, HASH_FIND, NULL)) continue;
+            if (relation_mask & LAPLACE_STRUCTURAL_CONTAINER)
+                structural_add(crossings, source, &trajectory->entity,
+                               LAPLACE_STRUCTURAL_CONTAINER, 1, 0);
+            if ((relation_mask & LAPLACE_STRUCTURAL_PREDECESSOR) && i > 0)
+                structural_add(crossings, source, &items[i - 1],
+                               LAPLACE_STRUCTURAL_PREDECESSOR, 1, 1);
+            if ((relation_mask & LAPLACE_STRUCTURAL_SUCCESSOR) && i + 1 < logical)
+                structural_add(crossings, source, &items[i + 1],
+                               LAPLACE_STRUCTURAL_SUCCESSOR, 1, 1);
+            if (relation_mask & LAPLACE_STRUCTURAL_COOCCUR)
+            {
+                for (size_t j = 0; j < logical; ++j)
+                {
+                    if (j == i) continue;
+                    uint64 gap = (uint64)(j > i ? j - i : i - j);
+                    structural_add(crossings, source, &items[j],
+                                   LAPLACE_STRUCTURAL_COOCCUR, 1, gap);
+                }
+            }
+            if ((i & 255) == 0) CHECK_FOR_INTERRUPTS();
+        }
+        pfree(items);
+        pfree(aligned);
+        CHECK_FOR_INTERRUPTS();
+    }
+
+    long entries = hash_get_num_entries(crossings);
+    if (entries > INT_MAX || (uint64)entries > MaxAllocSize / sizeof(*result))
+        ereport(ERROR, (errmsg("trajectory structural crossings: candidate set exceeds allocation capacity")));
+    MemoryContextSwitchTo(owner);
+    result = palloc(sizeof(*result) * Max(entries, 1));
+    HASH_SEQ_STATUS sequence;
+    StructuralEntry *entry;
+    hash_seq_init(&sequence, crossings);
+    while ((entry = hash_seq_search(&sequence)) != NULL)
+        result[(*count)++] = (LaplaceStructuralCandidate){
+            .source = entry->key.source,
+            .id = entry->key.target,
+            .relation_mask = entry->relation_mask,
+            .occurrences = entry->occurrences,
+            .nearest_gap = entry->nearest_gap
+        };
+    qsort(result, *count, sizeof(*result), structural_cmp);
+    MemoryContextSwitchTo(previous);
+    MemoryContextDelete(work);
+    MemoryContextSwitchTo(owner);
+    return result;
+}
+
 LaplaceContinuation *
 laplace_trajectory_continuations(ArrayType *context_array, bool suffix_backoff, int *count)
 {
@@ -524,10 +713,10 @@ laplace_trajectory_continuations_scoped(ArrayType *context_array, bool suffix_ba
                 if (!entry->ordinal_index)
                     elog(ERROR, "trajectory scope: ordinal index allocation failed");
             }
-            int result = trajectory_ordinal_index_read(entry->ordinal_index,
+            int result_code = trajectory_ordinal_index_read(entry->ordinal_index,
                 position.ordinal, &position.successor, NULL);
-            if (result < 0) elog(ERROR, "trajectory scope: invalid ordinal read");
-            if (result == 1) continue;
+            if (result_code < 0) elog(ERROR, "trajectory scope: invalid ordinal read");
+            if (result_code == 1) continue;
             position.stride = n_context;
             scope->positions[retained++] = position;
             record_successor(&state, position.ordinal, n_context, &position.successor);
