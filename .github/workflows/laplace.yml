@@ -90,7 +90,7 @@ jobs:
             GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
             git fetch --no-tags --depth=2 origin "$TARGET_SHA"
           unset checkout_auth CHECKOUT_TOKEN
-          git checkout --detach "$TARGET_SHA"
+          git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
           git diff --quiet
           git diff --cached --quiet
@@ -150,7 +150,7 @@ jobs:
             GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
             git fetch --no-tags --depth=2 origin "$TARGET_SHA"
           unset checkout_auth CHECKOUT_TOKEN
-          git checkout --detach "$TARGET_SHA"
+          git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
           git diff --quiet
           git diff --cached --quiet
