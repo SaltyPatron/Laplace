@@ -45,6 +45,12 @@ The joint owner nominates endpoint pairs from existing non-target graph evidence
 
 Both snapshot admissions retain their replay checks. The four model-evidence minima remain 1,000 each. Complete configured code-corpus admission, SQL readback, GGUF size and synthesis checks, and the external behavioral threshold remain unchanged. Source and fixture controls do not establish that a full model proof passes.
 
+## Executed source controls
+
+[Run 35213788581, job 105177323338](https://github.com/SaltyPatron/Laplace/actions/runs/35213788581/job/105177323338) authenticated the exact five source/test leaves and passed Bash syntax plus all 19 controls: three replay controls, six two-checkpoint orchestration controls, and ten prerequisite-probe controls. They ran in 0.033, 0.095, and 0.010 seconds respectively. The tests exercise shell command ordering and failures, actual fixture executable startup, bounded footer parsing, and model metadata/sample validation. They perform no real model ingestion or semantic proof.
+
+Retained artifact 10493847564 has SHA-256 83397f8e1770dc95a0b320682882b7b9a2061bc681f755d281a7a543fab98858. The hosted operator was 22076a81ce6f85dba9daba5ba3c1265ddcf664c9 with workflow 1104fb6c4269536682c1b1d53e8f5768067e9fa2; the source-control job did not run on the product host.
+
 ## Stack payload resolution remains blocked
 
 The [official Stack-v2 dataset card](https://huggingface.co/datasets/bigcode/the-stack-v2) documents that the shards distribute identifiers separately from file bodies. Its payload route is s3://softwareheritage/content/{blob_id}: decompress gzip, decode each row's src_encoding, and retain source text with its provenance. Bulk access requires the provider's Software Heritage/INRIA agreement and AWS credentials. The current card lists v2.2.0, including removals through July 29, 2026. Unversioned local downloads do not establish that revision.
