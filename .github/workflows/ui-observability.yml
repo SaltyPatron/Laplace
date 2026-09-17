@@ -3,6 +3,11 @@ name: Laplace — UI observability
 # Evidence-only workflow. It does not build, deploy, seed, mutate substrate state,
 # or participate in the product lifecycle/required checks.
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ui-observability.yml"
+      - "web/scripts/capture-ui-diagnostics.mjs"
   workflow_dispatch:
     inputs:
       base_url:
@@ -20,8 +25,8 @@ permissions:
   contents: read
 
 env:
-  LAPLACE_UI_URL: ${{ inputs.base_url }}
-  LAPLACE_UI_ROUTES: ${{ inputs.routes }}
+  LAPLACE_UI_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || 'http://127.0.0.1:5187' }}
+  LAPLACE_UI_ROUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.routes || '' }}
 
 jobs:
   capture:
