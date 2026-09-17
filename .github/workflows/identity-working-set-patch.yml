@@ -1,0 +1,33 @@
+name: Laplace — apply identity working-set patch
+
+on:
+  push:
+    branches: [fix/identity-storage-cohesion]
+    paths:
+      - scripts/patch-identity-working-set.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/identity-storage-cohesion
+          fetch-depth: 2
+      - name: Apply deterministic identity presence repair
+        run: python3 scripts/patch-identity-working-set.py
+      - name: Commit generated source repair
+        run: |
+          set -euo pipefail
+          git diff --check
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name SaltyPatron
+          git config user.email thesaltypatron@gmail.com
+          git add app/Laplace.Substrate/Crud/Npgsql/NpgsqlWorkingSetApply.cs
+          git commit -m "Make entity verification id-only and order-invariant"
+          git push origin HEAD:fix/identity-storage-cohesion
