@@ -4,9 +4,7 @@
   "runner": "scripts/benchmark_suite.py",
   "workflow": ".github/workflows/benchmark-evidence.yml",
   "triggers": [
-    "workflow_dispatch",
-    "explicit workflow_call",
-    "push only to verify/chess-acceptance-* operator branches at the exact deployed revision"
+    "workflow_dispatch"
   ],
   "source_core_mutability": "none_except_temporary_outputs",
   "artifact_binding": {
@@ -91,7 +89,6 @@
     "daily_rate": "arithmetic extrapolation of the measured interval, never a day-long observation"
   },
   "explicit_acceptance": {
-    "workflow_suite": "acceptance",
     "owner": "scripts/accept-chess-environment.py",
     "ordinary_delivery_dependency": false,
     "requires_exact_deployed_source_revision": true,
@@ -106,6 +103,21 @@
       "GeometryZM storage baseline",
       "Stockfish and Laplace UCI calibration"
     ],
-    "game_capacity_authority": "complete generated-and-recorded collector only"
+    "game_capacity_authority": "complete generated-and-recorded collector only",
+    "execution_surface": "explicit operator script; not exposed as a benchmark-evidence workflow suite"
+  },
+  "workflow_driver": "scripts/benchmark-evidence-ci.sh",
+  "host_ownership": {
+    "lock": "/build/laplace/work/host-resource.lock",
+    "scope": [
+      "workflow driver staging",
+      "target fetch and checkout",
+      "build or installed-runtime observation",
+      "measurement"
+    ],
+    "github_actions_concurrency_group": null,
+    "preserve_every_dispatch": true,
+    "driver_revision": "workflow dispatch revision",
+    "target_revision": "resolved target_ref or dispatch revision"
   }
 }
