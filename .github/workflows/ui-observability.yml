@@ -74,12 +74,14 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
 
-          mkdir -p build/.stamps
+          tooling_state="$lock_root/ui-observability"
+          mkdir -p "$tooling_state"
           current="$(sha256sum web/package-lock.json | awk '{print $1}')"
-          previous="$(cat build/.stamps/npm-lock 2>/dev/null || true)"
+          stamp="$tooling_state/npm-lock.sha256"
+          previous="$(cat "$stamp" 2>/dev/null || true)"
           if [[ ! -d web/node_modules || "$current" != "$previous" ]]; then
             (cd web && npm ci --no-audit --no-fund --prefer-offline)
-            printf '%s\n' "$current" > build/.stamps/npm-lock
+            printf '%s\n' "$current" > "$stamp"
           fi
           (cd web && npx playwright install chromium)
 
