@@ -92,4 +92,53 @@ public class HashComposerTests
             Assert.Contains("-7", ex.Message);
         }
     }
+
+    [Fact]
+    public unsafe void RunWorkers_MatchesScalarAcrossCompleteDag()
+    {
+        static TierTree Build()
+        {
+            const uint leaves = 256;
+            const uint fanout = 8;
+            var tree = TierTree.New(320);
+            for (uint i = 0; i < leaves; ++i)
+                tree.AddLeaf(0, i, i, 1);
+
+            uint levelFirst = 0;
+            uint levelCount = leaves;
+            byte tier = 1;
+            while (levelCount > 1)
+            {
+                uint nextFirst = (uint)tree.NodeCount;
+                uint nextCount = 0;
+                for (uint i = 0; i < levelCount; i += fanout)
+                {
+                    uint width = Math.Min(fanout, levelCount - i);
+                    tree.AddNode(tier, levelFirst + i, width, i, width);
+                    ++nextCount;
+                }
+                levelFirst = nextFirst;
+                levelCount = nextCount;
+                ++tier;
+            }
+            return tree;
+        }
+
+        using var scalar = Build();
+        using var parallel = Build();
+        HashComposer.Run(scalar, &SynthResolver);
+        HashComposer.RunWorkers(parallel, &SynthResolver, 4);
+
+        Assert.Equal(scalar.NodeCount, parallel.NodeCount);
+        for (uint i = 0; i < scalar.NodeCount; ++i)
+        {
+            TierNodeView expected = scalar.GetNode(i);
+            TierNodeView actual = parallel.GetNode(i);
+            Assert.Equal(expected.Id, actual.Id);
+            Assert.Equal(0, expected.Hilbert.CompareToBytewise(actual.Hilbert));
+            for (int axis = 0; axis < 4; ++axis)
+                Assert.Equal(expected.Coord[axis], actual.Coord[axis]);
+        }
+    }
+
 }

@@ -253,6 +253,13 @@ public static unsafe partial class NativeInterop
         delegate* unmanaged[Cdecl]<uint, IntPtr, Hash128*, double*, Hilbert128*, int> resolver,
         IntPtr resolverUserData);
 
+    [LibraryImport(Library, EntryPoint = "hash_composer_run_workers")]
+    internal static partial int HashComposerRunWorkers(
+        IntPtr tree,
+        delegate* unmanaged[Cdecl]<uint, IntPtr, Hash128*, double*, Hilbert128*, int> resolver,
+        IntPtr resolverUserData,
+        nuint workerCount);
+
     [LibraryImport(Library, EntryPoint = "merkle_dedup_filter_novel")]
     internal static partial int MerkleDedupFilterNovel(
         Hash128* candidates, nuint n,
@@ -591,10 +598,26 @@ public static unsafe partial class NativeInterop
         Hash128* sourceId,
         Hash128* outRootId);
 
+    [LibraryImport(Library, EntryPoint = "content_witness_batch_add_workers")]
+    internal static partial int ContentWitnessBatchAddWorkers(
+        IntPtr stage,
+        byte* utf8,
+        nuint len,
+        Hash128* sourceId,
+        nuint workerCount,
+        Hash128* outRootId);
+
     [LibraryImport(Library, EntryPoint = "content_witness_tree_build")]
     internal static partial int ContentWitnessTreeBuild(
         byte* utf8,
         nuint len,
+        IntPtr* outTree);
+
+    [LibraryImport(Library, EntryPoint = "content_witness_tree_build_workers")]
+    internal static partial int ContentWitnessTreeBuildWorkers(
+        byte* utf8,
+        nuint len,
+        nuint workerCount,
         IntPtr* outTree);
 
     [LibraryImport(Library, EntryPoint = "content_witness_emit_tree")]

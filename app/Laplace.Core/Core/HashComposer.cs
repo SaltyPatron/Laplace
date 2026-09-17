@@ -35,6 +35,35 @@ public static unsafe class HashComposer
 
 
 
+    /// <summary>
+    /// Compose one semantic DAG across native dependency frontiers under an explicit
+    /// caller-owned worker grant. The scalar <see cref="Run"/> remains the oracle.
+    /// </summary>
+    public static void RunWorkers(
+        TierTree tree,
+        delegate* unmanaged[Cdecl]<uint, IntPtr, Hash128*, double*, Hilbert128*, int> resolver,
+        int workerCount,
+        IntPtr resolverUserData = default)
+    {
+        ArgumentNullException.ThrowIfNull(tree);
+        if (resolver == null) throw new ArgumentNullException(nameof(resolver));
+        if (workerCount <= 0) throw new ArgumentOutOfRangeException(nameof(workerCount));
+
+        bool added = false;
+        try
+        {
+            tree.DangerousAddRef(ref added);
+            int rc = NativeInterop.HashComposerRunWorkers(
+                tree.DangerousNativeHandle, resolver, resolverUserData, (nuint)workerCount);
+            if (rc != 0)
+                throw new InvalidOperationException($"hash_composer_run_workers returned {rc}");
+        }
+        finally
+        {
+            if (added) tree.DangerousRelease();
+        }
+    }
+
     public static (Hash128 Id, Hilbert128 Hilbert) ComposeNode(
         byte tier,
         ReadOnlySpan<Hash128> childIds,

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -202,4 +203,96 @@ TEST(LaplaceCoreHashComposer, ScalesTo1KNodes) {
     hash128_t zero; hash128_zero(&zero);
     EXPECT_FALSE(hash128_equals(&root_v.id, &zero));
     tier_tree_free(t);
+}
+
+
+namespace {
+
+tier_tree_t* frontier_tree(uint32_t leaf_count = 512, uint32_t fanout = 8) {
+    tier_tree_t* tree = tier_tree_new(leaf_count * 2);
+    if (!tree || leaf_count == 0 || fanout < 2) return tree;
+
+    for (uint32_t i = 0; i < leaf_count; ++i)
+        tier_tree_add_leaf(tree, 0, i, i, 1);
+
+    uint32_t level_first = 0;
+    uint32_t level_count = leaf_count;
+    uint8_t tier = 1;
+    while (level_count > 1) {
+        const uint32_t next_first = (uint32_t)tier_tree_node_count(tree);
+        uint32_t next_count = 0;
+        for (uint32_t i = 0; i < level_count; i += fanout) {
+            const uint32_t width = std::min(fanout, level_count - i);
+            tier_tree_add_node(tree, tier, level_first + i, width, i, width);
+            ++next_count;
+        }
+        level_first = next_first;
+        level_count = next_count;
+        ++tier;
+    }
+    return tree;
+}
+
+void expect_same_composed_tree(const tier_tree_t* expected, const tier_tree_t* actual) {
+    const size_t count = tier_tree_node_count(expected);
+    ASSERT_EQ(count, tier_tree_node_count(actual));
+    for (uint32_t i = 0; i < count; ++i) {
+        tier_node_view_t left, right;
+        ASSERT_EQ(0, tier_tree_get_node(expected, i, &left));
+        ASSERT_EQ(0, tier_tree_get_node(actual, i, &right));
+        EXPECT_TRUE(hash128_equals(&left.id, &right.id)) << "id mismatch at node " << i;
+        for (int axis = 0; axis < 4; ++axis)
+            EXPECT_EQ(left.coord[axis], right.coord[axis])
+                << "coordinate mismatch at node " << i << " axis " << axis;
+        for (int byte = 0; byte < 16; ++byte)
+            EXPECT_EQ(left.hilbert.bytes[byte], right.hilbert.bytes[byte])
+                << "hilbert mismatch at node " << i << " byte " << byte;
+    }
+}
+
+}  // namespace
+
+TEST(LaplaceCoreHashComposer, FrontierWorkersAreByteIdenticalToScalarOracle) {
+    tier_tree_t* scalar = frontier_tree();
+    ASSERT_NE(nullptr, scalar);
+    ASSERT_EQ(0, hash_composer_run(scalar, synth_resolver, nullptr));
+
+    for (size_t workers : {size_t{2}, size_t{3}, size_t{4}, size_t{8}}) {
+        tier_tree_t* parallel = frontier_tree();
+        ASSERT_NE(nullptr, parallel);
+        ASSERT_EQ(0, hash_composer_run_workers(
+            parallel, synth_resolver, nullptr, workers));
+        expect_same_composed_tree(scalar, parallel);
+        tier_tree_free(parallel);
+    }
+    tier_tree_free(scalar);
+}
+
+TEST(LaplaceCoreHashComposer, FrontierWorkerSchedulingCannotChangeCanonicalOutput) {
+    tier_tree_t* scalar = frontier_tree(384, 6);
+    ASSERT_NE(nullptr, scalar);
+    ASSERT_EQ(0, hash_composer_run(scalar, synth_resolver, nullptr));
+
+    for (int repetition = 0; repetition < 8; ++repetition) {
+        const size_t workers = size_t{2} + (size_t)(repetition % 6);
+        tier_tree_t* parallel = frontier_tree(384, 6);
+        ASSERT_NE(nullptr, parallel);
+        ASSERT_EQ(0, hash_composer_run_workers(
+            parallel, synth_resolver, nullptr, workers));
+        expect_same_composed_tree(scalar, parallel);
+        tier_tree_free(parallel);
+    }
+    tier_tree_free(scalar);
+}
+
+TEST(LaplaceCoreHashComposer, FrontierWorkersRejectZeroGrantAndPreserveResolverError) {
+    tier_tree_t* zero = frontier_tree(16, 4);
+    ASSERT_NE(nullptr, zero);
+    EXPECT_NE(0, hash_composer_run_workers(zero, synth_resolver, nullptr, 0));
+    tier_tree_free(zero);
+
+    tier_tree_t* failed = frontier_tree(16, 4);
+    ASSERT_NE(nullptr, failed);
+    EXPECT_EQ(-42, hash_composer_run_workers(failed, err_resolver, nullptr, 4));
+    tier_tree_free(failed);
 }

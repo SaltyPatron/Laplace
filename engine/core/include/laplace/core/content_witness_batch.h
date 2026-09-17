@@ -26,6 +26,17 @@ int content_witness_batch_add(
     const hash128_t* source_id,
     hash128_t*       out_root_id);
 
+/* Same content/witness law with an explicit physical worker grant for one
+ * semantic DAG. The grant changes execution only; scalar content_witness_batch_add
+ * remains the compatibility/oracle path. */
+int content_witness_batch_add_workers(
+    intent_stage_t*  stage,
+    const uint8_t*   utf8,
+    size_t           len,
+    const hash128_t* source_id,
+    size_t           worker_count,
+    hash128_t*       out_root_id);
+
 int content_witness_add_underscored(
     intent_stage_t*  stage,
     const uint8_t*   utf8,
@@ -41,6 +52,14 @@ int content_witness_root_id_underscored(
 int content_witness_tree_build(
     const uint8_t* utf8,
     size_t         len,
+    tier_tree_t**  out_tree);
+
+/* Build the same canonical natural-language tree while composing independent
+ * dependency frontiers under a caller-owned worker grant. */
+int content_witness_tree_build_workers(
+    const uint8_t* utf8,
+    size_t         len,
+    size_t         worker_count,
     tier_tree_t**  out_tree);
 
 /* Build the shared content ladder in recipe-declared source representation:

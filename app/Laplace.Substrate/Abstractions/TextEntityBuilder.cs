@@ -131,7 +131,11 @@ public sealed class TextEntityBuilder
         try
         {
             using var tree = TextDecomposer.Run(canonical);
-            unsafe { HashComposer.Run(tree, &Resolver); }
+            unsafe
+            {
+                HashComposer.RunWorkers(
+                    tree, &Resolver, Math.Max(1, IngestTopology.Current.ComposeWorkers));
+            }
             int nc = tree.NodeCount;
             if (nc == 0)
             {
@@ -164,7 +168,11 @@ public sealed class TextEntityBuilder
         try
         {
             using var tree = TextDecomposer.Run(canonical);
-            unsafe { HashComposer.Run(tree, &Resolver); }
+            unsafe
+            {
+                HashComposer.RunWorkers(
+                    tree, &Resolver, Math.Max(1, IngestTopology.Current.ComposeWorkers));
+            }
             int nc = tree.NodeCount;
             if (nc == 0)
             {
@@ -211,7 +219,11 @@ public sealed class TextEntityBuilder
         try
         {
             using var tree = TextDecomposer.Run(canonical);
-            unsafe { HashComposer.Run(tree, &Resolver); }
+            unsafe
+            {
+                HashComposer.RunWorkers(
+                    tree, &Resolver, Math.Max(1, IngestTopology.Current.ComposeWorkers));
+            }
             int nc = tree.NodeCount;
             if (nc == 0)
             {
