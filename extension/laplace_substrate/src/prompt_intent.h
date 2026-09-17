@@ -187,6 +187,104 @@ laplace_prompt_binding_table(const char *name, MemoryContext owner)
     return hash_create(name, 128, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 }
 
+typedef struct LaplacePromptStructuralKey
+{
+    hash128_t source;
+    hash128_t target;
+} LaplacePromptStructuralKey;
+
+typedef struct LaplacePromptStructuralIndex
+{
+    LaplacePromptStructuralKey key;
+    int index;
+} LaplacePromptStructuralIndex;
+
+/* The input scope has already bound exact occurrences at every canonical cut.
+ * Pull their complete ordered successor set before ORIENT and merge that route
+ * into the retained physicality response. This is not an n-gram edge and does
+ * not synthesize testimony: it is the exact continuation of the whole admitted
+ * observation at a witnessed trajectory occurrence. */
+static inline int
+laplace_prompt_merge_continuations(LaplacePromptIntent *intent,
+                                   LaplaceTrajectoryScope *trajectory_scope)
+{
+    MemoryContext previous = MemoryContextSwitchTo(intent->owner);
+    int continuation_count = 0;
+    LaplaceContinuation *continuations = laplace_trajectory_continuations_scoped(
+        intent->input->context, false, trajectory_scope, &continuation_count);
+    if (continuation_count <= 0)
+    {
+        if (continuations) pfree(continuations);
+        MemoryContextSwitchTo(previous);
+        return 0;
+    }
+    if (continuation_count > INT_MAX - intent->structural_count ||
+        (Size)(intent->structural_count + continuation_count) >
+            MaxAllocSize / sizeof(LaplaceStructuralCandidate))
+        ereport(ERROR,
+                (errmsg("prompt intent: ordered continuation response exceeds allocation capacity")));
+
+    HASHCTL ctl = {0};
+    ctl.keysize = sizeof(LaplacePromptStructuralKey);
+    ctl.entrysize = sizeof(LaplacePromptStructuralIndex);
+    ctl.hcxt = intent->owner;
+    HTAB *index = hash_create("prompt structural response index",
+                              Max(intent->structural_count + continuation_count, 16),
+                              &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    intent->structural = intent->structural
+        ? repalloc(intent->structural,
+                   sizeof(*intent->structural) *
+                   (Size)(intent->structural_count + continuation_count))
+        : palloc(sizeof(*intent->structural) * (Size) continuation_count);
+
+    for (int i = 0; i < intent->structural_count; ++i)
+    {
+        LaplacePromptStructuralKey key = {
+            .source = intent->structural[i].source,
+            .target = intent->structural[i].id};
+        bool found;
+        LaplacePromptStructuralIndex *slot =
+            hash_search(index, &key, HASH_ENTER, &found);
+        if (!found) slot->index = i;
+    }
+
+    for (int i = 0; i < continuation_count; ++i)
+    {
+        const LaplaceContinuation *continuation = &continuations[i];
+        LaplacePromptStructuralKey key = {
+            .source = intent->root,
+            .target = continuation->id};
+        bool found;
+        LaplacePromptStructuralIndex *slot =
+            hash_search(index, &key, HASH_ENTER, &found);
+        LaplaceStructuralCandidate *target;
+        if (found)
+            target = &intent->structural[slot->index];
+        else
+        {
+            slot->index = intent->structural_count++;
+            target = &intent->structural[slot->index];
+            *target = (LaplaceStructuralCandidate) {
+                .source = intent->root,
+                .id = continuation->id,
+                .nearest_gap = 1};
+        }
+        target->relation_mask |= LAPLACE_STRUCTURAL_CONTINUATION;
+        if (continuation->occurrences < 0 ||
+            target->occurrences > PG_INT64_MAX - continuation->occurrences)
+            ereport(ERROR,
+                    (errmsg("prompt intent: ordered continuation occurrence count overflow")));
+        target->occurrences += continuation->occurrences;
+        if (target->nearest_gap > 1) target->nearest_gap = 1;
+    }
+
+    hash_destroy(index);
+    pfree(continuations);
+    MemoryContextSwitchTo(previous);
+    return continuation_count;
+}
+
 static inline LaplacePromptIntent
 laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner,
                             ArrayType *relation_types, int fanout,
@@ -237,9 +335,10 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
 
     /* Physicality participates in COUPLE before ORIENT. The native scope is the
      * same one later used for ordered continuation, so containment, membership,
-     * predecessor/successor and co-occurrence are not a second semantic engine.
-     * Stage one structural round from the exact root/current occurrences, retain
-     * the typed crossings separately, then expose only newly reached identities
+     * predecessor/successor, co-occurrence and exact whole-observation
+     * continuation are not a second semantic engine. Stage one structural round
+     * from the exact root/current occurrences and exact ordered occurrence state,
+     * retain the typed crossings separately, then expose newly reached identities
      * as a semantic query frontier. No structural fact is synthesized as a
      * testimony relation. */
     result.structural_frontier = construct_empty_array(BYTEAOID);
@@ -264,19 +363,21 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
         result.structural = laplace_trajectory_structural_candidates(
             trajectory_scope, sources, structural_mask, &result.structural_count);
         pfree(sources);
+        (void) laplace_prompt_merge_continuations(&result, trajectory_scope);
 
-        /* fanout is a per-source/per-plane envelope. Read the complete native
-         * structural response first; if the declared envelope cannot contain it,
-         * mark the orientation resource-bounded instead of compiling a retained
-         * prefix as if it were the whole observation. */
+        /* fanout is a per-source/per-plane envelope. Five structural crossing
+         * planes respond per active source, plus one ordered-continuation plane
+         * for the exact whole observation. Read the complete native responses;
+         * if the envelope cannot contain them, mark orientation resource-bounded
+         * instead of compiling a retained prefix as if it were the whole state. */
         uint64 structural_limit = 0;
         if (fanout > 0)
         {
-            uint64 per_source = (uint64) fanout * 5u;
-            structural_limit = ~(uint64) 0;
-            if (per_source != 0 &&
-                (uint64) source_count <= (~(uint64) 0) / per_source)
-                structural_limit = (uint64) source_count * per_source;
+            const uint64 maximum = ~(uint64) 0;
+            uint64 planes = (uint64) source_count * 5u + 1u;
+            structural_limit = maximum;
+            if (planes != 0 && (uint64) fanout <= maximum / planes)
+                structural_limit = (uint64) fanout * planes;
         }
         if ((uint64) result.structural_count > structural_limit)
             result.budget_exhausted = true;
