@@ -4,7 +4,7 @@ import { Html, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ExplorePhysicalityRow } from '../types';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
-import { lerpColor, visualizationPalette, type VisualizationPalette } from '../visualizationPalette';
+import { ensureVisualizationContrast, lerpColor, useVisualizationPalette, visualizationPalette, type VisualizationPalette } from '../visualizationPalette';
 import styles from './GlomeCanvas.module.css';
 
 export type GlomeProjection = 'packed' | 'placement';
@@ -38,48 +38,23 @@ interface GlomePalette {
   wireframe: string;
 }
 
-const LIGHT_PALETTE: GlomePalette = {
-  background: '#e4edf2',
-  primary: '#1f6f9f',
-  walk: '#007b68',
-  neighbor: '#a65e08',
-  constituent: '#7448c8',
-  highlight: '#00836e',
-  packedLine: '#7d4bc3',
-  placementLine: '#287da9',
-  wireframe: '#66889b',
-};
-
-const DARK_PALETTE: GlomePalette = {
-  background: '#173b50',
-  primary: '#69bced',
-  walk: '#5bd8b0',
-  neighbor: '#f0bd68',
-  constituent: '#b9a0ff',
-  highlight: '#69e4bd',
-  packedLine: '#c39cff',
-  placementLine: '#71c1ed',
-  wireframe: '#91b8ca',
-};
+function glomePalette(shared: VisualizationPalette): GlomePalette {
+  const visible = (color: string) =>
+    ensureVisualizationContrast(color, shared.background, shared.primary);
+  return {
+    background: shared.background,
+    primary: visible(shared.steel),
+    walk: visible(shared.signal),
+    neighbor: visible(shared.error),
+    constituent: visible(lerpColor(shared.steel, shared.error, 0.55)),
+    highlight: visible(shared.primary),
+    packedLine: visible(lerpColor(shared.steel, shared.signal, 0.5)),
+    placementLine: visible(shared.steel),
+    wireframe: visible(shared.muted),
+  };
+}
 
 const SHELL = 0.85;
-
-function useSystemDarkMode(): boolean {
-  const [dark, setDark] = useState(() =>
-    typeof window !== 'undefined'
-      && window.matchMedia('(prefers-color-scheme: dark)').matches,
-  );
-
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = (event: MediaQueryListEvent) => setDark(event.matches);
-    setDark(media.matches);
-    media.addEventListener('change', onChange);
-    return () => media.removeEventListener('change', onChange);
-  }, []);
-
-  return dark;
-}
 
 /** Packed: hash-XYZ on a display shell. M is paint, not an axis. */
 export function packedDisplayPos(n: GlomeNode): [number, number, number] {
@@ -251,7 +226,7 @@ function GlomeScene({
         }}
       >
         <sphereGeometry args={[1, 9, 9]} />
-        <meshBasicMaterial vertexColors toneMapped={false} />
+        <meshBasicMaterial vertexColors toneMapped={false} color={palette.primary} />
       </instancedMesh>
       {trajectory.length > 1 ? (
         <Line
@@ -349,8 +324,8 @@ export function GlomeCanvas({
   const [zmDegrees, setZmDegrees] = useState(25);
   const xmAngle = xmDegrees * Math.PI / 180;
   const zmAngle = zmDegrees * Math.PI / 180;
-  const dark = useSystemDarkMode();
-  const palette = dark ? DARK_PALETTE : LIGHT_PALETTE;
+  const sharedPalette = useVisualizationPalette();
+  const palette = useMemo(() => glomePalette(sharedPalette), [sharedPalette]);
 
   useEffect(() => {
     if (!baseReady || staggerMs <= 0) {
@@ -374,8 +349,8 @@ export function GlomeCanvas({
 
   const highlights = useMemo(() => new Set(highlightIds), [highlightIds]);
   const revision = useMemo(
-    () => `${projection}:${xmDegrees}:${zmDegrees}:${dark}:${nodes.length}:${highlightOrdinal}:${nodes.map((n) => n.id).join(',')}`,
-    [nodes, projection, xmDegrees, zmDegrees, dark, highlightOrdinal],
+    () => `${projection}:${xmDegrees}:${zmDegrees}:${palette.background}:${palette.primary}:${nodes.length}:${highlightOrdinal}:${nodes.map((n) => n.id).join(',')}`,
+    [nodes, projection, xmDegrees, zmDegrees, palette, highlightOrdinal],
   );
 
   if (nodes.length === 0) {
