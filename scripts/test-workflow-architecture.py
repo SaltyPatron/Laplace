@@ -59,6 +59,8 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertEqual(1, text.count("host-resource.lock"))
         self.assertIn("Build and measure under one real host reservation", text)
         self.assertIn("scripts/benchmark_scale_plan.py", text)
+        self.assertNotIn('echo "- Commit: `$sha`"', text)
+        self.assertIn('echo "- Commit: \\`$sha\\`"', text)
 
     def test_observability_uploads_failure_evidence_then_fails_truthfully(self):
         for name in ("ui-observability.yml", "api-observability.yml"):
@@ -68,6 +70,9 @@ class WorkflowArchitecture(unittest.TestCase):
             self.assertIn("Enforce collector result", text)
             self.assertIn("if-no-files-found: error", text)
             self.assertNotIn("exit 0", text)
+        ui = (WORKFLOWS / "ui-observability.yml").read_text(encoding="utf-8")
+        self.assertNotIn("build/.stamps/npm-lock", ui)
+        self.assertIn("ui-observability", ui)
 
     def test_seed_preflight_is_not_coupled_to_cli_help_rendering(self):
         text = (WORKFLOWS / "seed.yml").read_text(encoding="utf-8")

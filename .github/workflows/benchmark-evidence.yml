@@ -255,10 +255,10 @@ jobs:
           {
             echo '## Laplace versioned benchmark suite'
             echo
-            echo "- Commit: `$sha`"
-            echo "- Runner: `$RUNNER_NAME`"
-            echo "- Suite: `$SUITE`"
-            echo "- Artifact: `laplace-benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT`"
+            echo "- Commit: \`$sha\`"
+            echo "- Runner: \`$RUNNER_NAME\`"
+            echo "- Suite: \`$SUITE\`"
+            echo "- Artifact: \`laplace-benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT\`"
             if [[ -f "$LAPLACE_BENCH_RECEIPT/suite-receipt.json" ]]; then
               echo
               python3 - "$LAPLACE_BENCH_RECEIPT/suite-receipt.json" <<'PY'
