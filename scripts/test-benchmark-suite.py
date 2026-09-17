@@ -168,52 +168,37 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual("derived", source)
 
     def test_workflow_explicit_invocations_route_through_owned_runners(self):
-        import yaml
         path = ROOT / ".github/workflows/benchmark-evidence.yml"
-        workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-        triggers = workflow["on"]
-        names = {triggers} if isinstance(triggers, str) else set(triggers)
-        self.assertEqual({"workflow_dispatch", "workflow_call", "push"}, names)
-        self.assertEqual({"branches": ["verify/chess-acceptance-*"]}, triggers["push"])
-        inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-        self.assertIn("query", inputs["suite"]["options"])
-        self.assertIn("chess", inputs["suite"]["options"])
-        self.assertIn("acceptance", inputs["suite"]["options"])
-        self.assertEqual("chess", workflow["on"]["workflow_call"]["inputs"]["suite"]["default"])
-        job = workflow["jobs"]["benchmark"]
-        self.assertEqual(
-            "inputs.suite != 'acceptance' && (github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/verify/chess-acceptance-'))",
-            job["if"])
-        acceptance = workflow["jobs"]["acceptance"]
-        self.assertEqual(
-            "(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/verify/chess-acceptance-')) || inputs.suite == 'acceptance'",
-            acceptance["if"])
-        acceptance_commands = "\n".join(step.get("run", "") for step in acceptance["steps"])
-        self.assertIn("python3 scripts/accept-chess-environment.py", acceptance_commands)
-        self.assertIn("flock --exclusive --close /build/laplace/work/host-resource.lock", acceptance_commands)
-        commands = "\n".join(step.get("run", "") for step in job["steps"] if isinstance(step, dict))
-        self.assertIn("python3 scripts/benchmark_suite.py validate", commands)
-        self.assertIn("python3 scripts/benchmark_scale_plan.py", commands)
-        self.assertIn("runner=(python3 scripts/benchmark_suite.py)", commands)
-        self.assertIn('"${runner[@]}" "${args[@]}"', commands)
-        self.assertNotIn("python3 scripts/bench-compose.py", commands)
-        self.assertNotIn("python3 scripts/bench-compose-scale.py", commands)
-        self.assertNotIn("python3 scripts/bench-compose-stream-scale.py", commands)
-        self.assertNotIn("python3 scripts/bench-forward-program.py", commands)
-        self.assertEqual("laplace-shared-workspace", workflow["concurrency"]["group"])
-        self.assertEqual("false", workflow["concurrency"]["cancel-in-progress"])
+        text = path.read_text(encoding="utf-8")
+        registry_suites = {item["id"] for item in self.registry["suites"]}
+
+        self.assertIn("on:\n  workflow_dispatch:", text)
+        self.assertNotIn("\n  push:\n", text)
+        self.assertNotIn("\n  workflow_call:\n", text)
+        for suite in registry_suites:
+            self.assertIn(suite, text)
+
+        self.assertEqual(1, text.count("runs-on: [self-hosted, laplace]"))
+        self.assertEqual(1, text.count("host-resource.lock"))
+        self.assertNotIn("\nconcurrency:\n", text)
+        self.assertIn("python3 scripts/benchmark_suite.py validate", text)
+        self.assertIn('python3 scripts/benchmark_suite.py "${run_args[@]}"', text)
+        self.assertIn("scripts/benchmark_scale_plan.py", text)
+        self.assertNotIn("python3 scripts/bench-compose.py", text)
+        self.assertNotIn("python3 scripts/bench-compose-scale.py", text)
+        self.assertNotIn("python3 scripts/bench-compose-stream-scale.py", text)
+        self.assertNotIn("python3 scripts/bench-forward-program.py", text)
 
     def test_workflow_requires_explicit_saturation_and_records_scale_plan(self):
-        import yaml
-        path = ROOT / ".github/workflows/benchmark-evidence.yml"
-        workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-        inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-        self.assertIn("allow_saturation", inputs)
-        self.assertEqual("false", inputs["allow_saturation"]["default"])
-        self.assertEqual("2", inputs["reserve_logical_cpus"]["default"])
-        text = path.read_text(encoding="utf-8")
+        text = (ROOT / ".github/workflows/benchmark-evidence.yml").read_text(encoding="utf-8")
+        self.assertIn("reserve_logical_cpus:", text)
+        self.assertIn('default: "2"', text)
+        self.assertIn("allow_saturation:", text)
+        self.assertIn("default: false", text)
         self.assertIn("scale-plan.json", text)
-        self.assertIn("LAPLACE_BENCH_SCALE_WORKERS", text)
+        self.assertIn("--reserve-logical", text)
+        self.assertIn("--allow-saturation", text)
+        self.assertIn("resolved_workers_csv", text)
 
     def test_workflow_binds_built_core_t0_and_content_versioned_execution_identity(self):
         text = (ROOT / ".github/workflows/benchmark-evidence.yml").read_text(encoding="utf-8")
@@ -221,9 +206,9 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn("build/engine/core/perfcache/laplace_t0_perfcache.bin", text)
         self.assertIn("build/extension/laplace_substrate/laplace_substrate.control", text)
         self.assertIn("build/extension/laplace_substrate/laplace_execution_module.txt", text)
-        self.assertIn("LAPLACE_CORE", text)
-        self.assertIn("LAPLACE_T0", text)
-        self.assertIn("LAPLACE_PERFCACHE_BIN", text)
+        self.assertIn('run_args+=(--core "$core" --t0 "$t0")', text)
+        self.assertIn('sha256sum "$core" "$t0" "$control" "$execution"', text)
+        self.assertIn('if [[ "$SUITE" != chess && "$SUITE" != geometry && "$SUITE" != recorded ]]', text)
 
     def test_suite_runner_binds_build_tree_loader_before_measurement(self):
         text = (ROOT / "scripts/benchmark_suite.py").read_text(encoding="utf-8")
