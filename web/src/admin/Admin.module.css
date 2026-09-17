@@ -271,8 +271,50 @@
     gap: var(--space-1);
     margin-bottom: var(--space-3);
     font-size: var(--text-sm);
+    min-width: 0;
   }
   .field > span { color: var(--color-text-muted); font-size: var(--text-xs); }
+  .field > span em { opacity: .8; font-style: normal; }
+  .field input,
+  .field textarea { width: 100%; box-sizing: border-box; }
+
+  .ingestFormGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 var(--space-4);
+    margin-top: var(--space-3);
+  }
+
+  .ingestArgs { grid-column: 1 / -1; }
+
+  .processReceipt {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+    align-items: center;
+    padding: var(--space-3);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--color-accent) 5%, var(--color-bg-panel));
+  }
+
+  .processCommand {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+
+  .processReceipt > .progressPct { grid-column: 1 / -1; }
+
+  @media (max-width: 720px) {
+    .ingestFormGrid { grid-template-columns: 1fr; }
+    .ingestArgs { grid-column: auto; }
+    .processReceipt { grid-template-columns: 1fr; }
+    .processReceipt > .progressPct { grid-column: auto; }
+  }
 
   .sig {
     display: block;
