@@ -5726,7 +5726,53 @@
     },
     "source": "69cc059a6f5b0407df33d0604ae65a47c555067c",
     "status": "First140 and next2000 baselines completed and immutable; performance6 source-reviewed and hosted-qualified, not yet installed.",
-    "unchanged_in_selected_source": "ea9f60a1c2bac9fcc36491a6f26403d95c2b8359"
+    "unchanged_in_selected_source": "ea9f60a1c2bac9fcc36491a6f26403d95c2b8359",
+    "consensus_backend_diagnostics": {
+      "manifest": "0c950d4aa3609eeb30c438f5242f757ed0dd5315",
+      "files": [
+        {
+          "base": "7aed6a72b79d695805138cb2db7a05eed2853c18",
+          "blob": "04097be43b35f61561a4b32a13fbb14ff40cfdff",
+          "mode": "100644",
+          "path": "app/Laplace.Chess/Service/ChessPgnIngestor.cs"
+        },
+        {
+          "base": "6d4d4ee63b43f61fbd31c0cfd6d95d605af1e898",
+          "blob": "f3208043506382f5b5dd8244347b89ea50c7a09e",
+          "mode": "100644",
+          "path": "app/Laplace.Chess/Service/ChessRecordingMeasurement.Diagnostics.cs"
+        },
+        {
+          "base": "0d21ae2c250588379e102e8aab1a0b5dd1b590c0",
+          "blob": "1411c4e0286e12ed5f1b1a62c4e0d708326a281a",
+          "mode": "100644",
+          "path": "app/Laplace.Chess.Tests/Service/ChessRecordingDiagnosticsTests.cs"
+        }
+      ],
+      "scope": "Per-owned measured apply deltas of existing ConsensusAccumulatingWriter upsert/mask clocks, calls, cells and pairs. No additional timer, native/query/math/acceptance change. Borrowed shared writers are not sampled.",
+      "qualification": {
+        "artifact": 10501600373,
+        "artifact_bytes": 51975,
+        "artifact_sha256": "29c0a9b3c5cf78ddb970625732d52e624dee757579a1c357fb2ef3f251b72656",
+        "expected": {
+          "ChessPgnChunkTests": 11,
+          "ChessRecordingDiagnosticsTests": 10
+        },
+        "failed": 0,
+        "head": "d16abdc6ca1f03ddb1097bcce01a3da09fde2c34",
+        "job": 105234291377,
+        "limits": "Hosted managed/native-backed controls; installed runtime diagnostic measurement has not yet occurred.",
+        "mapped_core_sha256": "ef8d177eb4e7e6f75798377c3b7d9301dfa6954c490e15d1a156adf3adadecbf",
+        "passed": 21,
+        "run": 35230866293,
+        "skipped": 0,
+        "source_review": "Root PASS",
+        "status": "actual passed",
+        "workflow": "be6e13802a010e487a1dae5f8141c068a607b928"
+      },
+      "installed": false,
+      "interpretation": "The completed next2000 consensus-acceptance participant includes upsert/folding and highway-mask work; it does not separately attribute the 2515.5659094 seconds. This diagnostic adds no new clock or query and will expose existing accepted-work counter deltas in a subsequent actual measurement."
+    }
   },
   "prior_private_pg": {
     "artifact": 10487468298,

@@ -8,6 +8,38 @@ namespace Laplace.Chess.Service;
 
 internal sealed partial class ChessRecordingMeasurement
 {
+
+    public ConsensusBackendDiagnostics ConsensusBackend { get; private set; } = new(0, 0, 0, 0, 0, 0, 0);
+
+    public sealed record ConsensusBackendDiagnostics(long ObservedApplyWindows,
+        double ConsensusUpsertSeconds, double HighwayMaskSeconds, long CellsFolded,
+        long ConsensusUpsertCalls, long HighwayMaskCalls, long HighwayMaskPairs)
+    {
+        public string Scope => "Deltas of the owned ConsensusAccumulatingWriter's existing cumulative counters around measured ApplyManyAsync calls. Backend wall-clock times are nested in WriterApply and consensus acceptance, not additional exclusive time or pure CPU time. The writer publishes atomic counters only after successful apply; failed or cancelled backend work can therefore be absent. Cells and pairs count processed work, not unique durable objects. Setup and other admission windows are excluded; borrowed shared writers are not sampled.";
+    }
+
+    internal readonly record struct ConsensusBackendSnapshot(long ConsensusTicks, long MaskTicks,
+        long Cells, long ConsensusCalls, long MaskCalls, long MaskPairs)
+    {
+        internal static ConsensusBackendSnapshot Read(ConsensusAccumulatingWriter writer) => new(
+            writer.ConsensusUpsertBackendWallClock.Ticks, writer.HighwayMaskBackendWallClock.Ticks,
+            writer.CellsFolded, writer.ConsensusUpsertCalls, writer.HighwayMaskCalls, writer.HighwayMaskPairs);
+    }
+
+    internal void ObserveConsensusBackend(ConsensusBackendSnapshot before, ConsensusBackendSnapshot after)
+    {
+        var previous = ConsensusBackend;
+        // One owned ingestor applies serially. Publish one immutable diagnostic
+        // snapshot so receipt serialization cannot observe partially updated fields.
+        ConsensusBackend = new(previous.ObservedApplyWindows + 1,
+            previous.ConsensusUpsertSeconds + (after.ConsensusTicks - before.ConsensusTicks) / (double)TimeSpan.TicksPerSecond,
+            previous.HighwayMaskSeconds + (after.MaskTicks - before.MaskTicks) / (double)TimeSpan.TicksPerSecond,
+            previous.CellsFolded + after.Cells - before.Cells,
+            previous.ConsensusUpsertCalls + after.ConsensusCalls - before.ConsensusCalls,
+            previous.HighwayMaskCalls + after.MaskCalls - before.MaskCalls,
+            previous.HighwayMaskPairs + after.MaskPairs - before.MaskPairs);
+    }
+
     public WorkDiagnostics Work { get; } = new();
     public WriterLogDiagnostics WriterLog { get; } = new();
     private WorkPhase? _workPhase;

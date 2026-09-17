@@ -524,6 +524,11 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 if (measurement is not null) measurement.Work.WriterApplyAttempts++;
                 measurement?.Checkpoint("WriterApply", "writer-entered");
                 long commitStarted = Stopwatch.GetTimestamp();
+                // Shared hosts may update the same writer outside this PGN lane.
+                // Only an owned writer permits attribution to this apply window.
+                var backendBefore = measurement is not null && _ownsResources
+                    ? ChessRecordingMeasurement.ConsensusBackendSnapshot.Read(_writer)
+                    : (ChessRecordingMeasurement.ConsensusBackendSnapshot?)null;
                 try
                 {
                     var result = await _writer.ApplyManyAsync(changes, ct);
@@ -532,6 +537,9 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 }
                 finally
                 {
+                    if (backendBefore is { } before)
+                        measurement!.ObserveConsensusBackend(before,
+                            ChessRecordingMeasurement.ConsensusBackendSnapshot.Read(_writer));
                     if (measurement is not null)
                         measurement.ElapsedSeconds.Commit += Stopwatch.GetElapsedTime(commitStarted).TotalSeconds;
                 }
