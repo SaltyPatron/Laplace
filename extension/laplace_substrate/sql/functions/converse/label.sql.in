@@ -45,15 +45,16 @@ END;
 -- This is intentionally NOT the semantic contract of realize.label(). `label` must abstain
 -- when an entity has no name/surface. A product display still needs something intelligible
 -- to paint after its candidate set has been elected. The display projection therefore adds
--- bounded, containment-owned previews and descriptive metadata while keeping identity in a
--- separate id column. It NEVER uses encode(id,'hex') as a human label.
+-- bounded, containment-owned previews and descriptive metadata while keeping the complete
+-- identity in a separate id column. If friendly realization is exhausted, the display label
+-- itself retains a short canonical id so a known entity is never replaced by a generic status.
 --
 -- GH #804: form is caller/containment-owned, not inferred from entity.type_id. Exact
 -- self-rendering stops at sentence grain. Higher-tier text is previewed only when a
 -- witnessed role or the entity's own Content physicality proves containment.
 -- Provenance operands obey the same preview boundary; opaque content falls through to a name, relation,
--- type/source description, or explicit "Unrealized entity" rather than being silently
--- projected through a text lens.
+-- type/source description plus short canonical identity rather than being silently
+-- projected through a text lens or replaced by a generic unresolved placeholder.
 CREATE OR REPLACE FUNCTION realize.display_label_batch(p_ids bytea[])
     RETURNS TABLE(id bytea, label text, tier smallint)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_display_label_batch'
