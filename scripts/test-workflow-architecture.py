@@ -53,10 +53,21 @@ class WorkflowArchitecture(unittest.TestCase):
             self.assertIn("workflow_dispatch:", text)
             self.assertNotIn("\n  push:\n", text)
 
-    def test_benchmark_concurrency_uses_only_supported_keys(self):
+    def test_benchmark_uses_the_real_host_lock_not_actions_queue_replacement(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
-        self.assertNotIn("queue:", text)
-        self.assertIn("cancel-in-progress: false", text)
+        self.assertNotIn("\nconcurrency:\n", text)
+        self.assertEqual(1, text.count("host-resource.lock"))
+        self.assertIn("Build and measure under one real host reservation", text)
+        self.assertIn("scripts/benchmark_scale_plan.py", text)
+
+    def test_observability_uploads_failure_evidence_then_fails_truthfully(self):
+        for name in ("ui-observability.yml", "api-observability.yml"):
+            text = (WORKFLOWS / name).read_text(encoding="utf-8")
+            self.assertEqual(1, text.count("host-resource.lock"))
+            self.assertIn("collector-exit-code.txt", text)
+            self.assertIn("Enforce collector result", text)
+            self.assertIn("if-no-files-found: error", text)
+            self.assertNotIn("exit 0", text)
 
     def test_seed_preflight_is_not_coupled_to_cli_help_rendering(self):
         text = (WORKFLOWS / "seed.yml").read_text(encoding="utf-8")

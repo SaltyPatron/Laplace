@@ -1,7 +1,8 @@
 name: Laplace — API observability
 
-# Evidence-only workflow. It inventories the live API and probes safe read routes;
-# it never invokes mutating OpenAPI operations and is not a product lifecycle gate.
+# Explicit evidence lane. The collector runs under the same host reservation as
+# product/database/seed work, uploads its receipt even on failure, then reports
+# the collector's real exit status.
 on:
   workflow_dispatch:
     inputs:
@@ -15,7 +16,7 @@ permissions:
   contents: read
 
 env:
-  LAPLACE_API_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || 'http://127.0.0.1:5187' }}
+  LAPLACE_API_URL: ${{ inputs.base_url }}
 
 jobs:
   report:
@@ -32,13 +33,19 @@ jobs:
           mkdir -p "$receipt"
           printf 'LAPLACE_API_DIAGNOSTICS_DIR=%s\n' "$receipt" >> "$GITHUB_ENV"
 
-      - name: Select exact diagnostic source without lifecycle work
+      - name: Capture API evidence under the host reservation
         shell: bash
         env:
           TARGET_SHA: ${{ github.sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          umask 0002
+          lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          mkdir -p "$lock_root"
+          exec 9>"$lock_root/host-resource.lock"
+          flock 9
+
           cd "$GITHUB_WORKSPACE"
           if [[ ! -e .git ]]; then
             [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
@@ -58,18 +65,17 @@ jobs:
           unset checkout_auth CHECKOUT_TOKEN
           git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+          git diff --quiet
+          git diff --cached --quiet
 
-      - name: Collect endpoint inventory and safe live probes
-        shell: bash
-        run: |
           set +e
           python3 scripts/api-diagnostics.py
           rc=$?
+          set -e
           printf '%s\n' "$rc" > "$LAPLACE_API_DIAGNOSTICS_DIR/collector-exit-code.txt"
           if (( rc != 0 )); then
-            echo "::warning::API evidence collector exited $rc; artifact upload will still run"
+            echo "::error::API evidence collector exited $rc; receipt will be uploaded before the job fails"
           fi
-          exit 0
 
       - name: Publish evidence summary
         if: always()
@@ -85,10 +91,20 @@ jobs:
 
       - name: Upload API evidence
         if: always()
-        # actions/upload-artifact v4.6.2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: laplace-api-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.LAPLACE_API_DIAGNOSTICS_DIR }}/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
+
+      - name: Enforce collector result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$LAPLACE_API_DIAGNOSTICS_DIR/collector-exit-code.txt"
+          [[ -f "$receipt" ]] || { echo "::error::collector exit receipt missing"; exit 1; }
+          rc="$(cat "$receipt")"
+          [[ "$rc" =~ ^[0-9]+$ ]] || { echo "::error::invalid collector exit receipt: $rc"; exit 1; }
+          exit "$rc"
