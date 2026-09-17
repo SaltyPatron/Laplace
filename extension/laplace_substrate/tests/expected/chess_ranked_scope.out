@@ -152,8 +152,12 @@ DECLARE
 BEGIN
     players:=ARRAY[chess.player_id('rank-scope-probe'),decode(repeat('01',16),'hex'),
         decode(repeat('fe',16),'hex'),chess.player_id('Carlsen, Magnus'),chess.player_id('Carlsen, Inga')];
-    IF (SELECT count(*) FROM laplace.entities WHERE id=ANY(players) AND type_id=player_type)<>5 THEN
-        RAISE EXCEPTION 'membership fixture requires its five canonical players';
+    -- Player IDs can also be names/content with another compatibility summary.
+    -- Require exactly five canonical entities and their actual player facets.
+    IF (SELECT count(*) FROM laplace.entities WHERE id=ANY(players))<>5
+       OR (SELECT count(*) FROM laplace.entity_interpretations
+            WHERE entity_id=ANY(players) AND tier=0 AND type_id=player_type)<>5 THEN
+        RAISE EXCEPTION 'membership fixture requires five canonical entities with player interpretations';
     END IF;
     FOREACH sort_key IN ARRAY ARRAY['strength','games','rating','rd'] LOOP
         FOREACH direction IN ARRAY ARRAY['asc','desc'] LOOP

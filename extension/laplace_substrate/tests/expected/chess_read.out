@@ -446,8 +446,11 @@ BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (public.laplace_hash128_blake3('t2/outcome_obj'), 0, type_t, src)
     ON CONFLICT DO NOTHING;
-    UPDATE laplace.entities SET type_id = laplace.entity_type_id('Chess_Player')
-     WHERE id IN (tal, botv, spas);
+    -- Admit an additional observed type through the canonical INSERT owner;
+    -- the scalar compatibility summary is not the membership relation.
+    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+    SELECT id, 0, laplace.entity_type_id('Chess_Player'), src
+    FROM unnest(ARRAY[tal, botv, spas]) AS players(id);
 
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)

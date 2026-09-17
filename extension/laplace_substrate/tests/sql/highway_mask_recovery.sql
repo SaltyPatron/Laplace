@@ -16,10 +16,26 @@ SELECT DISTINCT entity_id,2,decode('d673b68115514712b366347069127aff','hex')
 FROM highway_recovery_pairs;
 INSERT INTO laplace.entities(id,tier,type_id) VALUES
 (decode('d673b68115514712b366347069127a01','hex'),3,decode('d673b68115514712b366347069127aff','hex'));
+CREATE TEMP TABLE highway_recovery_interpretations AS
+SELECT DISTINCT entity_id,2::smallint AS tier,
+       decode('d673b68115514712b366347069127aff','hex') AS type_id
+FROM highway_recovery_pairs
+UNION ALL
+SELECT decode('d673b68115514712b366347069127a01','hex'),3::smallint,
+       decode('d673b68115514712b366347069127aff','hex');
 INSERT INTO laplace.highway_mask_pending SELECT * FROM highway_recovery_pairs;
 
 DO $$
 BEGIN
+    IF (SELECT count(*) FROM laplace.entities WHERE id IN
+        (SELECT entity_id FROM highway_recovery_interpretations))<>2
+       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
+        (SELECT entity_id FROM highway_recovery_interpretations))<>(SELECT count(*) FROM highway_recovery_interpretations)
+       OR EXISTS(SELECT FROM highway_recovery_interpretations x
+        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
+        WHERE i.entity_id IS NULL) THEN
+        RAISE EXCEPTION 'fixture lost canonical entities or exact interpretation pairs';
+    END IF;
     IF NOT consensus.highway_ready() THEN RAISE EXCEPTION 'fixture registry is unavailable'; END IF;
     IF (SELECT l.lanname FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang
         WHERE p.oid='consensus.highway_mask_deposit(bytea[],bytea[])'::regprocedure)
@@ -71,11 +87,16 @@ BEGIN
     IF EXISTS(SELECT 1 FROM highway_recovery_pairs f JOIN laplace.entities e ON e.id=f.entity_id
         WHERE NOT COALESCE(consensus.highway_mask_bits(e.highway_mask) @>
             ARRAY[consensus.relation_highway_bit(f.type_id)],false)) THEN
-        RAISE EXCEPTION 'native replay did not populate every expected bit and stored tier';
+        RAISE EXCEPTION 'native replay did not populate every expected canonical mask bit';
     END IF;
     IF (SELECT count(*) FROM laplace.entities WHERE id IN
-        (SELECT entity_id FROM highway_recovery_pairs))<>3 THEN
-        RAISE EXCEPTION 'replay removed a stored entity tier';
+        (SELECT entity_id FROM highway_recovery_interpretations))<>2
+       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
+        (SELECT entity_id FROM highway_recovery_interpretations))<>(SELECT count(*) FROM highway_recovery_interpretations)
+       OR EXISTS(SELECT FROM highway_recovery_interpretations x
+        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
+        WHERE i.entity_id IS NULL) THEN
+        RAISE EXCEPTION 'replay changed canonical entities or exact interpretation pairs';
     END IF;
     IF EXISTS(SELECT 1 FROM laplace.consensus WHERE subject_id IN
         (SELECT entity_id FROM highway_recovery_pairs) OR object_id IN
@@ -98,23 +119,36 @@ BEGIN
         (SELECT entity_id FROM highway_recovery_pairs)) THEN
         RAISE EXCEPTION 'successful clear left dirty identities pending';
     END IF;
+    IF (SELECT count(*) FROM laplace.entities WHERE id IN
+        (SELECT entity_id FROM highway_recovery_interpretations))<>2
+       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
+        (SELECT entity_id FROM highway_recovery_interpretations))<>(SELECT count(*) FROM highway_recovery_interpretations)
+       OR EXISTS(SELECT FROM highway_recovery_interpretations x
+        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
+        WHERE i.entity_id IS NULL) THEN
+        RAISE EXCEPTION 'clear changed canonical entities or exact interpretation pairs';
+    END IF;
 END $$;
+DELETE FROM laplace.entity_interpretations WHERE entity_id IN (SELECT entity_id FROM highway_recovery_pairs);
 DELETE FROM laplace.entities WHERE id IN (SELECT entity_id FROM highway_recovery_pairs);
+DROP TABLE highway_recovery_interpretations;
 DROP TABLE highway_recovery_pairs;
 
 -- Refresh must use the same native relation/tuple machinery as admission,
--- including replacement (not merely OR), all tiers and more than one SPI page.
+-- including replacement (not merely OR), all interpretations and more than one SPI page.
 BEGIN;
 CREATE TEMP TABLE highway_refresh_fixture(name text PRIMARY KEY,id bytea);
 INSERT INTO highway_refresh_fixture
 SELECT name,public.laplace_hash128_blake3(convert_to('test/native-highway-refresh/'||name,'UTF8'))
 FROM unnest(ARRAY['a','b','isolated','untouched','dynamic','unknown','type']) name;
 INSERT INTO highway_refresh_fixture VALUES ('zero',decode(repeat('00',16),'hex'));
-INSERT INTO laplace.entities(id,tier,type_id)
-SELECT f.id,t.tier::smallint,k.id FROM highway_refresh_fixture f
+CREATE TEMP TABLE highway_refresh_interpretations AS
+SELECT f.id AS entity_id,t.tier::smallint AS tier,k.id AS type_id FROM highway_refresh_fixture f
 CROSS JOIN (VALUES(2),(3)) t(tier)
 CROSS JOIN highway_refresh_fixture k
 WHERE k.name='type' AND f.name IN ('a','b','isolated','untouched','zero');
+INSERT INTO laplace.entities(id,tier,type_id)
+SELECT entity_id,tier,type_id FROM highway_refresh_interpretations;
 INSERT INTO laplace.consensus
     (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
 SELECT laplace.consensus_id(s,r,o),s,r,o,
@@ -156,6 +190,15 @@ FROM requested q LEFT JOIN bits b ON b.id=q.id GROUP BY q.id;
 DO $$
 DECLARE ids bytea[]; changed bigint;
 BEGIN
+    IF (SELECT count(*) FROM laplace.entities WHERE id IN
+        (SELECT entity_id FROM highway_refresh_interpretations))<>5
+       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
+        (SELECT entity_id FROM highway_refresh_interpretations))<>(SELECT count(*) FROM highway_refresh_interpretations)
+       OR EXISTS(SELECT FROM highway_refresh_interpretations x
+        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
+        WHERE i.entity_id IS NULL) THEN
+        RAISE EXCEPTION 'refresh fixture lost canonical entities or exact interpretation pairs';
+    END IF;
     IF (SELECT l.lanname FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang
         WHERE p.oid='consensus.highway_mask_refresh(bytea[])'::regprocedure)
        IS DISTINCT FROM 'c' THEN RAISE EXCEPTION 'refresh did not enter native C'; END IF;
@@ -166,7 +209,7 @@ BEGIN
     END IF;
     SELECT array_agg(id ORDER BY id) INTO ids FROM highway_refresh_expected;
     changed:=consensus.highway_mask_refresh(ids||ids||ARRAY[NULL]::bytea[]);
-    IF changed<>8 THEN RAISE EXCEPTION 'refresh lost a requested tier: %',changed; END IF;
+    IF changed<>4 THEN RAISE EXCEPTION 'refresh changed wrong canonical entity count: %',changed; END IF;
     IF EXISTS(SELECT FROM highway_refresh_expected x JOIN laplace.entities e USING(id)
         WHERE e.highway_mask IS DISTINCT FROM x.mask) THEN
         RAISE EXCEPTION 'refresh differs from independent full incident/family oracle';
@@ -191,7 +234,7 @@ DECLARE ids bytea[]; changed bigint;
 BEGIN
     SELECT array_agg(id) INTO ids FROM highway_refresh_fixture WHERE name IN ('a','b','zero','isolated');
     changed:=consensus.highway_mask_refresh(ids);
-    IF changed<>4 THEN RAISE EXCEPTION 'family withdrawal changed wrong tier count: %',changed; END IF;
+    IF changed<>2 THEN RAISE EXCEPTION 'family withdrawal changed wrong canonical entity count: %',changed; END IF;
     IF EXISTS(SELECT FROM laplace.entities e JOIN highway_refresh_fixture f USING(id)
         WHERE f.name IN ('b','zero') AND
             (consensus.highway_mask_bits(e.highway_mask) @> ARRAY[consensus.relation_highway_bit(laplace.relation_type_id('CAUSES'))]
@@ -201,9 +244,13 @@ BEGIN
 END $$;
 DELETE FROM laplace.consensus WHERE subject_id IN (SELECT id FROM highway_refresh_fixture)
    OR object_id IN (SELECT id FROM highway_refresh_fixture);
--- Real CHECK rejection must roll back earlier native row replacements too.
+-- Reject the later nonzero endpoint so the earlier zero-id mask replacement
+-- must roll back too. The mask belongs to the canonical entity, not a tier.
 ALTER TABLE laplace.entities ADD CONSTRAINT highway_refresh_preserve
-CHECK(id<>decode(repeat('00',16),'hex') OR tier<>3 OR highway_mask IS NOT NULL) NOT VALID;
+CHECK(id<>GREATEST(
+    public.laplace_hash128_blake3(convert_to('test/native-highway-refresh/a','UTF8')),
+    public.laplace_hash128_blake3(convert_to('test/native-highway-refresh/b','UTF8')))
+    OR highway_mask IS NOT NULL) NOT VALID;
 CREATE TEMP TABLE highway_before_clear AS
 SELECT e.id,e.tier,e.highway_mask FROM laplace.entities e JOIN highway_refresh_fixture f USING(id);
 DO $$
@@ -215,9 +262,18 @@ BEGIN
         RAISE EXCEPTION 'native refresh bypassed CHECK';
     EXCEPTION WHEN check_violation THEN NULL;
     END;
-    IF EXISTS(SELECT FROM highway_before_clear b JOIN laplace.entities e USING(id,tier)
-        WHERE e.highway_mask IS DISTINCT FROM b.highway_mask) THEN
+    IF EXISTS(SELECT FROM highway_before_clear b LEFT JOIN laplace.entities e USING(id)
+        WHERE e.id IS NULL OR (e.tier,e.highway_mask) IS DISTINCT FROM (b.tier,b.highway_mask)) THEN
         RAISE EXCEPTION 'failed refresh left a partial replacement';
+    END IF;
+    IF (SELECT count(*) FROM laplace.entities WHERE id IN
+        (SELECT entity_id FROM highway_refresh_interpretations))<>5
+       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
+        (SELECT entity_id FROM highway_refresh_interpretations))<>(SELECT count(*) FROM highway_refresh_interpretations)
+       OR EXISTS(SELECT FROM highway_refresh_interpretations x
+        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
+        WHERE i.entity_id IS NULL) THEN
+        RAISE EXCEPTION 'failed refresh changed canonical entities or exact interpretation pairs';
     END IF;
 END $$;
 ALTER TABLE laplace.entities DROP CONSTRAINT highway_refresh_preserve;
@@ -226,14 +282,23 @@ DECLARE ids bytea[]; changed bigint;
 BEGIN
     SELECT array_agg(id) INTO ids FROM highway_refresh_fixture WHERE name IN ('a','b','zero','isolated');
     changed:=consensus.highway_mask_refresh(ids);
-    IF changed<>6 THEN
-        RAISE EXCEPTION 'final incident withdrawal changed wrong tier count: %',changed;
+    IF changed<>3 THEN
+        RAISE EXCEPTION 'final incident withdrawal changed wrong canonical entity count: %',changed;
     END IF;
     IF consensus.highway_mask_refresh(ids)<>0 THEN
-        RAISE EXCEPTION 'final incident withdrawal did not clear precisely six masks once';
+        RAISE EXCEPTION 'final incident withdrawal did not clear precisely three canonical masks once';
     END IF;
     IF EXISTS(SELECT FROM laplace.entities WHERE id=ANY(ids) AND highway_mask IS NOT NULL) THEN
         RAISE EXCEPTION 'final incident withdrawal retained a non-NULL mask';
+    END IF;
+    IF (SELECT count(*) FROM laplace.entities WHERE id IN
+        (SELECT entity_id FROM highway_refresh_interpretations))<>5
+       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
+        (SELECT entity_id FROM highway_refresh_interpretations))<>(SELECT count(*) FROM highway_refresh_interpretations)
+       OR EXISTS(SELECT FROM highway_refresh_interpretations x
+        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
+        WHERE i.entity_id IS NULL) THEN
+        RAISE EXCEPTION 'final refresh changed canonical entities or exact interpretation pairs';
     END IF;
 END $$;
 

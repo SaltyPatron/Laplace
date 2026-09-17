@@ -588,6 +588,8 @@ class Qualification:
             "SELECT encode(laplace.word_id('canonical identity qualification'),'hex');\n"
             "SELECT count(*) FROM converse.text_root_placements(ARRAY['canonical identity qualification']);\n"
             "SELECT json_build_object('qualification_backend',pg_backend_pid(),"
+            "'geometry_distance_4d',public.laplace_distance_4d("
+            "public.ST_MakePoint(0.0,0.0,0.0,0.0),public.ST_MakePoint(1.0,0.0,0.0,0.0)),"
             "'extensions',(SELECT json_object_agg(extname,extversion) FROM pg_extension WHERE extname IN "
             "('postgis','laplace_geom','laplace_substrate')),"
             "'execution_modules',(SELECT json_agg(DISTINCT probin) FROM pg_proc WHERE probin LIKE '%laplace_execution_%'));"
@@ -621,6 +623,9 @@ class Qualification:
             self.write()
             require(observed["extensions"] == self.versions, "actual extension versions differ from installed controls")
             require(observed["execution_modules"] == [self.module], "SQL catalog selects a different execution module")
+            require(type(observed.get("geometry_distance_4d")) in (int, float) and
+                    observed["geometry_distance_4d"] == 1,
+                    "held backend geometry unit-distance result differs")
             for name, expected in self.installed.items():
                 require(str(expected) in mappings, f"backend did not map installed {name}: {expected}")
                 require(mappings[str(expected)] == self.prepared_files[str(expected)],

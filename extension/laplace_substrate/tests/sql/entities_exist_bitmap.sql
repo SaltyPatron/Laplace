@@ -2,6 +2,10 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS laplace_geom;
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 
+-- All fixture observations, including their type interpretations, share one
+-- transaction so later identity-law checks see the original substrate.
+BEGIN;
+
 CREATE TEMP TABLE test_fixtures AS
 SELECT
     decode(lpad(to_hex(b), 2, '0') || repeat(lpad(to_hex(b), 2, '0'), 15), 'hex') AS id
@@ -75,5 +79,4 @@ WITH keyed AS (
 SELECT encode(laplace.entities_stored_bitmap(ids, tiers), 'hex') AS keyed_mixed
 FROM keyed;
 
-DELETE FROM laplace.entities WHERE id IN (SELECT id FROM test_fixtures);
-DROP TABLE test_fixtures;
+ROLLBACK;

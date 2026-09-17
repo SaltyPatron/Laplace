@@ -539,7 +539,7 @@ def main() -> int:
             "ingest-source.sh: must translate LAPLACE_INGEST_FORCE into the CLI --force flag"
         )
     seed_workflow = read_text(ROOT / ".github" / "workflows" / "seed.yml")
-    if 'echo "LAPLACE_INGEST_FORCE=1" >> "$GITHUB_ENV"' not in seed_workflow:
+    if "export LAPLACE_INGEST_FORCE=1" not in seed_workflow:
         errs.append(
             "seed.yml: evict_before_ingest must force the replacement observation"
         )

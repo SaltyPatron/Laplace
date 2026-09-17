@@ -98,20 +98,49 @@ BEGIN
     END;
 END $$;
 
--- Physical tuple routing must retain every stored tier for an identity.
+-- A second tier is another interpretation of one canonical content entity.
 INSERT INTO laplace.entities(id,tier,type_id)
 SELECT id,3,decode(repeat('dc',16),'hex') FROM deposit_fixtures WHERE name='entity_a';
 DO $$
-DECLARE n bigint;
+DECLARE
+    n bigint;
+    facets_before jsonb;
+    facets_after jsonb;
+    expected_facets jsonb := jsonb_build_array(
+        jsonb_build_array(2,repeat('dc',16)),jsonb_build_array(3,repeat('dc',16)));
+    expected_mask bytea := consensus.highway_mask_from_bits(ARRAY[
+        consensus.relation_highway_bit(laplace.relation_type_id('IS_A')),
+        consensus.relation_highway_bit(laplace.relation_type_id('HAS_PART')),
+        consensus.relation_highway_bit(laplace.relation_type_id('IS_ANTONYM_OF'))]);
 BEGIN
+    SELECT jsonb_agg(jsonb_build_array(tier,encode(type_id,'hex')) ORDER BY tier,type_id)
+      INTO facets_before FROM laplace.entity_interpretations
+      WHERE entity_id=decode(repeat('a7',16),'hex');
+    IF (SELECT count(*) FROM laplace.entities WHERE id=decode(repeat('a7',16),'hex'))<>1
+       OR facets_before IS DISTINCT FROM expected_facets THEN
+        RAISE EXCEPTION 'fixture must retain one content entity and both exact interpretations';
+    END IF;
     SELECT consensus.highway_mask_deposit(
         ARRAY[decode(repeat('a7',16),'hex')],
         ARRAY[laplace.relation_type_id('IS_ANTONYM_OF')]) INTO n;
-    IF n<>2 THEN RAISE EXCEPTION 'multi-tier identity lost an update: %',n; END IF;
+    IF n<>1 THEN RAISE EXCEPTION 'canonical entity mask changed wrong row count: %',n; END IF;
+    IF (SELECT highway_mask FROM laplace.entities WHERE id=decode(repeat('a7',16),'hex'))
+       IS DISTINCT FROM expected_mask THEN
+        RAISE EXCEPTION 'interpretation-bearing entity lost accumulated mask bits';
+    END IF;
     SELECT consensus.highway_mask_deposit(
         ARRAY[decode(repeat('a7',16),'hex')],
         ARRAY[laplace.relation_type_id('IS_ANTONYM_OF')]) INTO n;
     IF n<>0 THEN RAISE EXCEPTION 'replay updated % masks',n; END IF;
+    SELECT jsonb_agg(jsonb_build_array(tier,encode(type_id,'hex')) ORDER BY tier,type_id)
+      INTO facets_after FROM laplace.entity_interpretations
+      WHERE entity_id=decode(repeat('a7',16),'hex');
+    IF (SELECT count(*) FROM laplace.entities WHERE id=decode(repeat('a7',16),'hex'))<>1
+       OR facets_after IS DISTINCT FROM facets_before
+       OR (SELECT highway_mask FROM laplace.entities WHERE id=decode(repeat('a7',16),'hex'))
+          IS DISTINCT FROM expected_mask THEN
+        RAISE EXCEPTION 'mask replay changed canonical identity, interpretations or bits';
+    END IF;
 END $$;
 
 -- Native writes still run the table's constraints and roll back on failure.

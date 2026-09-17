@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,7 +88,7 @@ class Accessibility:
             require(depth <= 32 and count < 2048, "accessible widget tree exceeds its envelope")
             count += 1
             require(item is not None, "accessible child disappeared")
-            item.clear_cache_single()
+            item.clear_cache()
             yield item
             children = item.get_child_count()
             require(0 <= children <= 512, "accessible child count exceeds its envelope")
@@ -121,11 +122,11 @@ class Accessibility:
                 "named GUI action was not acknowledged")
 
     def checked(self, item):
-        item.clear_cache_single()
+        item.clear_cache()
         return item.get_state_set().contains(self.api.StateType.CHECKED)
 
     def name(self, item):
-        item.clear_cache_single()
+        item.clear_cache()
         return item.get_name()
 
     def choose_engine(self, dialog, side, name):
@@ -165,7 +166,7 @@ class Accessibility:
         else:
             self.session.key("Escape")
         dock = self.one(app, name="Engine Debug", role=self.api.Role.PANEL)
-        texts = [item for item in self.walk(dock) if item.is_text()
+        texts = [item for item in self.walk(dock) if item.get_text_iface() is not None
                  and item.get_role() in (self.api.Role.TEXT, self.api.Role.ENTRY)]
         require(len(texts) == 1, "Engine Debug does not expose one actual text document")
         return texts[0]
@@ -492,7 +493,10 @@ def worker(args):
                       selected_files=files, direct_acceptance_sha256=digest(args.engine_acceptance_receipt))
     except BaseException as error:
         result["failure_type"] = type(error).__name__
-        result["failure"] = str(error) if isinstance(error, (ValueError, TimeoutError)) else "GUI game failed; inspect retained private evidence"
+        result["failure"] = str(error) if isinstance(error, (ValueError, TimeoutError, AttributeError)) else "GUI game failed; inspect retained private evidence"
+        result["failure_trace"] = [{"file": Path(frame.filename).name, "line": frame.lineno,
+                                    "function": frame.name}
+                                   for frame in traceback.extract_tb(error.__traceback__)[-8:]]
     finally:
         if gui is not None and gui.poll() is None:
             gui.terminate()

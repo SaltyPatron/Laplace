@@ -35,6 +35,23 @@ bodies was checked against its manifest hash. Their writer counters are
 cumulative: use the last cumulative values above, not the sum of 78 snapshots.
 Similar entity and physicality totals do not establish a one-to-one identity law.
 
+For this particular sealed selection, the three table counters average
+3,318.502 entity rows, 3,312.133 physicality rows and 478.611 attestation rows
+per complete game: 7,109.246 inserted rows across those tables. If that same
+novelty mix and representation were sustained at 2,500 games/second, the
+arithmetic would require about 17.77 million combined table-row insertions per
+second, before accounting for index maintenance, interpretation facets,
+consensus work, WAL and exact readback. This is a workload projection, not a
+measured storage rate or a forecast of attainable game throughput.
+
+These are separate table-write counters, not a count of independent semantic
+objects. Existing canonical entities can be reused, while a new physicality
+or observation may still require recording. Different input novelty and less
+intermediate expansion can change the per-game write demand. The geometry
+COPY baseline and exclusive phase timings are intended to distinguish that
+representation cost from avoidable composition, lookup, transaction and
+readback overhead; the current expansion is not assumed to be optimal.
+
 The final recording receipt, full-selection replay and after-measurement runtime
 guard were not produced. This attempt therefore supplies committed chunk
 evidence, not a completed recorded-game rate or the 2,500-games/second result.

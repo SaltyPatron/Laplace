@@ -432,5 +432,91 @@ class RetainedActualCTestPlanTests(unittest.TestCase):
             self.validate()
 
 
+
+class HeldBackendGeometryTests(unittest.TestCase):
+    """Exercise the production held-session path; real SQL remains host-qualified."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.operator = module.Qualification(SimpleNamespace(work=self.root / "proof", timeout=300))
+        self.operator.pgprefix = self.root / "pg"
+        self.operator.nativeprefix = self.root / "native"
+        self.operator.bindir = self.operator.pgprefix / "bin"
+        self.operator.module = "laplace_execution_0123456789abcdef"
+        self.operator.versions = {"postgis": "3.6.3", "laplace_geom": "fixture-geom",
+                                  "laplace_substrate": "fixture-substrate"}
+        self.operator.postmaster = Mock(pid=123)
+        self.operator.postmaster_identity = {"pid": 123, "exe": str(self.operator.bindir / "postgres")}
+        self.identity = {"pid": 321, "ppid": 123, "exe": str(self.operator.bindir / "postgres")}
+        self.operator.installed = {
+            name: self.operator.pgprefix / "lib" / (name + ".so")
+            for name in ("laplace_geom", "laplace_substrate", self.operator.module)}
+        self.operator.installed.update({
+            name: self.operator.nativeprefix / "lib" / ("lib" + name + ".so")
+            for name in ("laplace_core", "laplace_dynamics")})
+        paths = [*self.operator.installed.values(), self.operator.pgprefix / "lib/postgis-3.so"]
+        self.mappings = {}
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("controlled candidate " + path.name)
+            self.mappings[str(path)] = module.fingerprint(path)
+        self.operator.prepared_files = {
+            str(path): self.mappings[str(path)] for path in self.operator.installed.values()}
+        self.observed = {"qualification_backend": 321, "extensions": self.operator.versions,
+                         "execution_modules": [self.operator.module], "geometry_distance_4d": 1}
+        self.operator.sql = Mock(return_value="")
+        self.process = Mock()
+        self.process.poll.return_value = None
+        self.process.wait.return_value = 0
+
+    def start_probe(self, command, **kwargs):
+        self.assertEqual(command[0], str(self.operator.bindir / "psql"))
+        self.assertIn("--dbname=laplace_identity_probe", command)
+        statement = Path(command[-1]).read_text()
+        # The real operation and observed value must belong to the held backend's
+        # own SELECT, not CREATE EXTENSION's earlier connection or a LOAD shortcut.
+        expected = ("'geometry_distance_4d',public.laplace_distance_4d("
+                    "public.ST_MakePoint(0.0,0.0,0.0,0.0),"
+                    "public.ST_MakePoint(1.0,0.0,0.0,0.0))")
+        self.assertIn(expected, statement)
+        self.assertLess(statement.index("'qualification_backend'"), statement.index(expected))
+        self.assertLess(statement.index(expected), statement.index("SELECT pg_sleep(15)"))
+        self.assertNotIn("LOAD ", statement)
+        kwargs["stdout"].write((json.dumps(self.observed) + "\n").encode())
+        kwargs["stdout"].flush()
+        return self.process
+
+    def execute(self):
+        with patch.object(module.subprocess, "Popen", side_effect=self.start_probe) as launch, \
+                patch.object(module, "proc_identity", return_value=self.identity) as identity, \
+                patch.object(module, "mapped_files", return_value=self.mappings) as mappings:
+            self.operator.backend_proof()
+        launch.assert_called_once()
+        identity.assert_called_once_with(321)
+        mappings.assert_called_once_with(321)
+
+    def test_real_geom_call_is_in_same_held_backend_and_result_is_retained(self):
+        self.execute()
+        self.assertEqual(self.operator.receipt["backend_observation"]["sql"]["geometry_distance_4d"], 1)
+        self.assertEqual(self.operator.receipt["backend_observation"]["mapped_libraries"], self.mappings)
+        self.assertEqual(self.operator.receipt["phases"][-1]["name"],
+                         "installed-backend-library-identity-verified")
+
+    def test_wrong_missing_or_boolean_geom_result_is_refused(self):
+        for value in (0, None, True):
+            with self.subTest(value=value):
+                self.observed["geometry_distance_4d"] = value
+                with self.assertRaisesRegex(RuntimeError, "geometry unit-distance result differs"):
+                    self.execute()
+        self.assertFalse(self.operator.receipt["phases"])
+
+    def test_successful_geom_result_does_not_bypass_actual_mapping(self):
+        del self.mappings[str(self.operator.installed["laplace_geom"])]
+        with self.assertRaisesRegex(RuntimeError, "backend did not map installed laplace_geom"):
+            self.execute()
+        self.assertFalse(self.operator.receipt["phases"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

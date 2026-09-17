@@ -1,5 +1,4 @@
 BEGIN;
-BEGIN
 SELECT p.partstrat = 'h' AS entities_hash_partitioned
 FROM pg_partitioned_table p
 WHERE p.partrelid = 'laplace.entities'::regclass;
@@ -41,7 +40,6 @@ BEGIN
     INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
     VALUES (b,1,ta,s1), (b,3,tb,s2);
 END $$;
-DO
 WITH ids AS (
     SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
            public.laplace_hash128_blake3('test/entity-identity/b') AS b
@@ -100,4 +98,3 @@ SELECT NOT EXISTS ((SELECT * FROM a_claims EXCEPT SELECT * FROM b_claims)
 (1 row)
 
 ROLLBACK;
-ROLLBACK

@@ -17,6 +17,21 @@ provision_deps() {
   bash scripts/ci-deps.sh
 }
 
+run_ci_contract_checks() {
+  bash -n \
+    scripts/product-ci.sh \
+    scripts/pipeline.sh \
+    scripts/ci-deps.sh \
+    scripts/test-parallel.sh \
+    scripts/model-synthesize-ci.sh \
+    scripts/maintain-installed-database.sh \
+    scripts/ingest-source.sh
+  python3 scripts/validate-pipeline.py
+  python3 scripts/test-ci-workspace.py
+  python3 scripts/test-product-ci-artifact-ownership.py
+  python3 scripts/test-seed-workflow-ownership.py
+}
+
 require_built_revision() {
   local expected actual
   expected="$(git rev-parse HEAD)"
@@ -42,9 +57,9 @@ run_build() {
 
 run_dev_tests() {
   require_built_revision
-  # Development tests are evidence, not a reason to discard the rest of the
-  # integrated lifecycle. Run every suite, remember any failure, and return it
-  # after the remaining suites have had a chance to report their own state.
+  # Run every development suite so one early failure does not hide another.
+  # The aggregate failure is still a hard pre-deployment gate: run_deploy never
+  # mutates the installed product after this function returns non-zero.
   local rc=0
   bash scripts/test-parallel.sh --profile dev-native --suite native-dev || rc=$?
   bash scripts/test-parallel.sh --profile dev-managed --suite managed-dev || rc=$?
@@ -95,7 +110,7 @@ run_competitive_model_proof() {
   # This is the executable competitive path, not a compile-only gate: a real
   # weighted checkpoint is admitted into the substrate, retained evidence is
   # read back, a GGUF is synthesized, llama.cpp loads it, and behavioral probes
-  # must pass. A missing model/runtime or semantic failure fails mainline.
+  # must pass. A missing model/runtime or semantic failure blocks publication.
   bash scripts/model-synthesize-ci.sh
 }
 
@@ -140,29 +155,19 @@ reconcile_installed_product() {
 }
 
 # Product lifecycle owns build/install/database verification/publication/live checks.
-# Mainline additionally proves the competitive model path end-to-end so a change
-# cannot be called integrated while model admission/synthesis/runtime behavior is broken.
+# Mainline proves the competitive model path before application activation so a
+# failed required capability cannot be published as a successful product revision.
 run_deploy() {
   check_deps
   run_build
-
-  # Preserve downstream product evidence even if a development suite fails.
-  # Build/install/runtime failures themselves still stop immediately under set -e.
-  local dev_test_rc=0
-  run_dev_tests || dev_test_rc=$?
-
+  run_dev_tests
   run_install
   run_database_maintenance --prepare
   run_db_tests
+  run_competitive_model_proof
   run_publish
   reconcile_installed_product
   run_live_tests
-  run_competitive_model_proof
-
-  if (( dev_test_rc != 0 )); then
-    echo "::error::development tests failed earlier (status $dev_test_rc); integrated lifecycle continued and retained downstream evidence" >&2
-    return "$dev_test_rc"
-  fi
 }
 
 case "$stage" in
@@ -170,7 +175,7 @@ case "$stage" in
     provision_deps
     ;;
   check)
-    bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-deps.sh scripts/test-parallel.sh scripts/model-synthesize-ci.sh
+    run_ci_contract_checks
     ;;
   reconcile)
     reconcile_installed_product

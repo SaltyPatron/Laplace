@@ -431,18 +431,43 @@ int main(void) {
         REFUSES((void)admission_sources(s, source_arrays, 2), "finite registered prior");
     }
     {
-        size_t expected_bytes = 0, first_size, second_size;
-        const uint8_t *first = intent_stage_tuple_ptr(original, INTENT_STAGE_TABLE_PHYSICALITIES, &first_size);
-        const uint8_t *second = intent_stage_tuple_ptr(s->current.items[0], INTENT_STAGE_TABLE_PHYSICALITIES, &second_size);
+        /* The SQL output uses zero-based E/P/A/interpretation fields, distinct
+         * from the one-based native table enum. Preserve each stage's exact
+         * bytes, including the empty slots in the physicality-only stage. */
         s->output[0] = original; s->output[1] = s->current.items[0]; s->output[2] = original;
-        ArrayType *out = admission_output(s, INTENT_STAGE_TABLE_PHYSICALITIES, &expected_bytes);
-        CHECK(expected_bytes == first_size * 2 + second_size && ARR_DIMS(out)[0] == 3 && ARR_LBOUND(out)[0] == 1);
-        char *cursor = (char *)out + ARR_OVERHEAD_NONULLS(1);
-        CHECK(VARSIZE_ANY_EXHDR(cursor) == first_size && memcmp(VARDATA_ANY(cursor), first, first_size) == 0);
-        cursor += INTALIGN(VARHDRSZ + first_size);
-        CHECK(VARSIZE_ANY_EXHDR(cursor) == second_size && memcmp(VARDATA_ANY(cursor), second, second_size) == 0);
-        cursor += INTALIGN(VARHDRSZ + second_size);
-        CHECK(VARSIZE_ANY_EXHDR(cursor) == first_size && memcmp(VARDATA_ANY(cursor), first, first_size) == 0);
+        const intent_stage_table_t tables[3] = {
+            INTENT_STAGE_TABLE_ENTITIES, INTENT_STAGE_TABLE_PHYSICALITIES, INTENT_STAGE_TABLE_ATTESTATIONS
+        };
+        for (int field = 0; field < 4; ++field) {
+            size_t expected_bytes = 0, first_size, second_size;
+            const uint8_t *first = field == 3
+                ? intent_stage_entity_interpretation_tuple_ptr(original, &first_size)
+                : intent_stage_tuple_ptr(original, tables[field], &first_size);
+            const uint8_t *second = field == 3
+                ? intent_stage_entity_interpretation_tuple_ptr(s->current.items[0], &second_size)
+                : intent_stage_tuple_ptr(s->current.items[0], tables[field], &second_size);
+            ArrayType *out = admission_output(s, field, &expected_bytes);
+            CHECK(expected_bytes == first_size * 2 + second_size);
+            CHECK(ARR_ELEMTYPE(out) == BYTEAOID && ARR_NDIM(out) == 1
+                  && ARR_DIMS(out)[0] == 3 && ARR_LBOUND(out)[0] == 1);
+            char *cursor = ARR_DATA_PTR(out);
+            CHECK(VARSIZE_ANY_EXHDR(cursor) == first_size
+                  && (first_size == 0 || memcmp(VARDATA_ANY(cursor), first, first_size) == 0));
+            cursor += INTALIGN(VARHDRSZ + first_size);
+            CHECK(VARSIZE_ANY_EXHDR(cursor) == second_size
+                  && (second_size == 0 || memcmp(VARDATA_ANY(cursor), second, second_size) == 0));
+            cursor += INTALIGN(VARHDRSZ + second_size);
+            CHECK(VARSIZE_ANY_EXHDR(cursor) == first_size
+                  && (first_size == 0 || memcmp(VARDATA_ANY(cursor), first, first_size) == 0));
+            cursor += INTALIGN(VARHDRSZ + first_size);
+            CHECK(cursor == (char *)out + VARSIZE(out));
+        }
+        ArrayType *completeness = admission_output_completeness(s);
+        CHECK(ARR_ELEMTYPE(completeness) == BOOLOID && ARR_NDIM(completeness) == 1
+              && ARR_DIMS(completeness)[0] == 3 && ARR_LBOUND(completeness)[0] == 1);
+        const bool *flags = (const bool *)ARR_DATA_PTR(completeness);
+        for (size_t i = 0; i < 3; ++i)
+            CHECK(flags[i] == (intent_stage_entity_interpretations_complete(s->output[i]) != 0));
         s->output[0] = s->output[1] = s->output[2] = NULL;
     }
     physicality_descriptor_basis_t basis;

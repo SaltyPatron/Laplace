@@ -4,6 +4,9 @@ CREATE EXTENSION IF NOT EXISTS laplace_geom;
 NOTICE:  extension "laplace_geom" already exists, skipping
 CREATE EXTENSION IF NOT EXISTS laplace_substrate;
 NOTICE:  extension "laplace_substrate" already exists, skipping
+-- All fixture observations, including their type interpretations, share one
+-- transaction so later identity-law checks see the original substrate.
+BEGIN;
 CREATE TEMP TABLE test_fixtures AS
 SELECT
     decode(lpad(to_hex(b), 2, '0') || repeat(lpad(to_hex(b), 2, '0'), 15), 'hex') AS id
@@ -98,5 +101,4 @@ FROM keyed;
  05
 (1 row)
 
-DELETE FROM laplace.entities WHERE id IN (SELECT id FROM test_fixtures);
-DROP TABLE test_fixtures;
+ROLLBACK;
