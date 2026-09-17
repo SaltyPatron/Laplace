@@ -186,12 +186,64 @@ and TLS server name and using the installed CA. The on-host name lookup resolved
 
 The installed GUI launcher is `/opt/laplace/bin/laplace-cutechess`. Its existence
 does not establish an open desktop session or a completed GUI game. Those are
-separate acceptance results. The latest recorded-game attempt retained 140
-complete games and 10,546 plies before failing; its recorded games/second remains
-null. See [complete recorded throughput](../benchmarks/RECORDED_CHESS_THROUGHPUT.md)
-for the exact durable work and failure boundary.
+separate acceptance results. The later interrupted recorded-game attempt retained
+594 new complete games and 47,162 plies in 78 sealed, verified chunks; the earlier
+140-game baseline is separate. Neither attempt completed its full selected
+measurement, so its successful recorded games/second remains null. See
+[complete recorded throughput](../benchmarks/RECORDED_CHESS_THROUGHPUT.md)
+for the exact durable work and failure boundaries.
 
-## Latest repeated Stockfish calibration (2026-09-17)
+## Original Stockfish calibration and service restart (2026-09-17 06:40 UTC)
+
+[Original component run 35189493886](https://github.com/SaltyPatron/Laplace/actions/runs/35189493886)
+completed the exact-executable calibration, applied its defaults and measured
+service readiness before a later GUI prerequisite failure. The official checkout
+was `/build/external/stockfish` at Stockfish 19 commit
+`edb0d9db6731067ec50ce619ff372b463bc4dd5d`. The executable SHA-256 was
+`1a488f087c4af7a41c1f737703541752a38831592886e7f3956ffaa7bc8e0871`,
+with the selected `nn-1a298aa575a0.nnue` network present and authenticated.
+
+The sweep reserved two of twelve logical CPUs, tested Threads=1/2/4/6/8/10
+and Hash=16/64/256 MiB, and tested complete self-play concurrency=1/2/4/6/8/10.
+Each configuration retained its first sample separately and used three later
+samples for its recommendation.
+
+| Workload | Selected measured setting | Median result and timing scope |
+| --- | --- | --- |
+| Built-in 51-position depth-12 bench latency | Threads=8; Hash=16 MiB | 1.604 engine-reported seconds; search node counts differ across repetitions/settings |
+| Complete Stockfish self-play, depth 8, unlimited clock, no move cap/adjudication | Concurrency=10; each engine Threads=1 and Hash=16 MiB | 5.737623 generated games/second, including match process wall time |
+
+The three measured game samples each completed 20 games and 3,120 plies.
+Their rates were 5.765347, 5.737623 and 5.507657 games/second. They repeat the
+same deterministic complete move line, so this is an engine/concurrency
+calibration rather than a diverse or novel recorded corpus. PostgreSQL recording
+and playing strength were not measured.
+
+GUI defaults select the measured single-engine setting of 8 threads and 16 MiB.
+The evaluator defaults also select 8 threads and 16 MiB with **one process**;
+evaluator-pool throughput was not measured. The self-play concurrency of ten
+was not applied to that pool. Existing explicit operator overrides keep priority.
+The same report records a 10-thread/64-MiB node-throughput candidate at a median
+5,680,556 engine-reported nodes/second, whose sample range overlaps other settings.
+
+The report SHA-256 is
+`19fddbd62f90999398cc8f7efc32230505f35e8002496d5a217702345266fbe1`.
+Its installed copy is under
+`/opt/laplace/share/laplace/chess-calibrations/<report-sha256>/report.json`.
+The [retained component artifact](https://github.com/SaltyPatron/Laplace/actions/runs/35189493886/artifacts/10484265314)
+contains the original report, full PGNs, configuration and startup receipts;
+ZIP SHA-256
+`3be336ee14bfc6b9e53d55442e24c68d6c010d4081f5c54bb11e85100aac5f31`.
+[Immutable readback 35191096860](https://github.com/SaltyPatron/Laplace/actions/runs/35191096860)
+authenticated and projected those exact receipts.
+
+The API/UI, MCP and configured Lichess services were active and enabled after
+a measured **3.445756-second service restart to full readiness**. This measured
+a warm service restart with existing OS caches, not a machine cold boot.
+The later GUI prerequisite failure does not erase that completed observation
+or establish a completed GUI game, source-corpus acceptance or installed cache hit.
+
+## Refactor repeated Stockfish calibration (2026-09-17)
 
 [Refactor calibration 35168534734](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35168534734)
 completed on hart-server with the official source-built Stockfish executable
@@ -211,10 +263,9 @@ game rate remains null.
 
 The same job activated the measured analysis and game profiles, exercised their
 actual UCI defaults, and verified explicit caller overrides. These settings belong
-to that exact executable and finite workload. Original's observed Stockfish
-executable has a different SHA-256
-(`1a488f087c4af7a41c1f737703541752a38831592886e7f3956ffaa7bc8e0871`);
-it requires its own calibration before claiming the same measured configuration.
+to that exact executable and finite workload. Original's different executable
+has its own calibration above; these two reports use different finite bench
+and match settings and are not an A/B performance comparison.
 
 The [retained calibration artifact](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35168534734/artifacts/10476786113)
 contains the inputs, full PGNs, executable/network identities, individual samples
