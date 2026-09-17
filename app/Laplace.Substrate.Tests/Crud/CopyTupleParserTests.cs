@@ -201,9 +201,13 @@ public class CopyTupleParserTests
         var distinct = NpgsqlSubstrateWriter.DistinctEntityRowIndices(
             parsed, tier0Gate: false, out var tier0Present);
 
-        Assert.Equal(new[] { 0, 1, 3 }, distinct);
+        // Canonical ID order is independent of source arrival order. This
+        // control owns the exact cross-blob winners; the selection tests own
+        // representative selection and stage-order invariance.
+        Assert.Equal(new[] { 0, 1, 3 }, distinct.OrderBy(i => i));
         Assert.Null(tier0Present);
-        Assert.Equal(new[] { H(1), H(2), H(3) }, distinct.Select(i => parsed.Ids[i]));
+        Assert.True(new[] { H(1), H(2), H(3) }.ToHashSet()
+            .SetEquals(distinct.Select(i => parsed.Ids[i])));
     }
 
     [Theory]

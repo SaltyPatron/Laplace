@@ -3,9 +3,92 @@
 The `recorded` benchmark suite measures ordinary Chess Lab jobs from game generation through synchronous PostgreSQL writer completion and exact native game readback. The API, native parser/composer, shared writer and native readback remain the production implementations. The collector checks their receipts and aggregates measured work.
 
 
-## Retained corpus evidence — 2026-09-17
+## Installed recording attempt — 2026-09-17
 
-The latest completed native installation and attempted retained-corpus run is
+[Run 35184890182, attempt 1](https://github.com/SaltyPatron/Laplace/actions/runs/35184890182)
+installed source `3a161d0f8390d4d5c3f9309d5a08746418d13b7d`
+(tree `f9db5544b0f14cb2eece60a1312706a77f0392ba`). Its native installation
+completed all 14 phases, and managed application publication completed all 19
+phases. The canonical consensus repair completed for all five chess sources
+without changing their evidence counts. The recording pilot was then cancelled
+while processing its seventy-ninth chunk.
+
+| Retained measurement | Actual result |
+| --- | ---: |
+| Requested and parsed complete games | 2,000 |
+| Newly recorded games with sealed exact readback | 594 |
+| Ordered plies in those sealed games | 47,162 |
+| Sealed chunks | 78 |
+| Composed candidate games at the last checkpoint | 601 |
+| Acknowledged writer calls | 78 |
+| Committed COPY transactions | 1,003 |
+| Logical writer round trips | 1,403 |
+| Inserted entity rows | 1,971,190 |
+| Inserted physicality rows | 1,967,407 |
+| Inserted attestation rows | 284,295 |
+| Journal replay hits | 0 |
+
+The selection excluded the earlier 140 sealed games and reselected the seven
+previously incomplete candidates. Composed candidates and the open seventy-ninth
+chunk are not added to the 594 sealed-game count. Each of the 78 current chunk
+bodies was checked against its manifest hash. Their writer counters are
+cumulative: use the last cumulative values above, not the sum of 78 snapshots.
+Similar entity and physicality totals do not establish a one-to-one identity law.
+
+The final recording receipt, full-selection replay and after-measurement runtime
+guard were not produced. This attempt therefore supplies committed chunk
+evidence, not a completed recorded-game rate or the 2,500-games/second result.
+Its last heartbeat was at 774.065 seconds; that diagnostic timestamp is not used
+as a successful benchmark denominator. The interrupted artifact retained no
+exclusive writer/readback timing totals, so those costs cannot be reconstructed
+from its sampled phase names.
+
+Evidence is retained in artifact `10482117875`,
+`original-native-install-35184890182-1`, with ZIP SHA256
+`d97b27055b3a34b6383f6d79d2f11d3dbb07a98e5c7fd6195a99e4701428d2e9`.
+The completed managed publication receipt SHA256 is
+`5e363d10cd2b8b3309bb343a0ea99840961cd1bf4959d1ed6ba12e008c2c8db3`.
+These identify the retained attempt; a later machine check still reads the
+currently installed files and PostgreSQL generation.
+
+## Exact native consensus calculation — 2026-09-17
+
+[Qualification 35188643764](https://github.com/SaltyPatron/Laplace/actions/runs/35188643764)
+compared the qualified native implementation
+`ac5f844627d7597279ae70f07ab084b09ba9b532` with
+`ec39c1f3bf57ec534a33dfdf769ffda77a222775`. The change reuses only the
+opponent-dependent calculation for adjacent identical rating/RD pairs within
+one canonical period. Every retained row keeps its count, score quotient and
+remainder, rounding, validation, accumulation order and final solve.
+
+The actual controls passed 759 arithmetic reference cases, 256 whole-period
+reference cases, 505 exact old/new grouped comparisons and 46 native tests,
+with no UBSan finding. All 30 timed output states and checksums matched.
+
+Each table entry is median CPU milliseconds for 25,000 folds across three
+trials on the GitHub-hosted qualifier, using identical compiler settings.
+The instrumentation that counts calculations was run separately.
+
+| Input pattern | Previous CPU ms | Cached CPU ms | Change |
+| --- | ---: | ---: | ---: |
+| One group | 35.930 | 35.736 | 0.54% lower |
+| Actual retained 60 rows, identical opponent | 260.703 | 59.739 | 77.09% lower; 4.36× faster |
+| Alternating four opponent pairs | 251.667 | 254.199 | 1.01% higher |
+| Four-row runs of repeated pairs | 246.804 | 102.221 | 58.58% lower; 2.41× faster |
+| Sixty distinct opponent pairs | 258.396 | 259.781 | 0.54% higher |
+
+Measured opponent calculations fell from 60 to one for the retained uniform
+case, and from 60 to 15 for repeated four-row runs. All-miss cases retained 60
+calculations. This is native calculation time: the measurement excludes SQL
+scans, evidence sorting, COPY, complete-game composition and readback, and
+does not imply a corresponding recorded-game speedup.
+
+Artifact `10483035849` has ZIP SHA256
+`ebdcf39d354757f72622c2483777c27f8c95feb6e549e406e5839128240fb457`.
+
+## Earlier retained corpus evidence — 2026-09-17
+
+The earlier native installation and attempted retained-corpus run is
 [35174504991, attempt 1](https://github.com/SaltyPatron/Laplace/actions/runs/35174504991),
 using source `ee2995b65e0f0182ae0776a9524443a6240d72b5`. The corpus measurement
 **failed**; it does not establish recorded-game capacity.
@@ -49,8 +132,10 @@ fully replayable retained testimony is folded as one canonical period per cell,
 and source repair uses the same target locking and fresh evidence read as
 admission. Mixed transient continuous-score cells retain their exact delta
 semantics. A separate checked-arithmetic correction removes saturated
-intermediates. Committed source and standalone qualification do not establish
-that the host has installed or measured that source.
+intermediates. Both corrections were subsequently installed by run 35184890182,
+whose five-source canonical refold is recorded above. The repaired 60-row cell
+retains 2,474 observations and reads rating `1798219672794`, RD `9058987541`
+and volatility `59999089` on the native fixed-point scale.
 
 The private host evidence directory for the attempted run is
 `/build/laplace/recovery/native-install/35174504991-1/`. The corresponding

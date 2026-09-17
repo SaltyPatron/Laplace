@@ -1,4 +1,4 @@
-name: Build and qualify canonical entity identity
+name: Verify canonical cross-stage selection
 on:
   push:
     branches: [review/canonical-identity-20260917]
@@ -52,14 +52,14 @@ jobs:
           set -euo pipefail
           cp .github/workflows/canonical-identity-qualification.yml "$QUALIFICATION_DIR/evidence/workflow.yml"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = 52e0dbdcfd6d567a2979d65f2b15e444bb32055a
+          test "$(git rev-parse HEAD^)" = d6bace57bdd1e0e3f3d539cb663daefd414edb43
           test -z "$(git status --porcelain --untracked-files=all)"
           python3 - <<'PY' 2>&1 | tee "$QUALIFICATION_DIR/evidence/source.log"
           import ast,base64,hashlib,json,os,re,subprocess,urllib.request
           from pathlib import Path
           root=Path(os.environ["QUALIFICATION_SOURCE"])
           evidence=Path(os.environ["QUALIFICATION_DIR"])/"evidence"
-          manifest_sha="7a6fd6cdbe2ca92945e64b0ab2825aa930c37e91"
+          manifest_sha="41ee158f1b2ef8aea3c7adc083f39ffa91f27f3f"
           request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+manifest_sha,
               headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
           with urllib.request.urlopen(request,timeout=60) as response: obj=json.load(response)
@@ -173,7 +173,7 @@ jobs:
             '-DLAPLACE_INSTALL_DIR_PERMS=OWNER_READ;OWNER_WRITE;OWNER_EXECUTE;GROUP_READ;GROUP_EXECUTE;WORLD_READ;WORLD_EXECUTE' \
             2>&1 | tee "$qualification_dir/evidence/configure.log"
           timeout --signal=TERM --kill-after=15s 1800s cmake --build "$build_dir" --parallel 2 \
-            --target laplace_core laplace_core_tests laplace_syzygy laplace_t0_perfcache laplace_modality_number_perfcache laplace_highway_perfcache \
+            --target laplace_core laplace_syzygy laplace_t0_perfcache laplace_modality_number_perfcache laplace_highway_perfcache \
             2>&1 | tee "$qualification_dir/evidence/native-build.log"
           timeout --signal=TERM --kill-after=15s 600s cmake --build "$build_dir" --parallel 2 \
             --target laplace_chess_position_perfcache \
@@ -182,59 +182,12 @@ jobs:
           test -s "$build_dir/core/liblaplace_syzygy.so"
           test -s "$build_dir/core/perfcache/chess-floor-pair.json"
           cp "$build_dir/CMakeCache.txt" "$qualification_dir/evidence/CMakeCache.txt"
-      - name: Execute complete native core tests and compile PostgreSQL 18 consumers
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$QUALIFICATION_SOURCE"
-          "$QUALIFICATION_BUILD/core/tests/laplace_core_tests" --gtest_list_tests > "$QUALIFICATION_DIR/evidence/native-test-list.txt"
-          timeout --signal=TERM --kill-after=15s 900s "$QUALIFICATION_BUILD/core/tests/laplace_core_tests" \
-            "--gtest_output=xml:$QUALIFICATION_DIR/evidence/native-tests.xml" \
-            2>&1 | tee "$QUALIFICATION_DIR/evidence/native-tests.log"
-          python3 - <<'PY'
-          import json,os,xml.etree.ElementTree as ET
-          from pathlib import Path
-          evidence=Path(os.environ["QUALIFICATION_DIR"])/"evidence"
-          tests=ET.parse(evidence/"native-tests.xml").getroot()
-          cases=list(tests.iter("testcase"))
-          assert cases and not list(tests.iter("failure")) and not list(tests.iter("error"))
-          required={"InterpretationsRetainOriginalPairsWithoutChangingLegacySemanticBytes",
-                    "InterpretationImportIsExplicitCompleteValidatedAndNondestructive",
-                    "InterpretationPartitionBudgetAndRetentionFollowStageOwnership",
-                    "PresentContentRetainsInterpretationsAndExactPhysicalityObservations",
-                    "NullableInterpretationProvenanceSurvivesImportPromotionAndPartition"}
-          assert required <= {x.attrib["name"] for x in cases if x.find("skipped") is None}
-          receipt={"selected":len(cases),"passed":sum(x.find("skipped") is None for x in cases),
-              "skipped":[{"class":x.attrib.get("classname"),"name":x.attrib["name"],
-                  "reason":"".join(x.find("skipped").itertext())} for x in cases if x.find("skipped") is not None]}
-          (evidence/"native-result.json").write_text(json.dumps(receipt,indent=2)+"\n")
-          print(json.dumps(receipt),flush=True)
-          PY
-          pg_source="$QUALIFICATION_DIR/external/postgresql"
-          (
-            cd "$pg_source"
-            timeout --signal=TERM --kill-after=15s 180s ./configure --without-readline --without-zlib --without-icu
-            timeout --signal=TERM --kill-after=15s 180s make -C src/backend generated-headers -j2
-          ) 2>&1 | tee "$QUALIFICATION_DIR/evidence/pg18-header-build.log"
-          for unit in generated_stage_sink recall generate_walk task_shape physicality_descriptor_admission; do
-            cc -std=gnu11 -O2 -fPIC -fsyntax-only -Werror=implicit-function-declaration -Wno-unused-parameter \
-              -I"$pg_source/src/include" -I"$QUALIFICATION_SOURCE/engine/core/include" \
-              "$QUALIFICATION_SOURCE/extension/laplace_substrate/src/$unit.c" \
-              2>&1 | tee "$QUALIFICATION_DIR/evidence/compile-$unit.log"
-          done
-          cc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Wno-unused-parameter \
-            -I"$pg_source/src/include" -I"$QUALIFICATION_SOURCE/engine/core/include" \
-            "$QUALIFICATION_SOURCE/extension/laplace_substrate/tests/generated_stage_sink_native_probe.c" \
-            -L"$QUALIFICATION_BUILD/core" -Wl,-rpath,"$QUALIFICATION_BUILD/core" \
-            -Wl,--gc-sections -llaplace_core -lm -o "$QUALIFICATION_BUILD/generated_stage_sink_probe" \
-            2>&1 | tee "$QUALIFICATION_DIR/evidence/sink-probe-build.log"
-          "$QUALIFICATION_BUILD/generated_stage_sink_probe" 2>&1 | tee "$QUALIFICATION_DIR/evidence/sink-probe.log"
       - name: Compile managed consumers and focused regression assemblies
         shell: bash
         run: |
           set -euo pipefail
           cd "$QUALIFICATION_SOURCE"
-          for project in Laplace.Core.Tests Laplace.Chess.Tests Laplace.Substrate.Tests Laplace.Decomposers.Tests; do
+          for project in Laplace.Substrate.Tests; do
             timeout --signal=TERM --kill-after=15s 600s dotnet build "app/$project/$project.csproj" -c Release -m:2 -p:UseSharedCompilation=false \
               2>&1 | tee "$QUALIFICATION_DIR/evidence/build-$project.log"
           done
@@ -282,13 +235,7 @@ jobs:
           evidence=Path(os.environ["QUALIFICATION_DIR"])/"evidence"
           native=build/"core/liblaplace_core.so"
           native_hash=hashlib.file_digest(native.open("rb"),"sha256").hexdigest()
-          suites=[
-              ("Laplace.Core.Tests",["IntentStageEntityInterpretationTests","IntentStageTests"]),
-              ("Laplace.Chess.Tests",["ChessGraphPresenceObservationTests","ChessPgnChunkTests","ChessUnitCompletionTests","ChessRecordingProgressTests","ChessRecordingDiagnosticsTests"]),
-              ("Laplace.Substrate.Tests",["EntityInterpretationIdentityTests","EntityInterpretationChangeTests",
-                  "PhysicalityAdmissionTransportTests","TextEntityBuilderEmissionTests","IngestAdmissionSizingTests",
-                  "ContentWitnessContainmentTests","GrammarComposeContainmentTests","CopyTupleParserTests",
-                  "IngestUnitCompletionIdentityTests","IngestCompletionGateTests"])]
+          suites=[("Laplace.Substrate.Tests",["CopyTupleParserTests","CanonicalEntitySelectionTests"])]
           excluded=["TextEntityBuilderEmissionTests.FullGalileo_InMemory_RoundtripsFromPhysicalities"]
           results=[];failures=[]
           for project,classes in suites:
@@ -393,14 +340,15 @@ jobs:
               floors[name]={"bytes":path.stat().st_size,
                             "sha256":hashlib.file_digest(path.open("rb"),"sha256").hexdigest()}
           receipt={"schema":"laplace.hosted-canonical-identity-controls/v1",
-                   "scope":"managed compilation and selected controls using genuine hosted native producers",
+                   "scope":"focused cross-stage and canonical representative controls; unchanged production source is bound to the preceding full native/managed result",
                    "source_commit":(evidence/"source-commit.txt").read_text().strip(),
-                   "manifest_blob":"7a6fd6cdbe2ca92945e64b0ab2825aa930c37e91",
+                   "manifest_blob":"41ee158f1b2ef8aea3c7adc083f39ffa91f27f3f",
                    "core_sha256":native_hash,"native_floors":floors,"chess_seed_input":"NONE",
                    "opening_classifier_fixture":json.loads((evidence/"opening-fixture.json").read_text()),
                    "excluded_external_corpus_tests":excluded,
                    "not_executed":["installed PostgreSQL interruption/re-admission and catalog-order tests",
                                    "installed host corpus, Stockfish calibration and recorded throughput"],
+                   "inherited_actual_evidence":json.loads((evidence/"manifest.json").read_text())["inherited_actual_evidence"],
                    "results":results,"failures":failures}
           (evidence/"result.json").write_text(json.dumps(receipt,indent=2)+"\n")
           print(json.dumps(receipt,sort_keys=True),flush=True)
