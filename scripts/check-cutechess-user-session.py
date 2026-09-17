@@ -203,6 +203,34 @@ def window_info(selected, password, environment, deadline):
     return sorted(matches, key=lambda item: item["window_id"])
 
 
+def wait_for_server_ready(selected, password, environment, deadline, uid):
+    """Wait for this active service to publish its authenticated native window."""
+    identity = service_identity(environment, deadline, uid)
+    ready_deadline = min(deadline, time.monotonic() + 25)
+    transient = {"native-cutechess-window-is-absent", "command-failed", "command-deadline-expired"}
+    while time.monotonic() < ready_deadline:
+        require(service_identity(environment, ready_deadline, uid) == identity,
+                "service-changed-during-readiness")
+        listeners = owned_tcp_listeners(Path("/proc") / str(identity["pid"]))
+        if listeners:
+            # Any unexpected address, port or additional listener fails immediately.
+            require_listener_scope(listeners)
+            try:
+                windows = window_info(selected, password, environment, ready_deadline)
+            except ProofError as error:
+                if error.code not in transient:
+                    raise
+            else:
+                require(service_identity(environment, ready_deadline, uid) == identity,
+                        "service-changed-during-readiness")
+                current = owned_tcp_listeners(Path("/proc") / str(identity["pid"]))
+                require_listener_scope(current)
+                require(current == listeners, "server-listeners-changed-during-readiness")
+                return identity, listeners, windows
+        time.sleep(min(.2, max(0, ready_deadline - time.monotonic())))
+    raise ProofError("server-readiness-deadline-expired")
+
+
 def wait_for_client_window(child, tools, environment, deadline, native_window_id):
     end = time.monotonic() + remaining(deadline, 25)
     while time.monotonic() < end:
@@ -279,9 +307,12 @@ def run_proof(deadline, checks):
     })
     checks["runtime_id"] = selected["runtime_id"]
     checks["runtime_manifest_sha256"] = selected["manifest_sha256"]
-    before_service = service_identity(environment, deadline, uid)
+    ready_start = time.monotonic()
+    before_service, listeners, ready_windows = wait_for_server_ready(
+        selected, password, environment, deadline, uid)
+    checks["readiness_elapsed_seconds"] = round(time.monotonic() - ready_start, 3)
     checks["service_before"] = before_service
-    checks["tcp_listeners_before"] = listener_audit(before_service["pid"])
+    checks["tcp_listeners_before"] = listeners
     # Never take over, remove a lock from, or kill an existing display.
     require(not Path("/tmp/.X121-lock").exists() and not Path("/tmp/.X11-unix/X121").exists(),
             "proof-display-is-already-owned")
@@ -299,6 +330,7 @@ def run_proof(deadline, checks):
             checks[name] = {"exit_code": status, "accepted": status == 0}
             require(authentication_refused(status), "authentication-negative-control-differs")
         before = window_info(selected, password, environment, deadline)
+        require(before == ready_windows, "native-window-changed-after-readiness")
         checks["native_windows_before"] = before
         native = process_identity(before[0]["pid"], uid)
         checks["native_process_before"] = native
