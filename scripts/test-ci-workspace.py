@@ -87,7 +87,6 @@ class WorkspaceReservation(WorkspaceFixture):
                 self.assertEqual(process.stdout.readline(), "started\n")
                 time.sleep(0.25)
                 self.assertIsNone(process.poll())
-                # With the lock still held, source selection cannot occur.
                 self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
                 self.assertFalse(self.events.exists())
                 self.assertEqual(self.marker.read_text(), "existing qualified build\n")
@@ -148,11 +147,30 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
         self.assertFalse(self.events.exists())
 
+    def test_mainline_and_operator_preserve_ignored_checkout_collisions(self):
+        path = self.workspace / "new-source.txt"
+        path.write_text("ignored local work\n")
+        with (self.workspace / ".git/info/exclude").open("a") as stream:
+            stream.write("\nnew-source.txt\n")
+        self.assertEqual(self.git(self.workspace, "status", "--porcelain",
+                                  "--untracked-files=all").strip(), "")
+        self.assertEqual(self.git(self.workspace, "check-ignore",
+                                  "new-source.txt").strip(), "new-source.txt")
+        before = path.stat()
+        for job in ("mainline", "operator"):
+            with self.subTest(job=job):
+                result = self.execute(job)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(path.read_text(), "ignored local work\n")
+                self.assertEqual(path.stat().st_ino, before.st_ino)
+                self.assertEqual(path.stat().st_mtime_ns, before.st_mtime_ns)
+                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
+                self.assertEqual(self.marker.read_text(), "existing qualified build\n")
+                self.assertFalse(self.events.exists())
+
 
 class DatabaseWorkspaceReservation(WorkspaceFixture):
     def prepare_seed(self):
-        # Real Git and flock are exercised. Only the database commands are
-        # fixtures: this suite must not connect to or mutate a developer DB.
         ownership = (
             'exec 8>"$LAPLACE_WORK_ROOT/host-resource.lock"\n'
             'if flock -n 8; then echo "reservation was not inherited" >&2; exit 97; fi\n'
@@ -314,7 +332,7 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
                 self.assertEqual(self.events.read_text().splitlines(), ["environment"])
 
 class IntegratedLifecycle(unittest.TestCase):
-    def execute(self, test_status):
+    def execute(self, test_status, failure_phase=None):
         source = (ROOT / "scripts/product-ci.sh").read_text()
         start = source.index("run_deploy() {\n")
         finish = source.index("\n}\n", start) + 3
@@ -326,7 +344,8 @@ class IntegratedLifecycle(unittest.TestCase):
             events = Path(directory) / "events"
             functions = []
             for name in names:
-                status = test_status if name == "run_dev_tests" else 0
+                status = (test_status if name == "run_dev_tests" else
+                          31 if name == failure_phase else 0)
                 event = name + (":$*" if name == "run_database_maintenance" else "")
                 functions.append(name + '() { printf "%s\\n" "' + event
                                  + '" >> "$TEST_EVENTS"; return ' + str(status) + '; }')
@@ -342,10 +361,44 @@ class IntegratedLifecycle(unittest.TestCase):
                 "run_database_maintenance:--prepare", "run_db_tests", "run_publish",
                 "reconcile_installed_product", "run_live_tests"]
 
-    def test_failed_dev_controls_retain_downstream_product_evidence(self):
+    def test_failed_dev_controls_preserve_failure_after_complete_product_lifecycle(self):
         result, events = self.execute(23)
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
         self.assertEqual(events, self.expected_lifecycle())
+        self.assertIn("development tests failed earlier (status 23)", result.stderr)
+
+    def test_build_and_runtime_failures_stop_before_later_phases(self):
+        order = self.expected_lifecycle()
+        for phase in ("run_build", "run_install", "run_database_maintenance", "run_db_tests",
+                      "run_publish", "reconcile_installed_product", "run_live_tests"):
+            with self.subTest(phase=phase):
+                result, events = self.execute(23, phase)
+                self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
+                index = next(i for i, event in enumerate(order)
+                             if event.split(":", 1)[0] == phase)
+                self.assertEqual(events, order[:index + 1])
+
+    def test_each_development_suite_runs_after_an_earlier_suite_failure(self):
+        source = (ROOT / "scripts/product-ci.sh").read_text()
+        start = source.index("run_dev_tests() {\n")
+        finish = source.index("\n}\n", start) + 3
+        owner = source[start:finish]
+        with tempfile.TemporaryDirectory(prefix="laplace-dev-suite-order-") as directory:
+            events = Path(directory) / "events"
+            fixture = (
+                'bash() { printf "%s\\n" "$*" >> "$TEST_EVENTS"; '
+                'case "$*" in *native-dev) return 7;; *uci-dev) return 11;; '
+                '*) return 0;; esac; }\n')
+            result = subprocess.run(
+                ["bash", "-c", "set -euo pipefail\n" + fixture + owner + "\nrun_dev_tests\n"],
+                env=dict(os.environ, TEST_EVENTS=str(events)),
+                text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 11, result.stdout + result.stderr)
+            self.assertEqual(events.read_text().splitlines(), [
+                "scripts/test-parallel.sh --profile dev-native --suite native-dev",
+                "scripts/test-parallel.sh --profile dev-managed --suite managed-dev",
+                "scripts/test-parallel.sh --profile dev-managed --suite uci-dev",
+                "scripts/test-parallel.sh --profile dev-managed --suite browser-dev"])
 
     def test_product_lifecycle_reaches_database_and_live_product_checks(self):
         result, events = self.execute(0)
