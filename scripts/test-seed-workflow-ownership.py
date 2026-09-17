@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static contracts for the reusable seed workflow's host ownership."""
+"""Static contracts for shared-host workflow ownership."""
 from pathlib import Path
 import unittest
 
@@ -17,9 +17,25 @@ def run_block(step_name: str) -> str:
     return SEED[run:finish]
 
 
+class SharedHostQueue(unittest.TestCase):
+    def test_all_mutation_owners_preserve_pending_operations(self):
+        expected_groups = {
+            "laplace.yml": 2,
+            "db-ops.yml": 1,
+            "seed.yml": 1,
+        }
+        for name, count in expected_groups.items():
+            with self.subTest(workflow=name):
+                text = (WORKFLOWS / name).read_text(encoding="utf-8")
+                self.assertEqual(text.count("group: laplace-host-lifecycle"), count)
+                self.assertEqual(text.count("queue: max"), count)
+                self.assertEqual(text.count("cancel-in-progress: false"), count)
+
+
 class SeedHostOwnership(unittest.TestCase):
     def test_reusable_seed_shares_actions_lifecycle_group(self):
         self.assertIn("group: laplace-host-lifecycle", SEED)
+        self.assertIn("queue: max", SEED)
         self.assertIn("cancel-in-progress: false", SEED)
 
     def test_mutation_holds_host_lock_before_reproving_source_and_build(self):
