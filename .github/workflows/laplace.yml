@@ -48,7 +48,6 @@ jobs:
     timeout-minutes: 120
     concurrency:
       group: laplace-mainline-validation
-      queue: max
       cancel-in-progress: true
     env:
       LICHESS_API: ${{ secrets.LICHESS_API }}
