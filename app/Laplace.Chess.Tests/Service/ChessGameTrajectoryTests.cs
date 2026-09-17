@@ -155,7 +155,7 @@ public sealed class ChessGameTrajectoryTests
         Assert.Equal(marker, receipt.ObjectId);
         Assert.Equal(ChessVocabulary.TrajectorySourceId, receipt.SourceId);
         Assert.Null(receipt.ContextId);
-        Assert.Equal(NativeAttestation.ComputeId(
+        Assert.Equal(Laplace.Decomposers.Abstractions.NativeAttestation.ComputeId(
             marker, type, marker, ChessVocabulary.TrajectorySourceId, null), receipt.Id);
     }
 
