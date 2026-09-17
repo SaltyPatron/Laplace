@@ -17,6 +17,8 @@ provision_deps() {
   bash scripts/ci-deps.sh
 }
 
+# Repository-policy checks are an explicit `check` operation. They are not a
+# prerequisite hidden inside build, deploy, database, or ingest operations.
 run_ci_contract_checks() {
   bash -n \
     scripts/product-ci.sh \
@@ -142,8 +144,9 @@ run_mainline() {
 }
 
 run_deploy() {
+  # Deploy is the product path. Static policy/lint suites are available through
+  # the explicit `check` stage and never block a requested product operation.
   check_deps
-  declare -F run_ci_contract_checks >/dev/null && run_ci_contract_checks
   run_build
   run_dev_tests
   run_install
