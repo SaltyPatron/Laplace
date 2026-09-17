@@ -85,6 +85,23 @@ opaque_name(const char *s, bool lexicon)
     return i>=6 && n==i+2 && s[i]=='-' && strchr("nvarspNVARSP",s[i+1])!=NULL;
 }
 
+static char *
+short_identity(const hash128_t *id)
+{
+    bytea *b = DatumGetByteaP(hash128_to_datum(id));
+    const unsigned char *d = (const unsigned char *) VARDATA(b);
+    static const char digits[] = "0123456789abcdef";
+    char *hex = palloc(13);
+
+    for (int i = 0; i < 6; ++i)
+    {
+        hex[i * 2] = digits[d[i] >> 4];
+        hex[i * 2 + 1] = digits[d[i] & 0x0f];
+    }
+    hex[12] = '\0';
+    return hex;
+}
+
 static int
 pending(DisplayItem **all,int n,DisplayItem **out,int mode)
 {
@@ -307,13 +324,17 @@ pg_laplace_display_label_batch(PG_FUNCTION_ARGS)
         char *type=type_slot[i]>=0?labels[type_slot[i]]:NULL,*source=source_slot[i]>=0?labels[source_slot[i]]:NULL;
         if(opaque_name(type,false))type=NULL;if(opaque_name(source,false))source=NULL;
         if(type)for(char *p=type;*p;++p)if(*p=='_')*p=' ';
-        if(type && source)work[i]->label=psprintf("%s · %s",type,source);
-        else if(type || source)work[i]->label=type?type:source;
+        char *identity = short_identity(&work[i]->id);
+        if(type && source)work[i]->label=psprintf("%s · %s · %s",type,source,identity);
+        else if(type)work[i]->label=psprintf("%s · %s",type,identity);
+        else if(source)work[i]->label=psprintf("Entity · %s · %s",source,identity);
+        else work[i]->label=psprintf("Entity · %s",identity);
     }
     for(int i=0;i<n;++i) {
         hash128_t id;DisplayItem *item=NULL;
         if(!nulls[i]){id=datum_to_hash128(ids[i]);item=hash_search(lookup,&id,HASH_FIND,NULL);}
-        Datum v[]={ids[i],CStringGetTextDatum(item&&item->label?item->label:"Unrealized entity"),Int16GetDatum(item?item->tier:0)};
+        const char *label = item && item->label ? item->label : "Entity";
+        Datum v[]={ids[i],CStringGetTextDatum(label),Int16GetDatum(item?item->tier:0)};
         bool out_nulls[]={nulls[i],false,item==NULL||!item->exists};tuplestore_putvalues(r->setResult,r->setDesc,v,out_nulls);
     }
     hash_destroy(lookup);laplace_spi_finish(spi_top);return (Datum)0;
