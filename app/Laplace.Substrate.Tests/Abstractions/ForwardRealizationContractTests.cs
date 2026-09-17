@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace Laplace.Substrate.Tests.Abstractions;
+namespace Laplace.Decomposers.Abstractions.Tests;
 
 public sealed class ForwardRealizationContractTests
 {
