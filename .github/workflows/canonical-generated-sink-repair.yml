@@ -18,16 +18,32 @@ jobs:
         with:
           fetch-depth: 0
       - name: Apply canonical generated-sink transform
-        run: python3 .github/scripts/canonical_generated_sink_repair.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/canonical_generated_sink_repair.py')
+          s=p.read_text()
+          old='if "SQ_LOCK" in tt or "accept_limit" in tt or "accept_none" in tt:'
+          new='if "accept_limit" in tt or "accept_none" in tt:'
+          if s.count(old) != 1:
+              raise SystemExit('repair guard shape changed')
+          p.write_text(s.replace(old,new,1))
+          PY
+          python3 .github/scripts/canonical_generated_sink_repair.py
+          python3 .github/scripts/canonical_generated_sink_fixup.py
       - name: Verify and commit
         shell: bash
         run: |
           set -euo pipefail
           git diff --check
-          ! grep -R "SQ_LOCK\|pg_laplace_entity_write_lock" extension/laplace_substrate/src/generated_stage_sink.c
+          ! grep -R "SQ_LOCK\|pg_laplace_entity_write_lock" extension/laplace_substrate/src/generated_stage_sink.c extension/laplace_substrate/tests/generated_stage_sink_native_probe.c
           git config user.name "Laplace CI repair"
           git config user.email "actions@users.noreply.github.com"
-          git rm .github/workflows/canonical-generated-sink-repair.yml .github/scripts/canonical_generated_sink_repair.py
+          git rm .github/workflows/canonical-generated-sink-repair.yml \
+                 .github/scripts/canonical_generated_sink_repair.py \
+                 .github/scripts/canonical_generated_sink_fixup.py
           git add extension/laplace_substrate/src/generated_stage_sink.c \
                   extension/laplace_substrate/src/generated_stage_sink.h \
                   extension/laplace_substrate/tests/generated_stage_sink_native_probe.c \
