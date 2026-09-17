@@ -51,7 +51,7 @@ class WorkflowOwnership(unittest.TestCase):
         self.assertNotIn("\n  push:\n", text)
         self.assertNotIn("\n  workflow_call:\n", text)
         self.assertIn(
-            "options: [quick, throughput, core, scale, moby, query, chess, geometry, recorded, all]",
+            "options: [quick, throughput, core, scale, dag, moby, query, chess, geometry, recorded, all]",
             text,
         )
         self.assertEqual(text.count("runs-on: [self-hosted, laplace]"), 1)
