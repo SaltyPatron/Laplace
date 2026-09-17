@@ -7,6 +7,7 @@ namespace Laplace.SubstrateCRUD;
 public sealed class SubstrateChangeBuilder : IDisposable
 {
     private readonly ImmutableArray<EntityRow>.Builder _entities;
+    private readonly ImmutableArray<EntityInterpretationRow>.Builder _entityInterpretations;
     private readonly ImmutableArray<PhysicalityRow>.Builder _physicalities;
     private readonly ImmutableArray<PhysicalityRow>.Builder _physicalityObservations;
     private readonly ImmutableDictionary<Hash128, double>.Builder _sourcePriors =
@@ -20,6 +21,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
     private Hash128? _fileId;
 
     private readonly HashSet<Hash128> _seenEntities = new();
+    private readonly HashSet<EntityInterpretationKey> _seenEntityInterpretations = new();
     private readonly HashSet<Hash128> _seenPhysicalities = new();
     private readonly Dictionary<Hash128, int> _physByEntity = new();
     private int _physIndexWatermark;
@@ -28,6 +30,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
     private PhysicalityDescriptorSizing.Shape _selectedShape;
     private bool _partialTrajectory;
     private bool _disposed;
+
+    private readonly record struct EntityInterpretationKey(Hash128 Id, byte Tier, Hash128 TypeId);
 
     // The canonical member order for a set composition. memcmp of the 16-byte host layout,
     // which is exactly hash128_compare — the same order the native side and the substrate's
@@ -54,6 +58,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
             ?? throw new ArgumentNullException(nameof(sourceContentUnitName));
         _parentIntentId = parentIntentId;
         _entities = ImmutableArray.CreateBuilder<EntityRow>(entityCapacity);
+        _entityInterpretations = ImmutableArray.CreateBuilder<EntityInterpretationRow>(entityCapacity);
         _physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>(physicalityCapacity);
         _physicalityObservations = ImmutableArray.CreateBuilder<PhysicalityRow>(physicalityCapacity);
         _attestations = ImmutableArray.CreateBuilder<AttestationRow>(attestationCapacity);
@@ -101,22 +106,31 @@ public sealed class SubstrateChangeBuilder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(row);
+        ObserveEntityInterpretation(row.Id, row.Tier, row.TypeId, row.FirstObservedBy);
         if (_seenEntities.Add(row.Id)) _entities.Add(row);
         return this;
     }
 
-    // Dedup BEFORE constructing the row. The id is the whole dedup key, so the EntityRow only
-    // needs to exist on a miss — and misses are the minority by an order of magnitude.
-    // MEASURED (IngestThroughputProbe, 400 games / 28,149 plies): the chess lane issues ~2,380
-    // AddNode calls per game and keeps 227 entities / 222 physicalities. ~90% of the row objects
-    // were allocated and immediately dropped by the HashSet test below, and "row building" was
-    // 49.9% of full record+analyze — the single largest cost in the compose path.
+    // Canonical identity is id-only, but structural interpretations are not. Every
+    // distinct (id,tier,type) observation is retained in the sidecar even when the
+    // canonical entity row was already staged. This keeps the original allocation win:
+    // duplicate identical observations allocate nothing; a genuinely new interpretation
+    // allocates exactly one compact sidecar row rather than a second logical entity.
     public SubstrateChangeBuilder AddEntity(
         Hash128 id, byte tier, Hash128 typeId, Hash128? firstObservedBy = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ObserveEntityInterpretation(id, tier, typeId, firstObservedBy);
         if (_seenEntities.Add(id)) _entities.Add(new EntityRow(id, tier, typeId, firstObservedBy));
         return this;
+    }
+
+    private void ObserveEntityInterpretation(
+        Hash128 id, byte tier, Hash128 typeId, Hash128? firstObservedBy)
+    {
+        var key = new EntityInterpretationKey(id, tier, typeId);
+        if (!_seenEntityInterpretations.Add(key)) return;
+        _entityInterpretations.Add(new EntityInterpretationRow(id, tier, typeId, firstObservedBy));
     }
 
     public SubstrateChangeBuilder AddPhysicality(PhysicalityRow row)
@@ -395,6 +409,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
             foreach (var s in _intentStages)
                 if (!s.IsInvalid) total += s.TotalTupleBytes;
             total += (long)_entities.Count * 72
+                   + (long)_entityInterpretations.Count * 56
                    + (long)_physicalityObservations.Count * 160
                    + (long)_physicalities.Count * IntPtr.Size
                    + (long)_attestations.Count * 152;
@@ -507,6 +522,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var entities = _entities.ToImmutable();
+        var interpretations = _entityInterpretations.ToImmutable();
         var physicalities = _physicalities.ToImmutable();
         var attestations = _attestations.ToImmutable();
 
@@ -526,7 +542,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
         }
 
         var intentId = ComputeIntentId(_sourceId, _sourceContentUnitName,
-                                        entities, physicalities, attestations, ephemeralFolds);
+                                        entities, interpretations, physicalities, attestations, ephemeralFolds);
 
 
 
@@ -553,6 +569,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
             default,
             ephemeralFolds)
         {
+            EntityInterpretations = interpretations,
             PhysicalityObservations = _physicalityObservations.ToImmutable(),
             PhysicalitySourcePriors = _sourcePriors.ToImmutable(),
         };
@@ -585,6 +602,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
         Hash128 sourceId,
         string unitName,
         ImmutableArray<EntityRow> entities,
+        ImmutableArray<EntityInterpretationRow> interpretations,
         ImmutableArray<PhysicalityRow> physicalities,
         ImmutableArray<AttestationRow> attestations,
         ImmutableArray<EphemeralFoldInput> ephemeralFolds)
@@ -598,6 +616,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
         {
             entities = entities.Where(static row =>
                 !Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.Id)).ToImmutableArray();
+            interpretations = interpretations.Where(static row =>
+                !Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.EntityId)).ToImmutableArray();
             attestations = attestations.Where(static row =>
                 !Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.TypeId)).ToImmutableArray();
         }
@@ -605,6 +625,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
         int nameByteCount = System.Text.Encoding.UTF8.GetByteCount(unitName);
         long total = 16L + nameByteCount
                      + 4L + (long)entities.Length * 16
+                     + 4L + (long)interpretations.Length * 50
                      + 4L + (long)physicalities.Length * 16
                      + 4L + (long)attestations.Length * 16
                      + 4L + (long)ephemeralFolds.Length * 32;
@@ -612,7 +633,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
         {
             throw new OverflowException(
                 $"intent '{unitName}' too large to hash: {entities.Length} entities, "
-                + $"{physicalities.Length} physicalities, {attestations.Length} attestations");
+                + $"{interpretations.Length} interpretations, {physicalities.Length} physicalities, "
+                + $"{attestations.Length} attestations");
         }
 
         var buf = new byte[(int)total];
@@ -621,6 +643,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
         System.Text.Encoding.UTF8.GetBytes(unitName, 0, unitName.Length, buf, offset);
         offset += nameByteCount;
         WriteLengthAndIds(buf.AsSpan(), ref offset, entities, e => e.Id);
+        WriteInterpretations(buf.AsSpan(), ref offset, interpretations);
         WriteLengthAndIds(buf.AsSpan(), ref offset, physicalities, p => p.Id);
         WriteLengthAndIds(buf.AsSpan(), ref offset, attestations, a => a.Id);
         System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(offset, 4), ephemeralFolds.Length);
@@ -634,6 +657,27 @@ public sealed class SubstrateChangeBuilder : IDisposable
             input.CalculationReceiptId.WriteBytes(buf.AsSpan(offset, 16)); offset += 16;
         }
         return Hash128.Blake3(buf);
+    }
+
+    private static void WriteInterpretations(
+        Span<byte> dst, ref int offset, ImmutableArray<EntityInterpretationRow> rows)
+    {
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(dst.Slice(offset, 4), rows.Length);
+        offset += 4;
+        var bytewise = new Hash128Bytewise();
+        foreach (var row in rows
+                     .OrderBy(x => x.EntityId, bytewise)
+                     .ThenBy(x => x.Tier)
+                     .ThenBy(x => x.TypeId, bytewise)
+                     .ThenBy(x => x.FirstObservedBy.HasValue ? 1 : 0)
+                     .ThenBy(x => x.FirstObservedBy ?? default, bytewise))
+        {
+            row.EntityId.WriteBytes(dst.Slice(offset, 16)); offset += 16;
+            dst[offset++] = row.Tier;
+            row.TypeId.WriteBytes(dst.Slice(offset, 16)); offset += 16;
+            dst[offset++] = row.FirstObservedBy.HasValue ? (byte)1 : (byte)0;
+            (row.FirstObservedBy ?? default).WriteBytes(dst.Slice(offset, 16)); offset += 16;
+        }
     }
 
     private static void WriteLengthAndIds<T>(
