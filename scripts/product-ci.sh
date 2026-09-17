@@ -74,16 +74,13 @@ reconcile_installed_product() {
   curl -fsS http://127.0.0.1:5187/health/ready | grep -q '"ready":true'
 }
 
-run_mainline() {
+run_deploy() {
   check_deps
   run_build
-  run_dev_tests
   run_install
   run_database_maintenance
   run_foundation
-  run_db_tests
   run_publish
-  run_live_tests
   reconcile_installed_product
 }
 
@@ -122,14 +119,7 @@ case "$stage" in
   test-live)
     run_live_tests
     ;;
-  deploy)
-    check_deps
-    run_build
-    run_install
-    run_database_maintenance
-    run_publish
-    ;;
-  mainline)
-    run_mainline
+  deploy|mainline)
+    run_deploy
     ;;
 esac
