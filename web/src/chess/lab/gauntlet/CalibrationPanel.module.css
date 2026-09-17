@@ -1,0 +1,7 @@
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.scroll { max-width: 100%; overflow-x: auto; margin: 1rem 0; }
+.measurements { width: 100%; border-collapse: collapse; text-align: left; font-variant-numeric: tabular-nums; }
+.measurements caption { text-align: left; font-weight: 600; margin-bottom: .5rem; }
+.measurements th, .measurements td { padding: .55rem .75rem; border-bottom: 1px solid currentColor; }
+.identity { margin-top: 1rem; }
+.identity code { overflow-wrap: anywhere; }

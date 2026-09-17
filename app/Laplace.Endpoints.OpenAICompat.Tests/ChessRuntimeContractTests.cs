@@ -94,6 +94,7 @@ public sealed class ChessRuntimeContractTests : IClassFixture<ExploreFactory>
                      "/chess/train/status",
                      "/chess/lichess/status",
                      "/chess/lab/catalog",
+                     "/chess/lab/calibration",
                      "/chess/lab/jobs",
                  })
         {

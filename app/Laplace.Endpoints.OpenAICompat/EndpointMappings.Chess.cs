@@ -113,6 +113,9 @@ internal static class ChessEndpoints
             await ServiceControlEndpoints.ExecuteAsync(services, ManagedService.Lichess, ServiceAction.Stop, ct))
             .WithTags("chess");
 
+        app.MapGet("/chess/lab/calibration", async (CancellationToken ct) =>
+            Results.Json(await ChessCalibration.ReadAsync(ct))).WithTags("chess");
+
         app.MapGet("/chess/lab/catalog", () =>
         {
             var engines = ChessLabPaths.Catalog.ToDictionary(

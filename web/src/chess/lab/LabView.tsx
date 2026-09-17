@@ -3,19 +3,10 @@ import { Muted, NavTabs } from '@ui';
 import { ExperimentRunner } from './ExperimentRunner';
 import { GauntletView } from './gauntlet/GauntletView';
 import { LichessPanel } from './LichessPanel';
+import { CalibrationPanel } from './gauntlet/CalibrationPanel';
 import styles from './LabView.module.css';
 
-/**
- * One shell for three lab operations that were previously stacked into a single scrolling
- * page: substrate experiments, the external engine gauntlet, and imports.
- *
- * They were never one workflow. Running a gauntlet means watching an external process for
- * an hour; running a substrate test means filling a form and reading a table; Lichess is a
- * long-lived connection with its own state. Sharing a page meant every one of them was
- * mostly chrome belonging to the other two, and the operation you actually came for was
- * somewhere below the fold. Each is a route now, so each can be deep-linked, and each
- * shows only its own jobs.
- */
+/** Chess experiments, measured machine calibration, external matches and imports. */
 const TABS: { id: string; label: string; path: string; blurb: string }[] = [
   {
     id: 'experiments',
@@ -28,6 +19,12 @@ const TABS: { id: string; label: string; path: string; blurb: string }[] = [
     label: 'Gauntlet',
     path: '/lab/gauntlet',
     blurb: 'laplace-uci vs Stockfish through cutechess-cli, with the full process transcript.',
+  },
+  {
+    id: 'calibration',
+    label: 'Calibration',
+    path: '/lab/calibration',
+    blurb: 'Measured Stockfish and CuteChess performance, engine identity, and machine settings.',
   },
   {
     id: 'import',
@@ -67,6 +64,7 @@ export function LabView() {
             element={<ExperimentRunner categories={['substrate', 'diagnostics']} initialKind="substrate-test" />}
           />
           <Route path="gauntlet" element={<GauntletView />} />
+          <Route path="calibration" element={<CalibrationPanel />} />
           <Route
             path="import"
             element={(
