@@ -221,12 +221,7 @@ jobs:
             local key="$1"
             scripts/verify-ingest-journal.sh --cli-key "$key"
             if [[ "$RUN_GATE" == 1 ]]; then
-              if python3 - "$key" <<'PY'
-import json,sys
-sources=json.load(open('scripts/decomposer-gates.json'))['sources']
-sys.exit(0 if sys.argv[1] in sources else 1)
-PY
-              then
+              if python3 -c 'import json,sys; sources=json.load(open("scripts/decomposer-gates.json"))["sources"]; sys.exit(0 if sys.argv[1] in sources else 1)' "$key"; then
                 python3 scripts/decomposer-gate-check.py \
                   --source "$key" --dbname "$PGDATABASE" \
                   --host /var/run/postgresql --user laplace_admin
@@ -240,12 +235,7 @@ PY
             local key="$1"
             local path="${2:-}"
             local src_name
-            src_name=$(python3 - "$key" <<'PY'
-import json,sys
-entry=json.load(open('scripts/decomposer-gates.json'))['sources'].get(sys.argv[1])
-print(entry['decomposer'] if entry else '')
-PY
-)
+            src_name=$(python3 -c 'import json,sys; entry=json.load(open("scripts/decomposer-gates.json"))["sources"].get(sys.argv[1]); print(entry["decomposer"] if entry else "")' "$key")
             local before after
             if [[ -n "$src_name" ]]; then
               before=$(psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
