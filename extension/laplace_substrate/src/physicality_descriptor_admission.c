@@ -854,11 +854,12 @@ static void admission_materialize(admission_state *s,
         size_t pending_count = 0, retained;
         const hash128_t *pending;
         CHECK_FOR_INTERRUPTS();
-        /* Source capture hashes once; each invocation validates source once,
-         * and current/admitted provider bodies twice. This grant counts raw
-         * expanded carrier work, separate from finite generated plan work. */
+        /* Source capture hashes once; each invocation validates source/current
+         * bodies in the combined plan. Admitted bodies also require preliminary
+         * validation before winner filtering. Count raw expanded carrier work
+         * separately from finite generated plan work. */
         admission_logical(s, admission_add(s->source_logical,
-            admission_multiply(2, admission_add(s->current_logical, s->admitted_logical))));
+            admission_add(s->current_logical, admission_multiply(2, s->admitted_logical))));
         status = physicality_descriptor_materialize_diagnosed_cancelable(s->capture, s->vocabulary,
             (const intent_stage_t *const *)s->current.items, s->current.count,
             (const intent_stage_t *const *)s->admitted.items, s->admitted.count,

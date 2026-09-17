@@ -41,6 +41,7 @@ internal static class AppComposition
 
     public static IServiceCollection AddOpenAiCompatServices(this IServiceCollection services)
     {
+        services.AddRefactorProxy();
         var browserAuth = BuildBrowserAuthSettings();
         var authMode = ResolveAuthMode(browserAuth);
         services.AddSingleton(browserAuth);

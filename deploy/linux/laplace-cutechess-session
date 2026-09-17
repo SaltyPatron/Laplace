@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Run one operator-owned CuteChess session; systemd owns its lifetime."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import pwd
+import re
+import stat
+import subprocess
+
+XPRA = Path("/usr/bin/xpra")
+LAUNCHER = Path("/opt/laplace/bin/laplace-cutechess")
+DISPLAY = ":120"
+CONF_ENV = ("XPRA_DEFAULT_CONF_DIRS", "XPRA_SYSTEM_CONF_DIRS", "XPRA_USER_CONF_DIRS")
+
+
+def session_command(home: Path) -> list[str]:
+    # The fixed display belongs to this one service. A collision must fail rather
+    # than attach to, replace, or kill an unrelated display.
+    return [
+        str(XPRA), "seamless", DISPLAY,
+        "--daemon=no", "--systemd-run=no", "--start-via-proxy=no",
+        "--backend=x11", "--session-name=Laplace CuteChess",
+        "--socket-dir=" + str(home / ".xpra"),
+        "--socket-dirs=" + str(home / ".xpra"),
+        "--socket-permissions=600", "--bind=auto",
+        "--html=no", "--mdns=no", "--start-new-commands=no",
+        "--exit-with-client=no", "--exit-with-children=yes",
+        "--terminate-children=yes", "--pulseaudio=no",
+        "--speaker=no", "--microphone=no", "--webcam=no",
+        "--printing=no", "--file-transfer=no", "--open-files=no",
+        "--open-url=no", "--forward-xdg-open=no", "--mmap=no",
+        "--start-child=" + str(LAUNCHER),
+    ]
+
+
+def environment(home: Path, runtime: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(HOME=str(home), XDG_RUNTIME_DIR=str(runtime),
+               XPRA_SESSION_DIR=str(runtime), QT_QPA_PLATFORM="xcb")
+    # Do not let unrelated package/user Xpra configuration add listeners,
+    # commands, proxy handoff, or transports to this fixed application service.
+    # Empty values mean no configuration directories in Xpra's public platform API.
+    for name in CONF_ENV:
+        env[name] = ""
+    for name in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY",
+                 "XPRA_START_VIA_PROXY", "XPRA_SOCKET_DIR", "XPRA_SOCKET_DIRS"):
+        env.pop(name, None)
+    return env
+
+
+def private_directory(path: Path, uid: int, *, create: bool) -> None:
+    if create:
+        path.mkdir(mode=0o700, exist_ok=True)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or info.st_mode & 0o077:
+        raise RuntimeError("session directory must be a private directory owned by the operator")
+
+
+def main() -> None:
+    uid = os.getuid()
+    if uid == 0 or os.geteuid() != uid:
+        raise RuntimeError("the CuteChess session must run as its unprivileged operator")
+    account = pwd.getpwuid(uid)
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]*[$]?", account.pw_name):
+        raise RuntimeError("unsupported operator account name")
+    home = Path(account.pw_dir)
+    runtime = Path("/run/laplace-cutechess-" + account.pw_name)
+    if not home.is_absolute() or not home.is_dir():
+        raise RuntimeError("operator home is absent")
+    private_directory(runtime, uid, create=False)
+    private_directory(home / ".xpra", uid, create=True)
+    if not XPRA.is_file() or not os.access(XPRA, os.X_OK):
+        raise RuntimeError("the selected official Xpra package is not installed")
+    if not LAUNCHER.is_file() or not os.access(LAUNCHER, os.X_OK):
+        raise RuntimeError("the verified CuteChess launcher is not installed")
+    env = environment(home, runtime)
+    result = subprocess.run([str(XPRA), "--version"], env=env, check=True,
+                            capture_output=True, text=True, timeout=15)
+    if not re.search(r"\b6\.5\.3\b", result.stdout):
+        raise RuntimeError("this session owner requires the qualified Xpra 6.5.3 package")
+    os.umask(0o077)
+    os.chdir(home)
+    os.execve(XPRA, session_command(home), env)
+
+
+if __name__ == "__main__":
+    main()

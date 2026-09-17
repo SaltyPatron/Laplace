@@ -17,6 +17,23 @@ newest_weighted_snapshot() {
   return 1
 }
 
+resolve_corroboration_snapshot() {
+  local primary="$1" candidate family
+  if [[ -n "${LAPLACE_MODEL_CORROBORATION_DIR:-}" ]]; then
+    printf '%s\n' "$LAPLACE_MODEL_CORROBORATION_DIR"
+    return 0
+  fi
+  for family in \
+    models--Qwen--Qwen2.5-Coder-3B-Instruct \
+    models--TinyLlama--TinyLlama-1.1B-Chat-v1.0; do
+    candidate="$(newest_weighted_snapshot "$family" || true)"
+    [[ -n "$candidate" && ! "$primary" -ef "$candidate" ]] || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+  return 1
+}
+
 MODEL_DIR="${1:-${LAPLACE_MODEL_PROOF_DIR:-${LAPLACE_QWEN25_CODER_DIR:-${LAPLACE_TINYLLAMA_DIR:-}}}}"
 if [[ -z "$MODEL_DIR" ]]; then
   MODEL_DIR="$(newest_weighted_snapshot 'models--Qwen--Qwen2.5-Coder-3B-Instruct' || true)"
@@ -26,6 +43,18 @@ if [[ -z "$MODEL_DIR" ]]; then
 fi
 [[ -n "$MODEL_DIR" ]] || {
   echo "[substrate-ci] ERROR: no weighted proof model resolved; pass a model dir or set LAPLACE_MODEL_PROOF_DIR/LAPLACE_QWEN25_CODER_DIR/LAPLACE_TINYLLAMA_DIR" >&2
+  exit 2
+}
+
+# A fresh database has no model-kind claims for a single checkpoint to
+# corroborate. The existing joint-analysis owner requires two independent
+# complete checkpoints; it verifies their full content identities itself.
+CORROBORATION_MODEL_DIR="$(resolve_corroboration_snapshot "$MODEL_DIR")" || {
+  echo "[substrate-ci] ERROR: no second weighted proof model resolved; set LAPLACE_MODEL_CORROBORATION_DIR" >&2
+  exit 2
+}
+[[ ! "$MODEL_DIR" -ef "$CORROBORATION_MODEL_DIR" ]] || {
+  echo "[substrate-ci] ERROR: corroboration requires a second model directory, not the selected snapshot again" >&2
   exit 2
 }
 
@@ -40,10 +69,36 @@ export LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROO
 log() { echo "[substrate-ci] $*"; }
 die() { echo "[substrate-ci] ERROR: $*" >&2; exit 1; }
 
-for f in "$MODEL_DIR/config.json" "$MODEL_DIR/tokenizer.json"; do
-  [ -e "$f" ] || die "missing: $f"
+for snapshot in "$MODEL_DIR" "$CORROBORATION_MODEL_DIR"; do
+  for f in "$snapshot/config.json" "$snapshot/tokenizer.json"; do
+    [ -e "$f" ] || die "missing: $f"
+  done
+  ls "$snapshot"/*.safetensors >/dev/null 2>&1 || die "no *.safetensors under $snapshot"
 done
-ls "$MODEL_DIR"/*.safetensors >/dev/null 2>&1 || die "no *.safetensors under $MODEL_DIR"
+
+# Inspect the exact selected inputs before Unicode, corpus admission, or model
+# work. Sampled metadata is only an early rejection gate; all full readers and
+# the complete evidence/export/behavioral proof below still have to succeed.
+preflight_code_corpora=0
+[[ "${LAPLACE_MODEL_PROOF_CODE_CORPORA:-1}" != 1 ]] || preflight_code_corpora=1
+if ! preflight_out="$(python3 -I "$ROOT/scripts/check-model-proof-prerequisites.py" \
+    --repo "$ROOT" --model-dir "$MODEL_DIR" --second-model-dir "$CORROBORATION_MODEL_DIR" \
+    --require-proof-ready --code-corpora "$preflight_code_corpora")"; then
+  echo "$preflight_out"
+  die "preliminary model-proof prerequisites failed before admission"
+fi
+echo "$preflight_out"
+LLAMA_BIN="$(python3 -c '
+import json, sys
+prefix = "MODEL_PROOF_PREFLIGHT "
+lines = [line[len(prefix):] for line in sys.stdin.read().splitlines() if line.startswith(prefix)]
+if len(lines) != 1:
+    raise SystemExit("expected one preliminary prerequisite report")
+report = json.loads(lines[0])
+if not report.get("preliminary_prerequisites_passed") or not report.get("selected_llama"):
+    raise SystemExit("preliminary prerequisites did not select a runnable llama executable")
+print(report["selected_llama"])
+' <<< "$preflight_out")" || die "invalid preliminary model-proof prerequisite report"
 
 psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc "SELECT 1" >/dev/null \
   || die "laplace DB unreachable (just db-up)"
@@ -63,6 +118,7 @@ if [ ! -f "$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll" ]; then
 fi
 
 log "proof model: $MODEL_DIR"
+log "corroborating model: $CORROBORATION_MODEL_DIR"
 log "migrations up + ingest unicode (idempotent; consensus folds, layer-0 marker set)"
 (cd "$ROOT/app" && dotnet run --project Laplace.Migrations/Laplace.Migrations.csproj -- up) \
   || die "db-up failed"
@@ -98,6 +154,20 @@ fi
 log "deposit safetensors (pass 1)"
 (cd "$ROOT/app" && "${CLI[@]}" ingest safetensors "$MODEL_DIR") \
   || die "safetensor deposition pass 1 failed"
+
+log "deposit corroborating safetensors (pass 1)"
+(cd "$ROOT/app" && "${CLI[@]}" ingest safetensors "$CORROBORATION_MODEL_DIR") \
+  || die "corroborating safetensor deposition pass 1 failed"
+
+log "deposit corroborating safetensors (pass 2 — must short-circuit via the re-ingest guard)"
+corroboration_pass2_out="$(cd "$ROOT/app" && "${CLI[@]}" ingest safetensors "$CORROBORATION_MODEL_DIR" 2>&1)"
+echo "$corroboration_pass2_out"
+echo "$corroboration_pass2_out" | grep -q '^Safetensor snapshot already deposited — source ' \
+  || die "corroborating model pass 2 did not short-circuit — idempotency broken"
+
+log "corroborate retained graph nominations through two independent model checkpoints"
+(cd "$ROOT/app" && "${CLI[@]}" ingest model-corroborate "$MODEL_DIR" "$CORROBORATION_MODEL_DIR") \
+  || die "joint model corroboration failed"
 
 log "deposit safetensors (pass 2 — must short-circuit via the re-ingest guard)"
 pass2_out="$(cd "$ROOT/app" && "${CLI[@]}" ingest safetensors "$MODEL_DIR" 2>&1)"
@@ -146,21 +216,6 @@ echo "$syn_out" | grep -qiE 'synthesis complete' \
 size=$(stat -c%s "$GGUF_OUT")
 [ "$size" -gt 50000000 ] || die "GGUF too small ($size bytes) — synthesis produced empty/trivial output"
 log "GGUF: $GGUF_OUT ($((size / 1048576)) MB)"
-
-LLAMA_BIN="${LAPLACE_LLAMA_BIN:-}"
-if [[ -z "$LLAMA_BIN" ]]; then
-  for candidate in \
-    /data/archive/llama-workspace/llama.cpp/build/bin/llama-completion \
-    /data/archive/llama-workspace/llama.cpp/build-cpu/bin/llama-completion \
-    "$(command -v llama-completion 2>/dev/null || true)"; do
-    [[ -n "$candidate" && -x "$candidate" ]] || continue
-    if "$candidate" --help >/dev/null 2>&1; then
-      LLAMA_BIN="$candidate"
-      break
-    fi
-  done
-fi
-[[ -n "$LLAMA_BIN" ]] || die "no runnable llama.cpp llama-completion binary; external-runtime proof is mandatory"
 
 log "external runtime behavioral proof via llama.cpp: $LLAMA_BIN"
 python3 "$ROOT/scripts/verify-model-behavioral.py" \

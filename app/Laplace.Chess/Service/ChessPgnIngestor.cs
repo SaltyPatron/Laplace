@@ -32,12 +32,26 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     private static readonly int ChunkSize =
         IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.ChessPgn, null);
 
-    // Preserve the same producer byte share used by ResolveRecordBatch, replacing its
-    // per-game residency estimate with the bytes actually accumulated by the builders.
-    internal static long ResolvedChunkStagedBytes => Math.Max(1,
-        Math.Min(IngestSizing.ResolveWorkingSetBudgetBytes(),
-            IngestSizing.ResolveWorkingSetFlushEnvelopeBytes())
-        / Math.Max(1, IngestTopology.Current.ComposeWorkers));
+    // An owned direct run holds one aggregate composition window under Gate through
+    // apply/readback/disposal. Record, Analyze and both repair builders are already
+    // included in that window's byte model; the generic compose fan is not active.
+    // This static value also describes the owned corpus benchmark's reported threshold.
+    internal static long ResolvedChunkStagedBytes => ResolveChunkStagedBytes(
+        ownsResources: true, IngestTopology.Current.ComposeWorkers,
+        IngestSizing.ResolveWorkingSetBudgetBytes(),
+        IngestSizing.ResolveWorkingSetFlushEnvelopeBytes());
+
+    // AttachAsync shares a live host whose other producers do not hold this Gate.
+    // Preserve its existing division until that host owns a common residency budget.
+    private long ChunkStagedBytes => ResolveChunkStagedBytes(
+        _ownsResources, IngestTopology.Current.ComposeWorkers,
+        IngestSizing.ResolveWorkingSetBudgetBytes(),
+        IngestSizing.ResolveWorkingSetFlushEnvelopeBytes());
+
+    internal static long ResolveChunkStagedBytes(
+        bool ownsResources, int composeWorkers, long workingSetBudgetBytes, long flushEnvelopeBytes) =>
+        Math.Max(1, Math.Min(workingSetBudgetBytes, flushEnvelopeBytes)
+            / (ownsResources ? 1 : Math.Max(1, composeWorkers)));
 
     private readonly NpgsqlDataSource _ds;
     private readonly ConsensusAccumulatingWriter _writer;
@@ -389,7 +403,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             using var compositionPhase = measurement?.MeasurePhase(
                 ChessRecordingMeasurement.WorkPhase.CompositionAndNoveltyProbe);
             using var composed = ChessPgnChunk.ComposeNext(chunk, novelIds, ref offset,
-                ResolvedChunkStagedBytes, measurement?.NextReplayChunkGames, measurement, ct);
+                ChunkStagedBytes, measurement?.NextReplayChunkGames, measurement, ct);
             var result = await ApplyComposedChunkAsync(composed, ct, experiment, measurement);
             composed.ForgetCommittedNovelty(novelIds);
             totalNovel += result.Novel;
