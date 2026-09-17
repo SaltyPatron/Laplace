@@ -972,12 +972,64 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     }
     array_free_iterator(route_iterator);
 
+    /* RESOLVE owns the physical observation scope before COUPLE. The same scope
+     * is then retained for continuation after ORIENT; physicality is not rebuilt
+     * as a later walk-only side channel. */
+    if (PG_NARGS() > 9 && !PG_ARGISNULL(9) && max_stride > 0)
+    {
+        explicit_observation_scope = true;
+        trajectory_scope = laplace_trajectory_scope_create();
+        laplace_trajectory_scope_extend(trajectory_scope, PG_GETARG_ARRAYTYPE_P(9));
+    }
+    if (PG_NARGS() > 10 && !PG_ARGISNULL(10) && max_stride > 0)
+    {
+        explicit_observation_scope = true;
+        if (!trajectory_scope)
+            trajectory_scope = laplace_trajectory_scope_create();
+        laplace_trajectory_scope_extend_containing(trajectory_scope,
+                                                   PG_GETARG_ARRAYTYPE_P(10));
+    }
+    if (input && max_stride > 0)
+    {
+        if (!trajectory_scope)
+            trajectory_scope = laplace_trajectory_scope_create();
+        laplace_trajectory_scope_bind_input(trajectory_scope, input);
+    }
+
     if (input)
     {
         /* COUPLE is unmasked unless the caller supplied a hard relation scope.
          * Naming paths remain semantic candidates. Only an explicit applicable
          * whole-observation contract can bind an executable operation. */
-        coupled_intent = laplace_prompt_intent_begin(input, walk_context, relation_types, fanout);
+        coupled_intent = laplace_prompt_intent_begin(
+            input, walk_context, relation_types, fanout, trajectory_scope);
+
+        /* Structural crossings are already exact prompt-relative bindings, but
+         * their reached identities also need typed relation/evidence responses
+         * before ORIENT. Extend the retained semantic query field once, with the
+         * original prompt occurrence provenance, and do not charge this initial
+         * physicality coupling against the semantic-hop routing budget. */
+        if (coupled_intent.structural_frontier &&
+            ArrayGetNItems(ARR_NDIM(coupled_intent.structural_frontier),
+                           ARR_DIMS(coupled_intent.structural_frontier)) > 0)
+        {
+            ArrayIterator structural_iterator =
+                array_create_iterator(coupled_intent.structural_frontier, 0, NULL);
+            Datum structural_value;
+            bool structural_null;
+            while (array_iterate(structural_iterator, &structural_value, &structural_null))
+            {
+                if (structural_null) continue;
+                hash128_t id = datum_to_hash128(structural_value);
+                hash_search(route_seen, &id, HASH_ENTER, NULL);
+                origin_add_occurrences(origins, &id,
+                    laplace_prompt_intent_origins(&coupled_intent, &id), walk_context);
+            }
+            array_free_iterator(structural_iterator);
+            laplace_query_state_extend_batch(
+                query_state, coupled_intent.structural_frontier, NULL);
+        }
+
         for (;;)
         {
             int channel_count = 0;
@@ -1135,27 +1187,6 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         pfree(output_operands);
     }
     pfree(operands);
-
-    if (PG_NARGS() > 9 && !PG_ARGISNULL(9) && max_stride > 0)
-    {
-        explicit_observation_scope = true;
-        trajectory_scope = laplace_trajectory_scope_create();
-        laplace_trajectory_scope_extend(trajectory_scope, PG_GETARG_ARRAYTYPE_P(9));
-    }
-    if (PG_NARGS() > 10 && !PG_ARGISNULL(10) && max_stride > 0)
-    {
-        explicit_observation_scope = true;
-        if (!trajectory_scope)
-            trajectory_scope = laplace_trajectory_scope_create();
-        laplace_trajectory_scope_extend_containing(trajectory_scope,
-                                                   PG_GETARG_ARRAYTYPE_P(10));
-    }
-    if (input && max_stride > 0)
-    {
-        if (!trajectory_scope)
-            trajectory_scope = laplace_trajectory_scope_create();
-        laplace_trajectory_scope_bind_input(trajectory_scope, input);
-    }
     MemoryContextSwitchTo(old);
 
     step_context = AllocSetContextCreate(walk_context, "forward query election",
