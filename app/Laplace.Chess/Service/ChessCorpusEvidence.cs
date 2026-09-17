@@ -52,6 +52,45 @@ internal sealed class ChessCorpusEvidence
         using var manifest = new FileStream(_manifest, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
     }
 
+    internal static async Task<ChessCorpusEvidence> ImportRecordedSelectionAsync(
+        string directory, ChessRecordedSelection selection, CancellationToken ct)
+    {
+        await selection.VerifyRetainedEvidenceAsync(ct);
+        var evidence = new ChessCorpusEvidence(directory);
+        foreach (var retained in selection.Chunks)
+        {
+            await evidence.AppendAsync(retained.Games, retained.Scopes,
+                retained.Identity.NovelGames, retained.Writer, ct);
+            var copied = evidence._chunks[^1];
+            if (copied.Body.Bytes != retained.Identity.Body.Bytes
+                || copied.Body.Sha256 != retained.Identity.Body.Sha256
+                || copied.Scope.Bytes != retained.Identity.Scope.Bytes
+                || copied.Scope.Sha256 != retained.Identity.Scope.Sha256
+                || copied.GameBodiesSha256 != retained.Identity.GameBodiesSha256)
+                throw new InvalidDataException("retained chunk body and scope are not the canonical complete evidence");
+        }
+        await evidence.CompleteAsync(ct);
+        await selection.VerifyRetainedEvidenceAsync(ct);
+        return evidence;
+    }
+
+    internal async Task<ChessRecordingMeasurement.ScopeObservation> ReadRetainedScopeAsync(CancellationToken ct)
+    {
+        if (_fresh is null || !_fresh.Completed || _chunks.Count >= _fresh._chunks.Count)
+            throw new InvalidDataException("retained recording-scope verification requires a sealed baseline chunk");
+        var identity = _fresh._chunks[_chunks.Count].Body;
+        byte[] bytes = await File.ReadAllBytesAsync(identity.Path, ct);
+        if (bytes.LongLength != identity.Bytes
+            || Convert.ToHexStringLower(SHA256.HashData(bytes)) != identity.Sha256)
+            throw new InvalidDataException("retained baseline chunk changed before scope verification");
+        using var document = JsonDocument.Parse(bytes);
+        var scopes = document.RootElement.GetProperty("scopes")
+            .Deserialize<ChessRecordingMeasurement.ScopeObservation[]>(ChessCorpusPreparation.Json);
+        if (scopes is not { Length: 1 })
+            throw new InvalidDataException("retained baseline requires exactly one recording scope");
+        return scopes[0];
+    }
+
     internal static bool WriterIsZero(ChessRecordingMeasurement.WriterCounts writer) =>
         writer.ApplyCalls == 0 && writer.EntitiesAttempted == 0 && writer.EntitiesInserted == 0
         && writer.PhysicalitiesAttempted == 0 && writer.PhysicalitiesInserted == 0

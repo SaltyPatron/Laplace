@@ -29,6 +29,7 @@ internal static class ChessCommands
             "match" => await MatchAsync(args[1..]),
             "bench" => Bench(args[1..]),
             "measure-corpus" => await ChessCorpusCommands.RunAsync(args[1..]),
+            "verify-recorded-corpus" => await ChessRecordedCorpusCommands.RunAsync(args[1..]),
             "repair-position-outcomes" => await RepairPositionOutcomesAsync(args[1..]),
             _ => Fail($"unknown chess subcommand '{args[0]}'\n{Usage}"),
         };
@@ -97,7 +98,7 @@ internal static class ChessCommands
     }
 
     private const string Usage =
-        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|measure-corpus>\n"
+        "usage: laplace chess <selfplay|move|fetch|substrate-test|ladder|review|learned-pst|learned-eval-test|tactics|lichess|match|measure-corpus|verify-recorded-corpus>\n"
         + "  match [--rounds N] [--depth D] [--st S] [--elo E] [--no-ingest]   (engine-vs-engine, live terminal board; games stream into the substrate)\n"
         + "  selfplay [--games N] [--temp T] [--max-plies M] [--weight W] [--report-every R]\n"
         + "  move <fen>\n"

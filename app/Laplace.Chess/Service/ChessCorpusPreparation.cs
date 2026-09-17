@@ -146,6 +146,22 @@ internal sealed class ChessCorpusPreparation
         }
     }
 
+    internal static ChessCorpusPreparation FromRecordedSelection(ChessRecordedSelection selection)
+    {
+        var value = new ChessCorpusPreparation(ChessRecordedSelection.Internal(selection.Source),
+            new Counts { SelectedGames = selection.SelectedGames })
+        {
+            SelectionManifest = ChessRecordedSelection.Internal(selection.SelectionManifest),
+        };
+        value.Selected.AddRange(selection.Entries);
+        value.DistinctLines = value.Selected.Select(s => s.LineId).Distinct(StringComparer.Ordinal).Count();
+        value.DistinctStartPositions = value.Selected.Select(s => s.StartPositionId).Distinct(StringComparer.Ordinal).Count();
+        value.Plies = value.Selected.Sum(s => (long)s.Plies);
+        value.MinimumPlies = value.Selected.Min(s => s.Plies);
+        value.MaximumPlies = value.Selected.Max(s => s.Plies);
+        return value;
+    }
+
     internal static Selection Describe(long ordinal, ChessGameRecord game)
         => new(ordinal, HashText(game.GameText), Id(game.PlayingId), Id(game.LineId),
             Id(game.PositionIds[0]), game.MoveIds.Length, game.Result.ResultToken);

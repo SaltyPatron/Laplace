@@ -76,6 +76,78 @@ def regular_child(root, relative):
     return current
 
 
+
+def validate_recorded_selection(selection, inventory, witnessed, count):
+    """Bind the optional explicit playing scope without changing normal full discovery."""
+    def identity(value):
+        if not isinstance(value, dict) or set(value) != {"path", "bytes", "sha256"}:
+            raise ValueError("recorded selection file identity is incomplete")
+        path = Path(value["path"])
+        if (not path.is_absolute() or path.is_symlink() or not path.is_file()
+                or type(value["bytes"]) is not int or value["bytes"] < 0
+                or path.stat().st_size != value["bytes"] or sha256(path) != value["sha256"]):
+            raise ValueError("recorded selection input changed")
+        return path
+
+    if (not isinstance(selection, dict)
+            or set(selection) != {"scope", "manifest", "source", "selection_manifest",
+                                  "selected_games", "playing_ids_sha256"}
+            or selection["scope"] != "immutable-recorded-manifest"
+            or type(selection["selected_games"]) is not int or selection["selected_games"] != count
+            or count <= 0):
+        raise ValueError("recorded selection coverage is incomplete")
+    expected = {
+        "Scope": selection["scope"], "SelectedGames": count,
+        "PlayingIdsSha256": selection["playing_ids_sha256"],
+        **{target: {"Path": selection[key]["path"], "Bytes": selection[key]["bytes"],
+                    "Sha256": selection[key]["sha256"]}
+           for key, target in (("manifest", "Manifest"), ("source", "Source"),
+                               ("selection_manifest", "SelectionManifest"))},
+    }
+    if inventory.get("Selection") != expected or inventory.get("CountScope") != "explicit-recorded-selection":
+        raise ValueError("inventory and export selection identities differ")
+    manifest_path = identity(selection["manifest"])
+    identity(selection["source"])
+    identity(selection["selection_manifest"])
+    manifest = read_json(manifest_path)
+    if (manifest.get("schema") != "laplace.chess-recorded-selection/v1"
+            or manifest.get("source") != selection["source"]
+            or manifest.get("selectionManifest") != selection["selection_manifest"]):
+        raise ValueError("export differs from its immutable recorded manifest")
+    selected = []
+    chunks = manifest.get("chunks")
+    if not isinstance(chunks, list) or not chunks:
+        raise ValueError("recorded selection has no complete chunks")
+    for index, chunk in enumerate(chunks, 1):
+        if (not isinstance(chunk, dict) or chunk.get("index") != index
+                or chunk.get("firstSelectedGame") != len(selected)
+                or type(chunk.get("games")) is not int or chunk["games"] <= 0
+                or chunk.get("novelGames") != chunk["games"]):
+            raise ValueError("recorded selection chunk boundaries are incomplete")
+        body = read_json(identity(chunk.get("body")))
+        identity(chunk.get("scope"))
+        games = body.get("games")
+        if (body.get("schema") != "laplace.chess-corpus-chunk/v1"
+                or body.get("index") != index
+                or body.get("firstSelectedGame") != len(selected)
+                or body.get("newlyRecordedGames") != chunk["games"]
+                or not isinstance(games, list) or len(games) != chunk["games"]):
+            raise ValueError("recorded selection body differs from its manifest")
+        selected.extend(game.get("playingId") for game in games)
+    if (len(selected) != count or len(set(selected)) != count
+            or any(not isinstance(value, str) or len(value) != 32
+                   or any(char not in "0123456789abcdef" for char in value) for value in selected)):
+        raise ValueError("recorded selection has duplicate or invalid playing identities")
+    expected_ids = sorted(selected)
+    digest = hashlib.sha256("".join(value + "\n" for value in expected_ids).encode("ascii")).hexdigest()
+    with Path(witnessed).open(encoding="utf-8") as source:
+        actual_ids = [json.loads(line).get("PlayingId") for line in source]
+    if actual_ids != expected_ids or digest != selection["playing_ids_sha256"]:
+        raise ValueError("export omitted, added or changed an explicitly selected playing")
+    identity(selection["manifest"])
+    return selection
+
+
 def validate_export(receipt):
     receipt = Path(receipt)
     if not receipt.is_absolute() or receipt.is_symlink() or not receipt.is_file():
@@ -145,12 +217,21 @@ def validate_export(receipt):
     if (inventory.get("InputsSha256") != sha256(witnessed)
             or inventory.get("RetainedBytes") != witnessed.stat().st_size):
         raise ValueError("inventory does not bind the retained witnessed inputs")
+    selection = value.get("selection")
+    if selection is not None:
+        if value.get("count_scope") != "explicit-recorded-selection":
+            raise ValueError("explicit selection lacks its truthful count scope")
+        validate_recorded_selection(selection, inventory, witnessed, value["selected_playings"])
+    elif (value.get("count_scope", "all-recorded-playings") != "all-recorded-playings"
+          or inventory.get("Selection") is not None
+          or inventory.get("CountScope", "all-recorded-playings") != "all-recorded-playings"):
+        raise ValueError("unselected export cannot claim an explicit recorded scope")
     if sha256(receipt) != before:
         raise ValueError("export receipt changed during validation")
     return {"receipt": str(receipt), "receipt_sha256": before, "roles": result,
             "coverage": {k: value[k] for k in ("selected_playings", "exported_playings",
                          "position_occurrences", "transition_occurrences", "unique_transitions")},
-            "database": first}
+            "database": first, **({"selection": selection} if selection is not None else {})}
 
 
 def selected_export(prefix):

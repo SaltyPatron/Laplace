@@ -32,6 +32,8 @@ internal static class ChessRecordedFloorExport
         public Inventory.DatabaseIdentity? DatabaseBefore { get; set; }
         public Inventory.DatabaseIdentity? DatabaseAfter { get; set; }
         public long? SelectedPlayings { get; set; }
+        public Inventory.SelectionReceipt? Selection { get; set; }
+        public string CountScope => Selection is null ? "all-recorded-playings" : "explicit-recorded-selection";
         public long ExportedPlayings { get; set; }
         public long PositionOccurrences { get; set; }
         public long TransitionOccurrences { get; set; }
@@ -127,6 +129,7 @@ internal static class ChessRecordedFloorExport
                 receipt.DatabaseBefore = inventory.DatabaseBefore;
                 receipt.DatabaseAfter = inventory.DatabaseAfter;
                 receipt.SelectedPlayings = inventory.SelectedBefore;
+                receipt.Selection = inventory.Selection;
                 receipt.InventoryComplete = inventory.Status == "completed";
                 if (!receipt.InventoryComplete || inventory.Retained != receipt.ExportedPlayings)
                     throw new InvalidDataException("Recorded input inventory is incomplete; retain and inspect inventory/summary.json.");

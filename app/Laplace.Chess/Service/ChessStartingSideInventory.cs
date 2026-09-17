@@ -16,9 +16,16 @@ internal static class ChessStartingSideInventory
 {
     internal const string Mode = "inventory-starting-sides";
     internal const string Usage = "ChessCatalogSurfaces inventory-starting-sides --output-dir <new-absolute-directory> "
-        + "[--page-size 64] [--maximum-materialized-mib 128] [--maximum-retained-mib 512] [--deadline-seconds 300]";
+        + "[--page-size 64] [--maximum-materialized-mib 128] [--maximum-retained-mib 512] [--deadline-seconds 300] "
+        + "[--recorded-selection <absolute-manifest> --recorded-selection-sha256 <sha256>]";
     internal sealed record Options(string OutputDirectory, int PageSize, long MaterializedBytes,
-        long RetainedBytes, int DeadlineSeconds);
+        long RetainedBytes, int DeadlineSeconds, string? RecordedSelection = null, string? RecordedSelectionSha256 = null);
+    internal sealed record SelectionReceipt(ChessRecordedSelection.FileIdentity Manifest,
+        ChessRecordedSelection.FileIdentity Source, ChessRecordedSelection.FileIdentity SelectionManifest,
+        int SelectedGames, string PlayingIdsSha256)
+    {
+        public string Scope => "immutable-recorded-manifest";
+    }
     internal sealed record DatabaseIdentity(string Database, string DatabaseOid, string SystemIdentifier);
     internal sealed record SourceBinding(string Name, string SourceId, string LineId);
     internal sealed record PageInputs(IReadOnlyList<ChessWitnessedGame> Games,
@@ -26,6 +33,7 @@ internal static class ChessStartingSideInventory
 
     internal interface IReadSource
     {
+        SelectionReceipt? Selection => null;
         Task<DatabaseIdentity> IdentityAsync(CancellationToken ct);
         Task<long?> CountAsync(CancellationToken ct);
         Task<IReadOnlyList<Hash128>> PageAsync(byte[] afterId, int limit, CancellationToken ct);
@@ -44,6 +52,8 @@ internal static class ChessStartingSideInventory
         public string Limitation => "Strict hydration admits complete replay under its explicit materialization byte allowance. "
             + "Unverified playings remain unclassified. Independent reads do not establish an MVCC snapshot or prior database contents.";
         public required Options Bounds { get; init; }
+        public SelectionReceipt? Selection { get; init; }
+        public string CountScope => Selection is null ? "all-recorded-playings" : "explicit-recorded-selection";
         public DateTimeOffset StartedUtc { get; init; } = DateTimeOffset.UtcNow;
         public DateTimeOffset? FinishedUtc { get; set; }
         public DatabaseIdentity? DatabaseBefore { get; set; }
@@ -74,7 +84,7 @@ internal static class ChessStartingSideInventory
         {
             string key = args[i];
             if (key is not ("--output-dir" or "--page-size" or "--maximum-materialized-mib"
-                or "--maximum-retained-mib" or "--deadline-seconds")
+                or "--maximum-retained-mib" or "--deadline-seconds" or "--recorded-selection" or "--recorded-selection-sha256")
                 || i + 1 == args.Length || !values.TryAdd(key, args[i + 1]))
                 throw new ArgumentException("Unknown, duplicate, or incomplete inventory option.");
         }
@@ -90,9 +100,17 @@ internal static class ChessStartingSideInventory
         long page = Number("--page-size", 64), seconds = Number("--deadline-seconds", 300);
         if (page > 256 || seconds > int.MaxValue / 1000)
             throw new ArgumentException("Page size must be at most 256 and the deadline must fit milliseconds.");
+        string? selection = values.GetValueOrDefault("--recorded-selection");
+        string? selectionSha = values.GetValueOrDefault("--recorded-selection-sha256");
+        if ((selection is null) != (selectionSha is null)
+            || selection is not null && !Path.IsPathFullyQualified(selection)
+            || selectionSha is not null && (selectionSha.Length != 64
+                || selectionSha.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f'))))
+            throw new ArgumentException("Recorded selection requires an absolute manifest and its exact lowercase SHA256.");
         return new Options(Path.GetFullPath(output), (int)page,
             checked(Number("--maximum-materialized-mib", 128) * 1024 * 1024),
-            checked(Number("--maximum-retained-mib", 512) * 1024 * 1024), (int)seconds);
+            checked(Number("--maximum-retained-mib", 512) * 1024 * 1024), (int)seconds,
+            selection is null ? null : Path.GetFullPath(selection), selectionSha);
     }
 
     internal static string ReadOnlyConnectionString(string basis)
@@ -141,12 +159,20 @@ internal static class ChessStartingSideInventory
     internal static async Task<Summary> CollectAsync(Options options, IReadSource source, CancellationToken ct,
         Func<ChessWitnessedGame, IReadOnlyList<SourceBinding>, CancellationToken, Task>? verifiedGameSink = null)
     {
+        ChessRecordedSelection? selection = options.RecordedSelection is null ? null
+            : await ChessRecordedSelection.LoadAsync(options.RecordedSelection,
+                options.RecordedSelectionSha256 ?? throw new ArgumentException("Recorded selection SHA256 is required."), ct)
+                .ConfigureAwait(false);
+        if (selection is not null)
+            source = new SelectedReadSource(source, selection.PlayingIds,
+                new SelectionReceipt(selection.Manifest, selection.Source, selection.SelectionManifest,
+                    selection.SelectedGames, PlayingIdsDigest(selection.PlayingIds)));
         if (Directory.Exists(options.OutputDirectory) || File.Exists(options.OutputDirectory))
             throw new IOException("Inventory output directory already exists.");
         Directory.CreateDirectory(options.OutputDirectory);
         string summaryPath = Path.Combine(options.OutputDirectory, "summary.json");
         string inputsPath = Path.Combine(options.OutputDirectory, "hydrated-playings.jsonl");
-        var summary = new Summary { Bounds = options };
+        var summary = new Summary { Bounds = options, Selection = source.Selection };
         // CreateNew also refuses a concurrent owner of the same evidence directory.
         using (var initial = new FileStream(summaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
             await JsonSerializer.SerializeAsync(initial, summary, cancellationToken: CancellationToken.None).ConfigureAwait(false);
@@ -200,7 +226,7 @@ internal static class ChessStartingSideInventory
                         // Explicit string identities preserve the exact native input ids in transport JSON.
                         byte[] record = JsonSerializer.SerializeToUtf8Bytes(new
                         {
-                            PlayingId = game.PlayingId.ToString(), LineId = game.LineId.ToString(),
+                            PlayingId = Convert.ToHexStringLower(game.PlayingId.ToBytes()), LineId = game.LineId.ToString(),
                             StartPositionId = game.StartPositionId!.Value.ToString(), StartingSide = side,
                             Sources = owners, game.StartFen, game.Moves,
                             MoveIds = game.MoveIds.Select(id => id.ToString()).ToArray(),
@@ -231,6 +257,7 @@ internal static class ChessStartingSideInventory
                 if (summary.DatabaseBefore != summary.DatabaseAfter
                     || summary.SelectedBefore != summary.Retained || summary.SelectedAfter != summary.Retained)
                     throw new InvalidDataException("Observed identity or selected counts do not reconcile with retained playings.");
+                if (selection is not null) await selection.VerifyUnchangedAsync(ct).ConfigureAwait(false);
                 summary.Status = "completed";
                 summary.Stage = "completed";
             }
@@ -265,6 +292,63 @@ internal static class ChessStartingSideInventory
             }
         }
         return summary;
+    }
+
+    internal static string PlayingIdsDigest(IEnumerable<Hash128> ids)
+    {
+        var ordered = ids.OrderBy(id => id, Comparer<Hash128>.Create((a, b) => a.CompareToBytewise(b)));
+        return Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            string.Concat(ordered.Select(id => Convert.ToHexStringLower(id.ToBytes()) + "\n"))))).ToLowerInvariant();
+    }
+
+    /// <summary>Selection changes enumeration only. Every selected playing still passes
+    /// the same current database identity, source ownership, and complete native hydration.</summary>
+    internal sealed class SelectedReadSource : IReadSource
+    {
+        private readonly IReadSource inner;
+        private readonly Hash128[] ids;
+        public SelectionReceipt Selection { get; }
+        public SelectedReadSource(IReadSource inner, IReadOnlyList<Hash128> ids, SelectionReceipt selection)
+        {
+            this.inner = inner;
+            this.ids = ids.OrderBy(id => id, Comparer<Hash128>.Create((a, b) => a.CompareToBytewise(b))).ToArray();
+            if (this.ids.Length == 0 || this.ids.Distinct().Count() != this.ids.Length
+                || selection.SelectedGames != this.ids.Length
+                || selection.PlayingIdsSha256 != PlayingIdsDigest(this.ids))
+                throw new InvalidDataException("Recorded selection has missing, duplicate, or conflicting playing identities.");
+            Selection = selection;
+        }
+        public Task<DatabaseIdentity> IdentityAsync(CancellationToken ct) => inner.IdentityAsync(ct);
+        public Task<long?> CountAsync(CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult<long?>(ids.Length);
+        }
+        public Task<IReadOnlyList<Hash128>> PageAsync(byte[] afterId, int limit, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            int start = 0;
+            if (afterId.Length != 0)
+            {
+                var cursor = Hash128.FromBytes(afterId);
+                int found = Array.BinarySearch(ids, cursor,
+                    Comparer<Hash128>.Create((a, b) => a.CompareToBytewise(b)));
+                start = found >= 0 ? found + 1 : ~found;
+            }
+            return Task.FromResult<IReadOnlyList<Hash128>>(
+                ids.AsSpan(start, Math.Min(limit, ids.Length - start)).ToArray());
+        }
+        public async Task<PageInputs> HydrateAsync(IReadOnlyList<Hash128> page, long maximumBytes, CancellationToken ct)
+        {
+            if (page.Any(id => Array.BinarySearch(ids, id,
+                    Comparer<Hash128>.Create((a, b) => a.CompareToBytewise(b))) < 0))
+                throw new InvalidDataException("Hydration requested a playing outside the immutable selection.");
+            var result = await inner.HydrateAsync(page, maximumBytes, ct).ConfigureAwait(false);
+            if (page.Any(id => !result.Sources.TryGetValue(id, out var owners)
+                    || !owners.Any(owner => owner.SourceId == ChessVocabulary.PgnSourceId.ToString())))
+                throw new InvalidDataException("Selected playing lacks its recorded PGN source ownership.");
+            return result;
+        }
     }
 
     internal sealed class DatabaseSource(NpgsqlDataSource ds) : IReadSource

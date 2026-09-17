@@ -60,8 +60,16 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     public static Task<ChessPgnIngestor> CreateAsync(CancellationToken ct = default)
         => CreateAsync(null, ct);
 
-    internal static async Task<ChessPgnIngestor> CreateAsync(
+    internal static Task<ChessPgnIngestor> CreateAsync(
         ChessRecordingMeasurement.WriterDiagnosticLogger? diagnostics, CancellationToken ct)
+        => CreateOwnedAsync(diagnostics, bootstrap: true, ct);
+
+    internal static Task<ChessPgnIngestor> CreateRecordedVerifierAsync(
+        ChessRecordingMeasurement.WriterDiagnosticLogger? diagnostics, CancellationToken ct)
+        => CreateOwnedAsync(diagnostics, bootstrap: false, ct);
+
+    private static async Task<ChessPgnIngestor> CreateOwnedAsync(
+        ChessRecordingMeasurement.WriterDiagnosticLogger? diagnostics, bool bootstrap, CancellationToken ct)
     {
         CodepointPerfcache.LoadDefault();
         var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest);
@@ -70,7 +78,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             inner, ds, logger: diagnostics, persistEvidence: true);
         var reader = new NpgsqlSubstrateReader(ds);
 
-        await BootstrapSourcesAsync(ds, writer, reader, ct);
+        if (bootstrap) await BootstrapSourcesAsync(ds, writer, reader, ct);
         return new ChessPgnIngestor(ds, writer, reader, ownsResources: true);
     }
 
@@ -444,17 +452,23 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                         expectedWitnesses.AddRange(repairBuilt.Attestations.Where(a => ChessRecordingMeasurement.IsGameWitness(a, selectedPlayings)));
                         expectedCarriers.AddRange(repairBuilt.Physicalities.Where(p => p.Type == PhysicalityType.Content && selectedLines!.Contains(p.EntityId)));
                     }
-                    var repairAnalyzed = await repairAnalyze.BuildAsync(ct);
-                    ownedChanges.Add(repairAnalyzed);
-                    var present = await ReadPresentAttestationIdsAsync(
-                        repairBuilt.Attestations.Concat(repairAnalyzed.Attestations).ToArray(), ct);
-                    foreach (var candidate in new[] { repairBuilt, repairAnalyzed })
+                    // Explicit retained-scope verification reads the original sealed game
+                    // testimony. New calculated/completion metadata is outside that scope;
+                    // ordinary ingestion still discovers and admits those repairs below.
+                    if (measurement?.RequireNoWriterWork != true)
                     {
-                        if (MissingWitnesses(candidate, present) is not { } repairChange) continue;
-                        changes.Add(repairChange);
-                        // Calculated testimony may be shared by several playings. Report
-                        // the repaired window size without inventing per-game attribution.
-                        repairedGames = repairPlayings.Count;
+                        var repairAnalyzed = await repairAnalyze.BuildAsync(ct);
+                        ownedChanges.Add(repairAnalyzed);
+                        var present = await ReadPresentAttestationIdsAsync(
+                            repairBuilt.Attestations.Concat(repairAnalyzed.Attestations).ToArray(), ct);
+                        foreach (var candidate in new[] { repairBuilt, repairAnalyzed })
+                        {
+                            if (MissingWitnesses(candidate, present) is not { } repairChange) continue;
+                            changes.Add(repairChange);
+                            // Calculated testimony may be shared by several playings. Report
+                            // the repaired window size without inventing per-game attribution.
+                            repairedGames = repairPlayings.Count;
+                        }
                     }
                 }
 
@@ -478,7 +492,10 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             if (measurement is { RetainedPgn: true })
             {
                 using var scopePhase = measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.BeforeScopeProbe);
-                scope = await measurement.ReadScopeBeforeAsync(_ds,
+                scope = measurement.RequireNoWriterWork
+                    ? await measurement.ReadRetainedScopeBeforeAsync(_ds,
+                        expectedEntities, expectedWitnesses, expectedCarriers, ct)
+                    : await measurement.ReadScopeBeforeAsync(_ds,
                     expectedEntities.Concat(experimentChange is null
                         ? Enumerable.Empty<EntityRow>() : experimentChange.Entities).ToArray(),
                     expectedWitnesses.Concat(experimentChange is null
@@ -486,6 +503,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     expectedCarriers, ct);
             }
 
+            RequireWritableAdmission(measurement?.RequireNoWriterWork == true, changes.Count);
             if (changes.Count > 0)
             {
                 using var writerPhase = measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.WriterApply);
@@ -504,7 +522,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                         measurement.ElapsedSeconds.Commit += Stopwatch.GetElapsedTime(commitStarted).TotalSeconds;
                 }
             }
-            if (observedPositions.Count > 0 || observedMoves.Count > 0)
+            if (measurement?.RequireNoWriterWork != true
+                && (observedPositions.Count > 0 || observedMoves.Count > 0))
                 ChessTransitionObservations.MarkObserved(observedPositions, observedMoves);
             if (measurement is not null)
             {
@@ -534,6 +553,12 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             foreach (var change in ownedChanges)
                 foreach (var stage in change.IntentStages) stage.Dispose();
         }
+    }
+
+    internal static void RequireWritableAdmission(bool requireNoWriterWork, int changes)
+    {
+        if (requireNoWriterWork && changes != 0)
+            throw new InvalidDataException("recorded selection is incomplete or requires repair; verification cannot write");
     }
 
     internal static SubstrateChange? MissingWitnesses(

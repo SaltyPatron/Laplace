@@ -17,7 +17,8 @@ internal readonly record struct IngestAdmissionSizing(
     long SourceTupleBytes,
     long AdmittedTupleBytes,
     long SourceStages,
-    long AdmittedStages)
+    long AdmittedStages,
+    long CaptureReservationBytes = 0)
 {
     internal IngestAdmissionSizing Add(IngestAdmissionSizing next) => new(
         checked(SerializedBytes + next.SerializedBytes),
@@ -26,7 +27,8 @@ internal readonly record struct IngestAdmissionSizing(
         checked(SourceTupleBytes + next.SourceTupleBytes),
         checked(AdmittedTupleBytes + next.AdmittedTupleBytes),
         checked(SourceStages + next.SourceStages),
-        checked(AdmittedStages + next.AdmittedStages));
+        checked(AdmittedStages + next.AdmittedStages),
+        checked(CaptureReservationBytes + next.CaptureReservationBytes));
 
     internal long ModeledSourcePayloadBytes
     {
@@ -62,7 +64,8 @@ internal readonly record struct IngestAdmissionSizing(
                 // bodies. Its no-reuse upper bound also covers original-only validation.
                 long plan = Source.Add(Admitted).PlanPayloadBound;
                 return Math.Max(SerializedBytes, metadata + clientTransport
-                    + sqlArrays + sqlSourceMetadata + encodedPayload + captures + plan);
+                    + sqlArrays + sqlSourceMetadata + encodedPayload + captures + plan
+                    + CaptureReservationBytes);
             }
         }
     }
@@ -90,7 +93,26 @@ internal readonly record struct IngestAdmissionSizing(
         PhysicalityDescriptorSizing.Shape selected,
         PhysicalityDescriptorSizing.Shape raw,
         ulong entities, ulong attestations, bool growingStages,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        MeasurePartsCore(serializedBytes, stages, selected, raw, entities, attestations,
+            growingStages, selectedRowsAlreadyObserved: false, ct);
+
+    // AddPhysicality appends every row to raw before retaining its selected
+    // reference. This invariant belongs to the builder, not arbitrary changes.
+    internal static IngestAdmissionSizing MeasureGrowingBuilder(
+        long serializedBytes, IReadOnlyList<IntentStage> stages,
+        PhysicalityDescriptorSizing.Shape selected,
+        PhysicalityDescriptorSizing.Shape raw,
+        ulong entities, ulong attestations) =>
+        MeasurePartsCore(serializedBytes, stages, selected, raw, entities, attestations,
+            growingStages: true, selectedRowsAlreadyObserved: true, default);
+
+    private static IngestAdmissionSizing MeasurePartsCore(
+        long serializedBytes, IReadOnlyList<IntentStage> stages,
+        PhysicalityDescriptorSizing.Shape selected,
+        PhysicalityDescriptorSizing.Shape raw,
+        ulong entities, ulong attestations, bool growingStages,
+        bool selectedRowsAlreadyObserved, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var native = growingStages
@@ -112,10 +134,22 @@ internal readonly record struct IngestAdmissionSizing(
             }
         }
 
-        // This matches capture's conservative reference-union reservation:
-        // every raw occurrence survives, and selected rows may supplement it.
-        // We do not deduplicate by content/placement or mutate either collection.
-        var managedSource = raw.Forms == 0 ? selected : raw.Add(selected);
+        // Arbitrary changes may supplement raw with selected row references.
+        // A growing builder has already appended every selected row to raw:
+        // capture emits raw exactly, including repeated and distinct same-ID rows.
+        var managedSource = selectedRowsAlreadyObserved
+            ? raw
+            : raw.Forms == 0 ? selected : raw.Add(selected);
+        long captureReservation = 0;
+        if (selectedRowsAlreadyObserved && raw.Forms != 0 && selected.Forms != 0)
+        {
+            // Capture still reserves raw+selected metadata capacity before its
+            // reference union, plus a possible merged reference array and the
+            // selected-reference set. Retain those actual client reservations;
+            // only the duplicated source tuple/capture/descriptor bodies vanish.
+            captureReservation = checked((long)selected.Forms * 40L
+                + ((long)raw.Forms + 2L * (long)selected.Forms) * IntPtr.Size);
+        }
         if (managedSource.Forms != 0)
         {
             sourceTuples = checked(sourceTuples + PhysicalityDescriptorSizing.TuplePayloadBound(
@@ -126,7 +160,8 @@ internal readonly record struct IngestAdmissionSizing(
         admittedTuples = checked(admittedTuples + PhysicalityDescriptorSizing.TuplePayloadBound(
             entities, selected.Forms, selected.StoredVertices, attestations));
         return new(serializedBytes, native.Add(managedSource), native.Add(selected),
-            sourceTuples, admittedTuples, sourceStages, checked(admittedStages + (managed ? 1L : 0)));
+            sourceTuples, admittedTuples, sourceStages, checked(admittedStages + (managed ? 1L : 0)),
+            captureReservation);
     }
 
     private static PhysicalityDescriptorSizing.Shape ShapeOf(

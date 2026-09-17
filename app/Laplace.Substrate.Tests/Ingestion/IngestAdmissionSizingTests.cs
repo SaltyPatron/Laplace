@@ -90,38 +90,7 @@ public sealed class IngestAdmissionSizingTests
             rows, size.ModeledSourcePayloadBytes, 200);
         var shape = PhysicalityDescriptorSizing.FromStages([stage]);
         Assert.Equal((ulong)rows.Length, shape.Forms);
-        long grant = checked(shape.CapturePayloadBound + shape.PlanPayloadBound);
-        IntPtr vocabulary = IntPtr.Zero, capture = IntPtr.Zero;
-        lock (LaplaceCoreGate.Native)
-        {
-            try
-            {
-                var source = Source;
-                Assert.Equal(0, VocabularyCreate(&source,
-                    checked((nuint)IngestSizing.ResolveWorkingSetBudgetBytes()), &vocabulary));
-                Assert.NotEqual(IntPtr.Zero, vocabulary);
-                IntPtr basis = VocabularyBasis(vocabulary);
-                Assert.NotEqual(IntPtr.Zero, basis);
-                IntPtr handle = stage.DangerousGetHandle();
-                nuint planLimit = checked((nuint)shape.PlanPayloadBound);
-                Assert.Equal(-2, CaptureStages(&handle, 1, basis, &planLimit, 1, &capture));
-                Assert.Equal(IntPtr.Zero, capture);
-                Assert.Equal(0, CaptureStages(&handle, 1, basis, &planLimit,
-                    checked((nuint)grant), &capture));
-                Assert.NotEqual(IntPtr.Zero, capture);
-                Assert.True((ulong)CapturePeak(capture) <= (ulong)grant);
-                nuint count = 0;
-                Assert.NotEqual(IntPtr.Zero, CaptureInputs(capture, &count));
-                Assert.Equal((ulong)rows.Length, (ulong)count);
-                Assert.Equal(rows.Length, stage.PhysicalityCount);
-                GC.KeepAlive(stage);
-            }
-            finally
-            {
-                CaptureFree(capture);
-                VocabularyFree(vocabulary);
-            }
-        }
+        AssertNativeCaptureFits(stage, shape);
     }
 
     [Fact]
@@ -198,7 +167,7 @@ public sealed class IngestAdmissionSizingTests
         var change = builder.Build();
         try
         {
-            Assert.True(second >= IngestAdmissionSizing.Measure(change, serialized).ModeledSourcePayloadBytes);
+            Assert.True(second >= serialized);
             Assert.Equal(3, change.PhysicalityObservations.Length);
             Assert.Single(change.Physicalities);
             Assert.False(stage.IsClosed);
@@ -228,6 +197,101 @@ public sealed class IngestAdmissionSizingTests
         var change = builder.Build();
         Assert.Same(invalid, Assert.Single(change.PhysicalityObservations));
         Assert.Throws<InvalidOperationException>(() => IngestAdmissionSizing.Measure(change, 152));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GrowingBuilderBoundMatchesActualReferenceUnionWithoutDroppingSameIdObservations(bool differentBody)
+    {
+        using var builder = new SubstrateChangeBuilder(Source, "builder-reference-union");
+        var row = Row(1);
+        var copied = row with { CoordX = differentBody ? .25 : row.CoordX };
+        builder.AddPhysicality(row).AddPhysicality(row).AddPhysicality(copied);
+        long serialized = builder.StagedBytesEstimate;
+        long modeled = SubstrateChangeBuilder.ModeledSourceAdmissionPayloadBytes(builder);
+        var change = builder.Build().WithSourcePrior(Source, .75);
+        using var captured = NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.Capture(
+            [change], Array.Empty<IntentStage>(), CancellationToken.None)!;
+        Assert.NotNull(captured);
+        var rawStage = Assert.Single(captured.RawStages);
+        using var expected = Scalar([row, row, copied]);
+        using var selectedStage = Scalar(change.Physicalities);
+        Assert.Equal(Tuples(expected), Tuples(rawStage));
+        Assert.Equal(3, rawStage.PhysicalityCount);
+        Assert.Equal(3, captured.ObservationSources.Count);
+        Assert.Equal(4 * 40L, captured.ObservationPayloadBytes);
+        Assert.Equal(4, captured.ObservationSources.Capacity);
+        Assert.Same(row, change.PhysicalityObservations[0]);
+        Assert.Same(row, change.PhysicalityObservations[1]);
+        Assert.Same(copied, change.PhysicalityObservations[2]);
+        Assert.NotSame(row, copied);
+
+        var actualSource = PhysicalityDescriptorSizing.FromStages(captured.RawStages);
+        var actualSelected = PhysicalityDescriptorSizing.FromStages([selectedStage]);
+        var exactBuilder = IngestAdmissionSizing.MeasureGrowingBuilder(
+            serialized, Array.Empty<IntentStage>(), actualSelected, actualSource, 0, 0);
+        Assert.Equal(actualSource, exactBuilder.Source);
+        Assert.Equal(actualSelected, exactBuilder.Admitted);
+        Assert.Equal(modeled, exactBuilder.ModeledSourcePayloadBytes);
+        Assert.True(modeled >= captured.OwnedRawBytes + captured.ObservationPayloadBytes);
+        Assert.True(exactBuilder.CaptureReservationBytes >=
+            captured.ObservationPayloadBytes - (long)actualSource.Forms * 40L);
+        AssertNativeCaptureFits(rawStage, exactBuilder.Source);
+        Assert.True(modeled < IngestAdmissionSizing.Measure(change, serialized).ModeledSourcePayloadBytes);
+
+        // An arbitrary change may have another selected object with the same ID.
+        // Capture must supplement it by reference; the general union stays conservative.
+        var extra = row with { CoordM = .9 };
+        var supplemented = change with { Physicalities = [extra] };
+        using var externalCapture = NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.Capture(
+            [supplemented], Array.Empty<IntentStage>(), CancellationToken.None)!;
+        Assert.NotNull(externalCapture);
+        using var externalExpected = Scalar([row, row, copied, extra]);
+        var externalStage = Assert.Single(externalCapture.RawStages);
+        Assert.Equal(Tuples(externalExpected), Tuples(externalStage));
+        Assert.Equal(4, externalStage.PhysicalityCount);
+        var externalSizing = IngestAdmissionSizing.Measure(supplemented, serialized);
+        Assert.Equal(PhysicalityDescriptorSizing.FromStages(externalCapture.RawStages), externalSizing.Source);
+        Assert.Equal(0, externalSizing.CaptureReservationBytes);
+        Assert.True(externalSizing.ModeledSourcePayloadBytes > modeled);
+    }
+
+    private static unsafe void AssertNativeCaptureFits(
+        IntentStage stage, PhysicalityDescriptorSizing.Shape shape)
+    {
+        long grant = checked(shape.CapturePayloadBound + shape.PlanPayloadBound);
+        IntPtr vocabulary = IntPtr.Zero, capture = IntPtr.Zero;
+        lock (LaplaceCoreGate.Native)
+        {
+            try
+            {
+                var source = Source;
+                Assert.Equal(0, VocabularyCreate(&source,
+                    checked((nuint)IngestSizing.ResolveWorkingSetBudgetBytes()), &vocabulary));
+                Assert.NotEqual(IntPtr.Zero, vocabulary);
+                IntPtr basis = VocabularyBasis(vocabulary);
+                Assert.NotEqual(IntPtr.Zero, basis);
+                IntPtr handle = stage.DangerousGetHandle();
+                nuint planLimit = checked((nuint)shape.PlanPayloadBound);
+                Assert.Equal(-2, CaptureStages(&handle, 1, basis, &planLimit, 1, &capture));
+                Assert.Equal(IntPtr.Zero, capture);
+                Assert.Equal(0, CaptureStages(&handle, 1, basis, &planLimit,
+                    checked((nuint)grant), &capture));
+                Assert.NotEqual(IntPtr.Zero, capture);
+                Assert.True((ulong)CapturePeak(capture) <= (ulong)grant);
+                nuint count = 0;
+                Assert.NotEqual(IntPtr.Zero, CaptureInputs(capture, &count));
+                Assert.Equal(shape.Forms, (ulong)count);
+                Assert.Equal((ulong)stage.PhysicalityCount, (ulong)count);
+                GC.KeepAlive(stage);
+            }
+            finally
+            {
+                CaptureFree(capture);
+                VocabularyFree(vocabulary);
+            }
+        }
     }
 
     private static List<List<SubstrateChange>> Group(

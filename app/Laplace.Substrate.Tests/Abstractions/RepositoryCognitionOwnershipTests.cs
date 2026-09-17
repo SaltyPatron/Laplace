@@ -31,17 +31,8 @@ public sealed class RepositoryCognitionOwnershipTests
 
     private static string FindRepoRoot()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Laplace.sln"))
-                || (Directory.Exists(Path.Combine(dir.FullName, "extension"))
-                    && Directory.Exists(Path.Combine(dir.FullName, "engine"))
-                    && Directory.Exists(Path.Combine(dir.FullName, "app"))))
-                return dir.FullName;
-            dir = dir.Parent;
-        }
-
+        if (Laplace.Engine.Core.LaplaceInstall.TryRepoRoot(out string root))
+            return root;
         throw new DirectoryNotFoundException("Could not locate the Laplace repository root.");
     }
 }

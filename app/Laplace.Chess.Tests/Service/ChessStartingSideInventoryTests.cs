@@ -182,6 +182,96 @@ public sealed class ChessStartingSideInventoryTests
         Assert.Equal(previous, File.ReadAllText(directory.Summary));
     }
 
+
+    [Fact]
+    public void ExplicitSelectionRequiresBothAbsoluteManifestAndExactDigest()
+    {
+        string[] basis = ["--output-dir", "/build/inventory-evidence"];
+        var parsed = Inventory.Parse([.. basis, "--recorded-selection", "/build/selection.json",
+            "--recorded-selection-sha256", new string('a', 64)]);
+        Assert.Equal("/build/selection.json", parsed.RecordedSelection);
+        Assert.Equal(new string('a', 64), parsed.RecordedSelectionSha256);
+        foreach (string[] extra in new string[][]
+        {
+            ["--recorded-selection", "/build/selection.json"],
+            ["--recorded-selection-sha256", new string('a', 64)],
+            ["--recorded-selection", "relative", "--recorded-selection-sha256", new string('a', 64)],
+            ["--recorded-selection", "/build/selection.json", "--recorded-selection-sha256", new string('A', 64)],
+        })
+            Assert.Throws<ArgumentException>(() => Inventory.Parse([.. basis, .. extra]));
+    }
+
+    [Fact]
+    public async Task ExplicitSelectionExportsOnlyItsExactIdsThroughTheExistingHydrationOwner()
+    {
+        using var directory = new EvidenceDirectory();
+        var games = new[] { Game(1, true), Game(2, false), Game(3, true) };
+        var inner = new ReadFixture(games);
+        var selected = new[] { games[2].PlayingId, games[0].PlayingId };
+        var descriptor = Descriptor(selected);
+        var report = await Inventory.CollectAsync(directory.Options(),
+            new Inventory.SelectedReadSource(inner, selected, descriptor), CancellationToken.None);
+        Assert.Equal("completed", report.Status);
+        Assert.Equal(2, report.Retained);
+        Assert.Equal(2, report.SelectedBefore);
+        Assert.Equal("explicit-recorded-selection", report.CountScope);
+        Assert.Equal(descriptor, report.Selection);
+        Assert.Empty(inner.Cursors); // Global discovery is never silently substituted.
+        var retained = File.ReadAllLines(directory.Inputs).Select(line =>
+        {
+            using var value = JsonDocument.Parse(line);
+            return value.RootElement.GetProperty("PlayingId").GetString();
+        }).ToArray();
+        Assert.Equal(new[] { Convert.ToHexStringLower(games[0].PlayingId.ToBytes()),
+            Convert.ToHexStringLower(games[2].PlayingId.ToBytes()) }, retained);
+        Assert.DoesNotContain(Convert.ToHexStringLower(games[1].PlayingId.ToBytes()), retained);
+    }
+
+    [Fact]
+    public async Task MissingSelectedPlayingFailsWithoutSubstitutingAnotherRecordedGame()
+    {
+        using var directory = new EvidenceDirectory();
+        var missing = Game(2, true).PlayingId;
+        var ids = new[] { missing };
+        var report = await Inventory.CollectAsync(directory.Options(),
+            new Inventory.SelectedReadSource(new ReadFixture([Game(1, true)]), ids, Descriptor(ids)),
+            CancellationToken.None);
+        Assert.Equal("partial", report.Status);
+        Assert.Equal(0, report.Retained);
+        Assert.Equal(new[] { missing.ToString() }, report.PendingPlayingIds);
+        Assert.Contains("PGN source ownership", report.FailureDetail);
+    }
+
+
+    [Fact]
+    public async Task SelectedCursorUsesStrictBytewiseSuccessorForPresentAbsentAndFinalIds()
+    {
+        var games = new[] { Game(1, true), Game(3, true), Game(5, true) };
+        var ids = games.Select(game => game.PlayingId).ToArray();
+        var source = new Inventory.SelectedReadSource(new ReadFixture(games), ids, Descriptor(ids));
+        Assert.Equal(new[] { ids[0], ids[1] }, await source.PageAsync([], 2, CancellationToken.None));
+        Assert.Equal(new[] { ids[1], ids[2] }, await source.PageAsync(ids[0].ToBytes(), 2, CancellationToken.None));
+        Assert.Equal(new[] { ids[1], ids[2] }, await source.PageAsync(Game(2, true).PlayingId.ToBytes(), 2, CancellationToken.None));
+        Assert.Empty(await source.PageAsync(ids[2].ToBytes(), 2, CancellationToken.None));
+    }
+
+    [Fact]
+    public void DuplicateOrReboundSelectedIdentitiesAreRefused()
+    {
+        var id = Game(1, true).PlayingId;
+        var inner = new ReadFixture([Game(1, true)]);
+        Assert.Throws<InvalidDataException>(() => new Inventory.SelectedReadSource(inner,
+            new[] { id, id }, Descriptor(new[] { id, id })));
+        Assert.Throws<InvalidDataException>(() => new Inventory.SelectedReadSource(inner,
+            new[] { id }, Descriptor(new[] { id }) with { PlayingIdsSha256 = new string('0', 64) }));
+    }
+
+    private static Inventory.SelectionReceipt Descriptor(IReadOnlyList<Hash128> ids)
+    {
+        var identity = new ChessRecordedSelection.FileIdentity("/build/fixture.json", 1, new string('a', 64));
+        return new(identity, identity, identity, ids.Count, Inventory.PlayingIdsDigest(ids));
+    }
+
     private static ChessWitnessedGame Game(byte id, bool white)
     {
         string fen = ChessModality.StartFen.Replace(" w ", white ? " w " : " b ");
@@ -237,7 +327,7 @@ public sealed class ChessStartingSideInventoryTests
             var selected = Games.Where(game => ids.Contains(game.PlayingId)).ToArray();
             var owners = selected.ToDictionary(game => game.PlayingId,
                 game => (IReadOnlyList<Inventory.SourceBinding>)[
-                    new("ChessPgn", "fixture-pgn-source", game.LineId.ToString()),
+                    new("ChessPgn", ChessVocabulary.PgnSourceId.ToString(), game.LineId.ToString()),
                     new("ChessBook", "fixture-book-source", game.LineId.ToString())]);
             return Task.FromResult(new Inventory.PageInputs(selected, owners));
         }

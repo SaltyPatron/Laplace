@@ -63,6 +63,7 @@ public sealed class ChessAdmissionBoundProbe(ITestOutputHelper output)
                 foreach (var builder in builders) changes.Add(builder.Build());
                 var corrected = default(IngestAdmissionSizing);
                 var prior = default(IngestAdmissionSizing);
+                var referenceUnion = default(IngestAdmissionSizing);
                 ulong exactNativeVertices = 0, priorNativeVertices = 0, correctedNativeVertices = 0;
                 for (int i = 0; i < changes.Count; i++)
                 {
@@ -70,8 +71,11 @@ public sealed class ChessAdmissionBoundProbe(ITestOutputHelper output)
                     var stages = change.IntentStages.ToArray();
                     var selected = Shape(change.Physicalities);
                     var raw = Shape(change.PhysicalityObservations);
-                    var current = IngestAdmissionSizing.MeasureParts(serialized[i], stages, selected, raw,
+                    var conservative = IngestAdmissionSizing.MeasureParts(serialized[i], stages, selected, raw,
                         (ulong)change.Entities.Length, (ulong)change.Attestations.Length, growingStages: true);
+                    var current = IngestAdmissionSizing.MeasureGrowingBuilder(serialized[i], stages, selected, raw,
+                        (ulong)change.Entities.Length, (ulong)change.Attestations.Length);
+                    referenceUnion = referenceUnion.Add(conservative);
                     var oldNative = default(PhysicalityDescriptorSizing.Shape);
                     foreach (var stage in stages)
                     {
@@ -83,7 +87,7 @@ public sealed class ChessAdmissionBoundProbe(ITestOutputHelper output)
                         correctedNativeVertices += PhysicalityDescriptorSizing.FromStageBound(stage).StoredVertices;
                     }
                     exactNativeVertices += PhysicalityDescriptorSizing.FromStages(stages).StoredVertices;
-                    var old = current with
+                    var old = conservative with
                     {
                         Source = oldNative.Add(raw.Forms == 0 ? selected : raw.Add(selected)),
                         Admitted = oldNative.Add(selected),
@@ -93,18 +97,22 @@ public sealed class ChessAdmissionBoundProbe(ITestOutputHelper output)
                 }
                 Assert.Equal(modeledBeforeBuild, corrected.ModeledSourcePayloadBytes);
                 Assert.True(corrected.ModeledSourcePayloadBytes < prior.ModeledSourcePayloadBytes);
+                Assert.True(corrected.ModeledSourcePayloadBytes <= referenceUnion.ModeledSourcePayloadBytes);
                 Assert.True(correctedNativeVertices >= exactNativeVertices);
                 output.WriteLine("CHESS_RETAINED_WINDOW_BOUND " + JsonSerializer.Serialize(new
                 {
-                    schema = "laplace.chess-admission-bound-comparison/v1",
+                    schema = "laplace.chess-admission-bound-comparison/v2",
                     retainedReceipt, source, manifest,
                     window.Index, window.FirstSelectedGame, window.Games, window.Plies,
                     window.GameBodiesSha256,
                     oldModeledBytes = prior.ModeledSourcePayloadBytes,
                     correctedModeledBytes = corrected.ModeledSourcePayloadBytes,
+                    framingOnlyModeledBytes = referenceUnion.ModeledSourcePayloadBytes,
+                    retainedCaptureReservationBytes = corrected.CaptureReservationBytes,
                     serializedBytes = corrected.SerializedBytes,
                     priorNativeVertices, correctedNativeVertices, exactNativeVertices,
                     oldSourceShape = prior.Source, correctedSourceShape = corrected.Source,
+                    framingOnlySourceShape = referenceUnion.Source,
                     oldAdmittedShape = prior.Admitted, correctedAdmittedShape = corrected.Admitted,
                     unchangedProducerGrantBytes = ChessPgnIngestor.ResolvedChunkStagedBytes,
                     syzygyLargest = ChessTablebaseRuntime.Largest,

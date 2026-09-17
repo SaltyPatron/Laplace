@@ -11,6 +11,8 @@ internal sealed partial class ChessRecordingMeasurement
     private bool _corpusSourceUnchanged;
     private bool _corpusScopesUnchanged = true;
 
+    internal bool RequireNoWriterWork { get; init; }
+
     internal bool IsCorpus => _corpusSource is not null;
     internal int? NextReplayChunkGames => _corpusEvidence?.NextReplayChunkGames;
     public ChessCorpusPreparation? CorpusSource => _corpusSource;
@@ -27,9 +29,10 @@ internal sealed partial class ChessRecordingMeasurement
         && ReplayScopes.All(scope => scope.Unchanged && ScopeRowsEqual(scope.Before, scope.After));
 
     internal static ChessRecordingMeasurement FromCorpus(
-        ChessCorpusPreparation source, ChessCorpusEvidence evidence) => new(null, source.Selected.Count, retainedPgn: true)
+        ChessCorpusPreparation source, ChessCorpusEvidence evidence, bool requireNoWriterWork = false) => new(null, source.Selected.Count, retainedPgn: true)
     {
         _corpusSource = source,
+        RequireNoWriterWork = requireNoWriterWork,
         _corpusEvidence = evidence,
         Pgn = new(source.Source.Bytes, source.Source.Sha256),
     };

@@ -138,6 +138,101 @@ class ArtifactTests(unittest.TestCase):
             shutil.copyfile(source, share / name)
         return share
 
+
+    def explicit_fixture(self, name="explicit"):
+        receipt, value = self.fixture_export(name)
+        root = receipt.parent
+        playing = "01" + "00" * 15
+        def identity(path):
+            return {"path": str(path), "bytes": path.stat().st_size, "sha256": owner.sha256(path)}
+        source = root / "original.pgn"
+        source.write_text("test-only source identity fixture\n", encoding="utf-8")
+        selected = root / "original-selection.jsonl"
+        selected.write_text(json.dumps({"playingId": playing}) + "\n", encoding="utf-8")
+        body = root / "original-chunk.json"
+        self.write_json(body, {"schema": "laplace.chess-corpus-chunk/v1", "index": 1,
+                              "firstSelectedGame": 0, "newlyRecordedGames": 1,
+                              "games": [{"playingId": playing}]})
+        scope = root / "original-scope.json"
+        self.write_json(scope, {"test_only_scope": True})
+        manifest = root / "selection.json"
+        self.write_json(manifest, {"schema": "laplace.chess-recorded-selection/v1",
+            "source": identity(source), "selectionManifest": identity(selected),
+            "chunks": [{"index": 1, "firstSelectedGame": 0, "games": 1, "novelGames": 1,
+                        "body": identity(body), "scope": identity(scope)}]})
+        selection = {"scope": "immutable-recorded-manifest", "manifest": identity(manifest),
+                     "source": identity(source), "selection_manifest": identity(selected),
+                     "selected_games": 1,
+                     "playing_ids_sha256": hashlib.sha256((playing + "\n").encode()).hexdigest()}
+        value.update(selection=selection, count_scope="explicit-recorded-selection")
+        inputs = root / "inventory/hydrated-playings.jsonl"
+        inputs.write_text(json.dumps({"PlayingId": playing}) + "\n", encoding="utf-8")
+        summary_path = root / "inventory/summary.json"
+        summary = owner.read_json(summary_path)
+        summary.update(InputsSha256=owner.sha256(inputs), RetainedBytes=inputs.stat().st_size,
+                       CountScope="explicit-recorded-selection")
+        summary["Selection"] = {
+            "Scope": selection["scope"], "SelectedGames": 1,
+            "PlayingIdsSha256": selection["playing_ids_sha256"],
+            **{target: {"Path": selection[key]["path"], "Bytes": selection[key]["bytes"],
+                        "Sha256": selection[key]["sha256"]}
+               for key, target in (("manifest", "Manifest"), ("source", "Source"),
+                                   ("selection_manifest", "SelectionManifest"))}}
+        self.write_json(summary_path, summary)
+        self.rebind(receipt, value, "witnessed-inputs")
+        self.rebind(receipt, value, "inventory-summary")
+        return receipt, value, playing
+
+    def test_explicit_selection_is_bound_through_the_normal_export_provenance(self):
+        receipt, value, playing = self.explicit_fixture()
+        selected = owner.validate_export(receipt)
+        self.assertEqual(selected["selection"], value["selection"])
+        self.assertEqual(selected["coverage"]["exported_playings"], 1)
+        self.assertEqual(owner.read_json(receipt)["count_scope"], "explicit-recorded-selection")
+
+    def test_explicit_selection_rejects_omitted_or_substituted_witnessed_playing(self):
+        receipt, value, _ = self.explicit_fixture()
+        inputs = receipt.parent / "inventory/hydrated-playings.jsonl"
+        inputs.write_text(json.dumps({"PlayingId": "02" + "00" * 15}) + "\n", encoding="utf-8")
+        summary_path = receipt.parent / "inventory/summary.json"
+        summary = owner.read_json(summary_path)
+        summary.update(InputsSha256=owner.sha256(inputs), RetainedBytes=inputs.stat().st_size)
+        self.write_json(summary_path, summary)
+        self.rebind(receipt, value, "witnessed-inputs")
+        self.rebind(receipt, value, "inventory-summary")
+        with self.assertRaisesRegex(ValueError, "omitted, added or changed"):
+            owner.validate_export(receipt)
+
+    def test_explicit_selection_rejects_changed_retained_source_and_incomplete_chunks(self):
+        receipt, value, _ = self.explicit_fixture()
+        source = Path(value["selection"]["source"]["path"])
+        source.write_text("changed source\n", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            owner.validate_export(receipt)
+        receipt, value, _ = self.explicit_fixture("incomplete")
+        manifest_path = Path(value["selection"]["manifest"]["path"])
+        manifest = owner.read_json(manifest_path)
+        manifest["chunks"][0]["novelGames"] = 0
+        self.write_json(manifest_path, manifest)
+        # Even rebinding the receipt metadata cannot make an incomplete chunk complete.
+        value["selection"]["manifest"].update(bytes=manifest_path.stat().st_size, sha256=owner.sha256(manifest_path))
+        summary_path = receipt.parent / "inventory/summary.json"
+        summary = owner.read_json(summary_path)
+        summary["Selection"]["Manifest"].update(Bytes=manifest_path.stat().st_size, Sha256=owner.sha256(manifest_path))
+        self.write_json(summary_path, summary)
+        self.rebind(receipt, value, "inventory-summary")
+        with self.assertRaisesRegex(ValueError, "boundaries are incomplete"):
+            owner.validate_export(receipt)
+
+    def test_selection_cannot_be_removed_while_retaining_scoped_inventory(self):
+        receipt, value, _ = self.explicit_fixture()
+        del value["selection"]
+        value["count_scope"] = "all-recorded-playings"
+        self.write_json(receipt, value)
+        with self.assertRaises(ValueError):
+            owner.validate_export(receipt)
+
+
     def test_only_complete_consistent_export_is_selectable(self):
         receipt, value = self.fixture_export()
         actual = owner.validate_export(receipt)

@@ -38,6 +38,28 @@ public sealed class ChessRecordedFloorExportTests
             File.ReadAllBytes(Path.Combine(directory.Path, "readback.bin")));
     }
 
+
+    [Fact]
+    public async Task ExplicitSelectionBuildsOnlyItsCompleteLinesAndRetainsSelectionIdentity()
+    {
+        using var directory = new ExportDirectory();
+        var first = Game(1, ["e4", "e5"]);
+        var unrelated = Game(2, ["d4", "d5", "c4"]);
+        Hash128[] ids = [first.PlayingId];
+        var file = new ChessRecordedSelection.FileIdentity("/build/selection.json", 1, new string('a', 64));
+        var selection = new Inventory.SelectionReceipt(file, file, file, 1, Inventory.PlayingIdsDigest(ids));
+        var receipt = await Export.ExportAsync(directory.Options(),
+            new Inventory.SelectedReadSource(new Source([first, unrelated]), ids, selection), CancellationToken.None);
+        Assert.Equal("completed", receipt.Status);
+        Assert.Equal("explicit-recorded-selection", receipt.CountScope);
+        Assert.Equal(selection, receipt.Selection);
+        Assert.Equal(1, receipt.ExportedPlayings);
+        Assert.Equal(3, receipt.PositionOccurrences);
+        Assert.Equal(2, receipt.TransitionOccurrences);
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory.Path, "export-receipt.json")));
+        Assert.Equal("immutable-recorded-manifest", json.RootElement.GetProperty("selection").GetProperty("scope").GetString());
+    }
+
     [Fact]
     public async Task MissingAdmittedReplayCannotPublishACompletedExport()
     {

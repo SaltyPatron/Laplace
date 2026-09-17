@@ -319,6 +319,12 @@ static int period_u256_increment(period_u256_t *value)
  * public helpers; sign is applied only after rounding the magnitude. */
 static period_u256_t period_u256_divide_scale(period_u256_t value)
 {
+    if ((value.word[2] | value.word[3]) == 0) {
+        period_uwide_t magnitude = ((period_uwide_t)value.word[1] << 64) | value.word[0];
+        period_uwide_t quotient = magnitude / LAPLACE_FP_ONE;
+        if (magnitude % LAPLACE_FP_ONE >= LAPLACE_FP_HALF) ++quotient;
+        return period_u256_from(quotient);
+    }
     uint64_t remainder = 0;
     for (int i = 3; i >= 0; --i) {
         period_uwide_t partial = ((period_uwide_t)remainder << 64) | value.word[i];
@@ -400,8 +406,16 @@ static period_wide_t period_product_ratio(period_wide_t a, period_wide_t b,
 {
     if (!*ok || denominator == 0) { *ok = 0; return 0; }
     int negative = (a < 0) ^ (b < 0) ^ (denominator < 0);
+    period_uwide_t magnitude;
+    period_uwide_t den = period_magnitude(denominator);
+    if (!__builtin_mul_overflow(period_magnitude(a), period_magnitude(b), &magnitude)) {
+        period_uwide_t quotient = magnitude / den;
+        period_uwide_t remainder = magnitude % den;
+        if (remainder >= den - remainder) ++quotient;
+        return period_signed_magnitude(period_u256_from(quotient), negative, ok);
+    }
     return period_ratio(period_u256_product(period_magnitude(a), period_magnitude(b)),
-                        period_u256_from(period_magnitude(denominator)), negative, ok);
+                        period_u256_from(den), negative, ok);
 }
 
 static period_wide_t period_add(period_wide_t a, period_wide_t b, int *ok)
@@ -420,6 +434,16 @@ static period_wide_t period_sub(period_wide_t a, period_wide_t b, int *ok)
 
 static period_wide_t period_mul(period_wide_t a, period_wide_t b, int *ok)
 {
+    if (!*ok) return 0;
+    period_wide_t product;
+    if (!__builtin_mul_overflow(a, b, &product)) {
+        /* Constant-scale division stays on the ordinary integer path. The
+         * quotient has 29 bits of headroom, including when product is MIN. */
+        period_uwide_t magnitude = period_magnitude(product);
+        period_uwide_t quotient = magnitude / LAPLACE_FP_ONE;
+        if (magnitude % LAPLACE_FP_ONE >= LAPLACE_FP_HALF) ++quotient;
+        return product < 0 ? -(period_wide_t)quotient : (period_wide_t)quotient;
+    }
     return period_product_ratio(a, b, LAPLACE_FP_ONE, ok);
 }
 

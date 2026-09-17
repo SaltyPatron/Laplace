@@ -108,17 +108,28 @@ public sealed class ConsensusMutationRoutingTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
+        // Eviction retains its explicit keyed replacement/culling owner. Refold
+        // now delegates to the same native evidence owner as atomic admission;
+        // restoring a second SQL writer would split that lock/snapshot contract.
         Assert.Equal([
             "extension/laplace_substrate/sql/functions/ops/evict_source.sql.in",
-            "extension/laplace_substrate/sql/functions/ops/refold_source.sql.in",
         ], writers);
 
-        var evict = File.ReadAllText(Path.Combine(RepoRoot, writers[0]));
-        var refold = File.ReadAllText(Path.Combine(RepoRoot, writers[1]));
+        var evict = File.ReadAllText(Path.Combine(RepoRoot, Assert.Single(writers)));
+        var refold = Read("extension", "laplace_substrate", "sql", "functions",
+            "ops", "refold_source.sql.in");
         Assert.DoesNotMatch(@"\b(?:UPDATE|DELETE\s+FROM)\s+laplace\.consensus\b", evict);
         Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", evict,
             StringComparison.Ordinal);
-        Assert.Contains("ON CONFLICT (id, type_id, subject_id) DO UPDATE", refold,
+        Assert.DoesNotMatch(directParentMutation, refold);
+        Assert.Contains("SELECT consensus.refold_evidence_type(", refold,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("laplace.consensus_fold(", refold, StringComparison.Ordinal);
+        var entry = Read("extension", "laplace_substrate", "sql", "functions",
+            "fold", "consensus_upsert.sql.in");
+        Assert.Contains("CREATE OR REPLACE FUNCTION consensus.upsert_evidence_type(", entry);
+        Assert.Contains("AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert_evidence_type'", entry);
+        Assert.Contains("CREATE OR REPLACE FUNCTION consensus.refold_evidence_type(", entry);
+        Assert.Contains("AS 'MODULE_PATHNAME', 'pg_laplace_consensus_refold_evidence_type'", entry);
     }
 }

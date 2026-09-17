@@ -77,6 +77,42 @@ bytes plus one 32-byte potential transition record per occurrence and the
 80-byte transition framing; deduplication can reduce final bytes. The native
 position producer has separate declared memory and spill allowances.
 
+## Select an exact retained recording scope
+
+The same exporter accepts `--recorded-selection <absolute-manifest>` together
+with `--recorded-selection-sha256 <sha256>`. Both are required. This selects only
+the named playing identities through the existing source-bound hydration and
+complete legal replay. Missing, extra, duplicated, incomplete or conflicting
+selected games fail the export; global discovery is not a fallback.
+
+The selection schema is `laplace.chess-recorded-selection/v1`. It binds the
+original PGN, original selection JSONL and each contiguous complete sealed chunk
+by absolute path, byte length and SHA256. Playing identities use lowercase
+hexadecimal of their canonical native bytes. The original failed or completed
+benchmark receipts remain unchanged.
+
+For a failed capacity run with independently sealed complete chunks,
+`scripts/verify-recorded-chess-selection.py` prepares this explicit manifest and
+runs `laplace chess verify-recorded-corpus` against the current matched
+source/native/database generation. Its declared source hashes, parent outcome,
+complete count and evidence paths are explicit arguments; `--help` lists them.
+The operation skips source bootstrap and prohibits writer work before apply.
+
+The two verification passes compare current native game bodies, exact source
+witnesses and full legal lines while checking the original retained EntityIds,
+PhysicalityIds, WitnessIds and observation counts. Every retained identity must
+still belong to current canonical composition. Newer completion metadata and
+calculated repair lanes are outside this retained recording scope. The receipt
+field `retainedScopeReplayVerified` therefore does not claim that whole current
+ingestion is a no-op or that newer metadata has been installed.
+
+An export from that manifest reports `count_scope: explicit-recorded-selection`
+and retains the selected manifest, source and native-byte playing-ID digest.
+A verified subset can supply a product cache even when its parent capacity run
+failed. It does not satisfy that benchmark's larger requested game count,
+duration or throughput criteria. Selection, normal build/install, consumer reload
+and the actual persistent-hit proof below remain required for a usable cache.
+
 ## Build and publish the declared generation
 
 The sole artifact helper validates export receipts and all four declared hashes.

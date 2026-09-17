@@ -30,17 +30,34 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
     public Task InitializeAsync() => Task.CompletedTask;
     public Task DisposeAsync() => Task.CompletedTask;
 
+    private sealed record SyntheticUnit(
+        byte[] Utf8, Hash128 Root, Hash128 Owner, Hash128 Recipe) : IIngestCompletionRecord
+    {
+        public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(2);
+        public Hash128 CompletionAttestationId =>
+            IngestUnitCompletion.AttestationId(Root, Owner, 2, Recipe);
+    }
+
     private sealed class DeferredContentSyntheticDecomposer : IDecomposer
     {
         private readonly int _unitCount;
-        // Prebuilt UTF-8 surfaces — warm re-ingest must measure ledger/skip + apply,
-        // not re-allocate the corpus on every DecomposeAsync.
+        // Input storage is stable, but every enumeration scans and hashes all bytes.
+        // No root or completion identity is precomputed outside the measured run.
         private readonly byte[][] _units;
+        private readonly Hash128 _recipe;
+        private long _scannedBytes;
+        private int _composedUnits;
 
-        public DeferredContentSyntheticDecomposer(int unitCount, int bytesPerUnit, Hash128 sourceId)
+        public long ScannedBytes => Interlocked.Read(ref _scannedBytes);
+        public int ComposedUnits => Volatile.Read(ref _composedUnits);
+
+        public DeferredContentSyntheticDecomposer(
+            int unitCount, int bytesPerUnit, Hash128 sourceId, Hash128? recipe = null)
         {
             _unitCount = unitCount;
             SourceId = sourceId;
+            _recipe = recipe ?? Hash128.OfCanonical(
+                "test/deferred-content-synthetic/content-observations/v1");
             _units = new byte[unitCount][];
             var sb = new StringBuilder(bytesPerUnit);
             for (int i = 0; i < unitCount; i++)
@@ -71,17 +88,23 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
             var records = EnumerateUnits(ct);
             await foreach (var change in IngestComposePipeline.RunAsync(
                 records,
-                (utf8, b) => ContentTierSpine.TryStageIntoBuilder(b, utf8, SourceId, out _),
+                (unit, b) =>
+                {
+                    if (!ContentTierSpine.TryStageIntoBuilder(b, unit.Utf8, SourceId, out var root)
+                        || root != unit.Root)
+                        throw new InvalidOperationException("synthetic unit did not compose its exact content");
+                    b.AddEntity(unit.Recipe, EntityTier.Word, EntityTypeRegistry.SourceReference, SourceId);
+                    // BuildAsync must finish deferred content before the control transaction
+                    // can admit this receipt together with its physicality testimony.
+                    IngestUnitCompletion.Emit(b, root, SourceId, LayerOrder, unit.Recipe);
+                    Interlocked.Increment(ref _composedUnits);
+                },
                 SourceId,
                 sourceTrust: 1.0,
                 "synthetic",
                 context.Reader,
                 options,
-                ct,
-                trunkShortcircuit: utf8 =>
-                    ContentLadderLedger.Armed
-                    && ContentTierSpine.ResolveRoot(utf8) is { } root
-                    && ContentLadderLedger.IsPersisted(root)))
+                ct))
             {
                 yield return change;
             }
@@ -92,13 +115,17 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-        private async IAsyncEnumerable<byte[]> EnumerateUnits(
+        private async IAsyncEnumerable<SyntheticUnit> EnumerateUnits(
             [EnumeratorCancellation] CancellationToken ct = default)
         {
             for (int i = 0; i < _units.Length; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                yield return _units[i];
+                var utf8 = _units[i];
+                var root = ContentTierSpine.ResolveRoot(utf8)
+                    ?? throw new InvalidOperationException("synthetic input has no content identity");
+                Interlocked.Add(ref _scannedBytes, utf8.Length);
+                yield return new SyntheticUnit(utf8, root, SourceId, _recipe);
             }
             await Task.CompletedTask;
         }
@@ -123,7 +150,8 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         long inputBytes = (long)unitCount * bytesPerUnit;
         double maxSeconds = IngestBaselineGates.MaxSecondsForBytes(inputBytes);
 
-        var srcId = SubstrateCanonicalIds.OfVersioned("source", "test", "pipeline-warm");
+        var srcId = SubstrateCanonicalIds.OfVersioned(
+            "source", "test", "pipeline-warm-" + Guid.NewGuid().ToString("N"));
         var decomposer = new DeferredContentSyntheticDecomposer(unitCount, bytesPerUnit, srcId);
         var runner = NewRunner(_pg.DataSource);
 
@@ -140,6 +168,8 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         var cold = await runner.RunAsync(decomposer, coldOpts);
         Assert.Equal(0, cold.UnitsFailed);
         Assert.True(cold.UnitsApplied > 0);
+        Assert.Equal(unitCount, decomposer.ComposedUnits);
+        Assert.Equal(inputBytes, decomposer.ScannedBytes);
 
         var warmOpts = coldOpts with { SkipSourceCompletion = true };
         var warmSw = System.Diagnostics.Stopwatch.StartNew();
@@ -147,7 +177,12 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         warmSw.Stop();
 
         Assert.Equal(0, warm.UnitsFailed);
-        Assert.True(warm.UnitsApplied > 0);
+        Assert.Equal(unitCount, warm.InputUnitsDone);
+        Assert.Equal(2 * inputBytes, decomposer.ScannedBytes);
+        Assert.Equal(unitCount, decomposer.ComposedUnits);
+        Assert.Equal(0, warm.EntitiesInserted);
+        Assert.Equal(0, warm.PhysicalitiesInserted);
+        Assert.Equal(0, warm.AttestationsInserted);
 
         double mbPerSec = inputBytes / (1024.0 * 1024.0) / warmSw.Elapsed.TotalSeconds;
         Assert.True(warmSw.Elapsed.TotalSeconds <= maxSeconds,
@@ -156,6 +191,113 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
           + $"round_trips={warm.TotalRoundTrips}, rows_new={warm.EntitiesInserted + warm.PhysicalitiesInserted + warm.AttestationsInserted:N0})");
         Assert.True(mbPerSec >= IngestBaselineGates.MinMegabytesPerSecond,
             $"warm scan {mbPerSec:F1} MiB/s is below {IngestBaselineGates.MinMegabytesPerSecond:F1} MiB/s gate");
+    }
+
+
+    [Fact]
+    public async Task WarmCompletionRequiresTheExactOwnerAndRecipeAndPreservesAcceptedEvidence()
+    {
+        const int count = 4, bytes = 128;
+        var peer = SubstrateCanonicalIds.Source("warm-peer-" + Guid.NewGuid().ToString("N"));
+        var source = SubstrateCanonicalIds.Source("warm-owner-" + Guid.NewGuid().ToString("N"));
+        var peerProducer = new DeferredContentSyntheticDecomposer(count, bytes, peer);
+        var producer = new DeferredContentSyntheticDecomposer(count, bytes, source);
+        var options = IngestRunOptions.Default with
+        {
+            SkipLayerOrderingCheck = true,
+            SkipSourceCompletion = true,
+            BatchSize = 4096,
+            CommitRows = 250_000,
+            DecomposerOptions = DecomposerOptions.ForWitness(producer.SourceName, batchSize: 4096),
+        };
+
+        // The other source has already deposited these exact canonical entities
+        // and its own complete receipts. Neither proves this owner's completion.
+        var peerRun = await NewRunner(_pg.DataSource).RunAsync(peerProducer, options);
+        Assert.Equal(0, peerRun.UnitsFailed);
+        Assert.Equal(count, peerProducer.ComposedUnits);
+        var cold = await NewRunner(_pg.DataSource).RunAsync(producer, options);
+        Assert.Equal(0, cold.UnitsFailed);
+        Assert.Equal(count, producer.ComposedUnits);
+        Assert.True(cold.AttestationsInserted > count);
+
+        async Task<string> DurableStateAsync()
+        {
+            await using var command = _pg.DataSource.CreateCommand("""
+                WITH owned AS MATERIALIZED (
+                    SELECT a.* FROM laplace.attestations a
+                    WHERE a.source_id=$1 AND a.type_id<>$2),
+                referenced AS MATERIALIZED (
+                    SELECT subject_id AS id FROM owned
+                    UNION SELECT object_id FROM owned WHERE object_id IS NOT NULL
+                    UNION SELECT context_id FROM owned WHERE context_id IS NOT NULL)
+                SELECT jsonb_build_object(
+                    'entities', COALESCE((
+                        SELECT jsonb_agg(jsonb_build_array(encode(e.id,'hex'),e.tier,e.type_id)
+                                         ORDER BY e.id,e.tier,e.type_id)
+                        FROM laplace.entities e JOIN referenced r ON r.id=e.id), '[]'::jsonb),
+                    'physicalities', COALESCE((
+                        SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)
+                        FROM laplace.physicalities p JOIN referenced r ON r.id=p.entity_id), '[]'::jsonb),
+                    'evidence', COALESCE((
+                        SELECT jsonb_agg(to_jsonb(a) ORDER BY a.type_id,a.id)
+                        FROM owned a), '[]'::jsonb),
+                    'standing', COALESCE((
+                        SELECT jsonb_agg(to_jsonb(c) ORDER BY c.type_id,c.id)
+                        FROM laplace.consensus c
+                        WHERE EXISTS (SELECT 1 FROM owned a
+                            WHERE a.type_id=c.type_id AND a.subject_id=c.subject_id
+                              AND a.object_id IS NOT DISTINCT FROM c.object_id)), '[]'::jsonb))::text
+                """);
+            command.Parameters.AddWithValue(source.ToBytes());
+            command.Parameters.AddWithValue(IngestUnitCompletion.RelationTypeId(2).ToBytes());
+            return (string)(await command.ExecuteScalarAsync())!;
+        }
+        async Task<long> ReceiptCountAsync()
+        {
+            await using var command = _pg.DataSource.CreateCommand(
+                "SELECT count(*) FROM laplace.attestations WHERE source_id=$1 AND type_id=$2");
+            command.Parameters.AddWithValue(source.ToBytes());
+            command.Parameters.AddWithValue(IngestUnitCompletion.RelationTypeId(2).ToBytes());
+            return (long)(await command.ExecuteScalarAsync())!;
+        }
+
+        Assert.Equal(count, await ReceiptCountAsync());
+        string accepted = await DurableStateAsync();
+        using (var snapshot = System.Text.Json.JsonDocument.Parse(accepted))
+        {
+            Assert.True(snapshot.RootElement.GetProperty("entities").GetArrayLength() > 0);
+            Assert.True(snapshot.RootElement.GetProperty("physicalities").GetArrayLength() > 0);
+        }
+        // A new reader and runner must obtain the durable receipt from PostgreSQL.
+        var warm = await NewRunner(_pg.DataSource).RunAsync(producer, options);
+        Assert.Equal(0, warm.UnitsFailed);
+        Assert.Equal(count, warm.InputUnitsDone);
+        Assert.Equal(count, producer.ComposedUnits);
+        Assert.Equal(2L * count * bytes, producer.ScannedBytes);
+        Assert.Equal(0, warm.EntitiesInserted);
+        Assert.Equal(0, warm.PhysicalitiesInserted);
+        Assert.Equal(0, warm.AttestationsInserted);
+        Assert.Equal(accepted, await DurableStateAsync());
+        Assert.Equal(count, await ReceiptCountAsync());
+
+        // Identical content and owner with a different declared recipe must compose
+        // again. Only that recipe's own receipts authorize its subsequent warm pass.
+        var revised = new DeferredContentSyntheticDecomposer(
+            count, bytes, source, Hash128.OfCanonical("test/deferred-content-synthetic/recipe/v2"));
+        var revisedRun = await NewRunner(_pg.DataSource).RunAsync(revised, options);
+        Assert.Equal(0, revisedRun.UnitsFailed);
+        Assert.Equal(count, revised.ComposedUnits);
+        Assert.Equal(2 * count, await ReceiptCountAsync());
+        string revisedAccepted = await DurableStateAsync();
+        var revisedWarm = await NewRunner(_pg.DataSource).RunAsync(revised, options);
+        Assert.Equal(0, revisedWarm.UnitsFailed);
+        Assert.Equal(count, revised.ComposedUnits);
+        Assert.Equal(2L * count * bytes, revised.ScannedBytes);
+        Assert.Equal(0, revisedWarm.EntitiesInserted);
+        Assert.Equal(0, revisedWarm.PhysicalitiesInserted);
+        Assert.Equal(0, revisedWarm.AttestationsInserted);
+        Assert.Equal(revisedAccepted, await DurableStateAsync());
     }
 
     [Fact]

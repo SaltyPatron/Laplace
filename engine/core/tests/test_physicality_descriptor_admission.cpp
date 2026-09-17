@@ -1645,4 +1645,58 @@ TEST_F(PhysicalityDescriptorAdmission, TerminalSelectedBodyViewsWorkload) {
     }
 }
 
+
+TEST_F(PhysicalityDescriptorAdmission, NonadjacentBodyReusePreservesGeneratedTuplesAndSourceUnits) {
+    const auto a = composition({atom('a'), atom('b')});
+    const auto b = composition({atom('c'), atom('d')});
+    auto alternate = a;
+    alternate.value.coord[0] = std::nextafter(alternate.value.coord[0], std::numeric_limits<double>::infinity());
+    hilbert4d_encode(alternate.value.coord, &alternate.value.hilbert_index);
+    const std::vector<Body> bodies{a, b, alternate, a, b, alternate, a, b, alternate};
+    const std::vector<int64_t> times{101, 102, 103, 104, 105, 106, 107, 108, 109};
+    auto together = stage(bodies, times);
+    auto captured = capture(together.get());
+    ASSERT_NE(captured, nullptr);
+    auto sources = witnesses(bodies.size());
+    for (size_t i = 0; i < sources.size(); ++i) {
+        sources[i].source_id.lo += i % 2u;
+        sources[i].source_unit_id.hi += (i / 2u) % 2u;
+        sources[i].source_trust = i % 2u ? 0.6 : 0.8;
+    }
+    Materialization combined(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {}, {}, {}, sources, combined), PHYSICALITY_DESCRIPTOR_OK);
+    for (size_t i = 0; i < bodies.size(); ++i) {
+        auto single_stage = stage({bodies[i]}, {times[i]});
+        auto single_capture = capture(single_stage.get());
+        ASSERT_NE(single_capture, nullptr);
+        Materialization scalar(nullptr, physicality_descriptor_materialization_free);
+        ASSERT_EQ(run(single_capture, {}, {}, {}, {sources[i]}, scalar), PHYSICALITY_DESCRIPTOR_OK);
+        const auto expected = form(scalar), actual = form(combined, i);
+        EXPECT_TRUE(hash128_equals(&expected.descriptor_id, &actual.descriptor_id));
+        EXPECT_TRUE(hash128_equals(&expected.view_id, &actual.view_id));
+        EXPECT_EQ(expected.view_state, actual.view_state);
+        EXPECT_EQ(expected.missing_first, actual.missing_first);
+        EXPECT_EQ(expected.missing_count, actual.missing_count);
+    }
+    const auto original_form = form(combined, 0), repeated_form = form(combined, 3);
+    const auto alternate_form = form(combined, 2);
+    EXPECT_TRUE(hash128_equals(&original_form.descriptor_id, &repeated_form.descriptor_id));
+    EXPECT_FALSE(hash128_equals(&original_form.descriptor_id, &alternate_form.descriptor_id));
+    auto first = stage(std::vector<Body>(bodies.begin(), bodies.begin() + 4),
+        std::vector<int64_t>(times.begin(), times.begin() + 4));
+    auto second = stage(std::vector<Body>(bodies.begin() + 4, bodies.end()),
+        std::vector<int64_t>(times.begin() + 4, times.end()));
+    const std::array<const intent_stage_t*, 2> parts{{first.get(), second.get()}};
+    const physicality_descriptor_limits_t limits{kBudget};
+    physicality_descriptor_capture_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_capture_stages(parts.data(), parts.size(),
+        physicality_descriptor_vocabulary_basis(vocabulary.get()), &limits, kBudget, &raw),
+        PHYSICALITY_DESCRIPTOR_OK);
+    Capture partitioned(raw, physicality_descriptor_capture_free);
+    Materialization split(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(partitioned, {}, {}, {}, sources, split), PHYSICALITY_DESCRIPTOR_OK);
+    const auto expected = take_tuple_bytes(combined), actual = take_tuple_bytes(split);
+    EXPECT_EQ(actual, expected); // All ordered E/P/A bytes, including actual timestamps.
+    record_admission_tuple_bytes("nonadjacent-source-units", actual);
+}
 } // namespace

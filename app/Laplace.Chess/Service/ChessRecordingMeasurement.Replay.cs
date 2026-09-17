@@ -18,7 +18,12 @@ internal sealed partial class ChessRecordingMeasurement
     internal sealed record ScopeRequest(byte[][] Entities, byte[][] Physicalities,
         byte[][] Witnesses, byte[][] WitnessTypes, IReadOnlyList<StoredScopeRow> Before);
 
-    public string ReplayScope => "Exact explicit EntityRows emitted by the source game recorder"
+    public string ReplayScope => RequireNoWriterWork
+        ? "Exact EntityIds, PhysicalityIds and WitnessIds from the authenticated retained recording chunks; "
+            + "each remains in current canonical source composition. Native body, source and legal-line readback "
+            + "is current. Later completion metadata and calculated repair lanes are outside this verification; "
+            + "this does not claim whole current ingestion is a no-op or that metadata upgrades were applied."
+        : "Exact explicit EntityRows emitted by the source game recorder"
         + (IsCorpus ? "; " : " and experiment builder; ")
         + "selected nonempty line Content physicalities; exact source playing/header/setup/result"
         + (IsCorpus ? " witnesses" : " and experiment witnesses")

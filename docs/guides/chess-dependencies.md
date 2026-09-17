@@ -166,7 +166,82 @@ engine play, or visual board correctness. The receipt and process logs are
 retained on failure as well as success. Temporary settings, Xauthority and display
 processes belong to this invocation and are removed when it finishes.
 
-## Measured hart-server configuration (2026-09-16)
+## Recorded host observations (2026-09-17)
+
+The [03:29 UTC service observation](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35176609118)
+found the API, MCP and Lichess systemd units active. MCP liveness/readiness returned
+HTTP 200, and the authenticated managed-service verifier completed successfully.
+Lichess readiness and status returned HTTP 200: readiness reported
+`connected=true` and `ready=true`, and status reported `configured=true`.
+These are dated observations of the running services, not evidence of a completed
+external Lichess game or a machine cold boot.
+
+The [03:34 UTC LAN observation](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35178643515)
+verified the UI at [https://hart-server:8443/](https://hart-server:8443/) and its
+`/health/ready` endpoint: both returned HTTP 200, with readiness true. The test
+connected to the configured LAN address `192.168.1.2`, preserving the hostname
+and TLS server name and using the installed CA. The on-host name lookup resolved
+`hart-server` to `127.0.1.1`; that loopback route received the configured ingress
+403. The successful LAN observation did not require changing ingress policy.
+
+The installed GUI launcher is `/opt/laplace/bin/laplace-cutechess`. Its existence
+does not establish an open desktop session or a completed GUI game. Those are
+separate acceptance results. The latest recorded-game attempt retained 140
+complete games and 10,546 plies before failing; its recorded games/second remains
+null. See [complete recorded throughput](../benchmarks/RECORDED_CHESS_THROUGHPUT.md)
+for the exact durable work and failure boundary.
+
+## Latest repeated Stockfish calibration (2026-09-17)
+
+[Refactor calibration 35168534734](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35168534734)
+completed on hart-server with the official source-built Stockfish executable
+SHA-256 `fe5f294eadb777e975aab62779edb78270aefb80b9cb125d5d31905233f3fc5a`.
+It tested three measured repetitions per configuration after an excluded warmup.
+
+| Workload | Best measured setting in this sweep | Median result |
+| --- | --- | --- |
+| Stockfish depth-12 suite | Threads=2; Hash=64 MiB | 1,149,291.198 wall-clock nodes/second; 2.388286 seconds |
+| Complete Stockfish self-play, depth 8, time control 60 | Concurrency=8; each engine Threads=1 and Hash=16 MiB | 4.982292 completed generated games/second |
+
+The selected game configuration completed 48 games and 7,488 plies across its
+three samples, with no move cap or adjudication. Individual sample rates ranged
+from 4.640343 to 5.009943 games/second. Generation and exact legal replay were
+measured; PostgreSQL recording was not part of this calibration and its recorded
+game rate remains null.
+
+The same job activated the measured analysis and game profiles, exercised their
+actual UCI defaults, and verified explicit caller overrides. These settings belong
+to that exact executable and finite workload. Original's observed Stockfish
+executable has a different SHA-256
+(`1a488f087c4af7a41c1f737703541752a38831592886e7f3956ffaa7bc8e0871`);
+it requires its own calibration before claiming the same measured configuration.
+
+The [retained calibration artifact](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35168534734/artifacts/10476786113)
+contains the inputs, full PGNs, executable/network identities, individual samples
+and profile checks. Its ZIP SHA-256 is
+`bbe1e2caaa063f6b5d8be3d0f6ff7be113fbfcdc692167bd7bcdb7dbeb529608`.
+This result supersedes the earlier finite configuration below for its selected
+Refactor executable; neither result establishes playing strength.
+
+## NNUE and the GTX 1080 Ti
+
+Stockfish's neural evaluation is already part of its CPU engine. Its incremental
+integer NNUE implementation is designed for short evaluations during alpha-beta
+search. The official engine has no GPU inference switch; adding Eigen or MKL to
+Laplace does not add that backend to Stockfish. GPU network training is a separate
+supported use in the upstream NNUE trainer. See the
+[Stockfish GPU FAQ](https://official-stockfish.github.io/docs/stockfish-wiki/Stockfish-FAQ.html#can-stockfish-use-my-gpu)
+and [NNUE design](https://official-stockfish.github.io/docs/nnue-pytorch-wiki/docs/nnue.html).
+
+The GTX 1080 Ti can remain available to an optional accelerator implementation.
+A CUDA build for its Pascal architecture needs a compatible toolkit: NVIDIA
+documents CUDA 12.9 and driver branch 580 for this generation; CUDA 13 removed
+offline compilation for architectures below compute capability 7.5. The observed
+driver was 580.178.04. Installing a toolkit alone does not implement or demonstrate
+acceleration in Laplace or Stockfish. See
+[NVIDIA's architecture support guidance](https://developer.nvidia.com/blog/navigating-gpu-architecture-support-a-guide-for-nvidia-cuda-developers/).
+
+## Earlier hart-server calibration (2026-09-16)
 
 [Candidate calibration run 35157006382](https://github.com/SaltyPatron/Laplace-Refactor/actions/runs/35157006382)
 completed on hart-server, the Intel Core i7-6850K machine with six physical cores

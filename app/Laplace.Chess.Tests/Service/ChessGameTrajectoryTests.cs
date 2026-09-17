@@ -142,9 +142,21 @@ public sealed class ChessGameTrajectoryTests
     }
 
     [Fact]
-    public void Backfill_DepositsNoTestimony()
+    public void Backfill_DepositsNoChessTestimonyAndOneCompletionReceipt()
     {
-        Assert.Empty(ComposeBackfill().Attestations);
+        // Backfill realizes an existing game's geometry. Its only attestation is
+        // operational proof that this source-owned trajectory unit completed;
+        // it must not add another observation of the game's moves or outcome.
+        var receipt = Assert.Single(ComposeBackfill().Attestations);
+        var marker = ChessTrajectoryDecomposer.MarkerId(Parsed().LineId);
+        var type = Hash128.OfCanonical("substrate/type/HasUnitCompleted/21/v1");
+        Assert.Equal(type, receipt.TypeId);
+        Assert.Equal(marker, receipt.SubjectId);
+        Assert.Equal(marker, receipt.ObjectId);
+        Assert.Equal(ChessVocabulary.TrajectorySourceId, receipt.SourceId);
+        Assert.Null(receipt.ContextId);
+        Assert.Equal(NativeAttestation.ComputeId(
+            marker, type, marker, ChessVocabulary.TrajectorySourceId, null), receipt.Id);
     }
 
     [Fact]

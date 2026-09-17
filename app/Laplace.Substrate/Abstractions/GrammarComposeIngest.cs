@@ -168,6 +168,9 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_composer is null || _ast is null)
                 throw new InvalidOperationException("whole-source grammar composition is unavailable");
+            // The handler owns this declared source prior even when there is no
+            // FileMetadata or outer pipeline wrapper. Relation weight is separate.
+            builder.DeclareSourcePrior(_sourceId, _trust);
             Hash128 emitted = _composer.DrainInto(builder, witnessWeight, descentBitmap);
             if (emitted != _root.Id)
                 throw new InvalidOperationException("whole-source identity changed during staging");

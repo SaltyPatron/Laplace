@@ -69,8 +69,11 @@ run_managed_dev() {
   python3 scripts/test-managed-policy.py
   python3 scripts/test-application-payload.py
   python3 scripts/test-cutechess-calibration.py
+  python3 scripts/test-chess-floor-artifacts.py
+  python3 scripts/test-recorded-chess-selection.py
   python3 scripts/test-chess-environment-benchmark.py ChessEnvironmentTests
   python3 scripts/test-ci-workspace.py
+  python3 scripts/test-managed-db-scheduling.py
   python3 scripts/test-codegen-configure.py
   dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
     --filter 'Tier!=db&Tier!=live&Tier!=perf'
@@ -112,7 +115,11 @@ run_native_db() {
 
 run_managed_db() {
   set_installed_perfcache
-  dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal --filter 'Tier=db'
+  # PostgreSQL's machine plan budgets one ingest process and its internal COPY
+  # fanout. Test projects otherwise create simultaneous independent full pools.
+  # Serialize project hosts while retaining each writer's native parallelism.
+  dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
+    -m:1 -p:BuildInParallel=false --filter 'Tier=db'
 }
 
 run_live_floor() {

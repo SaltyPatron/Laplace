@@ -1713,4 +1713,160 @@ TEST(PhysicalityDescriptor, AdjacentBodyRecipeWorkload) {
     }
 }
 
+
+void write_nonadjacent_evidence(const std::string& name, const std::vector<uint8_t>& bytes) {
+    if (const char* directory = std::getenv("LAPLACE_BODY_REUSE_EVIDENCE_DIR")) {
+        const std::filesystem::path root(directory);
+        ASSERT_TRUE(root.is_absolute());
+        std::filesystem::create_directories(root);
+        std::ofstream output(root / name, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(output.good());
+        if (!bytes.empty())
+            output.write(reinterpret_cast<const char*>(bytes.data()),
+                static_cast<std::streamsize>(bytes.size()));
+        output.close();
+        ASSERT_TRUE(output.good());
+    }
+}
+
+TEST(PhysicalityDescriptor, NonadjacentReuseKeepsCollisionVariantsAndEveryReferenceOccurrence) {
+    const std::array<hash128_t, 2> carriers{{{101, 201}, {102, 202}}};
+    std::array<double, 12> trajectory{};
+    ASSERT_EQ(trajectory_build(carriers.data(), carriers.size(), trajectory.data()), 0);
+    const float factors[]{0.25f, -0.75f, 0.5f, 0.125f, 0.875f, -0.625f};
+    size_t written = 0;
+    ASSERT_EQ(laplace_factor_pack_values(factors, 6, trajectory.data() + 8, &written), 0);
+    ASSERT_EQ(written, 1u);
+    auto copy = trajectory;
+    auto original = body();
+    original.trajectory_xyzm = trajectory.data();
+    original.trajectory_vertices = 3;
+    original.n_constituents = 3;
+    // These share the same routing key and placement but have different exact
+    // active bodies. More than four variants also exercise bounded replacement.
+    std::vector<physicality_descriptor_input_t> variants(9, original);
+    for (size_t i = 0; i < variants.size(); ++i) {
+        variants[i].coord[0] += static_cast<double>(i) / 32.0;
+        variants[i].hilbert_index.bytes[0] = static_cast<uint8_t>(i);
+        variants[i].trajectory_xyzm = i % 2u ? copy.data() : trajectory.data();
+    }
+    std::vector<physicality_descriptor_input_t> inputs;
+    for (size_t i = 0; i < 96; ++i)
+        inputs.push_back(variants[i < 48 ? i % 3u : i % variants.size()]);
+    const auto combined = build(inputs);
+    ASSERT_NE(combined, nullptr);
+    expect_scalar_plan_parity(inputs, combined);
+    const auto rows = public_plan_rows(combined);
+    ASSERT_EQ(rows.roots.size(), inputs.size());
+    ASSERT_EQ(rows.references.size(), inputs.size() * 3u);
+    EXPECT_TRUE(hash128_equals(&rows.roots[0], &rows.roots[3]));
+    EXPECT_FALSE(hash128_equals(&rows.roots[0], &rows.roots[1]));
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        EXPECT_EQ(rows.references[i * 3].kind, PHYSICALITY_DESCRIPTOR_REALIZED_ENTITY);
+        EXPECT_EQ(rows.references[i * 3].vertex_index, SIZE_MAX);
+        for (size_t j = 0; j < 3; ++j)
+            EXPECT_EQ(rows.references[i * 3 + j].input_index, i);
+        EXPECT_EQ(rows.references[i * 3 + 1].vertex_index, 0u);
+        EXPECT_EQ(rows.references[i * 3 + 2].vertex_index, 1u);
+        // The third trajectory vertex is numeric factor data, not a reference.
+    }
+    write_nonadjacent_evidence("nonadjacent-collisions.plan", public_plan_bytes(rows));
+}
+
+TEST(PhysicalityDescriptor, NonadjacentReuseDoesNotAuthenticateInvalidInterleavedBodies) {
+    const auto vocabulary = basis();
+    const physicality_descriptor_limits_t limits{1024u * 1024u};
+    const std::array<hash128_t, 2> carriers{{{11, 12}, {13, 14}}};
+    std::array<double, 8> trajectory{};
+    ASSERT_EQ(trajectory_build(carriers.data(), carriers.size(), trajectory.data()), 0);
+    auto valid = body();
+    valid.trajectory_xyzm = trajectory.data();
+    valid.trajectory_vertices = valid.n_constituents = 2;
+    auto other = valid;
+    other.coord[0] += 0.125;
+    std::vector<physicality_descriptor_input_t> invalid;
+    auto changed = valid; changed.coord[0] = std::numeric_limits<double>::infinity(); invalid.push_back(changed);
+    changed = valid; changed.trajectory_xyzm = nullptr; invalid.push_back(changed);
+    changed = valid; changed.n_constituents = 1; invalid.push_back(changed);
+    changed = valid; changed.alignment_residual_is_null = 2; invalid.push_back(changed);
+    changed = valid; changed.source_dim_is_null = 0; changed.source_dim = 0; invalid.push_back(changed);
+    changed = valid; changed.type = 1; invalid.push_back(changed);
+    for (const auto& bad : invalid) {
+        const std::array<physicality_descriptor_input_t, 5> inputs{{valid, other, valid, other, bad}};
+        physicality_descriptor_plan_t* raw = nullptr;
+        physicality_descriptor_plan_diagnostics_t diagnostic{};
+        EXPECT_EQ(physicality_descriptor_plan_build_diagnosed_cancelable(
+            inputs.data(), inputs.size(), &vocabulary, &limits, nullptr, &diagnostic, &raw),
+            PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+        EXPECT_EQ(raw, nullptr);
+        EXPECT_EQ(diagnostic.completed_inputs, 4u);
+        const auto retry = build({valid, other, valid, other});
+        ASSERT_NE(retry, nullptr);
+        expect_scalar_plan_parity({valid, other, valid, other}, retry);
+    }
+}
+
+TEST(PhysicalityDescriptor, NonadjacentReusePreservesTightGrantAcceptanceAndCancellation) {
+    const auto vocabulary = basis();
+    std::array<hash128_t, 8> carriers{};
+    for (size_t i = 0; i < carriers.size(); ++i) carriers[i] = hash128_t{100 + i, 200 + i};
+    std::array<double, 32> trajectory{};
+    ASSERT_EQ(trajectory_build(carriers.data(), carriers.size(), trajectory.data()), 0);
+    auto input = body();
+    input.trajectory_xyzm = trajectory.data();
+    input.trajectory_vertices = input.n_constituents = carriers.size();
+    std::vector<physicality_descriptor_input_t> inputs(24, input);
+    for (size_t i = 0; i < inputs.size(); ++i) inputs[i].coord[0] += (i % 3u) / 16.0;
+    const auto full = build(inputs);
+    ASSERT_NE(full, nullptr);
+    const auto expected = public_plan_bytes(public_plan_rows(full));
+    // Fixed grants, independent of candidate peak, let the hosted comparison
+    // assert precisely the same baseline/candidate status at every boundary.
+    std::vector<uint8_t> decisions;
+    bool accepted = false, refused = false;
+    for (size_t grant = 0; grant <= 65536; grant += 128) {
+        const physicality_descriptor_limits_t limits{grant};
+        physicality_descriptor_plan_t* raw = nullptr;
+        physicality_descriptor_plan_diagnostics_t diagnostic{};
+        const auto status = physicality_descriptor_plan_build_diagnosed_cancelable(
+            inputs.data(), inputs.size(), &vocabulary, &limits, nullptr, &diagnostic, &raw);
+        Plan result(raw, physicality_descriptor_plan_free);
+        decisions.push_back(static_cast<uint8_t>(status));
+        EXPECT_LE(diagnostic.peak_bytes, grant);
+        if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED) {
+            refused = true;
+            EXPECT_EQ(result, nullptr);
+            EXPECT_EQ(diagnostic.refusal, PHYSICALITY_DESCRIPTOR_PLAN_GRANT_REFUSED);
+        } else {
+            ASSERT_EQ(status, PHYSICALITY_DESCRIPTOR_OK);
+            accepted = true;
+            ASSERT_NE(result, nullptr);
+            EXPECT_EQ(public_plan_bytes(public_plan_rows(result)), expected);
+        }
+    }
+    EXPECT_TRUE(accepted);
+    EXPECT_TRUE(refused);
+    write_nonadjacent_evidence("nonadjacent-grant-statuses.bin", decisions);
+    const physicality_descriptor_limits_t generous{1024u * 1024u};
+    BodyReuseCancellation observed;
+    const physicality_descriptor_cancel_t count{BodyReuseCancellation::requested, &observed};
+    physicality_descriptor_plan_t* raw = nullptr;
+    ASSERT_EQ(physicality_descriptor_plan_build_cancelable(inputs.data(), inputs.size(),
+        &vocabulary, &generous, &count, &raw), PHYSICALITY_DESCRIPTOR_OK);
+    Plan counted(raw, physicality_descriptor_plan_free);
+    ASSERT_GT(observed.calls, 32u);
+    for (size_t stop : {size_t{1}, observed.calls / 3u, observed.calls - 16u, observed.calls}) {
+        BodyReuseCancellation probe{0u, stop};
+        const physicality_descriptor_cancel_t cancel{BodyReuseCancellation::requested, &probe};
+        raw = nullptr;
+        EXPECT_EQ(physicality_descriptor_plan_build_cancelable(inputs.data(), inputs.size(),
+            &vocabulary, &generous, &cancel, &raw), PHYSICALITY_DESCRIPTOR_CANCELLED);
+        EXPECT_EQ(raw, nullptr);
+        EXPECT_EQ(probe.calls, stop);
+    }
+    const auto retry = build(inputs);
+    ASSERT_NE(retry, nullptr);
+    EXPECT_EQ(public_plan_bytes(public_plan_rows(retry)), expected);
+}
+
 } // namespace

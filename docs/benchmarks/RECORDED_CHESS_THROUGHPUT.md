@@ -2,6 +2,66 @@
 
 The `recorded` benchmark suite measures ordinary Chess Lab jobs from game generation through synchronous PostgreSQL writer completion and exact native game readback. The API, native parser/composer, shared writer and native readback remain the production implementations. The collector checks their receipts and aggregates measured work.
 
+
+## Retained corpus evidence — 2026-09-17
+
+The latest completed native installation and attempted retained-corpus run is
+[35174504991, attempt 1](https://github.com/SaltyPatron/Laplace/actions/runs/35174504991),
+using source `ee2995b65e0f0182ae0776a9524443a6240d72b5`. The corpus measurement
+**failed**; it does not establish recorded-game capacity.
+
+| Measurement | Actual result |
+| --- | --- |
+| Requested complete games | 2,000 |
+| Complete games committed and exactly read back before failure | 140 |
+| Ordered plies in those games | 10,546 |
+| Completed admission chunks | 20 |
+| Attempted admission chunks | 21 |
+| Elapsed time through failure | 60.071 seconds |
+| Completed-run recorded games/second | `null` |
+| Completed full-selection replay | No |
+| 2,500 recorded games/second established | No |
+
+The failed twenty-first chunk contained seven additional candidates. They are
+excluded from the 140 complete-game count. Their attempted work remains in the
+failure evidence; the retained games and original failed receipt are preserved.
+Dividing 140 by the time through failure would not produce a successful complete
+benchmark.
+
+Whole-attempt diagnostics retained 21 provider calls totaling 22.155 seconds,
+21 COPY/commit calls totaling 8.927 seconds, and 21 consensus calls totaling
+4.279 seconds, of which one was interrupted. The enclosing writer interval was
+41.557 seconds; exact game readback took another 14.915 seconds. The nested
+provider, COPY and consensus intervals must not be added to their enclosing
+writer interval. These are workload measurements, not isolated CPU measurements.
+
+The 20 successful applies reported 557,199 inserted entities, 556,281 inserted
+physicalities and 66,989 inserted attestations, across 260 COPY transactions.
+Those counters exclude the failed apply and are separate from complete games.
+Native descriptor and selected-view structures contribute additional canonical
+entities and typed physicalities; the similar E/P totals do not establish a
+general one-to-one entity/physicality law.
+
+The failure exposed storage-flush-dependent consensus periods. The canonical
+recording correction is committed in
+[the source ending at dd31256](https://github.com/SaltyPatron/Laplace/commit/dd31256d3e8deca265a9b7861109e20273de52cb):
+fully replayable retained testimony is folded as one canonical period per cell,
+and source repair uses the same target locking and fresh evidence read as
+admission. Mixed transient continuous-score cells retain their exact delta
+semantics. A separate checked-arithmetic correction removes saturated
+intermediates. Committed source and standalone qualification do not establish
+that the host has installed or measured that source.
+
+The private host evidence directory for the attempted run is
+`/build/laplace/recovery/native-install/35174504991-1/`. The corresponding
+`original-native-install-35174504991-1` workflow artifact has ID
+`10477948015` and SHA256
+`667837b6c1f6dad4b703ab3669f41c8085a6e450579a67cc593d2d1bf40efeda`.
+Use the original corpus receipt, completed chunk descriptors, exact readback
+scope and writer aggregates together. Generated Stockfish self-play rates,
+position-floor row counts, kernel timings and geometry COPY rates are separate
+workloads.
+
 ## First establish correctness
 
 The direct collector keeps the existing 24-game, depth-4 sweep over concurrency 1, 2 and 4. Each case must finish normal games, preserve its exact executable and experiment identities, acknowledge synchronous local WAL flush, and read back every newly recorded playing, ordered move identity and experiment witness.

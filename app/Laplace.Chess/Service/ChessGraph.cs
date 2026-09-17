@@ -39,7 +39,8 @@ public static class ChessGraph
         SubstrateChangeBuilder b, Piece moving, ChessMove move, Hash128 src, long nowUs)
     {
         var composed = ChessCompose.Move(moving, move);
-        if (b.PresenceOracle?.IsProvenPresent(composed.Move.Id) == true) return composed.Move;
+        // Existing E proves only canonical identity. Preserve this source's
+        // exact form and all child candidates; shared admission owns E/P novelty.
         foreach (var field in composed.Fields)
             AddNode(b, field, ChessVocabulary.SubstructureType, nowUs, src);
         AddNode(b, composed.Move, ChessVocabulary.MoveType, nowUs, src);
@@ -219,21 +220,10 @@ public static class ChessGraph
     private static void StageNodes(
         SubstrateChangeBuilder b, ChessComposed c, long nowUs, Hash128 src)
     {
-        // TRUNK SHORT-CIRCUIT. A position whose id is already proven deposited implies its whole
-        // substructure subtree is too — they were staged together the first time, and the id is a
-        // Merkle over exactly those constituents, so the trunk cannot exist without them. Staging
-        // them again produces byte-identical rows that apply then dedups away: pure cost.
-        //
-        // This is the law the shared content path has always followed (ContentTierSpine.cs:127-133
-        // asks ContentLadderLedger.IsPersisted before staging anything) and that the chess lane
-        // never joined. MEASURED: the compose probe stages 227 entities per game where the live
-        // run keeps ~65, and row building is 56.2% of record+analyze.
-        //
-        // The oracle answers false for anything not yet probed, so this can only ever skip work
-        // that was provably redundant — never something absent. Ids are still COMPOSED (callers
-        // need them for the attestations below); only the staging is skipped, so the fold is
-        // untouched.
-        if (b.PresenceOracle?.IsProvenPresent(c.Position.Id) == true) return;
+        // Entity COPY can commit independently of its form, descendants and
+        // source testimony. An E-presence hint cannot prove any of those are
+        // complete or suppress this observation. Shared admission reuses exact
+        // descriptor identities and excludes already accepted source-unit evidence.
 
         foreach (var s in c.Substructures) AddNode(b, s, ChessVocabulary.SubstructureType, nowUs, src);
         AddNode(b, c.Position, ChessVocabulary.PositionType, nowUs, src);

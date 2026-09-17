@@ -483,6 +483,100 @@ static physicality_descriptor_status_t repeat_body_references(
     return PHYSICALITY_DESCRIPTOR_OK;
 }
 
+
+/* Optional invocation-local body reuse. The four-way routing key is only a
+ * coarse hash of the placement/type/shape: alternate bodies deliberately share
+ * a bucket and must pass same_body's complete active-recipe comparison. Stored
+ * indices refer only to earlier validated borrowed inputs and retained reference
+ * spans; roots, occurrence order and source-unit indices are never deduplicated. */
+typedef struct {
+    size_t input_plus_one, reference_first, reference_count;
+} body_cache_entry_t;
+
+typedef struct {
+    body_cache_entry_t* entries;
+    size_t buckets, bytes, maximum_bytes;
+} body_cache_t;
+
+enum { BODY_CACHE_WAYS = 4, BODY_CACHE_MAX_BUCKETS = 256 };
+
+static void body_cache_release(physicality_descriptor_plan_t* plan, body_cache_t* cache) {
+    if (cache->entries == NULL) return;
+    free(cache->entries);
+    plan->bytes -= cache->bytes;
+    cache->entries = NULL;
+    cache->bytes = 0u;
+}
+
+/* Upper-bound every geometric growth that the next ordinary body could ask
+ * for, including a complete replacement alongside all retained arrays. If this
+ * proof does not fit, discard the optional cache BEFORE any allocation choice;
+ * the existing exact-fit fallback and refusal contract then run unchanged. */
+static int body_cache_growth_fits(
+    const physicality_descriptor_plan_t* plan, const body_cache_t* cache, size_t vertices) {
+    size_t nodes = plan->node_count, children = plan->child_count;
+    size_t nc = plan->node_capacity == 0u ? 1u : plan->node_capacity;
+    size_t cc = plan->child_capacity == 0u ? 1u : plan->child_capacity;
+    size_t sc = plan->slot_count;
+    size_t retained = plan->bytes, nb = 0u, cb = 0u, sb = 0u, replacement = 0u;
+    if (!checked_add(&nodes, 14u) || !checked_array(&nodes, vertices, 5u) ||
+        !checked_add(&children, 95u) || !checked_array(&children, vertices, 42u) ||
+        nodes > SIZE_MAX / 2u)
+        return 0;
+    while (nc < nodes) { if (nc > SIZE_MAX / 2u) return 0; nc *= 2u; }
+    while (cc < children) { if (cc > SIZE_MAX / 2u) return 0; cc *= 2u; }
+    while (sc < nodes * 2u) { if (sc > SIZE_MAX / 2u) return 0; sc *= 2u; }
+    if (!checked_array(&nb, nc, sizeof(*plan->nodes)) ||
+        !checked_array(&cb, cc, sizeof(*plan->children)) ||
+        !checked_array(&sb, sc, sizeof(*plan->slots)))
+        return 0;
+    retained -= plan->node_capacity * sizeof(*plan->nodes);
+    retained -= plan->child_capacity * sizeof(*plan->children);
+    retained -= plan->slot_count * sizeof(*plan->slots);
+    if (!checked_add(&retained, nb) || !checked_add(&retained, cb) ||
+        !checked_add(&retained, sb))
+        return 0;
+    if (nc > plan->node_capacity) replacement = nb;
+    if (cc > plan->child_capacity && cb > replacement) replacement = cb;
+    if (sc > plan->slot_count && sb > replacement) replacement = sb;
+    return checked_add(&retained, replacement) && retained <= cache->maximum_bytes;
+}
+
+static void body_cache_initialize(physicality_descriptor_plan_t* plan,
+    size_t input_count, size_t vertices, size_t maximum_vertices, body_cache_t* cache) {
+    size_t bound;
+    memset(cache, 0, sizeof(*cache));
+    if (input_count < 3u) return; /* The existing adjacent path already covers two. */
+    cache->buckets = 1u;
+    while (cache->buckets < BODY_CACHE_MAX_BUCKETS &&
+        cache->buckets < input_count / BODY_CACHE_WAYS)
+        cache->buckets *= 2u;
+    cache->bytes = cache->buckets * BODY_CACHE_WAYS * sizeof(*cache->entries);
+    cache->maximum_bytes = plan->maximum_bytes;
+    /* Keep the existing public no-reuse payload bound conservative as well as
+     * respecting the caller's grant. No new reservation is required by callers. */
+    if (physicality_descriptor_plan_payload_bound(
+            input_count, vertices, maximum_vertices, &bound) == PHYSICALITY_DESCRIPTOR_OK &&
+        bound < cache->maximum_bytes)
+        cache->maximum_bytes = bound;
+    if (plan->bytes > cache->maximum_bytes ||
+        cache->bytes > cache->maximum_bytes - plan->bytes)
+        return;
+    cache->entries = calloc(cache->buckets * BODY_CACHE_WAYS, sizeof(*cache->entries));
+    if (cache->entries == NULL) return; /* Optional allocation: ordinary path still works. */
+    plan->bytes += cache->bytes;
+    if (plan->bytes > plan->peak_bytes) plan->peak_bytes = plan->bytes;
+}
+
+static size_t body_cache_bucket(
+    const physicality_descriptor_input_t* input, const body_cache_t* cache) {
+    hash128_t route = input->entity_id;
+    route.lo ^= (uint64_t)(uint16_t)input->type << 32u;
+    route.hi ^= (uint64_t)input->trajectory_vertices;
+    route.hi ^= (uint64_t)(uint32_t)input->n_constituents << 32u;
+    return identity_slot(&route, cache->buckets - 1u) * BODY_CACHE_WAYS;
+}
+
 void physicality_descriptor_plan_free(physicality_descriptor_plan_t* plan) {
     if (plan == NULL) return;
     free(plan->nodes);
@@ -520,7 +614,7 @@ physicality_descriptor_status_t physicality_descriptor_plan_build_diagnosed_canc
     const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_plan_diagnostics_t* diagnostics,
     physicality_descriptor_plan_t** out_plan) {
-    size_t vertices = 0u, widest = 17u;
+    size_t vertices = 0u, widest = 17u, maximum_vertices = 0u;
     size_t references = input_count, bytes = sizeof(physicality_descriptor_plan_t);
     physicality_descriptor_plan_t* plan;
     if (diagnostics != NULL) {
@@ -549,6 +643,7 @@ physicality_descriptor_status_t physicality_descriptor_plan_build_diagnosed_canc
             return PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED;
         }
         if (width + 1u > widest) widest = width + 1u;
+        if (width > maximum_vertices) maximum_vertices = width;
     }
     /* Roots and reference occurrences retain their exact input multiplicity.
      * Descriptor graph arrays grow only as distinct ordered nodes are found. */
@@ -590,25 +685,70 @@ physicality_descriptor_status_t physicality_descriptor_plan_build_diagnosed_canc
     plan->scratch_capacity = widest;
     plan->bytes = plan->peak_bytes = bytes;
     plan->maximum_bytes = limits->maximum_plan_bytes;
+    body_cache_t cache;
+    body_cache_initialize(plan, input_count, vertices, maximum_vertices, &cache);
     size_t previous_reference_first = 0u, previous_reference_count = 0u;
     for (size_t input = 0; input < input_count; ++input) {
         const size_t reference_first = plan->reference_count;
+        size_t template_input = input == 0u ? 0u : input - 1u;
+        size_t template_first = previous_reference_first;
+        size_t template_count = previous_reference_count;
+        size_t cache_slot = SIZE_MAX;
         int equal = 0;
         physicality_descriptor_status_t status = physicality_descriptor_cancel_requested(cancellation)
             ? PHYSICALITY_DESCRIPTOR_CANCELLED : PHYSICALITY_DESCRIPTOR_OK;
         if (status == PHYSICALITY_DESCRIPTOR_OK && input != 0u)
             status = same_body(&inputs[input], &inputs[input - 1u], cancellation, &equal);
+        if (status == PHYSICALITY_DESCRIPTOR_OK && !equal && cache.entries != NULL) {
+            const size_t bucket = body_cache_bucket(&inputs[input], &cache);
+            size_t empty = SIZE_MAX;
+            for (size_t way = 0u; way < BODY_CACHE_WAYS; ++way) {
+                const size_t slot = bucket + way;
+                const body_cache_entry_t* entry = &cache.entries[slot];
+                if (physicality_descriptor_cancel_requested(cancellation)) {
+                    status = PHYSICALITY_DESCRIPTOR_CANCELLED;
+                    break;
+                }
+                if (entry->input_plus_one == 0u) {
+                    if (empty == SIZE_MAX) empty = slot;
+                    continue;
+                }
+                status = same_body(&inputs[input], &inputs[entry->input_plus_one - 1u],
+                    cancellation, &equal);
+                if (status != PHYSICALITY_DESCRIPTOR_OK || equal) {
+                    if (equal) {
+                        template_input = entry->input_plus_one - 1u;
+                        template_first = entry->reference_first;
+                        template_count = entry->reference_count;
+                    }
+                    break;
+                }
+            }
+            if (!equal)
+                cache_slot = empty != SIZE_MAX ? empty :
+                    bucket + (input / cache.buckets) % BODY_CACHE_WAYS;
+        }
         if (status == PHYSICALITY_DESCRIPTOR_OK) {
             if (equal) {
-                status = repeat_body_references(plan, previous_reference_first,
-                    previous_reference_count, input);
+                status = repeat_body_references(plan, template_first, template_count, input);
                 if (status == PHYSICALITY_DESCRIPTOR_OK)
-                    plan->roots[input] = plan->roots[input - 1u];
+                    plan->roots[input] = plan->roots[template_input];
             } else {
+                if (cache.entries != NULL &&
+                    !body_cache_growth_fits(plan, &cache, inputs[input].trajectory_vertices))
+                    body_cache_release(plan, &cache);
                 status = describe_one(plan, diagnostics, basis, &inputs[input], input);
+                if (status == PHYSICALITY_DESCRIPTOR_OK && cache.entries != NULL &&
+                    cache_slot != SIZE_MAX) {
+                    body_cache_entry_t* entry = &cache.entries[cache_slot];
+                    entry->input_plus_one = input + 1u;
+                    entry->reference_first = reference_first;
+                    entry->reference_count = plan->reference_count - reference_first;
+                }
             }
         }
         if (status != PHYSICALITY_DESCRIPTOR_OK) {
+            body_cache_release(plan, &cache);
             plan_snapshot(plan, input, diagnostics);
             physicality_descriptor_plan_free(plan);
             return status;
@@ -616,6 +756,7 @@ physicality_descriptor_status_t physicality_descriptor_plan_build_diagnosed_canc
         previous_reference_first = reference_first;
         previous_reference_count = plan->reference_count - reference_first;
     }
+    body_cache_release(plan, &cache);
     plan_snapshot(plan, input_count, diagnostics);
     plan->cancellation = NULL;
     *out_plan = plan;

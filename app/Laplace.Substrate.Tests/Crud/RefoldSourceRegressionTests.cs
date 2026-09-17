@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Laplace.Decomposers.Abstractions.Tests;
 using Xunit;
 
@@ -6,36 +7,39 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class RefoldSourceRegressionTests
 {
     [Fact]
-    public void RefoldSource_RebuildsMissingRowsWithCanonicalConsensusIdentity()
+    public void RefoldSource_RoutesReconstructionToTheSharedNativeEvidenceOwner()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
         var sql = File.ReadAllText(Path.Combine(
-            repoRoot,
-            "extension", "laplace_substrate", "sql", "functions", "ops",
+            repoRoot, "extension", "laplace_substrate", "sql", "functions", "ops",
             "refold_source.sql.in"));
+        var entry = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "sql", "functions", "fold",
+            "consensus_upsert.sql.in"));
+        var native = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "src", "fold_route.c"));
 
-        // Refold is a reconstruction from durable testimony, not merely an update
-        // of already-materialized derived rows. An interrupted first fold may leave
-        // no consensus row to UPDATE (#1349/#1292).
-        Assert.Contains("INSERT INTO laplace.consensus", sql, StringComparison.Ordinal);
-        Assert.Contains(
-            "laplace.consensus_id(f.subject_id, %L::bytea, f.object_id)",
-            sql,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ON CONFLICT (id, type_id, subject_id) DO UPDATE",
-            sql,
-            StringComparison.Ordinal);
+        // This source control protects delegation and mutation ownership.
+        // ConsensusEvidencePeriodTests exercise actual missing-row identity,
+        // neutral reconstruction, replayability and concurrent admission.
+        Assert.Contains("SELECT consensus.refold_evidence_type(", sql, StringComparison.Ordinal);
+        Assert.DoesNotMatch(new Regex(
+            @"\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\s+laplace\.consensus\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant), sql);
+        Assert.DoesNotContain("laplace.consensus_fold(", sql, StringComparison.Ordinal);
 
-        // The rebuild must remain evidence-derived and deterministic: same neutral
-        // prior, same fixed-point observations, same canonical evidence ordering.
-        Assert.Contains("laplace.consensus_fold(false, NULL, NULL, NULL,", sql, StringComparison.Ordinal);
-        Assert.Contains("GREATEST(a.observation_count, 1)", sql, StringComparison.Ordinal);
-        Assert.Contains("a.sum_score_fp1e9", sql, StringComparison.Ordinal);
-        Assert.Contains("ORDER BY a.last_observed_at, a.id", sql, StringComparison.Ordinal);
+        var binding = Regex.Match(entry,
+            @"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+consensus\.refold_evidence_type\s*\(.*?;",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline);
+        Assert.True(binding.Success, "Missing native source-refold SQL entry point");
+        Assert.Contains("'pg_laplace_consensus_refold_evidence_type'", binding.Value);
+        Assert.Matches(@"LANGUAGE\s+C\s+VOLATILE", binding.Value);
 
-        // Recovery must never rewrite the source testimony it is reconstructing from.
-        Assert.DoesNotContain("UPDATE laplace.attestations", sql, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("DELETE FROM laplace.attestations", sql, StringComparison.OrdinalIgnoreCase);
+        // Recovery owns derived consensus only; testimony remains authoritative.
+        var evidenceMutation = new Regex(
+            @"\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\s+laplace\.attestations\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        Assert.DoesNotMatch(evidenceMutation, sql);
+        Assert.DoesNotMatch(evidenceMutation, native);
     }
 }

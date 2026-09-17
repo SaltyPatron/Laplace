@@ -335,12 +335,11 @@ public sealed class SubstrateChangeBuilder : IDisposable
     /// Read-only presence oracle for the batch being composed: "has this id already been proven
     /// present by a COMMITTED apply?" Populated from the pipeline's containment reader.
     ///
-    /// This is what lets a composer skip STAGING a subtree it knows is already deposited — the
-    /// trunk short-circuit the shared content path has had all along (ContentTierSpine +
-    /// ContentLadderLedger) and that the chess lane never joined. It answers false for anything
-    /// not yet probed, so it can only ever cause work, never skip something absent: staging an
-    /// already-present row is deduped at apply anyway, so a false negative costs exactly what
-    /// today costs and a false positive is impossible.
+    /// A positive result proves only the queried entity is present. It may suppress
+    /// that entity row, but does not prove descendant entities, physicality forms or
+    /// observations from the current source are complete. Skipping those requires
+    /// their own presence or exact completion proof. Unknown IDs remain eligible
+    /// for staging; admission resolves already-present canonical entities.
     /// </summary>
     public ISubstrateReader? PresenceOracle { get; private set; }
 
@@ -430,11 +429,10 @@ public sealed class SubstrateChangeBuilder : IDisposable
             ObjectDisposedException.ThrowIf(builder._disposed, builder);
             if (builder._partialTrajectory)
                 throw new InvalidOperationException("physicality observation contains a partial trajectory vertex");
-            total = total.Add(IngestAdmissionSizing.MeasureParts(
+            total = total.Add(IngestAdmissionSizing.MeasureGrowingBuilder(
                 builder.StagedBytesEstimate, builder._intentStages,
                 builder._selectedShape, builder._observationShape,
-                (ulong)builder._entities.Count, (ulong)builder._attestations.Count,
-                growingStages: true));
+                (ulong)builder._entities.Count, (ulong)builder._attestations.Count));
         }
         return total.ModeledSourcePayloadBytes;
     }

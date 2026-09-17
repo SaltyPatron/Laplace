@@ -3,6 +3,7 @@ using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
@@ -165,6 +166,71 @@ public sealed class SubstrateChangeSourcePriorTests
             Assert.All(ranges, range => Assert.Equal(prior, change.RequireSourcePrior(range.SourceId)));
         }
         finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
+    }
+
+    [Theory]
+    [InlineData(false, 0.0)]
+    [InlineData(false, 0.375)]
+    [InlineData(false, 1.0)]
+    [InlineData(true, 0.0)]
+    [InlineData(true, 0.375)]
+    [InlineData(true, 1.0)]
+    public void FilelessGrammarProducerCarriesItsExactPriorThroughActualCapture(bool observedPrompt, double prior)
+    {
+        CodepointPerfcache.LoadDefault();
+        var record = new GrammarComposeRecord("def keep(x):\n    return x\n"u8.ToArray(), "python",
+            ObservedPromptUtf8: observedPrompt ? "Keep the original order."u8.ToArray() : null);
+        var handler = new GrammarComposeHandler(Source, prior, null);
+        using var unit = handler.CreateDeferredUnit(record);
+        using var builder = new SubstrateChangeBuilder(OtherSource, "direct-grammar-prior")
+            .DeclareSourcePrior(OtherSource, .25);
+        Hash128 root = unit.DrainInto(builder, .17, null);
+        SubstrateChange change = builder.Build();
+        try
+        {
+            Assert.NotEqual(default, root);
+            Assert.Null(change.Metadata.FileId);
+            Assert.Equal(.25, change.RequireSourcePrior(OtherSource));
+            Assert.Equal(prior, change.RequireSourcePrior(Source));
+            var ranges = change.IntentStages.SelectMany(stage => stage.PhysicalitySourceRanges).ToArray();
+            Assert.NotEmpty(ranges);
+            Assert.All(ranges, range =>
+            {
+                Assert.Equal(Source, range.SourceId);
+                Assert.Equal(prior, change.RequireSourcePrior(range.SourceId));
+            });
+            using var captured = NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.Capture(
+                [change], change.IntentStages, CancellationToken.None)!;
+            Assert.NotNull(captured);
+            Assert.Equal(ranges.Sum(range => range.RowCount) + change.PhysicalityObservations.Length,
+                captured.ObservationSources.Count);
+            Assert.All(captured.ObservationSources, source => Assert.Equal(Source, source));
+            Assert.All(captured.ObservationPriors, actual => Assert.Equal(prior, actual));
+            Assert.Equal(captured.ObservationSources.Count, captured.ObservationPriors.Count);
+        }
+        finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FilelessGrammarProducerRejectsAConflictingPriorBeforeStaging(bool observedPrompt)
+    {
+        CodepointPerfcache.LoadDefault();
+        var record = new GrammarComposeRecord("def keep(x):\n    return x\n"u8.ToArray(), "python",
+            ObservedPromptUtf8: observedPrompt ? "Keep the original order."u8.ToArray() : null);
+        var handler = new GrammarComposeHandler(Source, .375, null);
+        using var unit = handler.CreateDeferredUnit(record);
+        using var builder = new SubstrateChangeBuilder(OtherSource, "conflicting-grammar-prior")
+            .DeclareSourcePrior(Source, .25);
+        Assert.Throws<InvalidOperationException>(() => unit.DrainInto(builder, .17, null));
+        var change = builder.Build();
+        Assert.Equal(.25, change.RequireSourcePrior(Source));
+        Assert.Empty(change.Entities);
+        Assert.Empty(change.Physicalities);
+        Assert.Empty(change.PhysicalityObservations);
+        Assert.Empty(change.Attestations);
+        Assert.Empty(change.IntentStages);
     }
 
     [Fact]
