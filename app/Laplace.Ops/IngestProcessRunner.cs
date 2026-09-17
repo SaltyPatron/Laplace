@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Laplace.Engine.Core;
 
@@ -7,15 +8,31 @@ namespace Laplace.Ops;
 /// Starts the canonical <c>Laplace.Cli ingest</c> lane without teaching every
 /// operator surface a second source registry. The CLI remains the authority for
 /// source names, defaults, argument validation and ingest semantics.
+///
+/// Processes started by this host are retained only while they are alive so the
+/// operator surface can recover them after navigation/reload and stop the actual CLI
+/// process rather than merely rewriting a journal receipt. We intentionally never
+/// attach to arbitrary PIDs: that avoids PID-reuse races and keeps process control
+/// scoped to children this host started.
 /// </summary>
 public static class IngestProcessRunner
 {
+    private sealed record OwnedProcess(Process Process, StartReceipt Receipt);
+    private static readonly ConcurrentDictionary<int, OwnedProcess> OwnedProcesses = new();
+
     public sealed record StartReceipt(
         int ProcessId,
         string Source,
         string? Path,
         string CliPath,
-        IReadOnlyList<string> Arguments);
+        IReadOnlyList<string> Arguments,
+        DateTimeOffset StartedAt);
+
+    public sealed record StopReceipt(
+        int ProcessId,
+        bool Found,
+        bool WasRunning,
+        bool StopRequested);
 
     public static StartReceipt Start(
         string source,
@@ -57,17 +74,92 @@ public static class IngestProcessRunner
 
         var process = Process.Start(start)
             ?? throw new InvalidOperationException("Laplace.Cli ingest process did not start.");
+        var pid = process.Id;
+        var receipt = new StartReceipt(pid, source, path, cliPath, args, DateTimeOffset.UtcNow);
+        process.EnableRaisingEvents = true;
+        process.Exited += (_, _) => ReleaseOwnedProcess(pid);
+
+        if (!OwnedProcesses.TryAdd(pid, new OwnedProcess(process, receipt)))
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            finally { process.Dispose(); }
+            throw new InvalidOperationException($"Ingest process {pid} could not be registered for operator control.");
+        }
+
+        // The process can exit between Process.Start and event registration. Close that
+        // race immediately; the event may also have removed/disposed the handle already.
         try
         {
-            return new StartReceipt(process.Id, source, path, cliPath, args);
+            if (process.HasExited)
+                ReleaseOwnedProcess(pid);
+        }
+        catch (InvalidOperationException) { }
+        catch (ObjectDisposedException) { }
+
+        return receipt;
+    }
+
+    public static IReadOnlyList<StartReceipt> ActiveProcesses()
+    {
+        var active = new List<StartReceipt>();
+        foreach (var pair in OwnedProcesses.ToArray())
+        {
+            try
+            {
+                if (pair.Value.Process.HasExited)
+                {
+                    ReleaseOwnedProcess(pair.Key);
+                    continue;
+                }
+                active.Add(pair.Value.Receipt);
+            }
+            catch (InvalidOperationException)
+            {
+                ReleaseOwnedProcess(pair.Key);
+            }
+            catch (ObjectDisposedException)
+            {
+                ReleaseOwnedProcess(pair.Key);
+            }
+        }
+        active.Sort(static (left, right) => right.StartedAt.CompareTo(left.StartedAt));
+        return active;
+    }
+
+    public static StopReceipt Stop(int processId)
+    {
+        if (processId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(processId), "Process id must be positive.");
+
+        if (!OwnedProcesses.TryRemove(processId, out var owned))
+            return new StopReceipt(processId, Found: false, WasRunning: false, StopRequested: false);
+
+        var process = owned.Process;
+        try
+        {
+            if (process.HasExited)
+                return new StopReceipt(processId, Found: true, WasRunning: false, StopRequested: false);
+
+            // Kill the process tree because the CLI may own workers whose continued
+            // writes would make a journal-only cancellation actively misleading.
+            process.Kill(entireProcessTree: true);
+            return new StopReceipt(processId, Found: true, WasRunning: true, StopRequested: true);
+        }
+        catch (InvalidOperationException)
+        {
+            return new StopReceipt(processId, Found: true, WasRunning: false, StopRequested: false);
         }
         finally
         {
-            // The ingest owns its own database/run journal lifetime. Disposing the local
-            // Process handle does not terminate the child; the operator follows progress
-            // through the canonical ingest journal instead of holding an HTTP/MCP request.
             process.Dispose();
         }
+    }
+
+    private static void ReleaseOwnedProcess(int processId)
+    {
+        if (OwnedProcesses.TryRemove(processId, out var owned))
+            owned.Process.Dispose();
     }
 
     public static string? ResolveCliBinary()
