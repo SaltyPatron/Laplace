@@ -1,10 +1,48 @@
 @layer components {
-  .page { display: flex; flex-direction: column; gap: var(--space-4, 1rem); width: min(100%, 1500px); min-width: 0; margin: 0 auto; padding: clamp(1rem, 2.5vw, 2rem); overflow-y: auto; }
-  .inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4, 1rem); }
-  .stack { display: flex; flex-direction: column; gap: var(--space-3, .75rem); min-width: 0; }
+  .page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3, .75rem);
+    width: min(100%, 1680px);
+    min-width: 0;
+    margin: 0 auto;
+    padding: clamp(.85rem, 2vw, 1.5rem);
+    overflow-y: auto;
+  }
+
+  .inputs {
+    display: grid;
+    grid-template-columns: minmax(320px, .78fr) minmax(440px, 1.22fr);
+    align-items: start;
+    gap: var(--space-3, .75rem);
+  }
+
+  .inputs > * { min-width: 0; }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    min-width: 0;
+  }
+
+  /* The authored-content editor used to determine the height of the entire first grid
+     row, leaving a mostly-empty file-selection card and pushing Selected artifacts below
+     the fold. Keep the editor useful but compact; it remains vertically resizable. */
+  .inputs textarea {
+    height: 8rem;
+    min-height: 7rem;
+    max-height: 20rem;
+    resize: vertical;
+  }
+
   .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
   .receipt { display: block; overflow-wrap: anywhere; }
   .preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30rem; overflow: auto; }
-  .page input, .page select { max-width: 100%; }
-  @media (max-width: 850px) { .inputs { grid-template-columns: minmax(0, 1fr); } }
+  .page input, .page select, .page textarea { max-width: 100%; box-sizing: border-box; }
+
+  @media (max-width: 1080px) {
+    .inputs { grid-template-columns: minmax(0, 1fr); }
+    .inputs textarea { height: 9rem; }
+  }
 }
