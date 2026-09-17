@@ -17,7 +17,7 @@ jobs:
         with:
           ref: fix/identity-storage-cohesion
           fetch-depth: 2
-      - name: Apply deterministic identity presence repair
+      - name: Apply identity-storage source repair
         run: python3 scripts/patch-identity-working-set.py
       - name: Commit generated source repair
         run: |
@@ -28,6 +28,10 @@ jobs:
           fi
           git config user.name SaltyPatron
           git config user.email thesaltypatron@gmail.com
-          git add app/Laplace.Substrate/Crud/Npgsql/NpgsqlWorkingSetApply.cs
-          git commit -m "Make entity verification id-only and order-invariant"
+          git add \
+            app/Laplace.Substrate/Crud/Npgsql/NpgsqlWorkingSetApply.cs \
+            app/Laplace.Substrate/Crud/Npgsql/NpgsqlIngestOps.cs \
+            app/Laplace.Substrate/Crud/Npgsql/CopyTupleParser.cs \
+            extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in
+          git commit -m "Finish identity-storage hot-path migration"
           git push origin HEAD:fix/identity-storage-cohesion
