@@ -16,17 +16,26 @@ on:
         type: choice
         required: true
         default: quick
-        options: [quick, throughput, core, scale, moby, all]
+        options: [quick, throughput, core, scale, moby, query, chess, geometry, recorded, all]
       repeats:
         description: "repeats per core/scaling point; all runs retained, best reported"
         type: string
         required: true
         default: "3"
       scale_workers:
-        description: "optional comma-separated scale points; blank derives physical-core/SMT points"
+        description: "optional comma-separated scale points; blank derives serviceable host points"
         type: string
         required: false
         default: ""
+      reserve_logical_cpus:
+        description: "logical CPUs reserved for PostgreSQL/runner/services during scale suites"
+        type: string
+        required: true
+        default: "2"
+      allow_saturation:
+        description: "explicitly allow a full-logical-CPU scaling point"
+        type: boolean
+        default: false
       corpus_dir:
         description: "core benchmark corpus root (blank = repository)"
         type: string
@@ -76,6 +85,8 @@ jobs:
           SUITE: ${{ inputs.suite }}
           REPEATS: ${{ inputs.repeats }}
           SCALE_WORKERS: ${{ inputs.scale_workers }}
+          RESERVE_LOGICAL_CPUS: ${{ inputs.reserve_logical_cpus }}
+          ALLOW_SATURATION: ${{ inputs.allow_saturation }}
           CORPUS_DIR: ${{ inputs.corpus_dir }}
           MOBY_PATH: ${{ inputs.moby_path }}
           FORCE_REBUILD: ${{ inputs.force_rebuild }}
@@ -133,6 +144,19 @@ jobs:
           }
 
           out="$LAPLACE_BENCH_RECEIPT"
+          resolved_scale=""
+          if [[ "$SUITE" == throughput || "$SUITE" == scale || "$SUITE" == all ]]; then
+            scale_plan_args=(
+              --reserve-logical "$RESERVE_LOGICAL_CPUS"
+              --github-env "$GITHUB_ENV"
+              --json "$out/scale-plan.json"
+            )
+            [[ -z "${SCALE_WORKERS:-}" ]] || scale_plan_args+=(--workers "$SCALE_WORKERS")
+            [[ "$ALLOW_SATURATION" != true ]] || scale_plan_args+=(--allow-saturation)
+            python3 scripts/benchmark_scale_plan.py "${scale_plan_args[@]}"
+            resolved_scale="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["resolved_workers_csv"])' "$out/scale-plan.json")"
+          fi
+
           {
             printf 'schema=laplace.benchmark-host/v2\n'
             printf 'repository=%s\n' "$GITHUB_REPOSITORY"
@@ -178,19 +202,27 @@ jobs:
           }
           trap record_after EXIT
 
-          args=()
-          [[ "$FORCE_REBUILD" != true ]] || args+=(--force-rebuild)
-          bash scripts/pipeline.sh "${args[@]}" build 2>&1 | tee "$out/build.log"
+          core=""
+          t0=""
+          if [[ "$SUITE" != chess && "$SUITE" != geometry && "$SUITE" != recorded ]]; then
+            args=()
+            [[ "$FORCE_REBUILD" != true ]] || args+=(--force-rebuild)
+            bash scripts/pipeline.sh "${args[@]}" build 2>&1 | tee "$out/build.log"
 
-          core="$GITHUB_WORKSPACE/build/engine/core/liblaplace_core.so"
-          t0="$GITHUB_WORKSPACE/build/engine/core/perfcache/laplace_t0_perfcache.bin"
-          [[ -f "$core" ]] || { echo "::error::built core missing: $core"; exit 1; }
-          [[ -f "$t0" ]] || { echo "::error::built T0 perfcache missing: $t0"; exit 1; }
-          {
-            sha256sum "$core" "$t0"
-            printf '\n== core linkage ==\n'
-            ldd "$core" || true
-          } > "$out/built-artifacts.txt"
+            core="$GITHUB_WORKSPACE/build/engine/core/liblaplace_core.so"
+            t0="$GITHUB_WORKSPACE/build/engine/core/perfcache/laplace_t0_perfcache.bin"
+            control="$GITHUB_WORKSPACE/build/extension/laplace_substrate/laplace_substrate.control"
+            execution="$GITHUB_WORKSPACE/build/extension/laplace_substrate/laplace_execution_module.txt"
+            [[ -f "$core" ]] || { echo "::error::built core missing: $core"; exit 1; }
+            [[ -f "$t0" ]] || { echo "::error::built T0 perfcache missing: $t0"; exit 1; }
+            [[ -f "$control" ]] || { echo "::error::built substrate control missing: $control"; exit 1; }
+            [[ -f "$execution" ]] || { echo "::error::built execution identity missing: $execution"; exit 1; }
+            {
+              sha256sum "$core" "$t0" "$control" "$execution"
+              printf '\n== core linkage ==\n'
+              ldd "$core" || true
+            } > "$out/built-artifacts.txt"
+          fi
 
           if [[ "$SUITE" == quick || "$SUITE" == moby || "$SUITE" == all ]]; then
             dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-restore 2>&1 \
@@ -205,10 +237,12 @@ jobs:
             --repeats "$REPEATS"
             --corpus-dir "$corpus"
             --moby-path "$MOBY_PATH"
-            --core "$core"
-            --t0 "$t0"
+            --database "$PGDATABASE"
           )
-          [[ -z "${SCALE_WORKERS:-}" ]] || run_args+=(--scale-workers "$SCALE_WORKERS")
+          if [[ -n "$core" ]]; then
+            run_args+=(--core "$core" --t0 "$t0")
+          fi
+          [[ -z "$resolved_scale" ]] || run_args+=(--scale-workers "$resolved_scale")
           python3 scripts/benchmark_suite.py "${run_args[@]}" 2>&1 | tee "$out/suite.log"
 
       - name: Publish benchmark summary
