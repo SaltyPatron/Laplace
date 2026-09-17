@@ -60,25 +60,16 @@ internal static class IngestAdminEndpoints
             try
             {
                 var receipt = IngestProcessRunner.Stop(request.Pid);
-                if (!receipt.Found)
-                    return Results.NotFound(new JsonObject
-                    {
-                        ["object"] = "ingest.process.stop",
-                        ["pid"] = receipt.ProcessId,
-                        ["found"] = false,
-                        ["was_running"] = false,
-                        ["stop_requested"] = false,
-                        ["note"] = "This server no longer owns that process. It may have exited already or the server may have restarted.",
-                    });
-
                 return Results.Json(new JsonObject
                 {
                     ["object"] = "ingest.process.stop",
                     ["pid"] = receipt.ProcessId,
-                    ["found"] = true,
+                    ["found"] = receipt.Found,
                     ["was_running"] = receipt.WasRunning,
                     ["stop_requested"] = receipt.StopRequested,
-                    ["note"] = receipt.StopRequested
+                    ["note"] = !receipt.Found
+                        ? "This server no longer owns that process. It may have exited already or the server may have restarted."
+                        : receipt.StopRequested
                         ? "Stop requested for the CLI process tree. Refresh the canonical journal to observe final run state."
                         : "The owned CLI process had already exited.",
                 });
