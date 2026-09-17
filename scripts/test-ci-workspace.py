@@ -347,8 +347,8 @@ class IntegratedLifecycle(unittest.TestCase):
         finish = source.index("\n}\n", start) + 3
         owner = source[start:finish]
         names = ("check_deps", "run_build", "run_dev_tests", "run_install",
-                 "run_database_maintenance", "run_db_tests", "run_publish",
-                 "reconcile_installed_product", "run_live_tests", "run_competitive_model_proof")
+                 "run_database_maintenance", "run_db_tests", "run_competitive_model_proof",
+                 "run_publish", "reconcile_installed_product", "run_live_tests")
         with tempfile.TemporaryDirectory(prefix="laplace-lifecycle-order-") as directory:
             events = Path(directory) / "events"
             functions = []
@@ -367,22 +367,21 @@ class IntegratedLifecycle(unittest.TestCase):
     @staticmethod
     def expected_lifecycle():
         return ["check_deps", "run_build", "run_dev_tests", "run_install",
-                "run_database_maintenance:--prepare", "run_db_tests", "run_publish",
-                "reconcile_installed_product", "run_live_tests", "run_competitive_model_proof"]
+                "run_database_maintenance:--prepare", "run_db_tests", "run_competitive_model_proof",
+                "run_publish", "reconcile_installed_product", "run_live_tests"]
 
-    def test_failed_dev_controls_preserve_failure_after_complete_product_lifecycle(self):
+    def test_failed_dev_controls_block_installed_product_mutation(self):
         result, events = self.execute(23)
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
-        self.assertEqual(events, self.expected_lifecycle())
-        self.assertIn("development tests failed earlier (status 23)", result.stderr)
+        self.assertEqual(events, ["check_deps", "run_build", "run_dev_tests"])
 
     def test_build_and_runtime_failures_stop_before_later_phases(self):
         order = self.expected_lifecycle()
         for phase in ("run_build", "run_install", "run_database_maintenance", "run_db_tests",
-                      "run_publish", "reconcile_installed_product", "run_live_tests",
-                      "run_competitive_model_proof"):
+                      "run_competitive_model_proof", "run_publish",
+                      "reconcile_installed_product", "run_live_tests"):
             with self.subTest(phase=phase):
-                result, events = self.execute(23, phase)
+                result, events = self.execute(0, phase)
                 self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
                 index = next(i for i, event in enumerate(order)
                              if event.split(":", 1)[0] == phase)
@@ -396,6 +395,7 @@ class IntegratedLifecycle(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="laplace-dev-suite-order-") as directory:
             events = Path(directory) / "events"
             fixture = (
+                'require_built_revision() { :; }\n'
                 'bash() { printf "%s\\n" "$*" >> "$TEST_EVENTS"; '
                 'case "$*" in *native-dev) return 7;; *uci-dev) return 11;; '
                 '*) return 0;; esac; }\n')
