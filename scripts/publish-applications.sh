@@ -45,8 +45,14 @@ main() {
       managed reconcile
       managed activate
       sudo -n systemctl restart laplace-api
+
+      # Publication owns application bytes and process activation. Seeded knowledge
+      # readiness is verified only after the distinct foundation phase; requiring it
+      # here creates a circular dependency on data that has not been admitted yet.
+      local live_body=""
       for _ in $(seq 1 60); do
-        if curl -fsS http://127.0.0.1:5187/health/ready | grep -q '"ready":true'; then
+        if live_body="$(curl -fsS http://127.0.0.1:5187/health 2>/dev/null)" && \
+           grep -q '"status":"ok"' <<<"$live_body"; then
           managed commit
           trap - EXIT INT TERM HUP
           echo "application publish committed"
@@ -54,7 +60,8 @@ main() {
         fi
         sleep 1
       done
-      echo "::error::laplace-api did not become ready after publish" >&2
+      echo "::error::laplace-api process did not become live after publish" >&2
+      [[ -z "$live_body" ]] || echo "::error::last laplace-api liveness document: $live_body" >&2
       return 1
       ;;
     *)
