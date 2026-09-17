@@ -10,20 +10,23 @@ namespace Laplace.Ops;
 /// source names, defaults, argument validation and ingest semantics.
 ///
 /// Processes started by this host are retained only while they are alive so the
-/// operator surface can stop the actual CLI process rather than merely rewriting
-/// a journal receipt. We intentionally never attach to arbitrary PIDs: that avoids
-/// PID-reuse races and keeps process control scoped to children this host started.
+/// operator surface can recover them after navigation/reload and stop the actual CLI
+/// process rather than merely rewriting a journal receipt. We intentionally never
+/// attach to arbitrary PIDs: that avoids PID-reuse races and keeps process control
+/// scoped to children this host started.
 /// </summary>
 public static class IngestProcessRunner
 {
-    private static readonly ConcurrentDictionary<int, Process> OwnedProcesses = new();
+    private sealed record OwnedProcess(Process Process, StartReceipt Receipt);
+    private static readonly ConcurrentDictionary<int, OwnedProcess> OwnedProcesses = new();
 
     public sealed record StartReceipt(
         int ProcessId,
         string Source,
         string? Path,
         string CliPath,
-        IReadOnlyList<string> Arguments);
+        IReadOnlyList<string> Arguments,
+        DateTimeOffset StartedAt);
 
     public sealed record StopReceipt(
         int ProcessId,
@@ -72,12 +75,15 @@ public static class IngestProcessRunner
         var process = Process.Start(start)
             ?? throw new InvalidOperationException("Laplace.Cli ingest process did not start.");
         var pid = process.Id;
+        var receipt = new StartReceipt(pid, source, path, cliPath, args, DateTimeOffset.UtcNow);
         process.EnableRaisingEvents = true;
         process.Exited += (_, _) => ReleaseOwnedProcess(pid);
 
-        if (!OwnedProcesses.TryAdd(pid, process))
+        if (!OwnedProcesses.TryAdd(pid, new OwnedProcess(process, receipt)))
         {
-            process.Dispose();
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            finally { process.Dispose(); }
             throw new InvalidOperationException($"Ingest process {pid} could not be registered for operator control.");
         }
 
@@ -91,7 +97,34 @@ public static class IngestProcessRunner
         catch (InvalidOperationException) { }
         catch (ObjectDisposedException) { }
 
-        return new StartReceipt(pid, source, path, cliPath, args);
+        return receipt;
+    }
+
+    public static IReadOnlyList<StartReceipt> ActiveProcesses()
+    {
+        var active = new List<StartReceipt>();
+        foreach (var pair in OwnedProcesses.ToArray())
+        {
+            try
+            {
+                if (pair.Value.Process.HasExited)
+                {
+                    ReleaseOwnedProcess(pair.Key);
+                    continue;
+                }
+                active.Add(pair.Value.Receipt);
+            }
+            catch (InvalidOperationException)
+            {
+                ReleaseOwnedProcess(pair.Key);
+            }
+            catch (ObjectDisposedException)
+            {
+                ReleaseOwnedProcess(pair.Key);
+            }
+        }
+        active.Sort(static (left, right) => right.StartedAt.CompareTo(left.StartedAt));
+        return active;
     }
 
     public static StopReceipt Stop(int processId)
@@ -99,9 +132,10 @@ public static class IngestProcessRunner
         if (processId <= 0)
             throw new ArgumentOutOfRangeException(nameof(processId), "Process id must be positive.");
 
-        if (!OwnedProcesses.TryRemove(processId, out var process))
+        if (!OwnedProcesses.TryRemove(processId, out var owned))
             return new StopReceipt(processId, Found: false, WasRunning: false, StopRequested: false);
 
+        var process = owned.Process;
         try
         {
             if (process.HasExited)
@@ -124,8 +158,8 @@ public static class IngestProcessRunner
 
     private static void ReleaseOwnedProcess(int processId)
     {
-        if (OwnedProcesses.TryRemove(processId, out var process))
-            process.Dispose();
+        if (OwnedProcesses.TryRemove(processId, out var owned))
+            owned.Process.Dispose();
     }
 
     public static string? ResolveCliBinary()
