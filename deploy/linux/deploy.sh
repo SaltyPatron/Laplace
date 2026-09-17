@@ -304,9 +304,7 @@ release_name="$(basename "$release")"
 ln -s "releases/$release_name/uci/laplace-uci" "$STAGE/laplace-uci"
 ln -s "releases/$release_name/mcp/Laplace.Endpoints.Mcp" "$STAGE/laplace-mcp"
 ln -s "releases/$release_name/lichess/Laplace.Endpoints.Lichess" "$STAGE/laplace-lichess"
-mkdir "$STAGE/managed-services"
-cp "$REPO_ROOT/deploy/linux/managed-services/"*.service "$STAGE/managed-services/"
-cp "$REPO_ROOT/deploy/linux/laplace-managed-deploy" "$STAGE/managed-services/"
+python3 "$REPO_ROOT/scripts/managed-policy.py" --root "$REPO_ROOT" --stage "$STAGE/managed-services"
 
 python3 "$REPO_ROOT/scripts/check-uci-runtime.py" "$release/uci/laplace-uci"
 

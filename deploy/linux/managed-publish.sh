@@ -12,19 +12,7 @@ BACKUP_ROOT=/opt/laplace/app-backups
 source "$ROOT/deploy/linux/payload-sync.sh"
 
 installed_policy() {
-  local name installed
-  for name in laplace-managed-deploy laplace-service-control; do
-    installed="${HELPER%/*}/$name"
-    if [[ ! -f "$installed" || -L "$installed" ]] \
-       || [[ "$(stat -c '%u:%a' -- "$installed")" != "$TRUSTED_POLICY_UID:755" ]]; then
-      echo "::error::managed policy must be a regular root-owned mode-0755 file: $installed" >&2
-      return 1
-    fi
-    cmp -s "$ROOT/deploy/linux/$name" "$installed" || {
-      echo "::error::managed root policy version differs; update through sudo bash scripts/setup-host.sh managed-services" >&2
-      return 1
-    }
-  done
+  python3 "$ROOT/scripts/managed-policy.py" --root "$ROOT"
 }
 
 prepare_policy() {
