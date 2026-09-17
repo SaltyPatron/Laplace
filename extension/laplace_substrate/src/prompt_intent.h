@@ -10,6 +10,7 @@
 #include "laplace/core/relation_law.h"
 #include "prompt_input.h"
 #include "prompt_structure.h"
+#include "trajectory_continuations.h"
 #include "observation_read.h"
 #include "consensus_scan.h"
 #include "laplace/core/attestation_engine.h"
@@ -61,6 +62,11 @@ typedef struct LaplacePromptIntent
     bool explicit_invocation;
     bool budget_exhausted;
     LaplacePromptStructure *structure;
+    /* Exact physicality responses are retained as their own typed plane. They
+     * may ground prompt-relative bindings without being rewritten as testimony. */
+    LaplaceStructuralCandidate *structural;
+    int structural_count;
+    ArrayType *structural_frontier;
 } LaplacePromptIntent;
 
 /* A hard relation scope differs from the optional output projection: NULL
@@ -183,7 +189,8 @@ laplace_prompt_binding_table(const char *name, MemoryContext owner)
 
 static inline LaplacePromptIntent
 laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner,
-                            ArrayType *relation_types, int fanout)
+                            ArrayType *relation_types, int fanout,
+                            LaplaceTrajectoryScope *trajectory_scope)
 {
     LaplacePromptIntent result = {0};
     Datum *values, *nodes;
@@ -202,6 +209,15 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
                       &nodes, &node_nulls, &node_count);
     if (count != node_count)
         elog(ERROR, "prompt intent: occurrence projections disagree");
+
+    /* The whole admitted observation is an exact source too. Give its root the
+     * complete current occurrence provenance before any structural response is
+     * admitted, rather than reconstructing that ancestry after ORIENT. */
+    bool root_found;
+    LaplacePromptIntentBinding *root_binding =
+        hash_search(result.bindings, &input->root, HASH_ENTER, &root_found);
+    if (!root_found) root_binding->origins = NULL;
+
     for (int i = 0; i < count; ++i)
     {
         LaplacePromptIntentBinding *entry;
@@ -216,7 +232,100 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
         entry = hash_search(result.bindings, &id, HASH_ENTER, &found);
         if (!found) entry->origins = NULL;
         entry->origins = bms_add_member(entry->origins, i);
+        root_binding->origins = bms_add_member(root_binding->origins, i);
     }
+
+    /* Physicality participates in COUPLE before ORIENT. The native scope is the
+     * same one later used for ordered continuation, so containment, membership,
+     * predecessor/successor and co-occurrence are not a second semantic engine.
+     * Stage one structural round from the exact root/current occurrences, retain
+     * the typed crossings separately, then expose only newly reached identities
+     * as a semantic query frontier. No structural fact is synthesized as a
+     * testimony relation. */
+    result.structural_frontier = construct_empty_array(BYTEAOID);
+    if (trajectory_scope)
+    {
+        Datum root_value = hash128_to_datum(&input->root);
+        Datum *source_values = palloc(sizeof(Datum) * Max(count + 1, 1));
+        int source_count = 0;
+        source_values[source_count++] = root_value;
+        for (int i = 0; i < count; ++i)
+            if (!nulls[i]) source_values[source_count++] = values[i];
+        ArrayType *sources = construct_array(source_values, source_count,
+                                             BYTEAOID, -1, false, TYPALIGN_INT);
+        pfree(source_values);
+        pfree(DatumGetPointer(root_value));
+
+        const uint32 structural_mask = LAPLACE_STRUCTURAL_CONTAINER |
+                                       LAPLACE_STRUCTURAL_CONSTITUENT |
+                                       LAPLACE_STRUCTURAL_PREDECESSOR |
+                                       LAPLACE_STRUCTURAL_SUCCESSOR |
+                                       LAPLACE_STRUCTURAL_COOCCUR;
+        result.structural = laplace_trajectory_structural_candidates(
+            trajectory_scope, sources, structural_mask, &result.structural_count);
+        pfree(sources);
+
+        /* fanout is a per-source/per-plane envelope. Read the complete native
+         * structural response first; if the declared envelope cannot contain it,
+         * mark the orientation resource-bounded instead of compiling a retained
+         * prefix as if it were the whole observation. */
+        uint64 structural_limit = 0;
+        if (fanout > 0)
+        {
+            uint64 per_source = (uint64) fanout * 5u;
+            structural_limit = ~(uint64) 0;
+            if (per_source != 0 &&
+                (uint64) source_count <= (~(uint64) 0) / per_source)
+                structural_limit = (uint64) source_count * per_source;
+        }
+        if ((uint64) result.structural_count > structural_limit)
+            result.budget_exhausted = true;
+        else if (result.structural_count > 0)
+        {
+            HTAB *pending = laplace_prompt_binding_table(
+                "prompt physicality pending bindings", owner);
+            for (int i = 0; i < result.structural_count; ++i)
+            {
+                const LaplaceStructuralCandidate *crossing = &result.structural[i];
+                LaplacePromptIntentBinding *source =
+                    hash_search(result.bindings, &crossing->source, HASH_FIND, NULL);
+                if (!source || !source->origins) continue;
+                bool found;
+                LaplacePromptIntentBinding *target =
+                    hash_search(pending, &crossing->id, HASH_ENTER, &found);
+                if (!found) target->origins = NULL;
+                target->origins = bms_add_members(target->origins, source->origins);
+            }
+
+            HASH_SEQ_STATUS sequence;
+            LaplacePromptIntentBinding *entry;
+            ArrayBuildState *frontier = NULL;
+            hash_seq_init(&sequence, pending);
+            while ((entry = hash_seq_search(&sequence)) != NULL)
+            {
+                bool found;
+                LaplacePromptIntentBinding *target =
+                    hash_search(result.bindings, &entry->id, HASH_ENTER, &found);
+                if (!found)
+                {
+                    target->origins = NULL;
+                    Datum id = hash128_to_datum(&entry->id);
+                    frontier = accumArrayResult(frontier, id, false, BYTEAOID, owner);
+                    pfree(DatumGetPointer(id));
+                }
+                target->origins = bms_add_members(target->origins, entry->origins);
+                bms_free(entry->origins);
+            }
+            hash_destroy(pending);
+            if (frontier)
+            {
+                pfree(result.structural_frontier);
+                result.structural_frontier =
+                    DatumGetArrayTypeP(makeArrayResult(frontier, owner));
+            }
+        }
+    }
+
     if (count > 0) { pfree(values); pfree(nulls); }
     if (node_count > 0) { pfree(nodes); pfree(node_nulls); }
     MemoryContextSwitchTo(previous);
