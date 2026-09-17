@@ -1,0 +1,100 @@
+name: Repair canonical RLE materialization
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/rle-materialization-repair.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Preserve logical trajectories with RLE
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('engine/core/src/physicality_descriptor_admission.cpp')
+          source = source_path.read_text()
+          old = '''        require(trajectory_build(output_children.data() + node.first_child, node.child_count, packed.data()) == 0);
+                  stage_require(intent_stage_add_entity(stage.get(), &node.geometry.id, 4, &document_type, &generated_source) == 0 &&
+                      intent_stage_add_physicality(stage.get(), &placement, &node.geometry.id, node.type,
+                          node.geometry.coord.data(), &node.geometry.hilbert, packed.data(),
+                          static_cast<uint32_t>(node.child_count), static_cast<int32_t>(node.child_count),
+                          1, 0.0, 1, 0, generated_at) == 0);'''
+          new = '''        size_t stored_vertices = 0;
+                  require(trajectory_build_rle(output_children.data() + node.first_child,
+                      node.child_count, packed.data(), &stored_vertices) == 0);
+                  require(stored_vertices <= UINT32_MAX, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
+                  stage_require(intent_stage_add_entity(stage.get(), &node.geometry.id, 4, &document_type, &generated_source) == 0 &&
+                      intent_stage_add_physicality(stage.get(), &placement, &node.geometry.id, node.type,
+                          node.geometry.coord.data(), &node.geometry.hilbert, packed.data(),
+                          static_cast<uint32_t>(stored_vertices), static_cast<int32_t>(node.child_count),
+                          1, 0.0, 1, 0, generated_at) == 0);'''
+          if source.count(old) != 1:
+              raise SystemExit(f'RLE serialization owner match count={source.count(old)}')
+          source_path.write_text(source.replace(old, new, 1))
+
+          test_path = Path('engine/core/tests/test_physicality_descriptor_retention.cpp')
+          tests = test_path.read_text()
+          marker = '''TEST_F(PhysicalityDescriptorRetention, OpaqueReferencesUseRealTypedLiteralGeometryWithoutReplacingChildren) {'''
+          if tests.count(marker) != 1:
+              raise SystemExit(f'test insertion marker count={tests.count(marker)}')
+          regression = r'''TEST_F(PhysicalityDescriptorRetention, MaterializedDescriptorsStoreRunsWithoutLosingLogicalConstituents) {
+              const auto child = compose({atom('r'), atom('s')});
+              const auto parent = compose({child, child, child, child});
+              auto source = stage({parent});
+              auto captured = capture(source.get());
+              Result result(nullptr, physicality_descriptor_materialization_free);
+              ASSERT_EQ(run(captured, {}, {child.value.entity_id}, result), PHYSICALITY_DESCRIPTOR_OK);
+
+              Stage generated(physicality_descriptor_materialization_take_stage(result.get()), intent_stage_free);
+              ASSERT_NE(generated, nullptr);
+              auto retained = capture(generated.get());
+              ASSERT_NE(retained, nullptr);
+
+              size_t count = 0;
+              const auto* bodies = physicality_descriptor_capture_inputs(retained.get(), &count);
+              ASSERT_GT(count, 0u);
+              bool saw_compressed_run = false;
+              for (size_t i = 0; i < count; ++i) {
+                  const auto& body = bodies[i];
+                  if (body.n_constituents <= 0) continue;
+                  size_t logical = 0;
+                  ASSERT_EQ(trajectory_constituent_count(
+                      body.trajectory_xyzm, body.trajectory_vertices, &logical), 0);
+                  EXPECT_EQ(logical, static_cast<size_t>(body.n_constituents));
+                  if (body.trajectory_vertices < static_cast<size_t>(body.n_constituents))
+                      saw_compressed_run = true;
+              }
+              EXPECT_TRUE(saw_compressed_run)
+                  << "descriptor materialization must preserve repeated logical children as RLE";
+          }
+
+          '''
+          test_path.write_text(tests.replace(marker, regression + marker, 1))
+          PY
+          git diff --check
+          grep -n "trajectory_build_rle(output_children" engine/core/src/physicality_descriptor_admission.cpp
+          grep -n "MaterializedDescriptorsStoreRunsWithoutLosingLogicalConstituents" engine/core/tests/test_physicality_descriptor_retention.cpp
+      - name: Commit repair and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Laplace CI repair"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/rle-materialization-repair.yml
+          git add engine/core/src/physicality_descriptor_admission.cpp \
+                  engine/core/tests/test_physicality_descriptor_retention.cpp
+          git commit -m "fix: preserve descriptor trajectories with RLE"
+          git pull --rebase origin main
+          git push origin HEAD:main
