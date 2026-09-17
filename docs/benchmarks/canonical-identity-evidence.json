@@ -2044,47 +2044,6 @@
     }
   },
   "next2000": {
-    "cache_receipt_sha256": "e4a7299e25f6ff32ac4bd0949d4656314de74d52cfd21dc29c3e5dcd0414ad39",
-    "deadline_seconds": 3600,
-    "expected_games": 2000,
-    "job": 105208217219,
-    "owner_blob": "f870aa941a9f58a373d809dfc30456480b773f15",
-    "record_phase_started_utc": "2026-09-17T12:48:22Z",
-    "recorded_rate": 0.5961239726659999,
-    "run": 35223192542,
-    "runtime_before_sha256": "fc4d6e3a59b48b41b0bc2146fe3da0a1d12617b3bde465f29c41c40bd16d996f",
-    "scope": "ordinary full original PGN selection; novel complete games exclude first140; exact readback and zero-write replay required; preparation retained separately",
-    "source": "ea9f60a1c2bac9fcc36491a6f26403d95c2b8359",
-    "status": "completed",
-    "qualified_window": true,
-    "target_attainment": false,
-    "recording": {
-      "bytes": 2541,
-      "path": "/build/laplace/recovery/canonical-next2000/35223192542-1/recording/receipt.json",
-      "sha256": "6996f17667612ba5157a290616b50d56be349a4fbd8b8d960396ad06c0422012"
-    },
-    "capacity_receipt": {
-      "bytes": 109779,
-      "path": "/build/laplace/recovery/canonical-next2000/35223192542-1/recording/measurement/corpus-recording.json",
-      "sha256": "6ebd269f6fb12aa89a3d7a2f67d3ebaeeeeb805ce8b5b4c3e0e26db86cb44ae0"
-    },
-    "root_receipt": {
-      "bytes": 116329,
-      "path": "/build/laplace/recovery/canonical-next2000/35223192542-1/receipt.json",
-      "sha256": "7bfb9ac3e021c5c0d4b0644da2ca45bbfd720d3a17a94ce70b8b0301658e19ff"
-    },
-    "artifact": {
-      "id": 10500925768,
-      "bytes": 27057496,
-      "sha256": "dd223da16b6172d440ed10978a9356771ae34bc19d4259ee7385077a988f545f"
-    },
-    "reader": {
-      "run": 35229354961,
-      "job": 105229070029,
-      "artifact": 10500511557,
-      "sha256": "cf7f110f32c61342a78a80d1a5c79f1996a650acb825612d34c394bff52c2488"
-    },
-    "finished_utc": "2026-09-17T13:46:10Z",
     "actual_summary": {
       "alreadyPresentGames": 0,
       "configuration": {
@@ -2642,466 +2601,17 @@
       "timingScope": "One contiguous warmed admission window: original source reading/framing, native parsing/normalization, ordinary shared composition and writer, synchronous WAL acknowledgement, complete exact native readback, per-chunk evidence and final exact scope manifest. Source selection/bootstrap occur before it; exact replay follows separately.",
       "workload": "Authentic unchanged complete source games including human resignations and agreed draws; no engine-generation throughput, invented occurrence headers or replay counted as novel. Prepared source/identity caches are warm."
     },
-    "derived_analysis": {
-      "EPA": 12038569,
-      "EPApergame": 6019.2845,
-      "avgPlies": 71.5125,
-      "consensusPct": 74.97945717073432,
-      "dropped": 6508,
-      "durability": {
-        "fsync": true,
-        "fullPageWrites": true,
-        "localWalFlushAcknowledged": true,
-        "synchronousCommit": "on",
-        "writeCommitAcknowledged": true
-      },
-      "formula": 0.5961239726659999,
-      "freshRate": 0.5961239726659999,
-      "namedSum": 2984.4208046999993,
-      "oldAvgPlies": 75.32857142857142,
-      "perGameComparison": {
-        "connection-and-apply-lock": {
-          "first140": 0.00009759428571428571,
-          "next2000": 0.00006894375000000003,
-          "ratio": 0.7064322413490255
-        },
-        "consensus-acceptance-participant": {
-          "first140": 0.0919986535714286,
-          "next2000": 1.2577829546999997,
-          "ratio": 13.671753942827495
-        },
-        "control-transaction-commit": {
-          "first140": 0.0011532207142857143,
-          "next2000": 0.0007326744499999997,
-          "ratio": 0.6353289018518941
-        },
-        "copy-and-copy-transaction-commits": {
-          "first140": 0.06583810000000001,
-          "next2000": 0.05655077789999998,
-          "ratio": 0.8589369665892541
-        },
-        "copy-survivor-selection": {
-          "first140": 0.0026044092857142854,
-          "next2000": 0.00126251115,
-          "ratio": 0.4847591186704526
-        },
-        "managed-staging": {
-          "first140": 0.0012141028571428572,
-          "next2000": 0.0005948270000000004,
-          "ratio": 0.48993130730274703
-        },
-        "native-tuples-and-merge-preparation": {
-          "first140": 0.005633255714285713,
-          "next2000": 0.0044391665,
-          "ratio": 0.788028579768259
-        },
-        "physicality-capture": {
-          "first140": 0.003216535,
-          "next2000": 0.0023282641499999986,
-          "ratio": 0.723842317897986
-        },
-        "physicality-provider-admission": {
-          "first140": 0.10272936785714286,
-          "next2000": 0.1010723615,
-          "ratio": 0.9838701785895624
-        },
-        "presence-verification": {
-          "first140": 0.024373852142857137,
-          "next2000": 0.06737792125000001,
-          "ratio": 2.7643525879738875
-        }
-      },
-      "phaseSeconds": {
-        "connection-and-apply-lock": 0.13788750000000005,
-        "consensus-acceptance-participant": 2515.5659093999993,
-        "control-transaction-commit": 1.4653488999999995,
-        "copy-and-copy-transaction-commits": 113.10155579999996,
-        "copy-survivor-selection": 2.5250223000000003,
-        "managed-staging": 1.1896540000000007,
-        "native-tuples-and-merge-preparation": 8.878333,
-        "physicality-capture": 4.656528299999997,
-        "physicality-provider-admission": 202.144723,
-        "presence-verification": 134.75584250000003
-      },
-      "providerPct": 6.025165766411407,
-      "readbackOperations": {
-        "operations": [
-          {
-            "interruptedCalls": 0,
-            "operation": "ExactWitnessBodies",
-            "returnedCalls": 237,
-            "totalSeconds": 2.001610142
-          },
-          {
-            "interruptedCalls": 0,
-            "operation": "CanonicalCarrierVertices",
-            "returnedCalls": 237,
-            "totalSeconds": 0.852670661
-          },
-          {
-            "interruptedCalls": 0,
-            "operation": "HydrationAndLegalReplay",
-            "returnedCalls": 237,
-            "totalSeconds": 27.166610682
-          },
-          {
-            "interruptedCalls": 0,
-            "operation": "ResultAndReceiptText",
-            "returnedCalls": 237,
-            "totalSeconds": 1.807388091
-          }
-        ],
-        "scope": "Nested wall-clock windows for the four existing exact-readback operations, including interrupted calls. HydrationAndLegalReplay includes database reads, native decoding and managed legal replay. These are not pure database or CPU times, and are already included in ExactReadback and elapsedSeconds.readback. Returning does not establish successful validation or durable-game acceptance."
-      },
-      "seconds": 3355.0068303,
-      "tail": [
-        {
-          "ms": 819.3286,
-          "phase": "presence-verification",
-          "t": 3249.9489139
-        },
-        {
-          "ms": 10.2553,
-          "phase": "copy-survivor-selection",
-          "t": 3249.9591769
-        },
-        {
-          "ms": 543.3383,
-          "phase": "copy-and-copy-transaction-commits",
-          "t": 3250.502529
-        },
-        {
-          "ms": 24640.1698,
-          "phase": "consensus-acceptance-participant",
-          "t": 3276.4498659
-        },
-        {
-          "ms": 9.3289,
-          "phase": "control-transaction-commit",
-          "t": 3276.4598394
-        },
-        {
-          "ms": 3.689,
-          "phase": "managed-staging",
-          "t": 3277.0864344
-        },
-        {
-          "ms": 21.5659,
-          "phase": "physicality-capture",
-          "t": 3277.1158579
-        },
-        {
-          "ms": 0.5225,
-          "phase": "connection-and-apply-lock",
-          "t": 3277.1164041
-        },
-        {
-          "ms": 1086.1195,
-          "phase": "physicality-provider-admission",
-          "t": 3278.2025443
-        },
-        {
-          "ms": 50.4581,
-          "phase": "native-tuples-and-merge-preparation",
-          "t": 3278.3100559
-        },
-        {
-          "ms": 795.4494,
-          "phase": "presence-verification",
-          "t": 3279.1078177
-        },
-        {
-          "ms": 11.3565,
-          "phase": "copy-survivor-selection",
-          "t": 3279.119182
-        },
-        {
-          "ms": 537.8571,
-          "phase": "copy-and-copy-transaction-commits",
-          "t": 3279.6570531
-        },
-        {
-          "ms": 22296.7906,
-          "phase": "consensus-acceptance-participant",
-          "t": 3303.2192149
-        },
-        {
-          "ms": 8.4469,
-          "phase": "control-transaction-commit",
-          "t": 3303.2283691
-        },
-        {
-          "ms": 4.362,
-          "phase": "managed-staging",
-          "t": 3303.8898131
-        },
-        {
-          "ms": 16.758,
-          "phase": "physicality-capture",
-          "t": 3303.9119273
-        },
-        {
-          "ms": 0.3521,
-          "phase": "connection-and-apply-lock",
-          "t": 3303.9122927
-        },
-        {
-          "ms": 993.4483,
-          "phase": "physicality-provider-admission",
-          "t": 3304.9057513
-        },
-        {
-          "ms": 29.0682,
-          "phase": "native-tuples-and-merge-preparation",
-          "t": 3304.9802928
-        },
-        {
-          "ms": 806.5092,
-          "phase": "presence-verification",
-          "t": 3305.7884128
-        },
-        {
-          "ms": 9.3182,
-          "phase": "copy-survivor-selection",
-          "t": 3305.7977384
-        },
-        {
-          "ms": 495.7639,
-          "phase": "copy-and-copy-transaction-commits",
-          "t": 3306.2935137
-        },
-        {
-          "ms": 23080.3776,
-          "phase": "consensus-acceptance-participant",
-          "t": 3330.5460327
-        },
-        {
-          "ms": 6.3024,
-          "phase": "control-transaction-commit",
-          "t": 3330.5530023
-        },
-        {
-          "ms": 4.197,
-          "phase": "managed-staging",
-          "t": 3330.8959947
-        },
-        {
-          "ms": 15.5896,
-          "phase": "physicality-capture",
-          "t": 3330.9225648
-        },
-        {
-          "ms": 0.4061,
-          "phase": "connection-and-apply-lock",
-          "t": 3330.9229897
-        },
-        {
-          "ms": 665.6411,
-          "phase": "physicality-provider-admission",
-          "t": 3331.5886504
-        },
-        {
-          "ms": 28.7814,
-          "phase": "native-tuples-and-merge-preparation",
-          "t": 3331.647807
-        },
-        {
-          "ms": 704.7793,
-          "phase": "presence-verification",
-          "t": 3332.354632
-        },
-        {
-          "ms": 12.5089,
-          "phase": "copy-survivor-selection",
-          "t": 3332.3671573
-        },
-        {
-          "ms": 343.4811,
-          "phase": "copy-and-copy-transaction-commits",
-          "t": 3332.7106542
-        },
-        {
-          "ms": 9162.6143,
-          "phase": "consensus-acceptance-participant",
-          "t": 3342.5763964
-        },
-        {
-          "ms": 7.5828,
-          "phase": "control-transaction-commit",
-          "t": 3342.5846106
-        },
-        {
-          "ms": 2.4709,
-          "phase": "managed-staging",
-          "t": 3343.0672373
-        },
-        {
-          "ms": 8.57,
-          "phase": "physicality-capture",
-          "t": 3343.0790376
-        },
-        {
-          "ms": 0.5089,
-          "phase": "connection-and-apply-lock",
-          "t": 3343.0795594
-        },
-        {
-          "ms": 500.1026,
-          "phase": "physicality-provider-admission",
-          "t": 3343.5796812
-        },
-        {
-          "ms": 21.7129,
-          "phase": "native-tuples-and-merge-preparation",
-          "t": 3343.6257077
-        },
-        {
-          "ms": 666.0823,
-          "phase": "presence-verification",
-          "t": 3344.2937153
-        },
-        {
-          "ms": 8.2027,
-          "phase": "copy-survivor-selection",
-          "t": 3344.3019317
-        },
-        {
-          "ms": 192.7338,
-          "phase": "copy-and-copy-transaction-commits",
-          "t": 3344.4946824
-        },
-        {
-          "ms": 6989.5976,
-          "phase": "consensus-acceptance-participant",
-          "t": 3352.0010984
-        },
-        {
-          "ms": 3.8595,
-          "phase": "control-transaction-commit",
-          "t": 3352.0055633
-        }
-      ],
-      "writerPct": 96.90531574653409,
-      "writerResidual": 266.7591575200008
+    "artifact": {
+      "bytes": 27057496,
+      "id": 10500925768,
+      "sha256": "dd223da16b6172d440ed10978a9356771ae34bc19d4259ee7385077a988f545f"
     },
-    "file_identities": [
-      {
-        "bytes": 86775,
-        "path": "machine-after-recording.json",
-        "sha256": "0696f48b501e5f3de44459f2e37f41010082daa02bedb0d577d18bb25e4b1f9c"
-      },
-      {
-        "bytes": 85769,
-        "path": "machine-before-recording.json",
-        "sha256": "9819b4b9ce9cb9f5cb2992af81414144e2366487d62634c6f1fd102d1959262b"
-      },
-      {
-        "bytes": 3651,
-        "path": "publication-after.json",
-        "sha256": "97d4fcca107aa1ca9584957bd7120dd4da42754677e7cc3c57656490ca6b421b"
-      },
-      {
-        "bytes": 3651,
-        "path": "publication-before.json",
-        "sha256": "97d4fcca107aa1ca9584957bd7120dd4da42754677e7cc3c57656490ca6b421b"
-      },
-      {
-        "bytes": 116329,
-        "path": "receipt.json",
-        "sha256": "7bfb9ac3e021c5c0d4b0644da2ca45bbfd720d3a17a94ce70b8b0301658e19ff"
-      },
-      {
-        "bytes": 213922,
-        "path": "recording/measurement.log",
-        "sha256": "bdbb1879479038dec9fb26e62b74cf80ff2571ac5a945b495eb70390619550c8"
-      },
-      {
-        "bytes": 109779,
-        "path": "recording/measurement/corpus-recording.json",
-        "sha256": "6ebd269f6fb12aa89a3d7a2f67d3ebaeeeeb805ce8b5b4c3e0e26db86cb44ae0"
-      },
-      {
-        "bytes": 139399,
-        "path": "recording/measurement/fresh/chunks.jsonl",
-        "sha256": "5910daa483fb651aa6ca4c48a476e180ac0300cf0adb7549c5c6fab2915ac5e4"
-      },
-      {
-        "bytes": 87541,
-        "path": "recording/measurement/fresh/recording.json",
-        "sha256": "43a7be9f0f7898a1829afd3219aaa15ba860b957ab501afe447e9f6de21dbe23"
-      },
-      {
-        "bytes": 141263,
-        "path": "recording/measurement/replay-01/chunks.jsonl",
-        "sha256": "e3378b0ba5c8d44924949528a68e12525c6b6686c07a8b5b4355b87c60a51541"
-      },
-      {
-        "bytes": 9427,
-        "path": "recording/measurement/replay-01/recording.json",
-        "sha256": "9f421817b1bc94b41dd18823956b8224a80938183f576c0d44c7863d36cb6039"
-      },
-      {
-        "bytes": 2541,
-        "path": "recording/receipt.json",
-        "sha256": "6996f17667612ba5157a290616b50d56be349a4fbd8b8d960396ad06c0422012"
-      }
-    ],
-    "machine_snapshots": [
-      {
-        "path": "machine-before-recording.json",
-        "value": {
-          "affinity": [
-            0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11
-          ],
-          "loadavg": "0.11 0.52 1.11 2/1046 1880474\n",
-          "logicalProcessors": 12,
-          "meminfo": "MemTotal:       131799164 kB\nMemFree:        55703916 kB\nMemAvailable:   83567660 kB\nBuffers:            1528 kB\nCached:         29857696 kB\nSwapCached:       578020 kB\nActive:         23237020 kB\nInactive:       17089876 kB\nActive(anon):    6852020 kB\nInactive(anon):  4871176 kB\nActive(file):   16385000 kB\nInactive(file): 12218700 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12351204 kB\nDirty:               612 kB\nWriteback:             0 kB\nAnonPages:       9968920 kB\nMapped:          1795140 kB\nShmem:           1255524 kB\nKReclaimable:     612712 kB\nSlab:             882088 kB\nSReclaimable:     612712 kB\nSUnreclaim:       269376 kB\nKernelStack:       16912 kB\nPageTables:        58316 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23197216 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      197088 kB\nVmallocChunk:          0 kB\nPercpu:            15040 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:    16172\nHugePages_Rsvd:    16032\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
-          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.05 total=11030798822\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
-          "pressure/io": "some avg10=2.85 avg60=1.09 avg300=1.02 total=40834337309\nfull avg10=2.73 avg60=1.06 avg300=0.97 total=39030603651\n",
-          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605064891\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2514773534\n",
-          "scope": "Observed host load/resources; no idle-machine or process-isolation inference",
-          "utc": "2026-09-17T12:48:25Z"
-        }
-      },
-      {
-        "path": "machine-after-recording.json",
-        "value": {
-          "affinity": [
-            0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11
-          ],
-          "loadavg": "1.13 1.24 1.31 3/1045 1885884\n",
-          "logicalProcessors": 12,
-          "meminfo": "MemTotal:       131799164 kB\nMemFree:        46441588 kB\nMemAvailable:   83462192 kB\nBuffers:            1528 kB\nCached:         39016708 kB\nSwapCached:       565784 kB\nActive:         23962632 kB\nInactive:       25632060 kB\nActive(anon):    6852176 kB\nInactive(anon):  4981688 kB\nActive(file):   17110456 kB\nInactive(file): 20650372 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12456932 kB\nDirty:             11408 kB\nWriteback:             0 kB\nAnonPages:      10091192 kB\nMapped:          1802440 kB\nShmem:           1257420 kB\nKReclaimable:     612444 kB\nSlab:             883708 kB\nSReclaimable:     612444 kB\nSUnreclaim:       271264 kB\nKernelStack:       16896 kB\nPageTables:        58468 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23156892 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      197040 kB\nVmallocChunk:          0 kB\nPercpu:            15040 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:    10458\nHugePages_Rsvd:    10318\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
-          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=11032699947\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
-          "pressure/io": "some avg10=1.04 avg60=0.36 avg300=0.35 total=40849905266\nfull avg10=1.04 avg60=0.35 avg300=0.34 total=39045335209\n",
-          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605089397\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2514797929\n",
-          "scope": "Observed host load/resources; no idle-machine or process-isolation inference",
-          "utc": "2026-09-17T13:46:07Z"
-        }
-      }
-    ],
+    "cache_receipt_sha256": "e4a7299e25f6ff32ac4bd0949d4656314de74d52cfd21dc29c3e5dcd0414ad39",
+    "capacity_receipt": {
+      "bytes": 109779,
+      "path": "/build/laplace/recovery/canonical-next2000/35223192542-1/recording/measurement/corpus-recording.json",
+      "sha256": "6ebd269f6fb12aa89a3d7a2f67d3ebaeeeeb805ce8b5b4c3e0e26db86cb44ae0"
+    },
     "chunks": [
       {
         "firstSelectedGame": 0,
@@ -4763,9 +4273,499 @@
         "plies": 228
       }
     ],
+    "deadline_seconds": 3600,
+    "derived_analysis": {
+      "EPA": 12038569,
+      "EPApergame": 6019.2845,
+      "avgPlies": 71.5125,
+      "consensusPct": 74.97945717073432,
+      "dropped": 6508,
+      "durability": {
+        "fsync": true,
+        "fullPageWrites": true,
+        "localWalFlushAcknowledged": true,
+        "synchronousCommit": "on",
+        "writeCommitAcknowledged": true
+      },
+      "formula": 0.5961239726659999,
+      "freshRate": 0.5961239726659999,
+      "namedSum": 2984.4208046999993,
+      "oldAvgPlies": 75.32857142857142,
+      "perGameComparison": {
+        "connection-and-apply-lock": {
+          "first140": 0.00009759428571428571,
+          "next2000": 0.00006894375000000003,
+          "ratio": 0.7064322413490255
+        },
+        "consensus-acceptance-participant": {
+          "first140": 0.0919986535714286,
+          "next2000": 1.2577829546999997,
+          "ratio": 13.671753942827495
+        },
+        "control-transaction-commit": {
+          "first140": 0.0011532207142857143,
+          "next2000": 0.0007326744499999997,
+          "ratio": 0.6353289018518941
+        },
+        "copy-and-copy-transaction-commits": {
+          "first140": 0.06583810000000001,
+          "next2000": 0.05655077789999998,
+          "ratio": 0.8589369665892541
+        },
+        "copy-survivor-selection": {
+          "first140": 0.0026044092857142854,
+          "next2000": 0.00126251115,
+          "ratio": 0.4847591186704526
+        },
+        "managed-staging": {
+          "first140": 0.0012141028571428572,
+          "next2000": 0.0005948270000000004,
+          "ratio": 0.48993130730274703
+        },
+        "native-tuples-and-merge-preparation": {
+          "first140": 0.005633255714285713,
+          "next2000": 0.0044391665,
+          "ratio": 0.788028579768259
+        },
+        "physicality-capture": {
+          "first140": 0.003216535,
+          "next2000": 0.0023282641499999986,
+          "ratio": 0.723842317897986
+        },
+        "physicality-provider-admission": {
+          "first140": 0.10272936785714286,
+          "next2000": 0.1010723615,
+          "ratio": 0.9838701785895624
+        },
+        "presence-verification": {
+          "first140": 0.024373852142857137,
+          "next2000": 0.06737792125000001,
+          "ratio": 2.7643525879738875
+        }
+      },
+      "phaseSeconds": {
+        "connection-and-apply-lock": 0.13788750000000005,
+        "consensus-acceptance-participant": 2515.5659093999993,
+        "control-transaction-commit": 1.4653488999999995,
+        "copy-and-copy-transaction-commits": 113.10155579999996,
+        "copy-survivor-selection": 2.5250223000000003,
+        "managed-staging": 1.1896540000000007,
+        "native-tuples-and-merge-preparation": 8.878333,
+        "physicality-capture": 4.656528299999997,
+        "physicality-provider-admission": 202.144723,
+        "presence-verification": 134.75584250000003
+      },
+      "providerPct": 6.025165766411407,
+      "readbackOperations": {
+        "operations": [
+          {
+            "interruptedCalls": 0,
+            "operation": "ExactWitnessBodies",
+            "returnedCalls": 237,
+            "totalSeconds": 2.001610142
+          },
+          {
+            "interruptedCalls": 0,
+            "operation": "CanonicalCarrierVertices",
+            "returnedCalls": 237,
+            "totalSeconds": 0.852670661
+          },
+          {
+            "interruptedCalls": 0,
+            "operation": "HydrationAndLegalReplay",
+            "returnedCalls": 237,
+            "totalSeconds": 27.166610682
+          },
+          {
+            "interruptedCalls": 0,
+            "operation": "ResultAndReceiptText",
+            "returnedCalls": 237,
+            "totalSeconds": 1.807388091
+          }
+        ],
+        "scope": "Nested wall-clock windows for the four existing exact-readback operations, including interrupted calls. HydrationAndLegalReplay includes database reads, native decoding and managed legal replay. These are not pure database or CPU times, and are already included in ExactReadback and elapsedSeconds.readback. Returning does not establish successful validation or durable-game acceptance."
+      },
+      "seconds": 3355.0068303,
+      "tail": [
+        {
+          "ms": 819.3286,
+          "phase": "presence-verification",
+          "t": 3249.9489139
+        },
+        {
+          "ms": 10.2553,
+          "phase": "copy-survivor-selection",
+          "t": 3249.9591769
+        },
+        {
+          "ms": 543.3383,
+          "phase": "copy-and-copy-transaction-commits",
+          "t": 3250.502529
+        },
+        {
+          "ms": 24640.1698,
+          "phase": "consensus-acceptance-participant",
+          "t": 3276.4498659
+        },
+        {
+          "ms": 9.3289,
+          "phase": "control-transaction-commit",
+          "t": 3276.4598394
+        },
+        {
+          "ms": 3.689,
+          "phase": "managed-staging",
+          "t": 3277.0864344
+        },
+        {
+          "ms": 21.5659,
+          "phase": "physicality-capture",
+          "t": 3277.1158579
+        },
+        {
+          "ms": 0.5225,
+          "phase": "connection-and-apply-lock",
+          "t": 3277.1164041
+        },
+        {
+          "ms": 1086.1195,
+          "phase": "physicality-provider-admission",
+          "t": 3278.2025443
+        },
+        {
+          "ms": 50.4581,
+          "phase": "native-tuples-and-merge-preparation",
+          "t": 3278.3100559
+        },
+        {
+          "ms": 795.4494,
+          "phase": "presence-verification",
+          "t": 3279.1078177
+        },
+        {
+          "ms": 11.3565,
+          "phase": "copy-survivor-selection",
+          "t": 3279.119182
+        },
+        {
+          "ms": 537.8571,
+          "phase": "copy-and-copy-transaction-commits",
+          "t": 3279.6570531
+        },
+        {
+          "ms": 22296.7906,
+          "phase": "consensus-acceptance-participant",
+          "t": 3303.2192149
+        },
+        {
+          "ms": 8.4469,
+          "phase": "control-transaction-commit",
+          "t": 3303.2283691
+        },
+        {
+          "ms": 4.362,
+          "phase": "managed-staging",
+          "t": 3303.8898131
+        },
+        {
+          "ms": 16.758,
+          "phase": "physicality-capture",
+          "t": 3303.9119273
+        },
+        {
+          "ms": 0.3521,
+          "phase": "connection-and-apply-lock",
+          "t": 3303.9122927
+        },
+        {
+          "ms": 993.4483,
+          "phase": "physicality-provider-admission",
+          "t": 3304.9057513
+        },
+        {
+          "ms": 29.0682,
+          "phase": "native-tuples-and-merge-preparation",
+          "t": 3304.9802928
+        },
+        {
+          "ms": 806.5092,
+          "phase": "presence-verification",
+          "t": 3305.7884128
+        },
+        {
+          "ms": 9.3182,
+          "phase": "copy-survivor-selection",
+          "t": 3305.7977384
+        },
+        {
+          "ms": 495.7639,
+          "phase": "copy-and-copy-transaction-commits",
+          "t": 3306.2935137
+        },
+        {
+          "ms": 23080.3776,
+          "phase": "consensus-acceptance-participant",
+          "t": 3330.5460327
+        },
+        {
+          "ms": 6.3024,
+          "phase": "control-transaction-commit",
+          "t": 3330.5530023
+        },
+        {
+          "ms": 4.197,
+          "phase": "managed-staging",
+          "t": 3330.8959947
+        },
+        {
+          "ms": 15.5896,
+          "phase": "physicality-capture",
+          "t": 3330.9225648
+        },
+        {
+          "ms": 0.4061,
+          "phase": "connection-and-apply-lock",
+          "t": 3330.9229897
+        },
+        {
+          "ms": 665.6411,
+          "phase": "physicality-provider-admission",
+          "t": 3331.5886504
+        },
+        {
+          "ms": 28.7814,
+          "phase": "native-tuples-and-merge-preparation",
+          "t": 3331.647807
+        },
+        {
+          "ms": 704.7793,
+          "phase": "presence-verification",
+          "t": 3332.354632
+        },
+        {
+          "ms": 12.5089,
+          "phase": "copy-survivor-selection",
+          "t": 3332.3671573
+        },
+        {
+          "ms": 343.4811,
+          "phase": "copy-and-copy-transaction-commits",
+          "t": 3332.7106542
+        },
+        {
+          "ms": 9162.6143,
+          "phase": "consensus-acceptance-participant",
+          "t": 3342.5763964
+        },
+        {
+          "ms": 7.5828,
+          "phase": "control-transaction-commit",
+          "t": 3342.5846106
+        },
+        {
+          "ms": 2.4709,
+          "phase": "managed-staging",
+          "t": 3343.0672373
+        },
+        {
+          "ms": 8.57,
+          "phase": "physicality-capture",
+          "t": 3343.0790376
+        },
+        {
+          "ms": 0.5089,
+          "phase": "connection-and-apply-lock",
+          "t": 3343.0795594
+        },
+        {
+          "ms": 500.1026,
+          "phase": "physicality-provider-admission",
+          "t": 3343.5796812
+        },
+        {
+          "ms": 21.7129,
+          "phase": "native-tuples-and-merge-preparation",
+          "t": 3343.6257077
+        },
+        {
+          "ms": 666.0823,
+          "phase": "presence-verification",
+          "t": 3344.2937153
+        },
+        {
+          "ms": 8.2027,
+          "phase": "copy-survivor-selection",
+          "t": 3344.3019317
+        },
+        {
+          "ms": 192.7338,
+          "phase": "copy-and-copy-transaction-commits",
+          "t": 3344.4946824
+        },
+        {
+          "ms": 6989.5976,
+          "phase": "consensus-acceptance-participant",
+          "t": 3352.0010984
+        },
+        {
+          "ms": 3.8595,
+          "phase": "control-transaction-commit",
+          "t": 3352.0055633
+        }
+      ],
+      "writerPct": 96.90531574653409,
+      "writerResidual": 266.7591575200008
+    },
+    "expected_games": 2000,
+    "file_identities": [
+      {
+        "bytes": 86775,
+        "path": "machine-after-recording.json",
+        "sha256": "0696f48b501e5f3de44459f2e37f41010082daa02bedb0d577d18bb25e4b1f9c"
+      },
+      {
+        "bytes": 85769,
+        "path": "machine-before-recording.json",
+        "sha256": "9819b4b9ce9cb9f5cb2992af81414144e2366487d62634c6f1fd102d1959262b"
+      },
+      {
+        "bytes": 3651,
+        "path": "publication-after.json",
+        "sha256": "97d4fcca107aa1ca9584957bd7120dd4da42754677e7cc3c57656490ca6b421b"
+      },
+      {
+        "bytes": 3651,
+        "path": "publication-before.json",
+        "sha256": "97d4fcca107aa1ca9584957bd7120dd4da42754677e7cc3c57656490ca6b421b"
+      },
+      {
+        "bytes": 116329,
+        "path": "receipt.json",
+        "sha256": "7bfb9ac3e021c5c0d4b0644da2ca45bbfd720d3a17a94ce70b8b0301658e19ff"
+      },
+      {
+        "bytes": 213922,
+        "path": "recording/measurement.log",
+        "sha256": "bdbb1879479038dec9fb26e62b74cf80ff2571ac5a945b495eb70390619550c8"
+      },
+      {
+        "bytes": 109779,
+        "path": "recording/measurement/corpus-recording.json",
+        "sha256": "6ebd269f6fb12aa89a3d7a2f67d3ebaeeeeb805ce8b5b4c3e0e26db86cb44ae0"
+      },
+      {
+        "bytes": 139399,
+        "path": "recording/measurement/fresh/chunks.jsonl",
+        "sha256": "5910daa483fb651aa6ca4c48a476e180ac0300cf0adb7549c5c6fab2915ac5e4"
+      },
+      {
+        "bytes": 87541,
+        "path": "recording/measurement/fresh/recording.json",
+        "sha256": "43a7be9f0f7898a1829afd3219aaa15ba860b957ab501afe447e9f6de21dbe23"
+      },
+      {
+        "bytes": 141263,
+        "path": "recording/measurement/replay-01/chunks.jsonl",
+        "sha256": "e3378b0ba5c8d44924949528a68e12525c6b6686c07a8b5b4355b87c60a51541"
+      },
+      {
+        "bytes": 9427,
+        "path": "recording/measurement/replay-01/recording.json",
+        "sha256": "9f421817b1bc94b41dd18823956b8224a80938183f576c0d44c7863d36cb6039"
+      },
+      {
+        "bytes": 2541,
+        "path": "recording/receipt.json",
+        "sha256": "6996f17667612ba5157a290616b50d56be349a4fbd8b8d960396ad06c0422012"
+      }
+    ],
+    "finished_utc": "2026-09-17T13:46:10Z",
+    "full_product_lifecycle_passed": false,
+    "job": 105208217219,
+    "machine_snapshots": [
+      {
+        "path": "machine-before-recording.json",
+        "value": {
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "loadavg": "0.11 0.52 1.11 2/1046 1880474\n",
+          "logicalProcessors": 12,
+          "meminfo": "MemTotal:       131799164 kB\nMemFree:        55703916 kB\nMemAvailable:   83567660 kB\nBuffers:            1528 kB\nCached:         29857696 kB\nSwapCached:       578020 kB\nActive:         23237020 kB\nInactive:       17089876 kB\nActive(anon):    6852020 kB\nInactive(anon):  4871176 kB\nActive(file):   16385000 kB\nInactive(file): 12218700 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12351204 kB\nDirty:               612 kB\nWriteback:             0 kB\nAnonPages:       9968920 kB\nMapped:          1795140 kB\nShmem:           1255524 kB\nKReclaimable:     612712 kB\nSlab:             882088 kB\nSReclaimable:     612712 kB\nSUnreclaim:       269376 kB\nKernelStack:       16912 kB\nPageTables:        58316 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23197216 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      197088 kB\nVmallocChunk:          0 kB\nPercpu:            15040 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:    16172\nHugePages_Rsvd:    16032\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
+          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.05 total=11030798822\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+          "pressure/io": "some avg10=2.85 avg60=1.09 avg300=1.02 total=40834337309\nfull avg10=2.73 avg60=1.06 avg300=0.97 total=39030603651\n",
+          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605064891\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2514773534\n",
+          "scope": "Observed host load/resources; no idle-machine or process-isolation inference",
+          "utc": "2026-09-17T12:48:25Z"
+        }
+      },
+      {
+        "path": "machine-after-recording.json",
+        "value": {
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "loadavg": "1.13 1.24 1.31 3/1045 1885884\n",
+          "logicalProcessors": 12,
+          "meminfo": "MemTotal:       131799164 kB\nMemFree:        46441588 kB\nMemAvailable:   83462192 kB\nBuffers:            1528 kB\nCached:         39016708 kB\nSwapCached:       565784 kB\nActive:         23962632 kB\nInactive:       25632060 kB\nActive(anon):    6852176 kB\nInactive(anon):  4981688 kB\nActive(file):   17110456 kB\nInactive(file): 20650372 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12456932 kB\nDirty:             11408 kB\nWriteback:             0 kB\nAnonPages:      10091192 kB\nMapped:          1802440 kB\nShmem:           1257420 kB\nKReclaimable:     612444 kB\nSlab:             883708 kB\nSReclaimable:     612444 kB\nSUnreclaim:       271264 kB\nKernelStack:       16896 kB\nPageTables:        58468 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23156892 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      197040 kB\nVmallocChunk:          0 kB\nPercpu:            15040 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:    10458\nHugePages_Rsvd:    10318\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
+          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=11032699947\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+          "pressure/io": "some avg10=1.04 avg60=0.36 avg300=0.35 total=40849905266\nfull avg10=1.04 avg60=0.35 avg300=0.34 total=39045335209\n",
+          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605089397\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2514797929\n",
+          "scope": "Observed host load/resources; no idle-machine or process-isolation inference",
+          "utc": "2026-09-17T13:46:07Z"
+        }
+      }
+    ],
+    "owner_blob": "f870aa941a9f58a373d809dfc30456480b773f15",
     "publication_before_after_identical": true,
     "publication_sha256": "97d4fcca107aa1ca9584957bd7120dd4da42754677e7cc3c57656490ca6b421b",
-    "full_product_lifecycle_passed": false
+    "qualified_window": true,
+    "reader": {
+      "artifact": 10500511557,
+      "job": 105229070029,
+      "run": 35229354961,
+      "sha256": "cf7f110f32c61342a78a80d1a5c79f1996a650acb825612d34c394bff52c2488"
+    },
+    "record_phase_started_utc": "2026-09-17T12:48:22Z",
+    "recorded_rate": 0.5961239726659999,
+    "recording": {
+      "bytes": 2541,
+      "path": "/build/laplace/recovery/canonical-next2000/35223192542-1/recording/receipt.json",
+      "sha256": "6996f17667612ba5157a290616b50d56be349a4fbd8b8d960396ad06c0422012"
+    },
+    "root_receipt": {
+      "bytes": 116329,
+      "path": "/build/laplace/recovery/canonical-next2000/35223192542-1/receipt.json",
+      "sha256": "7bfb9ac3e021c5c0d4b0644da2ca45bbfd720d3a17a94ce70b8b0301658e19ff"
+    },
+    "run": 35223192542,
+    "runtime_before_sha256": "fc4d6e3a59b48b41b0bc2146fe3da0a1d12617b3bde465f29c41c40bd16d996f",
+    "scope": "ordinary full original PGN selection; novel complete games exclude first140; exact readback and zero-write replay required; preparation retained separately",
+    "source": "ea9f60a1c2bac9fcc36491a6f26403d95c2b8359",
+    "status": "completed",
+    "target_attainment": false
   },
   "pending_activation": {
     "additions": [
@@ -5596,8 +5596,15 @@
       },
       "transactions": "Each <=10000-row chunk is one psql process/connection and implicit binary-COPY transaction. At most1,2,4 concurrent connections,3 repeats each of both targets, alternating target order. Every acknowledged transaction retained; failed case does not publish a passed rate."
     },
+    "next_measured_step": {
+      "count": 140,
+      "deadline_seconds": 1200,
+      "owner_blob": "1089b65143956e36ae7c03f6ad36df6789755ef7",
+      "scope": "After actual normal deployment/current installed proof, ordinary full-original-PGN novel sample excludes previous2140; same complete-body/WAL/readback/replay obligations. Different samples/populations remain comparison limits.",
+      "status": "source-reviewed only, not dispatched"
+    },
     "next_sample": {
-      "availability": "No remaining eligible novel-game inventory established. EOF shortage fails before fresh admission and does not shrink numerator.",
+      "availability": "The completed 2026-09-17 next2000 preparation scanned 8,624 complete legal games: 140 already present, 2,000 selected and 6,484 further eligible beyond the request. This dated scan is not a guarantee of unchanged inventory; the follow-up owner rechecks current novelty. EOF shortage fails before fresh admission and does not shrink the numerator.",
       "deadline": "Full original PGN is hashed twice in preparation and again in fresh/replay final checks, and source framing rescans through selected ordinals. Do not extrapolate only N/140 from a small exported140 file.",
       "paths": [
         {
@@ -5700,7 +5707,7 @@
       "installed": false,
       "limits": [
         "No installed source/database change",
-        "Current next2000 remains frozen ea9",
+        "Completed next2000 baseline remains immutable on ea9",
         "No complete recorded-game speedup established",
         "Native timings baseline then candidate with unchanged-control variation; no threshold used",
         "Direct owned grant correction applies to actual serial CLI PGN owner; shared Attach behavior unchanged",
@@ -5718,15 +5725,8 @@
       "source_finding": "Substantial physicality-descriptor DAG/carriers/view receipts; ordered canonical content identifies body roots, while observation/source-unit context belongs to views/testimony. No concrete random/time/path salt in body identity was found by the bounded audit."
     },
     "source": "69cc059a6f5b0407df33d0604ae65a47c555067c",
-    "status": "Baseline first140 completed; detached performance6 source-reviewed and hosted-qualified, not installed; next2000 stays immutable.",
-    "unchanged_in_selected_source": "ea9f60a1c2bac9fcc36491a6f26403d95c2b8359",
-    "next_measured_step": {
-      "count": 140,
-      "deadline_seconds": 1200,
-      "owner_blob": "1089b65143956e36ae7c03f6ad36df6789755ef7",
-      "status": "source-reviewed only, not dispatched",
-      "scope": "After actual normal deployment/current installed proof, ordinary full-original-PGN novel sample excludes previous2140; same complete-body/WAL/readback/replay obligations. Different samples/populations remain comparison limits."
-    }
+    "status": "First140 and next2000 baselines completed and immutable; performance6 source-reviewed and hosted-qualified, not yet installed.",
+    "unchanged_in_selected_source": "ea9f60a1c2bac9fcc36491a6f26403d95c2b8359"
   },
   "prior_private_pg": {
     "artifact": 10487468298,
