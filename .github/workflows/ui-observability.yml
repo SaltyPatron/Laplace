@@ -1,0 +1,113 @@
+name: Laplace — UI observability
+
+# Evidence-only workflow. It does not build, deploy, seed, mutate substrate state,
+# or participate in the product lifecycle/required checks.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "running Laplace UI/API base URL"
+        type: string
+        required: true
+        default: "http://127.0.0.1:5187"
+      routes:
+        description: "optional comma-separated route names/paths; blank captures every primary surface"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_UI_URL: ${{ inputs.base_url }}
+  LAPLACE_UI_ROUTES: ${{ inputs.routes }}
+
+jobs:
+  capture:
+    name: Capture rendered UI evidence
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 20
+    steps:
+      - name: Create evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/laplace-ui-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$receipt"
+          mkdir -p "$receipt"
+          printf 'LAPLACE_UI_DIAGNOSTICS_DIR=%s\n' "$receipt" >> "$GITHUB_ENV"
+
+      - name: Select exact diagnostic source without lifecycle work
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          if [[ ! -e .git ]]; then
+            [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+              echo "::error::nonempty diagnostics workspace has no repository; preserving its files" >&2
+              exit 1
+            }
+            git init --initial-branch=main
+            git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+            git fetch --no-tags --depth=1 origin "$TARGET_SHA"
+          unset checkout_auth CHECKOUT_TOKEN
+          git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+
+      - name: Prepare browser tooling only when cache is stale
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/.stamps
+          current="$(sha256sum web/package-lock.json | awk '{print $1}')"
+          previous="$(cat build/.stamps/npm-lock 2>/dev/null || true)"
+          if [[ ! -d web/node_modules || "$current" != "$previous" ]]; then
+            (cd web && npm ci --no-audit --no-fund --prefer-offline)
+            printf '%s\n' "$current" > build/.stamps/npm-lock
+          fi
+          (cd web && npx playwright install chromium)
+
+      - name: Capture screenshots, DOM, console and network evidence
+        shell: bash
+        run: |
+          set +e
+          (cd web && node scripts/capture-ui-diagnostics.mjs)
+          rc=$?
+          printf '%s\n' "$rc" > "$LAPLACE_UI_DIAGNOSTICS_DIR/collector-exit-code.txt"
+          if (( rc != 0 )); then
+            echo "::warning::UI evidence collector exited $rc; artifact upload will still run"
+          fi
+          exit 0
+
+      - name: Publish evidence summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$LAPLACE_UI_DIAGNOSTICS_DIR/summary.md" ]]; then
+            cat "$LAPLACE_UI_DIAGNOSTICS_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '## Laplace UI diagnostics' >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo 'Collector did not produce a summary; inspect the artifact/tooling logs.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload UI evidence
+        if: always()
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: laplace-ui-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.LAPLACE_UI_DIAGNOSTICS_DIR }}/
+          if-no-files-found: warn
+          retention-days: 30
