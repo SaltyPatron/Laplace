@@ -179,10 +179,13 @@ def native_managed_outcome(outcome, expected_outcome, source, directory, receipt
         phases += ["verify-" + role + "-payload"]
     phases += ["authenticated-managed-readiness"]
     actual = managed.get("phases", [])
+    # Historical receipts predate explicit recovery; new publications retain it
+    # as a separate passed phase before any preparation or payload mutation.
+    with_recovery = phases[:1] + ["recover-managed-services"] + phases[1:]
     if (managed.get("schema") != "laplace.managed-followthrough/v1"
             or managed.get("status") != "completed" or managed.get("mode") != "publish"
             or managed.get("source") != source
-            or [row.get("name") for row in actual] != phases
+            or [row.get("name") for row in actual] not in (phases, with_recovery)
             or any(row.get("status") != "passed" for row in actual)
             or managed.get("authenticatedMcpInitializeAndDiscovery") is not True
             or managed.get("lichess", {}).get("status", {}).get("ready") is not True):

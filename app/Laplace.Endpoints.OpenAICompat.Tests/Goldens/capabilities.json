@@ -3,12 +3,12 @@
   "endpoints": {
     "chat_completions": {
       "status": "live",
-      "backend": "converse.recall_session",
+      "backend": "converse.forward_turn -> generation.forward_program (native)",
       "billing": "preflight_quote_required"
     },
     "completions": {
       "status": "live",
-      "backend": "consensus.completions",
+      "backend": "converse.forward_turn -> generation.forward_program (native streaming)",
       "billing": "preflight_quote_required"
     },
     "embeddings": {

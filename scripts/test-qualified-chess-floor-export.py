@@ -558,6 +558,28 @@ class NativeQualificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "evidence changed"):
             driver.verify_qualification_receipts(proof)
 
+    def test_managed_recovery_phase_is_passed_and_ordered_before_preparation(self):
+        directory, original = self.add_managed_publication()
+        phases = original["phases"]
+        recovered = phases[:1] + [{"name": "recover-managed-services", "status": "passed"}] + phases[1:]
+        for rows, accepted in (
+                (recovered, True),
+                (phases[:1] + [{"name": "recover-managed-services", "status": "failed"}] + phases[1:], False),
+                (phases[:2] + [{"name": "recover-managed-services", "status": "passed"}] + phases[2:], False),
+                (recovered[:2] + [recovered[1]] + recovered[2:], False)):
+            with self.subTest(rows=rows):
+                path = directory / "receipt.json"
+                path.write_text(json.dumps({**original, "phases": rows}) + "\n")
+                self.outcome["applicationPublicationReceiptSha256"] = driver.file_identity(path)["sha256"]
+                self.seal()
+                if accepted:
+                    _, proof = self.qualify()
+                    self.assertEqual("completed", proof["managed_publication"])
+                    driver.verify_qualification_receipts(proof)
+                else:
+                    with self.assertRaisesRegex(ValueError, "native installation"):
+                        self.qualify()
+
     def test_managed_postphase_rejects_incomplete_or_other_source_even_when_receipt_hash_is_rebound(self):
         directory, original = self.add_managed_publication()
         for change in ({"status": "failed"}, {"source": {"commit": "6" * 40, "tree": "7" * 40}},

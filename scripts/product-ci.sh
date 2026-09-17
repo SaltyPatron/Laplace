@@ -63,6 +63,7 @@ run_db_tests() {
 }
 
 run_publish() {
+  bash scripts/publish-applications.sh recover
   bash scripts/publish-applications.sh deploy
 }
 
