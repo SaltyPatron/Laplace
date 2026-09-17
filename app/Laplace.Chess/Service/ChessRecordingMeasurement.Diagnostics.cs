@@ -94,23 +94,85 @@ internal sealed partial class ChessRecordingMeasurement
     public sealed record WriterLogEntry(double AdmissionElapsedSeconds, string Level,
         string Message, IReadOnlyDictionary<string, object?> Fields, string? ExceptionType);
 
+    public sealed record WriterPhaseAggregate(string Phase, long ObservedExits,
+        long ReturnedExits, long InterruptedExits, double TotalMilliseconds,
+        double MinimumMilliseconds, double MaximumMilliseconds);
+
     public sealed class WriterLogDiagnostics
     {
         internal const int Capacity = 128;
         internal const int MaximumTextLength = 2048;
+        internal const int MaximumDistinctPhases = 32;
+        private const int MaximumPhaseNameLength = 128;
         private readonly Queue<WriterLogEntry> _entries = new();
+        private readonly Dictionary<string, WriterPhaseAggregate> _phaseAggregates = new(StringComparer.Ordinal);
+        private long _unaggregatedPhaseExits, _rejectedPhaseExits;
         public string Scope => "Bounded existing writer ILogger diagnostics; elapsed values may be cumulative, nested or parallel and must not be summed as exclusive phases. A phase completion log describes that operation returning, not durable game acceptance. Missing logs do not prove zero work.";
         public long DroppedEntries { get; private set; }
         public IReadOnlyList<WriterLogEntry> Entries
         {
             get { lock (_entries) return _entries.ToArray(); }
         }
+        public string PhaseAggregateScope => "All well-formed writer phase exit observations in this admission, independent of the bounded log tail. At most 32 distinct phase names are retained; later unseen names and invalid samples are counted separately. TotalMilliseconds sums observed call durations, which may overlap or nest; it is not exclusive wall time, CPU time, or durable-game evidence. ReturnedExits describes operations returning, not committed or read-back games.";
+        public IReadOnlyList<WriterPhaseAggregate> PhaseAggregates
+        {
+            get
+            {
+                lock (_entries)
+                    return _phaseAggregates.Values.OrderBy(value => value.Phase, StringComparer.Ordinal).ToArray();
+            }
+        }
+        public long UnaggregatedPhaseExits { get { lock (_entries) return _unaggregatedPhaseExits; } }
+        public long RejectedPhaseExits { get { lock (_entries) return _rejectedPhaseExits; } }
+
+        // Called under the same lock as the log tail. No per-call timing or row
+        // payload is retained beyond the immutable count/sum/min/max snapshot.
+        private void AggregatePhaseExit(WriterLogEntry entry)
+        {
+            var fields = entry.Fields;
+            if (!Equals(fields.GetValueOrDefault("Boundary"), "exited")) return;
+            if (fields.GetValueOrDefault("Phase") is not string phase
+                || phase.Length is 0 or > MaximumPhaseNameLength
+                || fields.GetValueOrDefault("Returned") is not bool returned
+                || fields.GetValueOrDefault("ElapsedMs") is not double milliseconds
+                || !double.IsFinite(milliseconds) || milliseconds < 0)
+            {
+                _rejectedPhaseExits++;
+                return;
+            }
+            if (!_phaseAggregates.TryGetValue(phase, out var previous))
+            {
+                if (_phaseAggregates.Count == MaximumDistinctPhases)
+                {
+                    _unaggregatedPhaseExits++;
+                    return;
+                }
+                previous = new(phase, 0, 0, 0, 0, milliseconds, milliseconds);
+            }
+            double total = previous.TotalMilliseconds + milliseconds;
+            if (!double.IsFinite(total) || previous.ObservedExits == long.MaxValue)
+            {
+                _rejectedPhaseExits++;
+                return;
+            }
+            _phaseAggregates[phase] = previous with
+            {
+                ObservedExits = previous.ObservedExits + 1,
+                ReturnedExits = previous.ReturnedExits + (returned ? 1 : 0),
+                InterruptedExits = previous.InterruptedExits + (returned ? 0 : 1),
+                TotalMilliseconds = total,
+                MinimumMilliseconds = Math.Min(previous.MinimumMilliseconds, milliseconds),
+                MaximumMilliseconds = Math.Max(previous.MaximumMilliseconds, milliseconds),
+            };
+        }
+
         internal static string Bounded(string value) => value.Length <= MaximumTextLength
             ? value : value[..MaximumTextLength] + " [truncated]";
         internal void Add(WriterLogEntry entry)
         {
             lock (_entries)
             {
+                AggregatePhaseExit(entry);
                 if (_entries.Count == Capacity) { _entries.Dequeue(); DroppedEntries++; }
                 _entries.Enqueue(entry);
             }

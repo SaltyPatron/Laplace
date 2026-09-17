@@ -8,6 +8,7 @@ again here; the ordinary installed-form guard binds them to the pilot generation
 is performed. Selection is published only after complete readback and postflight.
 """
 import argparse
+import copy
 import hashlib
 import grp
 import importlib.util
@@ -331,6 +332,38 @@ def recording_compatible(guard, before, after):
         raise ValueError("installed native/database selection differs from the recording baseline")
 
 
+def installed_compatible(guard, baseline, observed):
+    """Compare a completed pilot with independently verified current installation.
+
+    A later restart or byte-identical atomic replacement does not change the
+    proven code, SQL or database incarnation. Both snapshots retain their actual
+    postmaster start and mapped file identities; only this later-use comparison
+    excludes those lifetime observations. Current snapshot/mapping validation
+    must already have rejected deleted, unselected or disk-mismatched mappings.
+    Recording and export intervals continue to use recording_compatible exactly.
+    """
+    states = copy.deepcopy((baseline, observed))
+    for state in states:
+        database = state["database"]
+        started = database.pop("postmaster_started")
+        if not isinstance(started, str) or not started:
+            raise ValueError("installed runtime postmaster observation is missing")
+        mappings = database["native_mappings"]
+        if not isinstance(mappings, dict) or not mappings:
+            raise ValueError("installed runtime mapped generation is missing")
+        for relative, identity in mappings.items():
+            if (not isinstance(relative, str) or not relative.endswith(".so")
+                    or not isinstance(identity, dict)
+                    or set(identity) != {"path", "device", "inode"}
+                    or not isinstance(identity["path"], str)
+                    or not Path(identity["path"]).is_absolute()
+                    or type(identity["device"]) is not int or identity["device"] < 0
+                    or type(identity["inode"]) is not int or identity["inode"] <= 0):
+                raise ValueError("installed runtime mapped identity is invalid")
+            mappings[relative] = {"path": identity["path"]}
+    recording_compatible(guard, *states)
+
+
 def installed_state(guard, prefix, pg, baseline, qualification):
     if qualification["build_identity"] != baseline.get("build"):
         raise ValueError("retained configured build differs from the exact installed pilot")
@@ -345,7 +378,7 @@ def installed_state(guard, prefix, pg, baseline, qualification):
     # unrelated historical entries as an admission lock.
     observed = guard.snapshot(Path(qualification["lifecycle_checkout"]), prefix, database,
                               purpose="recording")
-    recording_compatible(guard, baseline, observed)
+    installed_compatible(guard, baseline, observed)
     return observed
 
 def payload(artifact, directory):
@@ -533,6 +566,7 @@ def execute(plan, root, prefix, pg, output):
             if payload(artifact, catalog) != before or native_before != {name: artifact.sha256(path) for name, path in native.items()}:
                 raise ValueError("managed/native payload changed across export")
             proof["installed_after"] = installed_state(guard, prefix, pg, baseline, proof["qualification"])
+            recording_compatible(guard, proof["installed_before"], proof["installed_after"])
             if (artifact.sha256(pilot / "receipt.json") != plan["pilot_receipt_sha256"]
                     or artifact.sha256(pilot / "native-before.json") != plan["pilot_native_snapshot_sha256"]
                     or not guard.compatible(baseline, load(pilot / "native-after.json"), purpose="recording")):

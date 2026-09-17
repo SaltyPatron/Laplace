@@ -257,6 +257,180 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
 // GH #595: the span index must resolve every emitted occurrence at scale.
 // Occurrence spans are not entity identities: all CSV commas reuse one
 // codepoint, while the 3,000 different cell values retain different content IDs.
+
+TEST(GrammarCompose, EscapedJsonStringsConvergeThroughNativeComposition) {
+    struct Case {
+        const char* escaped;
+        const char* literal;
+        const char* decoded;
+    };
+    const Case cases[] = {
+        {R"("q\u0301")", "\"q\xCC\x81\"", "q\xCC\x81"},
+        {R"("a q\u0301 tail")", "\"a q\xCC\x81 tail\"", "a q\xCC\x81 tail"},
+        {R"("\u0063at")", R"("cat")", "cat"},
+        {R"("\u0061")", R"("a")", "a"},
+        {R"("caf\u00e9")", "\"caf\xC3\xA9\"", "caf\xC3\xA9"},
+        {R"("\ud83d\udc69\u200d\ud83d\udcbb")",
+         "\"\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB\"",
+         "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB"},
+    };
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("json");
+    ASSERT_NE(recipe, nullptr);
+    hash128_t source{}, type{};
+    hash128_blake3_str("test/json-complete-string", &source);
+    hash128_blake3_str("Type", &type);
+
+    for (const auto& fixture : cases) {
+        SCOPED_TRACE(fixture.escaped);
+        hash128_t expected{};
+        ASSERT_EQ(laplace_content_root_id(
+            reinterpret_cast<const uint8_t*>(fixture.decoded),
+            std::strlen(fixture.decoded), &expected), 0);
+        for (bool object : {false, true}) {
+            SCOPED_TRACE(object ? "object value" : "standalone scalar");
+            using Result = std::unique_ptr<laplace_compose_result_t,
+                                          decltype(&laplace_compose_result_free)>;
+            Result full[] = {Result(nullptr, laplace_compose_result_free),
+                             Result(nullptr, laplace_compose_result_free)};
+            const char* spellings[] = {fixture.escaped, fixture.literal};
+            for (size_t spelling = 0; spelling < 2; ++spelling) {
+                const std::string text = object
+                    ? std::string("{\"k\":") + spellings[spelling] + "}"
+                    : spellings[spelling];
+                const auto* bytes = reinterpret_cast<const uint8_t*>(text.data());
+                laplace_ast_t* ast = nullptr;
+                ASSERT_EQ(laplace_grammar_parse(bytes, text.size(), recipe, &ast), 0);
+                std::unique_ptr<laplace_ast_t, decltype(&laplace_ast_free)>
+                    ast_owner(ast, laplace_ast_free);
+                const uint32_t start = object ? 5u : 0u;
+                const uint32_t end = static_cast<uint32_t>(text.size() - (object ? 1u : 0u));
+                bool found_string = false;
+                for (size_t i = 0; i < laplace_ast_node_count(ast); ++i) {
+                    laplace_ast_node_t node{};
+                    ASSERT_EQ(laplace_ast_get_node(ast, i, &node), 0);
+                    const char* name = laplace_ast_type_name(ast, node.type_id);
+                    if (!name || std::strcmp(name, "string") != 0 ||
+                        node.start_byte != start || node.end_byte != end) continue;
+                    found_string = true;
+                    hash128_t node_id{};
+                    ASSERT_EQ(laplace_grammar_compose_node_id(
+                        bytes, text.size(), ast, "json", i, &node_id, nullptr), 0);
+                    EXPECT_TRUE(hash128_equals(&node_id, &expected))
+                        << "native string identity must include every decoded escape";
+                }
+                ASSERT_TRUE(found_string);
+                laplace_compose_result_t* raw = nullptr;
+                ASSERT_EQ(laplace_grammar_compose(
+                    bytes, text.size(), ast, "json", source, type, &raw), 0);
+                full[spelling].reset(raw);
+                ASSERT_NE(raw, nullptr);
+                hash128_t span_id{};
+                ASSERT_EQ(laplace_compose_span_lookup(raw, start, end, &span_id), 0);
+                EXPECT_TRUE(hash128_equals(&span_id, &expected))
+                    << "direct native span lookup must agree without JSON helper decoding";
+                hash128_t quick_root{};
+                ASSERT_EQ(laplace_grammar_compose_row_root(
+                    bytes, text.size(), ast, "json", &quick_root, nullptr), 0);
+                const hash128_t root = laplace_compose_root_id(raw);
+                EXPECT_TRUE(hash128_equals(&root, &quick_root));
+                if (!object) EXPECT_TRUE(hash128_equals(&root, &expected));
+                laplace_compose_result_t* probe = nullptr;
+                ASSERT_EQ(laplace_grammar_compose_probe(
+                    bytes, text.size(), ast, "json", source, type, &probe), 0);
+                Result probe_owner(probe, laplace_compose_result_free);
+                ASSERT_NE(probe, nullptr);
+                const hash128_t probe_root = laplace_compose_root_id(probe);
+                EXPECT_TRUE(hash128_equals(&root, &probe_root));
+                ASSERT_EQ(laplace_grammar_compose_materialize_phys(
+                    probe, bytes, text.size(), ast, "json"), 0);
+                EXPECT_EQ(laplace_compose_physicality_count(probe),
+                          laplace_compose_physicality_count(raw));
+            }
+            const hash128_t escaped_root = laplace_compose_root_id(full[0].get());
+            const hash128_t literal_root = laplace_compose_root_id(full[1].get());
+            EXPECT_TRUE(hash128_equals(&escaped_root, &literal_root))
+                << "record composition must not depend on the JSON escape spelling";
+            std::vector<laplace_compose_entity_t> persisted[2];
+            for (size_t spelling = 0; spelling < 2; ++spelling) {
+                for (size_t i = 0; i < laplace_compose_entity_count(full[spelling].get()); ++i) {
+                    laplace_compose_entity_t entity{};
+                    ASSERT_EQ(laplace_compose_get_entity(full[spelling].get(), i, &entity), 0);
+                    if (!entity.packaging) persisted[spelling].push_back(entity);
+                }
+            }
+            ASSERT_EQ(persisted[0].size(), persisted[1].size());
+            ASSERT_FALSE(persisted[0].empty());
+            for (size_t i = 0; i < persisted[0].size(); ++i) {
+                EXPECT_TRUE(hash128_equals(&persisted[0][i].id, &persisted[1][i].id));
+                EXPECT_EQ(persisted[0][i].tier, persisted[1][i].tier);
+                EXPECT_TRUE(hash128_equals(&persisted[0][i].type_id, &persisted[1][i].type_id));
+            }
+            if (!object) {
+                tier_tree_t* content = nullptr;
+                ASSERT_EQ(content_witness_tree_build(
+                    reinterpret_cast<const uint8_t*>(fixture.decoded),
+                    std::strlen(fixture.decoded), &content), 0);
+                std::unique_ptr<tier_tree_t, decltype(&tier_tree_free)>
+                    content_owner(content, tier_tree_free);
+                tier_node_view_t natural{};
+                ASSERT_EQ(content_witness_tree_root_node(content, &natural), 0);
+                size_t root_entities = 0;
+                const hash128_t natural_type = laplace_content_tier_type_id(natural.tier);
+                for (const auto& entity : persisted[0]) {
+                    if (!hash128_equals(&entity.id, &expected)) continue;
+                    ++root_entities;
+                    EXPECT_EQ(entity.tier, natural.tier);
+                    EXPECT_TRUE(hash128_equals(&entity.type_id, &natural_type));
+                }
+                EXPECT_EQ(root_entities, 1u);
+            }
+            const size_t count = laplace_compose_physicality_count(full[0].get());
+            ASSERT_GT(count, 0u);
+            ASSERT_EQ(count, laplace_compose_physicality_count(full[1].get()));
+            for (size_t i = 0; i < count; ++i) {
+                laplace_compose_physicality_t escaped{}, literal{};
+                ASSERT_EQ(laplace_compose_get_physicality(full[0].get(), i, &escaped), 0);
+                ASSERT_EQ(laplace_compose_get_physicality(full[1].get(), i, &literal), 0);
+                EXPECT_TRUE(hash128_equals(&escaped.id, &literal.id));
+                EXPECT_TRUE(hash128_equals(&escaped.entity_id, &literal.entity_id));
+                EXPECT_EQ(std::memcmp(escaped.coord, literal.coord, sizeof(escaped.coord)), 0);
+                EXPECT_EQ(std::memcmp(&escaped.hilbert, &literal.hilbert,
+                                      sizeof(escaped.hilbert)), 0);
+                EXPECT_EQ(escaped.n_constituents, literal.n_constituents);
+                ASSERT_EQ(escaped.trajectory_n, literal.trajectory_n);
+                EXPECT_EQ(std::memcmp(escaped.trajectory_xyzm, literal.trajectory_xyzm,
+                                      escaped.trajectory_n * sizeof(double)), 0);
+            }
+        }
+    }
+}
+
+TEST(GrammarCompose, InvalidEscapedJsonScalarDoesNotSilentlyDropItsValue) {
+    const TSLanguage* recipe = laplace_grammar_lookup_by_id("json");
+    ASSERT_NE(recipe, nullptr);
+    const char* cases[] = {R"({"k":"q\ud800"})", R"({"k":"\udc00"})"};
+    for (const char* text : cases) {
+        SCOPED_TRACE(text);
+        const auto* bytes = reinterpret_cast<const uint8_t*>(text);
+        const size_t length = std::strlen(text);
+        laplace_ast_t* ast = nullptr;
+        ASSERT_EQ(laplace_grammar_parse(bytes, length, recipe, &ast), 0);
+        std::unique_ptr<laplace_ast_t, decltype(&laplace_ast_free)>
+            ast_owner(ast, laplace_ast_free);
+        hash128_t source{}, type{};
+        for (bool probe : {false, true}) {
+            laplace_compose_result_t* result = nullptr;
+            const int rc = probe
+                ? laplace_grammar_compose_probe(bytes, length, ast, "json", source, type, &result)
+                : laplace_grammar_compose(bytes, length, ast, "json", source, type, &result);
+            std::unique_ptr<laplace_compose_result_t, decltype(&laplace_compose_result_free)>
+                owner(result, laplace_compose_result_free);
+            EXPECT_LT(rc, 0);
+            EXPECT_EQ(result, nullptr);
+        }
+    }
+}
+
 TEST(GrammarCompose, SpanLookupResolvesEveryDistinctSpanAtScale) {
     const TSLanguage* recipe = laplace_grammar_lookup_by_id("csv");
     ASSERT_NE(recipe, nullptr);

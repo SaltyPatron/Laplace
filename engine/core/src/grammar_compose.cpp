@@ -63,6 +63,7 @@ typedef struct {
     hash128_t* comp_id;
     double*    comp_coord;
     uint8_t*   comp_tier;
+    uint8_t*   entity_tier;
     uint8_t*   comp_valid;
     size_t     n;
 } compose_state_t;
@@ -82,6 +83,23 @@ static uint32_t node_parent(laplace_ast_t* ast, size_t idx) {
 
 static int is_json_modality(const char* modality_id) {
     return modality_id && strcmp(modality_id, "json") == 0;
+}
+
+/* A JSON string is one semantic scalar even when tree-sitter splits its
+ * source spelling into string_content and escape_sequence children. Those
+ * fragments remain available for span navigation, but the complete string
+ * owns decoded grapheme occurrences and parent composition. */
+static int json_node_is_string(laplace_ast_t* ast, const laplace_ast_node_t* node) {
+    const char* type = laplace_ast_type_name(ast, node->type_id);
+    return type && strcmp(type, "string") == 0;
+}
+
+static int json_node_is_string_fragment(laplace_ast_t* ast,
+                                        const laplace_ast_node_t* node) {
+    if (node->parent == LAPLACE_AST_ROOT) return 0;
+    laplace_ast_node_t parent;
+    return laplace_ast_get_node(ast, node->parent, &parent) == 0
+        && json_node_is_string(ast, &parent);
 }
 
 static int json_hex_digit(uint8_t c) {
@@ -215,12 +233,13 @@ static int json_leaf_fill_grapheme_children(
     laplace_compose_result_t* r,
     hash128_t** emitted_entity, size_t* emitted_entity_n, size_t* emitted_entity_cap,
     hash128_t** out_ids, double** out_coords, uint64_t** out_flags, size_t* out_m,
-    hash128_t* out_root_id) {
+    hash128_t* out_root_id, uint8_t* out_root_tier = NULL) {
     *out_ids = NULL;
     *out_coords = NULL;
     *out_flags = NULL;
     *out_m = 0;
     if (out_root_id) hash128_zero(out_root_id);
+    if (out_root_tier) *out_root_tier = 0;
 
     laplace_ast_node_t node;
     if (laplace_ast_get_node(ast, idx, &node) != 0) return -1;
@@ -251,9 +270,16 @@ static int json_leaf_fill_grapheme_children(
         content_span = decoded_owned;
     }
 
-    if (out_root_id) {
-        if (laplace_content_root_id(content_span, content_len, out_root_id) != 0)
-            hash128_zero(out_root_id);
+    if (out_root_id || out_root_tier) {
+        tier_tree_t* content_tree = NULL;
+        int root_rc = content_witness_tree_build(content_span, content_len, &content_tree);
+        if (root_rc != 0) { free(decoded_owned); return root_rc; }
+        tier_node_view_t root;
+        root_rc = content_witness_tree_root_node(content_tree, &root);
+        tier_tree_free(content_tree);
+        if (root_rc != 0) { free(decoded_owned); return root_rc; }
+        if (out_root_id) *out_root_id = root.id;
+        if (out_root_tier) *out_root_tier = root.tier;
     }
 
     tier_tree_t* local_tree = NULL;
@@ -340,8 +366,9 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
     st->comp_id    = (hash128_t*)calloc(n, sizeof(hash128_t));
     st->comp_coord = (double*)calloc(n * 4, sizeof(double));
     st->comp_tier  = (uint8_t*)calloc(n, 1);
+    st->entity_tier = (uint8_t*)calloc(n, 1);
     st->comp_valid = (uint8_t*)calloc(n, 1);
-    if (!st->comp_id || !st->comp_coord || !st->comp_tier || !st->comp_valid)
+    if (!st->comp_id || !st->comp_coord || !st->comp_tier || !st->entity_tier || !st->comp_valid)
         return -3;
 
     size_t graph_first = laplace_grapheme_floor_graph_first_idx(floor);
@@ -376,6 +403,10 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
         laplace_ast_node_t node;
         if (laplace_ast_get_node(ast, idx, &node) != 0) continue;
         uint32_t kid_n = child_counts[idx];
+        const int json_string = is_json_modality(modality_id)
+            && json_node_is_string(ast, &node);
+        const int json_fragment = is_json_modality(modality_id)
+            && json_node_is_string_fragment(ast, &node);
 
         hash128_t*  child_ids    = NULL;
         double*     child_coords = NULL;
@@ -383,9 +414,10 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
         size_t      m            = 0;
         uint8_t     tier         = 0;
         hash128_t   leaf_root_id;
+        uint8_t     leaf_root_tier = 0;
         hash128_zero(&leaf_root_id);
 
-        if (kid_n > 0) {
+        if (kid_n > 0 && !json_string) {
             child_ids    = (hash128_t*)malloc(kid_n * sizeof(hash128_t));
             child_coords = (double*)malloc(kid_n * 4 * sizeof(double));
             child_flags  = (uint64_t*)malloc(kid_n * sizeof(uint64_t));
@@ -417,13 +449,15 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
             }
         } else if (is_json_modality(modality_id)) {
             int leaf_rc = json_leaf_fill_grapheme_children(
-                    utf8, len, ast, idx, r,
+                    utf8, len, ast, idx, json_fragment ? NULL : r,
                     emitted_entity, emitted_entity_n, emitted_entity_cap,
                     &child_ids, &child_coords, &child_flags, &m,
-                    &leaf_root_id);
+                    &leaf_root_id, &leaf_root_tier);
             if (leaf_rc < 0) { rc = leaf_rc; goto done; }
             if (leaf_rc > 0) continue;
-            tier = 2;
+            /* Preserve the existing plain-string wrapper tier: its lexical
+             * content child was tier 2 before whole-string decoding. */
+            tier = json_string && kid_n > 0 ? 3 : 2;
         } else {
             size_t g_start = 0, g_end = 0;
             if (laplace_grapheme_floor_span_to_graphemes(
@@ -467,6 +501,9 @@ static int compose_ast_nodes(const uint8_t* utf8, size_t len, laplace_ast_t* ast
             st->comp_id[idx] = leaf_root_id;
         memcpy(st->comp_coord + idx * 4, out_coord, 4 * sizeof(double));
         st->comp_tier[idx]  = tier;
+        /* AST depth belongs to navigation/parent composition; an existing
+         * content ID keeps the natural tier selected by the shared ladder. */
+        st->entity_tier[idx] = leaf_root_id.hi || leaf_root_id.lo ? leaf_root_tier : tier;
         st->comp_valid[idx] = 1;
 
         free(child_ids);
@@ -683,13 +720,14 @@ static int emit_ast_node_physicalities(
     }
     for (size_t idx = n; idx-- > 0;) {
         if (!st->comp_valid[idx]) continue;
+        laplace_ast_node_t node;
+        if (laplace_ast_get_node(ast, idx, &node) != 0) continue;
+        if (json_mod && json_node_is_string_fragment(ast, &node)) continue;
+        const int json_string = json_mod && json_node_is_string(ast, &node);
         hash128_t id = st->comp_id[idx];
         const int packaging = !hash128_equals(&id, &st->comp_id[0]);
         const int novel_root = !root_seen;
         if (!packaging) root_seen = 1;
-
-        laplace_ast_node_t node;
-        if (laplace_ast_get_node(ast, idx, &node) != 0) continue;
 
         hilbert128_t hb;
         hilbert4d_encode(st->comp_coord + idx * 4, &hb);
@@ -703,7 +741,7 @@ static int emit_ast_node_physicalities(
         hash128_t* child_ids = NULL;
         uint64_t*  child_flags = NULL;
         size_t m = 0;
-        if (kid_n > 0) {
+        if (kid_n > 0 && !json_string) {
             child_ids = (hash128_t*)malloc(kid_n * sizeof(hash128_t));
             child_flags = (uint64_t*)malloc(kid_n * sizeof(uint64_t));
             if (child_ids && child_flags) {
@@ -807,6 +845,7 @@ done_st:
     free(st.comp_id);
     free(st.comp_coord);
     free(st.comp_tier);
+    free(st.entity_tier);
     free(st.comp_valid);
 done:
     laplace_grapheme_floor_free(&floor);
@@ -847,6 +886,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     int rc = 0;
     uint32_t** children_of  = NULL;
     uint32_t*  child_counts = NULL;
+    int root_seen = 0;
 
     tier_tree_t* tree = NULL;
     laplace_grapheme_floor_t floor;
@@ -931,17 +971,29 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         }
     }
 
+    if (json_mod && n > 0) {
+        for (size_t i = 0; i < r->phys_count; ++i) {
+            if (hash128_equals(&r->physicalities[i].entity_id, &st.comp_id[0])) {
+                root_seen = 1;
+                break;
+            }
+        }
+    }
+
     for (size_t idx = n; idx-- > 0;) {
         if (!st.comp_valid[idx]) continue;
         hash128_t id = st.comp_id[idx];
-        const int novel_entity = compose_id_push(
-            &emitted_entity, &emitted_entity_n, &emitted_entity_cap, id);
-        if (novel_entity < 0) { rc = -3; goto fail_emit; }
-
         laplace_ast_node_t node;
         if (laplace_ast_get_node(ast, idx, &node) != 0) continue;
-
         uint32_t kid_n = child_counts[idx];
+        const int json_string = json_mod && json_node_is_string(ast, &node);
+        const int json_fragment = json_mod && json_node_is_string_fragment(ast, &node);
+        /* A parser fragment contributes its span below, never the persisted
+         * scalar winner. Escape spelling must not choose a different tier or
+         * type for the same decoded content entity. */
+        const int novel_entity = json_fragment ? 0 : compose_id_push(
+            &emitted_entity, &emitted_entity_n, &emitted_entity_cap, id);
+        if (novel_entity < 0) { rc = -3; goto fail_emit; }
 
         /* RULE #8 STEP 1: "Tree-sitter unpacks the packaging (raw file format) ->
          * raw content. Nothing more."
@@ -1007,6 +1059,8 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
          * (GrammarCompose.TsvRowProducesEntitiesAndSpans caught exactly that).
          * The record root is whatever carries the root id, wherever it sits. */
         int packaging = !hash128_equals(&id, &st.comp_id[0]);
+        const int novel_root = !root_seen;
+        if (!packaging && !json_fragment) root_seen = 1;
 
         /* CONTAINER STRUCTURE IS NOT CONTENT.
          *
@@ -1037,9 +1091,9 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
          * (spans, containment, id convergence -- GrammarCompose.ConvergenceBattery
          * asserts the value id is findable here). Whether a node becomes a ROW is the
          * drain's decision, and it reads this flag. */
-        hash128_t tier_type = laplace_content_tier_type_id(st.comp_tier[idx]);
+        hash128_t tier_type = laplace_content_tier_type_id(st.entity_tier[idx]);
         if (novel_entity &&
-            push_entity(r, id, st.comp_tier[idx], tier_type, (uint8_t)packaging) != 0) {
+            push_entity(r, id, st.entity_tier[idx], tier_type, (uint8_t)packaging) != 0) {
             rc = -3; goto fail_emit;
         }
 
@@ -1048,7 +1102,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         hash128_t* child_ids = NULL;
         uint64_t*  child_flags = NULL;
         size_t m = 0;
-        if (kid_n > 0) {
+        if (kid_n > 0 && !json_string) {
             child_ids = (hash128_t*)malloc(kid_n * sizeof(hash128_t));
             child_flags = (uint64_t*)malloc(kid_n * sizeof(uint64_t));
             if (child_ids && child_flags) {
@@ -1097,8 +1151,8 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
         /* Entity reuse cannot discard another computed composition. Keep the
          * existing first candidate first; a collapsed duplicate AST wrapper
          * still contributes only its span, without a new self physicality. */
-        if (m > 0 && child_ids && materialize_phys && !packaging &&
-            (novel_entity || m > 1)) {
+        if (m > 0 && child_ids && materialize_phys && !packaging && !json_fragment &&
+            (novel_root || m > 1)) {
             if (push_phys(r, id, st.comp_coord + idx * 4, &hb,
                           child_ids, child_flags, m) != 0) {
                 free(child_ids); free(child_flags);
@@ -1210,6 +1264,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     free(st.comp_id);
     free(st.comp_coord);
     free(st.comp_tier);
+    free(st.entity_tier);
     free(st.comp_valid);
     laplace_grapheme_floor_free(&floor);
     tier_tree_free(tree);
@@ -1224,6 +1279,7 @@ fail_emit:
     free(st.comp_id);
     free(st.comp_coord);
     free(st.comp_tier);
+    free(st.entity_tier);
     free(st.comp_valid);
 fail:
     laplace_grapheme_floor_free(&floor);
@@ -1257,6 +1313,7 @@ int laplace_grammar_compose_node_id(const uint8_t* utf8, size_t len, laplace_ast
     free(st.comp_id);
     free(st.comp_coord);
     free(st.comp_tier);
+    free(st.entity_tier);
     free(st.comp_valid);
     laplace_grapheme_floor_free(&floor);
     tier_tree_free(tree);

@@ -49,6 +49,12 @@ public sealed class ChessRecordingDiagnosticsTests
         Assert.False(entered.Fields.ContainsKey("Returned"));
         Assert.Equal(false, failed.Fields["Returned"]);
         Assert.True(Convert.ToDouble(failed.Fields["ElapsedMs"]) >= 0);
+        var failedAggregate = Assert.Single(measurement.WriterLog.PhaseAggregates.Where(
+            value => value.Phase == expectedPhase));
+        Assert.Equal(1, failedAggregate.ObservedExits);
+        Assert.Equal(0, failedAggregate.ReturnedExits);
+        Assert.Equal(1, failedAggregate.InterruptedExits);
+        Assert.Equal(Convert.ToDouble(failed.Fields["ElapsedMs"]), failedAggregate.TotalMilliseconds);
         if (failDuringCapture)
             Assert.Contains(measurement.WriterLog.Entries, entry =>
                 Equals(entry.Fields.GetValueOrDefault("Phase"), "managed-staging")
@@ -90,6 +96,106 @@ public sealed class ChessRecordingDiagnosticsTests
         Assert.Contains("native physicality batch staging failed", failure.Message);
         Assert.DoesNotContain("diagnostic sink", failure.Message);
     }
+
+    [Fact]
+    public void WholeRunPhaseAggregatesSurviveParallelLoggingBeyondTheTail()
+    {
+        var measurement = new ChessRecordingMeasurement(null, 1);
+        ILogger logger = new ChessRecordingMeasurement.WriterDiagnosticLogger { Measurement = measurement };
+        Parallel.For(0, 1024, i =>
+        {
+            logger.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", "copy", "entered");
+            LogPhaseExit(logger, "copy", i + 1, returned: i % 3 != 0);
+        });
+
+        var phase = Assert.Single(measurement.WriterLog.PhaseAggregates);
+        Assert.Equal("copy", phase.Phase);
+        Assert.Equal(1024, phase.ObservedExits);
+        Assert.Equal(682, phase.ReturnedExits);
+        Assert.Equal(342, phase.InterruptedExits);
+        Assert.Equal(524800, phase.TotalMilliseconds);
+        Assert.Equal(1, phase.MinimumMilliseconds);
+        Assert.Equal(1024, phase.MaximumMilliseconds);
+        Assert.Equal(128, measurement.WriterLog.Entries.Count);
+        Assert.Equal(1920, measurement.WriterLog.DroppedEntries);
+        Assert.Equal(0, measurement.WriterLog.UnaggregatedPhaseExits);
+        Assert.Equal(0, measurement.WriterLog.RejectedPhaseExits);
+
+        // Immutable snapshots stay coherent while later observations accumulate.
+        LogPhaseExit(logger, "copy", 7, returned: true);
+        Assert.Equal(1024, phase.ObservedExits);
+        Assert.Equal(1025, Assert.Single(measurement.WriterLog.PhaseAggregates).ObservedExits);
+        Assert.Equal(0, measurement.Writer.ApplyCalls);
+        Assert.Equal(0, measurement.ReadbackGames);
+        Assert.Null(measurement.Durability);
+    }
+
+    [Fact]
+    public void PhaseAggregateNamesAndInvalidSamplesRemainBoundedAndExplicit()
+    {
+        var measurement = new ChessRecordingMeasurement(null, 1);
+        ILogger logger = new ChessRecordingMeasurement.WriterDiagnosticLogger { Measurement = measurement };
+        int maximum = ChessRecordingMeasurement.WriterLogDiagnostics.MaximumDistinctPhases;
+        for (int i = 0; i < maximum + 2; i++)
+            LogPhaseExit(logger, $"phase-{i:D2}", 2, returned: true);
+        // An existing phase continues accumulating after the distinct-name bound.
+        LogPhaseExit(logger, "phase-00", 5, returned: false);
+        foreach (double invalid in new[] { -1d, double.NaN, double.PositiveInfinity })
+            LogPhaseExit(logger, "phase-00", invalid, returned: true);
+        logger.LogInformation("malformed phase {Phase} boundary={Boundary}", "phase-00", "exited");
+        LogPhaseExit(logger, new string('x', 4096), 1, returned: true);
+
+        Assert.Equal(maximum, measurement.WriterLog.PhaseAggregates.Count);
+        var first = measurement.WriterLog.PhaseAggregates[0];
+        Assert.Equal("phase-00", first.Phase);
+        Assert.Equal(2, first.ObservedExits);
+        Assert.Equal(1, first.ReturnedExits);
+        Assert.Equal(1, first.InterruptedExits);
+        Assert.Equal(7, first.TotalMilliseconds);
+        Assert.Equal(2, first.MinimumMilliseconds);
+        Assert.Equal(5, first.MaximumMilliseconds);
+        Assert.Equal(2, measurement.WriterLog.UnaggregatedPhaseExits);
+        Assert.Equal(5, measurement.WriterLog.RejectedPhaseExits);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(measurement,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal("laplace.chess-recording/v2", json.RootElement.GetProperty("schema").GetString());
+        Assert.Equal(maximum, json.RootElement.GetProperty("writerLog").GetProperty("phaseAggregates").GetArrayLength());
+        Assert.Equal(5, json.RootElement.GetProperty("writerLog").GetProperty("rejectedPhaseExits").GetInt64());
+    }
+
+    [Fact]
+    public void PhaseAggregatesDoNotLeakFromSetupOrFreshIntoReplay()
+    {
+        var logger = new ChessRecordingMeasurement.WriterDiagnosticLogger();
+        LogPhaseExit(logger, "setup", 100, returned: true);
+        var fresh = new ChessRecordingMeasurement(null, 1);
+        logger.Measurement = fresh;
+        LogPhaseExit(logger, "copy", 5, returned: true);
+        logger.Measurement = null;
+        LogPhaseExit(logger, "between-admissions", 100, returned: true);
+        var replay = new ChessRecordingMeasurement(null, 1);
+        logger.Measurement = replay;
+        Assert.Empty(replay.WriterLog.PhaseAggregates);
+        LogPhaseExit(logger, "copy", 2, returned: false);
+
+        var freshPhase = Assert.Single(fresh.WriterLog.PhaseAggregates);
+        var replayPhase = Assert.Single(replay.WriterLog.PhaseAggregates);
+        Assert.Equal(1, freshPhase.ObservedExits);
+        Assert.Equal(5, freshPhase.TotalMilliseconds);
+        Assert.Equal(1, freshPhase.ReturnedExits);
+        Assert.Equal(1, replayPhase.ObservedExits);
+        Assert.Equal(2, replayPhase.TotalMilliseconds);
+        Assert.Equal(1, replayPhase.InterruptedExits);
+        Assert.Equal(0, fresh.Writer.ApplyCalls);
+        Assert.Equal(0, replay.Writer.ApplyCalls);
+        Assert.Null(fresh.Durability);
+        Assert.Null(replay.Durability);
+    }
+
+    private static void LogPhaseExit(ILogger logger, string phase, double milliseconds, bool returned) =>
+        logger.LogInformation(
+            "WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs}",
+            phase, "exited", returned, milliseconds);
 
     private static SubstrateChange RejectedPlacement(bool failDuringCapture)
     {

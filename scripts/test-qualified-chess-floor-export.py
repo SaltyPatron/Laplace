@@ -5,6 +5,7 @@ import importlib.util
 import copy
 import hashlib
 import json
+import mmap
 import os
 from pathlib import Path
 import signal
@@ -610,7 +611,11 @@ class NativeQualificationTests(unittest.TestCase):
     def baseline(self):
         return {"format": 3, "purpose": "recording", "build": copy.deepcopy(self.state["buildIdentity"]),
                 "database": {"server_version": "180006", "running_ingests": 2,
-                             "system_identifier": "1234567890123456789", "database_oid": 1001, "extensions": {"real-owner": "1"}},
+                             "system_identifier": "1234567890123456789", "database_oid": 1001,
+                             "postmaster_started": "2026-09-17T00:00:00+00:00",
+                             "native_mappings": {"lib/liblaplace_core.so": {
+                                 "path": str(self.prefix / "lib/liblaplace_core.so"), "device": 1, "inode": 2}},
+                             "extensions": {"real-owner": "1"}},
                 "artifacts": {"lib/liblaplace_core.so": {"sha256": "b" * 64}}}
 
     def runtime_guard(self, observed):
@@ -697,6 +702,87 @@ class NativeQualificationTests(unittest.TestCase):
         for value in variants:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 driver.recording_compatible(guard, baseline, value)
+
+    def test_later_installation_accepts_restart_and_equal_bytes_without_mutating_receipts(self):
+        baseline = self.baseline()
+        original = copy.deepcopy(baseline)
+        observed = copy.deepcopy(baseline)
+        observed["database"]["postmaster_started"] = "2026-09-17T01:00:00+00:00"
+        observed["database"]["native_mappings"]["lib/liblaplace_core.so"].update(device=3, inode=4)
+        saved = copy.deepcopy(observed)
+        guard = self.runtime_guard(observed)
+        driver.installed_compatible(guard, baseline, observed)
+        self.assertEqual(original, baseline)
+        self.assertEqual(saved, observed)
+        with self.assertRaisesRegex(ValueError, "recording baseline"):
+            driver.recording_compatible(guard, baseline, observed)
+
+    def test_later_installation_retains_source_sql_rom_and_database_incarnation(self):
+        baseline = self.baseline()
+        guard = self.runtime_guard(baseline)
+        for section, key, value in (
+                ("database", "system_identifier", "1234567890123456790"),
+                ("database", "database_oid", 1002),
+                ("database", "extensions", {"real-owner": "2"}),
+                ("database", "roms", {"laplace_substrate.perfcache_path": "/different/rom"}),
+                ("artifacts", "lib/liblaplace_core.so", {"sha256": "c" * 64}),
+                ("build", "installProgramSha256", "c" * 64)):
+            changed = copy.deepcopy(baseline)
+            changed[section][key] = value
+            with self.subTest(section=section, key=key), self.assertRaises(ValueError):
+                driver.installed_compatible(guard, baseline, changed)
+        changed = copy.deepcopy(baseline)
+        changed["database"]["native_mappings"]["lib/liblaplace_core.so"]["path"] = "/other/liblaplace_core.so"
+        with self.assertRaises(ValueError):
+            driver.installed_compatible(guard, baseline, changed)
+
+    def test_later_installation_refuses_missing_or_malformed_mapping_observation(self):
+        baseline = self.baseline()
+        guard = self.runtime_guard(baseline)
+        for value in ({}, [], {"lib/liblaplace_core.so": {"path": "/selected", "device": True, "inode": 1}},
+                      {"lib/liblaplace_core.so": {"path": "/selected", "device": 0, "inode": 0}},
+                      {"lib/liblaplace_core.so": {"path": "relative", "device": 0, "inode": 1}}):
+            changed = copy.deepcopy(baseline)
+            changed["database"]["native_mappings"] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                driver.installed_compatible(guard, baseline, changed)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires actual Linux process mappings")
+    def test_equal_replacement_requires_current_mapping_and_rejects_retained_deleted_generation(self):
+        actual = module("export_replacement_mapping_guard", "check-application-runtime.py")
+        relative = "lib/liblaplace_core.so"
+        path = self.prefix / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"mapping fixture, not an executable engine\n".ljust(4096, b"\0"))
+        original_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        def mappings():
+            return {"native_mappings": [line for line in Path("/proc/self/maps").read_text().splitlines()
+                                        if str(path) in line]}
+        def observe():
+            self.assertEqual(original_digest, hashlib.sha256(path.read_bytes()).hexdigest())
+            return actual.mapped_native_identities(
+                self.prefix, mappings(), {relative: original_digest}, required={relative})
+        with path.open("rb") as stream:
+            previous = mmap.mmap(stream.fileno(), 4096, prot=mmap.PROT_READ | mmap.PROT_EXEC)
+        try:
+            baseline = self.baseline()
+            baseline["artifacts"][relative] = original_digest
+            baseline["database"]["native_mappings"] = observe()
+            replacement = path.with_name("replacement.so")
+            replacement.write_bytes(path.read_bytes())
+            replacement.replace(path)
+            with self.assertRaisesRegex(ValueError, "replaced native library"):
+                observe()
+        finally:
+            previous.close()
+        with path.open("rb") as stream, mmap.mmap(
+                stream.fileno(), 4096, prot=mmap.PROT_READ | mmap.PROT_EXEC) as current:
+            observed = copy.deepcopy(baseline)
+            observed["database"]["native_mappings"] = observe()
+            self.assertNotEqual(baseline["database"]["native_mappings"], observed["database"]["native_mappings"])
+            driver.installed_compatible(actual, baseline, observed)
+            with self.assertRaisesRegex(ValueError, "recording baseline"):
+                driver.recording_compatible(actual, baseline, observed)
 
     def test_recorded_native_placement_is_bound_when_present(self):
         placement = {"checkout": str(self.checkout), "buildDirectory": str(self.build)}
