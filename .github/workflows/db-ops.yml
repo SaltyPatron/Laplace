@@ -10,12 +10,12 @@ on:
         default: status
         options: [status, create, drop, recreate, update, seed, verify]
       seed_source:
-        description: "optional seed source for seed/update"
+        description: "optional seed source for seed/update; blank seeds the foundation ladder"
         type: string
         required: false
         default: ""
       seed_limit:
-        description: "optional seed limit"
+        description: "reserved compatibility input; ingestion is source/artifact scoped"
         type: string
         required: false
         default: ""
@@ -61,4 +61,42 @@ jobs:
           mkdir -p /build/laplace/work
           exec 9>/build/laplace/work/host-resource.lock
           flock 9
-          exec bash scripts/product-ci.sh "$LAPLACE_DB_OPERATION"
+
+          case "$LAPLACE_DB_OPERATION" in
+            status)
+              exec bash scripts/db-migrations.sh status
+              ;;
+            create)
+              bash scripts/db-migrations.sh up
+              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
+              exec bash scripts/check-database-health.sh "$PGDATABASE"
+              ;;
+            drop)
+              exec bash scripts/db-migrations.sh nuke --yes
+              ;;
+            recreate)
+              bash scripts/db-migrations.sh nuke --yes
+              bash scripts/db-migrations.sh up
+              bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
+              exec bash scripts/check-database-health.sh "$PGDATABASE"
+              ;;
+            update)
+              bash scripts/maintain-installed-database.sh
+              if [[ -n "$LAPLACE_DB_SEED_SOURCE" ]]; then
+                exec bash scripts/ingest-source.sh "$LAPLACE_DB_SEED_SOURCE"
+              fi
+              ;;
+            seed)
+              if [[ -n "$LAPLACE_DB_SEED_SOURCE" ]]; then
+                exec bash scripts/ingest-source.sh "$LAPLACE_DB_SEED_SOURCE"
+              fi
+              exec bash scripts/ensure-foundation.sh
+              ;;
+            verify)
+              exec bash scripts/check-database-health.sh "$PGDATABASE"
+              ;;
+            *)
+              echo "::error::unknown database lifecycle operation: $LAPLACE_DB_OPERATION" >&2
+              exit 2
+              ;;
+          esac
