@@ -1,25 +1,101 @@
-name: Read installed managed policy authority
+name: Qualify PostgreSQL mapped native activation
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
 permissions:
   contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  GH_TOKEN: ${{ github.token }}
 jobs:
-  installed-policy:
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate and execute focused existing controls
+        run: |
+          set -euo pipefail
+          export TMPDIR="$GITHUB_WORKSPACE/tmp"
+          mkdir -p "$TMPDIR" qualification/scripts
+          python3 - <<'PY'
+          import ast,base64,hashlib,json,os,pathlib,re,subprocess,urllib.request
+          root=pathlib.Path("qualification")
+          files={"scripts/check-application-runtime.py":"3a21d103a3d9c09fe38754c8449d2769823d941a",
+                 "scripts/test-application-runtime.py":"1f8c75d574cd3ca38dec36c90478a43db7498e24",
+                 "scripts/pipeline.sh":"1e7b3cfa1d58813458f19c97c11bb336fd6b24fb"}
+          for path,sha in files.items():
+              req=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
+              with urllib.request.urlopen(req,timeout=30) as response:item=json.load(response)
+              raw=base64.b64decode(item["content"])
+              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
+              p=root/path;p.write_bytes(raw)
+              if p.suffix==".py":ast.parse(raw)
+              else:subprocess.run(["bash","-n",p],check=True)
+              print("AUTHENTICATED "+path+" "+sha,flush=True)
+          source=(root/"scripts/pipeline.sh").read_text()
+          bodies=re.findall(r"<<'PY'\n(.*?)\nPY",source,re.S)
+          for body in bodies:ast.parse(body)
+          assert len(bodies)==1
+          subprocess.run(["python3",root/"scripts/test-application-runtime.py"],check=True)
+          body=re.search(r"^phase_activate_postgres\(\) \{\n.*?^\}",source,re.M|re.S).group(0)
+          for case,expected,restarts in (("current",0,0),("stale",0,1),("still-stale",1,1),("read-error",2,0)):
+              script=body+r'''
+          calls=0
+          state=stale
+          postgresql_restart_required() { return 1; }
+          preloaded_native_restart_required() {
+            [[ "$CASE" != read-error ]] || return 2
+            [[ "$CASE" != current && "$state" != current ]] || return 1
+            return 0
+          }
+          restart_postgres() {
+            calls=$((calls+1))
+            [[ "$CASE" == still-stale ]] || state=current
+            return 0
+          }
+          result=0
+          phase_activate_postgres || result=$?
+          [[ "$result" == "$EXPECTED" && "$calls" == "$RESTARTS" ]]
+          '''
+              subprocess.run(["bash","-euo","pipefail","-c",script],check=True,env=dict(os.environ,CASE=case,EXPECTED=str(expected),RESTARTS=str(restarts)))
+              print("ACTIVATION_CONTROL_PASS "+case,flush=True)
+          PY
+      - name: Retain exact qualified source
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mapped-native-controls-${{ github.run_id }}
+          path: qualification/
+          retention-days: 30
+          if-no-files-found: error
+  actual-mappings:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 5
     steps:
-      - name: Read allowed commands and installed policy identities
+      - name: Read actual backend through the new canonical mapping guard
         run: |
           python3 - <<'PY'
-          import hashlib,json,os,pathlib,subprocess
-          result=subprocess.run(["sudo","-n","-l"],capture_output=True,text=True,timeout=15)
-          print("SUDO_COMMAND_AUTHORITY "+json.dumps({"exitCode":result.returncode,"stdout":result.stdout,"stderr":result.stderr}),flush=True)
-          for name in ("laplace-managed-deploy","laplace-service-control"):
-              p=pathlib.Path("/usr/local/libexec")/name
-              try:
-                  raw=p.read_bytes();st=p.stat()
-                  print("INSTALLED_POLICY "+json.dumps({"path":str(p),"uid":st.st_uid,"gid":st.st_gid,"mode":oct(st.st_mode&0o7777),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),"gitBlob":hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()}),flush=True)
-                  if len(raw)<=196608:print("INSTALLED_POLICY_SOURCE "+name+"\n"+raw.decode("utf-8","replace"),flush=True)
-              except OSError as error:print("POLICY_OBSERVATION_ERROR "+json.dumps({"path":str(p),"error":type(error).__name__}),flush=True)
+          import base64,hashlib,importlib.util,json,os,pathlib,urllib.request
+          root=pathlib.Path("/build/laplace/recovery/mapped-native-guard")/(os.environ["GITHUB_RUN_ID"]+"-"+os.environ["GITHUB_RUN_ATTEMPT"])
+          root.mkdir(parents=True,mode=0o700)
+          sha="3a21d103a3d9c09fe38754c8449d2769823d941a"
+          req=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
+          with urllib.request.urlopen(req,timeout=30) as response:item=json.load(response)
+          raw=base64.b64decode(item["content"])
+          assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
+          path=root/"guard.py";path.write_bytes(raw)
+          spec=importlib.util.spec_from_file_location("selected_mapping_guard",path)
+          guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+          prefix=pathlib.Path("/opt/laplace")
+          selected={relative:None for relative in guard.MODULES.values()}
+          manifest=prefix/"share/postgresql/18/extension/laplace_execution_module.txt"
+          if manifest.is_file():
+              name=manifest.read_text().strip()
+              assert __import__("re").fullmatch("laplace_execution_[0-9a-f]{16}",name)
+              selected["lib/postgresql/18/"+name+".so"]=None
+          database=guard.read_database(pathlib.Path("/opt/laplace/pgsql-18"))
+          mapped=guard.mapped_native_identities(prefix,database,selected)
+          result={"guardBlob":sha,"nativeMappings":mapped,"database":database["database"],"serverVersion":database["server_version"],"postmasterStarted":database["postmaster_started"],"readOnly":True}
+          (root/"receipt.json").write_text(json.dumps(result,sort_keys=True)+"\n")
+          print("ACTUAL_BACKEND_MAPPINGS_PASS "+json.dumps(result,sort_keys=True),flush=True)
           PY
