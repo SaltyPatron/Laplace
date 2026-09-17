@@ -158,7 +158,8 @@ class IntegratedLifecycle(unittest.TestCase):
             functions = []
             for name in names:
                 status = test_status if name == "run_dev_tests" else 0
-                functions.append(name + '() { printf "%s\\n" "' + name
+                event = name + (":$*" if name == "run_database_maintenance" else "")
+                functions.append(name + '() { printf "%s\\n" "' + event
                                  + '" >> "$TEST_EVENTS"; return ' + str(status) + '; }')
             script = "set -euo pipefail\n" + "\n".join(functions) + "\n" + owner + "\nrun_deploy\n"
             result = subprocess.run(["bash", "-c", script],
@@ -175,8 +176,55 @@ class IntegratedLifecycle(unittest.TestCase):
         result, events = self.execute(0)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(events, ["check_deps", "run_build", "run_dev_tests", "run_install",
-                                 "run_database_maintenance", "run_publish",
+                                 "run_database_maintenance:--prepare", "run_publish",
                                  "reconcile_installed_product", "run_foundation"])
+
+class DatabaseMaintenanceMode(unittest.TestCase):
+    def execute(self, arguments, pipeline_status=0, fresh=False):
+        with tempfile.TemporaryDirectory(prefix="laplace-database-order-") as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            source = ROOT / "scripts/maintain-installed-database.sh"
+            (scripts / source.name).write_bytes(source.read_bytes())
+            trace = root / "events"
+            for name, label in (("pipeline.sh", "pipeline"), ("reconcile-highway-masks.sh", "highway"),
+                                ("check-database-health.sh", "health")):
+                status = pipeline_status if label == "pipeline" else 0
+                (scripts / name).write_text(
+                    'printf "%s\\n" "' + label + ':$*" >> "$TEST_EVENTS"\nexit ' + str(status) + '\n')
+            result = subprocess.run(["bash", str(scripts / source.name), *arguments],
+                env=dict(os.environ, TEST_EVENTS=str(trace), PGDATABASE="fixture_database",
+                         LAPLACE_FRESH_DB="1" if fresh else ""),
+                text=True, capture_output=True, timeout=10)
+            return result, trace.read_text().splitlines() if trace.exists() else []
+
+    def test_prepare_defers_data_reconciliation_and_preserves_fresh_argument(self):
+        result, events = self.execute(["--prepare"], fresh=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(events, [
+            "pipeline:--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env",
+            "health:fixture_database"])
+
+    def test_standalone_database_maintenance_retains_full_reconciliation(self):
+        result, events = self.execute([])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(events, [
+            "pipeline:migrate sync-extension tune-pg tune-laplace perfcache-guc api-env",
+            "highway:fixture_database", "health:fixture_database"])
+
+    def test_schema_failure_prevents_reconciliation_and_health(self):
+        result, events = self.execute([], pipeline_status=23)
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0].startswith("pipeline:"))
+
+    def test_unknown_mode_or_extra_arguments_cannot_start_database_work(self):
+        for arguments in (["unknown"], ["--prepare", "extra"]):
+            with self.subTest(arguments=arguments):
+                result, events = self.execute(arguments)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(events, [])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

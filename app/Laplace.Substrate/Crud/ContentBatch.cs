@@ -101,18 +101,18 @@ public sealed class ContentBatch : IDisposable
             {
                 _reader.MarkProven([e.RootId], presenceScope);
                 _reader.CacheRoot(Hash128.Blake3(e.Canonical), e.RootId);
-                // Keep the real root proof for native entity filtering; its
-                // physicality observations still belong to this source unit.
-                e.ExistingBitmap = new byte[(e.Tree.NodeCount + 7) / 8];
-                int rootIndex = checked((int)e.Tree.NaturalUnitIndex());
-                e.ExistingBitmap[rootIndex >> 3] |= (byte)(1 << (rootIndex & 7));
-                continue;
+            }
+            else
+            {
+                // Carry this exact negative result into descent so the root is
+                // not queried again within the same unwritten working set.
+                rootsProvenAbsent.Add(e.RootId);
             }
 
-            // The unscoped root probe above already proved this identity absent.
-            // Carry that result into the tier descent so its highest-tier round
-            // does not immediately issue the same indexed lookup a second time.
-            rootsProvenAbsent.Add(e.RootId);
+            // A present root proves only that identity, not its descendants.
+            // The shared descent reuses positive root proof for every collapsed
+            // occurrence and probes each remaining exact node in tier batches.
+            // Every source's physicality observations are still emitted below.
 
             probeTrees.Add(e.Tree);
             emitEntries.Add(e);

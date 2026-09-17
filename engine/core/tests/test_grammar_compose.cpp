@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 
 #include "laplace/core/grammar_registry.h"
 #include "laplace/core/grammar_decomposer.h"
@@ -147,6 +148,92 @@ TEST(GrammarCompose, TsvRowProducesEntitiesAndSpans) {
 
 
 
+
+
+TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultiplicity) {
+    struct Case {
+        const char* modality;
+        const char* source;
+        bool repeated_grapheme;
+    };
+    const Case cases[] = {
+        {"tsv", "1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}", false},
+        {"tsv", "7\tIsA\t/c/en/a moment in time\t/c/en/moment\t{}", false},
+        {"tsv", "a\tb\tc\n", false},
+        {"tsv", "a\ta\ta\na\ta\ta\n", false},
+        {"tsv", "q\xCC\x81\tq\xCC\x81\n", true},
+        {"json", R"({"name":"dog","same":"dog"})", false},
+    };
+    for (const auto& fixture : cases) {
+        SCOPED_TRACE(::testing::Message() << fixture.modality << ": " << fixture.source);
+        const auto* bytes = reinterpret_cast<const uint8_t*>(fixture.source);
+        const size_t length = std::strlen(fixture.source);
+        const TSLanguage* recipe = laplace_grammar_lookup_by_id(fixture.modality);
+        ASSERT_NE(recipe, nullptr);
+        laplace_ast_t* ast = nullptr;
+        ASSERT_EQ(laplace_grammar_parse(bytes, length, recipe, &ast), 0);
+        std::unique_ptr<laplace_ast_t, decltype(&laplace_ast_free)> ast_owner(ast, laplace_ast_free);
+        hash128_t source_id{}, type_meta{};
+        hash128_blake3_str("test/grammar-probe-forms", &source_id);
+        hash128_blake3_str("Type", &type_meta);
+
+        laplace_compose_result_t* full = nullptr;
+        ASSERT_EQ(laplace_grammar_compose(bytes, length, ast, fixture.modality,
+                                            source_id, type_meta, &full), 0);
+        std::unique_ptr<laplace_compose_result_t, decltype(&laplace_compose_result_free)>
+            full_owner(full, laplace_compose_result_free);
+        ASSERT_NE(full, nullptr);
+        laplace_compose_result_t* probe = nullptr;
+        ASSERT_EQ(laplace_grammar_compose_probe(bytes, length, ast, fixture.modality,
+                                                  source_id, type_meta, &probe), 0);
+        std::unique_ptr<laplace_compose_result_t, decltype(&laplace_compose_result_free)>
+            probe_owner(probe, laplace_compose_result_free);
+        ASSERT_NE(probe, nullptr);
+        const size_t entity_count = laplace_compose_entity_count(probe);
+        const hash128_t root = laplace_compose_root_id(full);
+        const hash128_t probed_root = laplace_compose_root_id(probe);
+        ASSERT_TRUE(hash128_equals(&root, &probed_root));
+
+        ASSERT_EQ(laplace_grammar_compose_materialize_phys(
+            probe, bytes, length, ast, fixture.modality), 0);
+        ASSERT_EQ(laplace_compose_entity_count(probe), entity_count);
+        ASSERT_EQ(laplace_compose_entity_count(full), entity_count);
+        const size_t count = laplace_compose_physicality_count(full);
+        ASSERT_GT(count, 0u);
+        ASSERT_EQ(laplace_compose_physicality_count(probe), count);
+        size_t root_forms = 0;
+        size_t repeated_forms = 0;
+        for (size_t i = 0; i < count; ++i) {
+            laplace_compose_physicality_t expected{}, actual{};
+            ASSERT_EQ(laplace_compose_get_physicality(full, i, &expected), 0);
+            ASSERT_EQ(laplace_compose_get_physicality(probe, i, &actual), 0);
+            EXPECT_TRUE(hash128_equals(&expected.id, &actual.id));
+            EXPECT_TRUE(hash128_equals(&expected.entity_id, &actual.entity_id));
+            EXPECT_EQ(std::memcmp(expected.coord, actual.coord, sizeof(expected.coord)), 0);
+            EXPECT_EQ(std::memcmp(&expected.hilbert, &actual.hilbert, sizeof(expected.hilbert)), 0);
+            EXPECT_EQ(expected.n_constituents, actual.n_constituents);
+            ASSERT_EQ(expected.trajectory_n, actual.trajectory_n);
+            EXPECT_EQ(std::memcmp(expected.trajectory_xyzm, actual.trajectory_xyzm,
+                                  expected.trajectory_n * sizeof(double)), 0);
+            if (hash128_equals(&expected.entity_id, &root)) ++root_forms;
+            for (size_t j = 0; j < i; ++j) {
+                laplace_compose_physicality_t previous{};
+                ASSERT_EQ(laplace_compose_get_physicality(full, j, &previous), 0);
+                if (hash128_equals(&expected.id, &previous.id)) {
+                    ++repeated_forms;
+                    break;
+                }
+            }
+        }
+        EXPECT_EQ(root_forms, 1u) << "a unary AST wrapper must not add a self-form";
+        if (fixture.repeated_grapheme)
+            EXPECT_GT(repeated_forms, 0u) << "raw repeated occurrences must survive";
+        ASSERT_EQ(laplace_grammar_compose_materialize_phys(
+            probe, bytes, length, ast, fixture.modality), 0);
+        EXPECT_EQ(laplace_compose_physicality_count(probe), count)
+            << "materializing the same owned result twice must not append observations";
+    }
+}
 
 // GH #595: the span index must resolve every emitted occurrence at scale.
 // Occurrence spans are not entity identities: all CSV commas reuse one

@@ -42,7 +42,7 @@ run_install() {
 }
 
 run_database_maintenance() {
-  bash scripts/maintain-installed-database.sh
+  bash scripts/maintain-installed-database.sh "$@"
 }
 
 run_foundation() {
@@ -79,7 +79,7 @@ run_deploy() {
   run_build
   run_dev_tests
   run_install
-  run_database_maintenance
+  run_database_maintenance --prepare
   run_publish
   reconcile_installed_product
   run_foundation

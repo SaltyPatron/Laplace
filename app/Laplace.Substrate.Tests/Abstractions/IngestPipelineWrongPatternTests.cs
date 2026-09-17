@@ -63,19 +63,36 @@ public sealed class IngestPipelineWrongPatternTests
     }
 
     [Fact]
-    public async Task WrongPattern_ComposeBeforeProbe_SkippedWhenAllPresent()
+    public async Task PresentEntityProbeRetainsPhysicalityComposition()
     {
-        var records = new[] { ContentRecord("compose before probe should not happen") };
+        var records = new[] { ContentRecord("compose physicalities for an existing content root") };
         var reader = new ProbeTrackingReader(present: true);
-
+        var baseline = new List<SubstrateChange>();
         var changes = new List<SubstrateChange>();
-        await foreach (var c in IngestBatchPipeline.RunAsync(
-            new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig(reader)))
-            changes.Add(c);
+        try
+        {
+            await foreach (var c in IngestBatchPipeline.RunAsync(
+                new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig()))
+                baseline.Add(c);
+            await foreach (var c in IngestBatchPipeline.RunAsync(
+                new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig(reader)))
+                changes.Add(c);
 
-        Assert.Equal(1, reader.FlatProbeCalls);
-        Assert.Equal(0, reader.LegacyContentDescentCalls);
-        Assert.Equal(0, ContentEntityCount(changes));
+            Assert.Equal(1, reader.FlatCandidateCounts[0]);
+            Assert.InRange(reader.FlatProbeCalls, 2, MaxProbeCallsFor(1));
+            Assert.Equal(0, reader.LegacyContentDescentCalls);
+            Assert.True(ContentEntityCount(baseline) > 0);
+            Assert.Equal(0, ContentEntityCount(changes));
+            var expectedBodies = PhysicalityBodies(baseline);
+            Assert.NotEmpty(expectedBodies);
+            Assert.Equal(expectedBodies, PhysicalityBodies(changes));
+            Assert.Equal(records.Length, changes.Sum(x => x.Metadata.InputUnitsConsumed));
+        }
+        finally
+        {
+            DisposeStages(baseline);
+            DisposeStages(changes);
+        }
     }
 
     private sealed class FakeWriter(Action onApply) : ISubstrateWriter

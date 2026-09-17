@@ -121,28 +121,44 @@ public sealed class IngestBatchPipelineTests
     }
 
     [Fact]
-    public async Task PresentBatch_EmitsZeroEntities()
+    public async Task PresentBatch_EmitsZeroEntitiesAndRetainsPhysicalityBodies()
     {
-        var records = Enumerable.Range(1, 12)
+        const int rowCount = 12;
+        var records = Enumerable.Range(1, rowCount)
             .Select(i => ContentRecord($"present batch {i}"))
             .ToList();
-
         var baseline = new List<SubstrateChange>();
-        await foreach (var c in IngestBatchPipeline.RunAsync(
-            new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig()))
-            baseline.Add(c);
-        Assert.True(ContentEntityCount(baseline) > 0);
-
-        var reader = new ProbeTrackingReader(present: true);
         var changes = new List<SubstrateChange>();
-        await foreach (var c in IngestBatchPipeline.RunAsync(
-            new ListContentStream(records), new ContentIngestHandler(TestSource), DefaultConfig(reader)))
-            changes.Add(c);
+        try
+        {
+            await foreach (var c in IngestBatchPipeline.RunAsync(
+                new ListContentStream(records), new ContentIngestHandler(TestSource),
+                DefaultConfig(batchSize: rowCount, probeChunk: rowCount)))
+                baseline.Add(c);
+            Assert.True(ContentEntityCount(baseline) > 0);
 
-        Assert.Equal(1, reader.FlatProbeCalls);
-        Assert.Equal(0, reader.LegacyContentDescentCalls);
-        Assert.Equal(0, ContentEntityCount(changes));
-        Assert.Equal(records.Count, changes.Sum(x => x.Metadata.InputUnitsConsumed));
+            var reader = new ProbeTrackingReader(present: true);
+            await foreach (var c in IngestBatchPipeline.RunAsync(
+                new ListContentStream(records), new ContentIngestHandler(TestSource),
+                DefaultConfig(reader, batchSize: rowCount, probeChunk: rowCount)))
+                changes.Add(c);
+
+            // Root presence does not prove descendant presence. Preserve the
+            // bounded batched tier probes and suppress only existing entities.
+            Assert.Equal(rowCount, reader.FlatCandidateCounts[0]);
+            Assert.InRange(reader.FlatProbeCalls, 2, MaxProbeCallsFor(1));
+            Assert.Equal(0, reader.LegacyContentDescentCalls);
+            Assert.Equal(0, ContentEntityCount(changes));
+            Assert.Equal(records.Count, changes.Sum(x => x.Metadata.InputUnitsConsumed));
+            var expectedBodies = PhysicalityBodies(baseline);
+            Assert.NotEmpty(expectedBodies);
+            Assert.Equal(expectedBodies, PhysicalityBodies(changes));
+        }
+        finally
+        {
+            DisposeStages(baseline);
+            DisposeStages(changes);
+        }
     }
 
     [Fact]
@@ -238,10 +254,19 @@ public sealed class IngestBatchPipelineTests
         Assert.NotNull(bm);
         Assert.True(reader.FlatProbeCalls > 0);
 
-        var (ents, phys, prec, _) = composer.Materialize(1.0, bm);
+        using var fresh = new GrammarRowComposer(utf8, ast, TestSource, "tsv");
+        var (baseEnts, basePhys, basePrec, baseRoot) = fresh.Materialize(1.0);
+        Assert.NotEmpty(baseEnts);
+        Assert.NotEmpty(basePhys);
+        var (ents, phys, prec, root) = composer.Materialize(1.0, bm);
         Assert.Empty(ents);
-        Assert.Empty(phys);
-        Assert.True(prec.Length >= 0);
+        Assert.Equal(baseRoot, root);
+        Assert.Equal(basePhys.Length, phys.Length);
+        Assert.Equal(basePhys.Select(p => p with { ObservedAtUnixUs = 0, TrajectoryXyzm = null }),
+            phys.Select(p => p with { ObservedAtUnixUs = 0, TrajectoryXyzm = null }));
+        for (int i = 0; i < basePhys.Length; i++)
+            Assert.Equal(basePhys[i].TrajectoryXyzm, phys[i].TrajectoryXyzm);
+        Assert.Equal(basePrec.Length, prec.Length);
     }
 
     [Fact]

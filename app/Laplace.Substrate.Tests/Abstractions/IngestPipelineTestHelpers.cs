@@ -1,4 +1,7 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
+using Laplace.SubstrateCRUD.Npgsql;
+using Xunit;
 using System.Text;
 using System.Threading;
 using Laplace.Engine.Core;
@@ -15,6 +18,39 @@ internal static class IngestPipelineTestHelpers
         changes.Sum(c => c.IntentStages.IsDefaultOrEmpty
             ? 0L
             : c.IntentStages.Sum(s => (long)s.EntityCount));
+
+    // Compare actual native COPY bodies across batching shapes. Only the last
+    // field (observation time) changes between runs; every identity, placement,
+    // trajectory and descriptor byte remains part of the comparison. Sorting
+    // keeps every occurrence while ignoring transport batch boundaries.
+    internal static string[] PhysicalityBodies(IEnumerable<SubstrateChange> changes)
+    {
+        var bodies = new List<string>();
+        foreach (var stage in changes.Where(change => !change.IntentStages.IsDefaultOrEmpty)
+                     .SelectMany(change => change.IntentStages))
+        {
+            var blob = stage.TupleBuffer(IntentStageTable.Physicalities);
+            var rows = CopyTupleParser.ParsePhysicalities([blob]);
+            var bytes = new byte[checked((int)blob.Len)];
+            if (bytes.Length != 0) Marshal.Copy(blob.Ptr, bytes, 0, bytes.Length);
+            foreach (var row in rows.Rows)
+            {
+                var tuple = bytes.AsSpan(checked((int)row.Offset), row.Length);
+                Assert.True(tuple.Length >= 12);
+                Assert.Equal(8, BinaryPrimitives.ReadInt32BigEndian(tuple[^12..^8]));
+                bodies.Add(Convert.ToHexString(tuple[..^12]));
+            }
+        }
+        bodies.Sort(StringComparer.Ordinal);
+        return bodies.ToArray();
+    }
+
+    internal static void DisposeStages(IEnumerable<SubstrateChange> changes)
+    {
+        foreach (var stage in changes.Where(change => !change.IntentStages.IsDefaultOrEmpty)
+                     .SelectMany(change => change.IntentStages))
+            stage.Dispose();
+    }
 
     internal static long AttestationCount(IEnumerable<SubstrateChange> changes) =>
         changes.Sum(c => (long)c.Attestations.Length +

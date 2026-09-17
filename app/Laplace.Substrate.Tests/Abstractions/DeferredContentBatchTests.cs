@@ -2,6 +2,7 @@ using System.Linq;
 using System.Text;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -22,7 +23,12 @@ public sealed class DeferredContentBatchTests
     private sealed class FakeReader : ISubstrateReader
     {
         private readonly bool _present;
-        public FakeReader(bool present) => _present = present;
+        private readonly HashSet<Hash128> _exactPresent;
+        public FakeReader(bool present, params Hash128[] exactPresent)
+        {
+            _present = present;
+            _exactPresent = exactPresent.ToHashSet();
+        }
         public int RootProbeCalls { get; private set; }
         public List<Hash128> TierCandidates { get; } = [];
         private readonly Dictionary<Hash128, Hash128> _roots = new();
@@ -45,8 +51,8 @@ public sealed class DeferredContentBatchTests
         {
             RootProbeCalls++;
             var bm = new byte[(candidates.Count + 7) / 8];
-            if (_present)
-                for (int i = 0; i < candidates.Count; i++)
+            for (int i = 0; i < candidates.Count; i++)
+                if (_present || _exactPresent.Contains(candidates[i]))
                     bm[i >> 3] |= (byte)(1 << (i & 7));
             return Task.FromResult(bm);
         }
@@ -55,8 +61,8 @@ public sealed class DeferredContentBatchTests
         {
             TierCandidates.AddRange(ids);
             var bm = new byte[(ids.Count + 7) / 8];
-            if (_present)
-                for (int i = 0; i < ids.Count; i++)
+            for (int i = 0; i < ids.Count; i++)
+                if (_present || _exactPresent.Contains(ids[i]))
                     bm[i >> 3] |= (byte)(1 << (i & 7));
             return Task.FromResult(bm);
         }
@@ -88,7 +94,7 @@ public sealed class DeferredContentBatchTests
     {
         byte[] bytes = Encoding.UTF8.GetBytes(s);
         var reader = new FakeReader(present: true);
-        var b = new SubstrateChangeBuilder(Src, "test/present").EnableDeferredContent(reader);
+        using var b = new SubstrateChangeBuilder(Src, "test/present").EnableDeferredContent(reader);
         Assert.NotNull(b.DeferredContent);
 
 
@@ -96,8 +102,16 @@ public sealed class DeferredContentBatchTests
         Assert.NotEqual(default, root);
 
         var change = await b.SetInputUnitsConsumed(1).BuildAsync();
-        Assert.Equal(0, ContentEntityCount(change));
-        Assert.True(change.IntentStages.Sum(stage => stage.PhysicalityCount) > 0);
+        try
+        {
+            Assert.Equal(0, ContentEntityCount(change));
+            Assert.True(change.IntentStages.Sum(stage => stage.PhysicalityCount) > 0);
+            Assert.DoesNotContain(root, reader.TierCandidates);
+        }
+        finally
+        {
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
     }
 
     [Theory]
@@ -170,7 +184,7 @@ public sealed class DeferredContentBatchTests
         reader.CacheRoot(Hash128.Blake3(bytes), root);
         reader.MarkProven([root]);
         var other = new Hash128(501, 502);
-        var builder = new SubstrateChangeBuilder(Src, "cached-sources")
+        using var builder = new SubstrateChangeBuilder(Src, "cached-sources")
             .EnableDeferredContent(reader);
         foreach (var source in new[] { Src, other, other })
         {
@@ -179,12 +193,82 @@ public sealed class DeferredContentBatchTests
         }
         Assert.True(builder.DeferredContent!.HasPending);
         var change = await builder.SetInputUnitsConsumed(1).BuildAsync();
-        var stage = Assert.Single(change.IntentStages);
-        Assert.Equal(0, stage.EntityCount);
-        Assert.Equal(2, stage.PhysicalityCount);
-        Assert.Equal(new[] { new PhysicalitySourceRange(0, 1, Src),
-            new PhysicalitySourceRange(1, 1, other) }, stage.PhysicalitySourceRanges.ToArray());
-        Assert.Equal(1, reader.RootProbeCalls);
-        Assert.Empty(reader.TierCandidates);
+        try
+        {
+            var stage = Assert.Single(change.IntentStages);
+            Assert.Equal(0, stage.EntityCount);
+            Assert.Equal(2, stage.PhysicalityCount);
+            Assert.Equal(new[] { new PhysicalitySourceRange(0, 1, Src),
+                new PhysicalitySourceRange(1, 1, other) }, stage.PhysicalitySourceRanges.ToArray());
+            Assert.Equal(1, reader.RootProbeCalls);
+            using var tree = ContentTierSpine.BuildTree(bytes)!;
+            var descendants = Enumerable.Range(0, tree.NodeCount)
+                .Select(index => tree.GetNode((uint)index).Id)
+                .Where(id => id != root).Distinct().Select(id => id.ToString())
+                .Order(StringComparer.Ordinal).ToArray();
+            Assert.Equal(descendants, reader.TierCandidates.Select(id => id.ToString())
+                .Order(StringComparer.Ordinal).ToArray());
+        }
+        finally
+        {
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PresentRootStillChecksExactChildrenAndRetainsEverySourceOccurrence(bool allPresent)
+    {
+        var bytes = Encoding.UTF8.GetBytes("ab ab");
+        var root = ContentTierSpine.ResolveRoot(bytes)!.Value;
+        var wordBytes = Encoding.UTF8.GetBytes("ab");
+        var word = ContentTierSpine.ResolveRoot(wordBytes)!.Value;
+        Assert.NotEqual(root, word);
+        var reader = new FakeReader(allPresent, root);
+        var other = new Hash128(601, 602);
+        using var builder = new SubstrateChangeBuilder(Src, "root-and-children")
+            .EnableDeferredContent(reader);
+        foreach (var source in new[] { Src, other })
+        {
+            Assert.True(ContentTierSpine.TryStageIntoBuilder(builder, bytes, source, out var observed));
+            Assert.Equal(root, observed);
+        }
+        var change = await builder.SetInputUnitsConsumed(1).BuildAsync();
+        try
+        {
+            var stage = Assert.Single(change.IntentStages);
+            var entities = CopyTupleParser.ParseEntities([stage.TupleBuffer(IntentStageTable.Entities)]);
+            if (allPresent)
+            {
+                Assert.Equal(0, stage.EntityCount);
+                Assert.Empty(entities.Ids);
+            }
+            else
+            {
+                // Independently compose the missing word, then verify the actual
+                // staged COPY identity, tier and type rather than relaxing E0.
+                using var expected = IntentStage.New(0);
+                Assert.True(expected.TryAddContentWitness(wordBytes, Src, out var expectedWord));
+                Assert.Equal(word, expectedWord);
+                var expectedEntities = CopyTupleParser.ParseEntities(
+                    [expected.TupleBuffer(IntentStageTable.Entities)]);
+                Assert.Equal(word, Assert.Single(expectedEntities.Ids));
+                Assert.Equal(expectedEntities.Ids, entities.Ids);
+                Assert.Equal(expectedEntities.Tiers, entities.Tiers);
+                Assert.Equal(expectedEntities.TypeIds, entities.TypeIds);
+                Assert.Equal(1, stage.EntityCount);
+            }
+            Assert.Equal(6, stage.PhysicalityCount);
+            Assert.Equal(new[] { new PhysicalitySourceRange(0, 3, Src),
+                new PhysicalitySourceRange(3, 3, other) }, stage.PhysicalitySourceRanges.ToArray());
+            Assert.Contains(word, reader.TierCandidates);
+            Assert.DoesNotContain(root, reader.TierCandidates);
+            Assert.Equal(1, reader.RootProbeCalls);
+        }
+        finally
+        {
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
     }
 }

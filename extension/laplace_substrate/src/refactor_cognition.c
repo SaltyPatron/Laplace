@@ -132,10 +132,10 @@ ensure_candidate_plan(void)
         ereport(ERROR,
                 (errmsg("refactor cognition: physicality query missing from native catalog")));
     Oid argtypes[3] = { BYTEAOID, INT4OID, INT4OID };
-    SPIPlanPtr plan = SPI_prepare(sql, 3, argtypes);
+    SPIPlanPtr plan = SPI_prepare_cursor(sql, 3, argtypes, CURSOR_OPT_PARALLEL_OK);
     if (plan == NULL)
         ereport(ERROR,
-                (errmsg("refactor cognition: SPI_prepare candidate query failed: %s",
+                (errmsg("refactor cognition: SPI_prepare_cursor candidate query failed: %s",
                         SPI_result_code_string(SPI_result))));
     if (SPI_keepplan(plan) != 0)
         ereport(ERROR,
