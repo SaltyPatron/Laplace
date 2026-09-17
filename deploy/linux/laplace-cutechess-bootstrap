@@ -1,0 +1,395 @@
+#!/usr/bin/env python3
+"""Provision the fixed SSH-only CuteChess session through ordinary host setup."""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import pwd
+import re
+import stat
+import subprocess
+import tempfile
+import time
+import urllib.request
+
+STATE = Path("/var/lib/laplace-cutechess")
+KEYRING = Path("/usr/share/keyrings/laplace-xpra.asc")
+SOURCES = Path("/etc/apt/sources.list.d/laplace-xpra.sources")
+UNITS = ("xpra-server.socket", "xpra-server.service", "xpra.socket", "xpra.service")
+SYSTEMD = Path("/etc/systemd/system")
+VENDOR_UNIT_DIRS = (Path("/lib/systemd/system"), Path("/usr/lib/systemd/system"))
+LIBEXEC = Path("/usr/local/libexec/laplace")
+SCHEMA = "laplace.cutechess-session-install/v1"
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def run(argv, *, timeout=600, check=True, env=None, log=None):
+    try:
+        completed = subprocess.run(argv, check=False, capture_output=True, text=True,
+                                   timeout=timeout, env=env)
+    except subprocess.TimeoutExpired as error:
+        def decoded(value):
+            return value.decode(errors="replace") if isinstance(value, bytes) else (value or "")
+        output = decoded(error.stdout) + decoded(error.stderr)
+        if log is not None:
+            Path(log).write_text(output[-8 * 1024 * 1024:] + "\ncommand timed out\n")
+        raise RuntimeError("command timed out: " + Path(argv[0]).name + "; "
+                           + output[-2000:]) from error
+    output = completed.stdout + completed.stderr
+    if log is not None:
+        Path(log).write_text(output[-8 * 1024 * 1024:])
+    if check and completed.returncode != 0:
+        raise RuntimeError("command failed (" + str(completed.returncode) + "): "
+                           + Path(argv[0]).name + "; " + output[-4000:])
+    return completed
+
+
+def fields(text):
+    records = []
+    for paragraph in re.split(r"\n\s*\n", text.strip()):
+        values = {}
+        for line in paragraph.splitlines():
+            if line.startswith((" ", "\t")):
+                continue
+            if ": " in line:
+                key, value = line.split(": ", 1)
+                values[key] = value
+        if values:
+            records.append(values)
+    return records
+
+
+def package_record(text, package, release):
+    matches = [row for row in fields(text)
+               if row.get("Package") == package["name"]
+               and row.get("Version") == release["debian_version"]
+               and row.get("Architecture") == release["architecture"]]
+    require(bool(matches), "exact package is absent from authenticated apt metadata")
+    filename = ("dists/jammy/main/binary-amd64/" + package["name"] + "_"
+                + release["debian_version"] + "_amd64.deb")
+    require(all(row.get("SHA256") == package["sha256"]
+                and row.get("Size") == str(package["size"])
+                and row.get("Filename") == filename for row in matches),
+            "authenticated package metadata differs from the reviewed selection")
+    return matches[0]
+
+
+def key_fingerprint(output, expected):
+    primaries = []
+    awaiting = False
+    for line in output.splitlines():
+        parts = line.split(":")
+        if parts[0] == "pub":
+            awaiting = True
+        elif parts[0] == "sub":
+            awaiting = False
+        elif parts[0] == "fpr" and awaiting:
+            primaries.append(parts[9])
+            awaiting = False
+    require(bool(primaries) and set(primaries) == {expected},
+            "official signing key fingerprint does not match")
+
+
+def fetch(url, maximum):
+    require(url.startswith("https://xpra.org/"), "unexpected download origin")
+    with urllib.request.urlopen(url, timeout=60) as response:
+        require(response.geturl().startswith("https://xpra.org/"),
+                "download redirected outside the official origin")
+        data = response.read(maximum + 1)
+    require(len(data) <= maximum, "download exceeds its declared bound")
+    return data
+
+
+def root_directory(path):
+    path.mkdir(parents=True, exist_ok=True, mode=0o755)
+    info = path.lstat()
+    require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0
+            and not info.st_mode & 0o022, "setup directory must be root-owned and not writable by other users")
+
+
+def install_file(path, data, mode, previous_sha256=None):
+    # Only exact previously recorded managed bytes may be replaced. Local edits
+    # and unowned files are retained, including when a new source is selected.
+    root_directory(path.parent)
+    replacing = False
+    if path.exists() or path.is_symlink():
+        info = path.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0
+                and not info.st_mode & 0o022, "untrusted installed file: " + str(path))
+        current = path.read_bytes()
+        if current == data:
+            os.chmod(path, mode)
+            return
+        require(previous_sha256 is not None and sha256(current) == previous_sha256,
+                "existing installed file differs; preserving it: " + str(path))
+        replacing = True
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
+        temporary = Path(output.name)
+        output.write(data)
+        output.flush()
+        os.fsync(output.fileno())
+    try:
+        os.chmod(temporary, mode)
+        if replacing:
+            require(sha256(path.read_bytes()) == previous_sha256,
+                    "managed file changed during preparation; preserving it")
+            os.replace(temporary, path)
+        else:
+            os.link(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def write_receipt(value):
+    # Only this root-owned directory contains the mutable setup state.
+    data = (json.dumps(value, sort_keys=True, indent=2) + "\n").encode()
+    with tempfile.NamedTemporaryFile(dir=STATE, delete=False) as output:
+        temporary = Path(output.name)
+        output.write(data)
+        output.flush()
+        os.fsync(output.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, STATE / "receipt.json")
+
+
+def existing_packages():
+    result = run(["dpkg-query", "-W", "-f=${binary:Package}\t${Version}\t${db:Status-Status}\n",
+                  "xpra", "xpra-*", "python3-xpra"], check=False, timeout=30)
+    return [line.split("\t") for line in result.stdout.splitlines()
+            if line.endswith("\tinstalled")]
+
+
+def has_proxy_ownership(previous):
+    return isinstance(previous, dict) and previous.get("owned_proxy_masks") == list(UNITS)
+
+
+def inspect_proxy_masks(previous):
+    # The generic proxy is a distinct application. Never take over an existing
+    # installation, enabled listener, or local administrator's unit/drop-in.
+    owned = has_proxy_ownership(previous)
+    for name in UNITS:
+        target = SYSTEMD / name
+        allowed = owned and target.is_symlink() and os.readlink(target) == "/dev/null"
+        if owned:
+            require(allowed and target.lstat().st_uid == 0,
+                    "previously owned proxy mask changed; preserving current state")
+        for location in (target, *(directory / name for directory in VENDOR_UNIT_DIRS)):
+            if location.exists() or location.is_symlink():
+                require(owned and allowed,
+                        "independent Xpra service exists; it has not been changed")
+        require(not Path(str(target) + ".d").exists(),
+                "independent Xpra drop-in exists; it has not been changed")
+        active = run(["systemctl", "is-active", name], check=False, timeout=30)
+        require(active.stdout.strip() not in ("active", "activating", "reloading"),
+                "independent Xpra service is running; it has not been changed")
+        if target.exists() or target.is_symlink():
+            require(allowed, "Xpra proxy mask was changed; preserving it")
+def remove_created_masks(created):
+    for target, inode in reversed(created):
+        if (target.is_symlink() and target.lstat().st_ino == inode
+                and os.readlink(target) == "/dev/null"):
+            target.unlink()
+
+
+def own_proxy_masks(previous):
+    # Recheck after downloads as well as before setup writes.
+    inspect_proxy_masks(previous)
+    created = []
+    try:
+        for name in UNITS:
+            target = SYSTEMD / name
+            if not target.is_symlink():
+                target.symlink_to("/dev/null")
+                created.append((target, target.lstat().st_ino))
+    except Exception:
+        remove_created_masks(created)
+        raise
+    return created
+
+
+def publish_proxy_masks(previous, receipt):
+    created = own_proxy_masks(previous)
+    receipt["owned_proxy_masks"] = list(UNITS)
+    try:
+        write_receipt(receipt)
+    except Exception:
+        remove_created_masks(created)
+        raise
+    # The completed on-disk ownership proof precedes the fallible reload.
+    # A reload failure can therefore be retried without refusing our own masks.
+    run(["systemctl", "daemon-reload"], timeout=30, log=STATE / "proxy-reload.log")
+
+
+def verify_release(release):
+    require(release["schema"] == "laplace.cutechess-session-release/v1"
+            and release["version"] == "6.5.3"
+            and release["debian_version"] == "6.5.3-r0-1"
+            and release["distribution"] == "jammy"
+            and release["architecture"] == "amd64",
+            "unsupported session release selection")
+    require([p["name"] for p in release["packages"]] ==
+            ["xpra-common", "xpra-server", "xpra-x11"],
+            "unexpected package scope")
+    require(all(re.fullmatch("[0-9a-f]{64}", p["sha256"]) and 0 < p["size"] < 16000000
+                for p in release["packages"]), "invalid package bounds")
+
+
+def provision(repo, operator, prepare_only):
+    require(os.geteuid() == 0, "use sudo scripts/setup-host.sh cutechess-session")
+    require(re.fullmatch(r"[a-z_][a-z0-9_-]*[$]?", operator or ""),
+            "an explicit existing operator account is required")
+    account = pwd.getpwnam(operator)
+    require(account.pw_uid != 0 and operator != "laplace-runner",
+            "select the human operator account, not root or the CI runner")
+    os_release = dict(line.split("=", 1) for line in Path("/etc/os-release").read_text().splitlines()
+                      if "=" in line and not line.startswith("#"))
+    require(os_release.get("ID", "").strip('"') == "ubuntu"
+            and os_release.get("VERSION_CODENAME", "").strip('"') == "jammy"
+            and run(["dpkg", "--print-architecture"], timeout=30).stdout.strip() == "amd64",
+            "this reviewed package selection is for Ubuntu Jammy amd64")
+    release = json.loads((repo / "deploy/cutechess-session-release.json").read_text())
+    verify_release(release)
+    root_directory(STATE)
+    with (STATE / "setup.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        receipt_path = STATE / "receipt.json"
+        previous = None
+        if receipt_path.exists():
+            info = receipt_path.lstat()
+            require(stat.S_ISREG(info.st_mode) and info.st_uid == 0
+                    and not info.st_mode & 0o077, "untrusted prior setup receipt")
+            previous = json.loads(receipt_path.read_text())
+            require(previous.get("schema") == SCHEMA
+                    and previous.get("operator") == operator
+                    and previous.get("release") == release,
+                    "existing session setup belongs to another selection")
+        inspect_proxy_masks(previous)
+        require(has_proxy_ownership(previous) or not existing_packages(),
+                "independent Xpra installation exists; it has not been changed")
+        receipt = previous or {
+            "schema": SCHEMA, "operator": operator, "uid": account.pw_uid,
+            "release": release, "created_at_unix": time.time(), "status": "preparing",
+            "source_files": {},
+        }
+        write_receipt(receipt)
+        key = fetch("https://xpra.org/xpra.asc", 1024 * 1024)
+        with tempfile.NamedTemporaryFile(dir=STATE) as downloaded_key:
+            downloaded_key.write(key)
+            downloaded_key.flush()
+            key_fingerprint(run(["gpg", "--batch", "--with-colons", "--show-keys",
+                                 downloaded_key.name], timeout=30).stdout,
+                            release["signing_fingerprint"])
+        install_file(KEYRING, key, 0o644)
+        sources = ("Types: deb\nURIs: https://xpra.org\nSuites: jammy\nComponents: main\n"
+                   "Signed-By: " + str(KEYRING) + "\nArchitectures: amd64\n").encode()
+        install_file(SOURCES, sources, 0o644)
+        updated = run(["apt-get", "update"], timeout=600, log=STATE / "apt-update.log")
+        signed_lists = {}
+        retained_lists = STATE / "authenticated-apt-lists"
+        root_directory(retained_lists)
+        for path in Path("/var/lib/apt/lists").glob("xpra.org_dists_jammy_*"):
+            if path.is_file() and not path.is_symlink():
+                data = path.read_bytes()
+                require(len(data) <= 64 * 1024 * 1024, "apt metadata exceeds retention bound")
+                (retained_lists / path.name).write_bytes(data)
+                signed_lists[path.name] = {"sha256": sha256(data), "bytes": len(data)}
+        require(any(name.endswith("_InRelease") or name.endswith("_Release.gpg")
+                    for name in signed_lists), "authenticated repository signature file is absent")
+        receipt["authenticated_apt_lists"] = signed_lists
+        archives = STATE / "archives"
+        root_directory(archives)
+        selected = []
+        metadata = []
+        for package in release["packages"]:
+            record = package_record(run(["apt-cache", "show",
+                package["name"] + "=" + release["debian_version"]], timeout=30).stdout,
+                package, release)
+            metadata.append(record)
+            data = fetch(release["repository"] + "/" + record["Filename"], package["size"])
+            require(len(data) == package["size"] and sha256(data) == package["sha256"],
+                    "official package bytes differ from authenticated metadata")
+            target = archives / Path(record["Filename"]).name
+            install_file(target, data, 0o644)
+            actual = run(["dpkg-deb", "-f", str(target), "Package", "Version", "Architecture"],
+                         timeout=30).stdout
+            parsed = fields(actual)[0]
+            require(parsed == {"Package": package["name"], "Version": release["debian_version"],
+                               "Architecture": "amd64"}, "package control identity differs")
+            selected.append(str(target))
+        argv = ["apt-get", "--no-install-recommends", "--no-remove", "install",
+                *selected, *release["runtime_dependencies"]]
+        simulation = run([*argv[:1], "--simulate", *argv[1:]], timeout=120,
+                         log=STATE / "apt-plan.log")
+        require(not re.search(r"^Remv ", simulation.stdout, re.M),
+                "dependency selection would remove installed packages")
+        # Fresh masks are established before any new package maintainer script can
+        # activate the unrelated global proxy. Retry only accepts our exact masks.
+        receipt.update(status="packages-selected", key_sha256=sha256(key),
+                       sources_sha256=sha256(sources), package_metadata=metadata)
+        publish_proxy_masks(previous, receipt)
+        installed = run([argv[0], "-y", *argv[1:]], timeout=1200,
+                        env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
+                        log=STATE / "apt-install.log")
+        actual_packages = existing_packages()
+        for package in release["packages"]:
+            require(any(row[0].split(":")[0] == package["name"] and
+                        row[1] == release["debian_version"] for row in actual_packages),
+                    "installed package version differs from selection")
+        mappings = [
+            (repo / "deploy/linux/laplace-cutechess-session",
+             LIBEXEC / "laplace-cutechess-session", 0o755),
+            (repo / "deploy/linux/laplace-cutechess@.service",
+             Path("/etc/systemd/system/laplace-cutechess@.service"), 0o644),
+        ]
+        for source, destination, mode in mappings:
+            data = source.read_bytes()
+            install_file(destination, data, mode, receipt["source_files"].get(str(destination)))
+            receipt["source_files"][str(destination)] = sha256(data)
+        controls = run(["/usr/bin/python3", str(repo / "scripts/test-cutechess-session.py")],
+                       env={**os.environ, "LAPLACE_TEST_XPRA_PARSER": "1"}, timeout=60,
+                       log=STATE / "parser-controls.log")
+        run(["systemd-analyze", "verify", "/etc/systemd/system/laplace-cutechess@.service"],
+            timeout=60, log=STATE / "systemd-verify.log")
+        run(["systemctl", "daemon-reload"], timeout=30)
+        receipt.update(status="prepared", installed_packages=actual_packages,
+                       xpra_version=run(["/usr/bin/xpra", "--version"], timeout=30).stdout.strip(),
+                       prepared_at_unix=time.time())
+        write_receipt(receipt)
+        if not prepare_only:
+            unit = "laplace-cutechess@" + operator + ".service"
+            run(["systemctl", "enable", "--now", unit], timeout=60,
+                log=STATE / "systemd-start.log")
+            service = run(["systemctl", "show", unit, "-p", "ActiveState", "-p", "SubState",
+                           "-p", "MainPID", "-p", "User", "-p", "ControlGroup"], timeout=30).stdout
+            state = dict(line.split("=", 1) for line in service.splitlines() if "=" in line)
+            require(state.get("ActiveState") == "active" and int(state.get("MainPID", "0")) > 0
+                    and state.get("User") == operator, "session service did not start as the operator")
+            receipt.update(status="started", service=service, started_at_unix=time.time())
+            # Started is process state; it is not a completed remote-window proof.
+            write_receipt(receipt)
+        print(json.dumps({"status": receipt["status"], "receipt": str(receipt_path),
+                          "operator": operator}, sort_keys=True))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--operator", required=True)
+    parser.add_argument("--prepare-only", action="store_true")
+    args = parser.parse_args()
+    provision(Path(__file__).resolve().parents[2], args.operator, args.prepare_only)
+
+
+if __name__ == "__main__":
+    main()

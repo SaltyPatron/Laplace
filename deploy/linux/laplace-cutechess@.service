@@ -1,0 +1,23 @@
+[Unit]
+Description=Laplace persistent CuteChess for %i
+Documentation=https://github.com/SaltyPatron/Laplace
+After=network.target laplace-postgresql.service
+Wants=laplace-postgresql.service
+RequiresMountsFor=/opt/laplace /build
+
+[Service]
+Type=simple
+User=%i
+UMask=0077
+RuntimeDirectory=laplace-cutechess-%i
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 /usr/local/libexec/laplace/laplace-cutechess-session
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
