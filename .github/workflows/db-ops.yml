@@ -86,6 +86,10 @@ jobs:
             esac
           fi
 
+          health() {
+            bash scripts/check-database-health.sh --installed-runtime "$PGDATABASE"
+          }
+
           reindex_invalid() {
             P(){ psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc "$1"; }
             local invalid rc remaining idx def def_recursive
@@ -117,30 +121,30 @@ jobs:
           case "$LAPLACE_DB_OPERATION" in
             status)
               bash scripts/db-migrations.sh status
-              exec bash scripts/check-database-health.sh "$PGDATABASE"
+              health
               ;;
             migrate)
               bash scripts/db-migrations.sh up
-              exec bash scripts/check-database-health.sh "$PGDATABASE"
+              health
               ;;
             repair)
               bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
-              exec bash scripts/check-database-health.sh "$PGDATABASE"
+              health
               ;;
             reindex)
               reindex_invalid
-              exec bash scripts/check-database-health.sh "$PGDATABASE"
+              health
               ;;
             remigrate)
               bash scripts/db-migrations.sh reset --yes
               bash scripts/db-migrations.sh up
-              exec bash scripts/check-database-health.sh "$PGDATABASE"
+              health
               ;;
             recreate)
               bash scripts/db-migrations.sh nuke --yes
               bash scripts/db-migrations.sh up
               bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
-              exec bash scripts/check-database-health.sh "$PGDATABASE"
+              health
               ;;
             *)
               echo "::error::unknown database lifecycle operation: $LAPLACE_DB_OPERATION" >&2
