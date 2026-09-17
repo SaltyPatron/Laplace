@@ -105,15 +105,6 @@ run_live_tests() {
   bash scripts/test-parallel.sh --profile live --suite generation-eval
 }
 
-run_competitive_model_proof() {
-  require_built_revision
-  # This is the executable competitive path, not a compile-only gate: a real
-  # weighted checkpoint is admitted into the substrate, retained evidence is
-  # read back, a GGUF is synthesized, llama.cpp loads it, and behavioral probes
-  # must pass. A missing model/runtime or semantic failure blocks publication.
-  bash scripts/model-synthesize-ci.sh
-}
-
 check_application_live() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local body
@@ -155,9 +146,10 @@ reconcile_installed_product() {
 }
 
 # Product lifecycle owns build/install/database verification/publication/live checks.
-# Mainline proves the repository contracts and competitive model path before any
-# installed-product mutation so a broken control plane or required capability
-# cannot be published as a successful product revision.
+# Full corpus admission and competitive model proof belong to Seed-models, which
+# invokes model-synthesize-ci.sh under the shared host reservation. Missing model
+# inputs must not interrupt a code cutover before matching managed applications
+# are published. Existing database and live acceptance still run.
 run_deploy() {
   check_deps
   # The real script always defines this owner. The lifecycle-order fixture extracts
@@ -169,7 +161,6 @@ run_deploy() {
   run_install
   run_database_maintenance --prepare
   run_db_tests
-  run_competitive_model_proof
   run_publish
   reconcile_installed_product
   run_live_tests

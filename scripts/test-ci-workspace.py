@@ -375,7 +375,7 @@ class IntegratedLifecycle(unittest.TestCase):
     @staticmethod
     def expected_lifecycle():
         return ["check_deps", "run_build", "run_dev_tests", "run_install",
-                "run_database_maintenance:--prepare", "run_db_tests", "run_competitive_model_proof",
+                "run_database_maintenance:--prepare", "run_db_tests",
                 "run_publish", "reconcile_installed_product", "run_live_tests"]
 
     def test_failed_dev_controls_block_installed_product_mutation(self):
@@ -386,7 +386,7 @@ class IntegratedLifecycle(unittest.TestCase):
     def test_build_and_runtime_failures_stop_before_later_phases(self):
         order = self.expected_lifecycle()
         for phase in ("run_build", "run_install", "run_database_maintenance", "run_db_tests",
-                      "run_competitive_model_proof", "run_publish",
+                      "run_publish",
                       "reconcile_installed_product", "run_live_tests"):
             with self.subTest(phase=phase):
                 result, events = self.execute(0, phase)
@@ -420,10 +420,80 @@ class IntegratedLifecycle(unittest.TestCase):
                 "scripts/test-parallel.sh --profile dev-managed --suite uci-dev",
                 "scripts/test-parallel.sh --profile dev-managed --suite browser-dev"])
 
-    def test_product_lifecycle_reaches_database_live_and_competitive_product_checks(self):
+    def test_product_lifecycle_reaches_database_publication_and_live_checks(self):
         result, events = self.execute(0)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(events, self.expected_lifecycle())
+
+
+    def test_missing_model_inputs_do_not_interrupt_code_deployment(self):
+        # The retained proof stub fails if deployment ever invokes it again.
+        # The actual full-proof seed route is exercised separately below.
+        result, events = self.execute(0, "run_competitive_model_proof")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(events, self.expected_lifecycle())
+        self.assertNotIn("run_competitive_model_proof", events)
+
+
+class ModelProofSeedOwnership(unittest.TestCase):
+    def execute_model(self, proof_status, *, explicit=True):
+        import textwrap
+        source = (ROOT / ".github/workflows/seed.yml").read_text()
+        start = source.index("            model)\n")
+        finish = source.index("              ;;\n", start) + len("              ;;\n")
+        # Execute the actual reusable workflow's model dispatch arm. Existing
+        # controls cover its selected build and shared host reservation.
+        owner = textwrap.dedent(source[start:finish])
+        with tempfile.TemporaryDirectory(prefix="laplace-model-seed-owner-") as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            snapshot = root / "selected-checkpoint"
+            snapshot.mkdir()
+            events = root / "events"
+            proof = scripts / "model-synthesize-ci.sh"
+            proof.write_text(
+                '#!/usr/bin/env bash\nset -euo pipefail\n'
+                '[[ "$#" == 1 && "$1" == "$EXPECTED_MODEL" ]] || exit 97\n'
+                '[[ "$LAPLACE_GGUF_OUT" == "$GGUF_OUT" ]] || exit 98\n'
+                'printf "%s\\n" "full-model-proof:$1" >> "$TEST_EVENTS"\n'
+                'exit "$PROOF_STATUS"\n')
+            proof.chmod(0o755)
+            script = (
+                "set -euo pipefail\n"
+                'ingest_one() { echo unexpected-ingest >> "$TEST_EVENTS"; return 96; }\n'
+                'verify_source() { echo unexpected-shallow-gate >> "$TEST_EVENTS"; return 95; }\n'
+                'case model in\n' + owner + '\nesac\n'
+                'printf "%s\\n" proof-completed >> "$TEST_EVENTS"\n')
+            environment = dict(os.environ,
+                PATH_INPUT=str(snapshot) if explicit else "",
+                LAPLACE_TINYLLAMA_DIR=str(snapshot), SYNTHESIZE_MODEL="1",
+                GGUF_OUT=str(root / "output/model.gguf"), EXPECTED_MODEL=str(snapshot),
+                TEST_EVENTS=str(events), PROOF_STATUS=str(proof_status))
+            result = subprocess.run(["bash", "-c", script], cwd=root, env=environment,
+                                    text=True, capture_output=True, timeout=10)
+            observed = events.read_text().splitlines() if events.exists() else []
+            return result, observed, str(snapshot)
+
+    def test_model_wrapper_selects_full_proof_by_default(self):
+        source = (ROOT / ".github/workflows/seed-models.yml").read_text()
+        option = source.split("      synthesize_model:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("default: true", option)
+        self.assertIn("uses: ./.github/workflows/seed.yml", source)
+        self.assertIn("mode: model", source)
+        self.assertIn("synthesize_model: " + "$" + "{{ inputs.synthesize_model }}", source)
+
+    def test_selected_model_runs_the_exact_full_proof_owner(self):
+        for explicit in (True, False):
+            with self.subTest(explicit=explicit):
+                result, events, snapshot = self.execute_model(0, explicit=explicit)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(events, ["full-model-proof:" + snapshot, "proof-completed"])
+
+    def test_full_model_failure_remains_a_failed_seed_run(self):
+        result, events, snapshot = self.execute_model(23)
+        self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
+        self.assertEqual(events, ["full-model-proof:" + snapshot])
 
 class DatabaseMaintenanceMode(unittest.TestCase):
     def execute(self, arguments, pipeline_status=0, fresh=False, classification="canonical", probe_status=0):

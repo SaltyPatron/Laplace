@@ -26,7 +26,6 @@ class ProductStageOwnershipContract(unittest.TestCase):
             "run_install",
             "run_db_tests",
             "run_live_tests",
-            "run_competitive_model_proof",
         ):
             with self.subTest(function=name):
                 owner = function(name)
