@@ -3,6 +3,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+    min-width: 0;
   }
 
   .head {
@@ -31,6 +32,7 @@
 
   .arena {
     position: relative;
+    min-width: 0;
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     background:
@@ -59,9 +61,10 @@
   }
 
   .row {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-3);
+    display: grid;
+    grid-template-columns: 1.2rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-2);
     padding: var(--space-2) 0;
     border-bottom: 1px solid color-mix(in srgb, var(--color-border-default) 50%, transparent);
   }
@@ -71,7 +74,6 @@
   }
 
   .rank {
-    flex-shrink: 0;
     width: 1.2rem;
     font-variant-numeric: tabular-nums;
     font-size: var(--text-xs);
@@ -79,16 +81,22 @@
   }
 
   .edge {
-    flex: 1;
     min-width: 0;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) auto minmax(0, 1fr);
     align-items: baseline;
     gap: var(--space-2);
+  }
+
+  .subject,
+  .object {
+    min-width: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .subject {
-    flex-shrink: 0;
     font-weight: 600;
     font-size: var(--text-sm);
     color: var(--color-text-primary);
@@ -101,25 +109,21 @@
   }
 
   .relation {
-    flex-shrink: 0;
+    white-space: nowrap;
     font-size: var(--text-xs);
     color: var(--color-text-muted);
   }
 
   .object {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-size: var(--text-sm);
     color: var(--color-text-primary);
   }
 
-  /* The rating is the point — sports-numeral treatment. */
   .stat {
-    flex-shrink: 0;
+    min-width: max-content;
     display: flex;
     align-items: baseline;
+    justify-content: flex-end;
     gap: var(--space-2);
   }
 
@@ -153,7 +157,26 @@
     to { background-position: -200% 0; }
   }
 
-  @media (max-width: 860px) {
+  @media (max-width: 1100px) {
     .grid { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 620px) {
+    .row {
+      grid-template-columns: 1.2rem minmax(0, 1fr);
+    }
+
+    .edge {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .object {
+      grid-column: 1 / -1;
+    }
+
+    .stat {
+      grid-column: 2;
+      justify-content: flex-start;
+    }
   }
 }

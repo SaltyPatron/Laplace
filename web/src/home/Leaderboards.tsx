@@ -47,10 +47,16 @@ export function Leaderboards() {
                   <li key={`${row.subject_id}-${rank}`} className={styles.row}>
                     <span className={styles.rank}>{rank + 1}</span>
                     <span className={styles.edge}>
-                      <RouterLink className={styles.subject} to={`/explore/entity/${row.subject_id}`}>
+                      <RouterLink
+                        className={styles.subject}
+                        to={`/explore/entity/${row.subject_id}`}
+                        title={row.subject}
+                      >
                         {row.subject}
                       </RouterLink>
-                      <span className={styles.relation}>{row.relation.replace(/_/g, ' ').toLowerCase()}</span>
+                      <span className={styles.relation} title={row.relation.replace(/_/g, ' ')}>
+                        {row.relation.replace(/_/g, ' ').toLowerCase()}
+                      </span>
                       <span className={styles.object} title={row.object}>{row.object}</span>
                     </span>
                     <span className={styles.stat}>
