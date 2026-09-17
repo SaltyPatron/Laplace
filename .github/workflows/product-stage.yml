@@ -42,6 +42,9 @@ jobs:
     name: Product — ${{ inputs.stage }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
+    concurrency:
+      group: ${{ inputs.stage == 'mainline' && 'laplace-mainline-validation' || format('laplace-product-{0}', github.run_id) }}
+      cancel-in-progress: false
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}
       LAPLACE_PROVISION_TOOLS: ${{ inputs.stage == 'provision' && '1' || '0' }}
