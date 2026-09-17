@@ -271,6 +271,8 @@ export function GauntletView() {
   const total = active?.summary.total || Number(setup.rounds) || 0;
   const done = active?.summary.done ?? 0;
   const pct = total > 0 ? Math.min(100, Math.round((100 * done) / total)) : 0;
+  const readbackVerified = (metrics.games_committed_readback ?? 0) > 0
+    && (metrics.plies_committed_readback ?? 0) > 0;
 
   return (
     <div className={styles.gauntlet}>
@@ -516,6 +518,25 @@ export function GauntletView() {
                 </Muted>
               </div>
             )}
+          </Panel>
+
+          <Panel title="Laplace substrate proof">
+            <div className={styles.scoreboard}>
+              <Stat label="Games ingested" value={metrics.games_ingested} />
+              <Stat label="Games read back" value={metrics.games_committed_readback} />
+              <Stat label="Plies read back" value={metrics.plies_committed_readback} />
+              <Stat label="Readback seconds" value={metrics.readback_seconds} format={(v) => v.toFixed(3)} />
+            </div>
+            <section className={styles.readiness} aria-label="Substrate persistence proof">
+              <Chip variant={readbackVerified ? 'engineOk' : 'engineMissing'}>
+                persisted database readback {readbackVerified ? '✓' : 'not demonstrated'}
+              </Chip>
+            </section>
+            <Muted>
+              This proof comes from the completed gauntlet's ingest commit followed by PostgreSQL
+              readback. The transcript below is the spawned engines' real UCI traffic; filter it for
+              “providers” to see Laplace's per-search substrate-provider receipt.
+            </Muted>
           </Panel>
 
           <Panel title="Live board" className={styles.boardPanel}>
