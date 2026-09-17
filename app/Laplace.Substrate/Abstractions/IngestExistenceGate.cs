@@ -23,16 +23,17 @@ internal static class IngestExistenceGate
     {
         if (records.Count == 0) return [];
 
-        var presenceScope = reader.CapturePresenceScope();
+        // This gate owns durable COMPLETION receipts only. Entity/content presence is
+        // Rule #8 step 5's one whole-working-set trunk->tier descent; doing a root
+        // EntitiesExistBitmapAsync here creates a second novelty decision before that
+        // descent and adds a database crossing that scales outside O(tiers).
+        _ = builder;
+        _ = probedAbsent;
         var shortcircuited = new List<(TRecord, long)>();
+        var removed = new bool[records.Count];
         var perFile = handler as DocumentIngestHandler;
-        var roots = new List<(int Index, Hash128 RootId)>();
-        var presentFileRoots = new List<(int Index, Hash128 CompletionId)>();
-        var rootIndex = new int[records.Count];
-        Array.Fill(rootIndex, -1);
 
-        // These receipts belong to the atomic admission transaction. In contrast,
-        // an entity may survive a failed apply because its COPY committed separately.
+        // Explicit source-unit receipts belong to the atomic admission transaction.
         // Group by relation type so the reader can prune attestation partitions.
         var completionRecords = new Dictionary<Hash128, List<(int Index, Hash128 ReceiptId)>>();
         for (int i = 0; i < records.Count; i++)
@@ -52,111 +53,84 @@ internal static class IngestExistenceGate
                 .ConfigureAwait(false);
             foreach (var (i, receiptId) in candidates)
             {
-                if (!completed.Contains(receiptId)) continue;
+                if (!completed.Contains(receiptId) || removed[i]) continue;
                 shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
                 ReleaseNativeArtifacts(records[i], handler);
-                rootIndex[i] = -2;
+                removed[i] = true;
             }
         }
 
-        static Hash128 CompletionIdFor(TRecord record, Hash128 contentRoot)
+        // Per-file document completion is a replay receipt, not an entity-presence
+        // shortcut. Query the receipt directly. A completed file necessarily committed
+        // its content in the accepted working set; requiring a separate content-root
+        // presence query before trusting the receipt only duplicates step 5's authority.
+        if (perFile is not null && !perFile.IgnoreCompletedFiles)
         {
-            if (record is not ContentIngestRecord cr) return contentRoot;
-            if (cr.FileId != default) return cr.FileId;
-            return cr.Metadata is { } metadata
-                ? FileEntity.Resolve(cr.CanonicalUtf8, metadata).FileId
-                : contentRoot;
-        }
-
-        // Whole-record skipping needs a matching durable receipt. Content, grammar and
-        // relation records without one still compose: their entity-presence bitmaps
-        // suppress only canonical entity insertion, while native emission retains raw forms.
-        // Content presence and file completion are different identities. The content root
-        // answers whether this entity is present; it does not prove DAG completion. The file-composition id answers
-        // whether THIS occurrence (content + identity metadata) already completed.
-        for (int i = 0; i < records.Count; i++)
-        {
-            if (rootIndex[i] == -2 || records[i] is IIngestCompletionRecord || perFile is null) continue;
-            if (!TryResolveRoot(records[i], handler, out var rootId, out var unresolvable))
+            var candidates = new List<(int Index, Hash128 CompletionId, bool VendorOwned)>();
+            for (int i = 0; i < records.Count; i++)
             {
-                if (unresolvable) rootIndex[i] = -2;
-                continue;
-            }
+                if (removed[i] || records[i] is IIngestCompletionRecord) continue;
 
-            if (reader.IsProvenPresent(rootId))
-            {
-                if (!perFile.IgnoreCompletedFiles)
-                    presentFileRoots.Add((i, CompletionIdFor(records[i], rootId)));
-                continue;
-            }
-
-            if (probedAbsent is not null && probedAbsent.Contains(rootId)) continue;
-
-            rootIndex[i] = roots.Count;
-            roots.Add((i, rootId));
-        }
-
-        if (perFile is not null && roots.Count > 0)
-        {
-            var ids = new Hash128[roots.Count];
-            for (int k = 0; k < roots.Count; k++) ids[k] = roots[k].RootId;
-            byte[] bm = await reader.EntitiesExistBitmapAsync(ids, ct).ConfigureAwait(false);
-            List<Hash128>? confirmed = null;
-            for (int k = 0; k < roots.Count; k++)
-            {
-                bool present = BitmapBits.IsSet(bm, k);
-                if (!present)
+                bool vendorOwned = records[i] is ContentIngestRecord { Metadata: not null };
+                Hash128 completionId;
+                if (records[i] is ContentIngestRecord cr && cr.FileId != default)
                 {
-                    probedAbsent?.Add(roots[k].RootId);
+                    completionId = cr.FileId;
+                }
+                else if (records[i] is ContentIngestRecord { Metadata: { } metadata } withMetadata)
+                {
+                    completionId = FileEntity.Resolve(withMetadata.CanonicalUtf8, metadata).FileId;
+                }
+                else if (TryResolveRoot(records[i], handler, out var rootId, out var unresolvable))
+                {
+                    completionId = rootId;
+                }
+                else
+                {
+                    // Preserve the existing invalid-root disposition: a record whose
+                    // canonical root cannot be resolved cannot enter composition.
+                    if (unresolvable)
+                    {
+                        removed[i] = true;
+                        ReleaseNativeArtifacts(records[i], handler);
+                    }
                     continue;
                 }
-                int i = roots[k].Index;
-                (confirmed ??= []).Add(roots[k].RootId);
-                if (!perFile.IgnoreCompletedFiles)
-                    presentFileRoots.Add((i, CompletionIdFor(records[i], roots[k].RootId)));
+                candidates.Add((i, completionId, vendorOwned));
             }
-            if (confirmed is { Count: > 0 }) reader.MarkProven(confirmed, presenceScope);
-        }
 
-        if (perFile is not null && presentFileRoots.Count > 0)
-        {
-            bool VendorOwned(int i) =>
-                records[i] is ContentIngestRecord { Metadata: not null };
-            var ownedIds = presentFileRoots.Where(x => VendorOwned(x.Index))
-                .Select(static x => x.CompletionId).Distinct().ToArray();
-            var legacyIds = presentFileRoots.Where(x => !VendorOwned(x.Index))
-                .Select(static x => x.CompletionId).Distinct().ToArray();
-            IReadOnlySet<Hash128> owned = ownedIds.Length == 0
-                ? new HashSet<Hash128>()
-                : await reader.HasFilesCompletedAsync(
-                    ownedIds, DocumentSource.SourceId, perFile.LayerOrder, ct).ConfigureAwait(false);
-            IReadOnlySet<Hash128> legacy = legacyIds.Length == 0
-                ? new HashSet<Hash128>()
-                : await reader.HasSourcesCompletedAsync(
-                    legacyIds, perFile.LayerOrder, ct).ConfigureAwait(false);
-            foreach (var (i, completionId) in presentFileRoots)
-                if ((VendorOwned(i) ? owned : legacy).Contains(completionId))
+            if (candidates.Count > 0)
+            {
+                var ownedIds = candidates.Where(static x => x.VendorOwned)
+                    .Select(static x => x.CompletionId).Distinct().ToArray();
+                var legacyIds = candidates.Where(static x => !x.VendorOwned)
+                    .Select(static x => x.CompletionId).Distinct().ToArray();
+                IReadOnlySet<Hash128> owned = ownedIds.Length == 0
+                    ? new HashSet<Hash128>()
+                    : await reader.HasFilesCompletedAsync(
+                        ownedIds, DocumentSource.SourceId, perFile.LayerOrder, ct).ConfigureAwait(false);
+                IReadOnlySet<Hash128> legacy = legacyIds.Length == 0
+                    ? new HashSet<Hash128>()
+                    : await reader.HasSourcesCompletedAsync(
+                        legacyIds, perFile.LayerOrder, ct).ConfigureAwait(false);
+
+                foreach (var (i, completionId, vendorOwned) in candidates)
                 {
+                    if (removed[i] || !(vendorOwned ? owned : legacy).Contains(completionId)) continue;
                     shortcircuited.Add((records[i], handler.UnitsPerRecord(records[i])));
-                    rootIndex[i] = -2;
+                    removed[i] = true;
                     ReleaseNativeArtifacts(records[i], handler);
                 }
+            }
         }
 
         var novel = new List<TRecord>(records.Count);
         for (int i = 0; i < records.Count; i++)
-        {
-            if (rootIndex[i] == -2) continue;
-            novel.Add(records[i]);
-        }
+            if (!removed[i]) novel.Add(records[i]);
         records.Clear();
         records.AddRange(novel);
         return shortcircuited.ToArray();
     }
-
-    private static bool TryResolveRoot<TRecord>(
-        TRecord record, IIngestRecordHandler<TRecord> handler, out Hash128 rootId)
-        => TryResolveRoot(record, handler, out rootId, out _);
 
     private static bool TryResolveRoot<TRecord>(
         TRecord record, IIngestRecordHandler<TRecord> handler, out Hash128 rootId, out bool unresolvable)
@@ -209,7 +183,6 @@ internal static class IngestExistenceGate
         if (handler is GrammarIngestHandler && record is GrammarIngestRecord gr)
             gr.Ast.Dispose();
     }
-
 }
 
 public sealed class PresentRootDeferredUnit : IIngestDeferredUnit
