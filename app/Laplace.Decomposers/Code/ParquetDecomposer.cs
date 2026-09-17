@@ -12,14 +12,12 @@ namespace Laplace.Decomposers.Code;
 /// stripping the container (row groups / columns) and recording each cell exactly as
 /// the CSV <see cref="TabularDecomposer"/> records a table. Parquet is packaging; the
 /// column schema carries the semantics. No target/outcome interpretation — this is
-/// pure RECORDING of witnessed structure:
-/// <list type="bullet">
-///   <item>column entity (<c>TabularColumn</c>) per column, IS_INSTANCE_OF its name content;</item>
-///   <item>value entity (<c>TabularValue</c>) per distinct (column, value);</item>
-///   <item>value IS_VALUE_IN column; value IS_INSTANCE_OF the bare cell content.</item>
-/// </list>
-/// Content addressing dedups every column/value across rows, files, and sources — a
-/// value that appears in a million rows is stored once and witnessed a million times.
+/// pure RECORDING of witnessed structure.
+///
+/// Column names and cell values are ordinary decomposed content. A tabular value is
+/// the native ordered composition [column-content, value-content], so its identity,
+/// geometry and trajectory come from the substrate composition law rather than from a
+/// formatted string hash or a canonical-name side table.
 /// </summary>
 public sealed class ParquetDecomposer
     : ComposeDecomposerMultiFile<ParquetDecomposer.RowRecord, ParquetSource, FullScope>, IIngestInventoryProvider
@@ -30,16 +28,11 @@ public sealed class ParquetDecomposer
     private static readonly Hash128 ColumnTypeId = EntityTypeRegistry.TabularColumn;
     private static readonly Hash128 ValueTypeId = EntityTypeRegistry.TabularValue;
 
-    private readonly ConcurrentStringSet _canonicalNames = new(StringComparer.Ordinal);
-
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
     protected override string BatchLabelPrefix => "parquet";
 
-    public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
-
-    private static Hash128 ColumnId(string col) => Hash128.OfCanonical($"parquet/column/{col}/v1");
-    private static Hash128 ValueId(string col, string tok) => Hash128.OfCanonical($"parquet/value/{col}={tok}/v1");
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
@@ -74,27 +67,30 @@ public sealed class ParquetDecomposer
     {
         foreach (var (col, tok) in rec.Cells)
         {
-            EnsureColumn(b, col);
+            OrderedCompositionComponent column = EnsureColumn(b, col);
+            OrderedCompositionComponent value = RequireComponent(b, tok);
+            Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[1];
+            OrderedComposition.StageBatch(b.ContentStage,
+                [new OrderedCompositionRequest([column, value], ValueTypeId, Source, 0)], composed);
+            Hash128 valueId = composed[0].Id;
 
-            var valueId = ValueId(col, tok);
-            b.AddEntity(new EntityRow(valueId, EntityTier.Word, ValueTypeId, Source));
-            _canonicalNames.Add($"parquet/value/{col}={tok}/v1");
             b.AddAttestation(NativeAttestation.Categorical(
-                valueId, "IS_VALUE_IN", ColumnId(col), Source, TC.StructuredCorpus));
-            if (ContentEmitter.Emit(b, tok, Source) is { } bareId)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    valueId, "IS_INSTANCE_OF", bareId, Source, TC.StructuredCorpus));
+                valueId, "IS_VALUE_IN", column.Id, Source, TC.StructuredCorpus));
+            b.AddAttestation(NativeAttestation.Categorical(
+                valueId, "IS_INSTANCE_OF", value.Id, Source, TC.StructuredCorpus));
         }
     }
 
-    private void EnsureColumn(SubstrateChangeBuilder b, string col)
+    private static OrderedCompositionComponent EnsureColumn(SubstrateChangeBuilder b, string col)
     {
-        b.AddEntity(new EntityRow(ColumnId(col), EntityTier.Word, ColumnTypeId, Source));
-        _canonicalNames.Add($"parquet/column/{col}/v1");
-        if (ContentEmitter.Emit(b, col, Source) is { } colNameId)
-            b.AddAttestation(NativeAttestation.Categorical(
-                ColumnId(col), "IS_INSTANCE_OF", colNameId, Source, TC.StructuredCorpus));
+        OrderedCompositionComponent column = RequireComponent(b, col);
+        b.AddEntity(new EntityRow(column.Id, column.Tier, ColumnTypeId, Source));
+        return column;
     }
+
+    private static OrderedCompositionComponent RequireComponent(SubstrateChangeBuilder b, string value) =>
+        ContentEmitter.StageComponent(b, value, Source)
+        ?? throw new InvalidOperationException($"parquet content '{value}' has no decomposed root");
 
     public async Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
