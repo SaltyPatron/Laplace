@@ -37,6 +37,11 @@ public sealed partial class NpgsqlSubstrateWriter
         {
             ct.ThrowIfCancellationRequested();
             int n = Math.Min(chunkRows, rows.Count - start);
+            // Nested diagnostics carry only bounded ordinal/count metadata. The
+            // request window includes driver serialization, transport and server
+            // work; it is not an isolated serialization or SQL timer.
+            using var prepareDiagnostic = MeasureApplyPhase(
+                "entity-interpretation-preparation", chunkStart: start, rows: n);
             var ids = new byte[n][];
             var tiers = new short[n];
             var types = new byte[n][];
@@ -52,6 +57,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 sources[i] = (row.FirstObservedBy ?? default).ToBytes();
             }
 
+            prepareDiagnostic?.Complete();
+            using var bindDiagnostic = MeasureApplyPhase(
+                "entity-interpretation-binding", chunkStart: start, rows: n);
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandTimeout = 0;
@@ -66,7 +74,11 @@ public sealed partial class NpgsqlSubstrateWriter
             { Value = sources, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             command.Parameters.Add(new NpgsqlParameter
             { Value = sourceNull, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Boolean });
+            bindDiagnostic?.Complete();
+            using var requestDiagnostic = MeasureApplyPhase(
+                "entity-interpretation-request-response", chunkStart: start, rows: n);
             bool missingEntity = (bool)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+            requestDiagnostic?.Complete();
             if (missingEntity)
                 throw new InvalidOperationException("entity interpretation references an absent canonical entity");
             roundTrips++;

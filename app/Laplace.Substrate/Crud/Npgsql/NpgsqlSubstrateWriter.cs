@@ -354,11 +354,20 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
     // Opt-in, one scope per batch boundary through the existing logger. Disposal
     // records an interrupted window as well as successful return. These logs are
     // diagnostic child windows, not durable-success receipts.
-    private ApplyDiagnosticPhase? MeasureApplyPhase(string phase)
+    private ApplyDiagnosticPhase? MeasureApplyPhase(string phase, string? table = null,
+        int? lane = null, int? chunkStart = null, int? rows = null)
     {
-        // Diagnostics cannot reject an apply, including a sink that throws while
-        // checking its level or allocating its scope.
-        try { return _log.IsEnabled(LogLevel.Information) ? new(_log, phase) : null; }
+        // Diagnostics cannot reject an apply, including context/name allocation.
+        // Table names come from the three existing COPY owners; lane and chunk
+        // ordinals stay fields, never phase names. Parallel/nested durations are
+        // overlapping observations, not additional exclusive writer time.
+        try
+        {
+            return _log.IsEnabled(LogLevel.Information)
+                ? new(_log, table is null ? phase : table + "-" + phase,
+                    table, lane, chunkStart, rows)
+                : null;
+        }
         catch { return null; }
     }
 
@@ -366,13 +375,30 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
     {
         private readonly ILogger _log;
         private readonly string _phase;
+        private readonly string? _table;
+        private readonly int? _lane, _chunkStart, _rows;
+        private readonly bool _hasContext;
         private long _started = Stopwatch.GetTimestamp();
         private bool _completed;
-        internal ApplyDiagnosticPhase(ILogger log, string phase)
+        internal ApplyDiagnosticPhase(ILogger log, string phase, string? table,
+            int? lane, int? chunkStart, int? rows)
         {
             _log = log;
             _phase = phase;
-            try { _log.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", _phase, "entered"); }
+            _table = table;
+            _lane = lane;
+            _chunkStart = chunkStart;
+            _rows = rows;
+            _hasContext = table is not null || lane.HasValue || chunkStart.HasValue || rows.HasValue;
+            try
+            {
+                if (_hasContext)
+                    _log.LogInformation(
+                        "WS_APPLY phase: {Phase} boundary={Boundary} table={Table} lane={Lane} chunk_start={ChunkStart} rows={Rows}",
+                        _phase, "entered", _table, _lane, _chunkStart, _rows);
+                else
+                    _log.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", _phase, "entered");
+            }
             catch { /* A diagnostic sink cannot reject the operation it observes. */ }
         }
         public void Complete()
@@ -386,9 +412,15 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             if (started == 0) return;
             try
             {
-                _log.LogInformation(
-                    "WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs}",
-                    _phase, "exited", _completed, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                if (_hasContext)
+                    _log.LogInformation(
+                        "WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs} table={Table} lane={Lane} chunk_start={ChunkStart} rows={Rows}",
+                        _phase, "exited", _completed, Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                        _table, _lane, _chunkStart, _rows);
+                else
+                    _log.LogInformation(
+                        "WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs}",
+                        _phase, "exited", _completed, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             }
             catch
             {
