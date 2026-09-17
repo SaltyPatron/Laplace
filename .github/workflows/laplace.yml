@@ -85,21 +85,12 @@ jobs:
       serial_tests: ${{ inputs.serial_tests }}
     secrets: inherit
 
-  proof-model:
+  proof-transaction:
     if: github.event_name == 'workflow_dispatch' && inputs.stage == 'proof'
     needs: proof-candidate
     uses: ./.github/workflows/product-stage.yml
     with:
-      stage: proof-model
-      target_sha: ${{ github.sha }}
-    secrets: inherit
-
-  proof-activation:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'proof'
-    needs: proof-model
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-activation
+      stage: proof-transaction
       target_sha: ${{ github.sha }}
       serial_tests: ${{ inputs.serial_tests }}
     secrets: inherit
