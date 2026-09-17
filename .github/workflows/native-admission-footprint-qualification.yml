@@ -1,46 +1,57 @@
-name: Reproduce retained UCI seal and observe physical build
+name: Qualify UCI publication assembly regression
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
 permissions:
   contents: read
 jobs:
-  retained-uci:
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 5
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Reproduce exact UCI sealing failure without publishing
+      - name: Checkout exact source in the ordinary Actions workspace
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: a754665d33952a60e5aeecaee0e542d1d3824671
+          persist-credentials: false
+      - name: Run UCI assembly and persisted policy controls
         run: |
-          python3 - <<'PY'
-          import hashlib,importlib.util,json,os,pathlib,subprocess,sys
-          root=pathlib.Path("/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace")
-          proof=pathlib.Path("/build/laplace/recovery/chess-followthrough/35166221051-1/managed-before-gui")
-          build=pathlib.Path("/build/laplace/build/laplace-d32928234be8f570")
-          def fact(p):
-              raw=p.read_bytes();s=p.stat()
-              return {"path":str(p),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),"device":s.st_dev,"inode":s.st_ino}
-          print("CURRENT_CHECKOUT "+json.dumps({"commit":subprocess.check_output(["git","-C",root,"rev-parse","HEAD"],text=True).strip(),"buildLink":str((root/"build").resolve()),"buildIsSymlink":(root/"build").is_symlink()}),flush=True)
-          for rel in ("CMakeCache.txt","cmake_install.cmake","build.ninja","engine/core/liblaplace_core.so","engine/dynamics/liblaplace_dynamics.so","engine/synthesis/liblaplace_synthesis.so"):
-              p=build/rel
-              try:print("RETAINED_PHYSICAL_BUILD "+json.dumps(fact(p)),flush=True)
-              except OSError as error:print("RETAINED_PHYSICAL_BUILD "+json.dumps({"path":str(p),"error":type(error).__name__}),flush=True)
-          source=root/"scripts/verify-api-payload.py"
-          raw=source.read_bytes()
-          actual=hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()
-          assert actual=="fa50997cce0157c8cc42217c5630b6770223707a",actual
-          spec=importlib.util.spec_from_file_location("retained_uci_verifier",source)
-          owner=importlib.util.module_from_spec(spec);sys.modules[spec.name]=owner;spec.loader.exec_module(owner)
-          expected=proof/"reference/uci"
-          print("RETAINED_UCI_FILES "+json.dumps({"required":list(owner.UCI_REQUIRED),"present":sorted(p.name for p in expected.iterdir() if p.is_file()),"publicTarget":str(pathlib.Path("/opt/laplace/app/laplace-uci").resolve(strict=True))}),flush=True)
-          try:
-              manifest=owner.seal_uci(expected,build/"engine",root)
-              print("RETAINED_UCI_SEAL "+json.dumps({"status":"passed","manifest":manifest}),flush=True)
-          except ValueError as error:
-              print("RETAINED_UCI_SEAL "+json.dumps({"status":"failed","type":type(error).__name__,"message":str(error)}),flush=True)
-          desktop=pathlib.Path("/opt/laplace/share/laplace/cutechess-desktop.json")
-          if desktop.is_file():
-              value=json.loads(desktop.read_text())
-              print("DESKTOP_STOCKFISH "+json.dumps({"manifest":fact(desktop),"stockfish":value.get("stockfish")}),flush=True)
-          for p in pathlib.Path("/opt/laplace/share/laplace").glob("*stockfish*.json"):
-              print("STOCKFISH_RECEIPT "+json.dumps(fact(p)),flush=True)
+          set -euo pipefail
+          sudo mkdir -p /build/laplace
+          sudo chown "$(id -u):$(id -g)" /build/laplace
+          export TMPDIR=/build/laplace/work/policy-regressions/tmp
+          export TMP="$TMPDIR" TEMP="$TMPDIR"
+          mkdir -p "$TMPDIR" /build/laplace/work/policy-regressions/evidence
+          python3 - <<'PY' 2>&1 | tee /build/laplace/work/policy-regressions/evidence/tests.log
+          import base64,hashlib,json,os,pathlib,subprocess,sys,urllib.request
+          root=pathlib.Path(os.environ["GITHUB_WORKSPACE"])
+          assert subprocess.check_output(["git","-C",root,"rev-parse","HEAD"],text=True).strip()=="a754665d33952a60e5aeecaee0e542d1d3824671"
+          for name,sha in {"scripts/test-managed-policy.py":"be1a4d6fa6c215eb973ff9d7e1f1a2437a8f1057",
+              "scripts/test-parallel.sh":"e1af095112524762c80aabbdfe22d90647d6ac7d",
+              "scripts/test-application-payload.py":"66ec44d590fac096d1af22519c8aa58fc78c412f",
+              "scripts/verify-api-payload.py":"840926c7fe9b8e1c9279158259310aae9b592cbb",
+              "scripts/fixtures/laplace-managed-deploy-legacy-scratch.py":"dfade6c9b72277ed4d95e64376d283a4aa8821d2"}.items():
+              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
+                  headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
+              with urllib.request.urlopen(request,timeout=30) as response:item=json.load(response)
+              raw=base64.b64decode(item["content"])
+              assert item["sha"]==sha and item["encoding"]=="base64" and len(raw)==item["size"]
+              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
+              target=root/name
+              target.parent.mkdir(parents=True,exist_ok=True)
+              target.write_bytes(raw)
+          subprocess.run(["bash","-n",root/"scripts/test-parallel.sh"],check=True)
+          subprocess.run([sys.executable,root/"scripts/test-managed-policy.py"],check=True,cwd=root)
+          subprocess.run([sys.executable,root/"scripts/test-application-payload.py"],check=True,cwd=root)
           PY
+      - name: Retain regression result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: uci-assembly-controls-${{ github.run_id }}
+          path: /build/laplace/work/policy-regressions/evidence
+          if-no-files-found: error
+          retention-days: 30
