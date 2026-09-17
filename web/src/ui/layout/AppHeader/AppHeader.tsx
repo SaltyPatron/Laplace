@@ -17,7 +17,7 @@ export function AppHeader({ title, tagline, nav, tenant, className }: AppHeaderP
         {title}
         {tagline && <span className={styles.tagline}>{tagline}</span>}
       </h1>
-      {nav && <nav className={styles.nav}>{nav}</nav>}
+      {nav && <div className={styles.nav}>{nav}</div>}
       {tenant && <div className={styles.tenantSlot}>{tenant}</div>}
     </header>
   );

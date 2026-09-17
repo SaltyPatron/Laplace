@@ -11,9 +11,10 @@ import { formatCents, formatCurrencyCents as amount } from './amounts';
 import styles from './BillingView.module.css';
 
 export function BillingView() {
-  const { tenant, authReady, authUser } = useAppStore();
+  const { tenant, authUser } = useAppStore();
   // Reads and pending mutation receipts cannot cross a tenant or identity change.
-  return <BillingWorkspace key={JSON.stringify([tenant, authReady, authUser?.id])} tenant={tenant} />;
+  // Auth readiness alone must not remount public catalog reads and duplicate requests.
+  return <BillingWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} />;
 }
 
 function BillingWorkspace({ tenant }: { tenant: string }) {

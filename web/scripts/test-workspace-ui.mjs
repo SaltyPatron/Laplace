@@ -120,6 +120,7 @@ try {
   // Exercise the actual consumers as well as the shared control composition.
   const bodies = [];
   let failQuery = false, heldUsage;
+  let billingPlansCalls = 0, billingCatalogCalls = 0;
   const invocations = [];
   await page.route('**/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -146,12 +147,33 @@ try {
       if (failQuery) return route.fulfill({ status: 503, json: { error: { message: 'Fixture query unavailable' } } });
       return route.fulfill({ json: { shape: body.shape, topic_id: 'a'.repeat(32), topic_label: body.topic, rows: [{ reply: 'Fixture witnessed result', eff_mu: 1, witnesses: 1 }] } });
     }
-    if (path === '/v1/billing/plans') return route.fulfill({ json: { data: [{ plan_id: 'fixture', name: 'Fixture plan', monthly_price_cents: 1255, description: 'UI-only fixture', monthly_credits: {} }] } });
-    if (path === '/v1/billing/catalog') return route.fulfill({ status: 503, json: { error: { message: 'Fixture catalog unavailable' } } });
+    if (path === '/v1/billing/plans') { billingPlansCalls++; return route.fulfill({ json: { data: [{ plan_id: 'fixture', name: 'Fixture plan', monthly_price_cents: 1255, description: 'UI-only fixture', monthly_credits: {} }] } }); }
+    if (path === '/v1/billing/catalog') { billingCatalogCalls++; return route.fulfill({ status: 503, json: { error: { message: 'Fixture catalog unavailable' } } }); }
     if (path === '/v1/billing/usage') { heldUsage = route; return; }
     // No unexpected fixture action may reach a real server.
     return route.fulfill({ status: 501, json: { error: { message: `Unprovided fixture route: ${path}` } } });
   });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`${base}/__workspace_test?view=header`);
+    await expect(page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link')).toHaveCount(11);
+    const layout = await page.evaluate(() => {
+      const viewportWidth = document.documentElement.clientWidth;
+      const documentWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+      const controls = Array.from(document.querySelectorAll('header a, header input'));
+      return {
+        overflow: Math.max(0, documentWidth - viewportWidth),
+        clipped: controls.filter((node) => {
+          const rect = node.getBoundingClientRect();
+          return rect.left < -1 || rect.right > viewportWidth + 1;
+        }).map((node) => node.getAttribute('aria-label') || node.textContent || node.tagName),
+      };
+    });
+    assert.equal(layout.overflow, 0, `header must not overflow at ${width}px`);
+    assert.deepEqual(layout.clipped, [], `header controls must stay inside ${width}px viewport`);
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`${base}/__workspace_test?view=query`);
   await page.getByRole('textbox', { name: 'topic', exact: true }).fill(' King ');
   await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeEnabled();
@@ -169,6 +191,16 @@ try {
   await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeDisabled();
   await page.getByRole('textbox', { name: 'second topic', exact: true }).fill('second');
   await expect(page.getByRole('button', { name: 'Run query', exact: true })).toBeEnabled();
+
+  billingPlansCalls = 0; billingCatalogCalls = 0;
+  await page.goto(`${base}/__workspace_test?view=billing-auth-transition`);
+  await expect(page.getByRole('heading', { name: 'Fixture plan', exact: true })).toBeVisible();
+  await page.waitForTimeout(100);
+  const publicReadsBeforeAuth = { plans: billingPlansCalls, catalog: billingCatalogCalls };
+  await page.getByRole('button', { name: 'Resolve anonymous auth', exact: true }).click();
+  await page.waitForTimeout(150);
+  assert.equal(billingPlansCalls, publicReadsBeforeAuth.plans, 'auth readiness must not repeat public plan reads');
+  assert.equal(billingCatalogCalls, publicReadsBeforeAuth.catalog, 'auth readiness must not repeat public catalog reads');
 
   await page.goto(`${base}/__workspace_test?view=billing`);
   await expect(page.getByRole('heading', { name: 'Fixture plan', exact: true })).toBeVisible();
@@ -208,7 +240,7 @@ try {
   await expect.poll(() => invocations.length).toBe(beforeReview + 1);
   assert.equal(JSON.parse(invocations.at(-1)).name, 'ops.fixture_write');
   assert.deepEqual(errors, []);
-  console.log('WORKSPACE_UI_OK scope fencing; non-overlapping polling; independent panes; URL/back/reload; exact accessible fields; automatic label/description/focus binding; disabled primary/auxiliary activation; retained DOM/editor; nested modal focus/Escape; four viewport widths; actual Query exact submission/failure retention; actual Billing independent/failed/empty/tenant states; actual operation catalog/exact parameters/default/null/write confirmation');
+  console.log('WORKSPACE_UI_OK scope fencing; non-overlapping polling; independent panes; URL/back/reload; exact accessible fields; automatic label/description/focus binding; disabled primary/auxiliary activation; retained DOM/editor; nested modal focus/Escape; four viewport widths; responsive primary header without clipping; actual Query exact submission/failure retention; Billing auth transition without duplicate public reads; actual Billing independent/failed/empty/tenant states; actual operation catalog/exact parameters/default/null/write confirmation');
   passed = true;
 } finally {
   if (context) await context.tracing.stop({ path: join(artifacts, 'trace.zip') });

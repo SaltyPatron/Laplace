@@ -50,6 +50,17 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
     }
 
     [Fact]
+    public async Task HealthStatus_ReportsNotReadyWithoutFailedResourceStatus()
+    {
+        using var response = await _client.GetAsync("/health/status");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(json.RootElement.GetProperty("ready").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("substrate_reachable").GetBoolean());
+    }
+
+    [Fact]
     public async Task Capabilities_ExposeLiveAndPendingStatus()
     {
         using var response = await _client.GetAsync("/v1/capabilities");

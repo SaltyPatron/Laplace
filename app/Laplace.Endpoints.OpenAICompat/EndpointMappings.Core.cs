@@ -22,6 +22,14 @@ internal static class CoreEndpoints
           .Produces<ReadinessResponse>()
           .Produces<ReadinessResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        // Browser/product surfaces need the same readiness document without turning
+        // an expected not-ready state into a failed resource load in the console.
+        // /health/ready remains the orchestration probe with 503 semantics.
+        app.MapGet("/health/status", async (ISubstrateClient substrate, CancellationToken ct) =>
+            Results.Json(await substrate.ReadinessAsync(ct)))
+          .WithTags("core")
+          .Produces<ReadinessResponse>();
+
         app.MapGet("/v1/models", () => Results.Json(new ModelList("list", ModelCatalog.All)))
             .WithTags("core").Produces<ModelList>();
 

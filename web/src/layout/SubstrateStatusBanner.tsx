@@ -6,11 +6,19 @@ type Readiness = Schemas['ReadinessResponse'];
 
 function defaultDetail(report: Readiness): string {
   if (report.detail?.trim()) return report.detail.trim();
-  if (!report.substrate_reachable) return 'PostgreSQL is unreachable at localhost:5432.';
-  if (!report.perfcache_ready) return 'T0 perfcache is not loaded in Postgres.';
-  if (Number(report.entities) === 0) return 'Substrate is empty — run seed-foundation.';
-  if (Number(report.consensus_relations) === 0) return 'Substrate has no consensus — finish seeding.';
+  if (!report.substrate_reachable) return 'The PostgreSQL substrate cannot be reached.';
+  if (!report.perfcache_ready) return 'The T0 perfcache is not loaded.';
+  if (Number(report.entities) === 0) return 'The substrate is empty.';
+  if (Number(report.consensus_relations) === 0) return 'The substrate has no consensus relations yet.';
   return 'Substrate is not ready.';
+}
+
+function statusTitle(report: Readiness): string {
+  if (!report.substrate_reachable) return 'Substrate unavailable.';
+  if (!report.perfcache_ready) return 'Substrate runtime incomplete.';
+  if (Number(report.entities) === 0 || Number(report.consensus_relations) === 0)
+    return 'Substrate incomplete.';
+  return 'Substrate not ready.';
 }
 
 export function SubstrateStatusBanner() {
@@ -21,7 +29,7 @@ export function SubstrateStatusBanner() {
 
     const poll = async () => {
       try {
-        const res = await fetch('/health/ready');
+        const res = await fetch('/health/status');
         const data = (await res.json()) as Readiness;
         if (!alive) return;
         setReport(data.ready ? null : data);
@@ -50,7 +58,7 @@ export function SubstrateStatusBanner() {
 
   return (
     <Banner variant="warning">
-      <strong>Substrate unavailable.</strong> {defaultDetail(report)}
+      <strong>{statusTitle(report)}</strong> {defaultDetail(report)}
     </Banner>
   );
 }

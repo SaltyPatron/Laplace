@@ -2,7 +2,7 @@
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { Button, Field, Input, Modal, NavTabs, Panel, ReadStatus, Select, TextArea, TooltipProvider, useReadResource } from '../src/ui';
+import { AppHeader, Button, Field, Input, Modal, NavTabs, Panel, ReadStatus, Select, TenantField, TextArea, TooltipProvider, useReadResource } from '../src/ui';
 import { apiGet, setApiWorkspace } from '../src/api/client';
 import { QueryConsole } from '../src/query/QueryConsole';
 import { BillingView } from '../src/billing/BillingView';
@@ -59,9 +59,32 @@ function Fixture() {
     <Panel title="Other workspace" expandable><Input aria-label="Other draft" defaultValue="unchanged" /></Panel>
   </main>;
 }
+function HeaderFixture() {
+  const [tenant, setTenant] = useState('local-dev');
+  const tabs = [
+    ['home', 'Home', '/'], ['chat', 'Chat', '/chat'], ['query', 'Query', '/query'],
+    ['explore', 'Explore', '/explore'], ['data', 'Data', '/data'], ['chess', 'Chess', '/chess'],
+    ['play', 'Play', '/play'], ['lab', 'Lab', '/lab'], ['billing', 'Billing', '/billing'],
+    ['settings', 'Settings', '/settings'], ['operator', 'Operator', '/operator'],
+  ].map(([id, label, href]) => ({ id, label, href }));
+  return <AppHeader
+    title="Laplace"
+    tagline="witnessed consensus, not weights"
+    nav={<NavTabs label="Primary navigation" tabs={tabs} />}
+    tenant={<TenantField value={tenant} onChange={setTenant} />}
+  />;
+}
+function BillingAuthTransitionFixture() {
+  return <>
+    <Button onClick={() => useAppStore.getState().setAuth(null, [])}>Resolve anonymous auth</Button>
+    <BillingView />
+  </>;
+}
 function Surface() {
   const view = new URLSearchParams(location.search).get('view');
+  if (view === 'header') return <HeaderFixture />;
   if (view === 'query') return <QueryConsole />;
+  if (view === 'billing-auth-transition') return <BillingAuthTransitionFixture />;
   if (view === 'billing') return <><Button onClick={() => useAppStore.getState().setTenant('other-scope')}>Change tenant</Button><BillingView /></>;
   if (view === 'activity') return <Activity />;
   if (view === 'operations') return <OpConsole />;

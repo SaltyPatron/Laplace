@@ -1,9 +1,14 @@
 @layer components {
   .header {
     position: relative;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title tenant"
+      "nav nav";
     align-items: center;
-    gap: var(--space-6);
+    column-gap: var(--space-6);
+    row-gap: 0.5rem;
     min-height: 4.25rem;
     padding: 0.7rem clamp(1rem, 3vw, 2.5rem);
     background: var(--color-navy);
@@ -16,7 +21,6 @@
     --color-bg-panel-2: var(--color-navy-raised);
     --color-bg-elevated: var(--color-navy-raised);
     --color-border-default: color-mix(in srgb, white 20%, var(--color-navy));
-    flex-wrap: nowrap;
     flex-shrink: 0;
   }
 
@@ -29,6 +33,7 @@
   }
 
   .title {
+    grid-area: title;
     display: flex;
     align-items: center;
     font-family: var(--font-display);
@@ -53,9 +58,9 @@
     margin-right: var(--space-3);
     border: 2px solid #f7fbfd;
     background: var(--color-signal);
-    box-shadow:
-      0 0 0 4px color-mix(in srgb, var(--color-signal) 18%, transparent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-signal) 18%, transparent);
     transform: rotate(45deg);
+    flex: 0 0 auto;
   }
 
   .tagline {
@@ -69,10 +74,9 @@
   }
 
   .nav {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
+    grid-area: nav;
     min-width: 0;
+    width: 100%;
     padding: 3px;
     border: 1px solid color-mix(in srgb, white 11%, transparent);
     border-radius: var(--radius-lg);
@@ -80,12 +84,19 @@
   }
 
   .tenantSlot {
-    margin-left: auto;
+    grid-area: tenant;
+    justify-self: end;
+    min-width: 0;
   }
 }
 
 @media (max-width: 700px) {
   .header {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "title"
+      "nav"
+      "tenant";
     gap: var(--space-3);
     padding: 0.55rem 0.85rem;
   }
@@ -94,28 +105,8 @@
     display: none;
   }
 
-    .nav {
-    order: 3;
-    width: 100%;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    scrollbar-width: thin;
-    }
-
   .tenantSlot {
-    margin-left: 0;
+    justify-self: stretch;
     width: 100%;
-  }
-}
-
-@media (max-width: 1050px) {
-  .header {
-    flex-wrap: wrap;
-  }
-
-  .nav {
-    order: 3;
-    width: 100%;
-    overflow-x: auto;
   }
 }
