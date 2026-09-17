@@ -103,6 +103,7 @@ jobs:
     timeout-minutes: 720
     concurrency:
       group: laplace-host-lifecycle
+      queue: max
       cancel-in-progress: false
     env:
       TARGET_SHA: ${{ github.sha }}

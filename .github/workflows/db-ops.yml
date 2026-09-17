@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 420
     concurrency:
       group: laplace-host-lifecycle
+      queue: max
       cancel-in-progress: false
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}
