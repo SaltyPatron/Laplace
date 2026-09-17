@@ -64,10 +64,7 @@ public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeI
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
         => Task.FromResult<long?>(1);
 
-    public override IReadOnlyCollection<string> CanonicalNamesForReadback => new[]
-    {
-        RecipeExtractor.CanonicalName(_recipe),
-        _recipe.HiddenSize,
-        _recipe.NumLayers.ToString(),
-    };
+    // Source payload and scalar content are reconstructed through their witnessed
+    // tier/content roots; they are not canonical-name registry entries.
+    public override IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 }
