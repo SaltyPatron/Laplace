@@ -12,4 +12,10 @@ text = text.replace('CHECK(query_calls[SQ_LOCK]==0);', '')
 if 'SQ_LOCK' in text:
     lines = [line.strip() for line in text.splitlines() if 'SQ_LOCK' in line]
     raise SystemExit('unhandled SQ_LOCK references: ' + ' | '.join(lines))
+# A removed trailing conjunct can leave a whitespace-only line. Keep the
+# generated patch git-diff-clean before the workflow commits it.
+had_final_newline = text.endswith('\n')
+text = '\n'.join(line.rstrip() for line in text.splitlines())
+if had_final_newline:
+    text += '\n'
 p.write_text(text)
