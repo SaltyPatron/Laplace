@@ -110,6 +110,9 @@ app.UseMiddleware<ExceptionEnvelopeMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.ApiKeyEnforcementMiddleware>();
 app.UseMiddleware<Laplace.Endpoints.OpenAICompat.Auth.BillingAccountBoundaryMiddleware>();
+// Exact-model dispatch belongs before the generic OpenAI endpoint. A code request
+// can never drift into the prose walk simply because both share the same URL.
+app.UseMiddleware<CodeModelChatMiddleware>();
 
 app.MapPrometheusScrapingEndpoint();
 app.MapOpenApi();
