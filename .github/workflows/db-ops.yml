@@ -8,17 +8,7 @@ on:
         type: choice
         required: true
         default: status
-        options: [status, create, drop, recreate, update, seed, verify]
-      seed_source:
-        description: "optional seed source for seed/update; blank seeds the foundation ladder"
-        type: string
-        required: false
-        default: ""
-      seed_limit:
-        description: "reserved compatibility input; ingestion is source/artifact scoped"
-        type: string
-        required: false
-        default: ""
+        options: [status, create, drop, recreate, update, verify]
 
 permissions:
   contents: read
@@ -42,8 +32,6 @@ jobs:
       cancel-in-progress: false
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}
-      LAPLACE_DB_SEED_SOURCE: ${{ inputs.seed_source }}
-      LAPLACE_DB_SEED_LIMIT: ${{ inputs.seed_limit }}
     steps:
       - name: Select source and run the requested database operation under one host reservation
         env:
@@ -100,16 +88,7 @@ jobs:
               exec bash scripts/check-database-health.sh "$PGDATABASE"
               ;;
             update)
-              bash scripts/maintain-installed-database.sh
-              if [[ -n "$LAPLACE_DB_SEED_SOURCE" ]]; then
-                exec bash scripts/ingest-source.sh "$LAPLACE_DB_SEED_SOURCE"
-              fi
-              ;;
-            seed)
-              if [[ -n "$LAPLACE_DB_SEED_SOURCE" ]]; then
-                exec bash scripts/ingest-source.sh "$LAPLACE_DB_SEED_SOURCE"
-              fi
-              exec bash scripts/ensure-foundation.sh
+              exec bash scripts/maintain-installed-database.sh
               ;;
             verify)
               exec bash scripts/check-database-health.sh "$PGDATABASE"
