@@ -37,11 +37,21 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("uses: ./.github/workflows/product-stage.yml", mainline)
         self.assertIn("stage: mainline", mainline)
 
-    def test_mainline_has_no_actions_level_cancellation_queue(self):
+    def test_mainline_finishes_running_revision_and_coalesces_pending_work(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         mainline = text.split("  mainline:\n", 1)[1].split("\n  operator:\n", 1)[0]
         self.assertNotIn("concurrency:", mainline)
-        self.assertNotIn("cancel-in-progress:", mainline)
+
+        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
+        self.assertIn("laplace-mainline-validation", reusable)
+        self.assertIn("cancel-in-progress: false", reusable)
+        self.assertNotIn("cancel-in-progress: true", reusable)
+
+    def test_observability_is_explicit_evidence_not_push_queue_load(self):
+        for name in ("ui-observability.yml", "api-observability.yml"):
+            text = (WORKFLOWS / name).read_text(encoding="utf-8")
+            self.assertIn("workflow_dispatch:", text)
+            self.assertNotIn("\n  push:\n", text)
 
     def test_benchmark_concurrency_uses_only_supported_keys(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
