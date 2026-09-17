@@ -34,14 +34,14 @@ class WorkflowArchitecture(unittest.TestCase):
     def test_targeted_code_player_does_not_duplicate_mainline_build(self):
         self.assertFalse((WORKFLOWS / "code-player-ci.yml").exists())
         mainline = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertIn("scripts/product-ci.sh mainline", mainline)
+        self.assertIn("uses: ./.github/workflows/product-stage.yml", mainline)
+        self.assertIn("stage: mainline", mainline)
 
-    def test_running_mainline_validation_is_never_cancelled_by_a_new_push(self):
+    def test_mainline_has_no_actions_level_cancellation_queue(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         mainline = text.split("  mainline:\n", 1)[1].split("\n  operator:\n", 1)[0]
-        self.assertIn("group: laplace-mainline-validation", mainline)
-        self.assertIn("cancel-in-progress: false", mainline)
-        self.assertNotIn("cancel-in-progress: true", mainline)
+        self.assertNotIn("concurrency:", mainline)
+        self.assertNotIn("cancel-in-progress:", mainline)
 
     def test_benchmark_concurrency_uses_only_supported_keys(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
@@ -53,19 +53,33 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("scripts/laplace --help", text)
         self.assertIn('exec bash scripts/ensure-foundation.sh', text)
 
-    def test_competitive_proof_uses_the_canonical_product_stage(self):
-        text = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
-        self.assertIn("scripts/product-ci.sh proof", text)
-        for duplicated in (
-            "scripts/product-ci.sh build",
-            "scripts/product-ci.sh test-dev",
-            "scripts/product-ci.sh install",
-            "scripts/product-ci.sh test-db",
-            "scripts/product-ci.sh applications",
-            "scripts/product-ci.sh reconcile",
-            "scripts/product-ci.sh test-live",
-        ):
-            self.assertNotIn(duplicated, text)
+    def test_product_execution_has_one_reusable_self_hosted_owner(self):
+        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_call:", reusable)
+        self.assertEqual(1, reusable.count("runs-on: [self-hosted, laplace]"))
+        self.assertEqual(1, reusable.count("host-resource.lock"))
+        self.assertIn('exec bash scripts/product-ci.sh "$LAPLACE_STAGE"', reusable)
+
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertNotIn("runs-on: [self-hosted, laplace]", lifecycle)
+        self.assertNotIn("host-resource.lock", lifecycle)
+
+    def test_deploy_and_proof_are_composed_from_retryable_stage_jobs(self):
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("deploy-candidate:", lifecycle)
+        self.assertIn("deploy-activation:", lifecycle)
+        self.assertIn("needs: deploy-candidate", lifecycle)
+        self.assertIn("proof-candidate:", lifecycle)
+        self.assertIn("proof-model:", lifecycle)
+        self.assertIn("proof-activation:", lifecycle)
+        self.assertIn("needs: proof-candidate", lifecycle)
+        self.assertIn("needs: proof-model", lifecycle)
+
+        proof = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
+        for stage in ("release-candidate", "proof-model", "release-activation"):
+            self.assertIn(f"stage: {stage}", proof)
+        self.assertNotIn("scripts/product-ci.sh", proof)
+        self.assertNotIn("runs-on: [self-hosted, laplace]", proof)
 
 
 if __name__ == "__main__":
