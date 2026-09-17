@@ -12,6 +12,7 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
     private static readonly Hash128 ToolchainSource = SubstrateCanonicalIds.Source("ToolchainWitness");
     private static readonly Hash128 CodePlayerTrustClass = SubstrateCanonicalIds.TrustClass("AppDerived");
     private static readonly Hash128 ToolchainTrustClass = SubstrateCanonicalIds.TrustClass("StandardsDerived");
+    private static readonly Hash128 DefinesRelation = RelationTypeRegistry.RelationTypeId("DEFINES");
     private const double CodePlayerTrust = SourceTrust.AppDerived;
     private const double ToolchainTrust = SourceTrust.StandardsDerived;
     private const int DefaultAttempts = 4;
@@ -62,9 +63,6 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
         await using var writer = new ConsensusAccumulatingWriter(
             new NpgsqlSubstrateWriter(substrate.DataSource), substrate.DataSource);
 
-        // Proposal generation and deterministic verification are independent witnesses.
-        // Bootstrap their source/trust identities once through the same substrate owner;
-        // the compiler must not inherit the weaker AppDerived standing of the proposer.
         var codePlayerBootstrap = new BootstrapIntentBuilder(
             CodePlayerSource, "CodePlayer", CodePlayerTrustClass).Build();
         var toolchainBootstrap = new BootstrapIntentBuilder(
@@ -85,8 +83,6 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
             if (utf8.Length > MaxCandidateBytes)
                 return new Result(modality, candidate, null, false, "candidate_too_large", receipts);
 
-            // STAGE: mint the candidate as exact content + native Tree-sitter grammar/Merkle
-            // structure before a verifier is allowed to say anything about it.
             var record = new GrammarComposeRecord(Utf8: utf8, Modality: modality, RequireSourceAst: true);
             var handler = new GrammarComposeHandler(CodePlayerSource, CodePlayerTrust, reader: null);
             using var unit = handler.CreateDeferredUnit(record);
@@ -102,11 +98,21 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
             candidateBuilder.AddAttestation(NativeAttestation.Categorical(
                 root, "IS_TYPED_AS", EntityTypeRegistry.CodeConcept,
                 CodePlayerSource, (Hash128?)null, CodePlayerTrust, true, 1));
-            await writer.ApplyAsync(candidateBuilder.Build(), ct).ConfigureAwait(false);
 
-            // VERIFY/WITNESS: deterministic tooling is its own high-trust source. The
-            // diagnostic receipt is exact substrate content and polarity lives on the
-            // HAS_RESULT attestation; failed code is adjudicated down, never deleted.
+            // Capture the function/type definition entities emitted by the exact same
+            // Tree-sitter witness pass before persisting the immutable candidate change.
+            // Tool outcomes are then deposited on both the translation-unit root and the
+            // constituent definitions, so success/failure propagates across AST altitude
+            // without re-parsing source or minting a second code identity.
+            SubstrateChange candidateChange = candidateBuilder.Build();
+            Hash128[] definitionIds = candidateChange.Attestations
+                .Where(a => a.TypeId == DefinesRelation && a.ContextId == root)
+                .Select(a => a.SubjectId)
+                .Distinct()
+                .OrderBy(id => id)
+                .ToArray();
+            await writer.ApplyAsync(candidateChange, ct).ConfigureAwait(false);
+
             var tool = await CodeToolchain.VerifyAsync(candidate, modality, ct).ConfigureAwait(false);
             using var witnessBuilder = new SubstrateChangeBuilder(
                 ToolchainSource, $"toolchain-witness/{modality}/{attempt}/{Guid.NewGuid():N}")
@@ -115,9 +121,16 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
                 ?? throw new InvalidOperationException("Toolchain receipt did not compose into substrate content.");
             Hash128 toolRoot = ContentEmitter.Emit(
                 witnessBuilder, $"toolchain/{tool.Tool}/{modality}", ToolchainSource) ?? resultRoot;
-            witnessBuilder.AddAttestation(NativeAttestation.Categorical(
-                root, "HAS_RESULT", resultRoot, ToolchainSource, toolRoot,
-                ToolchainTrust, confirm: tool.Verified));
+
+            void WitnessOutcome(Hash128 subject) =>
+                witnessBuilder.AddAttestation(NativeAttestation.Categorical(
+                    subject, "HAS_RESULT", resultRoot, ToolchainSource, toolRoot,
+                    ToolchainTrust, confirm: tool.Verified));
+
+            WitnessOutcome(root);
+            foreach (Hash128 definitionId in definitionIds)
+                WitnessOutcome(definitionId);
+
             await writer.ApplyAsync(witnessBuilder.Build(), ct).ConfigureAwait(false);
 
             receipts.Add(new AttemptReceipt(attempt, root.ToString(), tool.Verified, tool.Tool,
@@ -128,8 +141,6 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
             if (tool.Verified)
                 return new Result(modality, candidate, root.ToString(), true, null, receipts);
 
-            // FOLD -> next COUPLE: the exact failed code root returns to the next forward
-            // frontier, while its freshly folded HAS_RESULT standing is query-visible.
             feedback.Clear();
             feedback.Add(root.ToBytes());
         }
