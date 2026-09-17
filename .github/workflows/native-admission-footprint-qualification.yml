@@ -46,12 +46,12 @@ jobs:
                   if run is None:continue
                   outer+=1
                   subprocess.run(["bash","-n"],input=run,text=True,check=True)
-                  for name,body in re.findall(r"<<'([A-Z_]+)'[^\\n]*\\n(.*?)^\\1$",run,re.M|re.S):
+                  for name,body in re.findall(r"<<'([A-Z_]+)'[^\n]*\n(.*?)^\1$",run,re.M|re.S):
                       if name=="PY":
                           ast.parse(body);python+=1
                       else:
                           subprocess.run(["bash","-n"],input=body,text=True,check=True);inner+=1
-                          for child in re.findall(r"<<'PY'[^\\n]*\\n(.*?)^PY$",body,re.M|re.S):
+                          for child in re.findall(r"<<'PY'[^\n]*\n(.*?)^PY$",body,re.M|re.S):
                               ast.parse(child);python+=1
           assert (outer,inner,python)==(5,2,11),(outer,inner,python)
           print("NATIVE_OPERATOR_SYNTAX_PASS "+json.dumps({"outerBash":outer,"innerBash":inner,"python":python}),flush=True)
