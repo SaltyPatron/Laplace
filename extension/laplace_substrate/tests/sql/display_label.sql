@@ -1,6 +1,7 @@
 -- Display identity and display text are different contracts. A graph node keeps its
--- exact content id, but the label must be Unicode/name/description — never that id
--- rendered back as arbitrary hex. High-tier text preview is containment-owned (#804).
+-- exact content id. Friendly Unicode/name/description wins, but the final fallback must
+-- retain a short canonical id instead of replacing a known entity with generic status text.
+-- High-tier text preview is containment-owned (#804).
 \set ECHO none
 BEGIN;
 DO $display_label$
@@ -101,14 +102,16 @@ BEGIN
     IF labels[5] IS DISTINCT FROM '狼' THEN
         RAISE EXCEPTION 'FAIL: tier-0 codepoint did not render Unicode exactly: %', labels[5];
     END IF;
-    IF labels[6] ~ '^[0-9A-Fa-f]{32}(…|\.\.\.)?$' THEN
-        RAISE EXCEPTION 'FAIL: unresolved opaque entity leaked identity as label: %', labels[6];
+    IF labels[6] IS NULL OR btrim(labels[6]) = ''
+       OR strpos(labels[6], left(encode(opaque,'hex'),12)) = 0 THEN
+        RAISE EXCEPTION 'FAIL: unresolved opaque entity did not retain canonical identity: %', labels[6];
     END IF;
-    IF labels[6] IS NULL OR btrim(labels[6]) = '' THEN
-        RAISE EXCEPTION 'FAIL: unresolved opaque entity has no friendly abstention/description';
+    IF labels[7] IS DISTINCT FROM ('Entity · ' || left(encode(missing,'hex'),12)) THEN
+        RAISE EXCEPTION 'FAIL: absent entity did not retain its requested canonical identity: %', labels[7];
     END IF;
-    IF labels[7] IS DISTINCT FROM 'Unrealized entity' THEN
-        RAISE EXCEPTION 'FAIL: absent identity did not abstain cleanly: %', labels[7];
+    IF labels[6] IN ('Unrealized entity','Unresolved entity')
+       OR labels[7] IN ('Unrealized entity','Unresolved entity') THEN
+        RAISE EXCEPTION 'FAIL: generic unresolved status replaced canonical identity: %', labels;
     END IF;
 
     -- Final-result projection is aligned, including duplicates. A graph batch can contain
@@ -133,7 +136,7 @@ BEGIN
         RAISE EXCEPTION 'FAIL: label fallback reconstructed an entire source: %',labels;
     END IF;
 
-    RAISE NOTICE 'display labels: id separate, Unicode exact, bounded containment preview, no hash fallback';
+    RAISE NOTICE 'display labels: Unicode exact, bounded containment preview, identity-bearing fallback';
 END
 $display_label$;
 ROLLBACK;
