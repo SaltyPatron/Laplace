@@ -97,6 +97,16 @@ public interface ISubstrateReader
     Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default);
 
     /// <summary>
+    /// Exact durable testimony in one relation partition. Entity/cache presence is not
+    /// acceptance evidence: content COPY can commit before testimony and consensus.
+    /// Readers without this capability must fail explicitly rather than report acceptance
+    /// or silently treat already accepted testimony as a new recording.
+    /// </summary>
+    Task<IReadOnlySet<Hash128>> PresentAttestationIdsAsync(
+        Hash128 typeId, IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+        => throw new NotSupportedException("reader does not support durable attestation presence");
+
+    /// <summary>
     /// One round of the tier-by-tier, trunk-to-leaf batch existence probe
     /// (see TierTreeDescent.ProbeBatchEmitBitmapsAsync). The caller passes
     /// exactly the candidate ids for one tier -- <paramref name="tier"/> is

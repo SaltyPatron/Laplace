@@ -41,6 +41,26 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         _evictSource = evictSource ?? EvictSourceDirectAsync;
     }
 
+    public async Task<IReadOnlySet<Hash128>> PresentAttestationIdsAsync(
+        Hash128 typeId, IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+    {
+        var present = new HashSet<Hash128>();
+        if (ids.Count == 0) return present;
+        await using var conn = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
+        int probeChunk = Math.Max(1, _cachePlan.ProbeChunkIds);
+        var type = typeId.ToBytes();
+        for (int offset = 0; offset < ids.Count; offset += probeChunk)
+        {
+            int count = Math.Min(probeChunk, ids.Count - offset);
+            var raw = new byte[count][];
+            for (int i = 0; i < count; i++) raw[i] = ids[offset + i].ToBytes();
+            var found = await NpgsqlAttestationReads.PresentIdsAsync(conn, type, raw, ct)
+                .ConfigureAwait(false);
+            foreach (var id in found) present.Add(Hash128.FromBytes(id));
+        }
+        return present;
+    }
+
     public async Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(

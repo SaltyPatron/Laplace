@@ -539,7 +539,7 @@ public sealed partial class NpgsqlSubstrateWriter
 
         // Entity sort+pack overlaps verification. The outer control transaction
         // already holds the apply lock and the physicality provider observation.
-        Task<(byte[][] Payloads, int Groups)>? optimisticEntCopy = null;
+        Task<(byte[][] Payloads, int[] RowsByLane, int Groups)>? optimisticEntCopy = null;
         long firstEntBytes = TotalEntityBytes(ents, firstEntIdx);
         int optimisticGroups = ResolveCopyGroups(firstEntIdx.Count, firstEntBytes);
         if (optimisticGroups > 1 && phys.Ids.Count == 0 && atts.Ids.Count == 0)
@@ -551,8 +551,8 @@ public sealed partial class NpgsqlSubstrateWriter
             optimisticEntCopy = Task.Run(() =>
             {
                 var payloads = BuildSortedEntityPayloads(
-                    blobsSnap, entsSnap, idxSnap, groupsSnap);
-                return (payloads, groupsSnap);
+                    blobsSnap, entsSnap, idxSnap, groupsSnap, out var rowsByLane);
+                return (payloads, rowsByLane, groupsSnap);
             }, ct);
         }
 
@@ -940,6 +940,7 @@ public sealed partial class NpgsqlSubstrateWriter
             // parallel bulk index build instead.
             List<KeptRow> keptEnts;
             byte[][]? prebuiltEntPayloads = null;
+            int[]? prebuiltEntRowsByLane = null;
             int prebuiltEntGroups = 0;
             bool anyPresent = presentEntities.Count > 0;
             if (optimisticEntCopy is not null)
@@ -948,6 +949,7 @@ public sealed partial class NpgsqlSubstrateWriter
                 if (!anyPresent)
                 {
                     prebuiltEntPayloads = prepared.Payloads;
+                    prebuiltEntRowsByLane = prepared.RowsByLane;
                     prebuiltEntGroups = prepared.Groups;
                     keptEnts = new List<KeptRow> { default };
                 }
@@ -967,6 +969,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     if (eSkip == 0)
                     {
                         prebuiltEntPayloads = prepared.Payloads;
+                        prebuiltEntRowsByLane = prepared.RowsByLane;
                         prebuiltEntGroups = prepared.Groups;
                         keptEnts = new List<KeptRow> { default };
                     }
@@ -1116,7 +1119,8 @@ public sealed partial class NpgsqlSubstrateWriter
                 {
                     rtCopy += await CopyPayloadsParallelAsync(
                         "entities", IntentStageTable.Entities,
-                        keptEntCount, prebuiltEntGroups, prebuiltEntPayloads, sortMs: 0, copyTransactions, ct);
+                        keptEntCount, prebuiltEntGroups, prebuiltEntPayloads, prebuiltEntRowsByLane!,
+                        sortMs: 0, copyTransactions, ct);
                 }
                 else
                 {
@@ -1836,26 +1840,21 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
-    /// Map a big-endian sort key into <c>[0, groups)</c> for parallel COPY.
-    /// <paramref name="groups"/> == 1 must short-circuit: C# masks ulong shifts
-    /// by 6 bits, so <c>hiBe &gt;&gt; 64</c> becomes <c>&gt;&gt; 0</c>, the cast to
-    /// int can be negative, and <c>counts[g]++</c> throws IndexOutOfRange.
-    /// Measured 2026-08-02: Unicode second working-set kept 3,580 entities
-    /// (groups=1) after the first mega-batch COPYed ~1.17M (groups=8).
+    /// Map the complete unsigned key space into equally sized, ordered COPY lanes.
+    /// Integer rounding makes lane widths differ by at most one key. In particular,
+    /// six lanes must not clamp eight leading-bit buckets into the final lane:
+    /// that gives the final lane three times the rows of each other lane.
+    /// This schedules transport only; PostgreSQL still routes HASH(id) partitions.
     /// </summary>
     internal static int CopyGroupOf(ulong hiBe, int groups)
     {
         if (groups <= 1) return 0;
-        int bits = 0;
-        while ((1 << bits) < groups) bits++;
-        int g = (int)(hiBe >> (64 - bits));
-        if ((uint)g >= (uint)groups) g = groups - 1;
-        return g;
+        return (int)(((UInt128)hiBe * (uint)groups) >> 64);
     }
 
     private static byte[][] BuildSortedEntityPayloads(
         IReadOnlyList<(IntPtr Ptr, long Len)> blobs,
-        CopyTupleParser.EntityRows ents, List<int> firstIdx, int groups)
+        CopyTupleParser.EntityRows ents, List<int> firstIdx, int groups, out int[] rowsByLane)
     {
         int rowCount = firstIdx.Count;
         var groupOf = new int[rowCount];
@@ -1893,11 +1892,13 @@ public sealed partial class NpgsqlSubstrateWriter
                 ? Array.Empty<byte>()
                 : CopyTupleParser.PackFiltered(blobs, groupRefs[g]);
         });
+        rowsByLane = counts;
         return payloads;
     }
 
     private static byte[][] BuildSortedCopyPayloads(
-        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, int groups)
+        IReadOnlyList<(IntPtr Ptr, long Len)> blobs, List<KeptRow> kept, int groups,
+        out int[] rowsByLane)
     {
         int rowCount = kept.Count;
         var groupOf = new int[rowCount];
@@ -1962,16 +1963,20 @@ public sealed partial class NpgsqlSubstrateWriter
             payloads[g] = CopyTupleParser.PackFiltered(
                 blobs, refs, patches, countOffs, sumPatches, sumOffs);
         });
+        rowsByLane = counts;
         return payloads;
     }
 
     private async Task<int> CopyPayloadsParallelAsync(
         string tableName, IntentStageTable table,
-        int rowCount, int groups, byte[][] payloads, long sortMs, CopyTransactionCounts copyTransactions,
-        CancellationToken ct)
+        int rowCount, int groups, byte[][] payloads, int[] rowsByLane, long sortMs,
+        CopyTransactionCounts copyTransactions, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var tasks = new Task[groups];
+        // One value per COPY lane, including pool/semaphore wait and commit.
+        // Reuse packing counts; do not parse the row payload again for diagnostics.
+        var elapsedMsByLane = new double[groups];
         for (int g = 0; g < groups; g++)
         {
             int group = g;
@@ -1979,6 +1984,7 @@ public sealed partial class NpgsqlSubstrateWriter
             {
                 var payload = payloads[group];
                 if (payload.Length == 0) return;
+                long laneStarted = System.Diagnostics.Stopwatch.GetTimestamp();
 
                 // Claim a slot in the plan's COPY share BEFORE renting from the pool:
                 // overlapping phases share one budget, so a group waits on a semaphore
@@ -2021,15 +2027,21 @@ public sealed partial class NpgsqlSubstrateWriter
                     // the try block, so the slot is released only after the pool has the
                     // connection back.
                     CopyConnectionBudget.Release();
+                    elapsedMsByLane[group] =
+                        System.Diagnostics.Stopwatch.GetElapsedTime(laneStarted).TotalMilliseconds;
                 }
             }, ct);
         }
         await Task.WhenAll(tasks);
         sw.Stop();
         _log.LogInformation(
-            "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s; sort {SortMs:N0}ms)",
+            "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s; sort {SortMs:N0}ms; lane rows {RowsByLane}; lane bytes {BytesByLane}; lane elapsed_ms {ElapsedMsByLane})",
             tableName, rowCount, groups, sw.ElapsedMilliseconds,
-            rowCount / Math.Max(1e-3, sw.Elapsed.TotalSeconds), sortMs);
+            rowCount / Math.Max(1e-3, sw.Elapsed.TotalSeconds), sortMs,
+            string.Join(",", rowsByLane),
+            string.Join(",", payloads.Select(static payload => payload.LongLength)),
+            string.Join(",", elapsedMsByLane.Select(static value =>
+                value.ToString("F3", System.Globalization.CultureInfo.InvariantCulture))));
         return 1;
     }
 
@@ -2060,9 +2072,10 @@ public sealed partial class NpgsqlSubstrateWriter
                     + $"len={kept[i].Row.Length}, off={kept[i].Row.Offset})");
         }
         byte[][] payloads;
+        int[] rowsByLane;
         try
         {
-            payloads = BuildSortedCopyPayloads(blobs, kept, groups);
+            payloads = BuildSortedCopyPayloads(blobs, kept, groups, out rowsByLane);
         }
         catch (IndexOutOfRangeException ex)
         {
@@ -2074,7 +2087,7 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         long sortMs = sw.ElapsedMilliseconds;
         return await CopyPayloadsParallelAsync(
-            tableName, table, kept.Count, groups, payloads, sortMs, copyTransactions, ct);
+            tableName, table, kept.Count, groups, payloads, rowsByLane, sortMs, copyTransactions, ct);
     }
 
     private static async Task CopyFilteredAsync(

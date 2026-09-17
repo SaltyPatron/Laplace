@@ -49,8 +49,11 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
+#include "miscadmin.h"
 #include "partitioning/partbounds.h"
 #include "partitioning/partdesc.h"
+#include "storage/fd.h"
+#include <inttypes.h>
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
@@ -804,6 +807,35 @@ period_window(const PeriodArrays *periods, const InArray *cell_opponents,
     return window;
 }
 
+/* Failure-only evidence for the actual mapped provider. Disk hashes do not
+ * identify a library inherited from an already-running postmaster. Preserve
+ * Linux's device/inode/path and deleted marker without reading source content. */
+static char *
+fold_function_mapping(uintptr_t address)
+{
+    FILE *maps = AllocateFile("/proc/self/maps", "r");
+    char line[2048];
+    bool found = false;
+    bool truncated = false;
+    if (maps == NULL)
+        return pstrdup("unavailable");
+    while (fgets(line, sizeof(line), maps) != NULL)
+    {
+        uintptr_t begin, end;
+        if (sscanf(line, "%" SCNxPTR "-%" SCNxPTR, &begin, &end) == 2 &&
+            address >= begin && address < end)
+        {
+            truncated = strchr(line, '\n') == NULL;
+            line[strcspn(line, "\r\n")] = '\0';
+            found = true;
+            break;
+        }
+    }
+    FreeFile(maps);
+    if (!found) return pstrdup("not-found");
+    return truncated ? psprintf("%s [truncated]", line) : pstrdup(line);
+}
+
 /* Fold one type run natively — matched cells from their stored prior
  * (`priors`: the FOR UPDATE read of this run; ord is 1-based within the run),
  * novel cells from the neutral prior. One tight native pass instead of a
@@ -901,14 +933,37 @@ fold_run_states(const InArray *phis, const InArray *opps,
             entry = hash_search(memo, input, HASH_ENTER, &found);
             if (found)
                 st = entry->result;
-            else if (consensus_fold_apply_partial(
-                         &st, opp, phi, n_games, sum,
-                         LAPLACE_GLICKO2_DEFAULT_TAU) != 0)
-                ereport(ERROR,
-                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                         errmsg("%s: aggregate exceeds fixed-point capacity", label),
-                         errdetail("games=%ld sum_score=%ld",
-                                   (long) n_games, (long) sum)));
+            else
+            {
+                int fold_result = consensus_fold_apply_partial(
+                    &st, opp, phi, n_games, sum, LAPLACE_GLICKO2_DEFAULT_TAU);
+                if (fold_result != 0)
+                {
+                    uintptr_t core_address = (uintptr_t)&glicko2_fold_uniform_period;
+                    uintptr_t route_address = (uintptr_t)&fold_run_states;
+                    char *core_mapping = fold_function_mapping(core_address);
+                    char *route_mapping = fold_function_mapping(route_address);
+                    ereport(ERROR,
+                            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                             errmsg("%s: native rating-period update failed", label),
+                             errdetail("result=%d cell_index=%d matched=%s "
+                                       "exact_period=%s period_start=%d "
+                                       "prior_rating=%ld prior_rd=%ld prior_volatility=%ld "
+                                       "opponent_rating=%ld opponent_rd=%ld "
+                                       "games=%ld sum_score=%ld tau=%ld "
+                                       "backend_pid=%d core_address=%" PRIxPTR
+                                       " core_mapping=[%s] route_address=%" PRIxPTR
+                                       " route_mapping=[%s]",
+                                       fold_result, run_start + i,
+                                       matched[i] ? "true" : "false",
+                                       periods->exact ? "true" : "false", period_start,
+                                       (long) input[0], (long) input[1], (long) input[2],
+                                       (long) input[3], (long) input[4], (long) input[5],
+                                       (long) input[6], (long) LAPLACE_GLICKO2_DEFAULT_TAU,
+                                       MyProcPid, core_address, core_mapping,
+                                       route_address, route_mapping)));
+                }
+            }
             if (!found) entry->result = st;
         }
         else

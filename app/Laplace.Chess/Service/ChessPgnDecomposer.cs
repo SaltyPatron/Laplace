@@ -178,47 +178,14 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
     }
 
-    private static async IAsyncEnumerable<ChessGameRecord> YieldNovelParsedAsync(
+    internal static async IAsyncEnumerable<ChessGameRecord> YieldNovelParsedAsync(
         List<ChessPlayingPeek> peeks, ISubstrateReader? reader, bool reObservePresent,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        if (peeks.Count == 0) yield break;
-        if (reObservePresent || reader is null)
-        {
-            foreach (var p in peeks) yield return p.Game;
-            yield break;
-        }
-
-        var toProbe = new List<int>(peeks.Count);
-        for (int i = 0; i < peeks.Count; i++)
-        {
-            if (reader.IsProvenPresent(peeks[i].PlayingId)) continue;
-            toProbe.Add(i);
-        }
-
-        var present = new bool[peeks.Count];
-        if (toProbe.Count > 0)
-        {
-            var ids = new Hash128[toProbe.Count];
-            for (int k = 0; k < toProbe.Count; k++) ids[k] = peeks[toProbe[k]].PlayingId;
-            var presenceScope = reader.CapturePresenceScope();
-            byte[] bm = await reader.TierBatchExistenceProbeAsync(
-                ids, (short)EntityTier.Document, ct).ConfigureAwait(false);
-            var proven = new List<Hash128>(toProbe.Count);
-            for (int k = 0; k < toProbe.Count; k++)
-            {
-                if (!BitmapBits.IsSet(bm, k)) continue;
-                present[toProbe[k]] = true;
-                proven.Add(ids[k]);
-            }
-            if (proven.Count > 0) reader.MarkProven(proven, presenceScope);
-        }
-
-        for (int i = 0; i < peeks.Count; i++)
-        {
-            if (present[i] || reader.IsProvenPresent(peeks[i].PlayingId)) continue;
-            yield return peeks[i].Game;
-        }
+        var games = peeks.Select(static p => p.Game).ToList();
+        await foreach (var game in YieldChunkAsync(games, reader, reObservePresent, ct)
+                           .ConfigureAwait(false))
+            yield return game;
     }
 
     internal static ChessPlayingPeek? TryPeekPlaying(string gameText)
@@ -296,40 +263,25 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         await foreach (var novel in FilterNovelAsync(chunk, reader, ct)) yield return novel;
     }
 
+    internal static Hash128 RecordingWitnessId(ChessGameRecord game)
+        => NativeAttestation.ComputeId(game.PlayingId, ChessVocabulary.PlaysLineType,
+            game.LineId, ChessVocabulary.PgnSourceId, null);
+
     internal static async IAsyncEnumerable<ChessGameRecord> FilterNovelAsync(
         List<ChessGameRecord> chunk, ISubstrateReader? reader, [EnumeratorCancellation] CancellationToken ct)
     {
         if (chunk.Count == 0) yield break;
-        if (reader is null) { foreach (var g in chunk) yield return g; yield break; }
+        if (reader is null) { foreach (var game in chunk) yield return game; yield break; }
 
-        var toProbe = new List<int>(chunk.Count);
+        // A PLAYING entity may survive detached E/P COPY after the control transaction
+        // rolls back. Only the exact PGN witness proves recording acceptance. It commits
+        // with the accepted testimony, consensus fold and working-set receipt. This is
+        // not a claim that older record-only ingests already contain every calculated lane.
+        var ids = chunk.Select(RecordingWitnessId).ToArray();
+        var accepted = await reader.PresentAttestationIdsAsync(
+            ChessVocabulary.PlaysLineType, ids, ct).ConfigureAwait(false);
         for (int i = 0; i < chunk.Count; i++)
-        {
-            if (reader.IsProvenPresent(chunk[i].PlayingId)) continue;
-            toProbe.Add(i);
-        }
-
-        bool[] present = new bool[chunk.Count];
-        if (toProbe.Count > 0)
-        {
-            var ids = new Hash128[toProbe.Count];
-            for (int k = 0; k < toProbe.Count; k++) ids[k] = chunk[toProbe[k]].PlayingId;
-            var presenceScope = reader.CapturePresenceScope();
-            byte[] bm = await reader.TierBatchExistenceProbeAsync(
-                ids, (short)EntityTier.Document, ct).ConfigureAwait(false);
-            var proven = new List<Hash128>(toProbe.Count);
-            for (int k = 0; k < toProbe.Count; k++)
-            {
-                if (!BitmapBits.IsSet(bm, k)) continue;
-                present[toProbe[k]] = true;
-                proven.Add(ids[k]);
-            }
-            if (proven.Count > 0) reader.MarkProven(proven, presenceScope);
-        }
-
-        for (int i = 0; i < chunk.Count; i++)
-            if (!present[i] && !reader.IsProvenPresent(chunk[i].PlayingId))
-                yield return chunk[i];
+            if (!accepted.Contains(ids[i])) yield return chunk[i];
     }
 
     internal static async IAsyncEnumerable<string> StreamFileGamesAsync(
@@ -898,7 +850,6 @@ public sealed record ChessGameRecord(
     Hash128 LineId,
     Hash128 EventId,
     Hash128 PlayingId)
-    : ITrunkRootRecord
 {
     internal PgnMovetext.PgnWalkResult Walk { get; init; } = null!;
 
@@ -916,5 +867,6 @@ public sealed record ChessGameRecord(
     internal bool NormalCompletionVerified { get; init; }
     internal bool CompleteSourceVerified { get; init; }
 
-    public Hash128 TrunkRootId => PlayingId;
+    // Recording acceptance is attestation-based. Do not implement ITrunkRootRecord:
+    // generic entity existence admission must not discard a partially recorded game.
 }

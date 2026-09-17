@@ -12,7 +12,7 @@ public sealed class ChessPgnChunkTests
             "Fixtures", $"position-playing-game-{number}.pgn")), requireCompleteSource: true));
 
     private static SubstrateChange[] Build(ChessPgnChunk chunk) =>
-        [chunk.Record.Build(), chunk.Analyze.Build(), chunk.Repair.Build()];
+        [chunk.Record.Build(), chunk.Analyze.Build(), chunk.Repair.Build(), chunk.RepairAnalyze.Build()];
 
     private static void Dispose(IEnumerable<SubstrateChange> changes)
     {
@@ -47,6 +47,122 @@ public sealed class ChessPgnChunkTests
             .Select(row => string.Join("|", row.Id, row.SubjectId, row.TypeId, row.ObjectId,
                 row.SourceId, row.ContextId, row.FoldReplayable, row.OpponentRdFp1e9, row.HighwayMask))
             .Distinct().Order(StringComparer.Ordinal).ToArray();
+
+
+    private static void AssertRepairParity(SubstrateChange expected, SubstrateChange repaired)
+    {
+        Assert.Equal(expected.Metadata.SourceId, repaired.Metadata.SourceId);
+        Assert.Equal(expected.Metadata.SourceContentUnitName, repaired.Metadata.SourceContentUnitName);
+        Assert.Equal(expected.Metadata.IntentId, repaired.Metadata.IntentId);
+        Assert.Equal(expected.Entities.Select(row => row.Id).OrderBy(id => id.ToString()),
+            repaired.Entities.Select(row => row.Id).OrderBy(id => id.ToString()));
+        Assert.Equal(Observations([expected]), Observations([repaired]));
+        Assert.Equal(expected.Physicalities.Select(Form).Order(StringComparer.Ordinal),
+            repaired.Physicalities.Select(Form).Order(StringComparer.Ordinal));
+        // The same game/window must produce the complete canonical evidence body.
+        // Only its new wall-clock observation time may change during recomposition.
+        Assert.Equal<AttestationRow>(
+            expected.Attestations.OrderBy(row => row.Id.ToString())
+                .Select(row => row with { LastObservedAtUnixUs = 0 }),
+            repaired.Attestations.OrderBy(row => row.Id.ToString())
+                .Select(row => row with { LastObservedAtUnixUs = 0 }));
+        Assert.Equal(expected.PhysicalitySourcePriors.OrderBy(pair => pair.Key.ToString()),
+            repaired.PhysicalitySourcePriors.OrderBy(pair => pair.Key.ToString()));
+        Assert.Equal(expected.IntentStages.Sum(stage => stage.PhysicalityCount),
+            repaired.IntentStages.Sum(stage => stage.PhysicalityCount));
+        foreach (var row in repaired.PhysicalityObservations)
+            Assert.Equal(expected.RequireSourcePrior(row.SourceId), repaired.RequireSourcePrior(row.SourceId));
+        foreach (var stage in repaired.IntentStages)
+        {
+            int covered = 0;
+            foreach (var range in stage.PhysicalitySourceRanges)
+            {
+                Assert.Equal(covered, range.FirstRow);
+                Assert.True(range.RowCount > 0);
+                Assert.Equal(expected.RequireSourcePrior(range.SourceId), repaired.RequireSourcePrior(range.SourceId));
+                covered = checked(covered + range.RowCount);
+            }
+            Assert.Equal(stage.PhysicalityCount, covered);
+        }
+    }
+
+    [Fact]
+    public void RepairRecomposesEveryOrdinaryLaneWithTheOriginalEvidenceBodyAndSourceIdentity()
+    {
+        var games = Games();
+        var novel = games.Select(game => game.PlayingId).ToHashSet();
+        var measurement = new ChessRecordingMeasurement(null, games.Length);
+        int novelOffset = 0, repairOffset = 0;
+        using var fresh = ChessPgnChunk.ComposeNext(games, novel, ref novelOffset, long.MaxValue);
+        using var repair = ChessPgnChunk.ComposeNext(games, new HashSet<Hash128>(), ref repairOffset,
+            long.MaxValue, measurement: measurement);
+        Assert.Equal(games.Length, novelOffset);
+        Assert.Equal(novelOffset, repairOffset);
+        Assert.Equal(fresh.StagedBytes, repair.StagedBytes);
+        Assert.Equal(fresh.ModeledSourceAdmissionBytes, repair.ModeledSourceAdmissionBytes);
+        Assert.Equal(0, repair.NovelGames);
+        Assert.True(novel.SetEquals(repair.RepairPlayings));
+        Assert.True(fresh.ObservedPositions.SetEquals(repair.ObservedPositions));
+        Assert.True(fresh.ObservedMoves.SetEquals(repair.ObservedMoves));
+        Assert.Equal((long)games.Length, measurement.Work.RepairGamesComposed);
+        Assert.Equal(0L, measurement.Work.NovelGamesComposed);
+        Assert.Equal(0L, measurement.Work.NovelPliesComposed);
+        Assert.Equal(0L, measurement.Work.PositionOccurrencesComposed);
+        var expected = Build(fresh);
+        var repaired = Build(repair);
+        try
+        {
+            Assert.Empty(repaired[0].Entities);
+            Assert.Empty(repaired[1].Attestations);
+            AssertRepairParity(expected[0], repaired[2]);
+            AssertRepairParity(expected[1], repaired[3]);
+            Assert.Contains(repaired[2].Attestations,
+                row => row.SourceId == ChessVocabulary.PgnSourceId
+                    && row.TypeId == ChessVocabulary.PlaysLineType);
+            foreach (var source in new[]
+            {
+                ChessAnalyze.SourceId, ChessTransitions.SourceId, ChessPositionOutcomes.SourceId
+            })
+                Assert.Contains(repaired[3].Attestations, row => row.SourceId == source);
+            Assert.Contains(repaired[3].PhysicalityObservations,
+                row => row.SourceId == ChessVocabulary.TrajectorySourceId);
+        }
+        finally { Dispose(expected); Dispose(repaired); }
+    }
+
+    [Fact]
+    public void RepairIncludesTheAvailableNativeSyzygyLaneAndMeasuresItsActualCalls()
+    {
+        // The existing test host selects the repository's real three-man table set.
+        Assert.Equal(3, ChessTablebaseRuntime.Largest);
+        const string pgn =
+            "[Event \"T\"]\n[White \"A\"]\n[Black \"B\"]\n[Date \"2024.01.01\"]\n"
+            + "[Result \"1-0\"]\n[SetUp \"1\"]\n[FEN \"4k3/8/8/8/8/8/8/3QK3 w - - 0 1\"]\n\n"
+            + "1. Qd5 1-0\n";
+        var game = Assert.IsType<ChessGameRecord>(ChessPgnDecomposer.TryParseGame(pgn));
+        ChessGameRecord[] games = [game];
+        var measurement = new ChessRecordingMeasurement(null, games.Length);
+        int novelOffset = 0, repairOffset = 0;
+        using var fresh = ChessPgnChunk.ComposeNext(games, new HashSet<Hash128> { game.PlayingId },
+            ref novelOffset, long.MaxValue);
+        using var repair = ChessPgnChunk.ComposeNext(games, new HashSet<Hash128>(),
+            ref repairOffset, long.MaxValue, measurement: measurement);
+        var expected = Build(fresh);
+        var repaired = Build(repair);
+        try
+        {
+            AssertRepairParity(expected[0], repaired[2]);
+            AssertRepairParity(expected[1], repaired[3]);
+            Assert.Contains(repaired[3].Attestations, row => row.SourceId == ChessSyzygy.SourceId);
+            Assert.Contains(repaired[3].PhysicalityObservations, row => row.SourceId == ChessSyzygy.SourceId);
+            Assert.True(measurement.Work.SyzygyAvailable);
+            Assert.Equal(1L, measurement.Work.SyzygyGameCalls);
+            Assert.Equal(1L, measurement.Work.SyzygyGameCallsCompleted);
+            Assert.Equal(1L, measurement.Work.RepairGamesComposed);
+            Assert.Equal(0L, measurement.Work.NovelGamesComposed);
+        }
+        finally { Dispose(expected); Dispose(repaired); }
+    }
 
     [Fact]
     public void ByteBoundaryKeepsFullGamesAndEveryObservationAcrossCanonicalComposition()
@@ -173,22 +289,27 @@ public sealed class ChessPgnChunkTests
         finally { Dispose(expected); Dispose(split); }
     }
 
-    [Fact]
-    public void DiscardedComposedChunkDeterministicallyReleasesUnbuiltNativeSourceStages()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DiscardedComposedChunkDeterministicallyReleasesUnbuiltNativeSourceStages(bool repair)
     {
         var games = Games();
-        var novel = games.Select(game => game.PlayingId).ToHashSet();
+        var novel = repair ? new HashSet<Hash128>() : games.Select(game => game.PlayingId).ToHashSet();
         int offset = 0;
         var chunk = ChessPgnChunk.ComposeNext(games, novel, ref offset, 1);
-        var recordStage = chunk.Record.ContentStage;
-        var analyzeStage = chunk.Analyze.ContentStage;
+        var record = repair ? chunk.Repair : chunk.Record;
+        var analyze = repair ? chunk.RepairAnalyze : chunk.Analyze;
+        var recordStage = record.ContentStage;
+        var analyzeStage = analyze.ContentStage;
         Assert.True(recordStage.TotalTupleBytes > 0);
         Assert.True(analyzeStage.TotalTupleBytes > 0);
         chunk.Dispose();
         chunk.Dispose();
         Assert.True(recordStage.IsClosed);
         Assert.True(analyzeStage.IsClosed);
-        Assert.Throws<ObjectDisposedException>(() => chunk.Record.Build());
+        Assert.Throws<ObjectDisposedException>(() => record.Build());
+        Assert.Throws<ObjectDisposedException>(() => analyze.Build());
     }
 
     [Fact]
@@ -234,6 +355,8 @@ public sealed class ChessPgnChunkTests
                 Assert.Empty(repeatedChanges[1].PhysicalityObservations);
                 Assert.Contains(repeatedChanges[2].Entities, row => row.Id == game.PlayingId);
                 Assert.NotEmpty(repeatedChanges[2].PhysicalityObservations);
+                AssertRepairParity(firstChanges[0], repeatedChanges[2]);
+                AssertRepairParity(firstChanges[1], repeatedChanges[3]);
                 Assert.DoesNotContain(game.PlayingId, remainingNovel);
             }
             finally { Dispose(repeatedChanges); }
@@ -259,6 +382,7 @@ public sealed class ChessPgnChunkTests
             Assert.Contains(changes[2].Entities, row => row.Id == games[1].PlayingId);
             Assert.DoesNotContain(changes[0].Entities, row => row.Id == games[1].PlayingId);
             Assert.NotEmpty(changes[2].PhysicalityObservations);
+            Assert.NotEmpty(changes[3].Attestations);
         }
         finally { Dispose(changes); }
 

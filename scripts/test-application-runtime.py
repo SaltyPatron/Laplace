@@ -61,6 +61,16 @@ class RuntimeGuardTests(unittest.TestCase):
         for filename in ("laplace_chess_transition_perfcache.bin", "laplace_modality_number_perfcache.bin"):
             self.write(self.prefix / "share/laplace" / filename, filename)
             self.write(self.root / "build/engine/core/perfcache" / filename, filename)
+        self.database["native_mappings"] = [
+            self.native_mapping(self.prefix / relative)
+            for relative in ("lib/liblaplace_core.so", "lib/postgresql/18/laplace_geom.so",
+                             "lib/postgresql/18/laplace_substrate.so")]
+
+    def native_mapping(self, path, *, start=4096):
+        details = path.stat()
+        return (f"{start:x}-{start + 4096:x} r-xp 00000000 "
+                f"{os.major(details.st_dev):x}:{os.minor(details.st_dev):x} "
+                f"{details.st_ino} {path.resolve()}")
 
     def write(self, path, content):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +95,81 @@ class RuntimeGuardTests(unittest.TestCase):
         self.assertEqual(guard.build_identity(self.root, self.prefix), state["build"])
         self.assertNotIn("native_fingerprint", state)
         self.assertFalse((self.root / "build/.stamps").exists())
+
+
+    def test_backend_mappings_bind_installed_generation_without_pid_or_aslr_identity(self):
+        before = self.snapshot()
+        self.database["native_mappings"] = [
+            self.native_mapping(self.prefix / relative, start=131072)
+            for relative in ("lib/liblaplace_core.so", "lib/postgresql/18/laplace_geom.so",
+                             "lib/postgresql/18/laplace_substrate.so")]
+        after = self.snapshot()
+        self.assertTrue(guard.compatible(before, after))
+        self.assertEqual(3, len(after["database"]["native_mappings"]))
+        self.assertIsInstance(self.database["native_mappings"], list)
+
+    def test_deleted_preload_mapping_is_rejected_even_when_installed_bytes_match(self):
+        self.database["native_mappings"][0] += " (deleted)"
+        with self.assertRaisesRegex(ValueError, "replaced native library"):
+            self.snapshot()
+
+    def test_replaced_inode_is_rejected_without_relying_on_deleted_suffix(self):
+        path = self.prefix / "lib/liblaplace_core.so"
+        replacement = path.with_name("replacement.so")
+        replacement.write_bytes(path.read_bytes())
+        replacement.replace(path)
+        with self.assertRaisesRegex(ValueError, "mapping differs from the installed file"):
+            self.snapshot()
+        self.database["native_mappings"][0] = self.native_mapping(path)
+        self.snapshot()
+
+    def test_unselected_native_generation_is_rejected_even_with_matching_bytes(self):
+        other = self.prefix / "lib/postgresql/18/laplace_execution_fedcba9876543210.so"
+        other.write_bytes((self.prefix / self.execution_artifact).read_bytes())
+        self.database["native_mappings"].append(self.native_mapping(other))
+        with self.assertRaisesRegex(ValueError, "unselected native library"):
+            self.snapshot()
+        self.database["native_mappings"][-1] = self.native_mapping(self.prefix / self.execution_artifact)
+        self.assertIn(self.execution_artifact, self.snapshot()["database"]["native_mappings"])
+
+    def test_missing_nonexecuting_or_malformed_backend_mappings_are_rejected(self):
+        original = list(self.database["native_mappings"])
+        cases = [None, [], original[1:],
+                 [line.replace("r-xp", "r--p") for line in original],
+                 ["not a mapping", *original[1:]],
+                 [original[0].replace(" r-xp ", " invalid "), *original[1:]]]
+        for rows in cases:
+            with self.subTest(rows=rows):
+                self.database["native_mappings"] = rows
+                with self.assertRaises(ValueError):
+                    self.snapshot()
+        self.database["native_mappings"] = original
+
+    def test_backend_mapping_device_is_checked_independently_of_path_and_inode(self):
+        fields = self.database["native_mappings"][0].split(None, 5)
+        fields[3] = "ffff:ffff"
+        self.database["native_mappings"][0] = " ".join(fields)
+        with self.assertRaisesRegex(ValueError, "mapping differs from the installed file"):
+            self.snapshot()
+
+
+    def test_explicit_preload_scope_accepts_only_its_required_mappings(self):
+        core = "lib/liblaplace_core.so"
+        database = {"native_mappings": [self.native_mapping(self.prefix / core)]}
+        hashes = {relative: "fixture" for relative in guard.MODULES.values()}
+        result = guard.mapped_native_identities(self.prefix, database, hashes, required=(core,))
+        self.assertEqual([core], list(result))
+        with self.assertRaisesRegex(ValueError, "required native library"):
+            guard.mapped_native_identities(self.prefix, database, hashes)
+
+    def test_only_explicit_empty_preload_scope_accepts_empty_mapping_list(self):
+        hashes = {relative: "fixture" for relative in guard.MODULES.values()}
+        self.assertEqual({}, guard.mapped_native_identities(
+            self.prefix, {"native_mappings": []}, hashes, required=()))
+        with self.assertRaisesRegex(ValueError, "mappings are missing"):
+            guard.mapped_native_identities(self.prefix, {"native_mappings": []}, hashes)
+        with self.assertRaisesRegex(ValueError, "mappings are missing"):
+            guard.mapped_native_identities(self.prefix, {}, hashes, required=())
 
     def install_pair_receipt(self):
         files = {}
@@ -270,7 +355,7 @@ class RuntimeGuardTests(unittest.TestCase):
             ("database", "database"), ("database", "server_version"),
             ("database", "postmaster_started"), ("database", "extension_functions"),
             ("database", "extensions"), ("database", "migrations"),
-            ("database", "roms"),
+            ("database", "roms"), ("database", "native_mappings"),
         ]
         for purpose in ("publication", "recording"):
             before = self.snapshot(purpose=purpose)

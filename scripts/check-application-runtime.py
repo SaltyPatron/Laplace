@@ -2,7 +2,7 @@
 """Read-only native compatibility guard with distinct publication and recording scopes.
 
 Observes the existing CMake configuration, a temporary DESTDIR CMake install for
-exact installed-form native comparisons, raw ROM comparisons, live extension
+exact installed-form native comparisons, raw ROM comparisons, actual PostgreSQL native file mappings, live extension
 versions and the migration journal. Build execution and source provenance belong
 to the build/install owner; configuration observation is not a substitute for them.
 No bootstrap, installation into the live prefix, SQL writes, service action,
@@ -34,7 +34,16 @@ ROMS = {
 }
 SQL = """
 BEGIN READ ONLY;
+WITH loaded AS MATERIALIZED (
+ SELECT public.laplace_geom_version() AS geom,
+        laplace.laplace_substrate_version() AS substrate
+)
 SELECT json_build_object(
+ 'native_mappings',(SELECT json_agg(line)
+     FROM regexp_split_to_table(
+       CASE WHEN loaded.geom IS NOT NULL AND loaded.substrate IS NOT NULL
+            THEN pg_read_file('/proc/self/maps') END, chr(10)) AS line
+     WHERE line ~ '/(liblaplace_(core|dynamics|synthesis)[.]so([.][0-9]+)*|laplace_(geom|substrate)[.]so|laplace_execution_[0-9a-f]{16}[.]so)( [(]deleted[)])?$'),
  'database',current_database(), 'server_version',current_setting('server_version_num'),
  'postmaster_started',pg_postmaster_start_time(),
  'extensions',(SELECT json_object_agg(extname,extversion) FROM pg_extension
@@ -48,7 +57,8 @@ SELECT json_build_object(
      FROM pg_proc p JOIN pg_depend d ON d.objid=p.oid AND d.classid='pg_proc'::regclass
        AND d.refclassid='pg_extension'::regclass AND d.deptype='e'
      JOIN pg_extension e ON e.oid=d.refobjid
-     WHERE e.extname IN ('laplace_geom','laplace_substrate') AND p.prokind='f'));
+     WHERE e.extname IN ('laplace_geom','laplace_substrate') AND p.prokind='f'))
+FROM loaded;
 ROLLBACK;
 """
 
@@ -175,6 +185,68 @@ def installed_native_hashes(root, prefix):
     return hashes
 
 
+def mapped_native_identities(prefix, database, hashes, *, required=None):
+    """Bind this fresh backend's mapped files to the selected installed generation.
+
+    Device/inode and pathname prove file generation, while installed_native_hashes
+    verifies that generation's installed bytes. This does not claim to inspect
+    private modified memory pages or authenticate an in-place library overwrite.
+    The install owner must replace libraries and restart their preload owner.
+    Before SQL upgrade, that owner may supply only the configured preload modules
+    as required; an explicitly empty set permits an initially unloaded postmaster.
+    """
+    required = set(("lib/liblaplace_core.so", "lib/postgresql/18/laplace_geom.so",
+                    "lib/postgresql/18/laplace_substrate.so") if required is None else required)
+    rows = database.get("native_mappings")
+    if not isinstance(rows, list) or (not rows and required) or len(rows) > 4096:
+        raise ValueError("running PostgreSQL native mappings are missing or exceed their bound")
+    selected = {}
+    for relative in hashes:
+        if relative.endswith(".so"):
+            path = (prefix / relative).resolve(strict=True)
+            if path in selected:
+                raise ValueError("ambiguous selected native library path")
+            selected[path] = relative
+    observed = {}
+    executable = set()
+    for line in rows:
+        if not isinstance(line, str) or len(line) > 8192:
+            raise ValueError("invalid running PostgreSQL native mapping")
+        fields = line.split(None, 5)
+        if (len(fields) != 6 or re.fullmatch(r"[0-9a-f]+-[0-9a-f]+", fields[0]) is None
+                or re.fullmatch(r"[r-][w-][x-][ps]", fields[1]) is None
+                or re.fullmatch(r"[0-9a-f]+", fields[2]) is None
+                or re.fullmatch(r"[0-9a-f]+:[0-9a-f]+", fields[3]) is None
+                or re.fullmatch(r"[0-9]+", fields[4]) is None):
+            raise ValueError("invalid running PostgreSQL native mapping")
+        raw_path = fields[5]
+        if raw_path.endswith(" (deleted)"):
+            raise ValueError("running PostgreSQL retains a replaced native library; "
+                             "restart the PostgreSQL preload owner: " + raw_path)
+        path = Path(raw_path)
+        if not path.is_absolute():
+            raise ValueError("running PostgreSQL native library path is not absolute")
+        path = path.resolve(strict=True)
+        relative = selected.get(path)
+        if relative is None:
+            raise ValueError("running PostgreSQL maps an unselected native library: " + raw_path)
+        details = path.stat()
+        major, minor = (int(part, 16) for part in fields[3].split(":"))
+        if (os.makedev(major, minor), int(fields[4])) != (details.st_dev, details.st_ino):
+            raise ValueError("running PostgreSQL native mapping differs from the installed file; "
+                             "restart the PostgreSQL preload owner: " + raw_path)
+        identity = {"path": str(path), "device": details.st_dev, "inode": details.st_ino}
+        if relative in observed and observed[relative] != identity:
+            raise ValueError("running PostgreSQL maps conflicting native file generations")
+        observed[relative] = identity
+        if fields[1][2] == "x":
+            executable.add(relative)
+    if not required.issubset(executable):
+        raise ValueError("running PostgreSQL lacks an executable mapping for a required native library")
+    # PID and ASLR addresses vary per connection. Compare the verified file
+    # generations, retaining all runtime/library compatibility distinctions.
+    return {key: observed[key] for key in sorted(observed)}
+
 def snapshot(root, prefix, database, *, purpose="publication"):
     if purpose not in ("publication", "recording"):
         raise ValueError("unknown runtime guard purpose")
@@ -191,6 +263,7 @@ def snapshot(root, prefix, database, *, purpose="publication"):
         raise ValueError("pending/unknown migrations; use the full database pipeline")
 
     hashes = installed_native_hashes(root, prefix)
+    mapped = mapped_native_identities(prefix, database, hashes)
     for name in ("laplace_geom", "laplace_substrate"):
         built = control_version(build / "extension" / name / f"{name}.control")
         installed = control_version(prefix / "share/postgresql/18/extension" / f"{name}.control")
@@ -226,6 +299,7 @@ def snapshot(root, prefix, database, *, purpose="publication"):
         raise ValueError("configured native build changed during runtime observation")
     state = {"format": 2, "build": identity, "artifacts": hashes,
              "database": copy.deepcopy(database)}
+    state["database"]["native_mappings"] = mapped
     if purpose == "recording":
         state["purpose"] = purpose
     return state
@@ -268,7 +342,7 @@ def main():
     if args.snapshot:
         with args.snapshot.open("x") as output:
             json.dump(state, output, sort_keys=True)
-    print(f"PASS: configured installed-form native artifacts, installed SQL versions and applied migrations match; "
+    print(f"PASS: configured installed-form and mapped native artifacts, installed SQL versions and applied migrations match; "
           f"purpose={args.purpose}; observed_running_ingests={state['database']['running_ingests']}")
 
 

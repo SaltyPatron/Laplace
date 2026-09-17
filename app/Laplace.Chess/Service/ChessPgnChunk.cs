@@ -22,8 +22,13 @@ internal sealed class ChessPgnChunk : IDisposable
             .DeclareSourcePrior(ChessTransitions.SourceId, SourceTrust.StructuredCorpus)
             .DeclareSourcePrior(ChessPositionOutcomes.SourceId, SourceTrust.StructuredCorpus);
     internal SubstrateChangeBuilder Repair { get; } =
-        new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/repair-playing")
+        new SubstrateChangeBuilder(ChessVocabulary.PgnSourceId, "chess/lab/ingest")
             .DeclareSourcePrior(SourceTrust.StructuredCorpus);
+    internal SubstrateChangeBuilder RepairAnalyze { get; } =
+        new SubstrateChangeBuilder(ChessVocabulary.AnalysisSourceId, "chess/lab/ingest")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
+            .DeclareSourcePrior(ChessTransitions.SourceId, SourceTrust.StructuredCorpus)
+            .DeclareSourcePrior(ChessPositionOutcomes.SourceId, SourceTrust.StructuredCorpus);
     internal HashSet<Hash128> RepairPlayings { get; } = [];
     internal HashSet<Hash128> ObservedPositions { get; } = [];
     internal HashSet<Hash128> ObservedMoves { get; } = [];
@@ -31,9 +36,10 @@ internal sealed class ChessPgnChunk : IDisposable
     internal long StagedBytesBeforeLastGame { get; private set; }
     internal long ModeledSourceAdmissionBytesBeforeLastGame { get; private set; }
     internal long ModeledSourceAdmissionBytes =>
-        SubstrateChangeBuilder.ModeledSourceAdmissionPayloadBytes(Record, Analyze, Repair);
+        SubstrateChangeBuilder.ModeledSourceAdmissionPayloadBytes(Record, Analyze, Repair, RepairAnalyze);
     internal long StagedBytes => checked(
-        Record.StagedBytesEstimate + Analyze.StagedBytesEstimate + Repair.StagedBytesEstimate);
+        Record.StagedBytesEstimate + Analyze.StagedBytesEstimate
+        + Repair.StagedBytesEstimate + RepairAnalyze.StagedBytesEstimate);
 
     internal static ChessPgnChunk ComposeNext(
         IReadOnlyList<ChessGameRecord> games, IReadOnlySet<Hash128> novelIds, ref int offset,
@@ -86,6 +92,7 @@ internal sealed class ChessPgnChunk : IDisposable
         Record.Dispose();
         Analyze.Dispose();
         Repair.Dispose();
+        RepairAnalyze.Dispose();
     }
 
     // The original probe spans a nominal parse window. Only a successful ordinary
@@ -103,42 +110,48 @@ internal sealed class ChessPgnChunk : IDisposable
             NovelGames++;
             measurement?.Checkpoint("CompositionAndNoveltyProbe", "game-composition-entered", periodic: true,
                 chunkGames: Games.Count);
-            ChessPgnDecomposer.RecordGame(game, Record);
-            // One parsed replay feeds the same calculated owners as the unsplit path.
-            var replay = ChessPgnDecomposer.MaterializeParsedReplay(game);
-            ChessAnalyze.DeriveFromParsed(Analyze, game, replay);
-            ChessTransitions.DepositFromParsed(Analyze, game);
-            ChessPositionOutcomes.DepositFromParsed(Analyze, game, replay);
-            var prober = ChessTablebaseRuntime.Prober;
-            if (measurement is not null) measurement.Work.SyzygyAvailable = prober is not null;
-            if (prober is not null)
-            {
-                using var syzygyPhase = measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.Syzygy);
-                if (measurement is not null) measurement.Work.SyzygyGameCalls++;
-                ChessSyzygy.DeriveGame(Analyze, ChessAnalyze.WitnessedFromParsed(game), prober);
-                if (measurement is not null) measurement.Work.SyzygyGameCallsCompleted++;
-            }
+            ComposeGame(game, Record, Analyze, measurement);
             if (measurement is not null)
             {
                 measurement.Work.NovelGamesComposed++;
                 measurement.Work.NovelPliesComposed += game.MoveIds.Length;
                 measurement.Work.PositionOccurrencesComposed += game.PositionIds.Length;
             }
-            for (int i = 0; i + 1 < game.PositionIds.Length; i++)
-                ObservedPositions.Add(game.PositionIds[i]);
-            foreach (var moveId in game.MoveIds)
-                ObservedMoves.Add(moveId);
         }
         else
         {
             RepairPlayings.Add(game.PlayingId);
-            // Reuse the current recorded projection, then let the unchanged writer
-            // owner retain only playing-scoped evidence absent from durable storage.
-            ChessPgnDecomposer.RecordGame(game, Repair);
+            // Existing objects do not prove complete testimony. Recompose every ordinary
+            // owner with its original source identity; the ingestor retains missing evidence.
+            ComposeGame(game, Repair, RepairAnalyze, measurement);
             if (measurement is not null) measurement.Work.RepairGamesComposed++;
         }
+        for (int i = 0; i + 1 < game.PositionIds.Length; i++)
+            ObservedPositions.Add(game.PositionIds[i]);
+        foreach (var moveId in game.MoveIds)
+            ObservedMoves.Add(moveId);
         Games.Add(game);
         measurement?.Checkpoint("CompositionAndNoveltyProbe",
             novel ? "game-completed" : "repair-game-completed", periodic: true, chunkGames: Games.Count);
+    }
+
+    private static void ComposeGame(ChessGameRecord game, SubstrateChangeBuilder record,
+        SubstrateChangeBuilder analyze, ChessRecordingMeasurement? measurement)
+    {
+        ChessPgnDecomposer.RecordGame(game, record);
+        // One parsed replay feeds the same calculated owners for new and repaired games.
+        var replay = ChessPgnDecomposer.MaterializeParsedReplay(game);
+        ChessAnalyze.DeriveFromParsed(analyze, game, replay);
+        ChessTransitions.DepositFromParsed(analyze, game);
+        ChessPositionOutcomes.DepositFromParsed(analyze, game, replay);
+        var prober = ChessTablebaseRuntime.Prober;
+        if (measurement is not null) measurement.Work.SyzygyAvailable = prober is not null;
+        if (prober is not null)
+        {
+            using var syzygyPhase = measurement?.MeasurePhase(ChessRecordingMeasurement.WorkPhase.Syzygy);
+            if (measurement is not null) measurement.Work.SyzygyGameCalls++;
+            ChessSyzygy.DeriveGame(analyze, ChessAnalyze.WitnessedFromParsed(game), prober);
+            if (measurement is not null) measurement.Work.SyzygyGameCallsCompleted++;
+        }
     }
 }

@@ -222,7 +222,7 @@ public sealed class ChessLineIdentityTests
             a => a.TypeId == ChessVocabulary.OutcomeType && a.SubjectId == whiteWin.LineId);
     }
 
-    // Idempotent re-ingest: once a record's event is present, a second pass over the
+    // Idempotent re-ingest: once the exact PGN witness is accepted, a second pass over the
     // same file yields nothing — while the SAME LINE arriving under a NEW event (a
     // different playing) still flows.
     [Fact]
@@ -232,6 +232,7 @@ public sealed class ChessLineIdentityTests
         var second = ChessPgnDecomposer.TryParseGame(GameVariantNotation)!; // same line, new event
         var reader = new FakeReader();
         reader.Present.Add(first.PlayingId);
+        reader.Accepted.Add(ChessPgnDecomposer.RecordingWitnessId(first));
 
         var novel = new List<ChessGameRecord>();
         await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(
@@ -246,6 +247,10 @@ public sealed class ChessLineIdentityTests
     private sealed class FakeReader : ISubstrateReader
     {
         public readonly HashSet<Hash128> Present = new();
+        public readonly HashSet<Hash128> Accepted = new();
+        public Task<IReadOnlySet<Hash128>> PresentAttestationIdsAsync(
+            Hash128 typeId, IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlySet<Hash128>>(ids.Where(Accepted.Contains).ToHashSet());
         public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default) => Task.FromResult(false);
         public Task<bool> HasSourceCompletedAsync(Hash128 sourceId, int layerOrder, CancellationToken ct = default) => Task.FromResult(false);
         public Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default) => Task.FromResult(0L);

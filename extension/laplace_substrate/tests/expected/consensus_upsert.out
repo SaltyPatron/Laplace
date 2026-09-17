@@ -169,4 +169,53 @@ BEGIN
     RAISE NOTICE 'all seven fold inputs retain exact scalar parity';
 END $$;
 NOTICE:  all seven fold inputs retain exact scalar parity
+-- Failed native folds expose the exact effective mathematical inputs and
+-- preserve the stored prior. Exact group inputs override cell placeholders.
+DO $fold_failure$
+DECLARE
+    t bytea := laplace.relation_type_id('IS_A');
+    s bytea := public.laplace_hash128_blake3('test/fold-failure/subject');
+    o bytea := public.laplace_hash128_blake3('test/fold-failure/object');
+    prior jsonb;
+    after_failure jsonb;
+    detail text;
+    message text;
+    refused boolean := false;
+BEGIN
+    INSERT INTO laplace.consensus
+        (id, subject_id, type_id, object_id, rating, rd, volatility,
+         witness_count, last_observed_at)
+    VALUES
+        (laplace.consensus_id(s,t,o),s,t,o,1800000000000,80000000000,70000000,
+         7,'2026-01-01 00:00:00+00');
+    SELECT to_jsonb(c) INTO STRICT prior FROM laplace.consensus c
+    WHERE c.id=laplace.consensus_id(s,t,o) AND c.type_id=t AND c.subject_id=s;
+    BEGIN
+        -- A score larger than the one-game maximum deterministically fails
+        -- inside the kernel without depending on a convergence edge case.
+        PERFORM consensus.upsert_type(t,ARRAY[s],ARRAY[o],
+            ARRAY[330000000000]::bigint[],ARRAY[1]::bigint[],
+            ARRAY[1000000001]::bigint[],ARRAY['2026-02-01 00:00:00+00'::timestamptz],
+            ARRAY[1900000000000]::bigint[],ARRAY[0,1]::bigint[],
+            ARRAY[1600000000000]::bigint[],ARRAY[70000000000]::bigint[],
+            ARRAY[1]::bigint[],ARRAY[1000000001]::bigint[]);
+    EXCEPTION WHEN numeric_value_out_of_range THEN
+        GET STACKED DIAGNOSTICS detail=PG_EXCEPTION_DETAIL, message=MESSAGE_TEXT;
+        refused := true;
+        IF message IS DISTINCT FROM 'consensus_upsert_type: native rating-period update failed'
+           OR detail IS NULL
+           OR detail NOT LIKE 'result=-1 cell_index=0 matched=true exact_period=true period_start=0 prior_rating=1800000000000 prior_rd=80000000000 prior_volatility=70000000 opponent_rating=1600000000000 opponent_rd=70000000000 games=1 sum_score=1000000001 tau=500000000%'
+           OR detail NOT LIKE ('%backend_pid=' || pg_backend_pid()::text || ' %')
+           OR detail NOT LIKE '%core_mapping=[%laplace_core%] route_address=%'
+           OR detail NOT LIKE '%route_mapping=[%laplace_substrate%]%' THEN
+            RAISE EXCEPTION 'native fold failure lost its exact effective input context: % / %',
+                message, detail;
+        END IF;
+    END;
+    SELECT to_jsonb(c) INTO STRICT after_failure FROM laplace.consensus c
+    WHERE c.id=laplace.consensus_id(s,t,o) AND c.type_id=t AND c.subject_id=s;
+    IF NOT refused OR after_failure IS DISTINCT FROM prior THEN
+        RAISE EXCEPTION 'failed native fold accepted invalid evidence or changed the stored prior';
+    END IF;
+END $fold_failure$;
 ROLLBACK;

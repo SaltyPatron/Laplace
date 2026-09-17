@@ -64,7 +64,7 @@ usage() {
   cat <<'EOF'
 Usage: pipeline.sh <phase> [<phase> ...] [options]
 
-Phases: clean codegen build install migrate sync-extension tune-pg tune-laplace
+Phases: clean codegen build install activate-postgres migrate sync-extension tune-pg tune-laplace
         perfcache-guc api-env publish foundation test
 Options:
   --fresh-db --force --force-codegen --clean-first --force-rebuild --serial-tests
@@ -181,6 +181,74 @@ restart_postgres() {
   [[ "$still" == 0 ]] || { echo "::error::$still PostgreSQL settings remain pending restart" >&2; return 1; }
 }
 
+
+preloaded_native_restart_required() {
+  local observation rc
+  mkdir -p "${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+  observation=$(mktemp "${LAPLACE_WORK_ROOT:-/build/laplace/work}/postgres-preload.XXXXXX")
+  if ! psql -d postgres -U laplace_admin -qtAX -v ON_ERROR_STOP=1 -c \
+    "SELECT json_build_object('preload',current_setting('shared_preload_libraries'),
+       'maps',pg_read_file('/proc/' || split_part(pg_read_file('postmaster.pid'),chr(10),1) || '/maps'))" \
+       >"$observation"; then
+    rm -f "$observation"; return 2
+  fi
+  if "$PYTHON" - "$ROOT" "$LAPLACE_INSTALL_PREFIX" "$LAPLACE_EXT_LIBDIR" "$observation" <<'PY'
+import importlib.util, json, pathlib, re, sys
+root, prefix, extension, observation = map(pathlib.Path, sys.argv[1:])
+spec = importlib.util.spec_from_file_location("laplace_preload_guard", root / "scripts/check-application-runtime.py")
+guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(guard)
+state = json.loads(observation.read_text())
+library = re.compile(r"/(liblaplace_(core|dynamics|synthesis)[.]so([.][0-9]+)*|laplace_(geom|substrate)[.]so|laplace_execution_[0-9a-f]{16}[.]so)( [(]deleted[)])?$")
+rows = [line for line in state["maps"].splitlines() if library.search(line)]
+selected = {}
+for path in (prefix / "lib/liblaplace_core.so", prefix / "lib/liblaplace_dynamics.so",
+             prefix / "lib/liblaplace_synthesis.so", extension / "laplace_geom.so",
+             extension / "laplace_substrate.so", *extension.glob("laplace_execution_*.so")):
+    if path.is_file():
+        selected[str(path.relative_to(prefix))] = None
+preload = {item.strip().strip('"').rsplit("/", 1)[-1].removesuffix(".so")
+           for item in state["preload"].split(",")}
+required = set()
+for module in ("laplace_geom", "laplace_substrate"):
+    if module in preload:
+        required.update(("lib/liblaplace_core.so", str((extension / (module + ".so")).relative_to(prefix))))
+try:
+    identities = guard.mapped_native_identities(prefix, {"native_mappings": rows}, selected, required=required)
+except ValueError as error:
+    print("PostgreSQL preload activation required: " + str(error), flush=True)
+    sys.exit(3)
+print("PostgreSQL preload identities current: " + json.dumps(identities, sort_keys=True), flush=True)
+PY
+  then
+    rc=1
+  else
+    rc=$?
+    if [[ "$rc" == 3 ]]; then rc=0; else rc=2; fi
+  fi
+  rm -f "$observation"
+  return "$rc"
+}
+
+phase_activate_postgres() {
+  local required="${1:-0}" rc
+  if postgresql_restart_required; then required=1; else rc=$?; [[ "$rc" == 1 ]] || return "$rc"; fi
+  if preloaded_native_restart_required; then required=1; else rc=$?; [[ "$rc" == 1 ]] || return "$rc"; fi
+  if [[ "$required" == 1 ]]; then
+    restart_postgres "installed PostgreSQL or preloaded native image changed" || return $?
+  fi
+  if postgresql_restart_required; then
+    echo "::error::running PostgreSQL release still differs after activation" >&2; return 1
+  else
+    rc=$?; [[ "$rc" == 1 ]] || return "$rc"
+  fi
+  if preloaded_native_restart_required; then
+    echo "::error::running PostgreSQL preload still differs after activation" >&2; return 1
+  else
+    rc=$?; [[ "$rc" == 1 ]] || return "$rc"
+  fi
+}
+
 phase_clean() {
   echo "===== PHASE — CLEAN ====="
   rm -rf "$LAPLACE_BUILD_DIRECTORY"
@@ -282,12 +350,7 @@ phase_install() (
       postgres_activation_required=1
     fi
   fi
-  [[ "$postgres_activation_required" != 1 ]] || restart_postgres "installed native/PostgreSQL image changed"
-  if postgresql_restart_required; then
-    echo "::error::running PostgreSQL release still differs after install" >&2; exit 1
-  else
-    server_rc=$?; [[ "$server_rc" == 1 ]] || exit "$server_rc"
-  fi
+  phase_activate_postgres "$postgres_activation_required"
   if [[ "$api_was_active" == 1 ]]; then sudo -n systemctl start laplace-api; api_was_active=0; fi
   trap - EXIT
 )
@@ -535,7 +598,7 @@ while [[ $# -gt 0 ]]; do
     --serial-tests) SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
     --force-all) shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|install|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
+    clean|codegen|build|install|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -548,6 +611,7 @@ for phase in "${PHASES[@]}"; do
     codegen) phase_codegen ;;
     build) phase_build ;;
     install) phase_install ;;
+    activate-postgres) phase_activate_postgres ;;
     migrate) phase_migrate ;;
     sync-extension) phase_sync_extension ;;
     tune-pg) phase_tune_pg ;;

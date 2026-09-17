@@ -26,6 +26,17 @@ public sealed class ChessPgnDecomposerNovelGameTests
     private sealed class FakeReader : ISubstrateReader
     {
         public readonly HashSet<Hash128> Present = new();
+        public readonly HashSet<Hash128> Accepted = new();
+        public int AttestationProbeCalls;
+        public Hash128? LastAttestationType;
+
+        public Task<IReadOnlySet<Hash128>> PresentAttestationIdsAsync(
+            Hash128 typeId, IReadOnlyList<Hash128> ids, CancellationToken ct = default)
+        {
+            AttestationProbeCalls++;
+            LastAttestationType = typeId;
+            return Task.FromResult<IReadOnlySet<Hash128>>(ids.Where(Accepted.Contains).ToHashSet());
+        }
         public int BitmapProbeCalls;
         public int TierProbeCalls;
         public short? LastTier;
@@ -71,24 +82,20 @@ public sealed class ChessPgnDecomposerNovelGameTests
         "[Event \"B\"]\n[White \"Carol\"]\n[Black \"Dave\"]\n[Date \"2024.01.02\"]\n\n1. d4 d5 0-1\n";
 
     [Fact]
-    public void ChessGameRecord_ImplementsTrunkRootRecord()
+    public void ChessGameRecord_EntityPresenceCannotSuppressRecordingAcceptance()
     {
-        var g = ChessPgnDecomposer.TryParseGame(GameA)!;
-        Assert.IsAssignableFrom<ITrunkRootRecord>(g);
-        // GH #736: the novelty gate keys on the PLAYING — re-ingesting the same record
-        // skips, while a new playing of a known line still records its witnesses. The
-        // playing is NOT the tournament EventId: one event holds many playings, so
-        // gating on the event would swallow every game after the first.
-        Assert.Equal(g.PlayingId, ((ITrunkRootRecord)g).TrunkRootId);
+        object game = ChessPgnDecomposer.TryParseGame(GameA)!;
+        Assert.False(game is ITrunkRootRecord);
     }
 
     [Fact]
-    public async Task FilterNovelAsync_SkipsGamesAlreadyPresent_BulkProbesOnce()
+    public async Task FilterNovelAsync_SkipsAcceptedRecording_BulkProbesOnce()
     {
         var a = ChessPgnDecomposer.TryParseGame(GameA)!;
         var b = ChessPgnDecomposer.TryParseGame(GameB)!;
         var reader = new FakeReader();
         reader.Present.Add(a.PlayingId);
+        reader.Accepted.Add(ChessPgnDecomposer.RecordingWitnessId(a));
 
         var novel = new List<ChessGameRecord>();
         await foreach (var g in ChessPgnDecomposer.FilterNovelAsync(new List<ChessGameRecord> { a, b }, reader, CancellationToken.None))
@@ -97,8 +104,44 @@ public sealed class ChessPgnDecomposerNovelGameTests
         Assert.Single(novel);
         Assert.Equal(b.PlayingId, novel[0].PlayingId);
         Assert.Equal(0, reader.BitmapProbeCalls);
-        Assert.Equal(1, reader.TierProbeCalls);
-        Assert.Equal((short)EntityTier.Document, reader.LastTier);
+        Assert.Equal(0, reader.TierProbeCalls);
+        Assert.Equal(1, reader.AttestationProbeCalls);
+        Assert.Equal(ChessVocabulary.PlaysLineType, reader.LastAttestationType);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnacceptedPlayingAndCachedContent_DoNotSuppressEitherSelectionPath(bool peekPath)
+    {
+        var game = ChessPgnDecomposer.TryParseGame(GameA)!;
+        var reader = new FakeReader();
+        reader.Present.Add(game.PlayingId);
+        reader.Present.Add(game.LineId);
+        var novel = new List<ChessGameRecord>();
+        var selected = peekPath
+            ? ChessPgnDecomposer.YieldNovelParsedAsync(
+                [new ChessPlayingPeek(game, game.PlayingId)], reader, false, CancellationToken.None)
+            : ChessPgnDecomposer.FilterNovelAsync([game], reader, CancellationToken.None);
+        await foreach (var item in selected) novel.Add(item);
+        Assert.Same(game, Assert.Single(novel));
+        Assert.Equal(1, reader.AttestationProbeCalls);
+        Assert.Equal(0, reader.TierProbeCalls);
+        Assert.Equal(0, reader.BitmapProbeCalls);
+
+        // A different line/source/context witness is not this game's acceptance.
+        reader.Accepted.Add(NativeAttestation.ComputeId(game.PlayingId,
+            ChessVocabulary.PlaysLineType, game.LineId, ChessVocabulary.AnalysisSourceId, null));
+        novel.Clear();
+        await foreach (var item in ChessPgnDecomposer.FilterNovelAsync([game], reader, CancellationToken.None))
+            novel.Add(item);
+        Assert.Same(game, Assert.Single(novel));
+
+        reader.Accepted.Add(ChessPgnDecomposer.RecordingWitnessId(game));
+        novel.Clear();
+        await foreach (var item in ChessPgnDecomposer.FilterNovelAsync([game], reader, CancellationToken.None))
+            novel.Add(item);
+        Assert.Empty(novel);
     }
 
     [Fact]
