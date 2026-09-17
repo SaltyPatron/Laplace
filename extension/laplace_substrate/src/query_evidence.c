@@ -81,6 +81,7 @@ typedef struct QueryEvidenceState
     HTAB *channel_index;
     HTAB *sources;
     HTAB *contexts;
+    HTAB *provenance;
     LaplaceQueryEvidenceStats *stats;
 } QueryEvidenceState;
 
@@ -364,6 +365,114 @@ add_occurrences(int64 *target, int64 value)
     return true;
 }
 
+/* Exact provenance is typed response state, not merely a source/context count.
+ * Bind every witnessed row to a portable digest before reducing the set. The
+ * row identity is included, but source/context/outcome/count are encoded again
+ * so legacy/noncanonical row ids cannot collapse distinct provenance routes. */
+static hash128_t
+query_provenance_witness(const LaplaceObservation *row)
+{
+    unsigned char bytes[16 * 4 + 12];
+    hash128_t domain;
+    hash128_t zero;
+    hash128_t result;
+    const hash128_t *source;
+    const hash128_t *context;
+    Size at = 0;
+    uint16 outcome = (uint16) row->outcome;
+    uint64 occurrences = (uint64) row->occurrences;
+
+    hash128_blake3_str("laplace:query-provenance-witness:v1", &domain);
+    hash128_zero(&zero);
+    source = row->source_null ? &zero : &row->source;
+    context = row->context_null ? &zero : &row->context;
+
+#define PROVENANCE_APPEND(value) \
+    do { memcpy(bytes + at, &(value), sizeof(value)); at += sizeof(value); } while (0)
+    PROVENANCE_APPEND(domain);
+    PROVENANCE_APPEND(row->id);
+    PROVENANCE_APPEND(*source);
+    PROVENANCE_APPEND(*context);
+#undef PROVENANCE_APPEND
+    bytes[at++] = row->source_null ? 0 : 1;
+    bytes[at++] = row->context_null ? 0 : 1;
+    bytes[at++] = (unsigned char) (outcome >> 8);
+    bytes[at++] = (unsigned char) outcome;
+    bytes[at++] = (unsigned char) (occurrences >> 56);
+    bytes[at++] = (unsigned char) (occurrences >> 48);
+    bytes[at++] = (unsigned char) (occurrences >> 40);
+    bytes[at++] = (unsigned char) (occurrences >> 32);
+    bytes[at++] = (unsigned char) (occurrences >> 24);
+    bytes[at++] = (unsigned char) (occurrences >> 16);
+    bytes[at++] = (unsigned char) (occurrences >> 8);
+    bytes[at++] = (unsigned char) occurrences;
+
+    hash128_blake3(bytes, at, &result);
+    return result;
+}
+
+static int
+query_evidence_key_order(const void *left, const void *right)
+{
+    const QueryEvidenceKey *a = (const QueryEvidenceKey *) left;
+    const QueryEvidenceKey *b = (const QueryEvidenceKey *) right;
+
+    if (a->channel_index != b->channel_index)
+        return a->channel_index < b->channel_index ? -1 : 1;
+    return memcmp(&a->id, &b->id, sizeof(hash128_t));
+}
+
+static void
+bind_channel_provenance_roots(QueryEvidenceState *state, int channel_count)
+{
+    long total = hash_get_num_entries(state->provenance);
+    QueryEvidenceKey *items;
+    HASH_SEQ_STATUS sequence;
+    QueryEvidenceKey *entry;
+    long used = 0;
+    hash128_t domain;
+
+    if (total <= 0)
+        return;
+    if ((uint64) total > MaxAllocSize / sizeof(QueryEvidenceKey))
+        ereport(ERROR,
+                (errmsg("query evidence: provenance route set exceeds allocation capacity")));
+    items = (QueryEvidenceKey *) palloc(sizeof(*items) * (Size) total);
+    hash_seq_init(&sequence, state->provenance);
+    while ((entry = (QueryEvidenceKey *) hash_seq_search(&sequence)) != NULL)
+        items[used++] = *entry;
+    if (used != total)
+        ereport(ERROR, (errmsg("query evidence: provenance route set changed during reduction")));
+    qsort(items, (size_t) total, sizeof(*items), query_evidence_key_order);
+    hash128_blake3_str("laplace:query-channel-provenance:v1", &domain);
+
+    for (long start = 0; start < total; )
+    {
+        long end = start + 1;
+        int channel_index = items[start].channel_index;
+        hash128_t *parts;
+        Size member_count;
+
+        while (end < total && items[end].channel_index == channel_index)
+            ++end;
+        if (channel_index < 0 || channel_index >= channel_count)
+            ereport(ERROR, (errmsg("query evidence: provenance channel index is invalid")));
+        member_count = (Size) (end - start);
+        if (member_count >= MaxAllocSize / sizeof(hash128_t))
+            ereport(ERROR,
+                    (errmsg("query evidence: channel provenance set exceeds allocation capacity")));
+        parts = (hash128_t *) palloc(sizeof(*parts) * (member_count + 1));
+        parts[0] = domain;
+        for (Size i = 0; i < member_count; ++i)
+            parts[i + 1] = items[start + (long) i].id;
+        hash128_merkle(0, parts, member_count + 1,
+                       &state->channels[channel_index].provenance_root);
+        pfree(parts);
+        start = end;
+    }
+    pfree(items);
+}
+
 static void
 query_observation(int ordinal, int16 role,
                   const LaplaceObservation *row, void *opaque)
@@ -412,6 +521,14 @@ query_observation(int ordinal, int16 role,
         default:
             ereport(ERROR,
                     (errmsg("query evidence: invalid attestation outcome %d", row->outcome)));
+    }
+
+    {
+        QueryEvidenceKey provenance;
+        MemSet(&provenance, 0, sizeof(provenance));
+        provenance.channel_index = index->heap_index;
+        provenance.id = query_provenance_witness(row);
+        (void) hash_search(state->provenance, &provenance, HASH_ENTER, NULL);
     }
 
     if (!row->source_null)
@@ -489,11 +606,14 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
         Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     evidence.contexts = hash_create("query evidence contexts",
         Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    evidence.provenance = hash_create("query evidence provenance routes",
+        Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     evidence.channels = channels;
     evidence.stats = stats;
 
     laplace_observation_read_cells(operands, NULL, cells, channel_count,
                                    query_observation, &evidence);
+    bind_channel_provenance_roots(&evidence, channel_count);
     pfree(cells);
 }
 

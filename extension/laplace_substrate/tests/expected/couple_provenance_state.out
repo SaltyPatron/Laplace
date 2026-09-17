@@ -1,0 +1,3 @@
+-- Exact source/context witness identity remains typed COUPLE state before ORIENT.
+\set ECHO none
+NOTICE:  exact provenance: preserved in pre-ORIENT typed response state
