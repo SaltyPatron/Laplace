@@ -5,7 +5,7 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  provision|reconcile|check|build|install|applications|deploy|mainline|test-dev|test-db|test-live) ;;
+  provision|reconcile|check|build|install|applications|deploy|proof|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
@@ -33,6 +33,7 @@ run_ci_contract_checks() {
   python3 scripts/test-ci-workspace.py
   python3 scripts/test-product-ci-artifact-ownership.py
   python3 scripts/test-seed-workflow-ownership.py
+  python3 scripts/test-workflow-architecture.py
 }
 
 require_built_revision() {
@@ -154,18 +155,34 @@ run_mainline() {
   run_dev_tests
 }
 
-run_deploy() {
-  # Deploy is the product path. Static policy/lint suites are available through
-  # the explicit `check` stage and never block a requested product operation.
+run_release_candidate() {
   check_deps
   run_build
   run_dev_tests
   run_install
   run_database_maintenance --prepare
   run_db_tests
+}
+
+run_release_activation() {
   run_publish
   reconcile_installed_product
   run_live_tests
+}
+
+run_deploy() {
+  # Deploy composes two independently testable lifecycle modules. Static
+  # repository policy remains an explicit check operation.
+  run_release_candidate
+  run_release_activation
+}
+
+run_proof() {
+  # Product proof adds competitive model synthesis between qualification and
+  # activation without reimplementing the delivery sequence in workflow YAML.
+  run_release_candidate
+  LAPLACE_MODEL_PROOF_CODE_CORPORA=1 bash scripts/model-synthesize-ci.sh
+  run_release_activation
 }
 
 case "$stage" in
@@ -202,5 +219,8 @@ case "$stage" in
     ;;
   deploy)
     run_deploy
+    ;;
+  proof)
+    run_proof
     ;;
 esac
