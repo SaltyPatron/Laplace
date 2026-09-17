@@ -1,4 +1,4 @@
-name: Reconcile current main into qualified identity candidate
+name: Reconcile current lifecycle and qualify database maintenance
 on:
   push:
     branches: [review/canonical-identity-20260917]
@@ -11,9 +11,10 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      BASE: d8d3d60256e8ae244368e2ccbe6c90e7c424a4fa
-      EXTERNAL: f36bdd63ab414cbf152eea774427fa7055ee9970
-      COMMON: 96a02adb064ad221e17ae275e076b11816b6a517
+      BASE: 0a196f8c578235c30a6ffefa948af6a1bc1240be
+      EXTERNAL: 3f4eeda3ed0ed88557011043a06afa1e2b251e2c
+      COMMON: f36bdd63ab414cbf152eea774427fa7055ee9970
+      MANIFEST: d1bbd0047242f5e6269aa196fa012a03500b561c
       CANDIDATE_REF: review/canonical-identity-20260917
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -21,26 +22,20 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Reconcile exact source histories in the ordinary hosted checkout
+      - name: Merge exact external history and reviewed corrections
         shell: bash
         run: |
           set -euo pipefail
           umask 0002
-          evidence_root="/build/laplace/work/identity-merge-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          evidence_root="/build/laplace/work/identity-followup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           sudo install -d -m 2775 -o "$(id -u)" -g "$(id -g)" /build/laplace/work
           test ! -e "$evidence_root"
           mkdir -m 0700 "$evidence_root"
           export EVIDENCE_ROOT="$evidence_root"
           printf 'EVIDENCE_ROOT=%s\n' "$evidence_root" >> "$GITHUB_ENV"
           cp .github/workflows/canonical-identity-qualification.yml "$evidence_root/workflow.yml"
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git merge-base --is-ancestor "$BASE" HEAD
-          python3 - <<'PY'
-          import subprocess
-          actual=subprocess.check_output(["git","diff","--name-only",__import__("os").environ["BASE"],"HEAD"],text=True).splitlines()
-          assert actual==[".github/workflows/canonical-identity-qualification.yml","docs/guides/chess-dependencies.md"],actual
-          assert subprocess.check_output(["git","rev-parse","HEAD:docs/guides/chess-dependencies.md"],text=True).strip()=="09ae93934552e5730dd8582727a3d9afaba01e5e"
-          PY
+          test "$(git rev-parse HEAD^)" = "$BASE"
+          test "$(git diff --name-only "$BASE" HEAD)" = ".github/workflows/canonical-identity-qualification.yml"
           test -z "$(git status --porcelain --untracked-files=all)"
           git config user.name "Laplace qualification"
           git config user.email "qualification@users.noreply.github.com"
@@ -49,101 +44,106 @@ jobs:
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $git_auth"
           unset git_auth
           git fetch --no-tags origin "$EXTERNAL"
-          git merge-base --is-ancestor "$COMMON" "$EXTERNAL"
-          git merge-base --is-ancestor 1c5eb49378c5d6c698e735a0fe8e1e7260429f28 "$BASE"
-          git merge-base --is-ancestor 1c5eb49378c5d6c698e735a0fe8e1e7260429f28 "$EXTERNAL"
+          test "$(git merge-base HEAD "$EXTERNAL")" = "$COMMON"
           set +e
           git merge --no-commit --no-ff "$EXTERNAL" > "$evidence_root/merge.log" 2>&1
           merge_status=$?
           set -e
           cat "$evidence_root/merge.log"
           git ls-files -u > "$evidence_root/conflict-index.txt"
-          git diff --binary > "$evidence_root/worktree.patch"
-          git diff --cached --binary > "$evidence_root/index.patch"
-          if [[ "$merge_status" -ne 0 ]]; then
-            python3 - <<'PY'
-          import json,os,subprocess
+          export MERGE_STATUS="$merge_status"
+          python3 - <<'PY'
+          import ast,base64,hashlib,json,os,subprocess,urllib.request
           from pathlib import Path
           root=Path(os.environ["EVIDENCE_ROOT"])
-          records=[]
-          for line in subprocess.check_output(["git","ls-files","-u"],text=True).splitlines():
-              metadata,path=line.split("\t",1)
-              mode,sha,stage=metadata.split()
-              raw=subprocess.check_output(["git","cat-file","blob",sha])
-              name="conflict-"+str(len(records))+"-stage"+stage+".txt"
-              (root/name).write_bytes(raw)
-              records.append({"path":path,"mode":mode,"blob":sha,"stage":int(stage),"file":name})
-          (root/"conflicts.json").write_text(json.dumps(records,indent=2)+"\n")
-          PY
-            exit "$merge_status"
-          fi
-          python3 - <<'PY'
-          import json,os,subprocess
-          from pathlib import Path
           def git(*args): return subprocess.check_output(["git",*args],text=True).strip()
-          expected=[".github/workflows/_ingest.yml",".github/workflows/db-ops.yml",".github/workflows/laplace.yml",".github/workflows/seed-chess-games.yml",".github/workflows/seed-chess.yml",".github/workflows/seed-models.yml",".github/workflows/seed.yml","app/Laplace.Decomposers.Tests/FrameNet/FrameNetAnnotationStructureTests.cs","app/Laplace.Decomposers/FrameNet/FrameNetDecomposer.cs","app/Laplace.Substrate.Tests/Abstractions/ExtensionManifestSeparationTests.cs","app/Laplace.Substrate/Crud/Npgsql/CopyTupleParser.cs","app/Laplace.Substrate/Crud/Npgsql/NpgsqlIngestOps.cs","app/Laplace.Substrate/Crud/Npgsql/NpgsqlWorkingSetApply.cs","extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in","scripts/product-ci.sh","scripts/publish-applications.sh","scripts/test-ci-workspace.py","scripts/validate-pipeline.py","web/src/explore/entity/tabs/OverviewTab.tsx"]
-          merged=git("diff","--cached","--name-only",os.environ["GITHUB_SHA"]).splitlines()
-          assert merged==expected,(merged,expected)
-          retained=[]
-          for path in [".github/workflows/_ingest.yml",".github/workflows/db-ops.yml",".github/workflows/laplace.yml",".github/workflows/seed-chess-games.yml",".github/workflows/seed-chess.yml",".github/workflows/seed-models.yml",".github/workflows/seed.yml","app/Laplace.Decomposers.Tests/FrameNet/FrameNetAnnotationStructureTests.cs","app/Laplace.Decomposers/FrameNet/FrameNetDecomposer.cs","app/Laplace.Substrate.Tests/Abstractions/ExtensionManifestSeparationTests.cs","app/Laplace.Substrate/Crud/Npgsql/CopyTupleParser.cs","app/Laplace.Substrate/Crud/Npgsql/NpgsqlIngestOps.cs","extension/laplace_substrate/sql/bootstrap/bootstrap.sql.in","scripts/product-ci.sh","scripts/publish-applications.sh","scripts/test-ci-workspace.py","scripts/validate-pipeline.py","web/src/explore/entity/tabs/OverviewTab.tsx"]:
-              external=subprocess.run(["git","rev-parse",os.environ["EXTERNAL"]+":"+path],capture_output=True,text=True)
-              index=subprocess.run(["git","rev-parse",":"+path],capture_output=True,text=True)
-              assert (external.returncode==0)==(index.returncode==0),path
-              if external.returncode==0:
-                  assert external.stdout.strip()==index.stdout.strip(),path
-                  retained.append({"path":path,"blob":index.stdout.strip()})
-              else:retained.append({"path":path,"removed":True})
-          path="app/Laplace.Substrate/Crud/Npgsql/NpgsqlWorkingSetApply.cs"
-          body=Path(path).read_text()
-          stale="Interpretations were published\n            // separately above."
-          assert body.count(stale)==1
-          body=body.replace(stale,"Interpretations publish\n            // after COPY within the accepting transaction.")
-          Path(path).write_text(body)
-          subprocess.run(["git","add","--",path],check=True)
-          # Only comments/log descriptions arrive in this overlapping writer file.
-          original=subprocess.check_output(["git","show",os.environ["GITHUB_SHA"]+":"+path],text=True)
-          import re
-          def semantic(text):
-              text=re.sub(r"(?m)^\s*//[^\n]*\n","",text)
-              return text.replace("retired-tier-invert","smaller-side invert")
-          assert semantic(body)==semantic(original),"writer runtime source changed during merge"
-          retained.append({"path":path,"blob":git("rev-parse",":"+path),"scope":"external comments and diagnostic label retained; comment adjusted to corrected post-COPY publication; executable source otherwise exact candidate"})
+          conflict="app/Laplace.Substrate.Tests/Crud/CopyTupleParserTests.cs"
+          paths=git("diff","--name-only","--diff-filter=U").splitlines()
+          assert paths in ([],[conflict]),paths
+          if os.environ["MERGE_STATUS"]!="0":
+              assert paths==[conflict],(os.environ["MERGE_STATUS"],paths)
+          ours=subprocess.check_output(["git","show",os.environ["BASE"]+":"+conflict],text=True)
+          theirs=subprocess.check_output(["git","show",os.environ["EXTERNAL"]+":"+conflict],text=True)
+          a=ours.index("        // Canonical ID order")
+          b=ours.index("\n    }\n",a)
+          ta=theirs.index("        Assert.Equal(3, distinct.Count);")
+          tb=theirs.index("\n    }\n",ta)
+          assert ours[:a]+ours[b:]==theirs[:ta]+theirs[tb:],"unexpected overlapping parser changes"
+          assert git("rev-parse",os.environ["BASE"]+":"+conflict)=="138d328b63aa3a7569d021c64a56c9cbf5d7db2f"
+          Path(conflict).write_text(ours)
+          subprocess.run(["git","add","--",conflict],check=True)
+          assert not git("ls-files","-u")
+          expected=[".github/workflows/db-ops.yml",".github/workflows/laplace.yml",".github/workflows/seed-chess.yml",".github/workflows/seed.yml","app/Laplace.Cli.Tests/FoundryContractDefaultsTests.cs","app/Laplace.Core/Core/FoundryDefaults.cs","app/Laplace.Substrate.Tests/Crud/SubstrateChangeTests.cs","scripts/maintain-installed-database.sh","scripts/product-ci.sh","scripts/test-parallel.sh"]
+          arrivals=git("diff","--cached","--name-only",os.environ["GITHUB_SHA"]).splitlines()
+          assert arrivals==expected,(arrivals,expected)
+          preserved=[]
+          for path in expected:
+              sha=git("rev-parse",":"+path)
+              assert sha==git("rev-parse",os.environ["EXTERNAL"]+":"+path),path
+              preserved.append({"path":path,"external_blob":sha})
+          def blob(sha):
+              request=urllib.request.Request("https://api.github.com/repos/"+os.environ["GITHUB_REPOSITORY"]+"/git/blobs/"+sha,
+                  headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
+              with urllib.request.urlopen(request) as response: result=json.load(response)
+              raw=base64.b64decode(result["content"])
+              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
+              return raw
+          raw=blob(os.environ["MANIFEST"])
+          (root/"overlay.json").write_bytes(raw)
+          manifest=json.loads(raw)
+          assert manifest["base"]==os.environ["BASE"] and manifest["external"]==os.environ["EXTERNAL"]
+          for entry in manifest["files"]:
+              path=entry["path"]
+              assert git("rev-parse",":"+path)==entry["base"],(path,git("rev-parse",":"+path),entry["base"])
+              raw=blob(entry["sha"])
+              Path(path).write_bytes(raw)
+              Path(path).chmod(int(entry["mode"],8)&0o777)
+              if path.endswith(".py"): ast.parse(raw,filename=path)
+              if path.endswith(".sh"): subprocess.run(["bash","-n",path],check=True)
+              subprocess.run(["git","add","--",path],check=True)
+              assert git("rev-parse",":"+path)==entry["sha"]
           for path in (".github/workflows/identity-storage-proof.yml",".github/workflows/identity-working-set-patch.yml","scripts/patch-identity-working-set.py"):
               assert subprocess.run(["git","cat-file","-e",":"+path],capture_output=True).returncode!=0,path
-          (Path(os.environ["EVIDENCE_ROOT"])/"preserved-main.json").write_text(json.dumps(retained,indent=2)+"\n")
+          (root/"preserved-main.json").write_text(json.dumps(preserved,indent=2)+"\n")
+          (root/"parser-resolution.json").write_text(json.dumps({"path":conflict,"retained_blob":git("rev-parse",":"+conflict),"scope":"same external unordered contract; preserve qualified exact cross-blob winner indices and ID set"},indent=2)+"\n")
           PY
-          git diff --check --cached
+          git diff --cached --check
           git diff --cached --binary > "$evidence_root/reconciled.patch"
-          git commit -m "Preserve current main lifecycle, ingestion and FrameNet work in identity candidate"
-          test "$(git rev-parse HEAD^1)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^2)" = "$EXTERNAL"
-          test -z "$(git status --porcelain --untracked-files=all)"
-          git ls-tree -r HEAD > "$evidence_root/source-tree.txt"
-          python3 - <<'PY'
-          import json,os,subprocess
-          from pathlib import Path
-          def git(*args): return subprocess.check_output(["git",*args],text=True).strip()
-          receipt={"base":os.environ["BASE"],"external":os.environ["EXTERNAL"],
-              "operator":os.environ["GITHUB_SHA"],"merged_commit":git("rev-parse","HEAD"),
-              "tree":git("rev-parse","HEAD^{tree}"),"parents":git("show","-s","--format=%P","HEAD").split(),
-              "status":"qualified identity native/managed source preserved; isolated e8 PostgreSQL run remains separate and pending",
-              "preserved_main_paths":19,"qualified_bridge_run":35191804573,"frozen_isolated_source":"e8e99359fc27c4a78a7d56779bc4f495d3bb17ff",
-              "excluded":[".github/workflows/identity-storage-proof.yml",".github/workflows/identity-working-set-patch.yml","scripts/patch-identity-working-set.py"]}
-          (Path(os.environ["EVIDENCE_ROOT"])/"source.json").write_text(json.dumps(receipt,indent=2)+"\n")
-          print(json.dumps(receipt,indent=2))
-          PY
-          test "$(git ls-remote origin "refs/heads/$CANDIDATE_REF" | cut -f1)" = "$GITHUB_SHA"
-          git push origin "HEAD:refs/heads/$CANDIDATE_REF"
-      - name: Exercise merged lifecycle controls
+      - name: Execute actual lifecycle and maintenance controls
         shell: bash
         run: |
           set -euo pipefail
           python3 scripts/test-ci-workspace.py 2>&1 | tee "$EVIDENCE_ROOT/workspace-controls.log"
           python3 scripts/validate-pipeline.py 2>&1 | tee "$EVIDENCE_ROOT/pipeline-validation.log"
-      - name: Retain reconciliation evidence
+      - name: Publish qualified reconciliation to isolated candidate only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git_auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $git_auth"
+          unset git_auth
+          test -z "$(git diff --name-only)"
+          test -z "$(git ls-files --others --exclude-standard)"
+          git commit -m "Preserve current lifecycle and reject failed database generation probes"
+          test "$(git rev-parse HEAD^1)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^2)" = "$EXTERNAL"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git ls-tree -r HEAD > "$EVIDENCE_ROOT/source-tree.txt"
+          python3 - <<'PY'
+          import json,os,subprocess
+          from pathlib import Path
+          def git(*args): return subprocess.check_output(["git",*args],text=True).strip()
+          receipt={"status":"passed","scope":"real Git reconciliation plus 29 actual Bash lifecycle/maintenance controls and pipeline validation; private e8 PostgreSQL qualification remains separately pending","base":os.environ["BASE"],"external":os.environ["EXTERNAL"],"operator":os.environ["GITHUB_SHA"],"manifest":os.environ["MANIFEST"],"merged_commit":git("rev-parse","HEAD"),"tree":git("rev-parse","HEAD^{tree}"),"parents":git("show","-s","--format=%P","HEAD").split()}
+          (Path(os.environ["EVIDENCE_ROOT"])/"source.json").write_text(json.dumps(receipt,indent=2)+"\n")
+          print(json.dumps(receipt,indent=2))
+          PY
+          test "$(git ls-remote origin "refs/heads/$CANDIDATE_REF" | cut -f1)" = "$GITHUB_SHA"
+          git push origin "HEAD:refs/heads/$CANDIDATE_REF"
+      - name: Retain exact merge and controls
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: canonical-identity-source-${{ github.run_id }}-${{ github.run_attempt }}
+          name: canonical-identity-followup-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.EVIDENCE_ROOT }}
           if-no-files-found: error
