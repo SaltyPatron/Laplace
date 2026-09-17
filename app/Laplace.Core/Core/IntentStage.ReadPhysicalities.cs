@@ -17,10 +17,24 @@ public sealed partial class IntentStage
         ReadOnlySpan<PhysicalityDescriptorInputNative> inputs,
         ReadOnlySpan<PhysicalityObservationNative> observations);
 
+    internal delegate void PhysicalityRowsBudgetVisitor(
+        ReadOnlySpan<PhysicalityDescriptorInputNative> inputs,
+        ReadOnlySpan<PhysicalityObservationNative> observations,
+        long retainedCaptureBytes);
+
     /// <summary>Copy native tuple bodies into a bounded native snapshot, then
     /// visit it while owned. Trajectory pointers must not escape the visitor.
     /// This transport does not perform descriptor admission.</summary>
     internal unsafe void VisitPhysicalityRows(long maximumBytes, PhysicalityRowsVisitor visitor)
+    {
+        ArgumentNullException.ThrowIfNull(visitor);
+        VisitPhysicalityRows(maximumBytes,
+            (inputs, observations, _) => visitor(inputs, observations));
+    }
+
+    /// <summary>The visitor receives the capture's actual retained allocation so
+    /// managed row exports can account for its overlapping lifetime.</summary>
+    internal unsafe void VisitPhysicalityRows(long maximumBytes, PhysicalityRowsBudgetVisitor visitor)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
         ArgumentNullException.ThrowIfNull(visitor);
@@ -46,7 +60,8 @@ public sealed partial class IntentStage
                 || (inputsCount != 0 && (inputs == null || observations == null)))
                 throw new InvalidOperationException("native physicality row export count differs from its source stage");
             visitor(new ReadOnlySpan<PhysicalityDescriptorInputNative>(inputs, expected),
-                new ReadOnlySpan<PhysicalityObservationNative>(observations, expected));
+                new ReadOnlySpan<PhysicalityObservationNative>(observations, expected),
+                checked((long)NativeInterop.PhysicalityDescriptorCaptureRetainedBytes(capture)));
         }
         finally
         {
@@ -68,6 +83,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "physicality_descriptor_capture_observations")]
     internal static partial PhysicalityObservationNative* PhysicalityDescriptorCaptureObservations(
         IntPtr capture, nuint* count);
+
+    [LibraryImport(Library, EntryPoint = "physicality_descriptor_capture_bytes")]
+    internal static partial nuint PhysicalityDescriptorCaptureRetainedBytes(IntPtr capture);
 
     [LibraryImport(Library, EntryPoint = "physicality_descriptor_capture_free")]
     internal static partial void PhysicalityDescriptorCaptureFree(IntPtr capture);

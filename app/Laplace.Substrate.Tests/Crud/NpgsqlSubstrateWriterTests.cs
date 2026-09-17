@@ -434,13 +434,13 @@ public class NpgsqlSubstrateWriterTests
         var typeId = Hash128.OfCanonical("TestFixture");
         await using var cmdType = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
-          + "VALUES ($1, 0::smallint, $1, NULL) ON CONFLICT (id, tier) DO NOTHING");
+          + "VALUES ($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");
         cmdType.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         await cmdType.ExecuteNonQueryAsync();
 
         await using var cmdSrc = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
-          + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id, tier) DO NOTHING");
+          + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id) DO NOTHING");
         cmdSrc.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, source.ToBytes());
         cmdSrc.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         await cmdSrc.ExecuteNonQueryAsync();
@@ -453,7 +453,7 @@ public class NpgsqlSubstrateWriterTests
         var relTypeId = Hash128.OfCanonical("TestFixture");
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
-          + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id, tier) DO NOTHING");
+          + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id) DO NOTHING");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         await cmd.ExecuteNonQueryAsync();

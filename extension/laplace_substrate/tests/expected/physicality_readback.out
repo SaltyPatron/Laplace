@@ -2,6 +2,7 @@
 \set ECHO none
 NOTICE:  physicality readback: loaded floor does not replace a missing persisted entity
 NOTICE:  physicality readback: actual native stage deposition and replay preserve E/P/A and exact consensus
+NOTICE:  physicality readback: native sink preserves exact plural facets for novel and present entities under origin and replica without fabricated summary facets or repeated evidence
 NOTICE:  physicality readback: exhausted post-insert sink grant rolls back E/P/A and exact consensus
 NOTICE:  physicality readback: opaque typed source retains native descriptor without fabricated Content or available view
 NOTICE:  physicality readback: descriptor-only type9 direct and indexed reads preserve exact opaque body bits

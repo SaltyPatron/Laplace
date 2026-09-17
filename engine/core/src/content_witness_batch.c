@@ -415,6 +415,14 @@ static int emit_node(
         hash128_t type_id = laplace_content_tier_type_id(node.tier);
         if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
             return -2;
+    } else {
+        /* This is a real retained node/form; E presence does not erase its
+         * interpretation. Collapsed wrappers and shared atomic floors already
+         * returned above. Historical entity tuples remain unchanged. */
+        hash128_t type_id = laplace_content_tier_type_id(node.tier);
+        if (intent_stage_add_entity_interpretation(
+                stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
+            return -2;
     }
 
     double* traj = NULL;

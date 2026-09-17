@@ -3,5 +3,9 @@ RETURNS bigint
 LANGUAGE sql
 STABLE
 BEGIN ATOMIC
-    SELECT count(*)::bigint FROM laplace.entities WHERE tier IN (247, 248, 250);
+    SELECT count(*)::bigint FROM laplace.entities e
+    WHERE e.tier IN (247, 248, 250)
+       OR EXISTS (
+           SELECT 1 FROM laplace.entity_interpretations i
+           WHERE i.entity_id = e.id AND i.tier IN (247, 248, 250));
 END;

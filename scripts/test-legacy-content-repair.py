@@ -211,7 +211,7 @@ FROM repair_alias_atoms ON CONFLICT(name) DO UPDATE SET id=excluded.id;
 INSERT INTO laplace.entities(id,tier,type_id,first_observed_by,created_at)
 SELECT root_id,tier,realize.canonical_id('Repair_Test_Atom'),repair_test.id('source'),
   '2026-09-01 12:34:56.123456+00'::timestamptz FROM repair_alias_atoms
-ON CONFLICT(id,tier) DO NOTHING;
+ON CONFLICT(id) DO NOTHING;
 INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
   n_constituents,alignment_residual,source_dim,observed_at)
 SELECT public.laplace_hash128_blake3(root_id||decode('0100','hex')),root_id,1,

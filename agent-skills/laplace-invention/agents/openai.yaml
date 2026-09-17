@@ -1,0 +1,6 @@
+interface:
+  display_name: "Laplace Invention"
+  short_description: "Permanent operating knowledge for every Laplace task"
+  default_prompt: "Apply the complete Laplace invention model to this task and deliver the requested behavior with matching executable evidence."
+policy:
+  allow_implicit_invocation: true

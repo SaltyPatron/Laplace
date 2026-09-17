@@ -35,7 +35,7 @@ intent_stage_t* intent_stage_new(size_t row_capacity_hint);
 intent_stage_t* intent_stage_new_bounded(size_t row_capacity_hint, size_t maximum_bytes);
 void            intent_stage_free(intent_stage_t* stage);
 /* Exclusive-owner lifetime operation for a stage whose entity/attestation
- * rows are no longer needed. Frees those table capacities and the entity
+ * rows and interpretations are no longer needed. Frees those table capacities and the entity
  * witness cache, resets their counts, and returns the exact released payload.
  * Physicality rows, bytes and borrowed physicality pointers remain unchanged;
  * borrowed entity/attestation pointers become invalid. The stage's historical
@@ -72,6 +72,28 @@ int intent_stage_add_entity(
     int16_t          tier,
     const hash128_t* type_id,
     const hash128_t* first_observed_by);
+
+/* Actual entity interpretations, separate from historical E/P/A transport and
+ * semantic digest. New stages capture each original add_entity input before
+ * compatibility edits; owners also record real observations suppressed by E
+ * presence/witness filters. No canonical entity or physicality is added.
+ * Legacy three-buffer imports have an incomplete stream: consumers must use
+ * their E tuples instead. A complete stream, even empty, replaces that fallback.
+ * Tuple framing is the existing four-column entity wire format. */
+int intent_stage_add_entity_interpretation(
+    intent_stage_t* stage, const hash128_t* id, int16_t tier,
+    const hash128_t* type_id, const hash128_t* first_observed_by);
+size_t intent_stage_entity_interpretation_count(const intent_stage_t* stage);
+int intent_stage_entity_interpretations_complete(const intent_stage_t* stage);
+const uint8_t* intent_stage_entity_interpretation_tuple_ptr(
+    const intent_stage_t* stage, size_t* out_len);
+/* Replace with an exported complete stream; validate framing and entity field
+ * widths/tier domain before mutation.
+ * Returns 0, -1 malformed input, -2 allocation refusal. On failure, prior
+ * metadata/completeness is unchanged (allocation failure flag may be set).
+ * Input may be the stage's own borrowed interpretation buffer. */
+int intent_stage_import_entity_interpretations(
+    intent_stage_t* stage, const uint8_t* tuples, size_t bytes);
 
 int intent_stage_add_physicality(
     intent_stage_t*     stage,
@@ -154,7 +176,7 @@ int intent_stage_lower_entity_tier(intent_stage_t* stage, const hash128_t* id, i
  * Splits `src` into `part_count` new stages, each safe to commit as an independent
  * transaction: every row partitions by the id of the entity it is "about" (an
  * entity's own id; a physicality's entity_id; an attestation's subject_id), so an
- * entity and every physicality/attestation whose subject is that entity always land
+ * entity, its interpretation metadata and every physicality/attestation whose subject is that entity always land
  * in the same output partition. Physicality rows within each output partition are
  * additionally ordered by Hilbert index for storage locality -- that ordering never
  * affects partition assignment. Callers must NOT further split an output partition's

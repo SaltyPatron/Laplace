@@ -277,9 +277,10 @@ public static class AgentTraceEmitter
         if (string.IsNullOrEmpty(text)) return null;
         if (!TextEntityBuilder.TryBuildContentWitness(
                 Encoding.UTF8.GetBytes(text), sourceId, 1.0,
-                out var entities, out var physicalities, out _, out var root, out _))
+                out var entities, out var physicalities, out _, out var root, out _, out var interpretations))
             return null;
         foreach (var e in entities) b.AddEntity(e);
+        foreach (var interpretation in interpretations) b.AddEntityInterpretation(interpretation);
         foreach (var p in physicalities)
         {
             b.AddPhysicality(p);

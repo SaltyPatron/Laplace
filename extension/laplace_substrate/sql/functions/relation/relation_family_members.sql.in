@@ -20,6 +20,8 @@ CREATE OR REPLACE FUNCTION consensus.relation_family_members(p_family text)
 BEGIN ATOMIC
     SELECT et.id
     FROM laplace.entities et
-    WHERE et.type_id = laplace.entity_type_id('RelationType')
+    WHERE EXISTS (
+          SELECT 1 FROM laplace.entity_interpretations i
+          WHERE i.entity_id = et.id AND i.type_id = laplace.entity_type_id('RelationType'))
       AND consensus.relation_type_in_family(et.id, p_family);
 END;

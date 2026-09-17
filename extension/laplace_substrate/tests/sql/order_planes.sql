@@ -35,7 +35,7 @@ BEGIN
         (w_b, 2, type_word, src), (w_rep, 2, type_word, src),
         (sent, 3, type_sent, src), (sent_rep, 3, type_sent, src),
         (doc, 4, type_doc, src)
-    ON CONFLICT (id, tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
 
     -- sent = a, gap, b  — three CONSECUTIVE words. `gap` is deliberately left OUT of the
     -- vocabulary below, so (a -> b) is NOT an adjacency that occurred.

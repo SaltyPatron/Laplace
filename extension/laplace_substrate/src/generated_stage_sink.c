@@ -29,6 +29,7 @@ typedef struct SinkRow {
     SinkField fields[14];
     size_t ordinal;
     bool duplicate, present, accepted;
+    const struct SinkRow *interpretation;
 } SinkRow;
 typedef struct SinkTable { SinkRow *rows; SinkRow **index; size_t count; } SinkTable;
 typedef struct SinkState {
@@ -38,6 +39,7 @@ typedef struct SinkState {
     MemoryContextCallback cleanup;
     physicality_descriptor_capture_t *capture;
     SinkTable tables[3];
+    SinkTable interpretations;
 } SinkState;
 
 static pg_noreturn void sink_invalid(const char *message)
@@ -135,7 +137,7 @@ static void sink_width(const SinkRow *row, unsigned column, int32 width, bool nu
         sink_invalid("invalid native tuple field width");
 }
 
-static void sink_validate_entity(const SinkRow *row)
+static void sink_validate_entity(const SinkRow *row, bool actual_interpretation)
 {
     sink_width(row, 1, 2, false);
     sink_width(row, 2, 16, false);
@@ -143,7 +145,7 @@ static void sink_validate_entity(const SinkRow *row)
     uint64 tier = sink_word(row->fields[1].data, 2);
     if (tier > UINT8_MAX) sink_invalid("invalid entity tier");
     hash128_t type = laplace_content_tier_type_id((uint8_t)tier);
-    if (memcmp(&type, row->fields[2].data, 16) != 0)
+    if (actual_interpretation && memcmp(&type, row->fields[2].data, 16) != 0)
         sink_invalid("generated entity is not declared Content");
 }
 
@@ -211,16 +213,13 @@ static void sink_deduplicate(SinkState *s, unsigned table)
             continue;
         }
         for (unsigned field = 0; field < columns[table]; ++field) {
-            /* E creation retains its first source. Repeated generated bodies
+            /* Canonical E transport retains one actual input row; all raw
+             * interpretations are published separately. Repeated generated bodies
              * and source-unit witnesses may carry a later observation time. */
             if ((table == 0 && field >= 1) || (table == 1 && field == 9) ||
                 (table == 2 && field == 7)) continue;
             if (!sink_field_equal(&first->fields[field], &row->fields[field]))
                 sink_invalid("duplicate generated identity has conflicting fields");
-        }
-        if (table == 0 && sink_word(row->fields[1].data,2) < sink_word(first->fields[1].data,2)) {
-            first->fields[1] = row->fields[1];
-            first->fields[2] = row->fields[2];
         }
         if (table == 2 && sink_integer(&row->fields[7]) > sink_integer(&first->fields[7]))
             first->fields[7] = row->fields[7];
@@ -231,6 +230,7 @@ static void sink_deduplicate(SinkState *s, unsigned table)
 static void sink_parse(SinkState *s, const intent_stage_t *const *stages, size_t stage_count)
 {
     const unsigned columns[] = {4, 10, 14};
+    size_t entity_stage_first[LAPLACE_GENERATED_STAGE_SINK_MAX_STAGES]={0};
     hash128_t relation;
     if (laplace_relation_resolve("HAS_PHYSICALITY", &relation) != 0)
         sink_invalid("missing governed HAS_PHYSICALITY relation");
@@ -241,6 +241,7 @@ static void sink_parse(SinkState *s, const intent_stage_t *const *stages, size_t
         t->index = sink_alloc(s, sink_multiply(t->count, sizeof(*t->index)));
         size_t at = 0;
         for (size_t stage = 0; stage < stage_count; ++stage) {
+            if (table == 0) entity_stage_first[stage]=at;
             size_t bytes, offset = 0;
             const uint8 *data = intent_stage_tuple_ptr(stages[stage], (intent_stage_table_t)(table + 1), &bytes);
             while (offset < bytes) {
@@ -249,25 +250,65 @@ static void sink_parse(SinkState *s, const intent_stage_t *const *stages, size_t
                 row->ordinal = at;
                 t->index[at++] = row;
                 sink_read_row(data, bytes, &offset, columns[table], row);
-                if (table == 0) sink_validate_entity(row);
+                if (table == 0) sink_validate_entity(row,
+                    !intent_stage_entity_interpretations_complete(stages[stage]));
                 if (table == 2) sink_validate_attestation(row, &relation);
             }
         }
         if (at != t->count) sink_invalid("native tuple count mismatch");
         sink_deduplicate(s, table);
     }
+    SinkTable *facets=&s->interpretations;
+    for (size_t stage=0;stage<stage_count;++stage) {
+        size_t count=intent_stage_entity_interpretations_complete(stages[stage])
+            ? intent_stage_entity_interpretation_count(stages[stage])
+            : intent_stage_entity_count(stages[stage]);
+        facets->count=sink_add(facets->count,count);
+    }
+    facets->rows=sink_alloc(s,sink_multiply(facets->count,sizeof(*facets->rows)));
+    facets->index=sink_alloc(s,sink_multiply(facets->count,sizeof(*facets->index)));
+    size_t at=0;
+    for (size_t stage=0;stage<stage_count;++stage) {
+        size_t bytes,offset=0;
+        const size_t first=at;
+        const bool complete=intent_stage_entity_interpretations_complete(stages[stage]);
+        const uint8 *data=complete
+            ? intent_stage_entity_interpretation_tuple_ptr(stages[stage],&bytes)
+            : intent_stage_tuple_ptr(stages[stage],INTENT_STAGE_TABLE_ENTITIES,&bytes);
+        while (offset<bytes) {
+            if (at==facets->count) sink_invalid("interpretation tuple count mismatch");
+            SinkRow *row=&facets->rows[at];
+            row->ordinal=at;
+            facets->index[at++]=row;
+            sink_read_row(data,bytes,&offset,4,row);
+            sink_validate_entity(row,true);
+        }
+        SinkTable selected={NULL,facets->index+first,at-first};
+        qsort(selected.index,selected.count,sizeof(*selected.index),sink_compare_ids);
+        if (complete) {
+            size_t end=entity_stage_first[stage]+intent_stage_entity_count(stages[stage]);
+            for (size_t row=entity_stage_first[stage];row<end;++row) {
+                SinkRow *entity=&s->tables[0].rows[row];
+                entity->interpretation=sink_find(&selected,&entity->id);
+                if (entity->interpretation == NULL)
+                    sink_invalid("complete interpretation stream omits staged entity");
+            }
+        }
+    }
+    if (at!=facets->count) sink_invalid("interpretation tuple count mismatch");
 }
 
 /* These are the only database statements owned by this sink. Plans are fixed
  * catalog entries and retained per backend; no statement depends on row data. */
 enum SinkQuery { SQ_LOCK, SQ_EPOCH, SQ_PRESENCE, SQ_ENTITIES, SQ_PHYSICALITIES,
-                 SQ_ATTESTATIONS, SQ_FOLD, SQ_MASKS, SQ_COUNT };
+                 SQ_ATTESTATIONS, SQ_FOLD, SQ_MASKS, SQ_INTERPRETATIONS, SQ_COUNT };
 static SPIPlanPtr sink_plans[SQ_COUNT];
 static const char *const sink_keys[SQ_COUNT] = {
     "ingest.generated_stage_sink.lock", "ingest.generated_stage_sink.epoch",
     "ingest.generated_stage_sink.presence", "ingest.generated_stage_sink.entities",
     "ingest.generated_stage_sink.physicalities", "ingest.generated_stage_sink.attestations",
-    "ingest.generated_stage_sink.fold", "ingest.generated_stage_sink.masks"};
+    "ingest.generated_stage_sink.fold", "ingest.generated_stage_sink.masks",
+    "ingest.entity_interpretations"};
 static const unsigned sink_column_counts[3] = {4,10,14};
 static const Oid sink_types[3][14] = {
     {BYTEAOID,INT2OID,BYTEAOID,BYTEAOID},
@@ -383,17 +424,20 @@ static Datum sink_field_value(SinkState *s, const SinkField *field, Oid type)
     return Int64GetDatum(sink_integer(field));
 }
 
-static Datum sink_column(SinkState *s, unsigned table, unsigned column, size_t count)
+static Datum sink_column(SinkState *s, unsigned table, unsigned column, size_t count,
+                         bool all_entity_rows)
 {
     Datum *values = sink_alloc(s,sink_multiply(count,sizeof(*values)));
     bool *nulls = sink_alloc(s,sink_multiply(count,sizeof(*nulls)));
     size_t at=0;
-    SinkTable *t=&s->tables[table];
+    SinkTable *t=all_entity_rows ? &s->interpretations : &s->tables[table];
     for (size_t i=0;i<t->count;++i) {
         SinkRow *row=t->index[i];
-        if (row->duplicate || (table == 0 && row->present)) continue;
+        if (!all_entity_rows && (row->duplicate || (table == 0 && row->present))) continue;
         if (at == count) sink_invalid("column count mismatch");
-        const SinkField *field=&row->fields[column];
+        const SinkRow *observed=!all_entity_rows && table == 0 && row->interpretation
+            ? row->interpretation : row;
+        const SinkField *field=&observed->fields[column];
         nulls[at]=field->length < 0;
         if (!nulls[at]) values[at]=sink_field_value(s,field,sink_types[table][column]);
         ++at;
@@ -412,7 +456,7 @@ static void sink_insert(SinkState *s, unsigned table)
     Datum values[14];
     Oid types[14];
     for (unsigned i=0;i<sink_column_counts[table];++i) {
-        values[i]=sink_column(s,table,i,count);
+        values[i]=sink_column(s,table,i,count,false);
         types[i]=sink_array_type(sink_types[table][i]);
     }
     /* Reserve returned heap tuples and ID detoast copies before execution.
@@ -436,6 +480,31 @@ static void sink_insert(SinkState *s, unsigned table)
         row->accepted=true;
         ++s->receipt.inserted_rows[table];
     }
+    sink_clear_result();
+}
+
+/* Complete explicit metadata records actual observations before historical E
+ * compatibility edits. Legacy stages fall back to their original E tuples.
+ * Neither id dedup nor presence can discard these selected interpretations. */
+static void sink_interpretations(SinkState *s)
+{
+    size_t count=s->interpretations.count;
+    if (count == 0) return;
+    Datum values[5];
+    Oid types[5]={BYTEAARRAYOID,INT2ARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID,BOOLARRAYOID};
+    for (unsigned i=0;i<4;++i) values[i]=sink_column(s,0,i,count,true);
+    Datum *source_null=sink_alloc(s,sink_multiply(count,sizeof(*source_null)));
+    /* Generated Content sources are required nonnull by sink_validate_entity. */
+    for (size_t i=0;i<count;++i) source_null[i]=BoolGetDatum(false);
+    values[4]=sink_array(s,source_null,NULL,count,BOOLOID);
+    sink_charge(s,sizeof(HeapTupleData)+128);
+    sink_execute(s,SQ_INTERPRETATIONS,5,types,values,SPI_OK_SELECT);
+    bool is_null;
+    if (SPI_processed != 1 || SPI_tuptable == NULL)
+        sink_invalid("expected one interpretation publication result");
+    Datum missing=SPI_getbinval(SPI_tuptable->vals[0],SPI_tuptable->tupdesc,1,&is_null);
+    if (is_null || DatumGetBool(missing))
+        sink_invalid("entity interpretation references an absent canonical entity");
     sink_clear_result();
 }
 
@@ -468,18 +537,24 @@ static bool sink_has_hash(const hash128_t *ids,size_t count,const hash128_t *id)
 
 static void sink_presence(SinkState *s,const physicality_descriptor_input_t *bodies,size_t count)
 {
-    size_t capacity=sink_add(sink_multiply(s->tables[0].count,2),
+    size_t entity_rows=sink_add(s->tables[0].count,s->interpretations.count);
+    size_t capacity=sink_add(sink_multiply(entity_rows,2),
                     sink_add(count,sink_add(s->receipt.stored_vertices,
                                            sink_multiply(s->tables[2].count,4))));
     SinkReferences refs={s,sink_alloc(s,sink_multiply(capacity,sizeof(hash128_t))),0,capacity};
-    for (size_t i=0;i<s->tables[0].count;++i) {
-        SinkRow *row=&s->tables[0].rows[i];
+    for (size_t i=0;i<entity_rows;++i) {
+        SinkRow *row=i<s->tables[0].count ? &s->tables[0].rows[i]
+            : &s->interpretations.rows[i-s->tables[0].count];
         hash128_t source;
         memcpy(&source,row->fields[3].data,16);
         sink_reference(&refs,&row->id);
         sink_reference(&refs,&source);
-        /* Every generated E has an authenticated ordinary Content body or an
-         * exact descriptor-retention manifest. Metadata is not a naked E. */
+        /* Every staged E keeps the existing authenticated-body requirement.
+         * Auxiliary-only interpretation metadata can reference an already
+         * persisted E without resubmitting its P; it never creates that E.
+         * The set presence check below still refuses an absent canonical ID. */
+        if (i>=s->tables[0].count && sink_find(&s->tables[0],&row->id) == NULL)
+            continue;
         hash128_t placement;
         laplace_physicality_id_compute(row->id,1,&placement);
         if (sink_find(&s->tables[1],&placement) == NULL) {
@@ -750,6 +825,14 @@ void laplace_generated_stage_sink(const intent_stage_t *const *stages,
                 sink_invalid("missing or allocation-failed native stage");
             size_t counts[3]={intent_stage_entity_count(stages[i]),intent_stage_physicality_count(stages[i]),
                               intent_stage_attestation_count(stages[i])};
+            if (intent_stage_entity_interpretations_complete(stages[i])) {
+                /* Explicit metadata is separate work, not another canonical E.
+                 * Its row/byte processing is charged to the same caller grant. */
+                total=sink_add(total,intent_stage_entity_interpretation_count(stages[i]));
+                size_t bytes;
+                (void)intent_stage_entity_interpretation_tuple_ptr(stages[i],&bytes);
+                s->receipt.tuple_bytes=sink_add(s->receipt.tuple_bytes,bytes);
+            }
             for (unsigned t=0;t<3;++t) {
                 s->receipt.input_rows[t]=sink_add(s->receipt.input_rows[t],counts[t]);
                 total=sink_add(total,counts[t]);
@@ -771,7 +854,9 @@ void laplace_generated_stage_sink(const intent_stage_t *const *stages,
         if (total != 0) {
             sink_execute(s,SQ_EPOCH,0,NULL,NULL,SPI_OK_SELECT);
             (void)sink_scalar();
-            for (unsigned t=0;t<3;++t) sink_insert(s,t);
+            sink_insert(s,0);
+            sink_interpretations(s);
+            for (unsigned t=1;t<3;++t) sink_insert(s,t);
             sink_fold(s);
         }
         if (SPI_finish()!=SPI_OK_FINISH) elog(ERROR,"generated stage sink: SPI_finish failed");
@@ -825,6 +910,24 @@ Datum pg_laplace_generated_stage_sink_test(PG_FUNCTION_ARGS)
         sink_charge(&budget,3*(sizeof(Datum)+sizeof(bool)));
         deconstruct_array(array,BYTEAOID,-1,false,TYPALIGN_INT,&columns[i],&nulls[i],&lengths[i]);
     }
+    Datum *interpretation_values=NULL,*complete_values=NULL;
+    bool *interpretation_nulls=NULL,*complete_nulls=NULL;
+    if (PG_NARGS() != 7 && PG_NARGS() != 9) sink_invalid("invalid regression adapter arity");
+    if (PG_NARGS() == 9) {
+        if (PG_ARGISNULL(7) || PG_ARGISNULL(8)) sink_invalid("null interpretation regression transport");
+        sink_charge(&budget,toast_raw_datum_size(PG_GETARG_DATUM(7)));
+        sink_charge(&budget,toast_raw_datum_size(PG_GETARG_DATUM(8)));
+        ArrayType *facets=PG_GETARG_ARRAYTYPE_P(7),*complete=PG_GETARG_ARRAYTYPE_P(8);
+        if (ARR_NDIM(facets)!=1 || ARR_DIMS(facets)[0]!=3 || ARR_ELEMTYPE(facets)!=BYTEAOID ||
+            ARR_NDIM(complete)!=1 || ARR_DIMS(complete)[0]!=3 || ARR_ELEMTYPE(complete)!=BOOLOID)
+            sink_invalid("regression interpretation transport requires three stages");
+        int facet_count,complete_count;
+        sink_charge(&budget,6*(sizeof(Datum)+sizeof(bool)));
+        deconstruct_array(facets,BYTEAOID,-1,false,TYPALIGN_INT,
+            &interpretation_values,&interpretation_nulls,&facet_count);
+        deconstruct_array(complete,BOOLOID,1,true,TYPALIGN_CHAR,
+            &complete_values,&complete_nulls,&complete_count);
+    }
     for (unsigned i=0;i<3;++i) {
         bytea *parts[3];
         for (unsigned t=0;t<3;++t) {
@@ -832,12 +935,26 @@ Datum pg_laplace_generated_stage_sink_test(PG_FUNCTION_ARGS)
             sink_charge(&budget,toast_raw_datum_size(columns[t][i]));
             parts[t]=DatumGetByteaPP(columns[t][i]);
         }
+        bytea *facets=NULL;
+        if (interpretation_values != NULL) {
+            if (interpretation_nulls[i] || complete_nulls[i])
+                sink_invalid("null regression interpretation stage");
+            if (DatumGetBool(complete_values[i])) {
+                sink_charge(&budget,toast_raw_datum_size(interpretation_values[i]));
+                facets=DatumGetByteaPP(interpretation_values[i]);
+            }
+        }
         int status=intent_stage_from_tuple_bytes(
             (const uint8 *)VARDATA_ANY(parts[0]),VARSIZE_ANY_EXHDR(parts[0]),
             (const uint8 *)VARDATA_ANY(parts[1]),VARSIZE_ANY_EXHDR(parts[1]),
             (const uint8 *)VARDATA_ANY(parts[2]),VARSIZE_ANY_EXHDR(parts[2]),
             budget.limits.maximum_bytes-budget.bytes,&stages->items[i]);
         if (status!=0) sink_invalid("invalid or over-budget regression tuple stage");
+        if (facets != NULL) {
+            status=intent_stage_import_entity_interpretations(stages->items[i],
+                (const uint8 *)VARDATA_ANY(facets),VARSIZE_ANY_EXHDR(facets));
+            if (status!=0) sink_invalid("invalid or over-budget regression interpretation stage");
+        }
         size_t peak=intent_stage_memory_peak_bytes(stages->items[i]);
         if (peak>budget.limits.maximum_bytes-budget.bytes) sink_invalid("native import peak exceeds grant");
         sink_charge(&budget,intent_stage_memory_bytes(stages->items[i]));

@@ -375,4 +375,38 @@ public sealed class IngestAdmissionSizingTests
     private static extern unsafe IntPtr CaptureInputs(IntPtr value, nuint* count);
     [DllImport("laplace_core", EntryPoint = "physicality_descriptor_capture_free")]
     private static extern void CaptureFree(IntPtr value);
+    [Fact]
+    public void AuxiliaryNativeAllocationClosesWindowWithoutChangingSemanticTransport()
+    {
+        using var stage = IntentStage.New(0);
+        Append(stage,Row(9));
+        var beforeTuples = Tuples(stage);
+        var beforeDigest = stage.SemanticDigest();
+        long serialized = stage.TotalTupleBytes;
+        long beforeAllocated = stage.AllocatedBytes;
+        var before = IngestAdmissionSizing.MeasureParts(serialized,[stage],
+            default,default,0,0,growingStages:false);
+        Assert.True(before.ModeledSourcePayloadBytes >= beforeAllocated);
+        var id = Hash128.OfCanonical("sizing/facet/entity");
+        var type = Hash128.OfCanonical("sizing/facet/type");
+        for (short tier=0;tier<128;tier++)
+            stage.AddEntityInterpretation(id,tier,type,Source);
+        long afterAllocated = stage.AllocatedBytes;
+        Assert.True(afterAllocated > beforeAllocated);
+        Assert.Equal(serialized,stage.TotalTupleBytes);
+        Assert.Equal(beforeTuples,Tuples(stage));
+        Assert.Equal(beforeDigest,stage.SemanticDigest());
+        var after = IngestAdmissionSizing.MeasureParts(serialized,[stage],
+            default,default,0,0,growingStages:false);
+        Assert.Equal(afterAllocated-beforeAllocated,
+            after.ModeledSourcePayloadBytes-before.ModeledSourcePayloadBytes);
+        Assert.Equal(afterAllocated,IngestAdmissionSizing.HeldNativeStageBytes([stage,stage]));
+        var window = new IngestAdmissionWindow(before.Add(before).ModeledSourcePayloadBytes);
+        window.Add(before);
+        Assert.False(window.ShouldFlushBefore(before));
+        Assert.True(window.ShouldFlushBefore(after));
+        Assert.False(stage.IsClosed);
+    }
+
+
 }

@@ -565,14 +565,18 @@ static void admission_hydrate(admission_state *s, const hash128_t *pending, size
     ++s->rounds;
 }
 
-static ArrayType *admission_output(admission_state *s, intent_stage_table_t table, size_t *tuple_bytes)
+/* Fields 0..2 retain the historical E/P/A bytes; field 3 carries the
+ * authoritative interpretation stream without changing those transports. */
+static ArrayType *admission_output(admission_state *s, int field, size_t *tuple_bytes)
 {
     size_t sizes[3], bytes = ARR_OVERHEAD_NONULLS(1);
     const uint8_t *parts[3];
     ArrayType *array;
     char *cursor;
     for (size_t i = 0; i < 3; ++i) {
-        parts[i] = intent_stage_tuple_ptr(s->output[i], table, &sizes[i]);
+        parts[i] = field == 3
+            ? intent_stage_entity_interpretation_tuple_ptr(s->output[i], &sizes[i])
+            : intent_stage_tuple_ptr(s->output[i], (intent_stage_table_t)(field + 1), &sizes[i]);
         *tuple_bytes = admission_add(*tuple_bytes, sizes[i]);
         bytes = admission_add(bytes, INTALIGN(admission_add(VARHDRSZ, sizes[i])));
     }
@@ -585,6 +589,19 @@ static ArrayType *admission_output(admission_state *s, intent_stage_table_t tabl
         if (sizes[i]) memcpy(cursor + VARHDRSZ, parts[i], sizes[i]);
         cursor += INTALIGN(VARHDRSZ + sizes[i]);
     }
+    return array;
+}
+
+static ArrayType *admission_output_completeness(admission_state *s)
+{
+    const size_t bytes = ARR_OVERHEAD_NONULLS(1) + 3 * sizeof(bool);
+    ArrayType *array = admission_alloc(s, bytes);
+    bool *flags;
+    SET_VARSIZE(array, bytes); ARR_NDIM(array) = 1; ARR_ELEMTYPE(array) = BOOLOID;
+    ARR_DIMS(array)[0] = 3; ARR_LBOUND(array)[0] = 1;
+    flags = (bool *)ARR_DATA_PTR(array);
+    for (size_t i = 0; i < 3; ++i)
+        flags[i] = intent_stage_entity_interpretations_complete(s->output[i]) != 0;
     return array;
 }
 
@@ -922,8 +939,8 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
     int64_t maximum_bytes = PG_GETARG_INT64(10), maximum_logical = PG_GETARG_INT64(12);
     int32_t maximum_operations = PG_GETARG_INT32(11);
     int64_t generated_at = PG_GETARG_INT64(9);
-    Datum snapshot_text, values[22] = {0};
-    bool nulls[22] = {false};
+    Datum snapshot_text, values[24] = {0};
+    bool nulls[24] = {false};
     ReturnSetInfo *result;
 
     if (maximum_bytes <= 0 || maximum_logical <= 0 || maximum_operations <= 0 ||
@@ -952,7 +969,9 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
         values[18+i]=PointerGetDatum(admission_view_field(s,forms,form_count,i));
     values[21]=PointerGetDatum(admission_ids(s,materialized.view_missing_ids,materialized.view_missing_count));
     for (int i = 0; i < 3; ++i)
-        values[i] = PointerGetDatum(admission_output(s, (intent_stage_table_t)(i + 1), &tuple_bytes));
+        values[i] = PointerGetDatum(admission_output(s, i, &tuple_bytes));
+    values[22] = PointerGetDatum(admission_output(s, 3, &tuple_bytes));
+    values[23] = PointerGetDatum(admission_output_completeness(s));
     {
         bytea *floor_id = admission_alloc(s, VARHDRSZ + sizeof(floor));
         SET_VARSIZE(floor_id, VARHDRSZ + sizeof(floor));
@@ -976,7 +995,7 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
         size_t result_bytes = 256 + VARHDRSZ + sizeof(generated_source);
         for (int i = 0; i < 7; ++i)
             result_bytes = admission_add(result_bytes, toast_raw_datum_size(values[i]));
-        for (int i = 18; i < 22; ++i)
+        for (int i = 18; i < 24; ++i)
             result_bytes = admission_add(result_bytes, toast_raw_datum_size(values[i]));
         admission_charge(s, result_bytes);
     }
@@ -987,7 +1006,19 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
     values[16] = Int64GetDatum((int64_t)s->stored_vertices);
     InitMaterializedSRF(fcinfo, 0);
     result = (ReturnSetInfo *)fcinfo->resultinfo;
-    if (result->setDesc->natts != 22) admission_invalid("SQL result contract does not match native provider");
+    if (result->setDesc->natts != 24) admission_invalid("SQL result contract does not match native provider");
+    {
+        static const Oid expected_types[24] = {
+            BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID, BYTEAARRAYOID,
+            BYTEAOID, TEXTOID, INT8OID, INT8OID, INT8OID, INT4OID, INT4OID,
+            INT8OID, INT8OID, INT8OID, INT8OID, INT8OID, BYTEAOID,
+            INT2ARRAYOID, INT8ARRAYOID, INT8ARRAYOID, BYTEAARRAYOID,
+            BYTEAARRAYOID, BOOLARRAYOID
+        };
+        for (int i = 0; i < 24; ++i)
+            if (TupleDescAttr(result->setDesc, i)->atttypid != expected_types[i])
+                admission_invalid("SQL result field type does not match native provider");
+    }
     tuplestore_putvalues(result->setResult, result->setDesc, values, nulls);
     admission_cleanup(s);
     PG_RETURN_NULL();

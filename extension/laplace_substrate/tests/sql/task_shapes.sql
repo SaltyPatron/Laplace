@@ -25,7 +25,7 @@ BEGIN
         SELECT 1 FROM unary_children u JOIN nodes c ON c.node_index=u.child_index
          WHERE u.parent_index=p.node_index AND p.tier>0 AND c.id=p.id
            AND c.byte_offset=p.byte_offset AND c.byte_length=p.byte_length)
-    ON CONFLICT (id,tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
     SELECT root_id INTO v_root FROM converse.prompt_tree(p_text) LIMIT 1;
     RETURN v_root;
 END
@@ -59,7 +59,7 @@ DECLARE v_id bytea := public.laplace_hash128_merkle(4::smallint,p_flat);
 BEGIN
     INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
     VALUES(v_id,4,laplace.entity_type_id(p_type),p_source)
-    ON CONFLICT (id,tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents)
     VALUES(public.laplace_hash128_blake3(v_id || decode('0800','hex')),
@@ -106,7 +106,7 @@ BEGIN
     SELECT DISTINCT value,2,laplace.entity_type_id('UD_Annotation_Marker'),p_source
       FROM unnest(v_flat) value
      WHERE NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id=value)
-    ON CONFLICT (id,tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
     v_parse := pg_temp.shape_projection(v_flat,'UD_Parse',p_source);
     PERFORM pg_temp.shape_cell(v_root,laplace.relation_type_id('HAS_PARSE'),v_parse,p_source,p_context);
     RETURN v_parse;
@@ -131,7 +131,7 @@ BEGIN
         v_flat := v_flat || ARRAY[v_slot,pg_temp.shape_ref(p_ordinals[i]),p_types[i]];
         INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
         VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'),p_source)
-        ON CONFLICT (id,tier) DO NOTHING;
+        ON CONFLICT (id) DO NOTHING;
     END LOOP;
     v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('laplace/task-shape/slots-end/v1')];
     v_shape := pg_temp.shape_projection(v_flat,'CodeConcept',p_source);
@@ -164,7 +164,7 @@ BEGIN
         v_flat := v_flat || ARRAY[v_slot,pg_temp.shape_ref(p_ordinals[i]),p_types[i],p_modes[i]];
         INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
         VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'),p_source)
-        ON CONFLICT (id,tier) DO NOTHING;
+        ON CONFLICT (id) DO NOTHING;
     END LOOP;
     v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('laplace/task-shape/slots-end/v2')];
     v_shape := pg_temp.shape_projection(v_flat,'CodeConcept',p_source);
@@ -318,6 +318,21 @@ BEGIN
         END IF;
     END LOOP;
 
+    -- An unrelated smaller summary and a second same-type facet must neither
+    -- erase this exact current form's Word membership nor duplicate candidates.
+    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) VALUES
+        (v_original,0,decode(repeat('00',16),'hex'),v_source),
+        (v_original,3,v_word,v_source);
+    IF (SELECT type_id FROM laplace.entities WHERE id=v_original)<>decode(repeat('00',16),'hex')
+       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=v_original AND type_id=v_word)<>2 THEN
+        RAISE EXCEPTION 'FAIL: current-form fixture did not establish plural memberships and changed summary';
+    END IF;
+    SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
+    IF r.emitted IS DISTINCT FROM ARRAY[v_answer] OR r.complete IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'FAIL: unrelated facet erased or duplicated exact current-form execution: %',r;
+    END IF;
+    RAISE NOTICE 'task shapes: current-form membership survives a smaller unrelated summary and repeated type at another tier';
+
     DELETE FROM laplace.consensus WHERE subject_id=v_original AND type_id=v_predicate AND object_id=v_answer;
     PERFORM pg_temp.shape_cell(v_original,v_predicate,v_changed,v_source,v_context);
     SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
@@ -458,9 +473,12 @@ BEGIN
      WHERE subject_id=v_shape AND type_id=v_inputs AND object_id=v_slot;
     PERFORM pg_temp.shape_reject('slot with negative pooled standing',v_prompt);
     PERFORM pg_temp.shape_cell(v_shape,v_inputs,v_slot,v_source,v_context);
-    UPDATE laplace.entities SET type_id=laplace.entity_type_id('Word') WHERE id=v_input;
-    PERFORM pg_temp.shape_reject('semantic input with incompatible declared type',v_prompt);
-    UPDATE laplace.entities SET type_id=v_concept WHERE id=v_input;
+    -- Membership is plural. A compatibility summary cannot confer a type that
+    -- is absent from the interpretation set.
+    DELETE FROM laplace.entity_interpretations WHERE entity_id=v_input AND type_id=v_concept;
+    PERFORM pg_temp.shape_reject('semantic input without its declared type membership',v_prompt);
+    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    VALUES(v_input,2,v_concept,v_source) ON CONFLICT (id) DO NOTHING;
     RAISE NOTICE 'task shapes: complete source and context testimony plus declared semantic input types are required';
 
     PERFORM pg_temp.shape_surface('«ζαλκ ñébulo»',v_source);
@@ -602,7 +620,22 @@ BEGIN
         IF r.emitted IS DISTINCT FROM ARRAY[v_answer] OR r.complete IS DISTINCT FROM true THEN
             RAISE EXCEPTION 'FAIL: language-specific surface structure changed the shared semantic input/result: %',r;
         END IF;
+        IF i=1 THEN
+            INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) VALUES
+                (v_input,0,decode(repeat('00',16),'hex'),v_source),
+                (v_input,3,v_concept,v_source);
+            IF (SELECT type_id FROM laplace.entities WHERE id=v_input)<>decode(repeat('00',16),'hex')
+               OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=v_input AND type_id=v_concept)<>2 THEN
+                RAISE EXCEPTION 'FAIL: semantic fixture did not establish plural memberships and changed summary';
+            END IF;
+            SELECT * INTO r FROM pg_temp.shape_receipt(v_cue || ' ' || v_word);
+            IF r.emitted IS DISTINCT FROM ARRAY[v_answer] OR r.complete IS DISTINCT FROM true THEN
+                RAISE EXCEPTION 'FAIL: unrelated facet erased or duplicated semantic-input execution: %',r;
+            END IF;
+        END IF;
+
     END LOOP;
+    RAISE NOTICE 'task shapes: semantic-input membership survives a smaller unrelated summary and repeated type at another tier';
     RAISE NOTICE 'task shapes: independently witnessed language structures converge on shared semantic input and predicate identities';
 END
 $language_surfaces$;

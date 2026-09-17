@@ -34,7 +34,7 @@ SELECT id, 2::smallint,
 FROM sym_fixtures WHERE name <> 'dummy_type'
 UNION ALL
 SELECT id, 2::smallint, id, NULL::bytea FROM sym_fixtures WHERE name = 'dummy_type'
-ON CONFLICT (id, tier) DO NOTHING;
+ON CONFLICT (id) DO NOTHING;
 
 -- sym: confirmed symmetric edge, rating 1800 / rd 50 -> signed-positive.
 -- asym: confirmed ASYMMETRIC edge, same ratings -- the control proving the

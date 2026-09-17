@@ -24,7 +24,7 @@ BEGIN
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
         (src, 0, type_t, NULL), (rel_a, 0, type_t, src), (subj, 0, type_t, src),
         (o1, 0, type_t, src), (o2, 0, type_t, src)
-    ON CONFLICT (id, tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
 
     -- 1) fresh insert: three cells in one ordered call (hot relation, plain
     --    relation, NULL object). Every row folds from the initial priors via

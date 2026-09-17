@@ -360,7 +360,7 @@ BEGIN
     -- stride_used = 0.
     INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
     VALUES (laplace.relation_type_id('COMPLETES_TO'), 0, laplace.entity_type_id('RelationType'), src)
-    ON CONFLICT (id, tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
                            rating, rd, volatility, witness_count, last_observed_at)
     VALUES (laplace.consensus_id(w_end, laplace.relation_type_id('COMPLETES_TO'), w_target),

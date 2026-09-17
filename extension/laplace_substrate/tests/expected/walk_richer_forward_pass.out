@@ -34,7 +34,7 @@ WHERE name <> 'dummy_type'
 UNION ALL
 SELECT id, 2::smallint, id, NULL
 FROM walk_c_fixtures WHERE name = 'dummy_type'
-ON CONFLICT (id, tier) DO NOTHING;
+ON CONFLICT (id) DO NOTHING;
 -- obj_confirmed: rating 1800, rd 50 -> eff_mu 1700 (well above neutral 1500).
 -- obj_refuted:   rating 500,  rd 200 -> eff_mu 100 (well below neutral) --
 -- signed-scores negative under 3Ca, so it is excluded at beam-placement time

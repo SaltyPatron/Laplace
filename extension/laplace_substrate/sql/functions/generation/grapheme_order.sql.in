@@ -19,11 +19,13 @@ BEGIN ATOMIC
         -- was spelling out the grapheme runs of RelationType and Language laplace.entities. It
         -- also missed single-grapheme words, which collapse to tier 0.
         --
-        -- Ranked by length rather than content hash (an arbitrary LIMIT is a missing
-        -- ranking); DISTINCT ON dropped, since (entity_id, type) is already unique.
+        -- Interpretations select membership without duplicating the physical
+        -- observations counted below. Each existing physicality remains one row.
         SELECT w.id AS wid, w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id = realize.canonical_id('Word')
+        WHERE EXISTS (
+              SELECT 1 FROM laplace.entity_interpretations i
+              WHERE i.entity_id = w.id AND i.type_id = realize.canonical_id('Word'))
           AND w.trajectory IS NOT NULL
         -- Sampling is by content hash, which is ARBITRARY -- an arbitrary LIMIT without
         -- an ordering is a missing ranking. The honest ranking is by trajectory length,

@@ -32,7 +32,7 @@
 --                          what else was in the array, and every realize_batch
 --                          consumer inherited it.
 --
---   dangling_entity_type   an entities.type_id with no entities row of its own.
+--   dangling_entity_type   an observed interpretation type with no entity row.
 --                          Nothing can render or describe such a type, so every
 --                          entity wearing it is untypeable at read time. Four of
 --                          them type 16,063 entities here, and none is a named
@@ -80,7 +80,12 @@ BEGIN ATOMIC
     -- construction. Reported once per dangling TYPE, not once per entity wearing
     -- it, so the row count stays proportional to the defect rather than to the
     -- corpus.
-    SELECT DISTINCT e.type_id, NULL::smallint, 'dangling_entity_type'::text
-    FROM laplace.entities e
-    WHERE NOT EXISTS (SELECT 1 FROM laplace.entities t WHERE t.id = e.type_id);
+    SELECT used.type_id, NULL::smallint, 'dangling_entity_type'::text
+    FROM (
+        SELECT i.type_id FROM laplace.entity_interpretations i
+        UNION
+        -- Retain detection on an already incomplete legacy/corrupt sidecar.
+        SELECT e.type_id FROM laplace.entities e
+    ) used
+    WHERE NOT EXISTS (SELECT 1 FROM laplace.entities t WHERE t.id = used.type_id);
 END;

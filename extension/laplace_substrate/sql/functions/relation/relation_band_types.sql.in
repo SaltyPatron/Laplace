@@ -27,7 +27,9 @@ CREATE OR REPLACE FUNCTION laplace.relation_band_types(p_band int)
 BEGIN ATOMIC
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
     FROM laplace.entities e
-    WHERE e.type_id = laplace.entity_type_id('RelationType')
+    WHERE EXISTS (
+          SELECT 1 FROM laplace.entity_interpretations i
+          WHERE i.entity_id = e.id AND i.type_id = laplace.entity_type_id('RelationType'))
       AND consensus.relation_highway_band(e.id) = p_band;
 END;
 
@@ -40,7 +42,9 @@ CREATE OR REPLACE FUNCTION laplace.relation_band_types(p_bands int[])
 BEGIN ATOMIC
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
     FROM laplace.entities e
-    WHERE e.type_id = laplace.entity_type_id('RelationType')
+    WHERE EXISTS (
+          SELECT 1 FROM laplace.entity_interpretations i
+          WHERE i.entity_id = e.id AND i.type_id = laplace.entity_type_id('RelationType'))
       AND consensus.relation_highway_band(e.id) = ANY (p_bands);
 END;
 

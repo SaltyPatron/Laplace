@@ -59,7 +59,8 @@ CREATE TYPE pg_temp.descriptor_result AS (
     missing_content_count bigint,provider_rounds integer,database_operations integer,
     reserved_peak_bytes bigint,tuple_bytes bigint,floor_index_added_bytes bigint,
     raw_logical_work bigint,stored_vertices bigint,generated_source_id bytea,
-    view_states smallint[],view_missing_first bigint[],view_missing_count bigint[],view_missing_ids bytea[]);
+    view_states smallint[],view_missing_first bigint[],view_missing_count bigint[],view_missing_ids bytea[],
+    entity_interpretations bytea[],entity_interpretations_complete boolean[]);
 CREATE FUNCTION pg_temp.descriptor_call(raw_frames bytea,winner_frames bytea,
     source_ids bytea[],unit_ids bytea[],priors float8[],byte_grant bigint DEFAULT 268435456,
     operation_grant integer DEFAULT 32,logical_grant bigint DEFAULT 1000000)
@@ -80,7 +81,9 @@ SELECT jsonb_build_object('source_forms',(r).source_form_count,'D_count',cardina
     'current',(r).current_content_count,'missing',(r).missing_content_count,'rounds',(r).provider_rounds,
     'operations',(r).database_operations,'peak',(r).reserved_peak_bytes,'logical',(r).raw_logical_work,
     'tuple_bytes',(r).tuple_bytes,'E_stages',cardinality((r).entities),'P_stages',cardinality((r).physicalities),
-    'A_stages',cardinality((r).attestations),'generated_A_bytes',octet_length((r).attestations[3]))
+    'A_stages',cardinality((r).attestations),'generated_A_bytes',octet_length((r).attestations[3]),
+    'interpretation_stages',cardinality((r).entity_interpretations),
+    'interpretations_complete',(r).entity_interpretations_complete)
 $$;
 CREATE TEMP TABLE descriptor_admitted ON COMMIT DROP AS
 SELECT r.* FROM descriptor_source s CROSS JOIN LATERAL pg_temp.descriptor_call(
@@ -104,7 +107,13 @@ BEGIN
        OR result.database_operations<>2+2*result.provider_rounds
        OR result.reserved_peak_bytes>268435456 OR result.raw_logical_work<=4
        OR result.tuple_bytes<=0 OR cardinality(result.entities)<>3 OR cardinality(result.physicalities)<>3
-       OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])=0 THEN
+       OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])=0
+       OR cardinality(result.entity_interpretations)<>3
+       OR result.entity_interpretations_complete IS DISTINCT FROM ARRAY[true,true,true]
+       OR array_position(result.entity_interpretations,NULL) IS NOT NULL
+       OR octet_length(result.entity_interpretations[3])=0
+       OR result.tuple_bytes IS DISTINCT FROM (SELECT sum(octet_length(body)) FROM
+           unnest(result.entities || result.physicalities || result.attestations || result.entity_interpretations) body) THEN
         RAISE EXCEPTION 'physicality admission lost source forms, tuple output, source evidence or bounded provider receipts'
             USING DETAIL=pg_temp.descriptor_receipt(result)::text;
     END IF;
@@ -156,7 +165,13 @@ BEGIN
        OR result.view_missing_count IS DISTINCT FROM ARRAY[1]::bigint[]
        OR result.view_missing_ids IS DISTINCT FROM ARRAY[s.entity_id]
        OR cardinality(result.physicalities)<>3 OR octet_length(result.physicalities[3])=0
-       OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])=0 THEN
+       OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])=0
+       OR cardinality(result.entity_interpretations)<>3
+       OR result.entity_interpretations_complete IS DISTINCT FROM ARRAY[true,true,true]
+       OR array_position(result.entity_interpretations,NULL) IS NOT NULL
+       OR octet_length(result.entity_interpretations[3])=0
+       OR result.tuple_bytes IS DISTINCT FROM (SELECT sum(octet_length(body)) FROM
+           unnest(result.entities || result.physicalities || result.attestations || result.entity_interpretations) body) THEN
         RAISE EXCEPTION 'missing geometry did not retain exact D, native stages and explicit unavailable V'
             USING DETAIL=pg_temp.descriptor_receipt(result)::text;
     END IF;
@@ -213,6 +228,8 @@ BEGIN
     IF actual.entities IS DISTINCT FROM expected.entities
        OR actual.physicalities IS DISTINCT FROM expected.physicalities
        OR actual.attestations IS DISTINCT FROM expected.attestations
+       OR actual.entity_interpretations IS DISTINCT FROM expected.entity_interpretations
+       OR actual.entity_interpretations_complete IS DISTINCT FROM expected.entity_interpretations_complete
        OR actual.descriptor_ids IS DISTINCT FROM expected.descriptor_ids
        OR actual.view_ids IS DISTINCT FROM expected.view_ids
        OR actual.view_states IS DISTINCT FROM expected.view_states

@@ -421,7 +421,10 @@ public sealed partial class NpgsqlSubstrateWriter
         NpgsqlConnection conn, NpgsqlTransaction tx, bool epochRoute,
         PhysicalityAdmissionBatch? physicalityAdmission,
         IReadOnlyList<IntentStage> stages,
+        IReadOnlyList<EntityInterpretationRow> interpretations,
         Hash128? workingSetToken,
+        Hash128? originalToken,
+        bool originalReceiptPresent,
         Hash128? legacyWorkingSetToken,
         Hash128? legacySingletonToken,
         Hash128? workingSetSource,
@@ -433,7 +436,7 @@ public sealed partial class NpgsqlSubstrateWriter
         using var preparationDiagnostic = MeasureApplyPhase("native-tuples-and-merge-preparation");
         var prepSw = System.Diagnostics.Stopwatch.StartNew();
         var copyTransactions = new CopyTransactionCounts();
-        var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
+        var ents = CollectEntityCopyRows(stages, out var entBlobs);
         var physBlobs = CollectBlobs(stages, IntentStageTable.Physicalities, 10, "physicalities");
         // 14 since fold_replayable (model transient-fold receipts) — must track
         // ATTESTATION_COL_COUNT in engine/core/src/intent_stage.c. This validator
@@ -443,7 +446,6 @@ public sealed partial class NpgsqlSubstrateWriter
         var attBlobs = CollectBlobs(stages, IntentStageTable.Attestations, 14, "attestations");
         long blobMs = prepSw.ElapsedMilliseconds;
 
-        var ents = CopyTupleParser.ParseEntities(entBlobs);
         var phys = CopyTupleParser.ParsePhysicalities(physBlobs);
         var atts = CopyTupleParser.ParseAttestations(attBlobs);
         if (transactionParticipant is null && atts.FoldReplayable.Any(static replayable => !replayable))
@@ -620,7 +622,7 @@ public sealed partial class NpgsqlSubstrateWriter
                         throw new LegacyReplayRequiresReconciliationException(
                             legacyWorkingSetToken!.Value);
                     _log.LogInformation(
-                        "WORKING_SET_REPLAY token={Token} already journaled — skipping apply (v2)",
+                        "WORKING_SET_REPLAY token={Token} already journaled — skipping complete admission",
                         token);
                     return (0, 0, 0, 0, 0, 0, rtLock + rtJournal + rtEpoch, true, commit, copyTransactions);
                 }
@@ -648,6 +650,17 @@ public sealed partial class NpgsqlSubstrateWriter
                     if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled
                         && physicalityAdmission is null)
                     {
+                        // This path performs no COPY: verified legacy rows already
+                        // exist. Complete their interpretation union before sealing
+                        // the same control receipt.
+                        rtJournal += await PersistEntityInterpretationsAsync(
+                            conn, tx, interpretations, ct).ConfigureAwait(false);
+                        if (!originalReceiptPresent && originalToken is { } reconciledOriginal)
+                        {
+                            await InsertJournalReceiptAsync(conn, tx, reconciledOriginal,
+                                workingSetSource, workingSetSources, "reconciled-existing", ct).ConfigureAwait(false);
+                            rtJournal++;
+                        }
                         await InsertJournalReceiptAsync(
                             conn, tx, token, workingSetSource, workingSetSources,
                             receiptKind: "reconciled-existing", ct).ConfigureAwait(false);
@@ -1134,6 +1147,14 @@ public sealed partial class NpgsqlSubstrateWriter
 
             copyDiagnostic?.Complete();
 
+            // COPY uses replica role and chooses one canonical row per ID;
+            // the ordinary INSERT trigger cannot publish its full interpretation
+            // summary. The row must exist before the set-wise summary UPDATE.
+            // Publish the complete managed/native union after every COPY has
+            // finished, before testimony acceptance and the replay commit.
+            rtCopy += await PersistEntityInterpretationsAsync(
+                conn, tx, interpretations, ct).ConfigureAwait(false);
+
             // Consensus acceptance is supplied only by the accumulating writer
             // for a freshly claimed V2 working set. It shares this transaction
             // with the evidence and replay token: a failure leaves no accepted
@@ -1145,16 +1166,16 @@ public sealed partial class NpgsqlSubstrateWriter
                     new WorkingSetAcceptedEvidence(
                         novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(),
                         physicalityAdmission?.GeneratedAttestations ?? [],
-                        physicalityAdmission?.OriginalReplay ?? false), ct);
+                        physicalityAdmission?.OriginalReplay ?? originalReceiptPresent), ct);
                 participantDiagnostic?.Complete();
             }
 
-            // Keep the pre-descriptor semantic source receipt in this same commit.
-            // It prevents backfilling forms from repeating conversation/participant work.
-            if (physicalityAdmission is { OriginalReceiptPresent: false, OriginalToken: { } originalToken }
-                && originalToken != workingSetToken)
+            // Keep the semantic source receipt in this same commit. It prevents
+            // form/facet upgrades from repeating already-accepted participant work.
+            if (!originalReceiptPresent && originalToken is { } semanticReceiptToken
+                && semanticReceiptToken != workingSetToken)
             {
-                await InsertJournalReceiptAsync(conn, tx, originalToken, workingSetSource,
+                await InsertJournalReceiptAsync(conn, tx, semanticReceiptToken, workingSetSource,
                     workingSetSources, "applied", ct).ConfigureAwait(false);
                 rtJournal++;
             }

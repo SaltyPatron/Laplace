@@ -184,6 +184,12 @@ public sealed class IngestRunner
                     stageBytes += s.TotalTupleBytes;
                     stageAtt += s.AttestationCount;
                 }
+                // Commit grain must cover actual held native allocations,
+                // including the auxiliary facet stream. The serialized E/P/A
+                // metric remains unchanged and repeated references retain their
+                // existing transport estimate without double-counting ownership.
+                stageBytes = Math.Max(stageBytes,
+                    IngestAdmissionSizing.HeldNativeStageBytes(c.IntentStages));
             }
             return IngestSizing.EstimateApplyGateBytes(
                 c.Entities.Length,

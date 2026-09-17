@@ -37,7 +37,6 @@ typedef struct ShapeCell
 typedef struct ShapeEntityType
 {
     hash128_t id, type;
-    bool known, conflicting;
 } ShapeEntityType;
 
 typedef struct ShapeRead
@@ -267,14 +266,12 @@ shape_read_entity_types(ShapeRead *read)
         elog(ERROR, "task shape: typed input set read failed");
     for (uint64 i = 0; i < SPI_processed; ++i)
     {
-        bool id_null, type_null, found;
+        bool id_null, type_null;
         Datum id_value = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &id_null);
         Datum type_value = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &type_null);
         if (id_null || type_null) continue;
-        hash128_t id = datum_to_hash128(id_value), type = datum_to_hash128(type_value);
-        ShapeEntityType *entry = hash_search(read->entity_types, &id, HASH_ENTER, &found);
-        if (!found) { entry->known = true; entry->conflicting = false; entry->type = type; }
-        else if (!hash128_eq(&entry->type, &type)) entry->conflicting = true;
+        ShapeEntityType key = {datum_to_hash128(id_value), datum_to_hash128(type_value)};
+        (void) hash_search(read->entity_types, &key, HASH_ENTER, NULL);
         CHECK_FOR_INTERRUPTS();
     }
     SPI_freetuptable(SPI_tuptable);
@@ -458,8 +455,8 @@ shape_instantiate(ShapeRead *read, const ShapeStructure *shape, const ShapeStruc
              * occurrence. Naming alternatives stay in COUPLE; they are not
              * inputs to a current-form slot and receive no ranking preference. */
             const hash128_t *form = read->intent->structure->forms + ordinals[slot];
-            ShapeEntityType *type = hash_search(read->entity_types, form, HASH_FIND, NULL);
-            if (type && type->known && !type->conflicting && hash128_eq(&type->type, fields + 2))
+            ShapeEntityType key = {*form, fields[2]};
+            if (hash_search(read->entity_types, &key, HASH_FIND, NULL))
                 choices[slot].ids[count++] = *form;
         }
         else
@@ -468,9 +465,8 @@ shape_instantiate(ShapeRead *read, const ShapeStructure *shape, const ShapeStruc
             while ((binding = hash_seq_search(&scan)) != NULL)
             {
                 if (!bms_is_member(choices[slot].origin, binding->origins)) continue;
-                ShapeEntityType *type = hash_search(read->entity_types, &binding->id, HASH_FIND, NULL);
-                if (!type || !type->known || type->conflicting ||
-                    !hash128_eq(&type->type, fields + 2)) continue;
+                ShapeEntityType key = {binding->id, fields[2]};
+                if (!hash_search(read->entity_types, &key, HASH_FIND, NULL)) continue;
                 if (count >= read->fanout) { read->failed = true; continue; }
                 choices[slot].ids[count++] = binding->id;
             }
@@ -527,7 +523,7 @@ laplace_task_shape_compile(LaplacePromptIntent *intent, int fanout)
     read.structures = shape_table("task shape structures", sizeof(hash128_t), sizeof(ShapeStructure), read.owner);
     read.witnesses = shape_table("task shape observations", sizeof(hash128_t), sizeof(LaplaceObservation), read.owner);
     read.cells = shape_table("task shape standing", sizeof(LaplaceObservationCell), sizeof(ShapeCell), read.owner);
-    read.entity_types = shape_table("task shape entity types", sizeof(hash128_t), sizeof(ShapeEntityType), read.owner);
+    read.entity_types = shape_table("task shape entity types", sizeof(ShapeEntityType), sizeof(ShapeEntityType), read.owner);
     /* These are the declared fields of the source-shape protocol. Resolve
      * registry metadata once at the boundary; no rendered cue or output label
      * supplies a relation, and aliases cannot silently change this schema. */

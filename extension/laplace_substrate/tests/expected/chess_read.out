@@ -706,7 +706,7 @@ BEGIN
         (good_move, 0, type_t, syz_src), (good_next, 0, type_t, syz_src),
         (bad_move, 0, type_t, other_src), (bad_next, 0, type_t, other_src),
         (good_chunk, 0, type_t, syz_src), (bad_chunk, 0, type_t, other_src)
-    ON CONFLICT (id, tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)

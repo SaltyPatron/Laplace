@@ -112,13 +112,15 @@ public sealed class WorkingSetAtomicReplayTests
 
         var retried = await writer.ApplyWorkingSetAsync(change);
         Assert.False(retried.JournalReplayHit);
+        // One original semantic receipt plus the complete facet admission receipt.
         Assert.Equal(2, await ObservationCountAsync(existing.Id));
         for (int i = 0; i < novelRows; i++)
             Assert.Equal(5, await ObservationCountAsync(H($"att/novel/{i}")));
-        Assert.Equal(1, await JournalCountAsync(source));
+        Assert.Equal(2, await JournalCountAsync(source));
 
         var replay = await writer.ApplyWorkingSetAsync(change);
         Assert.True(replay.JournalReplayHit);
+        Assert.Equal(2, await JournalCountAsync(source));
         Assert.Equal(2, await ObservationCountAsync(existing.Id));
         for (int i = 0; i < novelRows; i++)
             Assert.Equal(5, await ObservationCountAsync(H($"att/novel/{i}")));
@@ -155,7 +157,7 @@ public sealed class WorkingSetAtomicReplayTests
         var retry = await writer.ApplyWorkingSetAsync(change);
         Assert.False(retry.JournalReplayHit);
         Assert.Equal(5, await ObservationCountAsync(attestation.Id));
-        Assert.Equal(1, await JournalCountAsync(source));
+        Assert.Equal(2, await JournalCountAsync(source));
         Assert.Equal(5, await ConsensusWitnessCountAsync(attestation.SubjectId));
 
         var replay = await writer.ApplyWorkingSetAsync(change);
@@ -306,7 +308,7 @@ public sealed class WorkingSetAtomicReplayTests
         Assert.Equal(0, evidenceB.Value.Sum);
         Assert.False(evidenceA.Value.FoldReplayable);
         Assert.False(evidenceB.Value.FoldReplayable);
-        Assert.Equal((2L, 1L), await JournalOwnersAsync(sourceA, sourceB));
+        Assert.Equal((4L, 2L), await JournalOwnersAsync(sourceA, sourceB));
         Assert.Equal(2, (await ConsensusRowAsync(subject, relation, obj))!.Value.WitnessCount);
 
         // Mixed-source ordering is transport only: the same complete analysis
@@ -315,6 +317,7 @@ public sealed class WorkingSetAtomicReplayTests
             reverse, SubstrateApplyEnvelope.ComposeVerifier(reverse)!);
         Assert.True(replay.JournalReplayHit);
         Assert.Equal(2, verifications);
+        Assert.Equal((4L, 2L), await JournalOwnersAsync(sourceA, sourceB));
         Assert.Equal(1, (await EvidenceAsync(receiptA.Id, relation, subject))!.Value.Games);
         Assert.Equal(1, (await EvidenceAsync(receiptB.Id, relation, subject))!.Value.Games);
         Assert.Equal(2, (await ConsensusRowAsync(subject, relation, obj))!.Value.WitnessCount);

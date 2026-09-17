@@ -1522,10 +1522,20 @@ int laplace_compose_drain_into_stage(
     compose_emit_filter_t filter = make_emit_filter(r, existing_bitmap, bitmap_bits);
 
     for (size_t i = 0; i < r->entity_count; ++i) {
-        if (!entity_novel(&filter, i)) continue;
         const laplace_compose_entity_t* e = &r->entities[i];
         if (e->packaging) continue;   /* navigation only -- never a row */
-        if (intent_stage_witness_seen(stage, &e->id)) {
+        const int novel = entity_novel(&filter, i);
+        const int seen = intent_stage_witness_seen(stage, &e->id);
+        if ((!novel || seen) && e->tier > 0) {
+            /* Shared T0 presence may be cache-backed without a PostgreSQL E. */
+            if (intent_stage_add_entity_interpretation(
+                    stage, &e->id, (int16_t)e->tier, &e->type_id, source_id) != 0) {
+                free_emit_filter(&filter);
+                return -1;
+            }
+        }
+        if (!novel) continue;
+        if (seen) {
             if (intent_stage_lower_entity_tier(stage, &e->id, (int16_t)e->tier) < 0) {
                 free_emit_filter(&filter);
                 return -1;

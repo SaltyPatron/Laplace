@@ -246,6 +246,8 @@ struct intent_stage {
     byte_buf_t entities;
     byte_buf_t physicalities;
     byte_buf_t attestations;
+    byte_buf_t interpretations;
+    int interpretations_complete;
     hash128_t* witness_slots;
     size_t     witness_cap;
     size_t     witness_count;
@@ -254,6 +256,8 @@ struct intent_stage {
     size_t     maximum_bytes;
     int        allocation_failed;
 };
+
+static int interpretations_valid(const byte_buf_t* buffer);
 
 static int witness_slot_empty(const hash128_t* h) { return (h->hi | h->lo) == 0; }
 static int witness_contains_unlocked(const intent_stage_t* stage, const hash128_t* id);
@@ -371,8 +375,9 @@ intent_stage_t* intent_stage_new_bounded(size_t row_capacity_hint, size_t maximu
     s->allocated_bytes = sizeof(*s);
     s->peak_bytes = sizeof(*s);
     s->maximum_bytes = maximum_bytes;
-    byte_buf_t* buffers[3] = {&s->entities, &s->physicalities, &s->attestations};
-    for (size_t i = 0; i < 3u; ++i) {
+    s->interpretations_complete = 1;
+    byte_buf_t* buffers[4] = {&s->entities, &s->physicalities, &s->attestations, &s->interpretations};
+    for (size_t i = 0; i < 4u; ++i) {
         buffers[i]->allocated_bytes = &s->allocated_bytes;
         buffers[i]->peak_bytes = &s->peak_bytes;
         buffers[i]->maximum_bytes = &s->maximum_bytes;
@@ -392,8 +397,8 @@ intent_stage_t* intent_stage_new_bounded(size_t row_capacity_hint, size_t maximu
 size_t intent_stage_retain_physicalities(intent_stage_t* stage) {
     if (stage == NULL) return 0u;
     size_t released = stage->witness_cap * sizeof(hash128_t);
-    byte_buf_t* discarded[2] = {&stage->entities, &stage->attestations};
-    for (size_t i = 0u; i < 2u; ++i) {
+    byte_buf_t* discarded[3] = {&stage->entities, &stage->attestations, &stage->interpretations};
+    for (size_t i = 0u; i < 3u; ++i) {
         byte_buf_t* buffer = discarded[i];
         released += buffer->cap;
         free(buffer->data);
@@ -407,6 +412,7 @@ size_t intent_stage_retain_physicalities(intent_stage_t* stage) {
     stage->witness_cap = 0u;
     stage->witness_count = 0u;
     stage->allocated_bytes -= released;
+    stage->interpretations_complete = 1;
     return released;
 }
 
@@ -427,6 +433,7 @@ void intent_stage_free(intent_stage_t* stage) {
     free(stage->entities.data);
     free(stage->physicalities.data);
     free(stage->attestations.data);
+    free(stage->interpretations.data);
     free(stage->witness_slots);
     free(stage);
 }
@@ -444,15 +451,14 @@ const char* intent_stage_copy_column_list(intent_stage_table_t table) {
     }
 }
 
-int intent_stage_add_entity(
-    intent_stage_t*  stage,
+static int append_entity_row(
+    byte_buf_t* b,
     const hash128_t* id,
     int16_t          tier,
     const hash128_t* type_id,
     const hash128_t* first_observed_by) {
-    if (!stage || !id || !type_id) return -1;
+    if (!b || !id || !type_id) return -1;
     if (tier < 0 || tier > 255) return -1;
-    byte_buf_t* b = &stage->entities;
 
     if (buf_append_be16(b, ENTITY_COL_COUNT) != 0) return -1;
     if (buf_append_field_hash128(b, id) != 0) return -1;
@@ -465,6 +471,47 @@ int intent_stage_add_entity(
     }
     b->row_count++;
     return 0;
+}
+
+static int interpretation_seed_legacy(intent_stage_t* stage) {
+    if (stage->interpretations_complete) return 0;
+    if (!interpretations_valid(&stage->entities)) return -1;
+    if (stage->entities.len != 0u &&
+        buf_append(&stage->interpretations, stage->entities.data, stage->entities.len) != 0)
+        return -1;
+    stage->interpretations.row_count = stage->entities.row_count;
+    stage->interpretations_complete = 1;
+    return 0;
+}
+
+int intent_stage_add_entity_interpretation(
+    intent_stage_t* stage, const hash128_t* id, int16_t tier,
+    const hash128_t* type_id, const hash128_t* first_observed_by) {
+    if (!stage || !id || !type_id || tier < 0 || tier > 255) return -1;
+    if (interpretation_seed_legacy(stage) != 0) return -1;
+    return append_entity_row(&stage->interpretations,id,tier,type_id,first_observed_by);
+}
+
+int intent_stage_add_entity(
+    intent_stage_t* stage, const hash128_t* id, int16_t tier,
+    const hash128_t* type_id, const hash128_t* first_observed_by) {
+    if (intent_stage_add_entity_interpretation(stage,id,tier,type_id,first_observed_by) != 0)
+        return -1;
+    return append_entity_row(&stage->entities,id,tier,type_id,first_observed_by);
+}
+
+size_t intent_stage_entity_interpretation_count(const intent_stage_t* stage) {
+    return stage ? stage->interpretations.row_count : 0u;
+}
+
+int intent_stage_entity_interpretations_complete(const intent_stage_t* stage) {
+    return stage ? stage->interpretations_complete : 0;
+}
+
+const uint8_t* intent_stage_entity_interpretation_tuple_ptr(
+    const intent_stage_t* stage, size_t* out_len) {
+    if (out_len) *out_len = stage ? stage->interpretations.len : 0u;
+    return stage ? stage->interpretations.data : NULL;
 }
 
 int intent_stage_add_physicality(
@@ -619,6 +666,48 @@ static int import_tuples(byte_buf_t* out, const uint8_t* data, size_t bytes, uin
     return 0;
 }
 
+static int interpretations_valid(const byte_buf_t* buffer) {
+    size_t offset = 0u;
+    while (offset < buffer->len) {
+        const size_t row_len = row_byte_len(buffer->data,buffer->len,offset);
+        if (row_len == 0u) return 0;
+        for (int field = 1; field <= 4; ++field) {
+            const uint8_t* value = NULL;
+            int32_t length = 0;
+            if (row_field_at(buffer->data,buffer->len,offset,field,&value,&length) != 0)
+                return 0;
+            if (field == 2) {
+                if (length != 2 || ((uint16_t)value[0] << 8u | value[1]) > UINT8_MAX)
+                    return 0;
+            } else if (length != 16 && !(field == 4 && length == -1)) return 0;
+        }
+        offset += row_len;
+    }
+    return 1;
+}
+
+int intent_stage_import_entity_interpretations(
+    intent_stage_t* stage, const uint8_t* tuples, size_t bytes) {
+    if (!stage) return -1;
+    /* Validate/copy into a separately charged replacement. Old storage and
+     * completeness survive malformed input or bounded allocation refusal. */
+    byte_buf_t replacement = stage->interpretations;
+    replacement.data = NULL;
+    replacement.len = replacement.cap = replacement.row_count = 0u;
+    int status = import_tuples(&replacement,tuples,bytes,ENTITY_COL_COUNT);
+    if (status == 0 && !interpretations_valid(&replacement)) status = -1;
+    if (status != 0) {
+        stage->allocated_bytes -= replacement.cap;
+        free(replacement.data);
+        return status;
+    }
+    stage->allocated_bytes -= stage->interpretations.cap;
+    free(stage->interpretations.data);
+    stage->interpretations = replacement;
+    stage->interpretations_complete = 1;
+    return 0;
+}
+
 int intent_stage_from_tuple_bytes(
     const uint8_t* entities, size_t entity_bytes,
     const uint8_t* physicalities, size_t physicality_bytes,
@@ -639,6 +728,7 @@ int intent_stage_from_tuple_bytes(
         intent_stage_free(stage);
         return status;
     }
+    stage->interpretations_complete = 0;
     *out_stage = stage;
     return 0;
 }
@@ -783,12 +873,15 @@ int intent_stage_partition(
         }
     }
 
-    for (size_t t = 0; t < 3; ++t) {
+    for (size_t i = 0; i < part_count; ++i)
+        parts[i]->interpretations_complete = src->interpretations_complete;
+    for (size_t t = 0; t < 4; ++t) {
         const byte_buf_t* sb;
         switch (t) {
             case 0: sb = &src->entities;      break;
             case 1: sb = &src->physicalities; break;
-            default: sb = &src->attestations; break;
+            case 2: sb = &src->attestations; break;
+            default: sb = &src->interpretations; break;
         }
         if (sb->row_count == 0) continue;
         byte_buf_t* tbl_outs = (byte_buf_t*)malloc(part_count * sizeof(byte_buf_t));
@@ -800,15 +893,17 @@ int intent_stage_partition(
             switch (t) {
                 case 0: tbl_outs[i] = parts[i]->entities;      break;
                 case 1: tbl_outs[i] = parts[i]->physicalities; break;
-                default: tbl_outs[i] = parts[i]->attestations; break;
+                case 2: tbl_outs[i] = parts[i]->attestations; break;
+                default: tbl_outs[i] = parts[i]->interpretations; break;
             }
         }
-        int rc = partition_one_buf(sb, tbl_outs, part_count, (int)t);
+        int rc = partition_one_buf(sb, tbl_outs, part_count, t == 3 ? 0 : (int)t);
         for (size_t i = 0; i < part_count; ++i) {
             switch (t) {
                 case 0: parts[i]->entities      = tbl_outs[i]; break;
                 case 1: parts[i]->physicalities = tbl_outs[i]; break;
-                default: parts[i]->attestations = tbl_outs[i]; break;
+                case 2: parts[i]->attestations = tbl_outs[i]; break;
+                default: parts[i]->interpretations = tbl_outs[i]; break;
             }
         }
         free(tbl_outs);

@@ -20,7 +20,9 @@ BEGIN ATOMIC
           ON fam.subject_id = et.id
          AND fam.type_id = ANY (consensus.relation_set_ids('PATH_UPWARD'))
         CROSS JOIN wanted w
-        WHERE et.type_id = laplace.entity_type_id('RelationType')
+        WHERE EXISTS (
+              SELECT 1 FROM laplace.entity_interpretations i
+              WHERE i.entity_id = et.id AND i.type_id = laplace.entity_type_id('RelationType'))
           AND COALESCE(consensus.relation_highway_bit(et.id),
                        consensus.relation_highway_bit(fam.object_id)) = ANY (w.bits)
     )

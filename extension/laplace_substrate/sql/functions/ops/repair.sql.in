@@ -137,7 +137,9 @@ BEGIN
             FROM laplace.physicalities p
             JOIN laplace.entities e ON e.id = p.entity_id
             WHERE p.type = 1
-              AND e.type_id = annotation_type
+              AND EXISTS (
+                  SELECT 1 FROM laplace.entity_interpretations i
+                  WHERE i.entity_id = e.id AND i.type_id = annotation_type)
         )
         SELECT 1
         FROM candidates c
@@ -154,7 +156,9 @@ BEGIN
         FROM laplace.physicalities p
         JOIN laplace.entities e ON e.id = p.entity_id
         WHERE p.type = 1
-          AND e.type_id = annotation_type
+          AND EXISTS (
+                  SELECT 1 FROM laplace.entity_interpretations i
+                  WHERE i.entity_id = e.id AND i.type_id = annotation_type)
     )
     UPDATE laplace.physicalities p
        SET id = c.new_id,

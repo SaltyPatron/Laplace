@@ -9,8 +9,9 @@
 -- interpretation relation, not treat the compatibility summary as authority.
 --
 -- HASH(id) is the physical layout because ids are content hashes and therefore
--- distribute independently of modality-relative tier. GREENFIELD: reset and
--- reseed is the upgrade path; an old LIST(tier)/(id,tier) database is rejected.
+-- distribute independently of modality-relative tier. This schema is created in
+-- a new database; an existing LIST(tier)/(id,tier) database remains intact and
+-- is rejected here until an explicit data-preserving conversion is provided.
 CREATE TABLE IF NOT EXISTS entities (
     id                 bytea            NOT NULL CHECK (octet_length(id) = 16),
     tier               smallint         NOT NULL CHECK (tier >= 0 AND tier < 256),
@@ -38,7 +39,7 @@ BEGIN
     WHERE p.partrelid = (current_schema() || '.entities')::regclass;
     IF strategy <> 'h' THEN
         RAISE EXCEPTION
-            'entities uses obsolete partition strategy %; canonical entity identity is id-only and this version requires HASH(id). Recreate the database and reseed.',
+            'entities uses obsolete partition strategy %; canonical entity identity is id-only and this version requires HASH(id). Create a new canonical database and retain the existing database for transfer or rollback.',
             strategy;
     END IF;
 
@@ -85,7 +86,7 @@ BEGIN
 END $$;
 
 -- Storage invariant fallback. The normal ingest spine publishes all
--- interpretations set-wise before canonical COPY in the same control transaction.
+-- interpretations set-wise after canonical COPY in the same control transaction.
 -- Direct SQL/legacy callers still pass through here, so no caller can create a
 -- second logical entity or lose a previously unseen tier/type interpretation.
 CREATE OR REPLACE FUNCTION @extschema@.entity_identity_admit()
@@ -98,6 +99,11 @@ DECLARE
     summary_type bytea;
     summary_source bytea;
 BEGIN
+    -- Direct ordinary INSERT/COPY shares the same canonical write ordering as
+    -- managed/native bulk owners. Lock before observing either the sidecar or E;
+    -- a waiter must see the prior committed facet before computing its summary.
+    PERFORM pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0));
+
     INSERT INTO @extschema@.entity_interpretations AS ei(
         entity_id, tier, type_id, first_observed_by)
     VALUES (NEW.id, NEW.tier, NEW.type_id, NEW.first_observed_by)
@@ -107,7 +113,10 @@ BEGIN
              WHEN EXCLUDED.first_observed_by IS NULL THEN ei.first_observed_by
              WHEN ei.first_observed_by <= EXCLUDED.first_observed_by THEN ei.first_observed_by
              ELSE EXCLUDED.first_observed_by
-           END;
+           END
+     WHERE EXCLUDED.first_observed_by IS NOT NULL
+       AND (ei.first_observed_by IS NULL
+            OR EXCLUDED.first_observed_by < ei.first_observed_by);
 
     SELECT min(i.tier)::smallint,
            (array_agg(i.type_id ORDER BY i.type_id))[1],

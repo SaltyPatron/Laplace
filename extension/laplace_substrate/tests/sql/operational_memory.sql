@@ -11,7 +11,7 @@ RETURNS void LANGUAGE sql AS $admit$
                WHEN 2 THEN 'Word' WHEN 3 THEN 'Sentence' ELSE 'Document' END),
            p_source
       FROM converse.prompt_tree(p_prompt,false) p
-    ON CONFLICT (id,tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
 $admit$;
 
 -- Controlled source testimony plus pooled standing. The actual operation is
@@ -477,7 +477,7 @@ BEGIN
     SELECT id,2,laplace.entity_type_id('Source_Reference'),source
       FROM unnest(ARRAY[source,scope,occurrence,lang,schema,none_id,root_marker,
           features_end,enhanced_end,misc_end,tokens_end,ref_one,ref_two,pos_id,dep_id,answer]) id
-    ON CONFLICT (id,tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
     PERFORM pg_temp.admit_operational_prompt(prompt,source);
     PERFORM pg_temp.admit_operational_prompt(reordered,source);
     PERFORM pg_temp.admit_operational_prompt(wrapped,source);

@@ -243,11 +243,16 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         bool journalReplayHit = false;
         PostgresCommitReceipt? postgresCommit = null;
         int copyTransactionsStarted = 0, copyTransactionsCommitted = 0;
-        bool anyRows = entCount > 0 || physCount > 0 || attCount > 0;
+        bool anyRows = entCount > 0 || physCount > 0 || attCount > 0
+            || managedInterpretations.Count > 0
+            || sourceStages.Any(static stage => stage.EntityInterpretationCount > 0);
 
         PhysicalityAdmissionBatch? physicalityAdmission = null;
         try
         {
+            // Validate coverage while owned stages are inside the existing
+            // cleanup scope, before registry/admission can write anything.
+            var sourceInterpretations = CollectEntityInterpretations(sourceStages, managedInterpretations, ct);
             using (var captureDiagnostic = MeasureApplyPhase("physicality-capture"))
             {
                 physicalityAdmission = PhysicalityAdmissionBatch.Capture(changes, sourceStages, ct);
@@ -268,7 +273,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             if (anyRows)
             {
                 var r = await ApplyStagesCoreAsync(
-                    sourceStages, physicalityAdmission, managedInterpretations,
+                    sourceStages, physicalityAdmission, sourceInterpretations,
                     workingSetToken, legacyWorkingSetToken, legacySingletonToken,
                     workingSetSource, workingSetSources, transactionParticipant, reconciliation, ct);
                 entitiesInserted = r.e;

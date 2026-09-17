@@ -890,7 +890,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
     Oid    types1[1] = { BYTEAOID };
     Datum  args1[1] = { p_word };
     int    rc;
-    Datum  me_curve, me_coord, me_type_id;
+    Datum  me_curve, me_coord;
     int32  me_nconst;
     Oid    geom_oid;
     char  *me_case_class = NULL;
@@ -908,7 +908,7 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
      * candidate curves build inside the batched call below (STABLE functions in
      * filters run per row -- the anchor must never be recomputed per candidate). */
     rc = SPI_execute_with_args(
-        "SELECT structural.word_curve($1), w.coord, w.type_id, w.n_constituents "
+        "SELECT structural.word_curve($1), w.coord, w.n_constituents "
         "FROM laplace.v_word_points w "
         "WHERE w.id = $1 "
         "  AND w.trajectory IS NOT NULL AND w.coord IS NOT NULL "
@@ -920,12 +920,11 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
     {
         HeapTuple me_tup = SPI_tuptable->vals[0];
         TupleDesc me_td  = SPI_tuptable->tupdesc;
-        bool n0, n1, n2, n3;
+        bool n0, n1, n2;
 
         me_curve   = copy_bytea_datum(SPI_getbinval(me_tup, me_td, 1, &n0));
         me_coord   = copy_bytea_datum(SPI_getbinval(me_tup, me_td, 2, &n1));
-        me_type_id = copy_bytea_datum(SPI_getbinval(me_tup, me_td, 3, &n2));
-        me_nconst  = DatumGetInt32(SPI_getbinval(me_tup, me_td, 4, &n3));
+        me_nconst  = DatumGetInt32(SPI_getbinval(me_tup, me_td, 3, &n2));
         geom_oid   = SPI_gettypeid(me_td, 2);
         /* word_curve is NULL when the word has no constituent coords -- no
          * shape to gate on; empty result, same contract as a missing anchor. */
@@ -952,7 +951,11 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
         Datum args2[3] = { p_word, me_coord, Int32GetDatum(500) };
 
         rc = SPI_execute_with_args(
-            "SELECT w.id, w.coord, w.type_id, w.n_constituents "
+            "SELECT w.id, w.coord, EXISTS ("
+            "  SELECT 1 FROM laplace.entity_interpretations self "
+            "  JOIN laplace.entity_interpretations peer ON peer.type_id=self.type_id "
+            "  WHERE self.entity_id=$1 AND peer.entity_id=w.id"
+            "), w.n_constituents "
             "FROM laplace.v_word_points w "
             "WHERE w.trajectory IS NOT NULL AND w.coord IS NOT NULL "
             "  AND w.id <> $1 "
@@ -969,11 +972,11 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
             bool cn0, cn1, cn2, cn3;
             Datum eid   = SPI_getbinval(tup, td, 1, &cn0);
             Datum coord = SPI_getbinval(tup, td, 2, &cn1);
-            Datum tid   = SPI_getbinval(tup, td, 3, &cn2);
+            Datum same_type = SPI_getbinval(tup, td, 3, &cn2);
             Datum ncst  = SPI_getbinval(tup, td, 4, &cn3);
 
             if (cn0 || cn1 || cn2 || cn3) continue;
-            if (!bytea_eq(tid, me_type_id)) continue;
+            if (!DatumGetBool(same_type)) continue;
             if (DatumGetInt32(ncst) != me_nconst) continue;
             raw[n_raw].entity_id  = copy_bytea_datum(eid);
             raw[n_raw].coord      = copy_bytea_datum(coord);

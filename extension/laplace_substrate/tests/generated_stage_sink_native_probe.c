@@ -95,6 +95,10 @@ static size_t actual_cells,actual_groups;
 static int64 actual_games,actual_score;
 static int64 period_games[8],period_scores[8],period_ratings[8],period_phis[8];
 static hash128_t first_accepted;
+static int16 expected_canonical_tier=2;
+static size_t interpretation_rows;
+static uint32 interpretation_tiers;
+static bool interpretation_missing;
 
 /* Array contents are explicit Datum vectors in this controlled SPI double.
  * Production uses PostgreSQL construct_md_array; no emulated SQL is evaluated. */
@@ -169,7 +173,7 @@ int SPI_execute_plan(SPIPlanPtr plan,Datum *values,const char *nulls,bool read_o
         size_t n=array_count(values[0]);Datum *ids=array_values(values[0]);
         for(unsigned c=0;c<sink_column_counts[query-SQ_ENTITIES];++c)
             CHECK(array_count(values[c])==n);
-        if(query==SQ_ENTITIES)CHECK(n==1 && DatumGetInt16(array_values(values[1])[0])==1);
+        if(query==SQ_ENTITIES)CHECK(n==1 && DatumGetInt16(array_values(values[1])[0])==expected_canonical_tier);
         if(query==SQ_PHYSICALITIES)CHECK(n==1);
         if(!(query==SQ_ATTESTATIONS && accept_none))
             for(size_t i=0;i<n && (query!=SQ_ATTESTATIONS || i<accept_limit);++i) {
@@ -178,6 +182,21 @@ int SPI_execute_plan(SPIPlanPtr plan,Datum *values,const char *nulls,bool read_o
                     memcpy(&first_accepted,VARDATA_ANY(DatumGetByteaPP(ids[i])),16);
             }
         return SPI_OK_INSERT_RETURNING;
+    }
+    if(query==SQ_INTERPRETATIONS) {
+        interpretation_rows=array_count(values[0]);interpretation_tiers=0;
+        for(unsigned c=1;c<5;++c)CHECK(array_count(values[c])==interpretation_rows);
+        for(size_t i=0;i<interpretation_rows;++i) {
+            int16 tier=DatumGetInt16(array_values(values[1])[i]);
+            CHECK(tier>=0 && tier<32);interpretation_tiers|=UINT32_C(1)<<tier;
+            hash128_t type=laplace_content_tier_type_id((uint8_t)tier);
+            bytea *id=DatumGetByteaPP(array_values(values[0])[i]);
+            bytea *actual_type=DatumGetByteaPP(array_values(values[2])[i]);
+            CHECK(VARSIZE_ANY_EXHDR(id)==16 && memcmp(VARDATA_ANY(id),&novel_entity,16)==0);
+            CHECK(VARSIZE_ANY_EXHDR(actual_type)==16 && memcmp(VARDATA_ANY(actual_type),&type,16)==0);
+            CHECK(!DatumGetBool(array_values(values[4])[i]));
+        }
+        result_add(BoolGetDatum(interpretation_missing));return SPI_OK_SELECT;
     }
     if(query==SQ_FOLD) {
         actual_cells=array_count(values[0]);CHECK(actual_cells==1);
@@ -218,7 +237,8 @@ static SinkState *probe_state(const intent_stage_t *const *stages,size_t count)
 static void reset_spi(void)
 {
     memset(query_calls,0,sizeof(query_calls));actual_cells=actual_groups=0;actual_games=actual_score=0;
-    accept_none=all_present=omit_reference=false;accept_limit=SIZE_MAX;
+    accept_none=all_present=omit_reference=interpretation_missing=false;accept_limit=SIZE_MAX;
+    interpretation_rows=0;interpretation_tiers=0;
 }
 static void add_witness(intent_stage_t *stage,const hash128_t *subject,const hash128_t *object,
                         hash128_t source,hash128_t context,int64 games,int64 score,int64 phi,int64 rating)
@@ -242,6 +262,7 @@ int main(void)
     hash128_t tier1=laplace_content_tier_type_id(1),tier2=laplace_content_tier_type_id(2);
     CHECK(intent_stage_add_entity(stage,&novel_entity,2,&tier2,&source)==0);
     CHECK(intent_stage_add_entity(stage,&novel_entity,1,&tier1,&source)==0);
+    CHECK(intent_stage_lower_entity_tier(stage,&novel_entity,0)==1); // historical E pair is not an observation
     for(unsigned i=0;i<2;++i)CHECK(intent_stage_add_physicality(stage,&placement,&novel_entity,1,
         coord,&hilbert,trajectory,2,2,1,0,1,0,INTENT_STAGE_PG_EPOCH_UNIX_US+i)==0);
     add_witness(stage,&children[0],&novel_entity,source,context,1,1000000000,100,1500000000000);
@@ -254,7 +275,8 @@ int main(void)
     CHECK(s->receipt.distinct_rows[0]==1 && s->receipt.distinct_rows[1]==1 && s->receipt.distinct_rows[2]==3);
     reset_spi();sink_validate_bodies(s,stages,1);
     CHECK(s->receipt.logical_work==4 && s->receipt.stored_vertices==4);
-    for(unsigned i=0;i<3;++i)sink_insert(s,i);
+    sink_insert(s,0);sink_interpretations(s);
+    for(unsigned i=1;i<3;++i)sink_insert(s,i);
     sink_fold(s);
     CHECK(s->receipt.inserted_rows[0]==1 && s->receipt.inserted_rows[1]==1 && s->receipt.inserted_rows[2]==3);
     CHECK(actual_games==6 && actual_score==3500000000 && actual_groups==2);
@@ -264,17 +286,27 @@ int main(void)
     CHECK(s->receipt.folded_cells==1 && s->receipt.folded_observations==6 && s->receipt.mask_pairs==2);
     CHECK(query_calls[SQ_PRESENCE]==1 && query_calls[SQ_ENTITIES]==1 && query_calls[SQ_PHYSICALITIES]==1 &&
           query_calls[SQ_ATTESTATIONS]==1 && query_calls[SQ_FOLD]==1 && query_calls[SQ_MASKS]==1);
-    CHECK(s->receipt.operations==12 && prepares==6);
+    CHECK(query_calls[SQ_INTERPRETATIONS]==1 && interpretation_rows==2 && interpretation_tiers==6);
+    CHECK(s->receipt.operations==14 && prepares==7);
+    CHECK(sink_word(s->tables[0].rows[0].fields[1].data,2)==0);
+    CHECK(sink_word(s->tables[0].rows[1].fields[1].data,2)==1);
     sink_cleanup(s);
 
     /* Conflicts returned by PostgreSQL are replays. No accepted A means no
      * consensus or highway call, even when other stage rows are present. */
     reset_spi();all_present=accept_none=true;
     s=probe_state(stages,1);sink_parse(s,stages,1);sink_validate_bodies(s,stages,1);
-    for(unsigned i=0;i<3;++i) { sink_insert(s,i); }
+    sink_insert(s,0);sink_interpretations(s);
+    for(unsigned i=1;i<3;++i) { sink_insert(s,i); }
     sink_fold(s);
     CHECK(s->receipt.inserted_rows[0]==0 && s->receipt.inserted_rows[2]==0);
     CHECK(query_calls[SQ_ENTITIES]==0 && query_calls[SQ_FOLD]==0 && query_calls[SQ_MASKS]==0);
+    CHECK(query_calls[SQ_INTERPRETATIONS]==1 && interpretation_rows==2 && interpretation_tiers==6);
+    interpretation_missing=true;
+    REFUSES(sink_interpretations(s),"absent canonical entity");
+    interpretation_missing=false;
+    s->limits.maximum_bytes=s->bytes;
+    REFUSES(sink_interpretations(s),"byte grant");
     sink_cleanup(s);
 
     /* Only the exact subset returned by INSERT participates in the fold. */
@@ -319,6 +351,10 @@ int main(void)
     CHECK(first_two>0 && first_two<attestation_bytes);
     intent_stage_t *parts[4]={NULL,NULL,NULL,NULL};
     CHECK(intent_stage_from_tuple_bytes(entities,entity_bytes,NULL,0,NULL,0,1024*1024,&parts[0])==0);
+    size_t interpretation_bytes;
+    const uint8 *interpretations=intent_stage_entity_interpretation_tuple_ptr(stage,&interpretation_bytes);
+    CHECK(intent_stage_entity_interpretations_complete(stage));
+    CHECK(intent_stage_import_entity_interpretations(parts[0],interpretations,interpretation_bytes)==0);
     CHECK(intent_stage_from_tuple_bytes(NULL,0,physicalities,physicality_bytes,NULL,0,1024*1024,&parts[1])==0);
     CHECK(intent_stage_from_tuple_bytes(NULL,0,NULL,0,attestations,first_two,1024*1024,&parts[2])==0);
     CHECK(intent_stage_from_tuple_bytes(NULL,0,NULL,0,attestations+first_two,
@@ -354,6 +390,32 @@ int main(void)
     limits.maximum_operations=100;limits.maximum_rows=1;
     REFUSES(laplace_generated_stage_sink(stages,1,&limits,&receipt),"row grant");
     CHECK(memcmp(&receipt,&unchanged,sizeof(receipt))==0);
+
+    /* A complete metadata declaration must cover every staged E identity. */
+    intent_stage_t *omitted=intent_stage_new(0);
+    CHECK(intent_stage_add_entity(omitted,&novel_entity,2,&tier2,&source)==0);
+    CHECK(intent_stage_import_entity_interpretations(omitted,NULL,0)==0);
+    const intent_stage_t *omitted_stages[1]={omitted};
+    reset_spi();s=probe_state(omitted_stages,1);
+    REFUSES(sink_parse(s,omitted_stages,1),"omits staged entity");
+    CHECK(query_calls[SQ_LOCK]==0);
+    intent_stage_free(omitted);
+
+    /* A positive entity probe suppresses canonical E, not the actual source's
+     * interpretation. The same explicit metadata cannot admit an absent E. */
+    intent_stage_t *facet_only=intent_stage_new(0);
+    CHECK(intent_stage_add_entity_interpretation(facet_only,&novel_entity,1,&tier1,&source)==0);
+    const intent_stage_t *facet_stages[1]={facet_only};
+    reset_spi();all_present=true;limits.maximum_rows=1000;limits.maximum_operations=100;
+    laplace_generated_stage_sink(facet_stages,1,&limits,&receipt);
+    CHECK(receipt.input_rows[0]==0 && receipt.inserted_rows[0]==0);
+    CHECK(receipt.input_rows[1]==0 && receipt.inserted_rows[1]==0);
+    CHECK(query_calls[SQ_ENTITIES]==0 && query_calls[SQ_INTERPRETATIONS]==1);
+    CHECK(interpretation_rows==1 && interpretation_tiers==2);
+    reset_spi();unchanged=receipt;
+    REFUSES(laplace_generated_stage_sink(facet_stages,1,&limits,&receipt),"referenced entity");
+    CHECK(query_calls[SQ_INTERPRETATIONS]==0 && memcmp(&receipt,&unchanged,sizeof(receipt))==0);
+    intent_stage_free(facet_only);
 
     /* Framing uses native table enum1/2/3; malformed same-placement body is
      * refused instead of silently choosing an arbitrary different form. */
@@ -392,7 +454,7 @@ int main(void)
         PHYSICALITY_DESCRIPTOR_RETENTION_TYPE,coord,&hilbert,trajectory,2,2,1,0,1,0,
         INTENT_STAGE_PG_EPOCH_UNIX_US)==0);
     const intent_stage_t *retention_stages[1]={retention};
-    reset_spi();limits.maximum_rows=1000;limits.maximum_operations=100;
+    reset_spi();expected_canonical_tier=1;limits.maximum_rows=1000;limits.maximum_operations=100;
     laplace_generated_stage_sink(retention_stages,1,&limits,&receipt);
     CHECK(receipt.inserted_rows[0]==1 && receipt.inserted_rows[1]==1 && receipt.inserted_rows[2]==0);
     CHECK(receipt.logical_work==2 && receipt.stored_vertices==2);

@@ -3,6 +3,7 @@ using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -180,7 +181,10 @@ public sealed class TextEntityBuilderEmissionTests
         byte[]? bitmap = known ? Enumerable.Repeat((byte)255, (tree.NodeCount + 7) / 8).ToArray() : null;
         using var expected = IntentStage.New(tree.NodeCount);
         Assert.True(expected.EmitContentTree(tree, Src, bitmap, out var expectedRoot));
-        var (entities, physicalities) = new TextEntityBuilder(tree, Src, bitmap).Build();
+        var (entities, physicalities) = new TextEntityBuilder(tree, Src, bitmap).Build(out var interpretations);
+        var expectedInterpretations = NpgsqlSubstrateWriter.CollectEntityInterpretations([expected], [], default);
+        Assert.Equal(expectedInterpretations, interpretations.ToArray());
+        Assert.NotEmpty(interpretations);
         if (known) Assert.Empty(entities);
         Assert.NotEmpty(physicalities);
         Assert.True(physicalities.Length > physicalities.Select(p => p.EntityId).Distinct().Count(),
@@ -200,6 +204,66 @@ public sealed class TextEntityBuilderEmissionTests
         Assert.Equal(expected.EmitCopyBinary(IntentStageTable.Physicalities),
             transported.EmitCopyBinary(IntentStageTable.Physicalities));
         Assert.Equal(bytes, ReconstructFromPhysicalities(physicalities, expectedRoot));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TextWitnessConsumersPreserveActualFacetsWithoutExtraCanonicalEntities(bool response)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes("alpha alpha. alpha beta.");
+        Hash128 source = response ? ResponseContent.Source : UserPromptContent.Source;
+        Assert.True(TextEntityBuilder.TryBuildContentWitness(bytes, source, 1.0,
+            out var entities, out _, out _, out var expectedRoot, out _, out var interpretations));
+        Assert.NotEmpty(interpretations);
+        SubstrateChange change;
+        Hash128 root;
+        bool built = response
+            ? ResponseContent.TryBuildWitnessChange(bytes, "facet-response", null, out change, out root)
+            : UserPromptContent.TryBuildWitnessChange(bytes, "facet-prompt", out change, out root);
+        Assert.True(built);
+        Assert.Equal(expectedRoot, root);
+        Assert.True(entities.Select(row => row.Id).ToHashSet()
+            .SetEquals(change.Entities.Select(row => row.Id)));
+        Assert.All(interpretations, row => Assert.Contains(row, change.EntityInterpretations));
+    }
+
+    [Fact]
+    public unsafe void MetadataExportRefusesAStageOnlyGrantAndCanRetryWithoutLosingFacets()
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(string.Concat(
+            Enumerable.Repeat("alpha beta. alpha beta. ", 32)));
+        using var tree = TextDecomposer.Run(bytes);
+        HashComposer.Run(tree, &TextEntityBuilder.Resolver);
+        var bitmap = Enumerable.Repeat((byte)255, (tree.NodeCount + 7) / 8).ToArray();
+        long high = IngestSizing.ResolveWorkingSetBudgetBytes();
+        bool CanStage(long grant)
+        {
+            try
+            {
+                using var candidate = IntentStage.NewBounded(tree.NodeCount, grant);
+                return candidate.EmitContentTree(tree, Src, bitmap, out _);
+            }
+            catch (OutOfMemoryException) { return false; }
+        }
+        Assert.True(CanStage(high));
+        long low = 1;
+        while (low < high)
+        {
+            long middle = low + (high - low) / 2;
+            if (CanStage(middle)) high = middle;
+            else low = middle + 1;
+        }
+        Assert.True(CanStage(low)); // The exact native emission fits this grant.
+        var builder = new TextEntityBuilder(tree, Src, bitmap);
+        var error = Assert.Throws<InvalidOperationException>(() => builder.Build(low, out _));
+        Assert.Contains("managed metadata exhausted", error.Message);
+        var (entities, physicalities) = builder.Build(out var interpretations);
+        Assert.Empty(entities);
+        Assert.NotEmpty(physicalities);
+        Assert.NotEmpty(interpretations);
+        Assert.Equal(bytes, ReconstructFromPhysicalities(physicalities,
+            tree.GetNode(tree.NaturalUnitIndex()).Id));
     }
 
     [Fact]

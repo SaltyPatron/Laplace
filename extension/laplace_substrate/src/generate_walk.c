@@ -131,7 +131,10 @@ ensure_edge_plan(void)
  * WHERE object_id IS NOT NULL exists on every partition.
  */
 static const char *WALK_BATCH_QUERY =
-    "SELECT e.idx, e.neighbor, eo.type_id, e.type_id, e.rating, e.rd, e.witness_count, "
+    "SELECT e.idx, e.neighbor, EXISTS (SELECT 1 "
+    "FROM laplace.entity_interpretations i WHERE i.entity_id=eo.id "
+    "AND i.type_id=laplace.entity_type_id('RelationType')), "
+    "e.type_id, e.rating, e.rd, e.witness_count, "
     "       eo.highway_mask, "
     "       ST_X(ps.coord), ST_Y(ps.coord), ST_Z(ps.coord), ST_M(ps.coord), ps.physicality_tableoid, "
     "       ST_X(po.coord), ST_Y(po.coord), ST_Z(po.coord), ST_M(po.coord), po.physicality_tableoid "
@@ -160,7 +163,10 @@ static const char *WALK_BATCH_QUERY =
  * conditionally in the fetch loop, so this plan's narrower tuple descriptor is
  * the only difference the caller sees. */
 static const char *WALK_BATCH_QUERY_NOGEO =
-    "SELECT e.idx, e.neighbor, eo.type_id, e.type_id, e.rating, e.rd, e.witness_count, "
+    "SELECT e.idx, e.neighbor, EXISTS (SELECT 1 "
+    "FROM laplace.entity_interpretations i WHERE i.entity_id=eo.id "
+    "AND i.type_id=laplace.entity_type_id('RelationType')), "
+    "e.type_id, e.rating, e.rd, e.witness_count, "
     "       eo.highway_mask "
     "FROM ( "
     "  SELECT f.idx, f.subject_id AS anchor, c.object_id AS neighbor, "
@@ -216,29 +222,6 @@ ensure_walk_batch_plan(void)
     }
 }
 
-static hash128_t g_relationtype_type_id;
-static bool      g_relationtype_type_id_ready = false;
-
-static void
-ensure_relationtype_type_id(void)
-{
-    int  rc;
-    bool isnull;
-    Datum d;
-
-    if (g_relationtype_type_id_ready)
-        return;
-
-    rc = SPI_execute("SELECT laplace.entity_type_id('RelationType')", true, 1);
-    if (rc != SPI_OK_SELECT || SPI_processed == 0)
-        elog(ERROR, "walk_branches: could not resolve entity_type_id('RelationType')");
-    d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-    if (isnull)
-        elog(ERROR, "walk_branches: entity_type_id('RelationType') returned NULL");
-    g_relationtype_type_id = datum_to_hash128(d);
-    g_relationtype_type_id_ready = true;
-}
-
 /*
  * The per-edge score (relation_rank x Glicko-complete signed weight, doc 15
  * Phase 3Ca / doc 14 P5) now lives in walk_score.h, shared with S7
@@ -251,7 +234,7 @@ typedef struct RawEdge
 {
     int32  idx;
     Datum  object;
-    Datum  object_type;
+    bool   object_is_relation_type;
     Datum  rel_type;
     int64  rating;
     int64  rd;
@@ -636,7 +619,6 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
         ensure_walk_batch_plan();
     else
         ensure_walk_batch_nogeo_plan();
-    ensure_relationtype_type_id();
 
     cap = 1;
     nodes = (WalkNode *) palloc(sizeof(WalkNode) * cap);
@@ -744,7 +726,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
 
                 raw[r].idx         = DatumGetInt64(SPI_getbinval(tup, td, 1, &isnull));
                 raw[r].object      = copy_bytea_datum(SPI_getbinval(tup, td, 2, &isnull));
-                raw[r].object_type = copy_bytea_datum(SPI_getbinval(tup, td, 3, &isnull));
+                raw[r].object_is_relation_type = DatumGetBool(SPI_getbinval(tup, td, 3, &isnull));
                 raw[r].rel_type    = copy_bytea_datum(SPI_getbinval(tup, td, 4, &isnull));
                 raw[r].rating      = DatumGetInt64(SPI_getbinval(tup, td, 5, &isnull));
                 raw[r].rd          = DatumGetInt64(SPI_getbinval(tup, td, 6, &isnull));
@@ -794,7 +776,6 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                 cands = (RankedEdge *) palloc(sizeof(RankedEdge) * (r - run_start));
                 for (int j = run_start; j < r; j++)
                 {
-                    hash128_t obj_type_id = datum_to_hash128(raw[j].object_type);
                     hash128_t rel_type_id;
                     hash128_t obj_id;
                     bool      found2;
@@ -808,7 +789,7 @@ pg_laplace_walk_branches(PG_FUNCTION_ARGS)
                      * response = confirming the edges it walked; refuting
                      * must be equally visible, not silently absent).
                      */
-                    if (hash128_eq(&obj_type_id, &g_relationtype_type_id))
+                    if (raw[j].object_is_relation_type)
                         continue; /* object is itself a RelationType meta-entity */
                     obj_id = datum_to_hash128(raw[j].object);
                     hash_search(seen, &obj_id, HASH_FIND, &found2);

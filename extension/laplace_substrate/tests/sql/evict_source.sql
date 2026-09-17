@@ -49,7 +49,7 @@ BEGIN
         (m1, 4, marker_t, src_a), (m2, 4, marker_t, src_a),
         (m3, 4, type_t, src_a), (m4, 4, marker_t, src_w),
         (fm_t, 4, type_t, f1), (f1, 4, type_t, src_a), (f2, 4, type_t, src_a)
-    ON CONFLICT (id, tier) DO NOTHING;
+    ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO laplace.ingest_run_journal
         (run_id, source_name, source_id, layer, status)

@@ -139,6 +139,66 @@ BEGIN
     IF n<>1 THEN RAISE EXCEPTION 'exact lookup did not terminate'; END IF;
 END $$;
 
+
+-- Actual native roster and exact/name search must test plural membership,
+-- without multiplying a player when the same type appears at several tiers.
+DO $memberships$
+DECLARE
+    sort_key text;
+    direction text;
+    before_rows jsonb := '{}'::jsonb;
+    after_rows jsonb;
+    key text;
+    player_type bytea := laplace.entity_type_id('Chess_Player');
+    unrelated bytea := decode(repeat('00',16),'hex');
+    players bytea[];
+BEGIN
+    players:=ARRAY[chess.player_id('rank-scope-probe'),decode(repeat('01',16),'hex'),
+        decode(repeat('fe',16),'hex'),chess.player_id('Carlsen, Magnus'),chess.player_id('Carlsen, Inga')];
+    IF (SELECT count(*) FROM laplace.entities WHERE id=ANY(players) AND type_id=player_type)<>5 THEN
+        RAISE EXCEPTION 'membership fixture requires its five canonical players';
+    END IF;
+    FOREACH sort_key IN ARRAY ARRAY['strength','games','rating','rd'] LOOP
+        FOREACH direction IN ARRAY ARRAY['asc','desc'] LOOP
+            key:=sort_key || '/' || direction;
+            SELECT jsonb_build_object(
+                'ranked',(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.ordinality)
+                    FROM chess.ranked(1000,0,sort_key,direction) WITH ORDINALITY r),
+                'named',(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.ordinality)
+                    FROM chess.player_search_candidates(ARRAY['Carlsen'],1000,0,sort_key,direction) WITH ORDINALITY r),
+                'exact',(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.ordinality)
+                    FROM chess.player_search_candidates(ARRAY['rank-scope-probe'],1000,0,sort_key,direction,true) WITH ORDINALITY r))
+              INTO after_rows;
+            before_rows:=before_rows || jsonb_build_object(key,after_rows);
+        END LOOP;
+    END LOOP;
+    INSERT INTO laplace.entities(id,tier,type_id)
+    SELECT id,1,unrelated FROM unnest(players) id
+    UNION ALL SELECT id,2,player_type FROM unnest(players) id;
+    IF (SELECT count(*) FROM laplace.entities WHERE id=ANY(players) AND type_id=unrelated)<>5
+       OR (SELECT count(*) FROM laplace.entity_interpretations
+            WHERE entity_id=ANY(players) AND type_id=player_type)<>10 THEN
+        RAISE EXCEPTION 'fixture failed to change summaries while retaining two player facets per entity';
+    END IF;
+    FOREACH sort_key IN ARRAY ARRAY['strength','games','rating','rd'] LOOP
+        FOREACH direction IN ARRAY ARRAY['asc','desc'] LOOP
+            key:=sort_key || '/' || direction;
+            SELECT jsonb_build_object(
+                'ranked',(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.ordinality)
+                    FROM chess.ranked(1000,0,sort_key,direction) WITH ORDINALITY r),
+                'named',(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.ordinality)
+                    FROM chess.player_search_candidates(ARRAY['Carlsen'],1000,0,sort_key,direction) WITH ORDINALITY r),
+                'exact',(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.ordinality)
+                    FROM chess.player_search_candidates(ARRAY['rank-scope-probe'],1000,0,sort_key,direction,true) WITH ORDINALITY r))
+              INTO after_rows;
+            IF after_rows IS DISTINCT FROM before_rows->key THEN
+                RAISE EXCEPTION 'plural memberships changed native roster/search result or multiplicity for %',key;
+            END IF;
+        END LOOP;
+    END LOOP;
+END
+$memberships$;
+
 SELECT 'chess ranked canonical result scope' AS probe, true AS ok;
 
 ROLLBACK;

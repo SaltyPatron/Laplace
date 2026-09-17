@@ -18,7 +18,8 @@ internal readonly record struct IngestAdmissionSizing(
     long AdmittedTupleBytes,
     long SourceStages,
     long AdmittedStages,
-    long CaptureReservationBytes = 0)
+    long CaptureReservationBytes = 0,
+    long HeldNativeBytes = 0)
 {
     internal IngestAdmissionSizing Add(IngestAdmissionSizing next) => new(
         checked(SerializedBytes + next.SerializedBytes),
@@ -28,13 +29,14 @@ internal readonly record struct IngestAdmissionSizing(
         checked(AdmittedTupleBytes + next.AdmittedTupleBytes),
         checked(SourceStages + next.SourceStages),
         checked(AdmittedStages + next.AdmittedStages),
-        checked(CaptureReservationBytes + next.CaptureReservationBytes));
+        checked(CaptureReservationBytes + next.CaptureReservationBytes),
+        checked(HeldNativeBytes + next.HeldNativeBytes));
 
     internal long ModeledSourcePayloadBytes
     {
         get
         {
-            if (Source.Forms == 0) return SerializedBytes;
+            if (Source.Forms == 0) return Math.Max(SerializedBytes, HeldNativeBytes);
             checked
             {
                 long forms = (long)Source.Forms;
@@ -63,7 +65,7 @@ internal readonly record struct IngestAdmissionSizing(
                 // The later source-local plan may contain both source and admitted
                 // bodies. Its no-reuse upper bound also covers original-only validation.
                 long plan = Source.Add(Admitted).PlanPayloadBound;
-                return Math.Max(SerializedBytes, metadata + clientTransport
+                return Math.Max(SerializedBytes, HeldNativeBytes + metadata + clientTransport
                     + sqlArrays + sqlSourceMetadata + encodedPayload + captures + plan
                     + CaptureReservationBytes);
             }
@@ -161,7 +163,20 @@ internal readonly record struct IngestAdmissionSizing(
             entities, selected.Forms, selected.StoredVertices, attestations));
         return new(serializedBytes, native.Add(managedSource), native.Add(selected),
             sourceTuples, admittedTuples, sourceStages, checked(admittedStages + (managed ? 1L : 0)),
-            captureReservation);
+            captureReservation, HeldNativeStageBytes(stages));
+    }
+
+    // These are the borrowed producer stages, which stay alive alongside the
+    // separate transport/capture/plan allocations above. Native accounting includes
+    // auxiliary interpretation capacity and witness storage without row guesses.
+    internal static long HeldNativeStageBytes(IEnumerable<IntentStage> stages)
+    {
+        long bytes = 0;
+        var seen = new HashSet<IntentStage>(ReferenceEqualityComparer.Instance);
+        foreach (var stage in stages)
+            if (!stage.IsInvalid && seen.Add(stage))
+                bytes = checked(bytes + stage.AllocatedBytes);
+        return bytes;
     }
 
     private static PhysicalityDescriptorSizing.Shape ShapeOf(

@@ -79,7 +79,8 @@ CREATE TYPE pg_temp.descriptor_result AS (
     missing_content_count bigint,provider_rounds integer,database_operations integer,
     reserved_peak_bytes bigint,tuple_bytes bigint,floor_index_added_bytes bigint,
     raw_logical_work bigint,stored_vertices bigint,generated_source_id bytea,
-    view_states smallint[],view_missing_first bigint[],view_missing_count bigint[],view_missing_ids bytea[]);
+    view_states smallint[],view_missing_first bigint[],view_missing_count bigint[],view_missing_ids bytea[],
+    entity_interpretations bytea[],entity_interpretations_complete boolean[]);
 CREATE FUNCTION pg_temp.descriptor_call(raw_frames bytea,winner_frames bytea,
     source_ids bytea[],unit_ids bytea[],priors float8[],byte_grant bigint DEFAULT 268435456,
     operation_grant integer DEFAULT 32,logical_grant bigint DEFAULT 1000000)
@@ -104,6 +105,8 @@ BEGIN
     SELECT p.probin INTO STRICT library FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
     WHERE n.nspname='ops' AND p.proname='physicality_descriptor_materialize';
     EXECUTE format('CREATE FUNCTION pg_temp.deposit_generated(bytea[],bytea[],bytea[],bigint,bigint,bigint,integer) '
+        'RETURNS bigint[] AS %L,%L LANGUAGE C STRICT',library,'pg_laplace_generated_stage_sink_test');
+    EXECUTE format('CREATE FUNCTION pg_temp.deposit_interpreted(bytea[],bytea[],bytea[],bigint,bigint,bigint,integer,bytea[],boolean[]) '
         'RETURNS bigint[] AS %L,%L LANGUAGE C STRICT',library,'pg_laplace_generated_stage_sink_test');
 END
 $adapter$;
@@ -147,6 +150,126 @@ BEGIN
     RAISE NOTICE 'physicality readback: actual native stage deposition and replay preserve E/P/A and exact consensus';
 END
 $deposit$;
+
+-- Reuse genuine generated bodies and witness tuples, changing only declared
+-- Content interpretations. Each mode runs in a rolled-back subtransaction so
+-- later readback fixtures retain their exact original state.
+CREATE FUNCTION pg_temp.content_entity_tuple(p_id bytea,p_tier smallint,p_source bytea)
+RETURNS bytea LANGUAGE SQL IMMUTABLE AS $tuple$
+SELECT int2send(4::smallint) || pg_temp.descriptor_field(p_id) ||
+       pg_temp.descriptor_field(int2send(p_tier)) ||
+       pg_temp.descriptor_field(laplace.entity_type_id(CASE p_tier
+           WHEN 0 THEN 'Codepoint' WHEN 1 THEN 'Grapheme' WHEN 2 THEN 'Word'
+           WHEN 3 THEN 'Sentence' ELSE 'Document' END)) ||
+       pg_temp.descriptor_field(p_source)
+$tuple$;
+DO $interpretations$
+DECLARE
+    a record; s record; picked bytea; target bytea; low_tier smallint; high_tier smallint;
+    low_type bytea; high_type bytea; extra_tier smallint;
+    tuples bytea[]; declared bytea[]; transformed bytea[]; receipt bigint[]; replay bigint[]; role_name text;
+    refused boolean;
+    counts_before bigint[]; state_before jsonb; state_after jsonb;
+BEGIN
+    SELECT * INTO STRICT a FROM physicality_readback_fixture.admitted;
+    SELECT * INTO STRICT s FROM physicality_readback_fixture.source;
+    SELECT part INTO STRICT picked FROM unnest(a.entities) part
+      WHERE octet_length(part)>=68 LIMIT 1;
+    target:=substring(picked FROM 7 FOR 16);
+    -- Select an actual inversion in the canonical vocabulary: min tier and
+    -- min type come from different observed pairs. Never persist that summary
+    -- pair as if it had been supplied by the source.
+    SELECT lo.tier,hi.tier,lo.type_id,hi.type_id
+      INTO STRICT low_tier,high_tier,low_type,high_type
+      FROM (VALUES (1::smallint,laplace.entity_type_id('Grapheme')),
+                   (2::smallint,laplace.entity_type_id('Word')),
+                   (3::smallint,laplace.entity_type_id('Sentence')),
+                   (4::smallint,laplace.entity_type_id('Document'))) lo(tier,type_id)
+      CROSS JOIN (VALUES (1::smallint,laplace.entity_type_id('Grapheme')),
+                   (2::smallint,laplace.entity_type_id('Word')),
+                   (3::smallint,laplace.entity_type_id('Sentence')),
+                   (4::smallint,laplace.entity_type_id('Document'))) hi(tier,type_id)
+      WHERE lo.tier<hi.tier AND lo.type_id>hi.type_id ORDER BY lo.tier,hi.tier LIMIT 1;
+    SELECT min(t)::smallint INTO extra_tier FROM generate_series(1,4) t
+      WHERE t<>low_tier AND t<>high_tier;
+    counts_before:=ARRAY[(SELECT count(*) FROM laplace.entities),
+        (SELECT count(*) FROM laplace.physicalities),(SELECT count(*) FROM laplace.attestations)];
+    SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY c.id,c.type_id,c.subject_id),'[]'::jsonb)
+      INTO state_before FROM laplace.consensus c;
+    FOREACH role_name IN ARRAY ARRAY['origin','replica'] LOOP
+        BEGIN
+            PERFORM set_config('session_replication_role',role_name,true);
+            DELETE FROM laplace.entity_interpretations WHERE entity_id=target;
+            DELETE FROM laplace.entities WHERE id=target;
+            SELECT array_agg(filtered ORDER BY ordinal) INTO tuples
+              FROM unnest(a.entities) WITH ORDINALITY input(blob,ordinal)
+              CROSS JOIN LATERAL (
+                  SELECT coalesce(string_agg(substring(blob FROM at FOR 68),decode('','hex') ORDER BY at),decode('','hex')) AS filtered
+                    FROM generate_series(1,octet_length(blob),68) at
+                   WHERE substring(blob FROM at+6 FOR 16)<>target) keep;
+            tuples[1]:=tuples[1] ||
+                pg_temp.content_entity_tuple(target,high_tier,s.source_id) ||
+                pg_temp.content_entity_tuple(target,low_tier,s.entity_id) ||
+                pg_temp.content_entity_tuple(target,high_tier,s.source_id);
+            -- Complete metadata is authoritative. The raw historical E winner
+            -- is deliberately lowered without changing type, as legacy grammar
+            -- compatibility edits do; origin must not fabricate that pair.
+            declared:=tuples;
+            transformed:=tuples;
+            transformed[1]:=overlay(transformed[1] placing int2send(low_tier)
+                from octet_length(transformed[1])-3*68+27 for 2);
+            refused:=false;
+            BEGIN
+                PERFORM pg_temp.deposit_interpreted(transformed,a.physicalities,a.attestations,
+                    100000,268435456,10000000,1024,
+                    ARRAY[decode('','hex'),decode('','hex'),decode('','hex')],ARRAY[true,true,true]);
+            EXCEPTION WHEN invalid_parameter_value THEN
+                IF SQLERRM<>'generated stage sink: complete interpretation stream omits staged entity' THEN RAISE; END IF;
+                refused:=true;
+            END;
+            IF NOT refused OR EXISTS(SELECT FROM laplace.entities WHERE id=target) THEN
+                RAISE EXCEPTION 'incomplete metadata claim reached canonical insertion under %',role_name;
+            END IF;
+            receipt:=pg_temp.deposit_interpreted(transformed,a.physicalities,a.attestations,
+                100000,268435456,10000000,1024,declared,ARRAY[true,true,true]);
+            IF receipt[1:7] IS DISTINCT FROM ARRAY[1,0,0,0,0,0,0]::bigint[]
+               OR (SELECT count(*) FROM laplace.entities WHERE id=target)<>1
+               OR NOT EXISTS (SELECT FROM laplace.entities WHERE id=target AND tier=low_tier AND type_id=high_type)
+               OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=target)<>2
+               OR NOT EXISTS (SELECT FROM laplace.entity_interpretations WHERE entity_id=target
+                    AND tier=low_tier AND type_id=low_type AND first_observed_by=s.entity_id)
+               OR NOT EXISTS (SELECT FROM laplace.entity_interpretations WHERE entity_id=target
+                    AND tier=high_tier AND type_id=high_type AND first_observed_by=s.source_id) THEN
+                RAISE EXCEPTION 'native sink lost raw facets, invented a summary facet or changed canonical insertion counts under %',role_name;
+            END IF;
+            tuples[1]:=tuples[1] || pg_temp.content_entity_tuple(target,extra_tier,s.source_id);
+            -- Existing canonical identity, no raw E or P transport: auxiliary
+            -- observations must still reach the shared facet authority.
+            receipt:=pg_temp.deposit_interpreted(
+                ARRAY[decode('','hex'),decode('','hex'),decode('','hex')],
+                ARRAY[decode('','hex'),decode('','hex'),decode('','hex')],a.attestations,
+                100000,268435456,10000000,1024,tuples,ARRAY[true,true,true]);
+            replay:=pg_temp.deposit_interpreted(
+                ARRAY[decode('','hex'),decode('','hex'),decode('','hex')],a.physicalities,a.attestations,
+                100000,268435456,10000000,1024,tuples,ARRAY[true,true,true]);
+            SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY c.id,c.type_id,c.subject_id),'[]'::jsonb)
+              INTO state_after FROM laplace.consensus c;
+            IF receipt[1:7] IS DISTINCT FROM ARRAY[0,0,0,0,0,0,0]::bigint[]
+               OR replay[1:7] IS DISTINCT FROM ARRAY[0,0,0,0,0,0,0]::bigint[]
+               OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=target)<>3
+               OR counts_before IS DISTINCT FROM ARRAY[(SELECT count(*) FROM laplace.entities),
+                    (SELECT count(*) FROM laplace.physicalities),(SELECT count(*) FROM laplace.attestations)]
+               OR state_after IS DISTINCT FROM state_before THEN
+                RAISE EXCEPTION 'existing-E facet admission/replay changed canonical rows or evidence under %',role_name;
+            END IF;
+            RAISE SQLSTATE 'ZX001' USING MESSAGE='restore interpretation fixture';
+        EXCEPTION WHEN SQLSTATE 'ZX001' THEN NULL;
+        END;
+    END LOOP;
+    RAISE NOTICE 'physicality readback: native sink preserves exact plural facets for novel and present entities under origin and replica without fabricated summary facets or repeated evidence';
+END
+$interpretations$;
+
 DO $rollback$
 DECLARE s record; fresh record; unit bytea; counts_before bigint[]; counts_after bigint[];
     consensus_before jsonb; consensus_after jsonb; refused boolean:=false; message text;
@@ -162,11 +285,11 @@ BEGIN
     SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY c.id,c.type_id,c.subject_id),'[]'::jsonb)
       INTO consensus_before FROM laplace.consensus c;
     -- All sink plans were warmed by the actual successful write above. The
-    -- warm path is lock, presence, epoch, E, P, A, fold, masks. Grant six thus
-    -- fails after the new A INSERT (or after fold if E was already retained).
+    -- warm path is lock, presence, epoch, E, interpretations, P, A, fold,
+    -- masks. Grant seven fails after A INSERT (or after fold if E was retained).
     BEGIN
         PERFORM pg_temp.deposit_generated(fresh.entities,fresh.physicalities,fresh.attestations,
-            100000,268435456,10000000,6);
+            100000,268435456,10000000,7);
     EXCEPTION WHEN program_limit_exceeded THEN
         GET STACKED DIAGNOSTICS message=MESSAGE_TEXT;
         IF message<>'generated stage sink: database operation grant exhausted' THEN RAISE; END IF;

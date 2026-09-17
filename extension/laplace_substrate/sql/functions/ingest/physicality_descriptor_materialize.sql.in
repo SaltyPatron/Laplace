@@ -2,6 +2,24 @@
 -- tuple bodies, without a stream header/trailer, aligned E/P/A by stage.
 -- Raw source forms precede placement dedup. Admitted providers are the actual
 -- legacy Content placement winners, used only after an explicit database miss.
+-- PostgreSQL cannot replace a function's OUT shape in place. Retire only
+-- the exact former 22-column contract; no CASCADE or unrelated owner is removed.
+-- Fresh installs and already-upgraded functions keep normal replacement.
+DO $physicality_transport_upgrade$
+DECLARE old_shape pg_catalog.pg_proc%ROWTYPE;
+BEGIN
+    SELECT * INTO old_shape FROM pg_catalog.pg_proc
+    WHERE oid = pg_catalog.to_regprocedure('ops.physicality_descriptor_materialize(bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],bigint,bigint,integer,bigint)');
+    IF FOUND
+       AND cardinality(old_shape.proallargtypes) = 35
+       AND old_shape.proargnames[14:35] = ARRAY['entities','physicalities','attestations','descriptor_ids','view_ids','floor_receipt','snapshot_receipt','source_form_count','current_content_count','missing_content_count','provider_rounds','database_operations','reserved_peak_bytes','tuple_bytes','floor_index_added_bytes','raw_logical_work','stored_vertices','generated_source_id','view_states','view_missing_first','view_missing_count','view_missing_ids']::text[]
+       AND old_shape.proallargtypes[14:35] = ARRAY['bytea[]'::regtype,'bytea[]'::regtype,'bytea[]'::regtype,'bytea[]'::regtype,'bytea[]'::regtype,'bytea'::regtype,'text'::regtype,'bigint'::regtype,'bigint'::regtype,'bigint'::regtype,'integer'::regtype,'integer'::regtype,'bigint'::regtype,'bigint'::regtype,'bigint'::regtype,'bigint'::regtype,'bigint'::regtype,'bytea'::regtype,'smallint[]'::regtype,'bigint[]'::regtype,'bigint[]'::regtype,'bytea[]'::regtype]::oid[]
+       AND old_shape.proargmodes[14:35] = array_fill('t'::"char", ARRAY[22]) THEN
+        DROP FUNCTION ops.physicality_descriptor_materialize(bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],bigint,bigint,integer,bigint);
+    END IF;
+END
+$physicality_transport_upgrade$;
+
 CREATE OR REPLACE FUNCTION ops.physicality_descriptor_materialize(
     source_entities bytea[],
     source_physicalities bytea[],
@@ -38,11 +56,13 @@ RETURNS TABLE (
     view_states smallint[],
     view_missing_first bigint[],
     view_missing_count bigint[],
-    view_missing_ids bytea[])
+    view_missing_ids bytea[],
+    entity_interpretations bytea[],
+    entity_interpretations_complete boolean[])
 AS 'EXECUTION_LIBRARY', 'pg_laplace_physicality_descriptor_materialize'
 LANGUAGE C STABLE STRICT PARALLEL RESTRICTED;
 
 COMMENT ON FUNCTION ops.physicality_descriptor_materialize(
     bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],
     bigint,bigint,integer,bigint) IS
-'Trusted native ingest boundary: exact raw observations plus explicit producer source priors; one active SQL snapshot for current Content closure. Output stage arrays contain the native source declaration, vocabulary, then generated descriptors/views/structural observations. The returned generated source id is the actual ordinary source-label content root. Descriptors retain exact typed manifests independently of selected child geometry. View state 0 has a non-NULL view id; state 1 has NULL and an exact missing-id slice addressed by zero-based first/count arrays. Receipts describe this operation, not a historical child-geometry witness. Raw logical work counts expanded Content carrier validation; native generated plan allocation has the separate byte ceiling. Reserved bytes are admitted buffers, not backend RSS.';
+'Trusted native ingest boundary: exact raw observations plus explicit producer source priors; one active SQL snapshot for current Content closure. Output stage arrays contain the native source declaration, vocabulary, then generated descriptors/views/structural observations. The auxiliary interpretation tuples and explicit completeness flags align with those three stages; complete empty streams remain authoritative. E/P/A tuple bytes are unchanged; tuple_bytes includes the auxiliary payload. The returned generated source id is the actual ordinary source-label content root. Descriptors retain exact typed manifests independently of selected child geometry. View state 0 has a non-NULL view id; state 1 has NULL and an exact missing-id slice addressed by zero-based first/count arrays. Receipts describe this operation, not a historical child-geometry witness. Raw logical work counts expanded Content carrier validation; native generated plan allocation has the separate byte ceiling. Reserved bytes are admitted buffers, not backend RSS.';

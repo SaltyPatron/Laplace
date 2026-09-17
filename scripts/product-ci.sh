@@ -75,6 +75,14 @@ run_live_tests() {
   bash scripts/test-parallel.sh --profile live --suite generation-eval
 }
 
+run_competitive_model_proof() {
+  # A file-sized GGUF is not a product proof. This gate admits the real code
+  # corpora and a local checkpoint, reads the resulting model testimony through
+  # SQL, synthesizes from the substrate, then requires the exported GGUF to load
+  # and produce substrate-attested behavior in llama.cpp.
+  bash scripts/model-synthesize-ci.sh
+}
+
 check_application_live() {
   local body
   body="$(curl -fsS http://127.0.0.1:5187/health)" || {
@@ -138,12 +146,16 @@ run_deploy() {
   run_install
   run_database_maintenance --prepare
 
-  # Publication proves the installed application process, not knowledge volume.
-  # Structural DB/T0 reconciliation is seed-agnostic; the foundation owner then
-  # admits/resumes data and proves the complete seeded readiness contract.
+  # Mainline means the installed product, not a compile receipt. Publish and
+  # reconcile first; then admit the foundation, exercise database + deployed API
+  # tests, and finally prove a real competitive model path through an external
+  # runtime. Any of those failures is a mainline failure.
   run_publish
   reconcile_installed_product
   run_foundation
+  run_db_tests
+  run_live_tests
+  run_competitive_model_proof
 
   if (( dev_test_rc != 0 )); then
     echo "::error::development tests failed earlier (status $dev_test_rc); integrated lifecycle continued and retained downstream evidence" >&2
@@ -156,7 +168,7 @@ case "$stage" in
     provision_deps
     ;;
   check)
-    bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-deps.sh scripts/test-parallel.sh
+    bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-deps.sh scripts/test-parallel.sh scripts/model-synthesize-ci.sh
     ;;
   reconcile)
     reconcile_installed_product

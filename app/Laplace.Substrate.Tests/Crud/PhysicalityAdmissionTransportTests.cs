@@ -362,6 +362,62 @@ public class PhysicalityAdmissionTransportTests
     }
 
     [Fact]
+    public void MaterializerOutput_PreservesCompleteAuxiliaryPairsWithoutChangingEntityBytes()
+    {
+        using var original = CompleteStage();
+        byte[][] historical = Tables.Select(table => Tuples(original, table)).ToArray();
+        Hash128 digest = original.SemanticDigest();
+        original.AddEntityInterpretation(H(1), 7, H(91), H(51));
+        byte[] interpretations = original.EmitEntityInterpretationTuples();
+        using var imported = NpgsqlSubstrateWriter.ImportPhysicalityOutputStage(
+            historical[0], historical[1], historical[2], interpretations, true, Grant);
+        Assert.True(imported.EntityInterpretationsComplete);
+        Assert.Equal(3, imported.EntityInterpretationCount);
+        Assert.Equal(interpretations, imported.EmitEntityInterpretationTuples());
+        Assert.Equal(digest, imported.SemanticDigest());
+        Assert.Equal(2, imported.EntityCount);
+        for (int i = 0; i < Tables.Length; ++i)
+            Assert.Equal(historical[i], Tuples(imported, Tables[i]));
+        Array.Fill(interpretations, (byte)0);
+        Assert.NotEqual(interpretations, imported.EmitEntityInterpretationTuples());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MaterializerOutput_PreservesExplicitEmptyCompleteness(bool complete)
+    {
+        using var original = CompleteStage();
+        byte[][] historical = Tables.Select(table => Tuples(original, table)).ToArray();
+        using var imported = NpgsqlSubstrateWriter.ImportPhysicalityOutputStage(
+            historical[0], historical[1], historical[2], [], complete, Grant);
+        Assert.Equal(complete, imported.EntityInterpretationsComplete);
+        Assert.Equal(0, imported.EntityInterpretationCount);
+        Assert.Empty(imported.EmitEntityInterpretationTuples());
+        Assert.Equal(2, imported.EntityCount);
+        for (int i = 0; i < Tables.Length; ++i)
+            Assert.Equal(historical[i], Tuples(imported, Tables[i]));
+    }
+
+    [Fact]
+    public void MaterializerOutput_RejectsIncompleteOrMalformedAuxiliaryRows()
+    {
+        using var original = CompleteStage();
+        byte[][] historical = Tables.Select(table => Tuples(original, table)).ToArray();
+        byte[] interpretations = original.EmitEntityInterpretationTuples();
+        Assert.Throws<InvalidOperationException>(() =>
+            NpgsqlSubstrateWriter.ImportPhysicalityOutputStage(
+                historical[0], historical[1], historical[2], interpretations, false, Grant));
+        Assert.Throws<InvalidOperationException>(() =>
+            NpgsqlSubstrateWriter.ImportPhysicalityOutputStage(
+                historical[0], historical[1], historical[2], interpretations[..^1], true, Grant));
+        using var retry = NpgsqlSubstrateWriter.ImportPhysicalityOutputStage(
+            historical[0], historical[1], historical[2], interpretations, true, Grant);
+        Assert.Equal(interpretations, retry.EmitEntityInterpretationTuples());
+        Assert.True(retry.EntityInterpretationsComplete);
+    }
+
+    [Fact]
     public void TupleImport_RoundTripsAllThreeNativeTablesAndOwnsItsCopies()
     {
         byte[][] tuples;

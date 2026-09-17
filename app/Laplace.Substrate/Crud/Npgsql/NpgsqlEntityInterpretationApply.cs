@@ -18,9 +18,145 @@ public sealed partial class NpgsqlSubstrateWriter
     private async Task<int> PersistEntityInterpretationsAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
-        IReadOnlyList<IntentStage> stages,
-        IReadOnlyList<EntityInterpretationRow> managed,
+        IReadOnlyList<EntityInterpretationRow> rows,
         CancellationToken ct)
+    {
+        if (rows.Count == 0) return 0;
+
+        // Five parallel arrays carry 16+2+16+16+1 payload bytes per row before
+        // protocol/container overhead. Reuse the machine-derived flush envelope;
+        // this changes transport grain only, never the admitted interpretation set.
+        long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes();
+        int chunkRows = (int)Math.Max(1, Math.Min(Array.MaxLength,
+            envelope / 96L));
+        int roundTrips = 0;
+
+        for (int start = 0; start < rows.Count; start += chunkRows)
+        {
+            ct.ThrowIfCancellationRequested();
+            int n = Math.Min(chunkRows, rows.Count - start);
+            var ids = new byte[n][];
+            var tiers = new short[n];
+            var types = new byte[n][];
+            var sources = new byte[n][];
+            var sourceNull = new bool[n];
+            for (int i = 0; i < n; i++)
+            {
+                var row = rows[start + i];
+                ids[i] = row.EntityId.ToBytes();
+                tiers[i] = row.Tier;
+                types[i] = row.TypeId.ToBytes();
+                sourceNull[i] = row.FirstObservedBy is null;
+                sources[i] = (row.FirstObservedBy ?? default).ToBytes();
+            }
+
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandTimeout = 0;
+            command.CommandText = SqlCatalog.Get("ingest.entity_interpretations").Text;
+            command.Parameters.Add(new NpgsqlParameter
+            { Value = ids, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            command.Parameters.Add(new NpgsqlParameter
+            { Value = tiers, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
+            command.Parameters.Add(new NpgsqlParameter
+            { Value = types, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            command.Parameters.Add(new NpgsqlParameter
+            { Value = sources, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
+            command.Parameters.Add(new NpgsqlParameter
+            { Value = sourceNull, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Boolean });
+            bool missingEntity = (bool)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+            if (missingEntity)
+                throw new InvalidOperationException("entity interpretation references an absent canonical entity");
+            roundTrips++;
+        }
+
+        return roundTrips;
+    }
+
+
+    private static (IntPtr Ptr,long Len) SelectedEntityInterpretationBuffer(
+        IntentStage stage,out int count)
+    {
+        bool complete = stage.EntityInterpretationsComplete;
+        count = complete ? stage.EntityInterpretationCount : stage.EntityCount;
+        if (count == 0) return default;
+        var (pointer,length) = complete
+            ? stage.EntityInterpretationTupleBuffer()
+            : stage.TupleBuffer(IntentStageTable.Entities);
+        if (pointer == IntPtr.Zero || length <= 0)
+            throw new InvalidOperationException("native entity interpretation count has no tuple payload");
+        if (CopyBlobValidator.Enabled)
+            CopyBlobValidator.Validate(pointer,length,4,"entity_interpretations",count);
+        return (pointer,length);
+    }
+
+    internal static EntityInterpretationRow[] CollectEntityInterpretations(
+        IReadOnlyList<IntentStage> stages, IEnumerable<EntityInterpretationRow> managed,
+        CancellationToken ct = default)
+    {
+        var observed = new List<EntityInterpretationRow>();
+        observed.AddRange(managed);
+        foreach (var stage in stages)
+        {
+            ct.ThrowIfCancellationRequested();
+            var blob = SelectedEntityInterpretationBuffer(stage,out int count);
+            var native = count == 0 ? new List<EntityRow>()
+                : CopyTupleParser.DecodeEntityRows([blob]);
+            if (stage.EntityInterpretationsComplete && stage.EntityCount > 0)
+            {
+                var covered = native.Select(static row => row.Id).ToHashSet();
+                var raw = CopyTupleParser.ParseEntities(
+                    CollectBlobs([stage],IntentStageTable.Entities,4,"entities"));
+                if (raw.Ids.Any(id => !covered.Contains(id)))
+                    throw new InvalidOperationException(
+                        "complete native interpretation stream omits a staged canonical entity");
+            }
+            foreach (var row in native)
+                observed.Add(new EntityInterpretationRow(
+                    row.Id,row.Tier,row.TypeId,row.FirstObservedBy));
+        }
+        // Complete native metadata owns the actual observed pairs, even where
+        // historical E bytes carry a compatibility projection such as lowered
+        // AST altitude. The historical semantic digest still owns those bytes.
+        var result = CanonicalEntityInterpretations(observed,ct);
+        GC.KeepAlive(stages);
+        return result;
+    }
+
+    private static CopyTupleParser.EntityRows CollectEntityCopyRows(
+        IReadOnlyList<IntentStage> stages,out List<(IntPtr Ptr,long Len)> blobs)
+    {
+        var eligible = new HashSet<Hash128>();
+        blobs = new List<(IntPtr Ptr,long Len)>(stages.Count);
+        foreach (var stage in stages)
+        {
+            if (stage.EntityCount == 0) continue;
+            var raw = CopyTupleParser.ParseEntities(
+                CollectBlobs([stage],IntentStageTable.Entities,4,"entities"));
+            eligible.UnionWith(raw.Ids);
+            var blob = SelectedEntityInterpretationBuffer(stage,out int count);
+            if (count == 0)
+                throw new InvalidOperationException(
+                    "complete native interpretation stream omits a staged canonical entity");
+            blobs.Add(blob);
+        }
+        var facets = CopyTupleParser.ParseEntities(blobs);
+        var rows = new CopyTupleParser.EntityRows();
+        for (int i=0;i<facets.Ids.Count;i++)
+        {
+            if (!eligible.Contains(facets.Ids[i])) continue;
+            rows.Ids.Add(facets.Ids[i]);
+            rows.Tiers.Add(facets.Tiers[i]);
+            rows.TypeIds.Add(facets.TypeIds[i]);
+            rows.Rows.Add(facets.Rows[i]);
+        }
+        // Row references borrow the live original stages' selected facet buffers.
+        // Auxiliary-only IDs are never made eligible for canonical entity COPY.
+        return rows;
+    }
+
+    internal static EntityInterpretationRow[] CanonicalEntityInterpretations(
+        IEnumerable<EntityInterpretationRow> input, CancellationToken ct = default)
     {
         var byKey = new Dictionary<EntityInterpretationKey, EntityInterpretationRow>();
 
@@ -41,23 +177,11 @@ public sealed partial class NpgsqlSubstrateWriter
                 byKey[key] = prior with { FirstObservedBy = source };
         }
 
-        foreach (var row in managed)
+        foreach (var row in input)
         {
             ct.ThrowIfCancellationRequested();
             Observe(row);
         }
-
-        // Native/prebuilt/generated stages bypass SubstrateChangeBuilder, so decode
-        // their complete entity rows before the apply core collapses canonical ids.
-        var blobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
-        foreach (var row in CopyTupleParser.DecodeEntityRows(blobs))
-        {
-            ct.ThrowIfCancellationRequested();
-            Observe(new EntityInterpretationRow(
-                row.Id, row.Tier, row.TypeId, row.FirstObservedBy));
-        }
-
-        if (byKey.Count == 0) return 0;
 
         var rows = byKey.Values.ToArray();
         Array.Sort(rows, static (left, right) =>
@@ -73,103 +197,32 @@ public sealed partial class NpgsqlSubstrateWriter
             return left.FirstObservedBy.Value.CompareToBytewise(right.FirstObservedBy.Value);
         });
 
-        // Five parallel arrays carry 16+2+16+16+1 payload bytes per row before
-        // protocol/container overhead. Reuse the machine-derived flush envelope;
-        // this changes transport grain only, never the admitted interpretation set.
-        long envelope = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes();
-        int chunkRows = (int)Math.Max(1, Math.Min(Array.MaxLength,
-            envelope / 96L));
-        int roundTrips = 0;
+        return rows;
+    }
 
-        for (int start = 0; start < rows.Length; start += chunkRows)
+    internal static Hash128 InterpretationReplayToken(
+        Hash128 semanticToken, IEnumerable<EntityInterpretationRow> interpretations)
+    {
+        var rows = CanonicalEntityInterpretations(interpretations);
+        ReadOnlySpan<byte> domain = "LaplaceInterpretationAdmission/v1\0"u8;
+        long length = domain.Length + 16L + 4L + rows.Length * 50L;
+        if (length > Array.MaxLength)
+            throw new OverflowException("interpretation admission digest exceeds its managed buffer limit");
+        var payload = new byte[(int)length];
+        domain.CopyTo(payload);
+        int offset = domain.Length;
+        semanticToken.WriteBytes(payload.AsSpan(offset, 16)); offset += 16;
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+            payload.AsSpan(offset, 4), rows.Length); offset += 4;
+        foreach (var row in rows)
         {
-            ct.ThrowIfCancellationRequested();
-            int n = Math.Min(chunkRows, rows.Length - start);
-            var ids = new byte[n][];
-            var tiers = new short[n];
-            var types = new byte[n][];
-            var sources = new byte[n][];
-            var sourceNull = new bool[n];
-            for (int i = 0; i < n; i++)
-            {
-                var row = rows[start + i];
-                ids[i] = row.EntityId.ToBytes();
-                tiers[i] = row.Tier;
-                types[i] = row.TypeId.ToBytes();
-                sourceNull[i] = row.FirstObservedBy is null;
-                sources[i] = (row.FirstObservedBy ?? default).ToBytes();
-            }
-
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandTimeout = 0;
-            command.CommandText = """
-                WITH input AS MATERIALIZED (
-                    SELECT u.entity_id, u.tier, u.type_id,
-                           CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END AS first_observed_by
-                    FROM unnest($1::bytea[], $2::smallint[], $3::bytea[], $4::bytea[], $5::boolean[])
-                         AS u(entity_id, tier, type_id, source_id, source_is_null)
-                ), persisted AS (
-                    INSERT INTO laplace.entity_interpretations AS ei
-                        (entity_id, tier, type_id, first_observed_by)
-                    SELECT entity_id, tier, type_id, first_observed_by
-                    FROM input
-                    ON CONFLICT (entity_id, tier, type_id) DO UPDATE
-                    SET first_observed_by = CASE
-                        WHEN ei.first_observed_by IS NULL THEN EXCLUDED.first_observed_by
-                        WHEN EXCLUDED.first_observed_by IS NULL THEN ei.first_observed_by
-                        WHEN ei.first_observed_by <= EXCLUDED.first_observed_by THEN ei.first_observed_by
-                        ELSE EXCLUDED.first_observed_by
-                    END
-                    RETURNING entity_id
-                ), summary AS MATERIALIZED (
-                    SELECT i.entity_id,
-                           min(i.tier)::smallint AS tier,
-                           (array_agg(i.type_id ORDER BY i.type_id))[1] AS type_id,
-                           (array_agg(i.first_observed_by ORDER BY i.first_observed_by)
-                               FILTER (WHERE i.first_observed_by IS NOT NULL))[1] AS first_observed_by
-                    FROM input i
-                    GROUP BY i.entity_id
-                ), updated AS (
-                    UPDATE laplace.entities e
-                       SET tier = LEAST(e.tier, s.tier),
-                           type_id = LEAST(e.type_id, s.type_id),
-                           first_observed_by = CASE
-                               WHEN e.first_observed_by IS NULL THEN s.first_observed_by
-                               WHEN s.first_observed_by IS NULL THEN e.first_observed_by
-                               WHEN e.first_observed_by <= s.first_observed_by THEN e.first_observed_by
-                               ELSE s.first_observed_by
-                           END
-                      FROM summary s
-                     WHERE e.id = s.entity_id
-                       AND (e.tier, e.type_id, e.first_observed_by) IS DISTINCT FROM
-                           (LEAST(e.tier, s.tier), LEAST(e.type_id, s.type_id),
-                            CASE
-                                WHEN e.first_observed_by IS NULL THEN s.first_observed_by
-                                WHEN s.first_observed_by IS NULL THEN e.first_observed_by
-                                WHEN e.first_observed_by <= s.first_observed_by THEN e.first_observed_by
-                                ELSE s.first_observed_by
-                            END)
-                    RETURNING e.id
-                )
-                SELECT (SELECT count(*) FROM persisted)::bigint,
-                       (SELECT count(*) FROM updated)::bigint
-                """;
-            command.Parameters.Add(new NpgsqlParameter
-            { Value = ids, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            command.Parameters.Add(new NpgsqlParameter
-            { Value = tiers, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Smallint });
-            command.Parameters.Add(new NpgsqlParameter
-            { Value = types, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            command.Parameters.Add(new NpgsqlParameter
-            { Value = sources, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
-            command.Parameters.Add(new NpgsqlParameter
-            { Value = sourceNull, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Boolean });
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            roundTrips++;
+            row.EntityId.WriteBytes(payload.AsSpan(offset, 16)); offset += 16;
+            payload[offset++] = row.Tier;
+            row.TypeId.WriteBytes(payload.AsSpan(offset, 16)); offset += 16;
+            payload[offset++] = row.FirstObservedBy.HasValue ? (byte)1 : (byte)0;
+            (row.FirstObservedBy ?? default).WriteBytes(payload.AsSpan(offset, 16)); offset += 16;
         }
-
-        return roundTrips;
+        return Hash128.Blake3(payload);
     }
 
     private static Hash128? MinNullableSource(Hash128? left, Hash128? right)

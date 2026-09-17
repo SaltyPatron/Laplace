@@ -48,7 +48,7 @@ public sealed class EntityWriterThroughputTests
     {
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES "
-          + "($1, 0::smallint, $1, NULL) ON CONFLICT (id, tier) DO NOTHING");
+          + "($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
         await cmd.ExecuteNonQueryAsync();
 
@@ -103,7 +103,7 @@ public sealed class WriterThroughputTests
         await using var cmd = _pg.DataSource.CreateCommand(
             "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES "
           + "($1, 0::smallint, $1, NULL), ($2, 0::smallint, $1, NULL), ($3, 0::smallint, $1, NULL) "
-          + "ON CONFLICT (id, tier) DO NOTHING");
+          + "ON CONFLICT (id) DO NOTHING");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputSrc.ToBytes());
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, RelTypeId.ToBytes());

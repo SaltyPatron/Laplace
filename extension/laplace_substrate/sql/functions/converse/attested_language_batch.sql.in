@@ -30,7 +30,9 @@ BEGIN ATOMIC
     SELECT DISTINCT ON (a.subject_id) a.subject_id, a.context_id
     FROM laplace.attestations a
     JOIN laplace.entities e ON e.id = a.context_id
-                           AND e.type_id = realize.canonical_id('Language')
+                           AND EXISTS (
+                                   SELECT 1 FROM laplace.entity_interpretations i
+                                   WHERE i.entity_id = e.id AND i.type_id = realize.canonical_id('Language'))
     WHERE a.subject_id = ANY (p_ids)
     GROUP BY a.subject_id, a.context_id
     ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id;

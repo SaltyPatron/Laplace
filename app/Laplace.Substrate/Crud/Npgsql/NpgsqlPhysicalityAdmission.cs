@@ -364,6 +364,8 @@ public sealed partial class NpgsqlSubstrateWriter
             connection, "laplace_apply_batch", TransactionGucs(Durability), _log, ct).ConfigureAwait(false);
         connectionDiagnostic?.Complete();
         int preparationRoundTrips = 0;
+        var originalToken = workingSetToken;
+        bool originalReceiptPresent = false;
         if (physicalityAdmission is not null)
         {
             using var admissionDiagnostic = MeasureApplyPhase("physicality-provider-admission");
@@ -396,22 +398,59 @@ public sealed partial class NpgsqlSubstrateWriter
                 legacySingletonToken = null;
                 reconciliation = null;
             }
+            originalReceiptPresent = physicalityAdmission.OriginalReceiptPresent;
             admissionDiagnostic?.Complete();
         }
-
-        // Interpretations are part of the same control transaction as the replay
-        // receipt. Native generated stages are already present in `stages` here,
-        // so this one set-sized publication covers managed, prebuilt and generated
-        // producers before canonical entity COPY chooses one id row.
-        preparationRoundTrips += await PersistEntityInterpretationsAsync(
-            connection, transaction, stages, managedInterpretations, ct).ConfigureAwait(false);
+        else if (originalToken is { } original)
+        {
+            // An older semantic receipt proves the source callback was accepted,
+            // but does not prove the new interpretation sidecar was published.
+            await using var probe = connection.CreateCommand();
+            probe.Transaction = transaction;
+            probe.CommandText = SqlCatalog.Get("ingest.flush_receipt_exists").Text;
+            probe.Parameters.AddWithValue(NpgsqlDbType.Bytea, original.ToBytes());
+            originalReceiptPresent = (bool)(await probe.ExecuteScalarAsync(ct))!;
+            preparationRoundTrips++;
+            if (originalReceiptPresent)
+            {
+                legacyWorkingSetToken = null;
+                legacySingletonToken = null;
+                reconciliation = null;
+            }
+        }
+        var interpretations = CollectEntityInterpretations(stages, managedInterpretations, ct);
+        if (workingSetToken is { } semanticToken)
+            workingSetToken = InterpretationReplayToken(semanticToken, interpretations);
 
         var result = await ApplyPreparedStagesCoreAsync(
             connection, transaction, epochRoute, physicalityAdmission,
-            stages, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
+            stages, interpretations, workingSetToken, originalToken, originalReceiptPresent,
+            legacyWorkingSetToken, legacySingletonToken,
             workingSetSource, workingSetSources, transactionParticipant, reconciliation, ct).ConfigureAwait(false);
         result.rt = checked(result.rt + preparationRoundTrips);
         return result;
+    }
+
+    internal static IntentStage ImportPhysicalityOutputStage(
+        ReadOnlySpan<byte> entities, ReadOnlySpan<byte> physicalities,
+        ReadOnlySpan<byte> attestations, ReadOnlySpan<byte> interpretations,
+        bool interpretationsComplete, long maximumBytes)
+    {
+        if (!interpretationsComplete && !interpretations.IsEmpty)
+            throw new InvalidOperationException("incomplete physicality interpretation transport contains auxiliary rows");
+        var stage = IntentStage.FromTupleBytes(entities, physicalities, attestations, maximumBytes);
+        try
+        {
+            // A complete empty stream is meaningful and must replace the legacy
+            // entity-summary fallback just as a nonempty complete stream does.
+            if (interpretationsComplete) stage.ImportEntityInterpretations(interpretations);
+            return stage;
+        }
+        catch
+        {
+            stage.Dispose();
+            throw;
+        }
     }
 
     private static byte[][] ExportStageTuples(
@@ -500,7 +539,12 @@ public sealed partial class NpgsqlSubstrateWriter
         var viewMissingFirst = reader.GetFieldValue<long[]>(19);
         var viewMissingCount = reader.GetFieldValue<long[]>(20);
         var viewMissingIds = reader.GetFieldValue<byte[][]>(21);
+        var interpretations = reader.GetFieldValue<byte[][]>(22);
+        var interpretationsComplete = reader.GetFieldValue<bool[]>(23);
         if (entities.Length != 3 || physicalities.Length != 3 || attestations.Length != 3
+            || interpretations.Length != 3 || interpretationsComplete.Length != 3
+            || entities.Any(bytes => bytes is null) || physicalities.Any(bytes => bytes is null)
+            || attestations.Any(bytes => bytes is null) || interpretations.Any(bytes => bytes is null)
             || forms != input.ObservationSources.Count || descriptors.LongLength != forms
             || views.LongLength != forms || floor.Length != 16 || generatedSource.Length != 16
             || descriptors.Any(id => id is not { Length: 16 }))
@@ -527,7 +571,7 @@ public sealed partial class NpgsqlSubstrateWriter
         long returnedTupleBytes = 0;
         for (int i = 0; i < entities.Length; ++i)
             returnedTupleBytes = checked(returnedTupleBytes + entities[i].LongLength
-                + physicalities[i].LongLength + attestations[i].LongLength);
+                + physicalities[i].LongLength + attestations[i].LongLength + interpretations[i].LongLength);
         if (returnedTupleBytes != reportedTupleBytes)
             throw new InvalidOperationException("physicality tuple transport differs from its retained receipt");
         // Raw ID arrays, view-state/slice arrays, table arrays, floor/source IDs
@@ -535,7 +579,7 @@ public sealed partial class NpgsqlSubstrateWriter
         // Reserve both raw transport and decoded immutable receipt payloads.
         long returnedBytes = checked(returnedTupleBytes + forms * (32L + 2 * IntPtr.Size + 2 + 2 * sizeof(long))
             + viewMissingIds.LongLength * (16L + IntPtr.Size)
-            + 9L * IntPtr.Size + 32 + input.Receipt.SnapshotReceipt.Length * sizeof(char));
+            + 12L * IntPtr.Size + 3L * sizeof(bool) + 32 + input.Receipt.SnapshotReceipt.Length * sizeof(char));
         var decodedViews = PhysicalityViewReceipts.Decode(descriptors, views, viewStates,
             viewMissingFirst, viewMissingCount, viewMissingIds,
             checked(receiverGrant - returnedBytes), maximumLogicalWork);
@@ -552,7 +596,8 @@ public sealed partial class NpgsqlSubstrateWriter
             long remaining = checked(receiverGrant - returnedBytes - generatedBytes);
             if (remaining <= 0)
                 throw new InvalidOperationException("physicality output exhausted its aggregate allocation grant");
-            var stage = IntentStage.FromTupleBytes(entities[i], physicalities[i], attestations[i], remaining);
+            var stage = ImportPhysicalityOutputStage(entities[i], physicalities[i], attestations[i],
+                interpretations[i], interpretationsComplete[i], remaining);
             input.GeneratedStages.Add(stage);
             generatedBytes = checked(generatedBytes + stage.AllocatedBytes);
         }

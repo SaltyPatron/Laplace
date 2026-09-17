@@ -5,7 +5,6 @@ CREATE OR REPLACE FUNCTION generation.consensus_peer(p_id bytea, p_k int DEFAULT
  AS $$
 DECLARE
     v_result bytea;
-    v_type   bytea;
     v_coord  geometry;
     v_curve  geometry;
 BEGIN
@@ -76,7 +75,10 @@ BEGIN
              AND c2.object_id <> p_id
         ) arms
         JOIN laplace.entities x ON x.id = arms.peer
-        JOIN laplace.entities self ON self.id = p_id AND x.type_id = self.type_id
+        WHERE EXISTS (
+            SELECT 1 FROM laplace.entity_interpretations own
+            JOIN laplace.entity_interpretations peer ON peer.type_id = own.type_id
+            WHERE own.entity_id = p_id AND peer.entity_id = x.id)
         GROUP BY x.id
         ORDER BY score DESC
         LIMIT GREATEST(p_k, 0)
@@ -98,8 +100,8 @@ BEGIN
     -- (Rule #3 / Issue 51). p_k is the declared admission/election budget for
     -- both paths. The old fixed 48-row KNN pool silently changed the meaning and
     -- work of the same call regardless of p_k.
-    SELECT a.type_id, a.coord, structural.entity_curve(p_id)
-      INTO v_type, v_coord, v_curve
+    SELECT a.coord, structural.entity_curve(p_id)
+      INTO v_coord, v_curve
     FROM structural.word_anchor(p_id) a;
     IF v_coord IS NULL THEN
         RETURN NULL;
@@ -111,7 +113,11 @@ BEGIN
         FROM (
             SELECT w.id, structural.entity_curve(w.id) AS curve
             FROM laplace.v_word_points w
-            WHERE w.type_id = v_type AND w.id <> p_id AND w.trajectory IS NOT NULL
+            WHERE w.id <> p_id AND w.trajectory IS NOT NULL
+              AND EXISTS (
+                  SELECT 1 FROM laplace.entity_interpretations own
+                  JOIN laplace.entity_interpretations peer ON peer.type_id = own.type_id
+                  WHERE own.entity_id = p_id AND peer.entity_id = w.id)
             ORDER BY w.coord <<->> v_coord
             LIMIT GREATEST(p_k, 0)
         ) knn
