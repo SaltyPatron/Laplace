@@ -71,10 +71,43 @@ run_live_tests() {
   bash scripts/test-parallel.sh --profile live --suite generation-eval
 }
 
+check_application_live() {
+  local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
+  local body
+  body="$(curl -fsS "$base/health")" || {
+    echo "::error::installed laplace-api is not reachable after publication" >&2
+    return 1
+  }
+  if ! grep -q '"status":"ok"' <<<"$body"; then
+    echo "::error::installed laplace-api returned an unexpected liveness document: $body" >&2
+    return 1
+  fi
+}
+
+check_t0_perfcache_runtime() {
+  local host="${PGHOST:-/var/run/postgresql}"
+  local user="${PGUSER:-laplace_admin}"
+  local database="${PGDATABASE:-laplace}"
+  local word_id
+  word_id="$(psql -h "$host" -U "$user" -d "$database" -v ON_ERROR_STOP=1 -X -tAc \
+    "SELECT encode(laplace.word_id('the'),'hex');")" || {
+    echo "::error::installed PostgreSQL runtime cannot execute the T0 perfcache-backed word_id operation" >&2
+    return 1
+  }
+  if [[ ! "$word_id" =~ ^[0-9A-Fa-f]{32}$ ]]; then
+    echo "::error::installed T0 perfcache probe returned an invalid identity: $word_id" >&2
+    return 1
+  fi
+}
+
 reconcile_installed_product() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
+  # Installed product reconciliation is deliberately seed-independent. Corpus
+  # admission remains a separate seed workflow and cannot be required to deploy code.
   bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
+  check_application_live
+  check_t0_perfcache_runtime
   python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
 }
 
