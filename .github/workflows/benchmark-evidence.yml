@@ -1,8 +1,8 @@
 name: Laplace — manual benchmark evidence
 
-# Dispatch-only by design. Long benchmarks are evidence/calibration inputs, not
-# commit/push/PR gates. The measured self-hosted host is shared with delivery, so
-# this workflow uses the same workspace concurrency authority and cannot overlap it.
+# Explicit calibration/evidence lane. The complete measured preparation and run
+# hold the real host file reservation; there is no Actions-level concurrency group
+# that can silently replace a pending operator request.
 on:
   workflow_dispatch:
     inputs:
@@ -45,10 +45,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: laplace-host-lifecycle
-  cancel-in-progress: false
-
 env:
   LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
   LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
@@ -71,14 +67,27 @@ jobs:
           mkdir -p "$receipt"
           printf 'LAPLACE_BENCH_RECEIPT=%s\n' "$receipt" >> "$GITHUB_ENV"
 
-      - name: Resolve and checkout exact revision without destroying retained workspace state
+      - name: Build and measure under one real host reservation
         shell: bash
         env:
           DISPATCH_SHA: ${{ github.sha }}
           REQUESTED_REF: ${{ inputs.target_ref }}
           CHECKOUT_TOKEN: ${{ github.token }}
+          SUITE: ${{ inputs.suite }}
+          REPEATS: ${{ inputs.repeats }}
+          SCALE_WORKERS: ${{ inputs.scale_workers }}
+          CORPUS_DIR: ${{ inputs.corpus_dir }}
+          MOBY_PATH: ${{ inputs.moby_path }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
         run: |
           set -euo pipefail
+          umask 0002
+
+          lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          mkdir -p "$lock_root"
+          exec 9>"$lock_root/host-resource.lock"
+          flock 9
+
           target="${REQUESTED_REF:-}"
           [[ -n "$target" ]] || target="$DISPATCH_SHA"
           printf 'requested_ref=%s\n' "$target" > "$LAPLACE_BENCH_RECEIPT/request.env"
@@ -94,12 +103,14 @@ jobs:
           fi
           git diff --quiet
           git diff --cached --quiet
+
           checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
           GIT_CONFIG_COUNT=1 \
             GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
             GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
             git fetch --no-tags --prune origin "$target"
           unset checkout_auth CHECKOUT_TOKEN
+
           resolved="$(git rev-parse FETCH_HEAD)"
           git checkout --no-overwrite-ignore --detach "$resolved"
           [[ "$(git rev-parse HEAD)" == "$resolved" ]]
@@ -108,14 +119,8 @@ jobs:
           printf 'LAPLACE_BENCH_SHA=%s\n' "$resolved" >> "$GITHUB_ENV"
           printf 'resolved_sha=%s\n' "$resolved" >> "$LAPLACE_BENCH_RECEIPT/request.env"
 
-      - uses: ./.github/actions/setup-laplace-env
+          source scripts/ci-environment.sh
 
-      - name: Validate benchmark registry and dispatch inputs
-        shell: bash
-        env:
-          REPEATS: ${{ inputs.repeats }}
-        run: |
-          set -euo pipefail
           python3 scripts/benchmark_suite.py validate
           python3 scripts/benchmark_suite.py list | tee "$LAPLACE_BENCH_RECEIPT/suite-list.txt"
           [[ "$REPEATS" =~ ^[1-9][0-9]*$ ]] || {
@@ -127,25 +132,21 @@ jobs:
             exit 2
           }
 
-      - name: Record source, runner, hardware and accelerator inventory
-        shell: bash
-        run: |
-          set -euo pipefail
           out="$LAPLACE_BENCH_RECEIPT"
           {
             printf 'schema=laplace.benchmark-host/v2\n'
             printf 'repository=%s\n' "$GITHUB_REPOSITORY"
-            printf 'commit=%s\n' "$LAPLACE_BENCH_SHA"
+            printf 'commit=%s\n' "$resolved"
             printf 'run_id=%s\n' "$GITHUB_RUN_ID"
             printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
-            printf 'suite=%s\n' "${{ inputs.suite }}"
+            printf 'suite=%s\n' "$SUITE"
             printf 'observed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             printf 'runner_name=%s\n' "$RUNNER_NAME"
             printf 'runner_os=%s\n' "$RUNNER_OS"
             printf 'runner_arch=%s\n' "$RUNNER_ARCH"
           } > "$out/identity.env"
           git status --short > "$out/git-status.txt"
-          git show -s --format=fuller "$LAPLACE_BENCH_SHA" > "$out/commit.txt"
+          git show -s --format=fuller "$resolved" > "$out/commit.txt"
           uname -a > "$out/uname.txt"
           lscpu > "$out/lscpu.txt"
           free -b > "$out/memory.txt"
@@ -168,91 +169,62 @@ jobs:
             printf 'nvidia-smi unavailable\n' > "$out/nvidia-smi-before.txt"
           fi
 
-      - name: Build exact revision without installing or mutating substrate state
-        shell: bash
-        env:
-          FORCE_REBUILD: ${{ inputs.force_rebuild }}
-        run: |
-          set -o pipefail
+          record_after() {
+            if command -v nvidia-smi >/dev/null 2>&1; then
+              nvidia-smi -q > "$out/nvidia-smi-after.txt" 2>&1 || true
+              nvidia-smi --query-gpu=name,uuid,pstate,power.draw,power.limit,memory.used,utilization.gpu,utilization.memory \
+                --format=csv,noheader,nounits > "$out/gpu-after.csv" 2>&1 || true
+            fi
+          }
+          trap record_after EXIT
+
           args=()
           [[ "$FORCE_REBUILD" != true ]] || args+=(--force-rebuild)
-          bash scripts/pipeline.sh "${args[@]}" build 2>&1 \
-            | tee "$LAPLACE_BENCH_RECEIPT/build.log"
+          bash scripts/pipeline.sh "${args[@]}" build 2>&1 | tee "$out/build.log"
 
-      - name: Bind the benchmark to exact built native artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
           core="$GITHUB_WORKSPACE/build/engine/core/liblaplace_core.so"
           t0="$GITHUB_WORKSPACE/build/engine/core/perfcache/laplace_t0_perfcache.bin"
           [[ -f "$core" ]] || { echo "::error::built core missing: $core"; exit 1; }
           [[ -f "$t0" ]] || { echo "::error::built T0 perfcache missing: $t0"; exit 1; }
-          printf 'LAPLACE_CORE=%s\n' "$core" >> "$GITHUB_ENV"
-          printf 'LAPLACE_T0=%s\n' "$t0" >> "$GITHUB_ENV"
-          printf 'LAPLACE_PERFCACHE_BIN=%s\n' "$t0" >> "$GITHUB_ENV"
           {
             sha256sum "$core" "$t0"
             printf '\n== core linkage ==\n'
             ldd "$core" || true
-          } > "$LAPLACE_BENCH_RECEIPT/built-artifacts.txt"
+          } > "$out/built-artifacts.txt"
 
-      - name: Prepare Release CLI outside the measured interval when required
-        if: inputs.suite == 'quick' || inputs.suite == 'moby' || inputs.suite == 'all'
-        shell: bash
-        run: |
-          set -o pipefail
-          dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-restore 2>&1 \
-            | tee "$LAPLACE_BENCH_RECEIPT/cli-release-build.log"
+          if [[ "$SUITE" == quick || "$SUITE" == moby || "$SUITE" == all ]]; then
+            dotnet build app/Laplace.Cli/Laplace.Cli.csproj -c Release --no-restore 2>&1 \
+              | tee "$out/cli-release-build.log"
+          fi
 
-      - name: Execute versioned benchmark suite
-        shell: bash
-        env:
-          SUITE: ${{ inputs.suite }}
-          REPEATS: ${{ inputs.repeats }}
-          SCALE_WORKERS: ${{ inputs.scale_workers }}
-          CORPUS_DIR: ${{ inputs.corpus_dir }}
-          MOBY_PATH: ${{ inputs.moby_path }}
-        run: |
-          set -euo pipefail
           corpus="${CORPUS_DIR:-$GITHUB_WORKSPACE}"
-          args=(
+          run_args=(
             run
             --suite "$SUITE"
-            --receipt-dir "$LAPLACE_BENCH_RECEIPT"
+            --receipt-dir "$out"
             --repeats "$REPEATS"
             --corpus-dir "$corpus"
             --moby-path "$MOBY_PATH"
-            --core "$LAPLACE_CORE"
-            --t0 "$LAPLACE_T0"
+            --core "$core"
+            --t0 "$t0"
           )
-          [[ -z "${SCALE_WORKERS:-}" ]] || args+=(--scale-workers "$SCALE_WORKERS")
-          python3 scripts/benchmark_suite.py "${args[@]}" 2>&1 \
-            | tee "$LAPLACE_BENCH_RECEIPT/suite.log"
-
-      - name: Record post-run accelerator state
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$LAPLACE_BENCH_RECEIPT"
-          if command -v nvidia-smi >/dev/null 2>&1; then
-            nvidia-smi -q > "$out/nvidia-smi-after.txt" 2>&1 || true
-            nvidia-smi --query-gpu=name,uuid,pstate,power.draw,power.limit,memory.used,utilization.gpu,utilization.memory \
-              --format=csv,noheader,nounits > "$out/gpu-after.csv" 2>&1 || true
-          fi
+          [[ -z "${SCALE_WORKERS:-}" ]] || run_args+=(--scale-workers "$SCALE_WORKERS")
+          python3 scripts/benchmark_suite.py "${run_args[@]}" 2>&1 | tee "$out/suite.log"
 
       - name: Publish benchmark summary
         if: always()
         shell: bash
+        env:
+          SUITE: ${{ inputs.suite }}
         run: |
           sha="${LAPLACE_BENCH_SHA:-unresolved}"
           {
             echo '## Laplace versioned benchmark suite'
             echo
-            echo "- Commit: \`$sha\`"
-            echo "- Runner: \`$RUNNER_NAME\`"
-            echo "- Suite: \`${{ inputs.suite }}\`"
-            echo "- Artifact: \`laplace-benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT\`"
+            echo "- Commit: `$sha`"
+            echo "- Runner: `$RUNNER_NAME`"
+            echo "- Suite: `$SUITE`"
+            echo "- Artifact: `laplace-benchmark-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT`"
             if [[ -f "$LAPLACE_BENCH_RECEIPT/suite-receipt.json" ]]; then
               echo
               python3 - "$LAPLACE_BENCH_RECEIPT/suite-receipt.json" <<'PY'
@@ -300,7 +272,6 @@ jobs:
 
       - name: Upload complete benchmark evidence
         if: always()
-        # actions/upload-artifact v4.6.2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: laplace-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
