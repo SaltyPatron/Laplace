@@ -14,4 +14,13 @@ public sealed class FoundryContractDefaultsTests
     {
         Assert.False(FoundryDefaults.Ppmi);
     }
+
+    [Fact]
+    public void OperatorFactorization_DoesNotImplicitlyRetuneTheSpectrum()
+    {
+        // FoundryExport.Factor reconstructs (s_r / s_0)^alpha. Alpha=1 is the
+        // normalized operator selected from substrate state; values below one
+        // flatten its spectrum into a different operation before materialization.
+        Assert.Equal(1.0, FoundryDefaults.FactorSpectrumAlpha, 12);
+    }
 }
