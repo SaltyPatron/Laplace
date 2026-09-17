@@ -28,6 +28,7 @@ enum LaplaceStructuralRelation
 
 typedef struct LaplaceStructuralCandidate
 {
+    hash128_t source;
     hash128_t id;
     uint32 relation_mask;
     int64 occurrences;
@@ -58,8 +59,9 @@ LaplaceContinuation *laplace_trajectory_continuations_scoped(
 /* Enumerate exact structural crossings for active source identities over the
  * trajectories already retained in the request scope. RLE multiplicity and
  * logical ordinals are decoded natively; no SQL relation synthesis and no
- * trajectory-as-geometry shortcut. Results are deduplicated by target identity
- * while preserving which structural families responded and how often. */
+ * trajectory-as-geometry shortcut. Results are deduplicated by source/target
+ * pair while preserving which structural families responded and how often, so
+ * pre-ORIENT coupling can retain exact prompt-occurrence provenance. */
 LaplaceStructuralCandidate *laplace_trajectory_structural_candidates(
     LaplaceTrajectoryScope *scope, ArrayType *sources, uint32 relation_mask, int *count);
 
