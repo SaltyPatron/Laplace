@@ -4,10 +4,10 @@ using Laplace.Api.Contracts;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Exact-model adapter for the OpenAI chat surface. laplace-code-001 must never
-/// fall through to the prose conversation lane: it owns the same CodePlayerService
-/// as /v1/code/completions. Unsupported chat semantics fail explicitly instead of
-/// being silently discarded.
+/// Exact-model adapter for the OpenAI chat surface. A laplace-code-001 request that
+/// explicitly opts into a governed code modality owns the same CodePlayerService as
+/// /v1/code/completions. Without code_language it falls through to the ordinary model
+/// catalog, so an unproven/underspecified code label is never silently promoted.
 /// </summary>
 internal sealed class CodeModelChatMiddleware(RequestDelegate next)
 {
@@ -40,7 +40,8 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
             var root = document.RootElement;
             if (!root.TryGetProperty("model", out var modelElement)
                 || modelElement.ValueKind != JsonValueKind.String
-                || !ModelCatalog.IsCode(modelElement.GetString() ?? string.Empty))
+                || !ModelCatalog.IsCode(modelElement.GetString() ?? string.Empty)
+                || !root.TryGetProperty("code_language", out var languageElement))
             {
                 await next(context);
                 return;
@@ -105,8 +106,7 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
                 return;
             }
 
-            if (!root.TryGetProperty("code_language", out var languageElement)
-                || languageElement.ValueKind != JsonValueKind.String
+            if (languageElement.ValueKind != JsonValueKind.String
                 || !CodePlayerService.TryNormalizeModality(languageElement.GetString() ?? string.Empty,
                     out var modality))
             {
