@@ -62,14 +62,14 @@ export function Activity() {
   }
 
   return <Panel title={`Activity${rows ? ` — ${rows.length} backend${rows.length === 1 ? '' : 's'}` : ''}`} expandable label="Activity"
-    actions={<div className={styles.toolbar}>
-      <label className={styles.limitLabel}>age
+    actions={<div className={styles.panelToolbar}>
+      <label className={styles.limitLabel}>Age
         <select className={styles.limitSelect} value={minSeconds} onChange={(event) => setMinSeconds(Number(event.target.value))}>
           {AGE_FILTERS.map((filter) => <option key={filter.seconds} value={filter.seconds}>{filter.label}</option>)}
         </select>
       </label>
-      <label className={styles.liveLabel}><Toggle checked={includeIdle} onCheckedChange={setIncludeIdle} aria-label="Include idle backends" />idle</label>
-      <label className={styles.liveLabel}><Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />live ({REFRESH_MS / 1000}s)</label>
+      <label className={styles.liveLabel}><Toggle checked={includeIdle} onCheckedChange={setIncludeIdle} aria-label="Include idle backends" />Idle</label>
+      <label className={styles.liveLabel}><Toggle checked={live} onCheckedChange={setLive} aria-label="Live refresh" />Live · {REFRESH_MS / 1000}s</label>
       <Button variant="ghost" onClick={() => void read.refresh()} disabled={read.status === 'loading'}>Refresh</Button>
     </div>}>
     <ReadStatus label="Activity" resource={read} />
@@ -83,7 +83,7 @@ export function Activity() {
     {masked > 0 && <Muted>{masked} backend{masked === 1 ? '' : 's'} report no state or query: this role lacks pg_read_all_stats. That is not the same as idle.</Muted>}
     {rows && (ordered.length === 0 ? <Muted>No backend matches this filter.</Muted> : <div className={styles.tableWrap}>
       <table className={styles.table}>
-        <thead><tr><th scope="col">pid</th><th scope="col">state</th><th scope="col">running</th><th scope="col">wait</th><th scope="col">client</th><th scope="col">query</th><th scope="col">stop</th></tr></thead>
+        <thead><tr><th scope="col">PID</th><th scope="col">State</th><th scope="col">Running</th><th scope="col">Wait</th><th scope="col">Client</th><th scope="col">Query</th><th scope="col">Stop</th></tr></thead>
         <tbody>{ordered.map((row) => <tr key={row.pid}>
           <td className={styles.num}>{row.pid}{row.is_self && <Badge className={styles.badge}>this console</Badge>}</td>
           <td className={stateClass(row)}>{row.restricted ? 'masked' : row.state ?? '—'}</td>
