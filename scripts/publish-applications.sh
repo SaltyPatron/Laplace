@@ -82,6 +82,7 @@ main() {
         echo "::error::application publication recovery is unresolved; no full deployment changes made" >&2
         return 1
       }
+      application_revision_expected >/dev/null
       managed preflight
       managed begin
       trap 'rc=$?; trap - EXIT; trap "" INT TERM HUP; recover '"$keep_api_stopped"' || rc=1; exit "$rc"' EXIT
@@ -209,6 +210,7 @@ application_api_main() (
   [[ ! -e /var/lib/laplace-managed/transaction.json ]] || {
     echo "::error::managed service transaction unresolved; no application changes made" >&2; exit 1;
   }
+  application_revision_expected >/dev/null
   active="$(application_api_active)"
   [[ -d /opt/laplace/app-backups && ! -L /opt/laplace/app-backups ]] || {
     echo "::error::bootstrap-owned application backup root is missing" >&2; exit 1;
