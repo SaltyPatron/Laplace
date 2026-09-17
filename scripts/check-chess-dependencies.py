@@ -33,7 +33,7 @@ def module(name):
     return result
 
 
-def configuration(prefix, keys=None):
+def configuration(prefix, keys=None, api_environment=None, include_environment=True):
     allowed = KEYS if keys is None else keys
     result = {}
     # Match ChessRuntimeConfiguration: explicit environment, then the service's
@@ -41,9 +41,10 @@ def configuration(prefix, keys=None):
     for path in (prefix / "app/laplace-api.env", prefix / "app/chess-lab.env",
                  prefix / "chess-lab.env", prefix / "secrets/chess-lab.env",
                  ROOT / "deploy/secrets/chess-lab.env"):
-        if path.is_file():
+        supplied = api_environment if path == prefix / "app/laplace-api.env" else None
+        if supplied is not None or path.is_file():
             selected = {}
-            for line in path.read_text(encoding="utf-8").splitlines():
+            for line in (supplied if supplied is not None else path.read_text(encoding="utf-8")).splitlines():
                 if line.lstrip().startswith("#"):
                     continue
                 key, sep, value = line.partition("=")
@@ -55,9 +56,10 @@ def configuration(prefix, keys=None):
             for key, value in selected.items():
                 if value.strip():
                     result.setdefault(key, value)
-    result.update({key: os.environ[key].strip() for key in allowed if os.environ.get(key, "").strip()})
-    if os.environ.get("LAPLACE_STOCKFISH_SOURCE", "").strip() and not os.environ.get("LAPLACE_STOCKFISH", "").strip():
-        result.pop("LAPLACE_STOCKFISH", None)
+    if include_environment:
+        result.update({key: os.environ[key].strip() for key in allowed if os.environ.get(key, "").strip()})
+        if os.environ.get("LAPLACE_STOCKFISH_SOURCE", "").strip() and not os.environ.get("LAPLACE_STOCKFISH", "").strip():
+            result.pop("LAPLACE_STOCKFISH", None)
     return result
 
 

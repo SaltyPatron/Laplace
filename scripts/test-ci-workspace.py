@@ -95,7 +95,7 @@ class WorkspaceReservation(unittest.TestCase):
                     process.communicate(timeout=5)
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
         self.assertEqual(self.marker.read_text(), "existing qualified build\n")
-        self.assertEqual(self.events.read_text().splitlines(), ["environment", "check", "build", "test-dev"])
+        self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])
 
     def test_operator_uses_same_reserved_checkout(self):
         result = self.execute("operator")
@@ -112,7 +112,7 @@ class WorkspaceReservation(unittest.TestCase):
         result = self.execute("mainline")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
-        self.assertEqual(self.events.read_text().splitlines(), ["environment", "check", "build", "test-dev"])
+        self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])
 
     def test_nonrepository_files_are_preserved(self):
         shutil.rmtree(self.workspace)
@@ -142,6 +142,41 @@ class WorkspaceReservation(unittest.TestCase):
         self.assertEqual(path.read_text(), "untracked work\n")
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
         self.assertFalse(self.events.exists())
+
+
+class IntegratedLifecycle(unittest.TestCase):
+    def execute(self, test_status):
+        source = (ROOT / "scripts/product-ci.sh").read_text()
+        start = source.index("run_deploy() {\n")
+        finish = source.index("\n}\n", start) + 3
+        owner = source[start:finish]
+        names = ("check_deps", "run_build", "run_dev_tests", "run_install",
+                 "run_database_maintenance", "run_publish", "reconcile_installed_product",
+                 "run_foundation")
+        with tempfile.TemporaryDirectory(prefix="laplace-lifecycle-order-") as directory:
+            events = Path(directory) / "events"
+            functions = []
+            for name in names:
+                status = test_status if name == "run_dev_tests" else 0
+                functions.append(name + '() { printf "%s\\n" "' + name
+                                 + '" >> "$TEST_EVENTS"; return ' + str(status) + '; }')
+            script = "set -euo pipefail\n" + "\n".join(functions) + "\n" + owner + "\nrun_deploy\n"
+            result = subprocess.run(["bash", "-c", script],
+                                    env=dict(os.environ, TEST_EVENTS=str(events)),
+                                    text=True, capture_output=True, timeout=10)
+            return result, events.read_text().splitlines()
+
+    def test_failed_dev_controls_prevent_installation(self):
+        result, events = self.execute(23)
+        self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
+        self.assertEqual(events, ["check_deps", "run_build", "run_dev_tests"])
+
+    def test_publication_and_readiness_precede_resumable_foundation(self):
+        result, events = self.execute(0)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(events, ["check_deps", "run_build", "run_dev_tests", "run_install",
+                                 "run_database_maintenance", "run_publish",
+                                 "reconcile_installed_product", "run_foundation"])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -134,7 +134,23 @@ def running_gui(binary):
     return False
 
 
-def prepare(catalog, gui_binary, work_root):
+
+def fill_missing_options(entry, template):
+    """Apply calibrated defaults only where the user has no named option."""
+    defaults = template.get("options", [])
+    if not defaults:
+        return entry, []
+    existing = entry.get("options", [])
+    if not isinstance(existing, list) or any(not isinstance(row, dict) or
+            not isinstance(row.get("name"), str) for row in existing):
+        raise ValueError("existing CuteChess options are not named option objects")
+    names = {row["name"] for row in existing}
+    additions = [dict(row) for row in defaults if row["name"] not in names]
+    if not additions:
+        return entry, []
+    return {**entry, "options": [*existing, *additions]}, [row["name"] for row in additions]
+
+def prepare(catalog, gui_binary, work_root, previous_stockfish=None):
     """Return a lock descriptor retained across GUI exec and public session paths."""
     catalog = Path(catalog)
     with catalog.open("rb") as stream:
@@ -174,11 +190,23 @@ def prepare(catalog, gui_binary, work_root):
         original = read_owned(path)
         existing = engines(original[0]) if original is not None else []
         result = list(existing)
-        names = {item["name"] for item in existing}
-        commands = {(item["command"], item["protocol"]) for item in existing}
+        migrated = []
+        if previous_stockfish is not None:
+            for index, entry in enumerate(result):
+                if entry["command"] == previous_stockfish and entry["protocol"] == "uci":
+                    result[index] = {**entry, "command": selected[0]["command"]}
+                    migrated.append(entry["name"])
+        names = {item["name"] for item in result}
+        commands = {(item["command"], item["protocol"]) for item in result}
         added = []
+        added_options = {}
         for template in selected:
             if (template["command"], template["protocol"]) in commands:
+                for index, entry in enumerate(result):
+                    if (entry["command"], entry["protocol"]) == (template["command"], template["protocol"]):
+                        result[index], changed = fill_missing_options(entry, template)
+                        if changed:
+                            added_options[entry["name"]] = changed
                 continue
             name = template["name"]
             suffix = 2
@@ -191,7 +219,7 @@ def prepare(catalog, gui_binary, work_root):
             commands.add((entry["command"], entry["protocol"]))
             added.append(name)
         saved_backup = None
-        if added:
+        if added or added_options or migrated:
             if running_gui(Path(gui_binary)):
                 raise ValueError("close the running CuteChess GUI before installing engine entries")
             output = (json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
@@ -209,6 +237,10 @@ def prepare(catalog, gui_binary, work_root):
                    "config": str(path), "config_sha256": digest(current[0]),
                    "catalog_sha256": digest(raw_catalog), "added_names": added,
                    "engine_count": len(result), "backup": str(saved_backup) if saved_backup else None,
+                   "added_option_names": added_options, "migrated_stockfish_names": migrated,
+                   "configured_options": {entry["name"]: entry.get("options", []) for entry in result
+                                          if (entry["command"], entry["protocol"]) in
+                                          {(item["command"], item["protocol"]) for item in selected}},
                    "engine_execution_verified": False, "substrate_access_verified": False}
         atomic_text(directory / "laplace-engines.json",
                     (json.dumps(receipt, indent=2) + "\n").encode("utf-8"))

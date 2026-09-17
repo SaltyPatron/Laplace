@@ -292,25 +292,55 @@ TEST(LaplaceContentObservations, ExistingRootRetainsSourcesAndFormsWithoutDuplic
     EXPECT_EQ(2u, source_b_count);
 }
 
-TEST(LaplaceContentObservations, ExistingTrunkSuppressesEntitiesButRetainsEveryComputedOccurrenceForm) {
+TEST(LaplaceContentObservations, PresentRootDoesNotSuppressMissingDescendantsOrOccurrenceForms) {
     tier_tree_t* raw_tree = nullptr;
     ASSERT_EQ(0, content_witness_tree_build(reinterpret_cast<const uint8_t*>("ab ab"), 5, &raw_tree));
     Tree tree(raw_tree, tier_tree_free);
+    tier_node_view_t expected_root{};
+    ASSERT_EQ(0, content_witness_tree_root_node(tree.get(), &expected_root));
+    tier_tree_t* raw_word = nullptr;
+    ASSERT_EQ(0, content_witness_tree_build(reinterpret_cast<const uint8_t*>("ab"), 2, &raw_word));
+    Tree word(raw_word, tier_tree_free);
+    tier_node_view_t expected_word{};
+    ASSERT_EQ(0, content_witness_tree_root_node(word.get(), &expected_word));
+    ASSERT_FALSE(hash128_equals(&expected_root.id, &expected_word.id));
     const size_t nodes = tier_tree_node_count(tree.get());
-    std::vector<uint8_t> bitmap((nodes + 7u) / 8u, 0);
-    bitmap[(nodes - 1u) / 8u] |= uint8_t(1u << ((nodes - 1u) & 7u));
     const hash128_t source{101, 102};
-    hash128_t root{}, replay{};
-    Stage stage(intent_stage_new(0), intent_stage_free);
-    ASSERT_NE(nullptr, stage);
-    ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source, bitmap.data(), nodes, &root));
-    EXPECT_EQ(0u, intent_stage_entity_count(stage.get()));
-    // Two computed occurrences of "ab" plus the sentence composition.
-    EXPECT_EQ(3u, intent_stage_physicality_count(stage.get()));
-    ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source, bitmap.data(), nodes, &replay));
-    EXPECT_TRUE(hash128_equals(&root, &replay));
-    EXPECT_EQ(0u, intent_stage_entity_count(stage.get()));
-    EXPECT_EQ(6u, intent_stage_physicality_count(stage.get()));
+
+    for (const bool all_present : {false, true}) {
+        SCOPED_TRACE(all_present);
+        std::vector<uint8_t> bitmap((nodes + 7u) / 8u, 0);
+        for (size_t index = 0; index < nodes; ++index) {
+            tier_node_view_t node{};
+            ASSERT_EQ(0, tier_tree_get_node(tree.get(), static_cast<uint32_t>(index), &node));
+            // Identity is tier-blind: mark every occurrence of the known root,
+            // including collapsed singleton wrappers with that same identity.
+            if (all_present || hash128_equals(&node.id, &expected_root.id))
+                bitmap[index / 8u] |= uint8_t(1u << (index & 7u));
+        }
+        hash128_t root{}, replay{};
+        Stage stage(intent_stage_new(0), intent_stage_free);
+        ASSERT_NE(nullptr, stage);
+        ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source, bitmap.data(), nodes, &root));
+        EXPECT_TRUE(hash128_equals(&root, &expected_root.id));
+        EXPECT_EQ(all_present ? 0u : 1u, intent_stage_entity_count(stage.get()));
+        // Two computed occurrences of "ab" plus the sentence composition.
+        EXPECT_EQ(3u, intent_stage_physicality_count(stage.get()));
+        if (!all_present) {
+            size_t size = 0, offset = 0;
+            const uint8_t* bytes = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ENTITIES, &size);
+            std::vector<Field> fields;
+            ASSERT_TRUE(next_row(bytes, size, offset, fields));
+            ASSERT_EQ(4u, fields.size());
+            ASSERT_EQ(16, fields[0].length);
+            EXPECT_EQ(0, std::memcmp(fields[0].bytes, &expected_word.id, 16));
+            EXPECT_EQ(size, offset);
+        }
+        ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source, bitmap.data(), nodes, &replay));
+        EXPECT_TRUE(hash128_equals(&root, &replay));
+        EXPECT_EQ(all_present ? 0u : 1u, intent_stage_entity_count(stage.get()));
+        EXPECT_EQ(6u, intent_stage_physicality_count(stage.get()));
+    }
 }
 
 TEST(LaplaceContentObservations, InvalidBitmapAndEmptyTreeDoNotEmitRows) {

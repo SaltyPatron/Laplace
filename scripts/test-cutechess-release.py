@@ -746,6 +746,8 @@ main "$@"
         self.assertEqual(result, json.loads(manifest.read_text()))
         self.assertFalse(result["operator_desktop_tested"])
         self.assertFalse(result["autostart_installed"])
+        self.assertNotIn("stockfish_launcher", result)
+        self.assertFalse((prefix / "bin/laplace-cutechess-stockfish").exists())
         self.assertEqual(0o755, launcher.stat().st_mode & 0o777)
         arguments = ["a b", "$literal", ";no-shell", "unicode-\u03a9", ""]
         environment = dict(os.environ, DISPLAY=":73", XAUTHORITY="/operator/auth",
@@ -766,12 +768,31 @@ main "$@"
         engine_config = Path(environment["XDG_CONFIG_HOME"]) / "cutechess/engines.json"
         engines = json.loads(engine_config.read_text())
         self.assertEqual(["Stockfish (official)", "Laplace (substrate)"], [engine["name"] for engine in engines])
-        self.assertEqual([str(prefix / "bin/laplace-cutechess-stockfish"), str(prefix / "app/laplace-uci")],
+        self.assertEqual([str(installed), str(prefix / "app/laplace-uci")],
                          [engine["command"] for engine in engines])
         self.assertEqual(str(prefix / "share/laplace/laplace_t0_perfcache_fixture.bin"),
                          child["environment"]["LAPLACE_PERFCACHE_BIN"])
         self.assertEqual(str(prefix / "share/laplace/chess-floor/generations/fixture/laplace_chess_position_perfcache.bin"),
                          child["environment"]["LAPLACE_CHESS_PERFCACHE_BIN"])
+
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux direct Stockfish launch identity")
+    def test_desktop_validates_direct_stockfish_before_launching_gui(self):
+        installed, _, receipt, work, prefix, observed = self.desktop_fixture()
+        stockfish = self.root / "official-stockfish"
+        stockfish.write_text("#!/bin/sh\nexit 0\n")
+        stockfish.chmod(0o755)
+        verified = cutechess.verify_gui_install(installed, receipt, self.lock, work)
+        result = cutechess.install_desktop(prefix, verified, stockfish, work)
+        catalog = json.loads(Path(result["engine_catalog"]["path"]).read_text())
+        self.assertEqual(str(stockfish), catalog[0]["command"])
+        stockfish.write_text("#!/bin/sh\nexit 1\n")
+        run = subprocess.run([result["launcher"]["path"]],
+                             env=dict(os.environ, XDG_CONFIG_HOME=str(self.root / "direct-settings")),
+                             capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(0, run.returncode)
+        self.assertIn("selected official Stockfish changed", run.stderr)
+        self.assertFalse(observed.exists())
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux installed launcher provenance")
     def test_desktop_cli_install_and_changed_binary_refusal_preserve_prior_launcher(self):
@@ -976,6 +997,35 @@ class CuteChessUserEngineTests(unittest.TestCase):
         self.assertEqual(existing, merged[:2])
         self.assertEqual([self.selected[1]["name"]], receipt["added_names"])
         self.assertEqual("uci", merged[-1]["protocol"])
+
+
+    def test_retired_stockfish_shim_migrates_to_direct_command_preserving_user_options(self):
+        self.path.parent.mkdir(parents=True)
+        prior = str(self.root / "prefix/bin/laplace-cutechess-stockfish")
+        original = [{"name": "My Stockfish", "command": prior, "protocol": "uci",
+                     "options": [{"name": "Threads", "value": 2}], "custom": {"retained": True}}]
+        raw = json.dumps(original).encode()
+        self.path.write_bytes(raw)
+        self.selected[0]["options"] = [
+            {"name": "Threads", "type": "spin", "value": 4},
+            {"name": "Hash", "type": "spin", "value": 256}]
+        self.catalog.write_text(json.dumps(self.selected))
+        lock, _, receipt = self.owner.prepare(self.catalog, self.gui, self.work, previous_stockfish=prior)
+        os.close(lock)
+        merged = json.loads(self.path.read_bytes())
+        self.assertEqual(2, len(merged))
+        self.assertEqual("My Stockfish", merged[0]["name"])
+        self.assertEqual(self.selected[0]["command"], merged[0]["command"])
+        self.assertEqual(original[0]["custom"], merged[0]["custom"])
+        self.assertEqual(2, merged[0]["options"][0]["value"])
+        self.assertEqual(256, merged[0]["options"][1]["value"])
+        self.assertEqual(raw, Path(receipt["backup"]).read_bytes())
+        self.assertEqual(["My Stockfish"], receipt["migrated_stockfish_names"])
+        before = self.path.read_bytes(), self.path.stat().st_mtime_ns
+        lock, _, again = self.owner.prepare(self.catalog, self.gui, self.work, previous_stockfish=prior)
+        os.close(lock)
+        self.assertEqual(before, (self.path.read_bytes(), self.path.stat().st_mtime_ns))
+        self.assertEqual([], again["migrated_stockfish_names"])
 
     def test_malformed_duplicate_key_and_symlink_configs_are_preserved(self):
         self.path.parent.mkdir(parents=True)

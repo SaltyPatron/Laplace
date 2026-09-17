@@ -62,6 +62,53 @@ class UserEngineAcceptanceTests(unittest.TestCase):
             return OWNER.uci(entry, self.environment, self.root / (entry["name"] + ".log"),
                              time.monotonic() + 5, Path(sys.executable), substrate=substrate)
 
+
+    def option_engine(self, name):
+        path = self.root / name
+        path.write_text("#!" + sys.executable + "\n" + (
+            "import sys\n"
+            "options={}\n"
+            "for command in sys.stdin:\n"
+            " command=command.strip()\n"
+            " if command=='uci':\n"
+            "  print('id name option fixture')\n"
+            "  print('option name Threads type spin default 1 min 1 max 8')\n"
+            "  print('option name Hash type spin default 16 min 1 max 1024')\n"
+            "  print('uciok',flush=True)\n"
+            " elif command.startswith('setoption name '):\n"
+            "  name,value=command[len('setoption name '):].split(' value ',1)\n"
+            "  options[name]=value\n"
+            " elif command=='isready':\n"
+            "  if options!={'Threads':'4','Hash':'64'}: sys.exit(19)\n"
+            "  print('readyok',flush=True)\n"
+            " elif command.startswith('go '):\n"
+            "  print('info depth 2 score cp 0 nodes 21 time 1 pv e2e4')\n"
+            "  print('bestmove e2e4',flush=True)\n"
+            " elif command=='quit': break\n"))
+        path.chmod(0o700)
+        return {"name": name, "command": str(path), "workingDirectory": str(self.root),
+                "options": [{"name": "Threads", "type": "spin", "value": 4},
+                            {"name": "Hash", "type": "spin", "value": 64}]}
+
+    def test_real_child_receives_configured_options_before_readiness_and_search(self):
+        entry = self.option_engine("configured")
+        result = self.check(entry, substrate=False)
+        self.assertEqual([{"name": "Threads", "value": 4}, {"name": "Hash", "value": 64}],
+                         result["applied_uci_options"])
+        self.assertEqual("e2e4", result["bestmove"])
+        with self.assertRaises(ProcessLookupError):
+            os.kill(result["process"]["pid"], 0)
+
+    def test_unadvertised_or_out_of_range_configured_options_are_not_silently_sent(self):
+        for index, option in enumerate((
+                {"name": "Threads", "value": 9},
+                {"name": "Threads", "value": "4\nquit"},
+                {"name": "Unknown", "value": 1})):
+            entry = self.option_engine("invalid-option-" + str(index))
+            entry["options"] = [option]
+            with self.subTest(option=option), self.assertRaises(ValueError):
+                self.check(entry, substrate=False)
+
     def test_public_default_route_refuses_ambient_redirection_and_credentials(self):
         expected = OWNER.default_database_route({})
         self.assertEqual(5432, expected["port"])

@@ -432,7 +432,85 @@ def desktop_perfcache(prefix):
     return selected
 
 
-def install_desktop(prefix, verified, stockfish, work_root=None):
+
+def calibration_machine(host):
+    """Stable measured machine and process resource limits; exclude transient load."""
+    keys = ("hostname", "platform", "machine", "cpu_models", "affinity_cpu_ids",
+            "physical_core_groups_within_affinity", "physical_memory_bytes")
+    return {**{key: host[key] for key in keys},
+            "cpu_quota": host["cgroup"]["cpu_quota"],
+            "memory_limit_bytes": host["cgroup"]["memory_limit_bytes"]}
+
+
+def calibration_configuration(report, current_identity, current_host, recommendations):
+    if (report.get("schema") != "laplace.benchmark.chess-environment/v1"
+            or report.get("status") != "complete" or report.get("evidence_invalid")
+            or report.get("failures") or report["parameters"]["repeats"] < 3
+            or report["parameters"].get("max_moves", 0) != 0):
+        raise ValueError("desktop defaults require a complete repeated uncapped calibration")
+    measured = report["stockfish_identity"]
+    for key in ("sha256", "source_commit"):
+        if current_identity.get(key) != measured.get(key) or not measured.get(key):
+            raise ValueError("calibration Stockfish executable or source differs")
+    if not measured.get("build_receipt_matches_binary_and_source") \
+            or not current_identity.get("build_receipt_matches_binary_and_source"):
+        raise ValueError("calibration must identify the direct source-built Stockfish")
+    def networks(identity):
+        rows = identity.get("source_networks", [])
+        if not rows or any(not row.get("present") or not row.get("sha256") for row in rows):
+            raise ValueError("calibration has no complete NNUE source identity")
+        return sorted((row["name"], row["sha256"], row["size_bytes"]) for row in rows)
+    if networks(measured) != networks(current_identity):
+        raise ValueError("calibration NNUE source bytes differ")
+    before = calibration_machine(report["host"])
+    if before != calibration_machine(report["host_after"]) or before != calibration_machine(current_host):
+        raise ValueError("calibration machine or admitted process resource limits differ")
+    selection = recommendations["bench_suite_latency"]
+    threads, memory = selection["threads"], selection["hash_mib"]
+    if type(threads) is not int or type(memory) is not int or min(threads, memory) < 1:
+        raise ValueError("calibration selected invalid engine options")
+    budget = report["plan"]
+    if threads > current_host["effective_cpu_capacity"] - budget["reserved_cpu_capacity"]:
+        raise ValueError("calibrated search threads no longer fit the observed CPU allowance")
+    demand = memory * (1 << 20) + budget["engine_overhead_estimate_bytes"]
+    if current_host.get("available_memory_bytes") is None or demand > current_host["available_memory_bytes"]:
+        raise ValueError("calibrated Stockfish no longer fits current memory headroom")
+    options = []
+    for name, value in (("Threads", threads), ("Hash", memory)):
+        option = measured["uci_options"][name]
+        minimum, maximum, default = (int(option[key]) for key in ("min", "max", "default"))
+        if option["type"] != "spin" or not minimum <= value <= maximum:
+            raise ValueError("calibration option is outside the engine's advertised range")
+        options.append({"name": name, "type": "spin", "value": value,
+                        "default": default, "min": minimum, "max": maximum})
+    return options, {"status": "selected", "purpose": "single-engine-built-in-bench-latency",
+                     "scope": selection["scope"], "configuration": selection,
+                     "stockfish": {key: measured[key] for key in ("sha256", "source_commit", "source_networks")},
+                     "machine": before,
+                     "selfplayConcurrencyApplied": False,
+                     "evaluatorPoolConfigurationApplied": False}
+
+
+def desktop_calibration(path, expected_sha256, stockfish):
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256 or ""):
+        raise ValueError("select the exact completed calibration SHA256")
+    path = Path(path)
+    with path.open("rb") as stream:
+        raw = stream.read((32 << 20) + 1)
+    if len(raw) > 32 << 20 or hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise ValueError("selected calibration report differs")
+    report = json.loads(raw)
+    spec = importlib.util.spec_from_file_location(
+        "cutechess_machine_calibration", Path(__file__).with_name("benchmark-chess-environment.py"))
+    benchmark = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(benchmark)
+    options, receipt = calibration_configuration(report, benchmark.source_identity(stockfish),
+                                                 benchmark.machine(), benchmark.recommendations(report))
+    receipt.update(reportSha256=expected_sha256, producerSchema=report["schema"],
+                   startedUtc=report["started_utc"], finishedUtc=report["finished_utc"])
+    return options, receipt, raw
+
+def install_desktop(prefix, verified, stockfish, work_root=None, calibration_report=None, calibration_sha256=None):
     """Install public user-session launch files from the installed GUI verifier."""
     if not sys.platform.startswith("linux"):
         raise RuntimeError("desktop launcher installation requires Linux")
@@ -458,38 +536,44 @@ def install_desktop(prefix, verified, stockfish, work_root=None):
     stockfish = Path(stockfish).resolve(strict=True)
     if not stockfish.is_file() or not os.access(stockfish, os.X_OK):
         raise RuntimeError("selected installed Stockfish executable is unavailable")
+    selected_options = []
+    calibration = {"status": "not-selected", "scope": "existing explicit user options or engine defaults"}
+    explicit_calibration = calibration_report is not None
+    if calibration_report is None and manifest.is_file() and not manifest.is_symlink():
+        prior = json.loads(manifest.read_text()).get("calibration", {})
+        if prior.get("status") == "selected":
+            calibration_report, calibration_sha256 = prior["report"], prior["reportSha256"]
+    if calibration_report is not None:
+        try:
+            selected_options, calibration, raw = desktop_calibration(calibration_report, calibration_sha256, stockfish)
+        except (OSError, ValueError, KeyError, TypeError):
+            if explicit_calibration:
+                raise
+            calibration = {"status": "stale", "reportSha256": calibration_sha256,
+                           "scope": "existing user options or engine defaults; remeasure this installed engine"}
+        else:
+            retained = prefix / "share/laplace/chess-calibrations" / calibration_sha256 / "report.json"
+            if retained.exists() and (retained.is_symlink() or retained.read_bytes() != raw):
+                raise ValueError("retained calibration identity changed")
+            _publish_desktop_text(retained, raw.decode("utf-8"), 0o644)
+            calibration["report"] = str(retained)
     perfcache = desktop_perfcache(prefix)
     work_root = Path(work_root or os.environ.get("LAPLACE_WORK_ROOT", "/build/laplace/work")).absolute()
     if not work_root.is_dir():
         raise RuntimeError("existing permanent desktop work root is unavailable")
-    engine_launcher = prefix / "bin/laplace-cutechess-stockfish"
     engine_catalog = prefix / "share/laplace/cutechess-engines.json"
     session_helper = prefix / "share/laplace/cutechess-user-engines.py"
     helper_source = Path(__file__).with_name("cutechess-user-engines.py").read_text(encoding="utf-8")
     stockfish_selection = {"binary": str(stockfish), "sha256": digest(stockfish)}
-    stockfish_program = '''#!/usr/bin/env python3
-"""Launch the selected official Stockfish build; keep the UCI pipes unchanged."""
-import hashlib
-import os
-from pathlib import Path
-import sys
-
-SELECTION = ''' + repr(stockfish_selection) + '''
-binary = Path(SELECTION["binary"])
-digest = hashlib.sha256()
-with binary.open("rb") as stream:
-    for block in iter(lambda: stream.read(1 << 20), b""):
-        digest.update(block)
-if digest.hexdigest() != SELECTION["sha256"]:
-    raise SystemExit("Stockfish changed; rerun chess provisioning")
-os.execve(str(binary), [str(binary), *sys.argv[1:]], dict(os.environ))
-'''
-    catalog = [{"name": "Stockfish (official)", "command": str(engine_launcher), "protocol": "uci"},
+    catalog = [{"name": "Stockfish (official)", "command": str(stockfish), "protocol": "uci"},
                {"name": "Laplace (substrate)", "command": str(prefix / "app/laplace-uci"), "protocol": "uci"}]
-    _publish_desktop_text(engine_launcher, stockfish_program, 0o755)
+    if selected_options:
+        catalog[0]["options"] = selected_options
     _publish_desktop_text(engine_catalog, json.dumps(catalog, indent=2) + "\n", 0o644)
     _publish_desktop_text(session_helper, helper_source, 0o644)
     selection = {"argv": [str(binary)], "binary_sha256": runtime["binary_sha256"],
+                 "stockfish": stockfish_selection,
+                 "previous_stockfish_command": str(prefix / "bin/laplace-cutechess-stockfish"),
                  "environment": expected, "qt_library_path": library,
                  "session_helper": str(session_helper), "session_helper_sha256": digest(session_helper),
                  "engine_catalog": str(engine_catalog), "engine_catalog_sha256": digest(engine_catalog),
@@ -517,6 +601,13 @@ def main():
             digest.update(block)
     if digest.hexdigest() != SELECTION["binary_sha256"]:
         raise RuntimeError("installed CuteChess changed; rerun chess provisioning")
+    stockfish = Path(SELECTION["stockfish"]["binary"])
+    digest = hashlib.sha256()
+    with stockfish.open("rb") as stream:
+        for block in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(block)
+    if digest.hexdigest() != SELECTION["stockfish"]["sha256"]:
+        raise RuntimeError("selected official Stockfish changed; rerun chess provisioning")
     for role in ("session_helper", "engine_catalog"):
         path = Path(SELECTION[role])
         if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != SELECTION[role + "_sha256"]:
@@ -527,7 +618,8 @@ def main():
     spec.loader.exec_module(session)
     # The inheritable lock remains held by the GUI for its whole lifetime.
     session_lock, session_environment, _ = session.prepare(
-        SELECTION["engine_catalog"], binary, SELECTION["work_root"])
+        SELECTION["engine_catalog"], binary, SELECTION["work_root"],
+        previous_stockfish=SELECTION["previous_stockfish_command"])
     environment = session.launch_environment(SELECTION, session_environment)
     os.execve(str(binary), [*SELECTION["argv"], *sys.argv[1:]], environment)
 
@@ -550,10 +642,10 @@ if __name__ == "__main__":
               "qt_prefix": str(sdk), "build_receipt_sha256": verified["build_receipt_sha256"],
               "launcher": {"path": str(launcher), "sha256": digest(launcher)},
               "desktop": {"path": str(desktop), "sha256": digest(desktop)},
-              "stockfish_launcher": {"path": str(engine_launcher), "sha256": digest(engine_launcher)},
               "engine_catalog": {"path": str(engine_catalog), "sha256": digest(engine_catalog)},
               "session_helper": {"path": str(session_helper), "sha256": digest(session_helper)},
-              "stockfish": stockfish_selection, "session_work_root": str(work_root),
+              "stockfish": stockfish_selection, "calibration": calibration,
+              "session_work_root": str(work_root),
               "launch": selection,
               "t0_perfcache": str(perfcache),
               "engine_execution_verified": False, "desktop_substrate_access_verified": False,
@@ -562,6 +654,121 @@ if __name__ == "__main__":
               "operator_desktop_tested": False, "autostart_installed": False}
     _publish_desktop_text(manifest, json.dumps(result, indent=2) + "\n", 0o644)
     return result
+
+
+
+EVALUATION_BEGIN = "# >>> laplace measured Stockfish evaluation defaults >>>"
+EVALUATION_END = "# <<< laplace measured Stockfish evaluation defaults <<<"
+
+
+def without_evaluation_defaults(text):
+    """Remove only this owner's prior block; all other settings remain caller-owned."""
+    result, inside, seen = [], False, False
+    for line in text.splitlines(keepends=True):
+        if line.rstrip("\r\n") == EVALUATION_BEGIN:
+            if inside or seen:
+                raise ValueError("measured evaluation environment block is ambiguous")
+            inside, seen = True, True
+        elif line.rstrip("\r\n") == EVALUATION_END:
+            if not inside:
+                raise ValueError("measured evaluation environment block has no beginning")
+            inside = False
+        elif not inside:
+            result.append(line)
+    if inside:
+        raise ValueError("measured evaluation environment block is incomplete")
+    return "".join(result)
+
+
+def evaluation_configuration(options, explicit, report, host):
+    measured = {row["name"]: row["value"] for row in options}
+    defaults = {"THREADS": measured["Threads"], "HASH_MB": measured["Hash"], "PROCESSES": 1}
+    selected, overrides = {}, []
+    for suffix, default in defaults.items():
+        name = "LAPLACE_STOCKFISH_EVAL_" + suffix
+        value = explicit.get(name)
+        if value is not None:
+            if re.fullmatch(r"[1-9][0-9]*", value) is None:
+                raise ValueError("explicit evaluation option must be a positive integer: " + name)
+            selected[name] = int(value)
+            overrides.append(name)
+        else:
+            selected[name] = default
+    threads = selected["LAPLACE_STOCKFISH_EVAL_THREADS"]
+    memory = selected["LAPLACE_STOCKFISH_EVAL_HASH_MB"]
+    processes = selected["LAPLACE_STOCKFISH_EVAL_PROCESSES"]
+    for name, value in (("Threads", threads), ("Hash", memory)):
+        option = report["stockfish_identity"]["uci_options"][name]
+        if not int(option["min"]) <= value <= int(option["max"]):
+            raise ValueError("effective evaluation option exceeds the engine's advertised range")
+    cpu = host["effective_cpu_capacity"] - report["plan"]["reserved_cpu_capacity"]
+    demand = processes * (memory * (1 << 20) + report["plan"]["engine_overhead_estimate_bytes"])
+    memory_budget = min(host["available_memory_bytes"], report["plan"]["memory_budget_bytes"])
+    if processes * threads > cpu or demand > memory_budget:
+        raise ValueError("effective evaluation process/thread/hash configuration exceeds the measured resource envelope")
+    return selected, {"configuration": selected, "explicitOverrides": overrides,
+        "cpuAllowance": cpu, "requestedThreadSlots": processes * threads,
+        "estimatedMemoryBytes": demand, "availableMemoryBudgetBytes": memory_budget,
+        "processScope": "One analysis engine by default; an explicit process override is resource-checked, not throughput-calibrated",
+        "selfplayConcurrencyApplied": False, "enginePoolThroughputMeasured": False}
+
+
+def configure_evaluation(prefix, stockfish):
+    """Resolve a retained calibration once during ordinary cold deployment."""
+    prefix = Path(prefix).resolve(strict=True)
+    env_path = prefix / "app/laplace-api.env"
+    original = env_path.read_text(encoding="utf-8")
+    remaining = without_evaluation_defaults(original)
+    manifest = json.loads((prefix / "share/laplace/cutechess-desktop.json").read_text())
+    calibration = manifest.get("calibration", {})
+    receipt = {"schema": "laplace.stockfish-evaluation-defaults/v1",
+               "status": "not-selected", "configurationApplied": False,
+               "scope": "Installed cold-launch defaults; caller environment/options take precedence"}
+    if calibration.get("status") == "selected":
+        try:
+            options, identity, raw = desktop_calibration(
+                calibration["report"], calibration["reportSha256"], Path(stockfish).resolve(strict=True))
+        except (OSError, ValueError, KeyError, TypeError):
+            receipt.update(status="stale", reportSha256=calibration.get("reportSha256"))
+        else:
+            spec = importlib.util.spec_from_file_location(
+                "evaluation_runtime_configuration", Path(__file__).with_name("check-chess-dependencies.py"))
+            doctor = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(doctor)
+            keys = {"LAPLACE_STOCKFISH_EVAL_" + name for name in ("THREADS", "HASH_MB", "PROCESSES")}
+            explicit = doctor.configuration(prefix, keys, api_environment=remaining)
+            spec = importlib.util.spec_from_file_location(
+                "evaluation_machine_configuration", Path(__file__).with_name("benchmark-chess-environment.py"))
+            benchmark = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(benchmark)
+            report = json.loads(raw)
+            host = benchmark.machine()
+            if calibration_machine(host) != identity["machine"]:
+                raise ValueError("machine limits changed while selecting evaluation defaults")
+            effective, resource = evaluation_configuration(options, explicit, report, host)
+            # The block only fills absent installed values. Explicit environment values
+            # are persisted here only when no corresponding user-owned file value exists.
+            installed = doctor.configuration(prefix, keys, api_environment=remaining, include_environment=False)
+            entries = {key: value for key, value in effective.items() if key not in installed}
+            installed_values = {**installed, **{key: str(value) for key, value in entries.items()}}
+            _, installed_resource = evaluation_configuration(options, installed_values, report, host)
+            block = (EVALUATION_BEGIN + "\n"
+                     + "# report-sha256=" + identity["reportSha256"] + "\n"
+                     + "".join(key + "=" + str(value) + "\n" for key, value in entries.items())
+                     + EVALUATION_END + "\n")
+            remaining = remaining.rstrip("\n") + "\n" + block
+            receipt.update(status="selected", configurationApplied=True,
+                           reportSha256=identity["reportSha256"], stockfish=identity["stockfish"],
+                           machine=identity["machine"],
+                           installedConfiguration=installed_resource["configuration"],
+                           environmentOverridesPersistedOnlyForMissingFileKeys=True, **resource)
+    if remaining != original:
+        _publish_desktop_text(env_path, remaining, stat.S_IMODE(env_path.stat().st_mode))
+    receipt["environmentFile"] = str(env_path)
+    receipt["restartRequiredForRunningServices"] = True
+    receipt_path = prefix / "share/laplace/stockfish-evaluation-defaults.json"
+    _publish_desktop_text(receipt_path, json.dumps(receipt, indent=2) + "\n", 0o644)
+    return receipt
 
 
 def register_desktop(prefix, directory=Path("/usr/local/share/applications")):
@@ -573,7 +780,6 @@ def register_desktop(prefix, directory=Path("/usr/local/share/applications")):
         raise RuntimeError("desktop installation receipt is unavailable")
     for role, relative in (("launcher", "bin/laplace-cutechess"),
                            ("desktop", "share/applications/laplace-cutechess.desktop"),
-                           ("stockfish_launcher", "bin/laplace-cutechess-stockfish"),
                            ("engine_catalog", "share/laplace/cutechess-engines.json"),
                            ("session_helper", "share/laplace/cutechess-user-engines.py")):
         path = prefix / relative
@@ -612,10 +818,20 @@ def main():
     parser.add_argument("--install-desktop", type=Path, help="Install a public desktop launcher under this prefix after GUI installed verification")
     parser.add_argument("--desktop-stockfish", type=Path, help="Selected direct official Stockfish executable for the public GUI catalog")
     parser.add_argument("--register-desktop", type=Path, help="Register an existing prefix desktop installation in the system application menu; no GUI execution")
+    parser.add_argument("--configure-evaluation", type=Path, help="Apply retained measured analysis defaults to this prefix at cold deployment")
+    parser.add_argument("--calibration-report", type=Path, help="Completed exact-machine Stockfish calibration to apply as missing GUI option defaults")
+    parser.add_argument("--calibration-sha256", help="SHA256 of the explicitly selected calibration report")
     args = parser.parse_args()
     lock = json.loads(args.lock.read_text())
     if not re.fullmatch(r"[0-9a-f]{40}", lock["commit"]):
         parser.error("release lock must contain a complete source commit")
+    if args.configure_evaluation:
+        if args.desktop_stockfish is None:
+            parser.error("--configure-evaluation requires the selected direct --desktop-stockfish")
+        print(json.dumps(configure_evaluation(args.configure_evaluation, args.desktop_stockfish)))
+        return 0
+    if bool(args.calibration_report) != bool(args.calibration_sha256) or (args.calibration_report and not args.install_desktop):
+        parser.error("calibration report and SHA256 must be selected together with --install-desktop")
     if args.register_desktop:
         if any((args.source_dir, args.verify_source, args.binary, args.check_latest, args.gui,
                 args.qt_prefix, args.receipt, args.verify_receipt, args.install_desktop, args.desktop_stockfish, args.reset_build_cache, args.work)):
@@ -652,7 +868,8 @@ def main():
         elif args.gui and args.verify_receipt:
             verified = verify_gui_install(args.binary, args.verify_receipt, lock, args.work)
             if args.install_desktop:
-                verified["desktop_install"] = install_desktop(args.install_desktop, verified, args.desktop_stockfish, args.work)
+                verified["desktop_install"] = install_desktop(args.install_desktop, verified, args.desktop_stockfish, args.work,
+                                                              args.calibration_report, args.calibration_sha256)
             print(json.dumps(verified))
         elif args.gui and args.verify_source:
             print(json.dumps(verify_gui_build(args.verify_source, args.binary, lock, args.qt_prefix, args.receipt, args.work)))

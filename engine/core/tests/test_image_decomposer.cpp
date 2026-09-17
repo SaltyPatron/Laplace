@@ -2,6 +2,8 @@
 
 #include <vector>
 #include <memory>
+#include <cstring>
+#include <string>
 
 extern "C" {
 #include "laplace/core/content_witness_batch.h"
@@ -178,7 +180,24 @@ TEST(ImageDecomposer, ModalityFormsSurvivePresentEntitiesAndRepeatedSourceOccurr
         ASSERT_EQ(0, laplace_modality_witness_emit_tree(
             known.get(), tree.get(), modality, &source, present.data(), nodes, &known_root));
         EXPECT_EQ(0, hash128_compare(&full_root, &known_root));
-        EXPECT_EQ(0u, intent_stage_entity_count(known.get()));
+        if (modality == LAPLACE_MODALITY_IMAGE) {
+            EXPECT_EQ(0u, intent_stage_entity_count(known.get()));
+        } else {
+            // "-4321" is a shared scalar content root with a "4321" word
+            // child. The modality bitmap covered only sign/digit leaves and
+            // Sample/window nodes, so it cannot prove this child E exists.
+            ASSERT_EQ(1u, intent_stage_entity_count(known.get()));
+            hash128_t scalar_child{}, recorded_child{};
+            const uint8_t digits[] = {'4', '3', '2', '1'};
+            ASSERT_EQ(0, laplace_content_root_id(digits, sizeof(digits), &scalar_child));
+            size_t length = 0;
+            const uint8_t* row = intent_stage_tuple_ptr(
+                known.get(), INTENT_STAGE_TABLE_ENTITIES, &length);
+            ASSERT_NE(nullptr, row);
+            ASSERT_GE(length, 22u); // COPY int16 field count + int32 id length + 16 id bytes
+            std::memcpy(&recorded_child, row + 6, sizeof(recorded_child));
+            EXPECT_EQ(0, hash128_compare(&scalar_child, &recorded_child));
+        }
         EXPECT_EQ(forms, intent_stage_physicality_count(known.get()));
 
         // A stage-seen root suppresses no second observed form. Entity identity
@@ -194,9 +213,42 @@ TEST(ImageDecomposer, ModalityFormsSurvivePresentEntitiesAndRepeatedSourceOccurr
         // Compare every semantic body field and duplicate multiplicity independently
         // of the historical first-winner row ordering used by entity insertion.
         (void)intent_stage_retain_physicalities(full.get());
+        (void)intent_stage_retain_physicalities(known.get());
         hash128_t full_digest{}, known_digest{};
         ASSERT_EQ(0, intent_stage_semantic_digest(full.get(), &full_digest));
         ASSERT_EQ(0, intent_stage_semantic_digest(known.get(), &known_digest));
         EXPECT_EQ(0, hash128_compare(&full_digest, &known_digest));
+    }
+}
+
+TEST(AudioDecomposer, SignedScalarWitnessesRetainSharedContentIdentityAcrossPcmRange) {
+    const int16_t samples[] = {-32768, -4321, -42, -1, 0, 1, 255, 1234, 32767};
+    for (const int16_t sample : samples) {
+        SCOPED_TRACE((int)sample);
+        tier_tree_t* raw_tree = nullptr;
+        ASSERT_EQ(0, laplace_audio_tree_build(&sample, 1, &raw_tree));
+        std::unique_ptr<tier_tree_t, decltype(&tier_tree_free)> tree(raw_tree, tier_tree_free);
+        std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)> stage(
+            intent_stage_new(16), intent_stage_free);
+        ASSERT_NE(nullptr, stage.get());
+        const std::string scalar = std::to_string(sample);
+        hash128_t expected{}, actual{}, source{};
+        hash128_blake3_str("signed-sample-content-test", &source);
+        ASSERT_EQ(0, laplace_content_root_id(
+            reinterpret_cast<const uint8_t*>(scalar.data()), scalar.size(), &expected));
+        ASSERT_EQ(0, laplace_modality_witness_emit_tree(
+            stage.get(), tree.get(), LAPLACE_MODALITY_AUDIO, &source, nullptr, 0, &actual));
+        EXPECT_EQ(0, hash128_compare(&expected, &actual));
+        const size_t forms = intent_stage_physicality_count(stage.get());
+        ASSERT_GT(forms, 0u);
+        const size_t entities = intent_stage_entity_count(stage.get());
+        ASSERT_EQ(0, laplace_modality_witness_emit_tree(
+            stage.get(), tree.get(), LAPLACE_MODALITY_AUDIO, &source, nullptr, 0, &actual));
+        EXPECT_EQ(entities, intent_stage_entity_count(stage.get()));
+        EXPECT_EQ(2 * forms, intent_stage_physicality_count(stage.get()));
+        if (sample >= 0 && sample <= 9) {
+            EXPECT_EQ(0u, entities);
+            EXPECT_EQ(1u, forms);
+        }
     }
 }

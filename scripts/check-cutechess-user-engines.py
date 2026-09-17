@@ -269,6 +269,27 @@ def uci(entry, environment, output, deadline, expected, substrate=False, depth=2
         running.send("uci")
         running.until(lambda line: line == "uciok")
         identity = process_identity(running.process, expected)
+        configured_options = []
+        for option in entry.get("options", []):
+            if option.get("type") == "button":
+                continue
+            name, value = option["name"], option["value"]
+            text = ("true" if value else "false") if type(value) is bool else str(value)
+            require(isinstance(name, str) and name and not any(char in name + text for char in "\r\n"),
+                    "configured engine option is not one UCI command")
+            advertised = [line for line in running.stdout_lines
+                          if line.startswith("option name " + name + " type ")]
+            require(len(advertised) == 1, "configured engine option was not advertised exactly once")
+            declaration = advertised[0].split(" type ", 1)[1]
+            if declaration.startswith("spin "):
+                limits = re.search(r"(?:^| )min (-?\d+) max (-?\d+)(?: |$)", declaration)
+                require(limits is not None and re.fullmatch(r"-?\d+", text) is not None
+                        and int(limits[1]) <= int(text) <= int(limits[2]),
+                        "configured engine option exceeds the advertised spin range")
+            elif declaration.startswith("check "):
+                require(text in ("true", "false"), "configured engine checkbox is not boolean")
+            running.send("setoption name " + name + " value " + text)
+            configured_options.append({"name": name, "value": value})
         if substrate:
             require(any(line.startswith("option name Substrate type combo default substrate ")
                         for line in running.stdout_lines),
@@ -293,6 +314,8 @@ def uci(entry, environment, output, deadline, expected, substrate=False, depth=2
         result = {"name": entry["name"], "command": entry["command"],
                   "working_directory": entry["workingDirectory"], "process": identity,
                   "bestmove": move, "completed_depth": depth,
+                  "applied_uci_options": configured_options,
+                  "uci_option_scope": "sent before readyok; UCI has no general option-value readback",
                   "initialization_seconds": initialized - started,
                   "search_seconds": searched - initialized,
                   "cold_boot_proven": False, "complete_game_proven": False}
@@ -318,7 +341,6 @@ def authenticate_desktop(prefix, receipt_path, gui_receipt):
         "launcher": prefix / "bin/laplace-cutechess",
         "engine_catalog": prefix / "share/laplace/cutechess-engines.json",
         "session_helper": prefix / "share/laplace/cutechess-user-engines.py",
-        "stockfish_launcher": prefix / "bin/laplace-cutechess-stockfish",
         "desktop": prefix / "share/applications/laplace-cutechess.desktop"}
     files = {str(receipt_path): digest(receipt_path), str(gui_receipt): digest(gui_receipt)}
     require(files[str(gui_receipt)] == value["build_receipt_sha256"],
@@ -330,6 +352,7 @@ def authenticate_desktop(prefix, receipt_path, gui_receipt):
         files[str(path)] = value[role]["sha256"]
     require(selected["argv"] == [value["binary"]]
             and selected["binary_sha256"] == value["binary_sha256"]
+            and selected["stockfish"] == value["stockfish"]
             and selected["work_root"] == value["session_work_root"]
             and selected["t0_perfcache"] == value["t0_perfcache"]
             and selected["chess_floor_root"] == str(prefix / "share/laplace/chess-floor")
@@ -462,7 +485,7 @@ def main(argv=None):
             work = Path(private["TMPDIR"])
             entries = configured_engines(read_json(config_path),
                                          read_json(desktop["engine_catalog"]["path"]), work)
-            require(entries[0]["command"] == desktop["stockfish_launcher"]["path"]
+            require(entries[0]["command"] == desktop["stockfish"]["binary"]
                     and entries[1]["command"] == str(args.prefix / "app/laplace-uci"),
                     "configured commands differ from installed selected engines")
             require(config_receipt["config_sha256"] == digest(config_path),

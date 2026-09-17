@@ -68,6 +68,16 @@ class GuiGameControls(unittest.TestCase):
             with self.subTest(changed=changed[-80:]), self.assertRaises(ValueError):
                 OWNER.verify_protocol(changed, document())
 
+
+    def test_actual_protocol_options_and_button_actions_are_retained(self):
+        commands = (f">{OWNER.WHITE}(0): setoption name Threads value 4\n"
+                    f">{OWNER.WHITE}(0): setoption name Hash value 256\n"
+                    f">{OWNER.WHITE}(0): setoption name Clear Hash\n")
+        proof = OWNER.verify_protocol(commands + traffic(), document())
+        self.assertEqual({"Threads": "4", "Hash": "256", "Clear Hash": None},
+                         proof["applied_uci_options"][OWNER.WHITE])
+        self.assertEqual({}, proof["applied_uci_options"][OWNER.BLACK])
+
     def test_clock_finish_never_records_a_late_unaccepted_move(self):
         accepted = document(MOVES[:2], "time forfeit")
         proof = OWNER.verify_protocol(traffic(MOVES[:3]), accepted)

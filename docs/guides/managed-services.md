@@ -263,9 +263,9 @@ Root registration does not execute the GUI.
 On launch, the same public installation adds **Stockfish (official)** and
 **Laplace (substrate)** to the user's official CuteChess engine list, ready for
 selection in **New Game** and engine settings. Stockfish launches the selected
-source-built executable through `/opt/laplace/bin/laplace-cutechess-stockfish`;
+source-built executable directly from its official repository;
 Laplace uses the published `/opt/laplace/app/laplace-uci` runtime. The catalog is
-`/opt/laplace/share/laplace/cutechess-engines.json`. It uses the upstream
+`/opt/laplace/share/laplace/cutechess-engines.json`. The public GUI launcher validates the selected Stockfish bytes before opening CuteChess; the engine command itself is the official executable. Existing entries using the previous generated Stockfish shim migrate to that direct command while preserving their names, UCI options and other user settings. It uses the upstream
 [1.5.1 EngineConfiguration format](https://github.com/cutechess/cutechess/blob/45e923949e43570886c0ad3392f514e743839c6b/projects/lib/src/engineconfiguration.cpp)
 loaded by the [official GUI EngineManager](https://github.com/cutechess/cutechess/blob/45e923949e43570886c0ad3392f514e743839c6b/projects/gui/src/cutechessapp.cpp).
 
@@ -617,3 +617,41 @@ semantic gate. Changing that policy is a separate release decision; this rollout
 did not weaken it or change expected answers. Windows reachability, authenticated
 live operator status after a committed release, and persistent MCP/Lichess
 activation remain unverified until a release is committed.
+
+A completed Original machine calibration can supply missing Stockfish GUI defaults
+through the existing desktop installation command's `--calibration-report PATH`
+and `--calibration-sha256 SHA256` options. Both options must be supplied together
+with `--install-desktop`. The report must identify this exact source-built executable,
+NNUE files, machine and resource limits, with at least three repeats and uncapped
+complete games. The selected Threads/Hash pair minimizes the declared built-in
+bench workload among its measured cases. It does not establish optimal playing
+strength, evaluator worker count, or tournament concurrency.
+
+The exact report is retained under
+`share/laplace/chess-calibrations/<SHA256>/report.json`; its identity and selected
+configuration appear in `cutechess-desktop.json`. Existing explicit user options
+win; only missing named options receive measured defaults. Later provisioning
+revalidates a retained selection. If the binary or machine changes, the desktop
+receipt marks it stale and ordinary user/engine settings remain available until a
+new calibration is selected. Acceptance receipts distinguish catalog defaults,
+options actually sent through UCI before readiness, and options observed in a
+complete GUI game's protocol traffic.
+
+The ordinary chess bootstrap also resolves that retained report at cold deployment
+into the owned measured-defaults block in `app/laplace-api.env`. Laplace's corpus
+evaluation process reads the resulting Threads/Hash settings through its existing
+configuration owner. The single-engine analysis profile defaults to one evaluator
+process. Explicit caller Threads, Hash and process counts win when their combined
+thread and estimated memory demand fits the measured allowance; CuteChess selfplay
+concurrency is not imported as evaluator width. The selection, overrides and resource
+calculation are retained in `share/laplace/stockfish-evaluation-defaults.json`.
+A stale selection removes only that owner's environment block. Existing user
+configuration remains intact. Running services need their ordinary publication or
+restart to load changed environment defaults; the receipt does not claim that a
+live service has reloaded merely because a file was written.
+
+An invoking environment override does not replace a caller-owned value already in
+an installed configuration file. The receipt reports both the current effective
+configuration and the resulting installed configuration; the file value applies
+again when that environment override is absent. Environment values are retained
+as defaults only for keys absent from all caller-owned installed files.

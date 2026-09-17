@@ -280,6 +280,7 @@ def verify_protocol(log, pgn):
     active = {WHITE: None, BLACK: None}
     identities = {}
     sent_clock = {WHITE: False, BLACK: False}
+    sent_options = {WHITE: {}, BLACK: {}}
     for line in log.splitlines():
         match = re.fullmatch(r"([<>])(.+)\(([0-9]+)\): (.*)", line)
         if not match:
@@ -289,6 +290,10 @@ def verify_protocol(log, pgn):
             continue
         require(identities.setdefault(name, identifier) == identifier,
                 "GUI changed a selected protocol engine identity")
+        if direction == ">" and body.startswith("setoption name "):
+            option = re.fullmatch(r"setoption name (.+?)(?: value (.*))?", body)
+            require(option is not None, "GUI sent a malformed engine option")
+            sent_options[name][option[1]] = option[2]
         if direction == ">" and body.startswith("go "):
             require(active[name] is None, "GUI overlapped searches for one engine")
             require(not re.search(r"(?:^| )(?:depth|nodes|movetime|infinite)(?: |$)", body)
@@ -327,6 +332,7 @@ def verify_protocol(log, pgn):
             "GUI emitted unexplained extra engine moves")
     require(providers, "GUI Laplace process emitted no actual substrate search receipt")
     return {"accepted_engine_moves": len(accepted), "unaccepted_after_clock": extra,
+            "applied_uci_options": sent_options,
             "substrate_search_receipts": providers, "prepared_message_observed": prepared,
             "scope": "GUI child protocol and complete native PGN replay; no durable recording claim"}
 

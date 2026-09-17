@@ -187,6 +187,9 @@ write_api_env() {
     mkdir -p "$PREFIX/chess-lab-work"
   fi
 
+  if [[ -n "$sf" && -f "$PREFIX/share/laplace/cutechess-desktop.json" ]]; then
+    python3 "$SCRIPT_DIR/provision-cutechess.py" --configure-evaluation "$PREFIX" --desktop-stockfish "$sf"
+  fi
   echo "  CUTECHESS=${cc:-MISSING}  STOCKFISH=${sf:-MISSING}  QT=${qt:-MISSING}"
   if [ -f "$PREFIX/secrets/lichess.env" ]; then
     green "✓ secrets drop present"

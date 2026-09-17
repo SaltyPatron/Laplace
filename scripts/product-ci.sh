@@ -77,11 +77,12 @@ reconcile_installed_product() {
 run_deploy() {
   check_deps
   run_build
+  run_dev_tests
   run_install
   run_database_maintenance
-  run_foundation
   run_publish
   reconcile_installed_product
+  run_foundation
 }
 
 case "$stage" in

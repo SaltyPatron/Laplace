@@ -52,6 +52,18 @@ static int resolve_number_id(
     return 0;
 }
 
+/* Signed scalars are shared text content. Its UAX ladder may have an
+ * intermediate digit word, so both identity and placement come from the exact
+ * natural content node rather than a flat sign/digit centroid. */
+static int resolve_scalar_content_node(
+    const uint8_t* bytes, size_t length, tier_node_view_t* out_node) {
+    tier_tree_t* scalar = NULL;
+    if (content_witness_tree_build(bytes, length, &scalar) != 0 || !scalar) return -6;
+    const int rc = content_witness_tree_root_node(scalar, out_node);
+    tier_tree_free(scalar);
+    return rc == 0 ? 0 : -6;
+}
+
 #ifdef _WIN32
 #define LAPLACE_TIER_TLS __declspec(thread)
 #else
@@ -237,9 +249,11 @@ static int compose_audio_tree(tier_tree_t* tree) {
                                      &ids[i], &coords[i * 4], &hbs[i]) == 0) {
                 continue;
             }
-            if (laplace_content_root_id(buf, (size_t)cnt, &ids[i]) != 0) return -6;
-            math4d_centroid(&coords[(size_t)first * 4], (size_t)cnt, &coords[i * 4]);
-            hilbert4d_encode(&coords[i * 4], &hbs[i]);
+            tier_node_view_t scalar;
+            if (resolve_scalar_content_node(buf, (size_t)cnt, &scalar) != 0) return -6;
+            ids[i] = scalar.id;
+            memcpy(&coords[i * 4], scalar.coord, sizeof(scalar.coord));
+            hbs[i] = scalar.hilbert;
             continue;
         }
 
@@ -292,8 +306,10 @@ static uint32_t collapse_idx(const tier_tree_t* tree, uint32_t idx) {
         if (node.tier == 0 || node.child_count != 1) break;
         tier_node_view_t child;
         if (tier_tree_get_node(tree, node.first_child_idx, &child) != 0) break;
-        if (child.text_range_off != node.text_range_off
-            || child.text_range_len != node.text_range_len) break;
+        /* Audio scaffold spans use different units at successive tiers.
+         * Unary compose is the child's exact identity regardless of those
+         * bookkeeping offsets; it creates no additional Content body. */
+        if (!hash128_equals(&node.id, &child.id)) break;
         idx = node.first_child_idx;
     }
     return idx;
@@ -332,6 +348,36 @@ static int emit_node(
         hash128_t type_id = laplace_modality_tier_type_id(modality, node.tier);
         if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
             return -2;
+    }
+
+    /* A signed Sample's ScalarId is the shared text root of "-digits", not
+     * the flat hash of its interchange leaves. Retain that scalar's complete
+     * content ladder, including children missing from this modality bitmap.
+     * Keep the modality's canonical Sample E winner, then let the shared owner
+     * emit its valid bodies and independently deduplicate intermediate E. */
+    if (modality == LAPLACE_MODALITY_AUDIO && node.tier == 1u
+        && node.child_count > 1u) {
+        tier_node_view_t first;
+        if (tier_tree_get_node(tree, node.first_child_idx, &first) != 0) return -2;
+        if (first.atom == (uint32_t)'-') {
+            if (node.child_count > LAPLACE_DECIMAL_MAX_CPS) return -2;
+            uint8_t scalar_bytes[LAPLACE_DECIMAL_MAX_CPS];
+            for (uint32_t k = 0; k < node.child_count; ++k) {
+                tier_node_view_t digit;
+                if (tier_tree_get_node(tree, node.first_child_idx + k, &digit) != 0
+                    || (k > 0u && (digit.atom < (uint32_t)'0' || digit.atom > (uint32_t)'9')))
+                    return -2;
+                scalar_bytes[k] = (uint8_t)digit.atom;
+            }
+            if (!intent_stage_witness_seen(stage, &node.id)
+                && intent_stage_witness_record(stage, &node.id) != 0) return -2;
+            if (intent_stage_allocation_failed(stage)) return -2;
+            hash128_t scalar_root;
+            if (content_witness_batch_add(stage, scalar_bytes, node.child_count, source_id, &scalar_root) != 0
+                || !hash128_equals(&scalar_root, &node.id)) return -2;
+            *emitted = 1;
+            return 0;
+        }
     }
 
     double* traj = NULL;
@@ -397,6 +443,8 @@ int laplace_modality_witness_emit_tree(
     *out_root_id = root.id;
 
     int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+    if (root.tier == 0)
+        return content_witness_emit_floor_atom(stage, root.atom, &root.id, now_us);
     uint8_t* emitted = (uint8_t*)calloc(nc, 1);
     uint32_t* novel = NULL;
     size_t novel_n = 0;
