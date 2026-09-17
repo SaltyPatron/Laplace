@@ -243,7 +243,7 @@ bootstrap_chess_gui_runtime() {
     # This opt-in selection supports actual named-widget GUI acceptance. It is
     # separate from the normal runtime package list and does not alter engine setup.
     if [ "${1:-runtime}" = accessibility ]; then
-        packages=(dbus-daemon at-spi2-core gir1.2-atspi-2.0 python3-gi)
+        packages=(dbus at-spi2-core gir1.2-atspi-2.0 python3-gi)
         say "Optional GUI acceptance tools: isolated DBus and typed AT-SPI"
     fi
     local -a missing=() installer=(apt-get)

@@ -259,5 +259,64 @@ class RuntimeSelectionControls(unittest.TestCase):
             self.assertIn("signed archive", retained["error"])
 
 
+    def test_complete_accessibility_uses_existing_providers_without_package_install(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            observed, _, _ = self.fixture(directory)
+            providers = {"status": "providers-loaded", "loaded_files": {}, "gui_ready": False}
+            with mock.patch.object(owner.shutil, "which", side_effect=lambda name: observed["tools"][name]), \
+                 mock.patch.object(owner, "snapshot", return_value=observed), \
+                 mock.patch.object(owner, "package_versions", return_value={}), \
+                 mock.patch.object(owner, "accessibility_snapshot", return_value=providers), \
+                 mock.patch.object(owner.core, "load") as load, \
+                 mock.patch.object(owner.core, "provision") as provision:
+                selected = owner.ensure(directory / "private-store", time.monotonic() + 30,
+                                        accessibility=True)
+            self.assertEqual(providers, selected["accessibility"])
+            self.assertFalse(selected["gui_ready"])
+            load.assert_not_called()
+            provision.assert_not_called()
+
+    def test_missing_typelib_extends_existing_signed_private_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            observed, document, _ = self.fixture(directory)
+            typelib = Path(document["root"]) / "usr/lib/x86_64-linux-gnu/girepository-1.0/Atspi-2.0.typelib"
+            typelib.parent.mkdir()
+            typelib.write_bytes(b"fixture typelib")
+            providers = {"status": "providers-loaded", "loaded_files": {str(typelib): owner.digest(typelib)}}
+            deadline = time.monotonic() + 30
+            with mock.patch.object(owner.shutil, "which", return_value=None), \
+                 mock.patch.object(owner, "snapshot", return_value=observed), \
+                 mock.patch.object(owner, "package_versions", return_value={}), \
+                 mock.patch.object(owner, "accessibility_snapshot", side_effect=[
+                     RuntimeError("AT-SPI typelib absent"), providers]), \
+                 mock.patch.object(owner.core, "load", return_value=document), \
+                 mock.patch.object(owner.core, "provision", return_value=document) as provision:
+                selected = owner.ensure(directory, deadline, accessibility=True)
+            provision.assert_called_once_with(directory, deadline, None, accessibility=True)
+            self.assertEqual(owner.digest(typelib), selected["loaded_files"][str(typelib)])
+            self.assertEqual("private", selected["mode"])
+            environment = owner.selected_environment(selected, {"PATH": "/usr/bin", "GI_TYPELIB_PATH": "/caller"})
+            self.assertEqual([str(typelib.parent), "/caller"], environment["GI_TYPELIB_PATH"].split(os.pathsep))
+            receipt = directory / "selected.json"
+            self.write_selection(receipt, selected)
+            typelib.write_bytes(b"changed")
+            with mock.patch.object(owner.core, "load", return_value=document):
+                with self.assertRaisesRegex(RuntimeError, "changed"):
+                    owner.load_selection(receipt)
+
+    def test_failed_typed_api_after_acquisition_is_not_gui_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            observed, document, _ = self.fixture(directory)
+            with mock.patch.object(owner.shutil, "which", return_value=None), \
+                 mock.patch.object(owner.core, "load", return_value=document), \
+                 mock.patch.object(owner.core, "provision", return_value=document), \
+                 mock.patch.object(owner, "accessibility_snapshot", side_effect=RuntimeError("missing API")):
+                with self.assertRaisesRegex(RuntimeError, "missing API"):
+                    owner.ensure(directory, time.monotonic() + 30, accessibility=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -153,7 +153,69 @@ def retain_acquisition(document, evidence):
     save(evidence / "current.json", document)
 
 
-def ensure(root, deadline, evidence=None):
+
+def accessibility_snapshot(environment, deadline):
+    """Resolve the actual typed API and DBus providers; package names are not capabilities."""
+    program = """import ctypes, json, gi, sys
+from pathlib import Path
+gi.require_version('Atspi', '2.0')
+gi.require_version('GIRepository', '2.0')
+from gi.repository import Atspi, GIRepository
+repository = GIRepository.Repository.get_default()
+ctypes.CDLL('libatspi.so.0')
+paths = [sys.executable, gi.__file__, gi._gi.__file__]
+for line in Path('/proc/self/maps').read_text().splitlines():
+    fields = line.split(None, 5)
+    if len(fields) == 6 and fields[5].startswith('/'):
+        paths.append(fields[5])
+for namespace in repository.get_loaded_namespaces():
+    path = repository.get_typelib_path(namespace)
+    if path:
+        paths.append(path)
+print(json.dumps(sorted(set(paths))))
+"""
+    raw = core.execute(["/usr/bin/python3", "-c", program], deadline, env=environment)
+    paths = json.loads(raw)
+    require(isinstance(paths, list) and 1 <= len(paths) <= 128
+            and all(isinstance(path, str) and Path(path).is_absolute() for path in paths),
+            "AT-SPI returned an invalid provider inventory")
+    tools = {}
+    for name in ("dbus-run-session", "dbus-daemon"):
+        path = shutil.which(name, path=environment.get("PATH"))
+        require(path is not None, "selected GUI runtime is missing " + name)
+        tools[name] = str(Path(path).resolve(strict=True))
+        paths.append(tools[name])
+    # Ubuntu 22.04's already installed at-spi2-core supplies session activation.
+    for path in ("/usr/libexec/at-spi-bus-launcher", "/usr/libexec/at-spi2-registryd",
+                 "/usr/share/dbus-1/services/org.a11y.Bus.service",
+                 "/usr/share/defaults/at-spi2/accessibility.conf",
+                 "/usr/share/dbus-1/session.conf"):
+        require(Path(path).is_file(), "selected GUI activation resource is absent: " + path)
+        paths.append(path)
+    files = {}
+    for path in paths:
+        selected = Path(path).resolve(strict=True)
+        require(selected.is_file(), "selected GUI provider is not a regular file")
+        files[str(selected)] = digest(selected)
+        with selected.open("rb") as stream:
+            is_elf = stream.read(4) == b"\x7fELF"
+        if is_elf:
+            output = core.execute(["/usr/bin/ldd", str(selected)], deadline, env=environment)
+            require("not found" not in output, "GUI accessibility provider has an unresolved library")
+            for line in output.splitlines():
+                match = core.re.search(r"=> (/\S+)", line) or core.re.match(r"\s*(/\S+)", line)
+                if match:
+                    library = str(Path(match[1]).resolve(strict=True))
+                    files[library] = digest(library)
+    return {"schema": "laplace.gui-accessibility-selection/v1",
+            "status": "providers-loaded", "python": "/usr/bin/python3",
+            "tools": tools, "loaded_files": files,
+            "typed_api": "gi.repository.Atspi/2.0",
+            "scope": "Typed API and provider availability; the full GUI game proves interaction",
+            "gui_ready": False}
+
+
+def ensure(root, deadline, evidence=None, *, accessibility=False):
     found = {name: shutil.which(name) for name in TOOLS}
     missing = [name for name, path in found.items() if path is None]
     private_on_path = any(Path(path).resolve().is_relative_to(Path(root).absolute())
@@ -166,13 +228,27 @@ def ensure(root, deadline, evidence=None):
         environment = core.selected_environment(document)
     else:
         environment = dict(os.environ)
+    accessibility_observation = None
+    if accessibility:
+        try:
+            accessibility_observation = accessibility_snapshot(environment, deadline)
+        except (OSError, RuntimeError):
+            # Reuse the existing signed Ubuntu archive acquisition/extraction owner.
+            # It installs no host package and runs no maintainer script.
+            document = core.provision(root, deadline, evidence, accessibility=True)
+            environment = core.selected_environment(document)
+            accessibility_observation = accessibility_snapshot(environment, deadline)
     observation = snapshot(environment, deadline)
+    if accessibility_observation is not None:
+        observation["loaded_files"].update(accessibility_observation["loaded_files"])
     selection = {"schema": SCHEMA, "status": "tools-selected",
                  "mode": "private" if document is not None else "host",
                  "scope": "X11 prerequisites; actual Qt window interaction remains separately required",
                  "gui_ready": False, "host_packages_installed": False,
                  "initially_missing_tools": missing, **observation,
                  "host_package_versions": package_versions(deadline)}
+    if accessibility_observation is not None:
+        selection["accessibility"] = accessibility_observation
     if document is not None:
         require({name: observation["tools"][name] for name in core.TOOLS} == document["tools"],
                 "selected X11 tool paths differ from the private manifest")
@@ -195,6 +271,7 @@ def main(argv=None):
     parser.add_argument("--deadline-seconds", type=int, default=280)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--evidence-output", type=Path)
+    parser.add_argument("--accessibility", action="store_true", help="Select the typed AT-SPI and isolated DBus providers")
     args = parser.parse_args(argv)
     require(30 <= args.deadline_seconds <= 300, "provisioning deadline must be 30..300 seconds")
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -205,7 +282,8 @@ def main(argv=None):
         raise InterruptedError("X11 selection interrupted")
     signal.signal(signal.SIGTERM, interrupted)
     try:
-        value = ensure(args.root.absolute(), started + args.deadline_seconds, args.evidence_output)
+        value = ensure(args.root.absolute(), started + args.deadline_seconds, args.evidence_output,
+                       accessibility=args.accessibility)
     except (Exception, KeyboardInterrupt) as error:
         value.update(status="failed", error_type=type(error).__name__, error=str(error)[-2000:])
     finally:

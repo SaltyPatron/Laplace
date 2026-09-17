@@ -12,6 +12,9 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
+import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -275,6 +278,75 @@ class OwnershipTests(unittest.TestCase):
             instance.postmaster.send_signal.assert_called_once_with(signal.SIGINT)
             groups.assert_not_called()
             self.assertEqual(instance.receipt["cluster_shutdown"]["status"], "stopped")
+
+
+
+class ActualCTestSelectionTests(unittest.TestCase):
+    def setUp(self):
+        executable = shutil.which("ctest")
+        self.assertIsNotNone(executable, "these controls require an actual installed CTest executable")
+        self.ctest = Path(executable).resolve()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.build = self.root / "configured"
+        self.build.mkdir()
+        self.expected = {
+            "generated_stage_sink_pg_native_helpers",
+            "physicality_descriptor_pg_native_helpers",
+            "physicality_readback_pg_native_helpers",
+            "regress_laplace_geom", "regress_setup_laplace_geom", "regress_teardown_laplace_geom",
+            "regress_laplace_substrate", "regress_setup_laplace_substrate", "regress_teardown_laplace_substrate",
+        }
+        names = sorted(self.expected | {"unrelated_regress_laplace_geom", "regress_laplace_substrate_extra"})
+        lines = [
+            "add_test(" + name + " " + json.dumps(sys.executable) +
+            ' "-c" "raise SystemExit(97)")' for name in names
+        ]
+        for suffix in ("geom", "substrate"):
+            lines.extend([
+                "set_tests_properties(regress_laplace_" + suffix +
+                " PROPERTIES FIXTURES_REQUIRED regress_db_" + suffix + ")",
+                "set_tests_properties(regress_setup_laplace_" + suffix +
+                " PROPERTIES FIXTURES_SETUP regress_db_" + suffix + ")",
+                "set_tests_properties(regress_teardown_laplace_" + suffix +
+                " PROPERTIES FIXTURES_CLEANUP regress_db_" + suffix + ")",
+            ])
+        (self.build / "CTestTestfile.cmake").write_text("\n".join(lines) + "\n")
+        self.operator = module.Qualification(SimpleNamespace(work=self.root / "proof", timeout=300))
+        self.operator.env = os.environ.copy()
+
+    def plan(self, label, expression):
+        # Invoke the real production command runner, including --test-dir and
+        # combined diagnostic retention, from the separate proof working directory.
+        return self.operator.command(label, [
+            self.ctest, "--test-dir", self.build, "--show-only=json-v1", "-R", expression], limit=30)
+
+    def test_actual_ctest_selects_all_nine_native_sql_and_fixture_cases(self):
+        document = json.loads(self.plan("ctest-compatible-selection", module.CTEST_SELECTION_REGEX))
+        names = {test["name"] for test in document["tests"]}
+        self.assertEqual(names, self.expected)
+        self.assertEqual(len(document["tests"]), 9)
+        version = subprocess.run([str(self.ctest), "--version"], check=True, text=True,
+                                 capture_output=True, timeout=30).stdout.splitlines()[0]
+        print("ACTUAL_CTEST_SELECTION " + json.dumps({
+            "version": version, "regex": module.CTEST_SELECTION_REGEX,
+            "selected_names": sorted(names), "executed_test_commands": 0}), flush=True)
+
+    def test_exact_old_noncapturing_pattern_reproduces_compile_error(self):
+        old = module.CTEST_SELECTION_REGEX.replace("(", "(?:")
+        self.assertEqual(old,
+            "^(?:regress_laplace_(?:geom|substrate)|generated_stage_sink_pg_native_helpers|"
+            "physicality_descriptor_pg_native_helpers|physicality_readback_pg_native_helpers)$")
+        output = self.plan("ctest-old-pattern-negative-control", old)
+        self.assertIn("RegularExpression::compile()", output)
+        self.assertIn("Error in compile", output)
+        with self.assertRaises(json.JSONDecodeError):
+            json.loads(output)
+        print("ACTUAL_CTEST_OLD_PATTERN_REFUSED " + json.dumps({
+            "returncode": self.operator.receipt["commands"][-1]["returncode"],
+            "regex": old, "strict_json_parse_rejected": True,
+            "diagnostic": output.splitlines()[:2]}), flush=True)
 
 
 if __name__ == "__main__":

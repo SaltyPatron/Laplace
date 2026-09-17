@@ -179,7 +179,7 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         (self.seed / "scripts/ci-environment.sh").write_text(
             ownership
             + '[[ "$LAPLACE_SETUP_USE_CMAKE" == false ]] || exit 95\n'
-            + '[[ "$LAPLACE_SETUP_REQUIRE_BUILT_REVISION" == true ]] || exit 96\n'
+            + '[[ "$LAPLACE_SETUP_REQUIRE_BUILT_REVISION" == false ]] || exit 96\n'
             + '[[ ! -v CHECKOUT_TOKEN && ! -v checkout_auth ]] || exit 94\n'
             + 'printf "environment\\n" >> "$TEST_EVENTS"\n')
         for name, label in (
@@ -191,6 +191,12 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
                 + 'event="' + label + ':$*"\n'
                 + 'printf "%s\\n" "$event" >> "$TEST_EVENTS"\n'
                 + '[[ "$event" != "$TEST_FAIL_EVENT" ]] || exit 23\n')
+
+        (self.seed / "scripts/check-installed-extension-current.py").write_text(
+            'import os\nfrom pathlib import Path\n'
+            'with Path(os.environ["TEST_EVENTS"]).open("a") as stream:\n'
+            '    stream.write("extension-check\\n")\n'
+            'raise SystemExit(23 if os.environ["TEST_FAIL_EVENT"] == "extension-check" else 0)\n')
 
     def setUp(self):
         super().setUp()
@@ -236,11 +242,11 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         pipeline = "pipeline:sync-extension tune-pg tune-laplace perfcache-guc api-env"
         cases = (
             ("status", ["migration:status"]),
-            ("create", ["migration:up", pipeline, "health:fixture_database"]),
+            ("create", ["extension-check", "migration:up", pipeline, "health:fixture_database"]),
             ("drop", ["migration:nuke --yes"]),
-            ("recreate", ["migration:nuke --yes", "migration:up", pipeline,
+            ("recreate", ["extension-check", "migration:nuke --yes", "migration:up", pipeline,
                            "health:fixture_database"]),
-            ("update", ["maintenance:"]),
+            ("update", ["extension-check", "maintenance:"]),
             ("verify", ["health:fixture_database"]),
         )
         for operation, expected in cases:
@@ -321,7 +327,16 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         result = self.execute_database("recreate")
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
         self.assertEqual(self.events.read_text().splitlines(),
-                         ["environment", "migration:nuke --yes", "migration:up"])
+                         ["environment", "extension-check", "migration:nuke --yes", "migration:up"])
+
+    def test_artifact_mismatch_stops_before_database_changes(self):
+        self.env["TEST_FAIL_EVENT"] = "extension-check"
+        for operation in ("create", "recreate", "update"):
+            with self.subTest(operation=operation):
+                self.events.unlink(missing_ok=True)
+                result = self.execute_database(operation)
+                self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
+                self.assertEqual(self.events.read_text().splitlines(), ["environment", "extension-check"])
 
     def test_seed_and_unknown_operations_never_start_database_work(self):
         for operation in ("seed", "unknown"):
@@ -339,7 +354,7 @@ class IntegratedLifecycle(unittest.TestCase):
         owner = source[start:finish]
         names = ("check_deps", "run_build", "run_dev_tests", "run_install",
                  "run_database_maintenance", "run_db_tests", "run_publish",
-                 "reconcile_installed_product", "run_live_tests")
+                 "reconcile_installed_product", "run_live_tests", "run_competitive_model_proof")
         with tempfile.TemporaryDirectory(prefix="laplace-lifecycle-order-") as directory:
             events = Path(directory) / "events"
             functions = []
@@ -359,7 +374,7 @@ class IntegratedLifecycle(unittest.TestCase):
     def expected_lifecycle():
         return ["check_deps", "run_build", "run_dev_tests", "run_install",
                 "run_database_maintenance:--prepare", "run_db_tests", "run_publish",
-                "reconcile_installed_product", "run_live_tests"]
+                "reconcile_installed_product", "run_live_tests", "run_competitive_model_proof"]
 
     def test_failed_dev_controls_preserve_failure_after_complete_product_lifecycle(self):
         result, events = self.execute(23)
@@ -370,7 +385,8 @@ class IntegratedLifecycle(unittest.TestCase):
     def test_build_and_runtime_failures_stop_before_later_phases(self):
         order = self.expected_lifecycle()
         for phase in ("run_build", "run_install", "run_database_maintenance", "run_db_tests",
-                      "run_publish", "reconcile_installed_product", "run_live_tests"):
+                      "run_publish", "reconcile_installed_product", "run_live_tests",
+                      "run_competitive_model_proof"):
             with self.subTest(phase=phase):
                 result, events = self.execute(23, phase)
                 self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
@@ -406,7 +422,7 @@ class IntegratedLifecycle(unittest.TestCase):
         self.assertEqual(events, self.expected_lifecycle())
 
 class DatabaseMaintenanceMode(unittest.TestCase):
-    def execute(self, arguments, pipeline_status=0, fresh=False):
+    def execute(self, arguments, pipeline_status=0, fresh=False, classification="canonical", probe_status=0):
         with tempfile.TemporaryDirectory(prefix="laplace-database-order-") as directory:
             root = Path(directory)
             scripts = root / "scripts"
@@ -414,15 +430,30 @@ class DatabaseMaintenanceMode(unittest.TestCase):
             source = ROOT / "scripts/maintain-installed-database.sh"
             (scripts / source.name).write_bytes(source.read_bytes())
             trace = root / "events"
+            probe = root / "probe"
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            (fake_bin / "psql").write_text(
+                '#!/usr/bin/env bash\nset -euo pipefail\n'
+                'printf "%s\\n" "$*" >> "$TEST_PROBE"\n'
+                'cat >> "$TEST_PROBE"\n'
+                'printf "%s\\n" "$TEST_CLASSIFICATION"\n'
+                'if [[ "$TEST_PROBE_STATUS" != 0 ]]; then echo "catalog connection failed" >&2; fi\n'
+                'exit "$TEST_PROBE_STATUS"\n')
+            (fake_bin / "psql").chmod(0o755)
             for name, label in (("pipeline.sh", "pipeline"), ("reconcile-highway-masks.sh", "highway"),
-                                ("check-database-health.sh", "health")):
+                                ("check-database-health.sh", "health"), ("ensure-foundation.sh", "foundation")):
                 status = pipeline_status if label == "pipeline" else 0
                 (scripts / name).write_text(
                     'printf "%s\\n" "' + label + ':$*" >> "$TEST_EVENTS"\nexit ' + str(status) + '\n')
             result = subprocess.run(["bash", str(scripts / source.name), *arguments],
-                env=dict(os.environ, TEST_EVENTS=str(trace), PGDATABASE="fixture_database",
+                env=dict(os.environ, TEST_EVENTS=str(trace), TEST_PROBE=str(probe),
+                         TEST_CLASSIFICATION=classification, TEST_PROBE_STATUS=str(probe_status),
+                         PATH=str(fake_bin) + os.pathsep + os.environ["PATH"],
+                         PGDATABASE="fixture_database", PGUSER="fixture_owner",
                          LAPLACE_FRESH_DB="1" if fresh else ""),
                 text=True, capture_output=True, timeout=10)
+            self.last_probe = probe.read_text() if probe.exists() else ""
             return result, trace.read_text().splitlines() if trace.exists() else []
 
     def test_prepare_defers_data_reconciliation_and_preserves_fresh_argument(self):
@@ -451,6 +482,45 @@ class DatabaseMaintenanceMode(unittest.TestCase):
                 result, events = self.execute(arguments)
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(events, [])
+
+
+    def test_successful_complete_probe_alone_can_request_inferred_recreation(self):
+        for classification, expected_fresh in (("absent", False), ("canonical", False), ("incompatible", True)):
+            with self.subTest(classification=classification):
+                result, events = self.execute(["--prepare"], classification=classification)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                prefix = "--fresh-db " if expected_fresh else ""
+                self.assertEqual(events, [
+                    "pipeline:" + prefix + "migrate sync-extension tune-pg tune-laplace perfcache-guc api-env",
+                    *(["foundation:"] if expected_fresh else []),
+                    "health:fixture_database"])
+                self.assertIn("-X -d fixture_database -U fixture_owner -tAX -v ON_ERROR_STOP=1", self.last_probe)
+                self.assertEqual(self.last_probe.count("SELECT CASE"), 1)
+
+    def test_failed_probe_cannot_turn_any_partial_output_into_recreation(self):
+        for output in ("", "incompatible", "canonical", "incompatible\ncanonical"):
+            with self.subTest(output=output):
+                result, events = self.execute(["--prepare"], classification=output, probe_status=2)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(events, [])
+                self.assertIn("catalog connection failed", result.stderr)
+                self.assertIn("could not classify entity storage", result.stderr)
+
+    def test_empty_unsupported_or_multiple_results_cannot_start_maintenance(self):
+        for output in ("", "unsupported", "h", "incompatible\ncanonical"):
+            with self.subTest(output=output):
+                result, events = self.execute(["--prepare"], classification=output)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(events, [])
+                self.assertIn("unrecognized entity storage classification", result.stderr)
+
+    def test_explicit_fresh_selection_keeps_existing_reset_owner_without_probe(self):
+        result, events = self.execute(["--prepare"], fresh=True, probe_status=2)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.last_probe, "")
+        self.assertEqual(events, [
+            "pipeline:--fresh-db migrate sync-extension tune-pg tune-laplace perfcache-guc api-env",
+            "health:fixture_database"])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -40,6 +40,8 @@ NATIVE_TESTS = (
     "physicality_descriptor_pg_native_helpers",
     "physicality_readback_pg_native_helpers",
 )
+# CTest uses its own POSIX-style regular expressions, not Python's (?:...) syntax.
+CTEST_SELECTION_REGEX = ("^(regress_laplace_(geom|substrate)|" + "|".join(NATIVE_TESTS) + ")$")
 LIVE_ROOTS = (
     Path("/opt/laplace/pgsql-18"),
     Path("/opt/laplace/lib/postgresql/18"),
@@ -491,7 +493,7 @@ class Qualification:
         self.write()
         self.ctest = resolved(a.ctest)
         self.dotnet = resolved(a.dotnet)
-        self.test_regex = ("^(?:regress_laplace_(?:geom|substrate)|" + "|".join(NATIVE_TESTS) + ")$")
+        self.test_regex = CTEST_SELECTION_REGEX
         plan = json.loads(self.command("ctest-plan", [self.ctest, "--test-dir", self.build,
                                                      "--show-only=json-v1", "-R", self.test_regex]))
         (self.work / "ctest-plan.json").write_text(json.dumps(plan, indent=2) + "\n")

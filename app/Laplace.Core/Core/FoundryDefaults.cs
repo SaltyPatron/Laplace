@@ -48,7 +48,11 @@ public static class FoundryDefaults
     public const double GateZ = 6.0;
     public const double CtxQk = 8.0;
     public const double CapFrac = 0.05;
-    public const bool Ppmi = true;
+    /// PPMI is a declared association operator, not an implicit trajectory-export
+    /// policy. Trajectory synthesis must carry the substrate's rated continuation
+    /// evidence unchanged; enabling this silently reweighted it and dropped every
+    /// non-positive PMI edge before target-operator construction (#928).
+    public const bool Ppmi = false;
     public const bool Procrustes = true;
     /// Plan Phase 0 (2026-07-08 rope-probe verdict: CORRUPTS, 191% drift): synthesized
     /// QK operators are content-relational; llama-arch RoPE rotates them by absolute
@@ -65,13 +69,13 @@ public static class FoundryDefaults
     /// it moves only when the catalog does. Named here rather than inlined so the
     /// stratum allocator and the catalog cannot silently disagree.
     public const int HighwayBandCount = 13;
-    /// 2026-07-08 rank-collapse fix (doc 14 M3 at the OPERATOR level): factored
-    /// plane spectra are hub-dominated (observed 29:1 V-row ratio → effectively
-    /// rank-1 operators → prompt-independent final states, logit corr 1.0000).
-    /// Factor scales direction r by (s_r/s0)^alpha; 0.5 was the old sqrt (each side
-    /// sqrt(s/s0)); 0.25 flattens the spectrum enough for sub-dominant structure
-    /// to survive the stack while preserving ordering.
-    public const double FactorSpectrumAlpha = 0.25;
+    /// Exact normalized SVD factorization. Factor() normalizes the operator by its
+    /// leading singular value before splitting each singular ratio across both
+    /// factors. Alpha=1 preserves that normalized operator; historical alpha=0.25
+    /// changed its spectrum and therefore changed the substrate-selected operation.
+    /// Rank truncation remains the declared target-width loss; spectrum retuning is
+    /// not an implicit construction policy (#928).
+    public const double FactorSpectrumAlpha = 1.0;
     public static readonly bool CoordOnly = false;
     public const bool CoordDirect = false;
     public const bool Generative = true;

@@ -235,7 +235,7 @@ public class SubstrateChangeTests
             var observed = row with { TrajectoryXyzm = trajectory, ObservedAtUnixUs = i + 10 };
             builder.AddPhysicality(observed);
             trajectoryBytes += (long)(trajectory?.Length ?? 0) * sizeof(double);
-            long expected = 72L + (i + 1L) * 160 + IntPtr.Size + trajectoryBytes;
+            long expected = 128L + (i + 1L) * 160 + IntPtr.Size + trajectoryBytes;
             Assert.Equal(expected, builder.StagedBytesEstimate);
             Assert.Equal(expected, builder.StagedBytesEstimate);
         }

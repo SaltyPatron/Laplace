@@ -102,7 +102,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 720
     concurrency:
-      group: laplace-ingest-${{ inputs.database }}-${{ inputs.mode }}-${{ inputs.source }}
+      group: laplace-host-lifecycle
       cancel-in-progress: false
     env:
       LAPLACE_DATA_ROOT: /vault/Data
@@ -121,10 +121,31 @@ jobs:
       - name: Checkout exact revision
         env:
           TARGET_SHA: ${{ github.sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
+          umask 0002
+          cd "$GITHUB_WORKSPACE"
+          if [[ ! -e .git ]]; then
+            [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+              echo "::error::nonempty workspace has no repository; preserving its files" >&2
+              exit 1
+            }
+            git init --initial-branch=main
+            git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+            git fetch --no-tags --depth=2 origin "$TARGET_SHA"
+          unset checkout_auth CHECKOUT_TOKEN
+          git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+          git diff --quiet
+          git diff --cached --quiet
 
       - uses: ./.github/actions/setup-laplace-env
         with:

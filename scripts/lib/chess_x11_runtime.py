@@ -209,10 +209,11 @@ def selected_environment(document, base=None, *, qt_prefix=None):
     result = dict(os.environ if base is None else base)
     root = Path(document["root"])
     paths = {"PATH": [root / "usr/bin"],
-             "LD_LIBRARY_PATH": [root / "usr/lib/x86_64-linux-gnu", root / "lib/x86_64-linux-gnu"]}
+             "LD_LIBRARY_PATH": [root / "usr/lib/x86_64-linux-gnu", root / "lib/x86_64-linux-gnu"],
+             "GI_TYPELIB_PATH": [root / "usr/lib/x86_64-linux-gnu/girepository-1.0"]}
     for name, prefixes in paths.items():
         values = [str(p) for p in prefixes if p.is_dir()]
-        if qt_prefix is not None:
+        if qt_prefix is not None and name in ("PATH", "LD_LIBRARY_PATH"):
             values.insert(0, str(Path(qt_prefix) / ("bin" if name == "PATH" else "lib")))
         values.extend(filter(None, result.get(name, "").split(os.pathsep)))
         result[name] = os.pathsep.join(dict.fromkeys(values))
@@ -267,7 +268,7 @@ def load(root=None):
     return document
 
 
-def provision(root, deadline, evidence=None):
+def provision(root, deadline, evidence=None, *, accessibility=False):
     root = Path(checked_path(root)).absolute()
     release = {}
     for line in Path("/etc/os-release").read_text().splitlines():
@@ -316,7 +317,8 @@ def provision(root, deadline, evidence=None):
         execute(["/usr/bin/apt-get", "update", "-o", "APT::Update::Error-Mode=any"],
                 deadline, env=environment, output=work / "logs/update.log")
         simulated = execute(["/usr/bin/apt-get", "--simulate", "--no-install-recommends",
-                             "--no-remove", "install", *PACKAGES], deadline, env=environment)
+                             "--no-remove", "install", *PACKAGES,
+                             *(("gir1.2-atspi-2.0",) if accessibility else ())], deadline, env=environment)
         (work / "logs/selection.txt").write_text(simulated)
         rows = simulation_packages(simulated)
         metadata = [package_metadata(execute(["/usr/bin/apt-cache", "show", name + "=" + version],

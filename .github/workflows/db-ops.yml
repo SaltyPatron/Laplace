@@ -28,7 +28,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     concurrency:
-      group: laplace-database-lifecycle
+      group: laplace-host-lifecycle
       cancel-in-progress: false
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}
@@ -65,8 +65,14 @@ jobs:
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
           git diff --quiet
           git diff --cached --quiet
+
+          # Database lifecycle owns database state, not compilation. Requiring the
+          # whole checkout SHA to equal the last application build made script-only
+          # database fixes impossible to execute. Instead, operations that create or
+          # update substrate schema prove that the installed extension artifact is
+          # byte-derived from this checkout's extension source before mutating data.
           export LAPLACE_SETUP_USE_CMAKE=false
-          export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=true
+          export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
           source scripts/ci-environment.sh
 
           case "$LAPLACE_DB_OPERATION" in
@@ -74,6 +80,7 @@ jobs:
               exec bash scripts/db-migrations.sh status
               ;;
             create)
+              python3 scripts/check-installed-extension-current.py
               bash scripts/db-migrations.sh up
               bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
               exec bash scripts/check-database-health.sh "$PGDATABASE"
@@ -82,12 +89,14 @@ jobs:
               exec bash scripts/db-migrations.sh nuke --yes
               ;;
             recreate)
+              python3 scripts/check-installed-extension-current.py
               bash scripts/db-migrations.sh nuke --yes
               bash scripts/db-migrations.sh up
               bash scripts/pipeline.sh sync-extension tune-pg tune-laplace perfcache-guc api-env
               exec bash scripts/check-database-health.sh "$PGDATABASE"
               ;;
             update)
+              python3 scripts/check-installed-extension-current.py
               exec bash scripts/maintain-installed-database.sh
               ;;
             verify)
