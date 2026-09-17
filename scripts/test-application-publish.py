@@ -30,6 +30,15 @@ curl() {
   fi
 }
 sleep() { :; }
+application_revision_verify() {
+  local expected
+  expected="$(application_revision_expected)" || return $?
+  command bash "$ROOT/scripts/check-deployed-revision.sh" "$expected"
+}
+application_revision_install() {
+  install -m 0644 "$ROOT/build/.laplace-source-revision" "$LAPLACE_APP_DIR/.laplace-source-revision"
+  application_revision_verify
+}
 main "${@:3}"
 '''
 
@@ -41,6 +50,20 @@ def load_module(name: str, path: Path):
     return module
 
 
+def prepare_revision_fixture(root):
+    for name in ("build", "scripts", "app"):
+        (root / name).mkdir(exist_ok=True)
+    (root / "scripts/check-deployed-revision.sh").write_text(
+        (ROOT / "scripts/check-deployed-revision.sh").read_text())
+    for args in (("init", "-q"), ("config", "user.name", "publication fixture"),
+                 ("config", "user.email", "fixture@example.invalid"),
+                 ("add", "scripts"), ("commit", "-qm", "publication fixture")):
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    revision = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True)
+    (root / "build/.laplace-source-revision").write_text(revision)
+    return revision
+
+
 class ApplicationTransactionTests(unittest.TestCase):
     """Exercise current direct deployment; no removed session/stamp owner."""
     def setUp(self):
@@ -48,13 +71,13 @@ class ApplicationTransactionTests(unittest.TestCase):
             prefix="application-publish-contract-", dir=os.environ["TMPDIR"])
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        (self.root / "build").mkdir()
+        self.revision = prepare_revision_fixture(self.root)
 
     def run_release(self, mode="deploy", fail="", ready="true", script=SCRIPT, extra=(), adapter=ADAPTERS):
         (self.root / "events").unlink(missing_ok=True)
         return subprocess.run(
             ["bash", "-c", adapter, "test", str(script), str(self.root), mode, *extra],
-            env=dict(os.environ, FAIL_AT=fail, READY=ready),
+            env=dict(os.environ, FAIL_AT=fail, READY=ready, LAPLACE_APP_DIR=str(self.root / "app")),
             capture_output=True, text=True, timeout=10)
 
     def events(self):
@@ -73,6 +96,19 @@ class ApplicationTransactionTests(unittest.TestCase):
             "managed preflight", "managed begin", "pipeline publish", "managed reconcile",
             "managed activate", "systemctl restart laplace-api", "readiness", "managed commit"], self.events())
         self.assertFalse((self.root / "build/.applications-verified.json").exists())
+
+    def test_missing_or_stale_build_revision_refuses_before_publication(self):
+        marker = self.root / "build/.laplace-source-revision"
+        for content in (None, "f" * 40 + "\n"):
+            with self.subTest(marker=content):
+                marker.unlink(missing_ok=True)
+                if content is not None:
+                    marker.write_text(content)
+                result = self.run_release()
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("publication build does not belong", result.stderr)
+                self.assertEqual([], self.events())
+                self.assertFalse((self.root / "app/.laplace-source-revision").exists())
 
     def test_preflight_failure_does_not_publish_or_recover(self):
         result = self.run_release(fail="managed preflight")
@@ -426,6 +462,8 @@ class ApiOnlyTransactionTests(unittest.TestCase):
         self.backups = self.root / "backups"
         for name in ("app", "newapp", "backups", "build", "deploy/linux"):
             (self.root / name).mkdir(parents=True, exist_ok=True)
+        self.revision = prepare_revision_fixture(self.root)
+        (self.app / ".laplace-source-revision").write_text("0" * 40 + "\n")
         source = SCRIPT.read_text()
         self.assertIn("/opt/laplace/app-backups/api.", source)
         # Redirect only fixed host paths into this real filesystem fixture.
@@ -478,6 +516,7 @@ class ApiOnlyTransactionTests(unittest.TestCase):
     def test_api_commit_replaces_only_api_and_spa_without_full_publish_stamp(self):
         result = self.run_api()
         self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(self.revision, (self.app / ".laplace-source-revision").read_text())
         self.assertEqual("new", (self.app / "Api.dll").read_text())
         self.assertFalse((self.app / "old-only.dll").exists())
         self.assertTrue((self.app / "new-only.dll").exists())
@@ -493,6 +532,7 @@ class ApiOnlyTransactionTests(unittest.TestCase):
             with self.subTest(fail=fail):
                 result = self.run_api(fail=fail)
                 self.assertNotEqual(0, result.returncode)
+                self.assertEqual("0" * 40 + "\n", (self.app / ".laplace-source-revision").read_text())
                 self.assertEqual("old", (self.app / "Api.dll").read_text())
                 self.assertTrue((self.app / "old-only.dll").exists())
                 self.assertFalse((self.app / "new-only.dll").exists())
