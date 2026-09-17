@@ -75,6 +75,21 @@ typedef struct QueryEvidenceKey
     hash128_t id;
 } QueryEvidenceKey;
 
+/* One exact recorded witness retained only for the duration of this set-sized
+ * query coupling pass. The key begins the entry so PostgreSQL's dynahash can
+ * address it directly; the payload lets later source classification reduce a
+ * deterministic-calculation subset without rereading attestations. */
+typedef struct QueryEvidenceWitness
+{
+    QueryEvidenceKey key;
+    hash128_t source;
+    hash128_t context;
+    bool source_null;
+    bool context_null;
+    int16 outcome;
+    int64 occurrences;
+} QueryEvidenceWitness;
+
 typedef struct QueryEvidenceState
 {
     LaplaceQueryChannel *channels;
@@ -82,6 +97,11 @@ typedef struct QueryEvidenceState
     HTAB *sources;
     HTAB *contexts;
     HTAB *provenance;
+    HTAB *witnesses;
+    HTAB *calculation_sources;
+    HTAB *calculation_channel_sources;
+    HTAB *calculation_contexts;
+    HTAB *calculation_provenance;
     LaplaceQueryEvidenceStats *stats;
 } QueryEvidenceState;
 
