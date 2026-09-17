@@ -42,9 +42,6 @@ jobs:
     name: Product — ${{ inputs.stage }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
-    concurrency:
-      group: ${{ inputs.stage == 'mainline' && 'laplace-mainline-validation' || format('laplace-product-{0}', github.run_id) }}
-      cancel-in-progress: false
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}
       LAPLACE_PROVISION_TOOLS: ${{ inputs.stage == 'provision' && '1' || '0' }}
@@ -88,7 +85,28 @@ jobs:
 
           git diff --quiet
           git diff --cached --quiet
+
           checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
+          if [[ "$LAPLACE_STAGE" == mainline ]]; then
+            latest_main="$(GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+              git ls-remote --heads origin refs/heads/main | awk '{print $1}')"
+            [[ -n "$latest_main" ]] || { echo "::error::could not resolve current main" >&2; exit 1; }
+            if [[ "$latest_main" != "$TARGET_SHA" ]]; then
+              unset checkout_auth CHECKOUT_TOKEN
+              echo "::notice::mainline revision $TARGET_SHA is superseded by $latest_main; no build/test work executed"
+              {
+                echo "## Superseded mainline validation"
+                echo
+                printf '%s\n' "- Selected: \`$TARGET_SHA\`"
+                printf '%s\n' "- Current main: \`$latest_main\`"
+                echo "- Result: no checkout/build/test work executed"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
           GIT_CONFIG_COUNT=1 \
             GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
             GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \

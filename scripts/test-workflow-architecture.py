@@ -37,15 +37,26 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("uses: ./.github/workflows/product-stage.yml", mainline)
         self.assertIn("stage: mainline", mainline)
 
-    def test_mainline_finishes_running_revision_and_coalesces_pending_work(self):
+    def test_mainline_preserves_every_run_and_skips_only_superseded_work(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         mainline = text.split("  mainline:\n", 1)[1].split("\n  operator:\n", 1)[0]
         self.assertNotIn("concurrency:", mainline)
 
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
-        self.assertIn("laplace-mainline-validation", reusable)
-        self.assertIn("cancel-in-progress: false", reusable)
-        self.assertNotIn("cancel-in-progress: true", reusable)
+        self.assertNotIn("concurrency:", reusable)
+        self.assertNotIn("cancel-in-progress:", reusable)
+        lock = reusable.index("flock 9")
+        workspace = reusable.index('cd "$GITHUB_WORKSPACE"')
+        preserve = reusable.index("nonempty workspace has no repository")
+        resolve = reusable.index("git ls-remote --heads origin refs/heads/main")
+        skip = reusable.index('if [[ "$latest_main" != "$TARGET_SHA" ]]')
+        fetch = reusable.index('git fetch --no-tags --depth=2 origin "$TARGET_SHA"')
+        self.assertEqual(
+            [lock, workspace, preserve, resolve, skip, fetch],
+            sorted([lock, workspace, preserve, resolve, skip, fetch]),
+        )
+        self.assertIn("no build/test work executed", reusable)
+        self.assertIn("exit 0", reusable)
 
     def test_observability_is_explicit_evidence_not_push_queue_load(self):
         for name in ("ui-observability.yml", "api-observability.yml"):
