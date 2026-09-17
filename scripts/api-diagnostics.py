@@ -18,6 +18,21 @@ HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "tra
 OUT.mkdir(parents=True, exist_ok=True)
 
 
+def response_evidence(headers, body: bytes, status: int | None) -> dict:
+    correlation_id = headers.get("x-correlation-id") or headers.get("x-request-id") if headers else None
+    interesting_headers = {}
+    if headers:
+        for name in ("content-type", "content-length", "retry-after", "x-correlation-id", "x-request-id"):
+            value = headers.get(name)
+            if value is not None:
+                interesting_headers[name] = value
+    return {
+        "correlationId": correlation_id,
+        "responseHeaders": interesting_headers,
+        "errorBodyPreview": body[:8192].decode("utf-8", errors="replace") if status is not None and status >= 400 else None,
+    }
+
+
 def probe(path: str, method: str = "GET") -> dict:
     url = urljoin(BASE, path.lstrip("/"))
     request = Request(url, method=method.upper(), headers={
@@ -38,7 +53,7 @@ def probe(path: str, method: str = "GET") -> dict:
                 "contentLength": int(response.headers.get("content-length", len(body))) if response.headers.get("content-length", "").isdigit() else len(body),
                 "bytesRead": len(body),
                 "truncated": len(body) == 1024 * 1024,
-                "requestId": response.headers.get("x-request-id"),
+                **response_evidence(response.headers, body, response.status),
                 "error": None,
             }
     except HTTPError as error:
@@ -51,7 +66,7 @@ def probe(path: str, method: str = "GET") -> dict:
             "contentLength": int(error.headers.get("content-length", len(body))) if error.headers.get("content-length", "").isdigit() else len(body),
             "bytesRead": len(body),
             "truncated": len(body) == 1024 * 1024,
-            "requestId": error.headers.get("x-request-id"),
+            **response_evidence(error.headers, body, error.code),
             "error": str(error),
         }
     except (URLError, TimeoutError, OSError) as error:
@@ -60,7 +75,8 @@ def probe(path: str, method: str = "GET") -> dict:
             "status": None,
             "milliseconds": round((time.perf_counter() - started) * 1000, 1),
             "contentType": None, "contentLength": None, "bytesRead": 0,
-            "truncated": False, "requestId": None, "error": str(error),
+            "truncated": False, "correlationId": None, "responseHeaders": {},
+            "errorBodyPreview": None, "error": str(error),
         }
 
 
@@ -150,6 +166,7 @@ summary = {
     "safeProbeCount": len(probes),
     "statusCounts": status_counts,
     "serverErrorCount": sum(1 for item in probes if item["status"] is not None and item["status"] >= 500),
+    "badRequestCount": sum(1 for item in probes if item["status"] == 400),
     "networkErrorCount": sum(1 for item in probes if item["status"] is None),
 }
 
@@ -166,6 +183,7 @@ markdown = [
     f"- Safe live probes: **{len(probes)}**",
     f"- Status classes: **{json.dumps(status_counts, sort_keys=True)}**",
     f"- 5xx responses: **{summary['serverErrorCount']}**",
+    f"- 400 responses from parameter-free safe probes: **{summary['badRequestCount']}**",
     f"- Network errors: **{summary['networkErrorCount']}**",
     "", "### Slowest safe probes", "",
 ]
@@ -173,6 +191,15 @@ markdown.extend(
     f"- `{item['method']} {item['path']}` — {item['status'] if item['status'] is not None else 'network-error'} — {item['milliseconds']} ms"
     for item in slowest
 )
+failures = [item for item in probes if item["status"] is None or item["status"] >= 400]
+if failures:
+    markdown.extend(["", "### Failure evidence", ""])
+    for item in failures:
+        preview = (item.get("errorBodyPreview") or "").replace("\\n", " ").strip()
+        if len(preview) > 240:
+            preview = preview[:237] + "..."
+        correlation = item.get("correlationId") or "none"
+        markdown.append(f"- `{item['method']} {item['path']}` — {item['status'] if item['status'] is not None else 'network-error'} — correlation `{correlation}` — {preview or item.get('error') or 'no body'}")
 markdown.extend(["", "Mutating endpoints are inventoried from OpenAPI but deliberately not invoked by this diagnostic workflow.", ""])
 (OUT / "summary.md").write_text("\n".join(markdown), encoding="utf-8")
 
