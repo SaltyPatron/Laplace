@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using global::Npgsql;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -68,6 +69,8 @@ internal static class ChessWitnessHydrator
         int chunkSize,
         Func<Hash128, Hash128> markerId,
         bool includeLive,
+        int completionLayer,
+        IReadOnlyList<Hash128> completionOwners,
         [EnumeratorCancellation] CancellationToken ct)
     {
         chunkSize = Math.Max(1, chunkSize);
@@ -82,7 +85,7 @@ internal static class ChessWitnessHydrator
 
             lastId = playingIds[^1].ToBytes();
 
-            await foreach (var id in FilterByMarkerAsync(playingIds, reader, chunkSize, markerId, ct))
+            await foreach (var id in FilterByMarkerAsync(playingIds, reader, chunkSize, markerId, completionLayer, completionOwners, ct))
                 yield return id;
         }
     }
@@ -92,7 +95,10 @@ internal static class ChessWitnessHydrator
         ISubstrateReader reader,
         int chunkSize,
         Func<Hash128, Hash128> markerId,
-        [EnumeratorCancellation] CancellationToken ct)
+        int completionLayer,
+        IReadOnlyList<Hash128> completionOwners,
+        [EnumeratorCancellation] CancellationToken ct,
+        Hash128? completionContextId = null)
     {
         chunkSize = Math.Max(1, chunkSize);
         byte[] lastId = Array.Empty<byte>();
@@ -105,28 +111,38 @@ internal static class ChessWitnessHydrator
 
             lastId = lineIds[^1].ToBytes();
 
-            await foreach (var id in FilterByMarkerAsync(lineIds, reader, chunkSize, markerId, ct))
+            await foreach (var id in FilterByMarkerAsync(lineIds, reader, chunkSize, markerId, completionLayer, completionOwners, ct, completionContextId))
                 yield return id;
         }
     }
 
-    private static async IAsyncEnumerable<Hash128> FilterByMarkerAsync(
-        List<Hash128> ids, ISubstrateReader reader, int chunkSize, Func<Hash128, Hash128> markerId,
-        [EnumeratorCancellation] CancellationToken ct)
+    internal static async IAsyncEnumerable<Hash128> FilterByMarkerAsync(
+        IReadOnlyList<Hash128> ids, ISubstrateReader reader, int chunkSize,
+        Func<Hash128, Hash128> markerId, int completionLayer,
+        IReadOnlyList<Hash128> completionOwners,
+        [EnumeratorCancellation] CancellationToken ct,
+        Hash128? completionContextId = null)
     {
+        if (completionOwners.Count == 0)
+            throw new ArgumentException("unit completion requires an explicit output owner", nameof(completionOwners));
+        chunkSize = Math.Max(1, chunkSize);
+        var typeId = IngestUnitCompletion.RelationTypeId(completionLayer);
         for (int off = 0; off < ids.Count; off += chunkSize)
         {
             int take = Math.Min(chunkSize, ids.Count - off);
-            var chunk = ids.GetRange(off, take);
-            var markers = new Hash128[take];
+            var receipts = new Hash128[checked(take * completionOwners.Count)];
             for (int i = 0; i < take; i++)
-                markers[i] = markerId(chunk[i]);
+                for (int owner = 0; owner < completionOwners.Count; owner++)
+                    receipts[i * completionOwners.Count + owner] = IngestUnitCompletion.AttestationId(
+                        markerId(ids[off + i]), completionOwners[owner], completionLayer, completionContextId);
 
-            byte[] bm = await reader.EntitiesExistBitmapAsync(markers, ct).ConfigureAwait(false);
+            var present = await reader.PresentAttestationIdsAsync(typeId, receipts, ct).ConfigureAwait(false);
             for (int i = 0; i < take; i++)
             {
-                if (BitmapBits.IsSet(bm, i)) continue;
-                yield return chunk[i];
+                bool complete = false;
+                for (int owner = 0; owner < completionOwners.Count; owner++)
+                    complete |= present.Contains(receipts[i * completionOwners.Count + owner]);
+                if (!complete) yield return ids[off + i];
             }
         }
     }
@@ -139,7 +155,7 @@ internal static class ChessWitnessHydrator
     {
         await foreach (var g in StreamUnanalyzedEventsAsync(
             ds, reader, chunkSize, ev => ChessVocabulary.AnalysisMarkerId(ev, ChessAnalyze.Version),
-            includeLive: false, ct))
+            includeLive: false, 21, [ChessAnalyze.SourceId], ct))
             yield return g;
     }
 
@@ -149,13 +165,15 @@ internal static class ChessWitnessHydrator
         int chunkSize,
         Func<Hash128, Hash128> markerId,
         bool includeLive,
+        int completionLayer,
+        IReadOnlyList<Hash128> completionOwners,
         [EnumeratorCancellation] CancellationToken ct,
         long? strictMaterializationBytes = null)
     {
         chunkSize = Math.Max(1, chunkSize);
         var idChunk = new List<Hash128>(chunkSize);
         await foreach (var eventId in StreamUnanalyzedEventIdsAsync(
-                           ds, reader, chunkSize, markerId, includeLive, ct))
+                           ds, reader, chunkSize, markerId, includeLive, completionLayer, completionOwners, ct))
         {
             idChunk.Add(eventId);
             if (idChunk.Count < chunkSize) continue;
@@ -181,11 +199,14 @@ internal static class ChessWitnessHydrator
         ISubstrateReader reader,
         int chunkSize,
         Func<Hash128, Hash128> markerId,
-        [EnumeratorCancellation] CancellationToken ct)
+        int completionLayer,
+        IReadOnlyList<Hash128> completionOwners,
+        [EnumeratorCancellation] CancellationToken ct,
+        Hash128? completionContextId = null)
     {
         chunkSize = Math.Max(1, chunkSize);
         var idChunk = new List<Hash128>(chunkSize);
-        await foreach (var lineId in StreamUnanalyzedLineIdsAsync(ds, reader, chunkSize, markerId, ct))
+        await foreach (var lineId in StreamUnanalyzedLineIdsAsync(ds, reader, chunkSize, markerId, completionLayer, completionOwners, ct, completionContextId))
         {
             idChunk.Add(lineId);
             if (idChunk.Count < chunkSize) continue;
@@ -230,16 +251,11 @@ internal static class ChessWitnessHydrator
         if (eventIds.Count == 0) yield break;
         if (reader is null) { foreach (var id in eventIds) yield return id; yield break; }
 
-        var markers = new Hash128[eventIds.Count];
-        for (int i = 0; i < eventIds.Count; i++)
-            markers[i] = ChessVocabulary.AnalysisMarkerId(eventIds[i], ChessAnalyze.Version);
-
-        byte[] bm = await reader.EntitiesExistBitmapAsync(markers, ct).ConfigureAwait(false);
-        for (int i = 0; i < eventIds.Count; i++)
-        {
-            if (BitmapBits.IsSet(bm, i)) continue;
-            yield return eventIds[i];
-        }
+        await foreach (var id in FilterByMarkerAsync(
+                           eventIds, reader, Math.Max(1, eventIds.Count),
+                           id => ChessVocabulary.AnalysisMarkerId(id, ChessAnalyze.Version),
+                           21, [ChessAnalyze.SourceId], ct))
+            yield return id;
     }
 
     internal static async Task<List<Hash128>> FetchRecordedPlayingIdPageAsync(

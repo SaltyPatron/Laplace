@@ -13,6 +13,61 @@ internal sealed partial class ChessRecordingMeasurement
     private WorkPhase? _workPhase;
     private long _workPhaseStarted;
 
+    public ReadbackOperationDiagnostics ReadbackOperations { get; } = new();
+
+    internal enum ReadbackOperation
+    {
+        ExactWitnessBodies,
+        CanonicalCarrierVertices,
+        HydrationAndLegalReplay,
+        ResultAndReceiptText,
+    }
+
+    public sealed record ReadbackOperationAggregate(string Operation, long ReturnedCalls,
+        long InterruptedCalls, double TotalSeconds);
+
+    public sealed class ReadbackOperationDiagnostics
+    {
+        private readonly long[] _ticks = new long[Enum.GetValues<ReadbackOperation>().Length];
+        private readonly long[] _returned = new long[Enum.GetValues<ReadbackOperation>().Length];
+        private readonly long[] _interrupted = new long[Enum.GetValues<ReadbackOperation>().Length];
+        public string Scope => "Nested wall-clock windows for the four existing exact-readback operations, including interrupted calls. HydrationAndLegalReplay includes database reads, native decoding and managed legal replay. These are not pure database or CPU times, and are already included in ExactReadback and elapsedSeconds.readback. Returning does not establish successful validation or durable-game acceptance.";
+        public IReadOnlyList<ReadbackOperationAggregate> Operations
+        {
+            get
+            {
+                lock (_ticks)
+                    return Enum.GetValues<ReadbackOperation>().Select(operation =>
+                        new ReadbackOperationAggregate(operation.ToString(),
+                            _returned[(int)operation], _interrupted[(int)operation],
+                            _ticks[(int)operation] / (double)Stopwatch.Frequency)).ToArray();
+            }
+        }
+
+        internal void Add(ReadbackOperation operation, long ticks, bool returned)
+        {
+            lock (_ticks)
+            {
+                _ticks[(int)operation] += ticks;
+                if (returned) _returned[(int)operation]++;
+                else _interrupted[(int)operation]++;
+            }
+        }
+    }
+
+    private async Task<T> MeasureReadbackAsync<T>(ReadbackOperation operation, Func<Task<T>> read)
+    {
+        long started = Stopwatch.GetTimestamp();
+        bool returned = false;
+        try
+        {
+            T result = await read();
+            returned = true;
+            return result;
+        }
+        finally { ReadbackOperations.Add(operation, Stopwatch.GetTimestamp() - started, returned); }
+    }
+
     internal enum WorkPhase
     {
         SourceReadParseAndValidation,

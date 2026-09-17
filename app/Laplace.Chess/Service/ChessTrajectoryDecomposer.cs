@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -50,7 +51,7 @@ public sealed class ChessTrajectoryDecomposer
         var ws = IngestPipelineDefaults.ResolveWorkingSet(PipelineProfile, options);
         _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
-                           ds, ContainmentReader!, ws.Batch, MarkerId, ct))
+                           ds, ContainmentReader!, ws.Batch, MarkerId, LayerOrder, [SourceId], ct))
         {
             _candidatesStreamed++;
             yield return ChessTrajectoryRecord.ForGame(witnessed);
@@ -102,6 +103,7 @@ public sealed class ChessTrajectoryDecomposer
         ChessGraph.AppendPositionProjection(b, w.LineId, line, sourceId, nowUs);
         b.AddEntity(MarkerId(w.LineId), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, sourceId);
+        IngestUnitCompletion.Emit(b, MarkerId(w.LineId), sourceId, 21);
     }
 
     public override async Task<long?> EstimateUnitCountAsync(
@@ -117,7 +119,7 @@ public sealed class ChessTrajectoryDecomposer
     }
 }
 
-public sealed record ChessTrajectoryRecord : ITrunkRootRecord
+public sealed record ChessTrajectoryRecord : ITrunkRootRecord, IIngestCompletionRecord
 {
     private ChessTrajectoryRecord(ChessWitnessedGame? game, Hash128? playerId, string? playerName)
         => (Game, PlayerId, PlayerName) = (game, playerId, playerName);
@@ -131,6 +133,11 @@ public sealed record ChessTrajectoryRecord : ITrunkRootRecord
 
     public static ChessTrajectoryRecord ForPlayer(Hash128 playerId, string name) =>
         new(null, playerId, name);
+
+    public Hash128 CompletionAttestationTypeId => Game is null
+        ? default : IngestUnitCompletion.RelationTypeId(21);
+    public Hash128 CompletionAttestationId => Game is null ? default
+        : IngestUnitCompletion.AttestationId(TrunkRootId, ChessVocabulary.TrajectorySourceId, 21);
 
     public Hash128 TrunkRootId => Game is { } game
         ? ChessTrajectoryDecomposer.MarkerId(game.LineId)

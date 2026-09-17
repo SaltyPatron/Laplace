@@ -589,6 +589,19 @@ public sealed class SubstrateChangeBuilder : IDisposable
         ImmutableArray<AttestationRow> attestations,
         ImmutableArray<EphemeralFoldInput> ephemeralFolds)
     {
+        // Unit-completion metadata is new operational bookkeeping, not a new
+        // source observation. Preserve the legacy source-unit identity when it
+        // is added during recovery; the complete v2 payload digest still binds
+        // every receipt/type row in the returned change.
+        if (entities.Any(static row => Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.Id))
+            || attestations.Any(static row => Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.TypeId)))
+        {
+            entities = entities.Where(static row =>
+                !Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.Id)).ToImmutableArray();
+            attestations = attestations.Where(static row =>
+                !Laplace.Ingestion.IngestUnitCompletion.IsRelationType(row.TypeId)).ToImmutableArray();
+        }
+
         int nameByteCount = System.Text.Encoding.UTF8.GetByteCount(unitName);
         long total = 16L + nameByteCount
                      + 4L + (long)entities.Length * 16

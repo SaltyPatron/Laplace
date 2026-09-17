@@ -301,7 +301,7 @@ public class ConsensusAccumulatingWriterTests
     }
 
     [Fact]
-    public async Task Production_SecondPeriodAccumulatesOnPrior()
+    public async Task Production_StorageBatchesExtendOneDurableEvidencePeriod()
     {
         var src = H(500); var relType = H(501); var subj = H(510); var obj = H(520);
         await EnsureScaffoldAsync(src, relType, subj, obj);
@@ -322,6 +322,25 @@ public class ConsensusAccumulatingWriterTests
         Assert.Equal(5L, after2!.Value.wc);
         Assert.True(after2.Value.rating > after1.Value.rating);
         Assert.True(after2.Value.rd < after1.Value.rd);
+        await using var canonical = _pg.DataSource.CreateCommand("""
+            WITH folded AS MATERIALIZED (
+                SELECT laplace.consensus_fold(false,NULL,NULL,NULL,
+                    opponent_rating_fp1e9,opponent_rd_fp1e9,GREATEST(observation_count,1),
+                    sum_score_fp1e9,consensus.glicko2_tau()
+                    ORDER BY last_observed_at,id) AS result,count(*) AS evidence_rows
+                FROM laplace.attestations WHERE type_id=$1 AND subject_id=$2 AND object_id=$3
+            )
+            SELECT (result).rating,(result).rd,(result).volatility,
+                   (result).witness_count,evidence_rows FROM folded
+            """);
+        canonical.Parameters.AddWithValue(relType.ToBytes());
+        canonical.Parameters.AddWithValue(subj.ToBytes());
+        canonical.Parameters.AddWithValue(obj.ToBytes());
+        await using var expected = await canonical.ExecuteReaderAsync();
+        Assert.True(await expected.ReadAsync());
+        Assert.Equal((expected.GetInt64(0),expected.GetInt64(1),expected.GetInt64(2),expected.GetInt64(3)),
+                     after2.Value);
+        Assert.Equal(2L,expected.GetInt64(4));
     }
 
     [Fact]

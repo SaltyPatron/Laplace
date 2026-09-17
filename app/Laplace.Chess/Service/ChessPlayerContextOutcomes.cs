@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -37,15 +38,13 @@ public static class ChessPlayerContextOutcomes
 
         var modality = new ChessModality();
         if (ChessAnalyze.InitialState(game.StartFen, modality) is not { } start)
-        {
-            Stamp(b, game.PlayingId);
             return;
-        }
 
         var state = start.Initial;
         int plies = game.Moves.Count;
         var scratch = new List<ChessMove>(16);
         var seen = new HashSet<(Hash128 Player, string Context)>();
+        var pending = new List<(Hash128 Player, string Context, PlyOutcome Outcome)>();
 
         double[] clocks = game.ClockTokens is not null
             ? game.ClockTokens.Select(static token =>
@@ -63,7 +62,7 @@ public static class ChessPlayerContextOutcomes
             if (player is { } pid)
             {
                 PlyOutcome outcome = game.Result.ForMover(mover);
-                AppendOnce(b, seen, pid, ChessCanonical.PhaseClass(state.Board), outcome, game.PlayingId);
+                QueueOnce(pending, seen, pid, ChessCanonical.PhaseClass(state.Board), outcome);
 
                 string? clockToken = game.ClockTokens is not null && ply < game.ClockTokens.Length
                     ? game.ClockTokens[ply]
@@ -71,22 +70,22 @@ public static class ChessPlayerContextOutcomes
                 if (clockToken is not null && clocks.Length > ply)
                 {
                     double tf = PgnClocks.ThinkFactor(clocks, medianDrop, ply);
-                    AppendOnce(b, seen, pid, ChessCanonical.ThinkClass(tf), outcome, game.PlayingId);
+                    QueueOnce(pending, seen, pid, ChessCanonical.ThinkClass(tf), outcome);
                     if (ChessCanonical.ThinkLens(
                             ply, plies, tf, clocks[ply],
                             (ply & 1) == 0 ? medianRemEven : medianRemOdd,
                             medianDrop) is { } lens)
-                        AppendOnce(b, seen, pid, lens, outcome, game.PlayingId);
+                        QueueOnce(pending, seen, pid, lens, outcome);
                 }
                 else if (game.SpentSeconds is { } spent
                          && ply < spent.Length && medianSpent > 0)
                 {
                     double tf = PgnClocks.ThinkFactorFromSpent(spent, medianSpent, ply);
-                    AppendOnce(b, seen, pid, ChessCanonical.ThinkClass(tf), outcome, game.PlayingId);
+                    QueueOnce(pending, seen, pid, ChessCanonical.ThinkClass(tf), outcome);
                     if (ChessCanonical.ThinkLens(
                             ply, plies, tf,
                             remaining: 0, medianRemaining: 0, medianDrop: 0) is { } lens)
-                        AppendOnce(b, seen, pid, lens, outcome, game.PlayingId);
+                        QueueOnce(pending, seen, pid, lens, outcome);
                 }
             }
 
@@ -94,26 +93,35 @@ public static class ChessPlayerContextOutcomes
             if (move is null)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    "ChessPlayerContextOutcomes: could not replay {0} at ply {1}; contextual prefix retained",
+                    "ChessPlayerContextOutcomes: could not replay {0} at ply {1}; unit remains incomplete",
                     game.PlayingId, ply + 1);
-                break;
+                return;
             }
             state = modality.Apply(state, move.Value);
         }
 
+        foreach (var observation in pending)
+            AppendContext(b, observation.Player, observation.Context, observation.Outcome, game.PlayingId);
         Stamp(b, game.PlayingId);
     }
 
-    private static void AppendOnce(
-        SubstrateChangeBuilder b,
+    private static void QueueOnce(
+        List<(Hash128 Player, string Context, PlyOutcome Outcome)> pending,
         HashSet<(Hash128 Player, string Context)> seen,
         Hash128 player,
         string contextSurface,
-        PlyOutcome outcome,
-        Hash128 playingId)
+        PlyOutcome outcome)
     {
-        if (!seen.Add((player, contextSurface))) return;
-        if (ContentEmitter.Emit(b, contextSurface, SourceId) is not { } contextId) return;
+        if (seen.Add((player, contextSurface)))
+            pending.Add((player, contextSurface, outcome));
+    }
+
+    private static void AppendContext(
+        SubstrateChangeBuilder b, Hash128 player, string contextSurface,
+        PlyOutcome outcome, Hash128 playingId)
+    {
+        if (ContentEmitter.Emit(b, contextSurface, SourceId) is not { } contextId)
+            throw new InvalidDataException("player context could not be admitted as content");
         b.AddAttestation(NativeAttestation.Aggregated(
             subject: player,
             typeId: ChessVocabulary.OutcomeType,
@@ -126,9 +134,11 @@ public static class ChessPlayerContextOutcomes
     }
 
     private static void Stamp(SubstrateChangeBuilder b, Hash128 playingId)
-        => b.AddEntity(
-            MarkerId(playingId), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, SourceId);
+    {
+        var marker = MarkerId(playingId);
+        b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType, SourceId);
+        IngestUnitCompletion.Emit(b, marker, SourceId, 25);
+    }
 }
 
 /// <summary>
@@ -172,7 +182,7 @@ public sealed class ChessPlayerContextOutcomesDecomposer
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedEventsAsync(
                            ds, ContainmentReader!, ws.Batch,
                            ChessPlayerContextOutcomes.MarkerId,
-                           includeLive: true, ct))
+                           includeLive: true, LayerOrder, [SourceId], ct))
         {
             _candidatesStreamed++;
             yield return new ChessPlayerContextOutcomeRecord(witnessed);
@@ -195,11 +205,14 @@ public sealed class ChessPlayerContextOutcomesDecomposer
         => _candidatesStreamed == 0
             ? ("already-complete",
                $"ChessPlayerContextOutcomes: every one of {declaredInputUnits} recorded playing(s) "
-               + $"already carries the v{ChessPlayerContextOutcomes.Version} context marker.")
+               + $"already carries the v{ChessPlayerContextOutcomes.Version} context completion receipt.")
             : null;
 }
 
-public sealed record ChessPlayerContextOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessPlayerContextOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
+    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(25);
+    public Hash128 CompletionAttestationId =>
+        IngestUnitCompletion.AttestationId(TrunkRootId, ChessPlayerContextOutcomes.SourceId, 25);
     public Hash128 TrunkRootId => ChessPlayerContextOutcomes.MarkerId(Game.PlayingId);
 }

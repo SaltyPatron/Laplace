@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -67,18 +68,11 @@ public static class ChessPositionOutcomes
 
     internal static void Deposit(SubstrateChangeBuilder b, ChessWitnessedGame game)
     {
-        var modality = new ChessModality();
-        if (ChessAnalyze.InitialState(game.StartFen, modality) is not { } start) return;
-        var state = start.Initial;
-        var scratch = new List<ChessMove>(32);
-        foreach (string san in game.Moves)
-        {
-            var move = San.Resolve(state.Board, san, scratch);
-            if (move is null) return;
-            AppendBoard(b, state.Board, game.Result, game.PlayingId);
-            state = modality.Apply(state, move.Value);
-        }
-        AppendBoard(b, state.Board, game.Result, game.PlayingId);
+        // Admission must not retain a prefix if a later SAN fails. Reuse the
+        // complete board walk; each actual board is still emitted once in order.
+        if (!ChessTacticOutcomes.TryReplay(game, out var boards)) return;
+        foreach (var board in boards)
+            AppendBoard(b, board, game.Result, game.PlayingId);
         AddMarker(b, game.PlayingId);
     }
 
@@ -86,6 +80,7 @@ public static class ChessPositionOutcomes
         SubstrateChangeBuilder b, IReadOnlyList<string> positionSurfaces,
         GameOutcome result, Hash128 playingId)
     {
+        if (positionSurfaces.Count == 0) return;
         foreach (string surface in positionSurfaces)
             AppendComposed(b, ChessGraph.EmitComposed(b, surface, SourceId), result, playingId);
         AddMarker(b, playingId);
@@ -131,13 +126,19 @@ public static class ChessPositionOutcomes
         }
     }
 
-    private static void AddMarker(SubstrateChangeBuilder b, Hash128 playingId) =>
-        b.AddEntity(MarkerId(playingId), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, SourceId);
+    private static void AddMarker(SubstrateChangeBuilder b, Hash128 playingId)
+    {
+        var marker = MarkerId(playingId);
+        b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType, SourceId);
+        IngestUnitCompletion.Emit(b, marker, SourceId, 22);
+    }
 }
 
-public sealed record ChessPositionOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessPositionOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
+    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(22);
+    public Hash128 CompletionAttestationId =>
+        IngestUnitCompletion.AttestationId(TrunkRootId, ChessPositionOutcomes.SourceId, 22);
     public Hash128 TrunkRootId => ChessPositionOutcomes.MarkerId(Game.PlayingId);
 }
 
@@ -174,7 +175,7 @@ public sealed class ChessPositionOutcomesDecomposer(long? strictMaterializationB
         _candidatesStreamed = 0;
         await foreach (var game in ChessWitnessHydrator.StreamUnanalyzedEventsAsync(
                            ds, ContainmentReader, ws.Batch,
-                           ChessPositionOutcomes.MarkerId, includeLive: true, ct,
+                           ChessPositionOutcomes.MarkerId, includeLive: true, LayerOrder, [SourceId], ct,
                            strictMaterializationBytes: strictMaterializationBytes))
         {
             _candidatesStreamed++;
@@ -195,6 +196,6 @@ public sealed class ChessPositionOutcomesDecomposer(long? strictMaterializationB
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits) =>
         _candidatesStreamed == 0
             ? ("already-complete",
-                $"ChessPositionOutcomes: every one of {declaredInputUnits} playing(s) carries the v{ChessPositionOutcomes.Version} marker.")
+                $"ChessPositionOutcomes: every one of {declaredInputUnits} playing(s) carries the v{ChessPositionOutcomes.Version} completion receipt.")
             : null;
 }

@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -92,7 +93,7 @@ public static class ChessTacticOutcomes
         foreach (var (_, entry) in aggregate)
         {
             if (ContentEmitter.Emit(b, Surface(entry.Pattern), sourceId) is not { } patternId)
-                continue;
+                throw new InvalidDataException("tactic pattern could not be admitted as content");
             b.AddAttestation(NativeAttestation.Aggregated(
                 subject: patternId,
                 typeId: ChessVocabulary.OutcomeType,
@@ -106,6 +107,7 @@ public static class ChessTacticOutcomes
 
         b.AddEntity(MarkerId(playingId), EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, sourceId);
+        IngestUnitCompletion.Emit(b, MarkerId(playingId), sourceId, 24);
     }
 
     private static void Collect(
@@ -161,8 +163,11 @@ public static class ChessTacticOutcomes
     }
 }
 
-public sealed record ChessTacticOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessTacticOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
+    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(24);
+    public Hash128 CompletionAttestationId =>
+        IngestUnitCompletion.AttestationId(TrunkRootId, ChessTacticOutcomes.SourceId, 24);
     public Hash128 TrunkRootId => ChessTacticOutcomes.MarkerId(Game.PlayingId);
 }
 
@@ -207,7 +212,7 @@ public sealed class ChessTacticOutcomesDecomposer
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedEventsAsync(
                            ds, ContainmentReader!, ws.Batch,
                            playingId => ChessTacticOutcomes.MarkerId(playingId),
-                           includeLive: true, ct))
+                           includeLive: true, LayerOrder, [SourceId], ct))
         {
             _candidatesStreamed++;
             yield return new ChessTacticOutcomeRecord(witnessed);
@@ -228,6 +233,6 @@ public sealed class ChessTacticOutcomesDecomposer
         => _candidatesStreamed == 0
             ? ("already-complete",
                $"ChessTacticOutcomes: every one of {declaredInputUnits} recorded playing(s) " +
-               $"already carries the v{ChessTacticOutcomes.Version} tactic-outcome marker.")
+               $"already carries the v{ChessTacticOutcomes.Version} tactic-outcome completion receipt.")
             : null;
 }

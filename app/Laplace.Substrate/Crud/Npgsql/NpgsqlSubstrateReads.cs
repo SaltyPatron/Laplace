@@ -2976,8 +2976,10 @@ public static partial class NpgsqlSubstrateReads
         // is whatever the plan happened to emit — it could change after a replan, a vacuum
         // or a parallel scan, which is non-deterministic naming in a content-addressed
         // system. Rank by what the fold produced (eff_mu over the name cell), with the
-        // object id as a total tiebreak so the result is reproducible even for unattested
-        // names. consensus.eff_mu() is called, never inlined as `rating - 2*rd` — that literal is
+        // name object id as the next tiebreak. Several equal-priority rows can still
+        // name the same position with different ECOs, so finish with the ECO object id,
+        // absent values last. This makes the selected name/ECO pair reproducible.
+        // consensus.eff_mu() is called, never inlined as `rating - 2*rd` — that literal is
         // what g1_weight_literalism exists to reject.
         NpgsqlRead.ReadRowsAsync(dataSource, """
             WITH named AS MATERIALIZED (
@@ -3009,7 +3011,7 @@ public static partial class NpgsqlSubstrateReads
             )
             SELECT position_id, name_id, eco_id
             FROM terminal
-            ORDER BY position_id, rank DESC NULLS LAST, name_id
+            ORDER BY position_id, rank DESC NULLS LAST, name_id, eco_id ASC NULLS LAST
             """,
             r => ((byte[])r[0], (byte[])r[1], r.IsDBNull(2) ? null : (byte[])r[2]),
             p =>

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -167,6 +168,9 @@ public static class ChessStockfishEval
                 .AddAttestation(NativeAttestation.CategoricalResolved(
                     game.LineId, ChessVocabulary.AnalysisVersionMetaTypeId, vId,
                     SourceId, contextId: context, ChessVocabulary.Trust));
+        else
+            throw new InvalidDataException("Stockfish evaluation recipe could not be admitted as content");
+        IngestUnitCompletion.Emit(b, context, SourceId, 22);
     }
 
     private static int? EvaluatePosition(

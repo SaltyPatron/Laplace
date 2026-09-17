@@ -44,8 +44,37 @@ internal sealed class ChessOpeningIndex : ChessOpeningIndexView
 {
     private readonly Dictionary<Hash128, (Hash128 NameId, Hash128? EcoId)> _byPosition;
 
-    private ChessOpeningIndex(Dictionary<Hash128, (Hash128, Hash128?)> byPosition)
-        => _byPosition = byPosition;
+    internal ChessOpeningIndex(IReadOnlyDictionary<Hash128, (Hash128 NameId, Hash128? EcoId)> byPosition)
+    {
+        _byPosition = byPosition.ToDictionary(static entry => entry.Key, static entry => entry.Value);
+        GenerationId = ComputeGeneration(_byPosition);
+    }
+
+    public Hash128? GenerationId { get; }
+
+    private static Hash128 ComputeGeneration(
+        IReadOnlyDictionary<Hash128, (Hash128 NameId, Hash128? EcoId)> positions)
+    {
+        // Fingerprint exactly the selected lookup function: position, chosen name,
+        // and optional ECO. Input SQL order and unused synonym rows cannot change it.
+        ReadOnlySpan<byte> domain = "LaplaceOpeningCatalog/v1\0"u8;
+        var keys = positions.Keys.ToArray();
+        Array.Sort(keys, static (left, right) => left.CompareToBytewise(right));
+        var bytes = new byte[checked(domain.Length + 4 + keys.Length * 49)];
+        domain.CopyTo(bytes);
+        int offset = domain.Length;
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset, 4), keys.Length);
+        offset += 4;
+        foreach (var position in keys)
+        {
+            var entry = positions[position];
+            position.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
+            entry.NameId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
+            bytes[offset++] = entry.EcoId.HasValue ? (byte)1 : (byte)0;
+            entry.EcoId.GetValueOrDefault().WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
+        }
+        return Hash128.Blake3(bytes);
+    }
 
     internal int Count => _byPosition.Count;
 

@@ -63,6 +63,8 @@ CREATE OR REPLACE PROCEDURE ops.evict_source(
     LANGUAGE plpgsql AS $$
 DECLARE
     rels           bytea[];
+    operational_types bytea[];
+    operational_total bigint := 0;
     rel            bytea;
     leaf           oid;
     leaf_types     bytea[];
@@ -165,6 +167,23 @@ BEGIN
         END LOOP;
     END IF;
 
+    -- Match ConsensusAccumulatingWriter's bounded operational namespace.
+    -- These rows prove admission; they never supply rating observations.
+    SELECT array_agg(type_id) INTO operational_types
+    FROM (
+        SELECT realize.canonical_id('substrate/type/HasFileMetadata/v1') AS type_id
+        UNION ALL
+        SELECT realize.canonical_id('substrate/type/HasLayerCompleted/' || layer::text || '/v1')
+        FROM generate_series(0, 255) AS layers(layer)
+        UNION ALL
+        SELECT realize.canonical_id('substrate/type/HasUnitCompleted/' || layer::text || '/v1')
+        FROM generate_series(0, 255) AS units(layer)
+    ) marker_types;
+
+    SELECT COALESCE(array_agg(candidate ORDER BY ordinal), ARRAY[]::bytea[]) INTO rels
+    FROM unnest(rels) WITH ORDINALITY AS selected(candidate, ordinal)
+    WHERE NOT (candidate = ANY(operational_types));
+
     RAISE LOG 'evict_source: start — source %, % relation(s)',
         encode(p_source, 'hex'), COALESCE(cardinality(rels), 0);
 
@@ -184,6 +203,82 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'evict_source: source % touches transient-calibration evidence; no score replay exists',
             encode(p_source, 'hex');
+    END IF;
+
+    -- Replay claims are applied source state. Keeping them after retraction makes a
+    -- deterministic re-derive silently no-op. Invalidate replay first, before any
+    -- completion receipt or evidence can be deleted, so an interrupted eviction
+    -- admits repair of every row removed so far. Historical NULL-owned rows cannot
+    -- be attributed safely and intentionally remain untouched.
+    DELETE FROM laplace.ingest_flush_journal receipt
+    WHERE receipt.source_id = p_source
+       OR EXISTS (
+           SELECT 1
+           FROM laplace.ingest_flush_journal_sources owner
+           WHERE owner.working_set_id = receipt.working_set_id
+             AND owner.source_id = p_source);
+    GET DIAGNOSTICS replay_total = ROW_COUNT;
+    IF replay_total > 0 THEN COMMIT; END IF;
+
+    -- Per-file completion attestations are ops markers and never enter consensus, so
+    -- retracting them needs no refold. The literal type keeps LIST pruning intact.
+    FOR rel IN SELECT DISTINCT marker_type_id FROM _evict_file_markers LOOP
+        LOOP
+            EXECUTE format($q$
+                WITH pick AS (
+                    SELECT a.id, a.subject_id
+                    FROM laplace.attestations a
+                    JOIN _evict_file_markers m
+                      ON m.marker_type_id = %L::bytea
+                     AND m.file_source_id = a.source_id
+                     AND (a.context_id = m.owner_source_id OR a.context_id IS NULL)
+                    WHERE a.type_id = %L::bytea
+                    LIMIT %s),
+                del AS (
+                    DELETE FROM laplace.attestations a
+                    USING pick
+                    WHERE a.type_id = %L::bytea
+                      AND a.id = pick.id AND a.subject_id = pick.subject_id
+                    RETURNING 1)
+                SELECT count(*) FROM del
+            $q$, rel, rel, p_batch, rel)
+            INTO n;
+
+            EXIT WHEN n = 0;
+            file_marker_total := file_marker_total + n;
+            RAISE LOG 'evict_source: % file checkpoint(s) deleted (running %) — %s elapsed',
+                n, file_marker_total,
+                round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
+            COMMIT;
+        END LOOP;
+    END LOOP;
+
+    -- Operational receipts are owned by the actual decomposer source. Retract
+    -- them even when p_relations selected only rated testimony: any source
+    -- retraction invalidates its completion claims. Commit this invalidation before
+    -- the first durable evidence deletion: an interrupted later batch must never
+    -- leave a completion receipt that hides partially retracted output. The
+    -- transient-evidence refusal above still runs before any mutation.
+    -- No rating fold is meaningful.
+    LOOP
+        WITH pick AS (
+            SELECT a.id, a.type_id, a.subject_id
+            FROM laplace.attestations a
+            WHERE a.source_id = p_source AND a.type_id = ANY(operational_types)
+            LIMIT p_batch),
+        del AS (
+            DELETE FROM laplace.attestations a
+            USING pick
+            WHERE a.id = pick.id AND a.type_id = pick.type_id
+              AND a.subject_id = pick.subject_id
+            RETURNING 1)
+        SELECT count(*) INTO n FROM del;
+        EXIT WHEN n = 0;
+        operational_total := operational_total + n;
+        COMMIT;
+    END LOOP;
+    IF operational_total > 0 THEN
+        RAISE LOG 'evict_source: % owned operational receipt(s) removed', operational_total;
     END IF;
 
     FOREACH rel IN ARRAY COALESCE(rels, ARRAY[]::bytea[]) LOOP
@@ -296,39 +391,6 @@ BEGIN
         END LOOP;
     END LOOP;
 
-    -- Per-file completion attestations are ops markers and never enter consensus, so
-    -- retracting them needs no refold. The literal type keeps LIST pruning intact.
-    FOR rel IN SELECT DISTINCT marker_type_id FROM _evict_file_markers LOOP
-        LOOP
-            EXECUTE format($q$
-                WITH pick AS (
-                    SELECT a.id, a.subject_id
-                    FROM laplace.attestations a
-                    JOIN _evict_file_markers m
-                      ON m.marker_type_id = %L::bytea
-                     AND m.file_source_id = a.source_id
-                     AND (a.context_id = m.owner_source_id OR a.context_id IS NULL)
-                    WHERE a.type_id = %L::bytea
-                    LIMIT %s),
-                del AS (
-                    DELETE FROM laplace.attestations a
-                    USING pick
-                    WHERE a.type_id = %L::bytea
-                      AND a.id = pick.id AND a.subject_id = pick.subject_id
-                    RETURNING 1)
-                SELECT count(*) FROM del
-            $q$, rel, rel, p_batch, rel)
-            INTO n;
-
-            EXIT WHEN n = 0;
-            file_marker_total := file_marker_total + n;
-            RAISE LOG 'evict_source: % file checkpoint(s) deleted (running %) — %s elapsed',
-                n, file_marker_total,
-                round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
-            COMMIT;
-        END LOOP;
-    END LOOP;
-
     -- (e) marker entities: the lane's derivation gates. Deleting them re-opens every
     -- unit for the hydrator's bitmap probe. first_observed_by scopes to this source;
     -- p_marker_types scopes to gate entities only — content entities never qualify.
@@ -359,19 +421,6 @@ BEGIN
             COMMIT;
         END LOOP;
     END IF;
-
-    -- Replay claims are applied source state. Keeping them after retraction makes a
-    -- deterministic re-derive silently no-op. Historical NULL-owned rows cannot be
-    -- attributed safely and intentionally remain untouched.
-    DELETE FROM laplace.ingest_flush_journal receipt
-    WHERE receipt.source_id = p_source
-       OR EXISTS (
-           SELECT 1
-           FROM laplace.ingest_flush_journal_sources owner
-           WHERE owner.working_set_id = receipt.working_set_id
-             AND owner.source_id = p_source);
-    GET DIAGNOSTICS replay_total = ROW_COUNT;
-    IF replay_total > 0 THEN COMMIT; END IF;
 
     -- (d) drain the mask-repair queue through the existing machinery (refresh
     -- recomputes from scratch and can CLEAR bits deposit could only OR on).

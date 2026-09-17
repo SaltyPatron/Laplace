@@ -37,6 +37,7 @@ CREATE OR REPLACE PROCEDURE ops.refold_source(
 DECLARE
     src            bytea;
     rels           bytea[];
+    operational_types bytea[];
     rel            bytea;
     n_cells        bigint;
     n              bigint;
@@ -66,8 +67,22 @@ BEGIN
             p_source_name;
     END IF;
 
+    -- Match ConsensusAccumulatingWriter's bounded operational namespace.
+    -- These rows prove admission; they never supply rating observations.
+    SELECT array_agg(type_id) INTO operational_types
+    FROM (
+        SELECT realize.canonical_id('substrate/type/HasFileMetadata/v1') AS type_id
+        UNION ALL
+        SELECT realize.canonical_id('substrate/type/HasLayerCompleted/' || layer::text || '/v1')
+        FROM generate_series(0, 255) AS layers(layer)
+        UNION ALL
+        SELECT realize.canonical_id('substrate/type/HasUnitCompleted/' || layer::text || '/v1')
+        FROM generate_series(0, 255) AS units(layer)
+    ) marker_types;
+
     SELECT array_agg(DISTINCT a.type_id) INTO rels
-    FROM laplace.attestations a WHERE a.source_id = src;
+    FROM laplace.attestations a
+    WHERE a.source_id = src AND NOT (a.type_id = ANY(operational_types));
     IF rels IS NULL THEN
         RAISE LOG 'refold_source: % has no testimony — nothing to refold', p_source_name;
         RETURN;
@@ -95,45 +110,21 @@ BEGIN
             CONTINUE;
         END IF;
 
-        -- Total reconstruction from evidence, not update-in-place. A source can
-        -- have committed attestations before the first consensus insert for a cell
-        -- (#1349/#1292), so the recovery primitive must materialize missing derived
-        -- rows as well as replace stale ones. Identity stays canonical and the
-        -- partitioned-table conflict target is the declared consensus PK.
-        EXECUTE format($q$
-            INSERT INTO laplace.consensus
-                (id, subject_id, type_id, object_id,
-                 rating, rd, volatility, witness_count, last_observed_at)
-            SELECT laplace.consensus_id(f.subject_id, %L::bytea, f.object_id),
-                   f.subject_id, %L::bytea, f.object_id,
-                   (f.acc).rating, (f.acc).rd, (f.acc).volatility,
-                   (f.acc).witness_count, f.last_ts
-            FROM (
-                SELECT t.subject_id, t.object_id,
-                       laplace.consensus_fold(false, NULL, NULL, NULL,
-                           a.opponent_rating_fp1e9,
-                           a.opponent_rd_fp1e9,
-                           GREATEST(a.observation_count, 1),
-                           a.sum_score_fp1e9,
-                           consensus.glicko2_tau()
-                           ORDER BY a.last_observed_at, a.id) AS acc,
-                       max(a.last_observed_at) AS last_ts
-                FROM _refold_cells t
-                JOIN laplace.attestations a
-                  ON a.type_id = %L::bytea
-                 AND a.subject_id = t.subject_id
-                 AND a.object_id IS NOT DISTINCT FROM t.object_id
-                GROUP BY t.subject_id, t.object_id
-            ) f
-            ON CONFLICT (id, type_id, subject_id) DO UPDATE
-            SET object_id        = EXCLUDED.object_id,
-                rating           = EXCLUDED.rating,
-                rd               = EXCLUDED.rd,
-                volatility       = EXCLUDED.volatility,
-                witness_count    = EXCLUDED.witness_count,
-                last_observed_at = EXCLUDED.last_observed_at
-        $q$, rel, rel, rel);
-        GET DIAGNOSTICS n = ROW_COUNT;
+        IF n_cells = 0 THEN
+            CONTINUE;
+        END IF;
+
+        -- The native repair owner takes the same sorted canonical target locks
+        -- as admission, then reads a fresh READ COMMITTED snapshot of ALL A.
+        -- It checks replayability again inside that lock window, so a concurrent
+        -- transient receipt cannot be replaced with its categorical value.
+        -- No incoming delta is fabricated and no neutral placeholder is committed.
+        SELECT consensus.refold_evidence_type(
+            rel,
+            array_agg(subject_id ORDER BY subject_id, object_id NULLS FIRST),
+            array_agg(object_id ORDER BY subject_id, object_id NULLS FIRST))
+        INTO n
+        FROM _refold_cells;
         refold_total := refold_total + n;
         RAISE LOG 'refold_source: relation % — % cell(s) touched, % consensus row(s) rebuilt',
             encode(rel, 'hex'), n_cells, n;

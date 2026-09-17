@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.SubstrateCRUD;
 using Xunit;
@@ -110,6 +111,8 @@ public sealed class ChessStockfishEvalTests
         var parsed = ChessPgnDecomposer.TryParseGame(Game)!;
         var marker = ChessStockfishEval.MarkerId(parsed.LineId, Recipe);
         Assert.Contains(change.Entities, e => e.Id == marker);
+        Assert.Contains(change.Attestations, a => a.Id ==
+            IngestUnitCompletion.AttestationId(marker, ChessStockfishEval.SourceId, 22));
         Assert.Contains(change.Attestations, a =>
             a.TypeId == ChessVocabulary.AnalysisVersionMetaTypeId && a.SubjectId == parsed.LineId
             && a.SourceId == ChessStockfishEval.SourceId && a.ContextId == marker
@@ -123,12 +126,12 @@ public sealed class ChessStockfishEvalTests
         var witnessed = ChessAnalyze.WitnessedFromParsed(parsed);
         var memo = new ConcurrentDictionary<Hash128, int?>();
         var original = new ScriptedEvaluator();
-        var first = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/original-recipe");
+        using var first = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/original-recipe");
         ChessStockfishEval.DeriveGame(first, witnessed, original, Recipe, memo);
 
         var changedRecipe = StockfishEvaluationRecipe.ForTests("different-engine-or-options/v1");
         var changed = new ScriptedEvaluator();
-        var second = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/changed-recipe");
+        using var second = new SubstrateChangeBuilder(ChessStockfishEval.SourceId, "test/changed-recipe");
         ChessStockfishEval.DeriveGame(second, witnessed, changed, changedRecipe, memo);
         Assert.Equal(7, original.Fens.Count);
         Assert.Equal(7, changed.Fens.Count);
@@ -136,14 +139,35 @@ public sealed class ChessStockfishEvalTests
         var oldContext = ChessStockfishEval.MarkerId(parsed.LineId, Recipe);
         var newContext = ChessStockfishEval.MarkerId(parsed.LineId, changedRecipe);
         Assert.NotEqual(oldContext, newContext);
-        Assert.All(second.Build().Attestations.Where(a => a.TypeId == ChessVocabulary.HasEvalType),
-            a => Assert.Equal(newContext, a.ContextId));
+        var oldChange = first.Build();
+        var newChange = second.Build();
+        try
+        {
+            Assert.All(newChange.Attestations.Where(a => a.TypeId == ChessVocabulary.HasEvalType),
+                a => Assert.Equal(newContext, a.ContextId));
+            var oldReceipt = Assert.Single(oldChange.Attestations,
+                a => a.TypeId == IngestUnitCompletion.RelationTypeId(22));
+            var newReceipt = Assert.Single(newChange.Attestations,
+                a => a.TypeId == IngestUnitCompletion.RelationTypeId(22));
+            Assert.NotEqual(oldReceipt.Id, newReceipt.Id);
+            Assert.Equal(oldContext, oldReceipt.SubjectId);
+            Assert.Equal(newContext, newReceipt.SubjectId);
+            Assert.Equal(new ChessStockfishEvalRecord(witnessed, changedRecipe).CompletionAttestationId,
+                newReceipt.Id);
+        }
+        finally
+        {
+            foreach (var stage in oldChange.IntentStages) stage.Dispose();
+            foreach (var stage in newChange.IntentStages) stage.Dispose();
+        }
     }
 
     [Fact]
     public void DeriveGame_NullEvals_ProduceNoRows()
     {
         var change = Derive(new ScriptedEvaluator(new int?[] { null, null, null, null, null, null, null }));
+        Assert.DoesNotContain(change.Attestations,
+            a => a.TypeId == IngestUnitCompletion.RelationTypeId(22));
         Assert.DoesNotContain(change.Attestations, a => a.TypeId == ChessVocabulary.HasEvalType);
         Assert.DoesNotContain(change.Attestations, a => a.TypeId == ChessVocabulary.MoveQualityType);
     }

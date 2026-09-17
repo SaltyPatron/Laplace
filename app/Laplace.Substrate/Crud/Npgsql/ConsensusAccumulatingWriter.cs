@@ -21,7 +21,9 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 /// in from the pairs this batch touched).
 /// Ingest completion IS fold completion — no accumulator epochs, no staging
 /// tables, no walk journal, no terminal fold, no advisory-lock wall.
-/// The Glicko rating period is the batch (ratified 2026-07-15).
+/// Durable replayable testimony forms one canonical rating period per typed cell;
+/// storage flush boundaries do not define semantic periods. Cells containing
+/// transient continuous scores retain their exact atomic delta path.
 /// </summary>
 public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFoldMetrics, IAsyncDisposable
 {
@@ -593,7 +595,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
 
     /// <summary>
     /// Ops-marker relation types that never fold into consensus: per-file completion
-    /// markers and file-metadata edges ride inside ordinary working-set changes (unlike
+    /// markers, source-unit receipts, and file-metadata edges ride inside ordinary working-set changes (unlike
     /// the source-level marker, whose whole change is skipped by unit-name prefix in
     /// BuildDelta), so they must be excluded row-by-row. They are recording metadata,
     /// not testimony — folding them would also mix marker φ with content φ in one batch.
@@ -604,7 +606,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     {
         var set = new HashSet<Hash128> { Laplace.Decomposers.Abstractions.FileEntity.MetadataRelationTypeId };
         for (int layer = 0; layer <= Laplace.Ingestion.LayerCompletion.MaxMarkedLayer; layer++)
+        {
             set.Add(Laplace.Ingestion.LayerCompletion.RelationTypeId(layer));
+            set.Add(Laplace.Ingestion.IngestUnitCompletion.RelationTypeId(layer));
+        }
         return set;
     }
 
@@ -794,7 +799,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             return c != 0 ? c : x.Key.S.CompareToBytewise(y.Key.S);
         });
 
-        bool directRoute = await SupportsDirectConsensusRouteAsync(connection, ct).ConfigureAwait(false);
         long folded = 0;
         long foldCalls = 0;
         long foldStarted = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -843,19 +847,19 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 await using var command = connection.CreateCommand();
                 command.Transaction = transaction;
                 command.CommandTimeout = 0;
-                command.CommandText = directRoute
-                    ? "SELECT consensus.upsert_type($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)"
-                    : "SELECT consensus.upsert($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)";
+                // Accepted A is already visible in this transaction. The native
+                // route locks each complete cell before reading its durable
+                // testimony; mixed transient cells keep these exact delta scores.
+                command.CommandText =
+                    "SELECT consensus.upsert_evidence_type($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)";
                 command.Parameters.Add(new NpgsqlParameter
                 {
-                    Value = directRoute ? type.ToBytes() : subjects,
-                    NpgsqlDbType = directRoute
-                        ? NpgsqlDbType.Bytea
-                        : NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                    Value = type.ToBytes(),
+                    NpgsqlDbType = NpgsqlDbType.Bytea,
                 });
                 command.Parameters.AddWithValue(
                     NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                    directRoute ? subjects : Enumerable.Repeat(type.ToBytes(), count).ToArray());
+                    subjects);
                 command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, objects);
                 command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, phis);
                 command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, games);

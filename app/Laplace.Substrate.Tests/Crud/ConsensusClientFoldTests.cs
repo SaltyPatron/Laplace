@@ -10,8 +10,8 @@ namespace Laplace.SubstrateCRUD.Tests;
 /// strongest way available: apply a batch through the writer, then recompute
 /// every edge with laplace_glicko2_accumulate_period() directly and demand
 /// exact int64 equality on rating/rd/volatility, plus witness accumulation and
-/// last_observed_at semantics across a second batch folding against priors
-/// (the rating period IS the batch).
+/// last_observed_at semantics across separately admitted durable evidence.
+/// A storage batch does not create another semantic rating period.
 /// </summary>
 [Collection("substrate-pg")]
 [Trait("Tier", "db")]
@@ -69,7 +69,7 @@ public class ConsensusClientFoldTests
     }
 
     [Fact]
-    public async Task ClientFold_MatchesServerMath_FreshAndSeededPeriods()
+    public async Task ClientFold_MatchesCanonicalServerMath_AcrossStorageBatches()
     {
         long phi = 30_000_000_000L;
         long ts1 = IntentStage.PgEpochUnixUs + 11_000_000;
@@ -105,7 +105,7 @@ public class ConsensusClientFoldTests
             Assert.Equal(games, stored.Witnesses);
         }
 
-        // Second batch folds against the stored priors.
+        // The second storage batch extends the same durable evidence period.
         var cid11 = ConsensusKeys.EdgeId(H("s1"), H("rel"), H("o1"));
         var prior = await StoredAsync(cid11);
         await using (var writer2 = new ConsensusAccumulatingWriter(inner, _pg.DataSource))
@@ -117,8 +117,27 @@ public class ConsensusClientFoldTests
         }
 
         var stored2 = await StoredAsync(cid11);
-        var expect2 = await ServerMathAsync(
-            prior.Rating, prior.Rd, prior.Vol, phi, 4, 4 * 750_000_000L);
+        await using var canonical = _pg.DataSource.CreateCommand("""
+            WITH folded AS MATERIALIZED (
+                SELECT laplace.consensus_fold(false,NULL,NULL,NULL,
+                    opponent_rating_fp1e9,opponent_rd_fp1e9,GREATEST(observation_count,1),
+                    sum_score_fp1e9,consensus.glicko2_tau()
+                    ORDER BY last_observed_at,id) AS result,
+                    count(*) AS evidence_rows
+                FROM laplace.attestations
+                WHERE type_id=$1 AND subject_id=$2 AND object_id=$3
+            )
+            SELECT (result).rating,(result).rd,(result).volatility,
+                   (result).witness_count,evidence_rows FROM folded
+            """);
+        canonical.Parameters.AddWithValue(H("rel").ToBytes());
+        canonical.Parameters.AddWithValue(H("s1").ToBytes());
+        canonical.Parameters.AddWithValue(H("o1").ToBytes());
+        await using var expected = await canonical.ExecuteReaderAsync();
+        Assert.True(await expected.ReadAsync());
+        var expect2 = (Rating:expected.GetInt64(0), Rd:expected.GetInt64(1), Vol:expected.GetInt64(2));
+        Assert.Equal(7L,expected.GetInt64(3));
+        Assert.Equal(2L,expected.GetInt64(4));
         Assert.Equal(expect2.Rating, stored2.Rating);
         Assert.Equal(expect2.Rd, stored2.Rd);
         Assert.Equal(expect2.Vol, stored2.Vol);

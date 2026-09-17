@@ -1,5 +1,6 @@
 using System.Linq;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
@@ -23,18 +24,18 @@ public static class ChessAnalyze
     private const double MetaWeight = 0.7;
     // Entry point for the analyzer decomposer: assemble DeriveGame's inputs from a parsed game
     // (the witnessed content), derive, and stamp the (game, version) marker the scan probes.
-    internal static void DeriveFromParsed(SubstrateChangeBuilder b, ChessGameRecord parsed)
+    internal static bool DeriveFromParsed(SubstrateChangeBuilder b, ChessGameRecord parsed)
         => DeriveFromParsed(b, parsed, ChessPgnDecomposer.MaterializeParsedReplay(parsed));
 
-    internal static void DeriveFromParsed(
+    internal static bool DeriveFromParsed(
         SubstrateChangeBuilder b, ChessGameRecord parsed, ChessParsedReplay replay)
         => DeriveFromWitnessed(b, WitnessedFromParsed(parsed), replay);
 
     /// <summary>Derive from substrate-hydrated witnessed inputs (no PGN re-parse).</summary>
-    internal static void DeriveFromWitnessed(SubstrateChangeBuilder b, ChessWitnessedGame witnessed, int engineDepth = 0)
+    internal static bool DeriveFromWitnessed(SubstrateChangeBuilder b, ChessWitnessedGame witnessed, int engineDepth = 0)
         => DeriveFromWitnessed(b, witnessed, replay: null, engineDepth);
 
-    private static void DeriveFromWitnessed(
+    private static bool DeriveFromWitnessed(
         SubstrateChangeBuilder b, ChessWitnessedGame witnessed,
         ChessParsedReplay? replay, int engineDepth = 0)
     {
@@ -51,13 +52,16 @@ public static class ChessAnalyze
             ? evalTokens.Select(t => t is null ? 0 : PgnEvals.ParseToken(t)).ToArray()
             : null;
 
-        DeriveGame(b, lineId, playingId, result, moves, startFen, wp, bp,
-                   clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
-                   spentSeconds, replay);
+        if (!DeriveGame(b, lineId, playingId, result, moves, startFen, wp, bp,
+                       clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
+                       spentSeconds, replay))
+            return false;
 
         // Analyzer unit = PLAYING (not tournament Chess_Event). Marker per playing.
-        b.AddEntity(ChessVocabulary.AnalysisMarkerId(playingId, Version), EntityTier.Document,
-                    ChessVocabulary.AnalysisMarkerType, SourceId);
+        var marker = ChessVocabulary.AnalysisMarkerId(playingId, Version);
+        b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType, SourceId);
+        IngestUnitCompletion.Emit(b, marker, SourceId, 21);
+        return true;
     }
 
     internal static ChessWitnessedGame WitnessedFromParsed(ChessGameRecord parsed)
@@ -93,7 +97,7 @@ public static class ChessAnalyze
     // movetext; token arrays are indexed by ply (sparse allowed); `evals` are centipawns (mover
     // POV pre-sign). GH #736: line-grain facts (opening/motif) subject onto the LINE; per-playing
     // testimony carries ctx = the EVENT.
-    internal static void DeriveGame(
+    internal static bool DeriveGame(
         SubstrateChangeBuilder b, Hash128 lineId, Hash128 eventId, GameOutcome result,
         IReadOnlyList<string> sans, string? startFen,
         Hash128? whitePlayer, Hash128? blackPlayer,
@@ -106,15 +110,13 @@ public static class ChessAnalyze
         // Unreadable start = derive nothing. The recorder already refused this game, and
         // deriving from a substituted board is how a game we could not read became a game we
         // invented.
-        if (InitialState(startFen, m) is not { } start) return;
+        if (InitialState(startFen, m) is not { } start) return false;
         var (initial, standardStart) = start;
 
-        // Opening classification + named-trap motif only make sense from the standard array.
-        if (standardStart) ClassifyOpening(b, lineId, sans, m);
-
-        AppendGame(b, m, initial, sans, result, whitePlayer, blackPlayer, lineId, eventId,
-                   clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
-                   spentSeconds, standardStart, replay);
+        if (!AppendGame(b, m, initial, sans, result, whitePlayer, blackPlayer, lineId, eventId,
+                       clocks, medianDrop, clockTokens, evalTokens, evals, qualityTokens, engineDepth,
+                       spentSeconds, standardStart, replay))
+            return false;
 
         // Watermark: this playing is now derived at the current analysis version.
         // Metadata on the trunk, not rated testimony -- see ChessVocabulary
@@ -127,6 +129,9 @@ public static class ChessAnalyze
                 .AddAttestation(NativeAttestation.CategoricalResolved(
                     eventId, ChessVocabulary.AnalysisVersionMetaTypeId, vId,
                     SourceId, contextId: null, ChessVocabulary.Trust));
+        else
+            throw new InvalidDataException("analysis version could not be admitted as content");
+        return true;
     }
 
     /// <summary>
@@ -171,7 +176,7 @@ public static class ChessAnalyze
             ChessGraph.AppendGameMeta(b, lineId, "GAME_HAS_MOTIF", motif, MoveWeight, src);
     }
 
-    private static void AppendGame(
+    private static bool AppendGame(
         SubstrateChangeBuilder b, ChessModality m, ChessState initial, IReadOnlyList<string> sans,
         GameOutcome result, Hash128? whitePlayer, Hash128? blackPlayer, Hash128 lineId, Hash128 eventId,
         double[] clocks, double medianDrop,
@@ -198,6 +203,8 @@ public static class ChessAnalyze
             && replay.Moves.Length == sans.Count;
         var state = initial;
         var line = new List<ChessNode>(sans.Count + 1);
+        if (sans.Count == 0)
+            line.Add(ChessGraph.ComposePositionPoint(initial.Board));
         var boards = useReplay
             ? new List<Board>(replay!.Boards)
             : new List<Board>(sans.Count + 1) { initial.Board };
@@ -206,7 +213,6 @@ public static class ChessAnalyze
         for (int ply = 0; ply < sans.Count; ply++)
         {
             ChessMove mv;
-            int mover;
             ChessNode from;
             ChessNode to;
             if (useReplay)
@@ -215,16 +221,14 @@ public static class ChessAnalyze
                 // board. Share that result with motifs and outcomes as well as the
                 // composed positions; resolving SAN again repeats legal-move work.
                 mv = replay!.Moves[ply];
-                mover = replay.Boards[ply].WhiteToMove ? 0 : 1;
                 from = replay.Positions[ply].Position;
                 to = replay.Positions[ply + 1].Position;
             }
             else
             {
                 var resolved = San.Resolve(state.Board, sans[ply], scratch);
-                if (resolved is null) return;
+                if (resolved is null) return false;
                 mv = resolved.Value;
-                mover = m.SideToMove(state);
                 from = ChessGraph.ComposePositionPoint(state.Board);
                 var next = m.Apply(state, mv);
                 to = ChessGraph.ComposePositionPoint(next.Board);
@@ -234,7 +238,15 @@ public static class ChessAnalyze
             if (line.Count == 0) line.Add(from);
             line.Add(to);
             played.Add(mv);
+        }
 
+        // Complete the legal replay before publishing any owner output. Keep
+        // the successful emission order unchanged: opening labels, then per-ply
+        // think observations, motifs, tactic output and the trajectory.
+        if (standardStart) ClassifyOpening(b, lineId, sans, m);
+        for (int ply = 0; ply < sans.Count; ply++)
+        {
+            int mover = boards[ply].WhiteToMove ? 0 : 1;
             string? clk = Tok(clockTokens, ply);
             if (clk is not null)
             {
@@ -286,6 +298,9 @@ public static class ChessAnalyze
         ChessGraph.AppendPositionProjection(b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
         b.AddEntity(ChessTrajectoryDecomposer.MarkerId(lineId), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, ChessVocabulary.TrajectorySourceId);
+        IngestUnitCompletion.Emit(
+            b, ChessTrajectoryDecomposer.MarkerId(lineId), ChessVocabulary.TrajectorySourceId, 21);
+        return true;
     }
 
     private static string? Tok(string?[]? arr, int i)

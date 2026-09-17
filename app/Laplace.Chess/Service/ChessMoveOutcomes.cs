@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -74,6 +75,7 @@ public static class ChessMoveOutcomes
 
         b.AddEntity(MarkerId(lineId, Version), EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, src);
+        IngestUnitCompletion.Emit(b, MarkerId(lineId, Version), src, 22);
     }
 
     /// <summary>Backfill arm: same deposit, under this lane's own source.</summary>
@@ -91,8 +93,11 @@ public static class ChessMoveOutcomes
 /// Line-grain record; trunk root is the versioned per-LINE marker so re-runs dedup
 /// against the marker, never against the line. Same law as the stockfish census.
 /// </summary>
-public sealed record ChessMoveOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessMoveOutcomeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
+    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(22);
+    public Hash128 CompletionAttestationId =>
+        IngestUnitCompletion.AttestationId(TrunkRootId, ChessMoveOutcomes.SourceId, 22);
     public Hash128 TrunkRootId => ChessMoveOutcomes.MarkerId(Game.LineId, ChessMoveOutcomes.Version);
 }
 
@@ -101,6 +106,13 @@ public sealed class ChessMoveOutcomesDecomposer
     : ComposeDecomposer<ChessMoveOutcomeRecord>, IIngestNoOpExplainer
 {
     private long _candidatesStreamed;
+    // These are the actual owners used by RecordGame and both live hosts. A
+    // completed inline deposit satisfies this existing once-per-line backfill.
+    private static readonly Hash128[] CompletionOwners =
+    [
+        ChessMoveOutcomes.SourceId, ChessVocabulary.PgnSourceId,
+        ChessVocabulary.BookSourceId, ChessVocabulary.SourceId,
+    ];
 
     public override Hash128 SourceId => ChessMoveOutcomes.SourceId;
     public override string SourceName => ChessMoveOutcomes.SourceName;
@@ -133,7 +145,8 @@ public sealed class ChessMoveOutcomesDecomposer
         _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, ws.Batch,
-                           lineId => ChessMoveOutcomes.MarkerId(lineId, ChessMoveOutcomes.Version), ct))
+                           lineId => ChessMoveOutcomes.MarkerId(lineId, ChessMoveOutcomes.Version),
+                           LayerOrder, CompletionOwners, ct))
         {
             if (witnessed.MoveIds.Count == 0) continue;
             _candidatesStreamed++;
@@ -156,6 +169,6 @@ public sealed class ChessMoveOutcomesDecomposer
         => _candidatesStreamed == 0
             ? ("already-complete",
                $"ChessMoveOutcomes: every one of {declaredInputUnits} recorded line(s) already "
-               + $"carries the v{ChessMoveOutcomes.Version} move-outcome marker — nothing left to fold.")
+               + $"carries the v{ChessMoveOutcomes.Version} move-outcome completion receipt — nothing left to fold.")
             : null;
 }

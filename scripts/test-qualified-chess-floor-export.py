@@ -492,6 +492,104 @@ class NativeQualificationTests(unittest.TestCase):
               mock.patch.object(driver, "git", side_effect=git)):
             return driver.qualification(self.plan, ROOT)
 
+
+    def add_managed_publication(self):
+        source = {"commit": self.plan["candidate_commit"], "tree": self.plan["candidate_tree"]}
+        directory = self.directory / "managed-after-native"
+        directory.mkdir(exist_ok=True)
+        def save(name, value):
+            path = directory / name
+            path.write_text(json.dumps(value) + "\n")
+            return driver.file_identity(path)["sha256"]
+        phases = ["bind-publication-owners", "prepare-managed-policy", "publish-managed-services"]
+        payloads = {}
+        for role in ("api", "uci", "mcp", "lichess"):
+            phases += ["reference-" + role]
+            phases += (["seal-" + role + "-payload"] if role in ("api", "uci")
+                       else ["seal-" + role + "-files", "seal-" + role + "-native"])
+            phases += ["verify-" + role + "-payload"]
+            assembly = {"api": "Laplace.Endpoints.OpenAICompat", "uci": "laplace-uci",
+                        "mcp": "Laplace.Endpoints.Mcp", "lichess": "Laplace.Endpoints.Lichess"}[role]
+            names = [assembly + ".dll", assembly + ".deps.json", assembly + ".runtimeconfig.json",
+                     "Laplace.Core.dll", "Laplace.Chess.dll", "liblaplace_core.so",
+                     "liblaplace_dynamics.so", "liblaplace_synthesis.so", "liblaplace_syzygy.so"]
+            if role == "api": names.append("wwwroot/index.html")
+            if role == "uci": names.append("laplace-uci")
+            files = {name: {"bytes": 7, "sha256": "a" * 64} for name in names}
+            native = {name: dict(fact, path="/build/fixture/" + name)
+                      for name, fact in files.items() if name.startswith("liblaplace_")}
+            manifest = {"files": files, "native_sources": native, "source": source,
+                        "schema": "laplace." + role + "-payload/v1", "provenance": "selected-build"}
+            verified = {"status": "passed", "payload" if role in ("api", "uci") else "files": files,
+                        "schema": "laplace." + role + "-payload-verification/v1",
+                        "provenance": "selected-build", "native_sources": native}
+            manifest_sha = save(role + "-manifest.json", manifest)
+            verified_sha = save(role + "-verified.json", verified)
+            payloads[role] = {"manifest": str(directory / (role + "-manifest.json")),
+                "manifestSha256": manifest_sha, "verified": str(directory / (role + "-verified.json")),
+                "verifiedSha256": verified_sha, "installedDirectory": "/opt/laplace/app"}
+        phases += ["authenticated-managed-readiness"]
+        owners = {"source": source, "owners": {name: {} for name in ("managed", "publisher", "startup")}}
+        owners_sha = save("publication-owners.json", owners)
+        managed = {"schema": "laplace.managed-followthrough/v1", "status": "completed",
+                   "mode": "publish", "source": source,
+                   "phases": [{"name": name, "status": "passed"} for name in phases],
+                   "authenticatedMcpInitializeAndDiscovery": True,
+                   "lichess": {"status": {"ready": True}},
+                   "publicationOwners": {"path": str(directory / "publication-owners.json"), "sha256": owners_sha},
+                   "payloads": payloads}
+        receipt_sha = save("receipt.json", managed)
+        self.outcome.update(schema="laplace.native-recording-workflow-outcome/v2",
+            applicationPublication="completed", applicationPublicationReceipt=str(directory / "receipt.json"),
+            applicationPublicationReceiptSha256=receipt_sha, applicationPublicationSource=source)
+        self.seal()
+        return directory, managed
+
+    def test_managed_postphase_publication_preserves_native_phase_scope_and_binds_every_payload_receipt(self):
+        directory, _ = self.add_managed_publication()
+        _, proof = self.qualify()
+        self.assertEqual("completed", proof["managed_publication"])
+        self.assertFalse(proof["full_lifecycle_passed"])
+        self.assertEqual("not_attempted", self.state["managedPublication"])
+        self.assertEqual(14, len(proof["evidence_receipts"]))
+        self.assertEqual(str(directory / "receipt.json"), proof["managed_publication_evidence"]["receipt"])
+        driver.verify_qualification_receipts(proof)
+        (directory / "mcp-verified.json").write_text("{}")
+        with self.assertRaisesRegex(ValueError, "evidence changed"):
+            driver.verify_qualification_receipts(proof)
+
+    def test_managed_postphase_rejects_incomplete_or_other_source_even_when_receipt_hash_is_rebound(self):
+        directory, original = self.add_managed_publication()
+        for change in ({"status": "failed"}, {"source": {"commit": "6" * 40, "tree": "7" * 40}},
+                       {"phases": original["phases"][:-1]}, {"authenticatedMcpInitializeAndDiscovery": False},
+                       {"payloads": {name: row for name, row in original["payloads"].items() if name != "lichess"}}):
+            with self.subTest(change=change):
+                path = directory / "receipt.json"
+                path.write_text(json.dumps({**original, **change}) + "\n")
+                self.outcome["applicationPublicationReceiptSha256"] = driver.file_identity(path)["sha256"]
+                self.seal()
+                with self.assertRaisesRegex(ValueError, "native installation"):
+                    self.qualify()
+
+    def test_managed_postphase_rejects_changed_file_closure_and_unknown_outcome(self):
+        directory, managed = self.add_managed_publication()
+        path = directory / "uci-verified.json"
+        value = driver.load(path)
+        value["payload"]["laplace-uci.dll"]["sha256"] = "b" * 64
+        path.write_text(json.dumps(value) + "\n")
+        managed["payloads"]["uci"]["verifiedSha256"] = driver.file_identity(path)["sha256"]
+        receipt = directory / "receipt.json"
+        receipt.write_text(json.dumps(managed) + "\n")
+        self.outcome["applicationPublicationReceiptSha256"] = driver.file_identity(receipt)["sha256"]
+        self.seal()
+        with self.assertRaisesRegex(ValueError, "verified file differs"):
+            self.qualify()
+        self.outcome["schema"] = "unrecognized"
+        self.seal()
+        with self.assertRaisesRegex(ValueError, "outcome differs"):
+            self.qualify()
+
+
     def test_native_installation_retains_independent_scope_and_optional_fetch(self):
         for fetch in (False, True):
             with self.subTest(fetch=fetch):

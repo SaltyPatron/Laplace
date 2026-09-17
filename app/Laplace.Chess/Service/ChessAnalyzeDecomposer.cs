@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.SubstrateCRUD;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
@@ -71,7 +72,7 @@ public sealed class ChessAnalyzeDecomposer
         => _candidatesStreamed == 0
             ? ("already-complete",
                $"ChessAnalysis: every one of {declaredInputUnits} recorded playing(s) already "
-               + $"carries the v{ChessAnalyze.Version} ANALYZED_AT marker — nothing to backfill "
+               + $"carries the v{ChessAnalyze.Version} analysis completion receipt — nothing to backfill "
                + "(the fused ingest pass derives inline, GH #600).")
             : null;
 
@@ -90,7 +91,10 @@ public sealed class ChessAnalyzeDecomposer
 /// Analysis pipeline record whose trunk root is the versioned per-EVENT analysis marker,
 /// not the playing itself (GH #736: the analyzer's unit is the playing).
 /// </summary>
-public sealed record ChessAnalyzeRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessAnalyzeRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
+    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(21);
+    public Hash128 CompletionAttestationId =>
+        IngestUnitCompletion.AttestationId(TrunkRootId, ChessAnalyze.SourceId, 21);
     public Hash128 TrunkRootId => ChessVocabulary.AnalysisMarkerId(Game.PlayingId, ChessAnalyze.Version);
 }

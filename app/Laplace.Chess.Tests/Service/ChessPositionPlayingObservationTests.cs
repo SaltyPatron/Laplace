@@ -1,5 +1,6 @@
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -37,8 +38,8 @@ public sealed class ChessPositionPlayingObservationTests
         var replay = Deposit(games[0], path);
         try
         {
-            var firstRows = first.Attestations.OrderBy(a => a.SubjectId.ToString()).ToArray();
-            var secondRows = second.Attestations.OrderBy(a => a.SubjectId.ToString()).ToArray();
+            var firstRows = first.Attestations.Where(a => a.TypeId == ChessVocabulary.OutcomeType).OrderBy(a => a.SubjectId.ToString()).ToArray();
+            var secondRows = second.Attestations.Where(a => a.TypeId == ChessVocabulary.OutcomeType).OrderBy(a => a.SubjectId.ToString()).ToArray();
             Assert.NotEmpty(firstRows);
             Assert.Equal(firstRows.Select(a => a.SubjectId), secondRows.Select(a => a.SubjectId));
             Assert.All(firstRows, a => Assert.Equal(games[0].PlayingId, a.ContextId));
@@ -81,7 +82,7 @@ public sealed class ChessPositionPlayingObservationTests
                 actual = Deposit(game, path);
                 long after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000 + 999;
                 AssertChangesEqual(expected, actual);
-                Assert.Equal(occurrences, actual.Attestations.Sum(row => row.ObservationCount));
+                Assert.Equal(occurrences, actual.Attestations.Where(row => row.TypeId == ChessVocabulary.OutcomeType).Sum(row => row.ObservationCount));
                 Assert.Contains(actual.Attestations, row => row.ObservationCount > 1);
                 Assert.All(actual.Attestations, row =>
                 {
@@ -113,7 +114,7 @@ public sealed class ChessPositionPlayingObservationTests
         {
             actual = Deposit(game, "shared-replay");
             AssertChangesEqual(expected, actual);
-            Assert.Equal(occurrences, actual.Attestations.Sum(row => row.ObservationCount));
+            Assert.Equal(occurrences, actual.Attestations.Where(row => row.TypeId == ChessVocabulary.OutcomeType).Sum(row => row.ObservationCount));
             foreach (var atom in replay.Positions[0].Substructures)
                 Assert.True(Assert.Single(actual.Attestations,
                     row => row.SubjectId == atom.Id).ObservationCount >= 2);
@@ -146,6 +147,8 @@ public sealed class ChessPositionPlayingObservationTests
         }
         builder.AddEntity(ChessPositionOutcomes.MarkerId(game.PlayingId), EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, ChessPositionOutcomes.SourceId);
+        IngestUnitCompletion.Emit(builder, ChessPositionOutcomes.MarkerId(game.PlayingId),
+            ChessPositionOutcomes.SourceId, 22);
         return builder.SetInputUnitsConsumed(1).Build();
     }
 

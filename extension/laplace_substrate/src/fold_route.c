@@ -36,7 +36,10 @@
  * (laplace_glicko2_accumulate_period) wraps — computed natively in one pass
  * per type run, matched cells from their stored prior, novel cells from the
  * neutral prior. The scalar remains only in the collision MERGE fallback for
- * a concurrently-inserted cell (see UPSERT_MERGE_SQL).
+ * a concurrently-inserted cell (see UPSERT_MERGE_SQL). The atomic evidence-backed
+ * entry point instead folds ALL replayable testimony from neutral with the
+ * existing consensus_fold aggregate; arbitrary storage flushes are not periods.
+ * Cells containing transient continuous evidence retain the explicit delta law.
  * consensus_id stays one implementation the same way: the SQL definition IS
  * blake3(subject || type || COALESCE(object, 16 zero bytes)) via the core
  * hash128_blake3; this file calls that exact core function over the exact
@@ -72,6 +75,8 @@ PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge);
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_type);
+PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_evidence_type);
+PG_FUNCTION_INFO_V1(pg_laplace_consensus_refold_evidence_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_partition_leaf);
 
 /* ------------------------------------------------------------------ */
@@ -87,6 +92,9 @@ typedef struct TypePlanEntry
 static HTAB *upsert_matched_plans = NULL; /* consensus PK-arbitrated updates  */
 static HTAB *upsert_novel_plans = NULL;   /* consensus target-free inserts    */
 static HTAB *upsert_merge_plans = NULL;   /* collision-only MERGE fallback    */
+static HTAB *evidence_lock_plans = NULL;
+static HTAB *evidence_fold_plans = NULL;
+static HTAB *evidence_write_plans = NULL;
 
 /* The substrate contract is LIST(type_id) -> HASH(subject_id, 8). A prior
  * lookup must use BOTH pieces of routing information. Literal type pruning
@@ -851,7 +859,8 @@ fold_run_states(const InArray *phis, const InArray *opps,
                 const InArray *games, const InArray *sums,
                 const PeriodArrays *periods,
                 int run_start, int run_n, const FoldPriorStates *priors,
-                const char *label, FoldStateArrays *out)
+                const char *label, FoldStateArrays *out,
+                const bool *recomputed)
 {
     bool   *matched = priors->matched;
     Datum  *seen = (Datum *) palloc(sizeof(Datum) * run_n);
@@ -870,6 +879,13 @@ fold_run_states(const InArray *phis, const InArray *opps,
 
     for (i = 0; i < run_n; i++)
     {
+        /* Evidence-backed cells already contain the canonical native aggregate
+         * result. Do not turn the transport delta into another rating period. */
+        if (recomputed != NULL && recomputed[i])
+        {
+            seen[i] = BoolGetDatum(true);
+            continue;
+        }
         glicko2_state_t st;
         int64 input[7];
         FoldMemo *entry = NULL;
@@ -1509,7 +1525,7 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
                                  &subjects, run_start, run_n, label);
         matched_n = priors->matched_n;
         fold_run_states(&phis, &opps, &games, &sums, &periods, run_start, run_n,
-                        priors, label, &folds);
+                        priors, label, &folds, NULL);
 
         matched_plan = typed_plan(&upsert_matched_plans,
                                   "consensus_upsert matched plans", type16,
@@ -1575,13 +1591,285 @@ pg_laplace_consensus_upsert(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(affected);
 }
 
+static Datum *
+typed_cell_ids(const uint8_t *type16,const InArray *subjects,
+               const InArray *objects,const char *label)
+{
+    HTAB *seen;
+    HASHCTL ctl;
+    Datum *cell_ids;
+    int i;
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.keysize = 16;
+    ctl.entrysize = sizeof(CellSeen);
+    seen = hash_create("consensus_upsert_type cell guard", subjects->n, &ctl,
+                       HASH_ELEM | HASH_BLOBS);
+    cell_ids = (Datum *) palloc(sizeof(Datum) * subjects->n);
+    for (i = 0; i < subjects->n; i++)
+    {
+        uint8_t   buf[48];
+        hash128_t h;
+        bytea    *out;
+        bool      found;
+
+        memcpy(buf, bytea16(subjects->elems[i], label), 16);
+        memcpy(buf + 16, type16, 16);
+        if (objects->nulls[i])
+            memset(buf + 32, 0, 16);
+        else
+            memcpy(buf + 32, bytea16(objects->elems[i], label), 16);
+        hash128_blake3(buf, sizeof(buf), &h);
+        hash_search(seen, &h, HASH_ENTER, &found);
+        if (found)
+            ereport(ERROR,
+                    (errcode(ERRCODE_CARDINALITY_VIOLATION),
+                     errmsg("%s: duplicate cell in one call "
+                            "(client-dedup contract violated)", label)));
+        out = (bytea *) palloc(VARHDRSZ + 16);
+        SET_VARSIZE(out, VARHDRSZ + 16);
+        memcpy(VARDATA(out), &h, 16);
+        cell_ids[i] = PointerGetDatum(out);
+    }
+    hash_destroy(seen);
+    return cell_ids;
+}
+
+/* Evidence-backed writes own their complete canonical target set before they
+ * inspect testimony. ON CONFLICT ... WHERE false takes the conflicting row lock
+ * without rewriting it; sorted input also serializes simultaneous novel keys.
+ * Missing neutral rows are transaction-local until every result is installed. */
+static const char *EVIDENCE_LOCK_SQL =
+    "INSERT INTO laplace.consensus AS c "
+    " (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
+    "SELECT b.id,b.s,'\\x%s'::bytea,b.o,consensus.glicko2_neutral_mu(),"
+    " consensus.glicko2_initial_rd(),consensus.glicko2_initial_volatility(),0,b.ts "
+    "FROM unnest($1::bytea[],$2::bytea[],$3::bytea[],$4::timestamptz[]) AS b(id,s,o,ts) "
+    "ORDER BY b.id,b.s "
+    "ON CONFLICT (id,type_id,subject_id) DO UPDATE SET rating=c.rating WHERE false";
+
+/* The complete indexed testimony of the requested cells is selected once.
+ * Only fully replayable cells enter the existing consensus_fold aggregate.
+ * A continuous transient score is never reconstructed from its categorical
+ * receipt, including when the incoming delta itself is replayable. */
+static const char *EVIDENCE_FOLD_SQL =
+    "WITH requested AS MATERIALIZED ("
+    " SELECT * FROM unnest($1::bytea[],$2::bytea[]) WITH ORDINALITY AS b(s,o,ord)), "
+    "evidence AS MATERIALIZED ("
+    " SELECT b.ord,a.id,a.last_observed_at,a.observation_count,a.sum_score_fp1e9,"
+    " a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,a.fold_replayable "
+    " FROM requested b JOIN laplace.attestations a "
+    " ON a.type_id='\\x%s'::bytea AND a.subject_id=b.s AND a.object_id=b.o "
+    " WHERE b.o IS NOT NULL "
+    " UNION ALL "
+    " SELECT b.ord,a.id,a.last_observed_at,a.observation_count,a.sum_score_fp1e9,"
+    " a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,a.fold_replayable "
+    " FROM requested b JOIN laplace.attestations a "
+    " ON a.type_id='\\x%s'::bytea AND a.subject_id=b.s AND a.object_id IS NULL "
+    " WHERE b.o IS NULL), "
+    "flags AS MATERIALIZED ("
+    " SELECT ord,bool_and(fold_replayable) AS replayable,count(*) AS n "
+    " FROM evidence GROUP BY ord), "
+    "folded AS MATERIALIZED ("
+    " SELECT a.ord,laplace.consensus_fold(false,NULL,NULL,NULL,"
+    " a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,GREATEST(a.observation_count,1),"
+    " a.sum_score_fp1e9,consensus.glicko2_tau() ORDER BY a.last_observed_at,a.id) AS acc,"
+    " max(a.last_observed_at) AS ts "
+    " FROM evidence a JOIN flags f ON f.ord=a.ord AND f.replayable "
+    " GROUP BY a.ord) "
+    "SELECT b.ord,f.replayable,f.n,(g.acc).rating,(g.acc).rd,(g.acc).volatility,"
+    " (g.acc).witness_count,g.ts "
+    "FROM requested b LEFT JOIN flags f ON f.ord=b.ord "
+    "LEFT JOIN folded g ON g.ord=b.ord";
+
+static const char *EVIDENCE_WRITE_SQL =
+    "UPDATE laplace.consensus c SET "
+    " rating=b.rating,rd=b.rd,volatility=b.volatility,"
+    " witness_count=CASE WHEN b.recomputed THEN b.games ELSE c.witness_count+b.games END,"
+    " last_observed_at=CASE WHEN b.recomputed THEN b.ts ELSE GREATEST(c.last_observed_at,b.ts) END "
+    "FROM unnest($1::bytea[],$2::bytea[],$3::int8[],$4::timestamptz[],"
+    " $5::bool[],$6::int8[],$7::int8[],$8::int8[]) "
+    " AS b(id,s,games,ts,recomputed,rating,rd,volatility) "
+    "WHERE c.type_id='\\x%s'::bytea AND c.subject_id=b.s AND c.id=b.id";
+
+typedef struct FoldEvidenceStates
+{
+    bool *recomputed;
+    Datum *counts;
+    Datum *timestamps;
+} FoldEvidenceStates;
+
+static void
+lock_evidence_targets(const uint8_t *type16, ArrayType *ids,
+                      const InArray *subjects, const InArray *objects,
+                      const InArray *ts, const char *label)
+{
+    static const Oid args[4] =
+        {BYTEAARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID,TIMESTAMPTZARRAYOID};
+    Datum vals[4] = {PointerGetDatum(ids),PointerGetDatum(subjects->array),
+                     PointerGetDatum(objects->array),(Datum)0};
+    if (ts != NULL)
+        vals[3]=PointerGetDatum(ts->array);
+    else
+    {
+        /* A refold has no incoming observation time. This transaction-local
+         * placeholder is overwritten by the actual retained maximum before
+         * commit; it never becomes an evidence timestamp. */
+        Datum *empty_times=palloc0(sizeof(Datum)*subjects->n);
+        vals[3]=PointerGetDatum(construct_array(
+            empty_times,subjects->n,TIMESTAMPTZOID,8,true,'d'));
+        pfree(empty_times);
+    }
+    SPIPlanPtr plan = typed_plan(&evidence_lock_plans,
+        "consensus evidence target locks",type16,EVIDENCE_LOCK_SQL,4,args);
+    int rc = SPI_execute_plan(plan,vals,NULL,false,0);
+    if (rc != SPI_OK_INSERT)
+        ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
+                       errmsg("%s: evidence target locking failed: %s",
+                              label,SPI_result_code_string(rc))));
+}
+
+static FoldEvidenceStates *
+read_evidence_states(const uint8_t *type16, const InArray *subjects,
+                     const InArray *objects, const InArray *games,
+                     const InArray *ts, FoldPriorStates *priors,
+                     const char *label, bool replayable_only)
+{
+    static const Oid args[2] = {BYTEAARRAYOID,BYTEAARRAYOID};
+    Datum vals[2] = {PointerGetDatum(subjects->array),PointerGetDatum(objects->array)};
+    SPIPlanPtr plan = typed_plan(&evidence_fold_plans,
+        "consensus exact durable evidence",type16,EVIDENCE_FOLD_SQL,2,args);
+    FoldEvidenceStates *out = palloc(sizeof(*out));
+    bool *visited = palloc0(sizeof(bool)*subjects->n);
+    out->recomputed = palloc0(sizeof(bool)*subjects->n);
+    out->counts = palloc(sizeof(Datum)*subjects->n);
+    out->timestamps = palloc(sizeof(Datum)*subjects->n);
+    if (games != NULL) memcpy(out->counts,games->elems,sizeof(Datum)*subjects->n);
+    if (ts != NULL) memcpy(out->timestamps,ts->elems,sizeof(Datum)*subjects->n);
+
+    /* Non-readonly SPI takes a fresh READ COMMITTED snapshot AFTER all target
+     * locks. A writer which waited for another apply must see its committed A. */
+    int rc = SPI_execute_plan(plan,vals,NULL,false,0);
+    if (rc != SPI_OK_SELECT || SPI_processed != (uint64)subjects->n)
+        ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
+                       errmsg("%s: durable evidence read lost target coverage",label)));
+    for (uint64 r=0;r<SPI_processed;r++)
+    {
+        HeapTuple tuple=SPI_tuptable->vals[r];
+        TupleDesc desc=SPI_tuptable->tupdesc;
+        Datum values[8];
+        bool nulls[8];
+        for (int c=0;c<8;c++)
+            values[c]=SPI_getbinval(tuple,desc,c+1,&nulls[c]);
+        int64 ord=DatumGetInt64(values[0]);
+        if (nulls[0] || ord<1 || ord>subjects->n || visited[ord-1])
+            ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
+                           errmsg("%s: invalid durable evidence target ordinal",label)));
+        int i=(int)ord-1;
+        visited[i]=true;
+        if (nulls[1] || nulls[2] || DatumGetInt64(values[2])<=0)
+            ereport(ERROR,(errcode(ERRCODE_DATA_EXCEPTION),
+                           errmsg("%s: target has no durable accepted testimony",label),
+                           errdetail("cell_index=%d",i)));
+        if (!DatumGetBool(values[1]))
+        {
+            if (replayable_only)
+                ereport(ERROR,(errcode(ERRCODE_DATA_EXCEPTION),
+                               errmsg("%s: non-replayable testimony has no retained continuous score",label),
+                               errdetail("cell_index=%d",i)));
+            continue;
+        }
+        for (int c=3;c<8;c++)
+            if (nulls[c])
+                ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
+                               errmsg("%s: incomplete canonical evidence fold",label)));
+        out->recomputed[i]=true;
+        priors->ratings[i]=values[3];
+        priors->rds[i]=values[4];
+        priors->volatilities[i]=values[5];
+        out->counts[i]=values[6];
+        out->timestamps[i]=values[7];
+    }
+    SPI_freetuptable(SPI_tuptable);
+    pfree(visited);
+    return out;
+}
+
+static int64
+write_evidence_states(const uint8_t *type16, ArrayType *ids,
+                      const InArray *subjects, const FoldEvidenceStates *evidence,
+                      const FoldStateArrays *folds, const char *label)
+{
+    static const Oid args[8] =
+        {BYTEAARRAYOID,BYTEAARRAYOID,INT8ARRAYOID,TIMESTAMPTZARRAYOID,
+         BOOLARRAYOID,INT8ARRAYOID,INT8ARRAYOID,INT8ARRAYOID};
+    Datum *flags=palloc(sizeof(Datum)*subjects->n);
+    for (int i=0;i<subjects->n;i++) flags[i]=BoolGetDatum(evidence->recomputed[i]);
+    Datum vals[8] = {
+        PointerGetDatum(ids),PointerGetDatum(subjects->array),
+        PointerGetDatum(construct_array(evidence->counts,subjects->n,INT8OID,8,true,'d')),
+        PointerGetDatum(construct_array(evidence->timestamps,subjects->n,TIMESTAMPTZOID,8,true,'d')),
+        PointerGetDatum(construct_array(flags,subjects->n,BOOLOID,1,true,'c')),
+        PointerGetDatum(folds->rating_array),PointerGetDatum(folds->rd_array),
+        PointerGetDatum(folds->volatility_array)};
+    SPIPlanPtr plan=typed_plan(&evidence_write_plans,
+        "consensus evidence result writes",type16,EVIDENCE_WRITE_SQL,8,args);
+    int rc=SPI_execute_plan(plan,vals,NULL,false,0);
+    if (rc!=SPI_OK_UPDATE || SPI_processed!=(uint64)subjects->n)
+        ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
+                       errmsg("%s: locked evidence targets changed before result write",label)));
+    pfree(flags);
+    return (int64)SPI_processed;
+}
+
+/* Keep the explicit delta contract checked even when durable testimony supplies
+ * the resulting state. Otherwise malformed incoming totals could be hidden by
+ * an already populated replayable cell. */
+static void
+validate_evidence_delta(const InArray *phis, const InArray *games,
+                         const InArray *sums, const PeriodArrays *periods,
+                         const char *label)
+{
+    for (int i=0;i<games->n;i++)
+    {
+        int64 n=DatumGetInt64(games->elems[i]);
+        int64 sum=DatumGetInt64(sums->elems[i]);
+        if (n<=0 || sum<0 || (__int128)sum>(__int128)n*1000000000LL ||
+            DatumGetInt64(phis->elems[i])<0)
+            ereport(ERROR,(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                           errmsg("%s: invalid incoming evidence delta",label),
+                           errdetail("cell_index=%d",i)));
+        if (periods->exact)
+        {
+            int64 begin=DatumGetInt64(periods->offsets.elems[i]);
+            int64 end=DatumGetInt64(periods->offsets.elems[i+1]);
+            __int128 total_games=0,total_sum=0;
+            for (int64 j=begin;j<end;j++)
+            {
+                int64 group_games=DatumGetInt64(periods->games.elems[j]);
+                int64 group_sum=DatumGetInt64(periods->sums.elems[j]);
+                if (group_games<=0 || group_sum<0 ||
+                    (__int128)group_sum>(__int128)group_games*1000000000LL ||
+                    DatumGetInt64(periods->phis.elems[j])<0)
+                    ereport(ERROR,(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                   errmsg("%s: invalid incoming evidence period group",label)));
+                total_games+=group_games;
+                total_sum+=group_sum;
+            }
+            if (total_games!=n || total_sum!=sum)
+                ereport(ERROR,(errcode(ERRCODE_DATA_EXCEPTION),
+                               errmsg("%s: grouped period totals do not match cell totals",label)));
+        }
+    }
+}
+
 /* Direct routed form for a caller-owned single type run. Besides eliminating
  * the redundant type array, this constructs the derived cell-id array exactly
  * once and passes every caller array straight through to the cached MERGE plan. */
-Datum
-pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
+static Datum
+consensus_upsert_type(FunctionCallInfo fcinfo, bool from_evidence)
 {
-    const char    *label = "consensus_upsert_type";
+    const char    *label = from_evidence
+        ? "consensus_upsert_evidence_type" : "consensus_upsert_type";
     const uint8_t *type16;
     Datum          type_datum;
     InArray        subjects, objects, phis, games, sums, ts;
@@ -1592,8 +1880,6 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
     FoldPriorStates *priors;
     FoldStateArrays folds;
     PeriodWindow    period_run;
-    HTAB          *seen;
-    HASHCTL        ctl;
     SPIPlanPtr     matched_plan;
     SPIPlanPtr     novel_plan;
     SPIPlanPtr     merge_plan;
@@ -1609,8 +1895,6 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
          BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID,
          INT8ARRAYOID, INT4ARRAYOID, INT4ARRAYOID, INT8ARRAYOID,
          INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
-    int i;
-
     if (PG_ARGISNULL(0))
         ereport(ERROR,
                 (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
@@ -1638,39 +1922,13 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
                  errmsg("%s: parallel arrays must share length", label)));
     if (subjects.n == 0)
         PG_RETURN_INT64(0);
+    if (from_evidence)
+        validate_evidence_delta(&phis,&games,&sums,&periods,label);
+    if (from_evidence && IsolationUsesXactSnapshot())
+        ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                       errmsg("%s: retry the evidence transaction at READ COMMITTED",label)));
 
-    memset(&ctl, 0, sizeof(ctl));
-    ctl.keysize = 16;
-    ctl.entrysize = sizeof(CellSeen);
-    seen = hash_create("consensus_upsert_type cell guard", subjects.n, &ctl,
-                       HASH_ELEM | HASH_BLOBS);
-    cell_ids = (Datum *) palloc(sizeof(Datum) * subjects.n);
-    for (i = 0; i < subjects.n; i++)
-    {
-        uint8_t   buf[48];
-        hash128_t h;
-        bytea    *out;
-        bool      found;
-
-        memcpy(buf, bytea16(subjects.elems[i], label), 16);
-        memcpy(buf + 16, type16, 16);
-        if (objects.nulls[i])
-            memset(buf + 32, 0, 16);
-        else
-            memcpy(buf + 32, bytea16(objects.elems[i], label), 16);
-        hash128_blake3(buf, sizeof(buf), &h);
-        hash_search(seen, &h, HASH_ENTER, &found);
-        if (found)
-            ereport(ERROR,
-                    (errcode(ERRCODE_CARDINALITY_VIOLATION),
-                     errmsg("%s: duplicate cell in one call "
-                            "(client-dedup contract violated)", label)));
-        out = (bytea *) palloc(VARHDRSZ + 16);
-        SET_VARSIZE(out, VARHDRSZ + 16);
-        memcpy(VARDATA(out), &h, 16);
-        cell_ids[i] = PointerGetDatum(out);
-    }
-    hash_destroy(seen);
+    cell_ids=typed_cell_ids(type16,&subjects,&objects,label);
     cell_id_array = construct_array(cell_ids, subjects.n,
                                     BYTEAOID, -1, false, 'i');
 
@@ -1678,11 +1936,27 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("%s: SPI_connect failed", label)));
+    if (from_evidence)
+        lock_evidence_targets(type16,cell_id_array,&subjects,&objects,&ts,label);
     priors = read_run_priors(type16, type_datum, cell_ids, &subjects,
                              0, subjects.n, label);
     matched_n = priors->matched_n;
+    if (from_evidence)
+    {
+        if (matched_n!=(uint64)subjects.n)
+            ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
+                           errmsg("%s: locked target is absent from its physical owner",label)));
+        FoldEvidenceStates *evidence=read_evidence_states(
+            type16,&subjects,&objects,&games,&ts,priors,label,false);
+        fold_run_states(&phis,&opps,&games,&sums,&periods,0,subjects.n,
+                        priors,label,&folds,evidence->recomputed);
+        int64 affected=write_evidence_states(
+            type16,cell_id_array,&subjects,evidence,&folds,label);
+        SPI_finish();
+        PG_RETURN_INT64(affected);
+    }
     fold_run_states(&phis, &opps, &games, &sums, &periods, 0, subjects.n,
-                    priors, label, &folds);
+                    priors, label, &folds, NULL);
 
     matched_plan = typed_plan(&upsert_matched_plans,
                               "consensus_upsert matched plans", type16,
@@ -1730,4 +2004,66 @@ pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
         SPI_finish();
         PG_RETURN_INT64(affected);
     }
+}
+
+Datum
+pg_laplace_consensus_upsert_type(PG_FUNCTION_ARGS)
+{
+    return consensus_upsert_type(fcinfo,false);
+}
+
+Datum
+pg_laplace_consensus_upsert_evidence_type(PG_FUNCTION_ARGS)
+{
+    return consensus_upsert_type(fcinfo,true);
+}
+
+/* Maintenance uses the identical lock/snapshot/native-aggregate/write boundary
+ * without pretending that retained evidence is an incoming score delta. */
+Datum
+pg_laplace_consensus_refold_evidence_type(PG_FUNCTION_ARGS)
+{
+    const char *label="consensus_refold_evidence_type";
+    InArray subjects,objects;
+    Datum type_datum;
+    const uint8_t *type16;
+    Datum *cell_ids;
+    ArrayType *ids;
+    FoldPriorStates *priors;
+    FoldEvidenceStates *evidence;
+    FoldStateArrays folds;
+    int64 affected;
+
+    if (PG_ARGISNULL(0))
+        ereport(ERROR,(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                       errmsg("%s: type must not be NULL",label)));
+    type_datum=PG_GETARG_DATUM(0);
+    type16=bytea16(type_datum,label);
+    in_array(fcinfo,1,BYTEAOID,-1,false,'i',false,label,&subjects);
+    in_array(fcinfo,2,BYTEAOID,-1,false,'i',true,label,&objects);
+    if (subjects.n!=objects.n)
+        ereport(ERROR,(errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                       errmsg("%s: parallel arrays must share length",label)));
+    if (subjects.n==0) PG_RETURN_INT64(0);
+    if (IsolationUsesXactSnapshot())
+        ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                       errmsg("%s: retry the evidence transaction at READ COMMITTED",label)));
+    cell_ids=typed_cell_ids(type16,&subjects,&objects,label);
+    ids=construct_array(cell_ids,subjects.n,BYTEAOID,-1,false,'i');
+    if (SPI_connect()!=SPI_OK_CONNECT)
+        ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
+                       errmsg("%s: SPI_connect failed",label)));
+    lock_evidence_targets(type16,ids,&subjects,&objects,NULL,label);
+    priors=read_run_priors(type16,type_datum,cell_ids,&subjects,0,subjects.n,label);
+    if (priors->matched_n!=(uint64)subjects.n)
+        ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
+                       errmsg("%s: locked target is absent from its physical owner",label)));
+    evidence=read_evidence_states(type16,&subjects,&objects,NULL,NULL,priors,label,true);
+    folds.seen_array=NULL;
+    folds.rating_array=construct_array(priors->ratings,subjects.n,INT8OID,8,true,'d');
+    folds.rd_array=construct_array(priors->rds,subjects.n,INT8OID,8,true,'d');
+    folds.volatility_array=construct_array(priors->volatilities,subjects.n,INT8OID,8,true,'d');
+    affected=write_evidence_states(type16,ids,&subjects,evidence,&folds,label);
+    SPI_finish();
+    PG_RETURN_INT64(affected);
 }

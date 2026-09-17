@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.SubstrateCRUD;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
@@ -118,7 +119,7 @@ public sealed class ChessStockfishEvalDecomposer
         _candidatesStreamed = 0;
         await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
                            ds, ContainmentReader!, wave,
-                           lineId => ChessStockfishEval.MarkerId(lineId, Recipe), ct))
+                           lineId => ChessStockfishEval.MarkerId(lineId, Recipe), LayerOrder, [SourceId], ct))
         {
             _candidatesStreamed++;
             yield return new ChessStockfishEvalRecord(witnessed, Recipe);
@@ -129,7 +130,7 @@ public sealed class ChessStockfishEvalDecomposer
         => _candidatesStreamed == 0
             ? ("already-complete",
                $"ChessStockfishEval: every one of {declaredInputUnits} recorded line(s) already "
-               + $"carries the v{ChessStockfishEval.Version} recipe {Recipe.Id} eval marker — nothing left to evaluate.")
+               + $"carries the v{ChessStockfishEval.Version} recipe {Recipe.Id} evaluation completion receipt — nothing left to evaluate.")
             : null;
 
     protected override IIngestRecordHandler<ChessStockfishEvalRecord> CreateHandler()
@@ -236,7 +237,10 @@ public sealed class ChessStockfishEvalDecomposer
     }
 }
 
-public sealed record ChessStockfishEvalRecord(ChessWitnessedGame Game, StockfishEvaluationRecipe Recipe) : ITrunkRootRecord
+public sealed record ChessStockfishEvalRecord(ChessWitnessedGame Game, StockfishEvaluationRecipe Recipe) : ITrunkRootRecord, IIngestCompletionRecord
 {
+    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(22);
+    public Hash128 CompletionAttestationId =>
+        IngestUnitCompletion.AttestationId(TrunkRootId, ChessStockfishEval.SourceId, 22);
     public Hash128 TrunkRootId => ChessStockfishEval.MarkerId(Game.LineId, Recipe);
 }

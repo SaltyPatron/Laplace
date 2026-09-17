@@ -233,18 +233,20 @@ internal sealed partial class ChessRecordingMeasurement(string? experimentId, in
             var playingIds = games.Select(g => g.PlayingId).ToHashSet();
             var witnesses = expected.Concat(experimentChange is null
                 ? Enumerable.Empty<AttestationRow>() : experimentChange.Attestations).DistinctBy(a => a.Id).ToArray();
-            var stored = await NpgsqlAttestationReads.WitnessesAsync(ds,
-                WitnessScopes(witnesses), ct);
+            var stored = await MeasureReadbackAsync(ReadbackOperation.ExactWitnessBodies,
+                () => NpgsqlAttestationReads.WitnessesAsync(ds, WitnessScopes(witnesses), ct));
             ValidateWitnesses(witnesses, stored);
 
             var carriers = expectedCarriers.DistinctBy(p => p.EntityId).ToArray();
-            var carrierVertices = await NpgsqlSubstrateReads.CanonicalContentVerticesAsync(ds,
-                carriers.Select(p => p.EntityId.ToBytes()).ToArray(), carriers.Select(p => p.Id.ToBytes()).ToArray(), ct);
+            var carrierVertices = await MeasureReadbackAsync(ReadbackOperation.CanonicalCarrierVertices,
+                () => NpgsqlSubstrateReads.CanonicalContentVerticesAsync(ds,
+                    carriers.Select(p => p.EntityId.ToBytes()).ToArray(), carriers.Select(p => p.Id.ToBytes()).ToArray(), ct));
             ValidateCarriers(games, carrierVertices);
 
             // The existing hydrator owns native trajectory decoding, line identity, start
             // board identity and legal full-line replay. This consumer compares the batch.
-            var hydrated = await ChessWitnessHydrator.TryHydrateChunkAsync(ds, playingIds.ToArray(), ct);
+            var hydrated = await MeasureReadbackAsync(ReadbackOperation.HydrationAndLegalReplay,
+                () => ChessWitnessHydrator.TryHydrateChunkAsync(ds, playingIds.ToArray(), ct));
             var whiteByPlaying = expected.Where(a => a.TypeId == ChessVocabulary.HasWhiteType)
                 .ToDictionary(a => a.ContextId!.Value, a => a.ObjectId);
             var blackByPlaying = expected.Where(a => a.TypeId == ChessVocabulary.HasBlackType)
@@ -263,7 +265,8 @@ internal sealed partial class ChessRecordingMeasurement(string? experimentId, in
             }
             int resultOffset = textIds.Count;
             textIds.AddRange(resultRows.Select(a => a.ObjectId!.Value));
-            var text = await NpgsqlSubstrateReads.RenderTextBatchAsync(ds, textIds.Select(id => id.ToBytes()).ToArray(), ct);
+            var text = await MeasureReadbackAsync(ReadbackOperation.ResultAndReceiptText,
+                () => NpgsqlSubstrateReads.RenderTextBatchAsync(ds, textIds.Select(id => id.ToBytes()).ToArray(), ct));
             if (text is null || text.Length != textIds.Count)
                 throw new InvalidDataException("committed source result text inventory differs");
             if (experiment is not null && (text[0] != experiment.ReceiptJson || text[1] != experiment.PgnEvent))

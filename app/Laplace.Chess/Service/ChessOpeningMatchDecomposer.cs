@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -40,9 +41,9 @@ public sealed class ChessOpeningMatchDecomposer
     : ComposeDecomposer<ChessOpeningMatchRecord>, IIngestNoOpExplainer
 {
     /// <summary>
-    /// Marker generation. Bump when the MATCHING RULE changes (which position wins),
-    /// never when the catalog grows — a new opening simply names lines the previous run
-    /// left unmatched, and those lines still carry no marker.
+    /// Matching-rule generation. The durable completion receipt separately binds
+    /// the actual selected catalog generation, so a changed catalog revisits both
+    /// previously unmatched lines and lines whose deepest match may improve.
     /// </summary>
     public const int MatchVersion = 1;
 
@@ -103,10 +104,11 @@ public sealed class ChessOpeningMatchDecomposer
             // LINE grain: the opening is a pure function of the play, so a line shared by a
             // thousand playings is matched ONCE — the same grain as trajectory and syzygy.
             await foreach (var witnessed in ChessWitnessHydrator.StreamUnanalyzedLinesAsync(
-                               ds, ContainmentReader!, ws.Batch, MarkerId, ct))
+                               ds, ContainmentReader!, ws.Batch, MarkerId, LayerOrder, [SourceId], ct,
+                               completionContextId: _index.GenerationId))
             {
                 _candidatesStreamed++;
-                yield return new ChessOpeningMatchRecord(witnessed);
+                yield return new ChessOpeningMatchRecord(witnessed, _index.GenerationId);
             }
         }
         finally { ChessDropLedger.Report(SourceName); }
@@ -138,7 +140,7 @@ public sealed class ChessOpeningMatchDecomposer
             ChessDropLedger.Drop(NoMoves, $"line {w.LineId}");
 
         // The marker is deposited even when no opening matched: "this line was checked
-        // against catalog v1 and reached no named board" is a fact, and without it every
+        // against this catalog generation and reached no named board" is a fact, and without it every
         // re-run re-replays every unmatched line forever.
         b.AddEntity(MarkerId(w.LineId), EntityTier.Document,
                     ChessVocabulary.AnalysisMarkerType, sourceId);
@@ -146,8 +148,10 @@ public sealed class ChessOpeningMatchDecomposer
         if (index.DeepestMatch(positions) is not { } hit)
         {
             // Checked and reached no catalogued board. A real answer, not a failure —
-            // the marker above records that the check happened.
+            // the owner-qualified receipt below records the exact checked catalog.
             ChessDropLedger.Drop(NoCataloguedBoard, $"line {w.LineId} plies={positions.Count - 1}");
+            if (index.GenerationId is { } unmatchedGeneration)
+                IngestUnitCompletion.Emit(b, MarkerId(w.LineId), sourceId, 21, unmatchedGeneration);
             return;
         }
         ChessDropLedger.Kept();
@@ -157,6 +161,8 @@ public sealed class ChessOpeningMatchDecomposer
         if (hit.EcoId is { } ecoId)
             b.AddAttestation(NativeAttestation.Categorical(
                 w.LineId, ChessSeedManifest.GameHasEco, ecoId, sourceId, null, MatchWeight));
+        if (index.GenerationId is { } generation)
+            IngestUnitCompletion.Emit(b, MarkerId(w.LineId), sourceId, 21, generation);
     }
 
     /// <summary>
@@ -207,7 +213,7 @@ public sealed class ChessOpeningMatchDecomposer
         if (_candidatesStreamed == 0)
             return ("already-complete",
                 $"ChessOpeningMatch: every one of {declaredInputUnits} recorded line(s) already "
-                + $"carries the v{MatchVersion} match marker — nothing left to name.");
+                + $"carries the v{MatchVersion} completion receipt for catalog {_index?.GenerationId} — nothing left to name.");
         return null;
     }
 }
@@ -215,11 +221,19 @@ public sealed class ChessOpeningMatchDecomposer
 /// <summary>The catalog surface Match() needs — an interface so the rule is testable with a fake.</summary>
 public interface ChessOpeningIndexView
 {
+    /// <summary>Exact selected catalog generation; absent views cannot grant durable completion.</summary>
+    Hash128? GenerationId => null;
     (Hash128 NameId, Hash128? EcoId, int Ply)? DeepestMatch(IReadOnlyList<Hash128> positionIds);
 }
 
 /// <summary>Trunk root is this lane's marker, so batches never collide with another lane's.</summary>
-public sealed record ChessOpeningMatchRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessOpeningMatchRecord(ChessWitnessedGame Game, Hash128? CatalogGenerationId = null)
+    : ITrunkRootRecord, IIngestCompletionRecord
 {
+    public Hash128 CompletionAttestationTypeId => CatalogGenerationId.HasValue
+        ? IngestUnitCompletion.RelationTypeId(21) : default;
+    public Hash128 CompletionAttestationId => CatalogGenerationId is { } generation
+        ? IngestUnitCompletion.AttestationId(TrunkRootId, ChessVocabulary.OpeningMatchSourceId, 21, generation)
+        : default;
     public Hash128 TrunkRootId => ChessOpeningMatchDecomposer.MarkerId(Game.LineId);
 }

@@ -1,8 +1,10 @@
 -- attestations: provenance rows, LIST-partitioned along the same HIGHWAY axis
--- as consensus (type_id). The fold NEVER reads this table (all fold lanes read
--- the in-RAM accumulator / staging + priors from consensus), so partitioning
--- costs the fold nothing; a modality's bulk load writes only the partitions of
--- the relations it emits, with indexes LIVE. Per-relation partitions come from
+-- as consensus (type_id). Evidence-backed folds select the exact touched cells
+-- through the relation index, after locking their consensus targets. Fully
+-- replayable testimony is one canonical neutral-prior period independent of
+-- storage batching; mixed transient cells retain their exact score delta.
+-- A modality's bulk load writes only the partitions of the relations it emits,
+-- with indexes LIVE. Per-relation partitions come from
 -- generated/seed_relation_partitions.sql.in; dynamic relations land in DEFAULT.
 --
 -- The highway GIN/partial indexes are dropped: with edges partitioned per

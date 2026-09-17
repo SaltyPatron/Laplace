@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
@@ -34,6 +35,7 @@ public static class ChessTransitions
         b.AddEntity(
             MarkerId(parsed.PlayingId), EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, SourceId);
+        IngestUnitCompletion.Emit(b, MarkerId(parsed.PlayingId), SourceId, 22);
     }
 
     internal static void Deposit(SubstrateChangeBuilder b, ChessWitnessedGame game)
@@ -59,6 +61,7 @@ public static class ChessTransitions
         b.AddEntity(
             MarkerId(game.PlayingId), EntityTier.Document,
             ChessVocabulary.AnalysisMarkerType, SourceId);
+        IngestUnitCompletion.Emit(b, MarkerId(game.PlayingId), SourceId, 22);
     }
 }
 
@@ -94,7 +97,7 @@ public sealed class ChessTransitionsDecomposer
         _candidatesStreamed = 0;
         await foreach (var game in ChessWitnessHydrator.StreamUnanalyzedEventsAsync(
                            ds, ContainmentReader, ws.Batch, ChessTransitions.MarkerId,
-                           includeLive: true, ct))
+                           includeLive: true, LayerOrder, [SourceId], ct))
         {
             _candidatesStreamed++;
             yield return new ChessTransitionRecord(game);
@@ -114,11 +117,14 @@ public sealed class ChessTransitionsDecomposer
     public (string Status, string Detail)? ExplainEmptyRun(long declaredInputUnits) =>
         _candidatesStreamed == 0
             ? ("already-complete",
-                $"ChessTransitions: every one of {declaredInputUnits} playing(s) carries the v{ChessTransitions.Version} marker.")
+                $"ChessTransitions: every one of {declaredInputUnits} playing(s) carries the v{ChessTransitions.Version} completion receipt.")
             : null;
 }
 
-public sealed record ChessTransitionRecord(ChessWitnessedGame Game) : ITrunkRootRecord
+public sealed record ChessTransitionRecord(ChessWitnessedGame Game) : ITrunkRootRecord, IIngestCompletionRecord
 {
+    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(22);
+    public Hash128 CompletionAttestationId =>
+        IngestUnitCompletion.AttestationId(TrunkRootId, ChessTransitions.SourceId, 22);
     public Hash128 TrunkRootId => ChessTransitions.MarkerId(Game.PlayingId);
 }

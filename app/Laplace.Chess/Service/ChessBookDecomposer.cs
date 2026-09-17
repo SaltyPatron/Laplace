@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.Ingestion;
 using Laplace.Modality;
 using Laplace.Modality.Chess;
 using Laplace.SubstrateCRUD;
@@ -85,37 +86,12 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
         if (reObservePresent || ContainmentReader is not { } reader || records.Count == 0)
             return records;
 
-        var probeIds = new List<Hash128>(records.Count * 2);
-        var offsets = new (int Marker, int Game)[records.Count];
-        for (int i = 0; i < records.Count; i++)
-        {
-            var r = records[i];
-            if (r.Parsed is { } parsed)
-            {
-                offsets[i] = (probeIds.Count, probeIds.Count + 1);
-                probeIds.Add(ChessVocabulary.AnalysisMarkerId(parsed.PlayingId, ChessAnalyze.Version));
-                probeIds.Add(parsed.PlayingId);
-            }
-            else
-            {
-                offsets[i] = (probeIds.Count, -1);
-                probeIds.Add(r.RootId);
-            }
-        }
-
-        byte[] bm = await reader.EntitiesExistBitmapAsync(probeIds.ToArray(), ct).ConfigureAwait(false);
-        bool Present(int k) => BitmapBits.IsSet(bm, k);
-
+        var ids = records.Select(static record => record.CompletionAttestationId).ToArray();
+        var present = await reader.PresentAttestationIdsAsync(
+            IngestUnitCompletion.RelationTypeId(20), ids, ct).ConfigureAwait(false);
         var novel = new List<ChessBookRecord>(records.Count);
         for (int i = 0; i < records.Count; i++)
-        {
-            var (markerIdx, gameIdx) = offsets[i];
-            if (Present(markerIdx)) continue;
-            var r = records[i];
-            novel.Add(gameIdx >= 0 && Present(gameIdx)
-                ? r with { NeedsRecord = false }
-                : r);
-        }
+            if (!present.Contains(ids[i])) novel.Add(records[i]);
         return novel;
     }
 
@@ -151,35 +127,34 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     {
         var parsed = record.Parsed!;
         var src = ChessVocabulary.BookSourceId;
+        var replay = ChessPgnDecomposer.MaterializeParsedReplay(parsed);
+        if (!replay.IsCompleteFor(parsed)) return;
 
-        if (record.NeedsRecord)
+        ChessPgnDecomposer.RecordGame(parsed, b, src);
+        if (!string.IsNullOrWhiteSpace(record.Context))
         {
-            ChessPgnDecomposer.RecordGame(parsed, b, src);
-
-            if (!string.IsNullOrWhiteSpace(record.Context)
-                && ContentEmitter.Emit(b, record.Context, src) is { } ctxId)
-                b.AddAttestation(NativeAttestation.Categorical(
-                    ctxId, "EXPLAINS", parsed.LineId, src, null, BookWitnessWeight));
-
-            var m = new ChessModality();
-            var state = m.Initial();
-            var mainline = parsed.Walk.Mainline;
-            for (int ply = 0; ply < mainline.Count; ply++)
-            {
-                var mv = San.Resolve(state.Board, m.LegalActions(state), mainline[ply].San);
-                if (mv is null) break;
-                state = m.Apply(state, mv.Value);
-
-                string? comment = mainline[ply].CommentText;
-                if (string.IsNullOrWhiteSpace(comment)) continue;
-                var posId = ChessGraph.EmitPosition(b, state.Board, src);
-                if (ContentEmitter.Emit(b, comment.Trim(), src) is { } commentId)
-                    b.AddAttestation(NativeAttestation.Categorical(
-                        commentId, "EXPLAINS", posId, src, parsed.PlayingId, BookWitnessWeight));
-            }
+            var ctxId = ContentEmitter.Emit(b, record.Context, src)
+                ?? throw new InvalidDataException("book context could not be admitted as content");
+            b.AddAttestation(NativeAttestation.Categorical(
+                ctxId, "EXPLAINS", parsed.LineId, src, null, BookWitnessWeight));
         }
 
-        ChessAnalyze.DeriveFromParsed(b, parsed);
+        var mainline = parsed.Walk.Mainline;
+        for (int ply = 0; ply < mainline.Count; ply++)
+        {
+            string? comment = mainline[ply].CommentText;
+            if (string.IsNullOrWhiteSpace(comment)) continue;
+            // The validated replay carries the actual SetUp/FEN starting board.
+            // A partial reparse from the standard array cannot complete this unit.
+            var posId = ChessGraph.EmitPosition(b, replay.Boards[ply + 1], src);
+            var commentId = ContentEmitter.Emit(b, comment.Trim(), src)
+                ?? throw new InvalidDataException("book commentary could not be admitted as content");
+            b.AddAttestation(NativeAttestation.Categorical(
+                commentId, "EXPLAINS", posId, src, parsed.PlayingId, BookWitnessWeight));
+        }
+
+        if (!ChessAnalyze.DeriveFromParsed(b, parsed, replay)) return;
+        IngestUnitCompletion.Emit(b, record.RootId, src, 20, record.CompletionContextId);
     }
 
     private static void ComposeProseLine(ChessBookRecord record, SubstrateChangeBuilder b)
@@ -211,10 +186,14 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             b, record.LineId, line[0], movePoints, src, nowUs);
         ChessGraph.AppendPositionProjection(
             b, record.LineId, line, src, nowUs);
-        if (!string.IsNullOrWhiteSpace(record.Context)
-            && ContentEmitter.Emit(b, record.Context, src) is { } ctxId)
+        if (!string.IsNullOrWhiteSpace(record.Context))
+        {
+            var ctxId = ContentEmitter.Emit(b, record.Context, src)
+                ?? throw new InvalidDataException("book context could not be admitted as content");
             b.AddAttestation(NativeAttestation.Categorical(
                 ctxId, "EXPLAINS", record.LineId, src, null, BookWitnessWeight));
+        }
+        IngestUnitCompletion.Emit(b, record.RootId, src, 20, record.CompletionContextId);
     }
 
     internal static IEnumerable<ChessBookRecord> ExtractFromText(string text, string fallbackTitle)
@@ -492,11 +471,18 @@ public sealed record ChessBookRecord(
     string BookTitle,
     string? GameText,
     IReadOnlyList<string> Sans,
-    string Context) : ITrunkRootRecord
+    string Context) : ITrunkRootRecord, IIngestCompletionRecord
 {
     internal ChessGameRecord? Parsed { get; init; }
     internal Hash128 RootId { get; init; }
     internal Hash128 LineId { get; init; }
-    internal bool NeedsRecord { get; init; } = true;
+    // The existing semantic root can be quoted with distinct commentary. Bind
+    // the operational receipt to both actual text inputs without changing the
+    // playing, line, paragraph, or testimony identities.
+    internal Hash128 CompletionContextId => Hash128.OfCanonical(
+        $"chess/book-completion-input/v1/{RootId}/{ContentEmitter.RootId(Context)}/{ContentEmitter.RootId(GameText ?? string.Empty)}");
+    public Hash128 CompletionAttestationTypeId => IngestUnitCompletion.RelationTypeId(20);
+    public Hash128 CompletionAttestationId => IngestUnitCompletion.AttestationId(
+        RootId, ChessVocabulary.BookSourceId, 20, CompletionContextId);
     public Hash128 TrunkRootId => RootId;
 }

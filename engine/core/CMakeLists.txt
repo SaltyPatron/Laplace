@@ -264,7 +264,7 @@ set(LAPLACE_CHESS_PERFCACHE_MEMORY_BYTES "67108864" CACHE STRING "Controlled nat
 set(LAPLACE_CHESS_PERFCACHE_SPILL_BYTES "4294967296" CACHE STRING "Maximum owned chess producer spill bytes")
 set(LAPLACE_CHESS_TRANSITION_BUFFER_RECORDS "65536" CACHE STRING "Buffered transition records per sorted run")
 set(LAPLACE_CHESS_TRANSITION_MERGE_FAN_IN "32" CACHE STRING "Maximum transition merge readers")
-set(_chess_artifact_script "${CMAKE_SOURCE_DIR}/scripts/chess-floor-artifacts.py")
+set(_chess_artifact_script "${_laplace_codegen_root}/scripts/chess-floor-artifacts.py")
 set(_chess_corpus_deps)
 set(_chess_corpus_surfaces)
 set(_chess_corpus_transitions)
