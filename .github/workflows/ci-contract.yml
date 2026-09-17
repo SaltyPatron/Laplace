@@ -1,0 +1,44 @@
+name: Laplace — CI contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+      - "scripts/**"
+      - "deploy/**"
+      - "db/**"
+      - "cmake/**"
+      - "CMakeLists.txt"
+  push:
+    branches: [main]
+    paths:
+      - ".github/**"
+      - "scripts/**"
+      - "deploy/**"
+      - "db/**"
+      - "cmake/**"
+      - "CMakeLists.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laplace-ci-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Static CI/CD contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate workflow, lifecycle, and operator contracts
+        shell: bash
+        run: bash scripts/product-ci.sh check
