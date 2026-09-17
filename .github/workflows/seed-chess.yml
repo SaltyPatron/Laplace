@@ -52,15 +52,20 @@ jobs:
       path: ${{ steps.pick.outputs.path }}
     steps:
       - id: pick
+        env:
+          SOURCE_INPUT: ${{ inputs.source }}
+          CORPUS_INPUT: ${{ inputs.corpus }}
+          SLICE_INPUT: ${{ inputs.slice }}
+          PATH_INPUT: ${{ inputs.path }}
         run: |
           set -euo pipefail
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
           chess="$root/Games/Chess"
           lum="$chess/Lumbras"
-          src='${{ inputs.source }}'
-          corpus='${{ inputs.corpus }}'
-          slice='${{ inputs.slice }}'
-          user_path='${{ inputs.path }}'
+          src="$SOURCE_INPUT"
+          corpus="$CORPUS_INPUT"
+          slice="$SLICE_INPUT"
+          user_path="$PATH_INPUT"
 
           case "$src" in
             chess-analyze|chess-eval|chess-move-outcomes|chess-transitions|chess-trajectory|chess-opening-match)
