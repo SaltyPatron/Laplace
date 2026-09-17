@@ -853,6 +853,7 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
     if (channel_count <= 0)
         return;
     cells = palloc(sizeof(*cells) * channel_count);
+    MemSet(&evidence, 0, sizeof(evidence));
 
     MemSet(&ctl, 0, sizeof(ctl));
     ctl.keysize = sizeof(QueryChannelKey);
@@ -882,11 +883,35 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
         Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     evidence.provenance = hash_create("query evidence provenance routes",
         Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    ctl.entrysize = sizeof(QueryEvidenceWitness);
+    evidence.witnesses = hash_create("query evidence retained witnesses",
+        Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    ctl.entrysize = sizeof(QueryEvidenceKey);
+    evidence.calculation_channel_sources = hash_create(
+        "query calculation channel sources", Max(channel_count, 16),
+        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    evidence.calculation_contexts = hash_create(
+        "query calculation contexts", Max(channel_count, 16),
+        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    evidence.calculation_provenance = hash_create(
+        "query calculation provenance routes", Max(channel_count, 16),
+        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = work;
+    evidence.calculation_sources = hash_create("query calculation sources",
+        Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
     evidence.channels = channels;
     evidence.stats = stats;
 
     laplace_observation_read_cells(operands, NULL, cells, channel_count,
                                    query_observation, &evidence);
+    bind_channel_calculations(&evidence, channel_count);
     bind_channel_provenance_roots(&evidence, channel_count);
     pfree(cells);
 }
