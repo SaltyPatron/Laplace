@@ -154,6 +154,8 @@ program_channel_compare(const void *left, const void *right)
     const LaplaceQueryChannel *a = left, *b = right;
     int order;
     if (a->ordinal != b->ordinal) return a->ordinal < b->ordinal ? -1 : 1;
+    if (a->operand_role != b->operand_role)
+        return a->operand_role < b->operand_role ? -1 : 1;
     order = memcmp(&a->anchor, &b->anchor, sizeof(hash128_t));
     if (order) return order;
     order = memcmp(&a->candidate, &b->candidate, sizeof(hash128_t));
@@ -235,6 +237,40 @@ program_fingerprint_structural(StringInfo bytes, const LaplacePromptIntent *inte
 }
 
 static void
+program_fingerprint_discourse(StringInfo bytes, const LaplacePromptIntent *intent)
+{
+    ArrayType *discourse = intent ? intent->discourse : NULL;
+    Datum *values = NULL;
+    bool *nulls = NULL;
+    int count = 0;
+
+    if (!discourse)
+    {
+        program_fingerprint_u32(bytes, 0);
+        return;
+    }
+    if (ARR_NDIM(discourse) > 1 || ARR_ELEMTYPE(discourse) != BYTEAOID)
+        elog(ERROR, "cognition program: discourse response plane is invalid");
+    deconstruct_array(discourse, BYTEAOID, -1, false, TYPALIGN_INT,
+                      &values, &nulls, &count);
+    program_fingerprint_u32(bytes, (uint32) count);
+    for (int i = 0; i < count; ++i)
+    {
+        program_fingerprint_u32(bytes, nulls[i] ? 0u : 1u);
+        if (!nulls[i])
+        {
+            hash128_t id = datum_to_hash128(values[i]);
+            appendBinaryStringInfo(bytes, (const char *) &id, sizeof(id));
+        }
+    }
+    if (count > 0)
+    {
+        pfree(values);
+        pfree(nulls);
+    }
+}
+
+static void
 program_fingerprint_channels(StringInfo bytes,
                              const LaplaceQueryChannel *channels, int count)
 {
@@ -251,6 +287,7 @@ program_fingerprint_channels(StringInfo bytes,
     {
         const LaplaceQueryChannel *channel = &items[i];
         program_fingerprint_u32(bytes, (uint32) channel->ordinal);
+        program_fingerprint_u32(bytes, channel->operand_role);
         appendBinaryStringInfo(bytes, (const char *) &channel->anchor, sizeof(hash128_t));
         appendBinaryStringInfo(bytes, (const char *) &channel->candidate, sizeof(hash128_t));
         appendBinaryStringInfo(bytes, (const char *) &channel->relation, sizeof(hash128_t));
@@ -279,10 +316,11 @@ program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values,
                     int initial_channel_count)
 {
     StringInfoData bytes;
-    /* v7 binds the canonical exact witness-provenance root for every semantic
-     * response channel. Equal source/context cardinalities are not equivalent
-     * response state when the responding witnesses differ. */
-    hash128_t domain = cognition_domain("laplace:cognition-program:v7");
+    /* v8 binds the exact input role of every query channel plus the ordered
+     * discourse occurrence plane. Equal canonical ids in current observation,
+     * prior discourse, physicality, and generated working state remain distinct
+     * program coordinates instead of collapsing into one semantic bag. */
+    hash128_t domain = cognition_domain("laplace:cognition-program:v8");
     int member = -1;
     initStringInfo(&bytes);
     appendBinaryStringInfo(&bytes, (const char *) &domain, sizeof(domain));
@@ -305,6 +343,7 @@ program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values,
      * data here; it is never serialized as a semantic attestation. */
     program_fingerprint_bindings(&bytes, intent);
     program_fingerprint_structural(&bytes, intent);
+    program_fingerprint_discourse(&bytes, intent);
     program_fingerprint_channels(&bytes, initial_channels, initial_channel_count);
 
     program_fingerprint_u32(&bytes, (uint32) program->operation_relation_count);
