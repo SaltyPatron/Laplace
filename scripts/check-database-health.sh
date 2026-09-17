@@ -9,6 +9,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+require_source_match=1
+if [[ "${1:-}" == "--installed-runtime" ]]; then
+  require_source_match=0
+  shift
+fi
+[[ "$#" -le 1 ]] || {
+  echo "usage: $0 [--installed-runtime] [database]" >&2
+  exit 2
+}
 DB="${1:-${LAPLACE_DBNAME:-${PGDATABASE:-laplace}}}"
 PGHOST="${PGHOST:-/var/run/postgresql}"
 PGUSER="${PGUSER:-laplace_admin}"
@@ -33,18 +42,34 @@ ext=$("${PSQL[@]}" -d "$DB" -tAc \
   "SELECT extversion FROM pg_extension WHERE extname = 'laplace_substrate'" 2>/dev/null || true)
 [[ -n "$ext" ]] || fail "laplace_substrate extension is not installed in '$DB'"
 
-# Source, installed extension artifacts, and the database catalog must name the same
-# content-derived extension version. A green regression against a stale installed SQL
-# artifact or a successful source build cannot establish that the live database was
-# upgraded. This gate runs after sync-extension and therefore treats any mismatch as a
-# failed deployment, not as an informational warning.
-if ! "$SCRIPT_DIR/check-installed-extension-current.py" >/dev/null; then
-  fail "installed laplace_substrate artifacts do not match the current source"
+source_ext="not-required"
+artifact_scope="installed"
+if [[ "$require_source_match" == 1 ]]; then
+  # Release/build validation proves source, installed extension artifacts, and the
+  # database catalog name the same content-derived extension version.
+  if ! "$SCRIPT_DIR/check-installed-extension-current.py" >/dev/null; then
+    fail "installed laplace_substrate artifacts do not match the current source"
+  fi
+  source_ext=$("$SCRIPT_DIR/check-installed-extension-current.py" --print-source-version)
+  [[ -n "$source_ext" ]] || fail "could not determine the source laplace_substrate version"
+  [[ "$ext" == "$source_ext" ]] || \
+    fail "live laplace_substrate version is stale: database=$ext source=$source_ext"
+  artifact_scope="source"
+else
+  # Developer/operator DB actions intentionally operate on the already-installed
+  # runtime. A checkout may be newer than that runtime and must not turn status,
+  # migrate, repair, remigrate or recreate into an implicit product build. Prove
+  # instead that the exact live extension version still exists in the installed
+  # PostgreSQL extension catalog, then continue with structural schema checks.
+  installed_match=$("${PSQL[@]}" -d "$DB" -tAc "
+SELECT count(*)
+FROM pg_extension e
+JOIN pg_available_extension_versions a
+  ON a.name = e.extname AND a.version = e.extversion
+WHERE e.extname = 'laplace_substrate';")
+  [[ "${installed_match:-0}" != "0" ]] || \
+    fail "live laplace_substrate version $ext is not present in installed extension artifacts"
 fi
-source_ext=$("$SCRIPT_DIR/check-installed-extension-current.py" --print-source-version)
-[[ -n "$source_ext" ]] || fail "could not determine the source laplace_substrate version"
-[[ "$ext" == "$source_ext" ]] || \
-  fail "live laplace_substrate version is stale: database=$ext source=$source_ext"
 
 missing=$("${PSQL[@]}" -d "$DB" -tAc "
 WITH required(name) AS (VALUES
@@ -146,4 +171,4 @@ if [[ "${op_invalid:-0}" != "0" ]]; then
   fail "ops.index_health reports $op_invalid invalid index(es)"
 fi
 
-echo "DB_HEALTH_OK database=$DB extension=$ext source_extension=$source_ext relation_bands=maintained_counts required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=$running seed_state=not_required"
+echo "DB_HEALTH_OK database=$DB extension=$ext source_extension=$source_ext artifact_scope=$artifact_scope relation_bands=maintained_counts required_relations=6 invalid_indexes=0 unvalidated_constraints=0 running_ingests=$running seed_state=not_required"
