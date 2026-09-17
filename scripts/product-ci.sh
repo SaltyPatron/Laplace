@@ -25,7 +25,8 @@ run_ci_contract_checks() {
     scripts/test-parallel.sh \
     scripts/model-synthesize-ci.sh \
     scripts/maintain-installed-database.sh \
-    scripts/ingest-source.sh
+    scripts/ingest-source.sh \
+    scripts/check-deployed-revision.sh
   python3 scripts/validate-pipeline.py
   python3 scripts/test-ci-workspace.py
   python3 scripts/test-product-ci-artifact-ownership.py
@@ -40,6 +41,10 @@ require_built_revision() {
     echo "::error::prepared build does not belong to this checkout (expected $expected, found ${actual:-missing}); run product-ci.sh build or deploy first" >&2
     return 1
   fi
+}
+
+require_deployed_revision() {
+  bash scripts/check-deployed-revision.sh "$(git rev-parse HEAD)"
 }
 
 run_build() {
@@ -90,6 +95,7 @@ run_publish() {
 
 run_live_tests() {
   require_built_revision
+  require_deployed_revision
   export LAPLACE_API_BASE="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
   bash scripts/test-parallel.sh --profile live --suite live-floor
   bash scripts/test-parallel.sh --profile live --suite live-api
@@ -128,6 +134,11 @@ check_t0_perfcache_runtime() {
 
 reconcile_installed_product() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
+  # Installed reconciliation may mutate canonical database state, so first prove
+  # that the application selected on this host is the checkout being reconciled.
+  require_deployed_revision
+  # Installed product reconciliation is deliberately seed-independent. Corpus
+  # admission remains a separate seed workflow and cannot be required to deploy code.
   bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
   check_application_live
