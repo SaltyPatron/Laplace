@@ -72,6 +72,14 @@ run_live_tests() {
   bash scripts/test-parallel.sh --profile live --suite generation-eval
 }
 
+run_competitive_model_proof() {
+  # This is the executable competitive path, not a compile-only gate: a real
+  # weighted checkpoint is admitted into the substrate, retained evidence is
+  # read back, a GGUF is synthesized, llama.cpp loads it, and behavioral probes
+  # must pass. A missing model/runtime or semantic failure fails mainline.
+  bash scripts/model-synthesize-ci.sh
+}
+
 check_application_live() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local body
@@ -113,7 +121,8 @@ reconcile_installed_product() {
 }
 
 # Product lifecycle owns build/install/database verification/publication/live checks.
-# Corpus ingestion and foundation/model seeding are owned exclusively by seed.yml.
+# Mainline additionally proves the competitive model path end-to-end so a change
+# cannot be called integrated while model admission/synthesis/runtime behavior is broken.
 run_deploy() {
   check_deps
   run_build
@@ -129,6 +138,7 @@ run_deploy() {
   run_publish
   reconcile_installed_product
   run_live_tests
+  run_competitive_model_proof
 
   if (( dev_test_rc != 0 )); then
     echo "::error::development tests failed earlier (status $dev_test_rc); integrated lifecycle continued and retained downstream evidence" >&2
