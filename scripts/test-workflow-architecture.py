@@ -22,6 +22,15 @@ class WorkflowArchitecture(unittest.TestCase):
         ):
             self.assertFalse((WORKFLOWS / name).exists())
 
+    def test_ci_contract_has_a_lightweight_hosted_lane(self):
+        text = (WORKFLOWS / "ci-contract.yml").read_text(encoding="utf-8")
+        self.assertIn("pull_request:", text)
+        self.assertIn("push:", text)
+        self.assertIn("runs-on: ubuntu-24.04", text)
+        self.assertNotIn("self-hosted", text)
+        self.assertIn("bash scripts/product-ci.sh check", text)
+        self.assertIn("cancel-in-progress: false", text)
+
     def test_targeted_code_player_does_not_duplicate_mainline_build(self):
         self.assertFalse((WORKFLOWS / "code-player-ci.yml").exists())
         mainline = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
