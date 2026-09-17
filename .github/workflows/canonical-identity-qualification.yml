@@ -1,4 +1,4 @@
-name: Reconcile artifact ownership and preserve qualified identity source
+name: Correct canonical identity regressions and preserve current lifecycle
 on:
   push:
     branches: [review/canonical-identity-20260917]
@@ -11,10 +11,10 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      BASE: 7de8e48d90ad8ad329a97504e8f83d48fa35c192
-      EXTERNAL: ea4cfa7382086feddeb608723b7c72164e5e1499
-      COMMON: 3f4eeda3ed0ed88557011043a06afa1e2b251e2c
-      MANIFEST: ab5b0ac31b2c8c854590e7b3459af29d1347a3c7
+      BASE: 711f9d71d739d22589d960b0d37b9920f845e742
+      EXTERNAL: 5fbcaca34fc882fa376e49fe595302dd092a098d
+      COMMON: ea4cfa7382086feddeb608723b7c72164e5e1499
+      MANIFEST: e586efa601c175c05ac718e891a7a7b8a54a3dbd
       CANDIDATE_REF: review/canonical-identity-20260917
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -63,17 +63,17 @@ jobs:
           if os.environ["MERGE_STATUS"]!="0":
               assert paths==[conflict],(os.environ["MERGE_STATUS"],paths)
           if paths:
-              expected_stages={"1":"294131119272975d9c8139d92c2216f4916e38b8","2":"e012d08c7b762f502450898d543077c696bcef4f","3":"6568aef5d5f9a7e29730d2bf73c7d595a92100cc"}
+              expected_stages={"1":"6568aef5d5f9a7e29730d2bf73c7d595a92100cc","2":"4bd4ec37f381a65dac9e671fe2447c861db6ba4a","3":"9ef6e73d87914a46ee644b53aa6fe6e1df1b6077"}
               for line in git("ls-files","-u").splitlines():
                   metadata,path=line.split("\t",1)
                   mode,sha,stage=metadata.split()
                   assert path==conflict and sha==expected_stages[stage],line
                   (root/("workspace-stage"+stage+".py")).write_bytes(subprocess.check_output(["git","cat-file","blob",sha]))
-          assert git("rev-parse",os.environ["BASE"]+":"+conflict)=="e012d08c7b762f502450898d543077c696bcef4f"
+          assert git("rev-parse",os.environ["BASE"]+":"+conflict)=="4bd4ec37f381a65dac9e671fe2447c861db6ba4a"
           Path(conflict).write_bytes(subprocess.check_output(["git","show",os.environ["BASE"]+":"+conflict]))
           subprocess.run(["git","add","--",conflict],check=True)
           assert not git("ls-files","-u")
-          expected=[".github/workflows/seed-foundation.yml","scripts/product-ci.sh","scripts/test-parallel.sh","scripts/test-product-ci-artifact-ownership.py"]
+          expected=[".github/workflows/db-ops.yml",".github/workflows/laplace.yml",".github/workflows/seed.yml","scripts/product-ci.sh","scripts/test-parallel.sh","scripts/test-product-ci-artifact-ownership.py","scripts/test-seed-workflow-ownership.py"]
           arrivals=git("diff","--cached","--name-only",os.environ["GITHUB_SHA"]).splitlines()
           assert arrivals==expected,(arrivals,expected)
           preserved=[]
@@ -84,9 +84,11 @@ jobs:
                   marker="  python3 scripts/test-cutechess-calibration.py\n"
                   assert external.count(marker)==1 and "test-chess-x11-runtime.py" not in external
                   assert Path(path).read_text()==external.replace(marker,marker+"  python3 scripts/test-chess-x11-runtime.py\n"),"lost incoming registration or qualified GUI control"
+              elif path=="scripts/test-product-ci-artifact-ownership.py":
+                  assert sha=="b4621b2aacf49d474c2444bd440a7556c9a33713",sha
               else:
                   assert sha==git("rev-parse",os.environ["EXTERNAL"]+":"+path),path
-              preserved.append({"path":path,"external_blob":sha})
+              preserved.append({"path":path,"merged_blob":sha,"incoming_blob":git("rev-parse",os.environ["EXTERNAL"]+":"+path)})
           def blob(sha):
               request=urllib.request.Request("https://api.github.com/repos/"+os.environ["GITHUB_REPOSITORY"]+"/git/blobs/"+sha,
                   headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
@@ -113,7 +115,7 @@ jobs:
           for path in (".github/workflows/identity-storage-proof.yml",".github/workflows/identity-working-set-patch.yml","scripts/patch-identity-working-set.py"):
               assert subprocess.run(["git","cat-file","-e",":"+path],capture_output=True).returncode!=0,path
           (root/"preserved-main.json").write_text(json.dumps(preserved,indent=2)+"\n")
-          (root/"workspace-resolution.json").write_text(json.dumps({"path":conflict,"retained_blob":git("rev-parse",":"+conflict),"scope":"preserve incoming artifact-proof and HEAD check plus qualified maintenance/refusal controls; isolate suite-continuation fixture from separately exercised revision guard"},indent=2)+"\n")
+          (root/"workspace-resolution.json").write_text(json.dumps({"path":conflict,"retained_blob":git("rev-parse",":"+conflict),"scope":"preserve incoming strict prepublication gates and shared seed ownership, qualified maintenance/refusal controls and actual artifact revision proof"},indent=2)+"\n")
           PY
           git diff --cached --check
           git diff --cached --binary > "$evidence_root/reconciled.patch"
@@ -123,6 +125,8 @@ jobs:
           set -euo pipefail
           python3 scripts/test-ci-workspace.py 2>&1 | tee "$EVIDENCE_ROOT/workspace-controls.log"
           python3 scripts/test-product-ci-artifact-ownership.py 2>&1 | tee "$EVIDENCE_ROOT/artifact-controls.log"
+          python3 scripts/test-seed-workflow-ownership.py 2>&1 | tee "$EVIDENCE_ROOT/seed-controls.log"
+          python3 scripts/test-qualify-canonical-identity-pg.py 2>&1 | tee "$EVIDENCE_ROOT/pg-helper-controls.log"
           python3 scripts/validate-pipeline.py 2>&1 | tee "$EVIDENCE_ROOT/pipeline-validation.log"
       - name: Publish qualified reconciliation to isolated candidate only
         shell: bash
@@ -134,7 +138,7 @@ jobs:
           unset git_auth
           test -z "$(git diff --name-only)"
           test -z "$(git ls-files --others --exclude-standard)"
-          git commit -m "Preserve build ownership and reconcile lifecycle execution fixtures"
+          git commit -m "Correct canonical identity regression fixtures and preserve shared lifecycle ownership"
           test "$(git rev-parse HEAD^1)" = "$GITHUB_SHA"
           test "$(git rev-parse HEAD^2)" = "$EXTERNAL"
           test -z "$(git status --porcelain --untracked-files=all)"
@@ -143,7 +147,7 @@ jobs:
           import json,os,subprocess
           from pathlib import Path
           def git(*args): return subprocess.check_output(["git",*args],text=True).strip()
-          receipt={"status":"passed","scope":"real Git reconciliation plus 29 actual lifecycle/maintenance controls, 6 artifact ownership controls and pipeline validation; private e8 PostgreSQL qualification remains separately pending","base":os.environ["BASE"],"external":os.environ["EXTERNAL"],"operator":os.environ["GITHUB_SHA"],"manifest":os.environ["MANIFEST"],"merged_commit":git("rev-parse","HEAD"),"tree":git("rev-parse","HEAD^{tree}"),"parents":git("show","-s","--format=%P","HEAD").split()}
+          receipt={"status":"passed","scope":"real Git reconciliation and actual lifecycle, artifact, seed, PG helper controls; corrected SQL/native regression fixtures await actual private PostgreSQL execution","base":os.environ["BASE"],"external":os.environ["EXTERNAL"],"operator":os.environ["GITHUB_SHA"],"manifest":os.environ["MANIFEST"],"merged_commit":git("rev-parse","HEAD"),"tree":git("rev-parse","HEAD^{tree}"),"parents":git("show","-s","--format=%P","HEAD").split()}
           (Path(os.environ["EVIDENCE_ROOT"])/"source.json").write_text(json.dumps(receipt,indent=2)+"\n")
           print(json.dumps(receipt,indent=2))
           PY
