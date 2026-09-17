@@ -67,7 +67,40 @@ typedef struct LaplacePromptIntent
     LaplaceStructuralCandidate *structural;
     int structural_count;
     ArrayType *structural_frontier;
+    /* Prior discourse is an ordered response plane of exact admitted turn/content
+     * identities.  It remains distinct from current observation occurrences and
+     * from testimony even when equal canonical identities appear in both. */
+    ArrayType *discourse;
 } LaplacePromptIntent;
+
+static inline void
+laplace_prompt_intent_bind_discourse(LaplacePromptIntent *intent, ArrayType *discourse)
+{
+    MemoryContext previous;
+
+    if (!intent)
+        ereport(ERROR, (errmsg("prompt intent: discourse binding requires an intent")));
+    previous = MemoryContextSwitchTo(intent->owner);
+    if (!discourse)
+    {
+        intent->discourse = construct_empty_array(BYTEAOID);
+        MemoryContextSwitchTo(previous);
+        return;
+    }
+    if (ARR_NDIM(discourse) > 1 || ARR_ELEMTYPE(discourse) != BYTEAOID)
+        ereport(ERROR, (errmsg("prompt intent: discourse must be a one-dimensional bytea array")));
+
+    ArrayIterator iterator = array_create_iterator(discourse, 0, NULL);
+    Datum value;
+    bool isnull;
+    while (array_iterate(iterator, &value, &isnull))
+        if (!isnull && VARSIZE_ANY_EXHDR(DatumGetByteaPP(value)) != sizeof(hash128_t))
+            ereport(ERROR, (errmsg("prompt intent: discourse identities must be 16 bytes")));
+    array_free_iterator(iterator);
+
+    intent->discourse = DatumGetArrayTypePCopy(PointerGetDatum(discourse));
+    MemoryContextSwitchTo(previous);
+}
 
 /* A hard relation scope differs from the optional output projection: NULL
  * permits all relations, while an explicitly empty array permits none. */
