@@ -73,14 +73,21 @@ static bool mask_missing(Datum datum, bool isnull, const laplace_mask256_t *delt
     return changed;
 }
 
-/* This storage operation must never silently skip policies or rewrite rules.
- * The substrate entities schema has none; reject unsupported schema changes
- * before writing, preserving transaction rollback rather than bypassing them. */
+/* This storage operation performs a direct executor UPDATE and therefore may
+ * bypass no UPDATE policy. The canonical-identity admission trigger is
+ * INSERT-only and does not participate in highway-mask maintenance, so it is
+ * explicitly compatible. Reject rules, generated stored columns, row security,
+ * or any UPDATE trigger before writing rather than silently bypassing them. */
 static void check_storage(Relation relation)
 {
-    if (relation->rd_rules || relation->trigdesc ||
+    TriggerDesc *triggers = relation->trigdesc;
+    bool update_triggers = triggers && (
+        triggers->trig_update_before_row || triggers->trig_update_after_row ||
+        triggers->trig_update_instead_row || triggers->trig_update_before_statement ||
+        triggers->trig_update_after_statement);
+    if (relation->rd_rules || update_triggers ||
         (relation->rd_att->constr && relation->rd_att->constr->has_generated_stored))
-        elog(ERROR,"entity mask write requires entities without rules, triggers or stored generated columns");
+        elog(ERROR,"entity mask write requires entities without rules, UPDATE triggers or stored generated columns");
     if (check_enable_rls(RelationGetRelid(relation),InvalidOid,true)==RLS_ENABLED)
         elog(ERROR,"entity mask write cannot bypass row security");
 }

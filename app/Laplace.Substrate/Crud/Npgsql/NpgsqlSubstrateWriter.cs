@@ -66,6 +66,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         int roundTrips = 0;
 
         int managedEntitiesAttempted = 0, managedPhysAttempted = 0, managedAttAttempted = 0;
+        var managedInterpretations = new List<EntityInterpretationRow>();
         checked
         {
             for (int i = 0; i < changes.Count; i++)
@@ -78,6 +79,16 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 managedEntitiesAttempted += changes[i].Entities.Length;
                 managedPhysAttempted += changes[i].Physicalities.Length;
                 managedAttAttempted += changes[i].Attestations.Length;
+
+                // Preserve every managed interpretation. Direct/legacy callers may
+                // not know about the sidecar yet, so canonical entity rows are also
+                // projected into it. The transaction owner deduplicates the union
+                // with native stage interpretations before one set-sized write.
+                if (!changes[i].EntityInterpretations.IsDefaultOrEmpty)
+                    managedInterpretations.AddRange(changes[i].EntityInterpretations);
+                foreach (var entity in changes[i].Entities)
+                    managedInterpretations.Add(new EntityInterpretationRow(
+                        entity.Id, entity.Tier, entity.TypeId, entity.FirstObservedBy));
             }
         }
         if (changes.Count == 0)
@@ -139,6 +150,9 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             var seenEntity = new HashSet<Hash128>();
             var seenPhys = new HashSet<Hash128>();
 
+            // Canonical table staging remains id-only. Tier/type multiplicity is
+            // published separately from managedInterpretations in the same control
+            // transaction, so COPY cannot manufacture a second logical entity.
             foreach (var c in changes)
                 foreach (var e in c.Entities)
                 {
@@ -254,7 +268,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             if (anyRows)
             {
                 var r = await ApplyStagesCoreAsync(
-                    sourceStages, physicalityAdmission, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
+                    sourceStages, physicalityAdmission, managedInterpretations,
+                    workingSetToken, legacyWorkingSetToken, legacySingletonToken,
                     workingSetSource, workingSetSources, transactionParticipant, reconciliation, ct);
                 entitiesInserted = r.e;
                 physicalitiesInserted = r.p;

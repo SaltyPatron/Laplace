@@ -11,11 +11,14 @@ END $upgrade_shape$;
 CREATE OR REPLACE FUNCTION ops.entity_facets(p_id bytea)
     RETURNS TABLE(tier smallint, type_id bytea)
     LANGUAGE sql STABLE
-
 BEGIN ATOMIC
-
-    SELECT e.tier, e.type_id FROM laplace.entities e WHERE e.id = p_id
-;
+    -- A canonical content id can carry several witnessed structural roles.
+    -- Facets are the plural interpretation projection, not the compatibility
+    -- summary stored on the one-row identity relation.
+    SELECT i.tier, i.type_id
+    FROM laplace.entity_interpretations i
+    WHERE i.entity_id = p_id
+    ORDER BY i.tier, i.type_id;
 END;
 
 -- LIVE-UPGRADE DROP ORDER. These BEGIN-ATOMIC functions pin the exact OIDs of
@@ -50,8 +53,8 @@ BEGIN
     END IF;
 END $upgrade_shape$;
 
--- Batch form for serving/browse paths.  One set read over surviving ids; callers
--- must not LATERAL-loop the scalar facet reader or hand-read laplace.entities.
+-- Batch form for serving/browse paths. One set read over surviving ids; callers
+-- must not LATERAL-loop the scalar facet reader or hand-read compatibility columns.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
 BEGIN
@@ -65,7 +68,8 @@ CREATE OR REPLACE FUNCTION ops.entity_facets_batch(p_ids bytea[])
     RETURNS TABLE(entity_id bytea, tier smallint, type_id bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT e.id, e.tier, e.type_id
-    FROM laplace.entities e
-    WHERE e.id = ANY(COALESCE(p_ids, '{}'::bytea[]));
+    SELECT i.entity_id, i.tier, i.type_id
+    FROM laplace.entity_interpretations i
+    WHERE i.entity_id = ANY(COALESCE(p_ids, '{}'::bytea[]))
+    ORDER BY i.entity_id, i.tier, i.type_id;
 END;

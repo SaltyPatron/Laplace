@@ -1,15 +1,16 @@
 DROP FUNCTION IF EXISTS laplace.entity_tier_of(bytea);
--- BEGIN ATOMIC: GH #764.
+-- BEGIN ATOMIC: GH #764/#1008.  Tier is an interpretation projection, never an
+-- identity key.  The scalar returns the lowest witnessed floor for compatibility;
+-- callers needing every lawful interpretation read entity_interpretations.
 CREATE OR REPLACE FUNCTION generation.entity_tier_of(p_entity bytea)
     RETURNS int
     LANGUAGE sql STABLE STRICT PARALLEL SAFE
 BEGIN ATOMIC
-    -- Fall back to the perfcache-backed codepoint lookup before giving up: a valid
-    -- tier-0 codepoint is tier 0 whether or not it has been given its own laplace.entities
-    -- row yet. Only genuinely unresolvable ids (neither a real row nor a valid
-    -- codepoint) should surface as NULL here.
     SELECT COALESCE(
-        (SELECT tier FROM laplace.entities WHERE id = p_entity),
+        (SELECT min(i.tier)::int
+         FROM laplace.entity_interpretations i
+         WHERE i.entity_id = p_entity),
+        (SELECT e.tier::int FROM laplace.entities e WHERE e.id = p_entity),
         CASE WHEN realize.codepoint_for_id(p_entity) IS NOT NULL THEN 0 END
     );
 END;

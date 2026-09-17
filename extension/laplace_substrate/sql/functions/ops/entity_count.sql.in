@@ -1,4 +1,4 @@
--- BEGIN ATOMIC: GH #764.
+-- BEGIN ATOMIC: GH #764/#1008.
 DROP FUNCTION IF EXISTS laplace.entity_count(bytea);
 DROP FUNCTION IF EXISTS laplace.entity_counts_by_types(bytea[]);
 
@@ -6,28 +6,28 @@ CREATE OR REPLACE FUNCTION ops.entity_count(p_type bytea)
     RETURNS bigint
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    -- Scalar counterpart to ops.entity_type_counts(). That function aggregates every
-    -- type in the substrate; a caller that wants one type's count should not pay
-    -- a full GROUP BY over entities to read a single row. Here p_type arrives as
-    -- a plain equality the planner can drive from the type_id index.
-    --
-    -- NULL p_type counts nothing, not everything: `type_id = NULL` matches no
-    -- rows, and an unspecified type is not a wildcard. Callers that want the
-    -- whole-table count already have ops.substrate_counts().
-    SELECT count(*) FROM laplace.entities e WHERE e.type_id = p_type;
+    -- Type is an observed interpretation, not the singular compatibility type
+    -- on the canonical identity row. Count each content id once for the requested
+    -- type even when several source/tier observations witness it.
+    SELECT count(DISTINCT i.entity_id)
+    FROM laplace.entity_interpretations i
+    WHERE i.type_id = p_type;
 END;
 
 CREATE OR REPLACE FUNCTION ops.entity_counts_by_types(p_types bytea[])
     RETURNS TABLE(type_id bytea, entities bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    -- Batch form: one round trip for N types, and every requested type comes back
-    -- whether or not it has rows. A LEFT JOIN, not an inner one -- a type with no
-    -- entities is a 0, and dropping it would make "absent from the result" and
-    -- "count zero" the same answer, which is the tri-state collapse the read law
-    -- names. Callers resolving names should aggregate ids and batch, not loop.
-    SELECT t.type_id, count(e.id)
-    FROM unnest(p_types) AS t(type_id)
-    LEFT JOIN laplace.entities e ON e.type_id = t.type_id
-    GROUP BY t.type_id;
+    WITH requested AS (
+        SELECT DISTINCT t.type_id
+        FROM unnest(COALESCE(p_types, '{}'::bytea[])) AS t(type_id)
+    ), counted AS (
+        SELECT i.type_id, count(DISTINCT i.entity_id)::bigint AS entities
+        FROM laplace.entity_interpretations i
+        WHERE i.type_id = ANY(COALESCE(p_types, '{}'::bytea[]))
+        GROUP BY i.type_id
+    )
+    SELECT r.type_id, COALESCE(c.entities, 0)::bigint
+    FROM requested r
+    LEFT JOIN counted c USING (type_id);
 END;

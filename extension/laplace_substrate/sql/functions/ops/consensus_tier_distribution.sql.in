@@ -1,13 +1,19 @@
--- BEGIN ATOMIC: GH #764.
+-- BEGIN ATOMIC: GH #764/#1008.
 DROP FUNCTION IF EXISTS laplace.consensus_tier_distribution();
 
 CREATE OR REPLACE FUNCTION ops.consensus_tier_distribution()
     RETURNS TABLE(subject_tier smallint, relations bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    SELECT e.tier, count(*)
-    FROM laplace.consensus c JOIN laplace.entities e ON e.id = c.subject_id
+    WITH structural_tiers AS NOT MATERIALIZED (
+        SELECT DISTINCT i.entity_id, i.tier
+        FROM laplace.entity_interpretations i
+        WHERE i.type_id = ANY(laplace.compositional_type_ids())
+    )
+    SELECT t.tier, count(*)
+    FROM laplace.consensus c
+    JOIN structural_tiers t ON t.entity_id = c.subject_id
     WHERE c.object_id IS NOT NULL
-      AND e.type_id = ANY(laplace.compositional_type_ids())
-    GROUP BY e.tier ORDER BY e.tier;
+    GROUP BY t.tier
+    ORDER BY t.tier;
 END;
