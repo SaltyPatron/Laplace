@@ -4,10 +4,10 @@ using Laplace.Ops;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// Operator control for starting the canonical CLI ingest lane. The API does not
-/// duplicate the CLI source registry or ingest implementation: it starts
-/// <c>Laplace.Cli ingest</c> and the normal ingest journal remains the authority
-/// for progress, completion and failure.
+/// Operator control for the canonical CLI ingest lane. The API does not duplicate
+/// the CLI source registry or ingest implementation: it starts <c>Laplace.Cli ingest</c>
+/// and the normal ingest journal remains the authority for progress, completion and failure.
+/// Process stop is restricted to CLI children started by this server instance.
 /// </summary>
 internal static class IngestAdminEndpoints
 {
@@ -15,6 +15,8 @@ internal static class IngestAdminEndpoints
         string Source,
         string? Path = null,
         string[]? Arguments = null);
+
+    internal sealed record StopRequest(int Pid);
 
     public static void MapIngestAdminEndpoints(this WebApplication app)
     {
@@ -50,6 +52,44 @@ internal static class IngestAdminEndpoints
             catch (Exception ex)
             {
                 return EndpointJson.BadRequest("ingest_start_failed", ex.Message);
+            }
+        }).WithTags("admin");
+
+        app.MapPost("/v1/admin/ingest/stop", (StopRequest request) =>
+        {
+            try
+            {
+                var receipt = IngestProcessRunner.Stop(request.Pid);
+                if (!receipt.Found)
+                    return Results.NotFound(new JsonObject
+                    {
+                        ["object"] = "ingest.process.stop",
+                        ["pid"] = receipt.ProcessId,
+                        ["found"] = false,
+                        ["was_running"] = false,
+                        ["stop_requested"] = false,
+                        ["note"] = "This server no longer owns that process. It may have exited already or the server may have restarted.",
+                    });
+
+                return Results.Json(new JsonObject
+                {
+                    ["object"] = "ingest.process.stop",
+                    ["pid"] = receipt.ProcessId,
+                    ["found"] = true,
+                    ["was_running"] = receipt.WasRunning,
+                    ["stop_requested"] = receipt.StopRequested,
+                    ["note"] = receipt.StopRequested
+                        ? "Stop requested for the CLI process tree. Refresh the canonical journal to observe final run state."
+                        : "The owned CLI process had already exited.",
+                });
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return EndpointJson.BadRequest("invalid_ingest_process", ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return EndpointJson.BadRequest("ingest_stop_failed", ex.Message);
             }
         }).WithTags("admin");
     }
