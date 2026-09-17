@@ -173,9 +173,24 @@ public sealed class FrameNetAnnotationStructureTests
     }
 
     [Fact]
-    public void InvalidRoleSpanIsRejectedInsteadOfSilentlyDiscardingTheRole()
+    public void MalformedSourceSpansAreRetainedWhileValidTargetsRemainRealizable()
     {
-        Assert.Throws<FormatException>(() => ParseLu(Layers.Replace("end=\"12\"", "end=\"99\"")));
-        Assert.Throws<FormatException>(() => FrameNetDecomposer.ReadAnnotationLabel("Theme", "3", null, null));
+        string layers = Layers
+            .Replace(
+                "<layer name=\"Target\" rank=\"1\"><label name=\"Target\" start=\"5\" end=\"8\"/></layer>",
+                "<layer name=\"Target\" rank=\"1\"><label name=\"Target\" start=\"99\" end=\"102\"/><label name=\"Target\" start=\"5\" end=\"8\"/></layer>")
+            .Replace("<label name=\"Theme\" start=\"10\" end=\"12\"/>",
+                "<label name=\"Theme\" start=\"13\" end=\"12\"/>");
+
+        var annotation = Assert.Single(Assert.Single(ParseLu(layers).Sentences).Annotations);
+        Assert.Equal("gave", annotation.TargetText);
+        Assert.Contains(annotation.Layers.SelectMany(layer => layer.Labels),
+            label => label.Name == "Target" && label.Start == 99 && label.End == 102);
+        Assert.Contains(annotation.Layers.SelectMany(layer => layer.Labels),
+            label => label.Name == "Theme" && label.Start == 13 && label.End == 12);
+
+        var partial = FrameNetDecomposer.ReadAnnotationLabel("Theme", "3", null, null);
+        Assert.Equal(3, partial.Start);
+        Assert.Null(partial.End);
     }
 }

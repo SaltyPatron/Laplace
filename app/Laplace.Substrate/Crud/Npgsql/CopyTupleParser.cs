@@ -25,10 +25,12 @@ internal static class CopyTupleParser
     internal sealed class EntityRows
     {
         public readonly List<Hash128> Ids = new();
-        /// <summary>Partition key (LIST(tier), t2 further HASH(id)) — the
-        /// keyed presence probe needs it because id alone cannot prune.</summary>
+        /// <summary>Observed structural tier. Canonical storage is HASH(id);
+        /// tier is retained for interpretation publication and deterministic
+        /// compatibility-row selection, never as an entity presence key.</summary>
         public readonly List<short> Tiers = new();
-        /// <summary>type_id — secondary-index contention key for parallel COPY.</summary>
+        /// <summary>Observed type interpretation and deterministic compatibility
+        /// representative key for canonical entity COPY.</summary>
         public readonly List<Hash128> TypeIds = new();
         public readonly List<StagedRowRef> Rows = new();
     }

@@ -28,6 +28,10 @@ on:
         type: choice
         options: [laplace]
         default: laplace
+      derive_after_games:
+        description: "after source=chess, derive move outcomes and transitions"
+        type: boolean
+        default: true
       evict_before_ingest:
         description: "retract this source before re-deriving it"
         type: boolean
@@ -138,11 +142,12 @@ jobs:
 
   seed:
     needs: resolve
-    uses: ./.github/workflows/_ingest.yml
+    uses: ./.github/workflows/seed.yml
     with:
+      mode: source
       source: ${{ inputs.source }}
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
-      timeout_minutes: 720
+      chess_derived: ${{ inputs.source == 'chess' && inputs.derive_after_games }}
       evict_before_ingest: ${{ inputs.evict_before_ingest }}
       evict_confirm: ${{ inputs.evict_confirm }}

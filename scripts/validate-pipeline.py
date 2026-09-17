@@ -48,7 +48,15 @@ def parse_ensure_foundation_sh(text: str) -> list[str] | None:
 def validate_retired_workflows() -> list[str]:
     errs: list[str] = []
     workflows = ROOT / ".github" / "workflows"
-    for name in ("ci.yml", "integration.yml", "deploy-app.yml", "seed-ladder.yml"):
+    for name in (
+        "ci.yml",
+        "integration.yml",
+        "deploy-app.yml",
+        "seed-ladder.yml",
+        "_ingest.yml",
+        "seed-chess-games.yml",
+        "seed-models.yml",
+    ):
         if (workflows / name).is_file():
             errs.append(f"retired workflow still present: .github/workflows/{name}")
     laplace = workflows / "laplace.yml"
@@ -68,14 +76,16 @@ def validate_retired_workflows() -> list[str]:
         for stale in ("integration.yml", "deploy-app.yml", "seed-ladder.yml"):
             if stale in text:
                 errs.append(f"laplace.yml: references retired workflow {stale}")
+    if not (workflows / "seed.yml").is_file():
+        errs.append("missing canonical ingestion workflow: .github/workflows/seed.yml")
     return errs
 
 
 def validate_foundation_indexes_stay_online() -> list[str]:
     """Production foundation ingest must not remove the live read indexes."""
-    workflow = ROOT / ".github" / "workflows" / "seed-foundation.yml"
+    workflow = ROOT / ".github" / "workflows" / "seed.yml"
     if not workflow.is_file():
-        return ["missing workflow: .github/workflows/seed-foundation.yml"]
+        return ["missing canonical ingestion workflow: .github/workflows/seed.yml"]
 
     text = read_text(workflow)
     ensure = read_text(ROOT / "scripts" / "ensure-foundation.sh")
@@ -277,7 +287,7 @@ def expected_audit_layer_map(knowledge: list[str]) -> dict[str, int]:
 
 def _seed_workflow_sources() -> set[str]:
     """
-    Every source key a `.github/workflows/seed-*.yml` can hand to `_ingest.yml`.
+    Every source key a `.github/workflows/seed-*.yml` can hand to canonical `seed.yml`.
 
     Two forms reach it, and both count as dispatchable:
       - a `source:` workflow_dispatch input whose `options:` the operator picks from
@@ -347,12 +357,13 @@ def validate_seed_chess_routes() -> list[str]:
         value.strip().strip("\"'") for value in options.group(1).split(",") if value.strip()
     }
 
-    source_case = re.search(r'case "\$src" in\s*\n(?P<body>.*?)^\s{10}esac$', text, re.M | re.S)
-    if not source_case:
+    source_cases = re.findall(r'case "\$src" in\s*\n(?P<body>.*?)^\s{10}esac$', text, re.M | re.S)
+    if not source_cases:
         return ["seed-chess.yml: could not parse source legality resolver"]
     accepted: set[str] = set()
-    for label in re.findall(r"^\s{12}([^#\n][^\n)]*)\)", source_case.group("body"), re.M):
-        accepted.update(part.strip() for part in label.split("|") if part.strip() != "*")
+    for source_case in source_cases:
+        for label in re.findall(r"^\s{12}([^#\n][^\n)]*)\)", source_case, re.M):
+            accepted.update(part.strip() for part in label.split("|") if part.strip() != "*")
 
     missing = sorted(advertised - accepted)
     return ([f"seed-chess.yml: advertised sources rejected by resolver: {missing}"]
@@ -450,7 +461,9 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
 _LEGACY_TYPE_PATH = re.compile(r"substrate/type/[A-Z]")
 _TYPE_IDENTITY_CARVEOUTS = (
     "substrate/type/grammar/",
+    "substrate/type/HasFileMetadata/",
     "substrate/type/HasLayerCompleted/",
+    "substrate/type/HasUnitCompleted/",
     "substrate/type_tier/",
 )
 
@@ -525,14 +538,19 @@ def main() -> int:
         errs.append(
             "ingest-source.sh: must translate LAPLACE_INGEST_FORCE into the CLI --force flag"
         )
-    ingest_workflow = read_text(ROOT / ".github" / "workflows" / "_ingest.yml")
-    if "LAPLACE_INGEST_FORCE: ${{ inputs.evict_before_ingest" not in ingest_workflow:
+    seed_workflow = read_text(ROOT / ".github" / "workflows" / "seed.yml")
+    if 'echo "LAPLACE_INGEST_FORCE=1" >> "$GITHUB_ENV"' not in seed_workflow:
         errs.append(
-            "_ingest.yml: evict_before_ingest must force the replacement observation"
+            "seed.yml: evict_before_ingest must force the replacement observation"
         )
+    if 'scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict "$src_name"' not in seed_workflow:
+        errs.append("seed.yml: source eviction must use the measured canonical CLI path")
+    eviction_sql = read_text(
+        ROOT / "extension" / "laplace_substrate" / "sql" / "functions" / "ops" / "evict_source.sql.in"
+    )
     for receipt in ("file checkpoint(s)", "replay claim(s)"):
-        if receipt not in ingest_workflow:
-            errs.append(f"_ingest.yml: eviction receipt missing {receipt}")
+        if receipt not in eviction_sql:
+            errs.append(f"evict_source.sql.in: eviction receipt missing {receipt}")
 
     if not pipeline_sh.is_file():
         errs.append("missing canonical orchestrator: scripts/pipeline.sh")

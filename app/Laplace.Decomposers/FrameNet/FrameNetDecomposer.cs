@@ -548,8 +548,6 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
             throw new FormatException($"Invalid FrameNet character offset '{value}'");
         }
         int? first = Offset(start), last = Offset(end);
-        if (first.HasValue != last.HasValue || (first is { } f && last is { } l && l < f))
-            throw new FormatException("FrameNet label must have a complete ordered span or no span");
         return new AnnotationLabel(name ?? "", first, last, instantiationType);
     }
 
@@ -565,11 +563,18 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         var boundaries = new List<int>(sentence.Length + 1) { 0 };
         foreach (Rune rune in sentence.EnumerateRunes())
             boundaries.Add(boundaries[^1] + rune.Utf16SequenceLength);
-        if (layers.SelectMany(layer => layer.Labels).Any(label => label.End is { } end && end >= boundaries.Count - 1))
-            throw new FormatException("FrameNet label span is outside the unchanged source sentence");
+        // FrameNet 1.7 retains superseded and parser-produced labels beside the
+        // corrected annotation. Some of those source labels are partial, reversed,
+        // or outside the sentence (for example a stale Target followed by the valid
+        // replacement in the same layer). Keep every declared label in the exact
+        // annotation trajectory, but only realize valid Target spans as text.
         TargetSpan[] spans = layers.Where(layer => layer.Name == "Target")
             .SelectMany(layer => layer.Labels)
-            .Where(label => label.Name == "Target" && label.Start.HasValue && label.End.HasValue)
+            .Where(label => label.Name == "Target"
+                && label.Start is { } first
+                && label.End is { } last
+                && first <= last
+                && last < boundaries.Count - 1)
             .Select(label => new TargetSpan(label.Start!.Value, label.End!.Value))
             .OrderBy(span => span.Start).ThenBy(span => span.End).ToArray();
         if (spans.Length == 0) return null;

@@ -77,6 +77,7 @@ public static class NpgsqlIngestOps
             ANALYZE laplace.attestations;
             ANALYZE laplace.consensus;
             ANALYZE laplace.entities;
+            ANALYZE laplace.entity_interpretations;
             ANALYZE laplace.physicalities (entity_id, type)
             """, timeoutSeconds: 0, ct: ct, label: "analyze_core_write_tables");
 
@@ -85,7 +86,8 @@ public static class NpgsqlIngestOps
         NpgsqlRead.ExecuteNonQueryAsync(conn, """
             ANALYZE laplace.attestations (subject_id, source_id, type_id, object_id);
             ANALYZE laplace.physicalities (entity_id, type);
-            ANALYZE laplace.entities (id, tier, type_id);
+            ANALYZE laplace.entities (id);
+            ANALYZE laplace.entity_interpretations (entity_id, tier, type_id, first_observed_by);
             ANALYZE laplace.consensus (subject_id, type_id, object_id, rating, rd)
             """, timeoutSeconds: 0, ct: ct, label: "analyze_post_ingest_validation");
 

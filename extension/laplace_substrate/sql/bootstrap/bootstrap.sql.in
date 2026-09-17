@@ -165,9 +165,8 @@ BEGIN
         1000000000, 30000000000
     );
 
-    -- Self-referential FKs dropped with the partitioned schema: a partitioned
-    -- entities has no unique(id) to reference (PK is (id, tier)), and per-row
-    -- FK validation on bulk COPY was pure cost. Referential integrity is
-    -- structural — ids are content hashes minted by the same law that mints
-    -- the referenced rows.
+    -- Per-row self-FKs stay out of the hot COPY path. Canonical entities now
+    -- have one id-only primary key, while tier/type/source observations live in
+    -- entity_interpretations. Referential closure is proved set-wise by the
+    -- admission/apply/proof owners rather than by one RBAR FK check per tuple.
 END $bootstrap$;

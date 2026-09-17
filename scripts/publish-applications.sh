@@ -46,9 +46,8 @@ main() {
       managed activate
       sudo -n systemctl restart laplace-api
 
-      # Publication owns application bytes and process activation. Seeded knowledge
-      # readiness is verified only after the distinct foundation phase; requiring it
-      # here creates a circular dependency on data that has not been admitted yet.
+      # Publication owns application bytes and process activation. Corpus volume
+      # and seeded product readiness belong to the distinct seed lifecycle.
       local live_body=""
       for _ in $(seq 1 60); do
         if live_body="$(curl -fsS http://127.0.0.1:5187/health 2>/dev/null)" && \
