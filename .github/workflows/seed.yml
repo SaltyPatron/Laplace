@@ -50,6 +50,14 @@ on:
         description: "after mode=model, synthesize the substrate GGUF"
         type: boolean
         default: true
+      run_gate:
+        description: "source mode: prove journal completion and source consensus/layer gates when registered"
+        type: boolean
+        default: true
+      run_idempotency:
+        description: "source mode: re-ingest and prove source evidence does not double-count"
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       mode:
@@ -92,6 +100,14 @@ on:
         type: boolean
         required: false
         default: true
+      run_gate:
+        type: boolean
+        required: false
+        default: true
+      run_idempotency:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -127,6 +143,8 @@ jobs:
           CHESS_DERIVED: ${{ inputs.chess_derived && '1' || '0' }}
           FORCE_INPUT: ${{ inputs.force && '1' || '0' }}
           SYNTHESIZE_MODEL: ${{ inputs.synthesize_model && '1' || '0' }}
+          RUN_GATE: ${{ inputs.run_gate && '1' || '0' }}
+          RUN_IDEMPOTENCY: ${{ inputs.run_idempotency && '1' || '0' }}
         run: |
           set -euo pipefail
           umask 0002
@@ -189,17 +207,73 @@ jobs:
             export LAPLACE_INGEST_FORCE=1
           fi
 
+          ingest_one() {
+            local key="$1"
+            local path="${2:-}"
+            if [[ -n "$path" ]]; then
+              scripts/ingest-source.sh "$key" "$path"
+            else
+              scripts/ingest-source.sh "$key"
+            fi
+          }
+
+          verify_source() {
+            local key="$1"
+            scripts/verify-ingest-journal.sh --cli-key "$key"
+            if [[ "$RUN_GATE" == 1 ]]; then
+              if python3 -c 'import json,sys; sources=json.load(open("scripts/decomposer-gates.json"))["sources"]; sys.exit(0 if sys.argv[1] in sources else 1)' "$key"; then
+                python3 scripts/decomposer-gate-check.py \
+                  --source "$key" --dbname "$PGDATABASE" \
+                  --host /var/run/postgresql --user laplace_admin
+              else
+                echo "::notice::$key has no decomposer consensus gate; journal proof is authoritative"
+              fi
+            fi
+          }
+
+          verify_idempotency() {
+            local key="$1"
+            local path="${2:-}"
+            local src_name
+            src_name=$(python3 -c 'import json,sys; entry=json.load(open("scripts/decomposer-gates.json"))["sources"].get(sys.argv[1]); print(entry["decomposer"] if entry else "")' "$key")
+            local before after
+            if [[ -n "$src_name" ]]; then
+              before=$(psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
+                "SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));" | xargs)
+            else
+              before=$(psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
+                "SELECT count(*) FROM laplace.attestations;" | xargs)
+            fi
+            ingest_one "$key" "$path"
+            if [[ -n "$src_name" ]]; then
+              after=$(psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
+                "SELECT ops.evidence_count(p_source => laplace.source_id('$src_name'));" | xargs)
+            else
+              after=$(psql -h /var/run/postgresql -U laplace_admin -d "$PGDATABASE" -v ON_ERROR_STOP=1 -tAc \
+                "SELECT count(*) FROM laplace.attestations;" | xargs)
+            fi
+            [[ "$before" == "$after" ]] || {
+              echo "::error::idempotency broken for $key: evidence $before -> $after" >&2
+              exit 1
+            }
+            echo "IDEMPOTENCY_OK source=$key evidence=$after"
+          }
+
           case "$MODE" in
             source)
               [[ -n "$SOURCE_KEY" ]] || { echo "::error::mode=source requires source"; exit 2; }
-              if [[ -n "$PATH_INPUT" ]]; then
-                scripts/ingest-source.sh "$SOURCE_KEY" "$PATH_INPUT"
-              else
-                scripts/ingest-source.sh "$SOURCE_KEY"
-              fi
+              ingest_one "$SOURCE_KEY" "$PATH_INPUT"
+              proof_sources=("$SOURCE_KEY")
               if [[ "$SOURCE_KEY" == chess && "$CHESS_DERIVED" == 1 ]]; then
-                scripts/ingest-source.sh chess-move-outcomes
-                scripts/ingest-source.sh chess-transitions
+                ingest_one chess-move-outcomes
+                ingest_one chess-transitions
+                proof_sources+=(chess-move-outcomes chess-transitions)
+              fi
+              for proof_source in "${proof_sources[@]}"; do
+                verify_source "$proof_source"
+              done
+              if [[ "$RUN_IDEMPOTENCY" == 1 ]]; then
+                verify_idempotency "$SOURCE_KEY" "$PATH_INPUT"
               fi
               ;;
             foundation-ladder)
@@ -215,7 +289,8 @@ jobs:
                 mkdir -p "$(dirname "$GGUF_OUT")"
                 LAPLACE_GGUF_OUT="$GGUF_OUT" scripts/model-synthesize-ci.sh "$model_dir"
               else
-                scripts/ingest-source.sh model "$model_dir"
+                ingest_one model "$model_dir"
+                verify_source model
               fi
               ;;
             *)

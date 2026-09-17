@@ -19,11 +19,19 @@ def run_block(step_name: str) -> str:
 
 
 class SharedHostQueue(unittest.TestCase):
-    def test_all_mutation_owners_preserve_pending_operations(self):
+    def test_product_lifecycle_validates_workflow_changes(self):
+        text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("branches: [main]", text)
+        self.assertNotIn('- ".github/**"', text)
+        self.assertIn('- "docs/**"', text)
+        self.assertIn('- "**/*.md"', text)
+
+    def test_all_host_owners_preserve_pending_operations(self):
         expected_groups = {
             "laplace.yml": 2,
             "db-ops.yml": 1,
             "seed.yml": 1,
+            "benchmark-evidence.yml": 1,
         }
         for name, count in expected_groups.items():
             with self.subTest(workflow=name):
@@ -31,6 +39,14 @@ class SharedHostQueue(unittest.TestCase):
                 self.assertEqual(text.count("group: laplace-host-lifecycle"), count)
                 self.assertEqual(text.count("queue: max"), count)
                 self.assertEqual(text.count("cancel-in-progress: false"), count)
+
+    def test_benchmark_checkout_preserves_retained_workspace_state(self):
+        text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
+        self.assertIn("git diff --quiet", text)
+        self.assertIn("git diff --cached --quiet", text)
+        self.assertIn("git checkout --no-overwrite-ignore --detach", text)
+        self.assertNotIn("git checkout --force", text)
+        self.assertIn("AUTHORIZATION: basic $checkout_auth", text)
 
 
 class SeedHostOwnership(unittest.TestCase):
@@ -82,11 +98,37 @@ class SeedHostOwnership(unittest.TestCase):
         for name in ("MODE", "SOURCE_KEY", "PATH_INPUT", "LANGS_INPUT", "EVICT_CONFIRM"):
             self.assertIn(f"{name}:", SEED)
 
-    def test_operator_wrappers_delegate_mutation_to_reusable_seed(self):
-        chess = (WORKFLOWS / "seed-chess.yml").read_text(encoding="utf-8")
-        foundation = (WORKFLOWS / "seed-foundation.yml").read_text(encoding="utf-8")
-        self.assertIn("uses: ./.github/workflows/seed.yml", chess)
-        self.assertIn("uses: ./.github/workflows/seed.yml", foundation)
+    def test_every_seed_wrapper_delegates_to_one_shared_mutation_owner(self):
+        direct = {
+            "seed-chess.yml",
+            "seed-code.yml",
+            "seed-documents.yml",
+            "seed-foundation.yml",
+            "seed-knowledge.yml",
+            "seed-models.yml",
+        }
+        chess_wrappers = {
+            "seed-chess-books.yml",
+            "seed-chess-eval.yml",
+            "seed-chess-games.yml",
+            "seed-chess-openings.yml",
+        }
+        actual = {p.name for p in WORKFLOWS.glob("seed-*.yml")}
+        self.assertEqual(direct | chess_wrappers, actual)
+
+        for name in direct:
+            with self.subTest(workflow=name):
+                text = (WORKFLOWS / name).read_text(encoding="utf-8")
+                self.assertIn("uses: ./.github/workflows/seed.yml", text)
+                self.assertNotIn("scripts/ingest-source.sh", text)
+                self.assertNotIn("scripts/measure-lane.sh", text)
+
+        for name in chess_wrappers:
+            with self.subTest(workflow=name):
+                text = (WORKFLOWS / name).read_text(encoding="utf-8")
+                self.assertIn("uses: ./.github/workflows/seed-chess.yml", text)
+                self.assertNotIn("scripts/ingest-source.sh", text)
+                self.assertNotIn("scripts/measure-lane.sh", text)
 
 
 if __name__ == "__main__":

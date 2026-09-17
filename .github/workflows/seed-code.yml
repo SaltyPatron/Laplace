@@ -1,0 +1,79 @@
+name: Seed — code
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "code source"
+        type: choice
+        required: true
+        options: [code, repo, stack, tiny-codes, tabular, recipe]
+      corpus:
+        description: "named corpus for path-backed sources"
+        type: choice
+        required: false
+        default: "-"
+        options: ["-", cpython, postgres, runtime, docs, treesitter, self, path-only]
+      path:
+        description: "explicit path; overrides corpus"
+        type: string
+        default: ""
+      database:
+        description: "target database"
+        type: choice
+        options: [laplace]
+        default: laplace
+      run_idempotency:
+        description: "re-ingest and prove no double-count"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
+    outputs:
+      path: ${{ steps.pick.outputs.path }}
+    steps:
+      - id: pick
+        env:
+          SOURCE_INPUT: ${{ inputs.source }}
+          CORPUS_INPUT: ${{ inputs.corpus }}
+          PATH_INPUT: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          if [[ -n "$PATH_INPUT" ]]; then
+            [[ -e "$PATH_INPUT" ]] || { echo "::error::$PATH_INPUT does not exist"; exit 1; }
+            echo "path=$PATH_INPUT" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$SOURCE_INPUT" in
+            stack|tiny-codes) echo "path=" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          case "$CORPUS_INPUT" in
+            cpython) p="$root/code-authority/cpython" ;;
+            postgres) p="$root/code-authority/postgres" ;;
+            runtime) p="$root/code-authority/runtime" ;;
+            docs) p="$root/code-authority/docs" ;;
+            treesitter) p="$root/TreeSitter" ;;
+            self) p="$GITHUB_WORKSPACE" ;;
+            path-only|-) echo "::error::pick a corpus or provide path"; exit 1 ;;
+            *) echo "::error::unknown corpus $CORPUS_INPUT"; exit 1 ;;
+          esac
+          [[ -e "$p" ]] || { echo "::error::$p does not exist"; exit 1; }
+          echo "path=$p" >> "$GITHUB_OUTPUT"
+
+  seed:
+    needs: resolve
+    uses: ./.github/workflows/seed.yml
+    with:
+      mode: source
+      source: ${{ inputs.source }}
+      path: ${{ needs.resolve.outputs.path }}
+      database: ${{ inputs.database }}
+      run_gate: false
+      run_idempotency: ${{ inputs.run_idempotency }}

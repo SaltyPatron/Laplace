@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -109,10 +110,21 @@ class CMakeProvisionTests(unittest.TestCase):
             self.select(self.archive(executable_failure=True))
         self.assertFalse((self.root / self.lock["version"]).exists())
 
+    def executable_fixture_source(self):
+        # The fixture package has its own authenticated release pin. The real
+        # provisioner is unchanged, but must read that pin in its source directory.
+        checkout = self.base / "fixture-source"
+        (checkout / "scripts").mkdir(parents=True, exist_ok=True)
+        (checkout / "deploy").mkdir(exist_ok=True)
+        script = checkout / "scripts/provision-cmake.py"
+        script.write_bytes((ROOT / "scripts/provision-cmake.py").read_bytes())
+        (checkout / "deploy/cmake-release.json").write_text(json.dumps(self.lock))
+        return checkout, script
+
     def test_exec_tool_runs_the_selected_companion_binary(self):
         selected = self.select(self.archive(command_fixture=True))
         arguments = ["--test-dir", "a path with spaces", "--", "-L", "regress"]
-        script = ROOT / "scripts/provision-cmake.py"
+        _, script = self.executable_fixture_source()
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
         for tool in owner.TOOLS:
             completed = subprocess.run(
@@ -123,6 +135,47 @@ class CMakeProvisionTests(unittest.TestCase):
             output = json.loads(completed.stdout)
             self.assertEqual(str(selected / tool), output["selected"])
             self.assertEqual(arguments, output["argv"])
+
+    def native_dispatch(self, suite, selector):
+        self.root = self.base / "install/tools/cmake"
+        selected = self.select(self.archive(command_fixture=True))
+        checkout, _ = self.executable_fixture_source()
+        source = (ROOT / "scripts/test-parallel.sh").read_text()
+        functions = []
+        for name in ("run_ctest", suite):
+            match = re.search(r"(?ms)^" + name + r"\(\) \{\n.*?^\}", source)
+            self.assertIsNotNone(match, name)
+            functions.append(match.group(0))
+        hostile = self.base / "host-tools"; hostile.mkdir()
+        marker = self.base / "wrong-ctest-used"
+        obsolete = hostile / "ctest"
+        obsolete.write_text("#!/bin/sh\nprintf wrong > \"$WRONG_CTEST_MARKER\"\nexit 99\n")
+        obsolete.chmod(0o755)
+        env = dict(os.environ, PATH=str(hostile) + os.pathsep + os.environ["PATH"],
+                   PYTHONDONTWRITEBYTECODE="1", WRONG_CTEST_MARKER=str(marker),
+                   LAPLACE_INSTALL_PREFIX=str(self.base / "install"),
+                   LAPLACE_WORK_ROOT=str(self.work), CTEST_PARALLEL_LEVEL="7")
+        # Isolate tool dispatch from installed-floor selection, while executing
+        # both actual native-suite functions and the actual companion-tool owner.
+        shell = ("set -euo pipefail\nROOT=$1\n" + "\n".join(functions)
+                 + "\nset_installed_perfcache() { :; }\n" + suite + "\n")
+        completed = subprocess.run(["bash", "-c", shell, "native-dispatch-control", str(checkout)],
+                                   cwd=self.base, env=env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(23, completed.returncode, completed.stderr)
+        output = json.loads(completed.stdout)
+        self.assertEqual("ctest", output["tool"])
+        self.assertEqual(str(selected / "ctest"), output["selected"])
+        self.assertEqual(str(self.base), output["cwd"])
+        self.assertEqual(["--test-dir", "build", "--output-on-failure", "-j", "7", selector, "regress"],
+                         output["argv"])
+        self.assertFalse(marker.exists(), "ambient old CTest was invoked")
+        self.assertIn("CMake execution: " + str(selected / "ctest"), completed.stderr)
+
+    def test_native_development_uses_verified_ctest_after_build_shell_exits(self):
+        self.native_dispatch("run_native_dev", "-LE")
+
+    def test_native_database_uses_verified_ctest_after_build_shell_exits(self):
+        self.native_dispatch("run_native_db", "-L")
 
 
 if __name__ == "__main__":

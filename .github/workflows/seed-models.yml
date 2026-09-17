@@ -1,0 +1,30 @@
+name: Seed — models
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_dir:
+        description: "HF snapshot directory; blank uses $LAPLACE_TINYLLAMA_DIR"
+        type: string
+        default: ""
+      database:
+        description: "target database"
+        type: choice
+        options: [laplace]
+        default: laplace
+      synthesize_model:
+        description: "ingest, synthesize GGUF, and run behavioral verification"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  model:
+    uses: ./.github/workflows/seed.yml
+    with:
+      mode: model
+      path: ${{ inputs.model_dir }}
+      database: ${{ inputs.database }}
+      synthesize_model: ${{ inputs.synthesize_model }}

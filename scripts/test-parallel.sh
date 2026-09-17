@@ -60,8 +60,17 @@ set_installed_perfcache() {
   [[ -z "$candidate" ]] || export LAPLACE_PERFCACHE_BIN="$candidate"
 }
 
+# CTest must come from the same pinned distribution that configured this tree.
+# Build and test stages run in separate shells, so pipeline's PATH is not inherited.
+run_ctest() {
+  python3 "$ROOT/scripts/provision-cmake.py" \
+    --root "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/tools/cmake" \
+    --work "${LAPLACE_WORK_ROOT:-/build/laplace/work}/cmake" \
+    --exec-tool ctest -- "$@"
+}
+
 run_native_dev() {
-  ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -LE regress
+  run_ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -LE regress
 }
 
 run_managed_dev() {
@@ -78,6 +87,7 @@ run_managed_dev() {
   python3 scripts/test-seed-workflow-ownership.py
   python3 scripts/test-managed-db-scheduling.py
   python3 scripts/test-codegen-configure.py
+  python3 scripts/test-cmake-release.py
   dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
     --filter 'Tier!=db&Tier!=live&Tier!=perf'
 }
@@ -113,7 +123,7 @@ run_db_health() {
 
 run_native_db() {
   set_installed_perfcache
-  ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -L regress
+  run_ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -L regress
 }
 
 run_managed_db() {

@@ -341,4 +341,63 @@ public sealed class EntityInterpretationDirectWriteTests(LocalPgFixture pg)
         Assert.Equal(0L, (long)(await absent.ExecuteScalarAsync())!);
     }
 
+    [Fact]
+    public async Task EntityInsertedByAnotherTriggerStillPublishesItsActualFacet()
+    {
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] type = Enumerable.Repeat((byte)0x49, 16).ToArray();
+        string suffix = Guid.NewGuid().ToString("N");
+        string table = "identity_parent_" + suffix, function = "identity_emit_" + suffix;
+        await using var connection = await pg.DataSource.OpenConnectionAsync();
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            await using (var setup = connection.CreateCommand())
+            {
+                setup.Transaction = transaction;
+                setup.CommandText = $"""
+                    CREATE TEMP TABLE "{table}"(id bytea NOT NULL,type_id bytea NOT NULL);
+                    CREATE FUNCTION pg_temp."{function}"() RETURNS trigger LANGUAGE plpgsql AS $fixture$
+                    BEGIN
+                        INSERT INTO laplace.entities(id,tier,type_id) VALUES(NEW.id,3,NEW.type_id);
+                        RETURN NEW;
+                    END;
+                    $fixture$;
+                    CREATE TRIGGER emit_identity AFTER INSERT ON "{table}"
+                    FOR EACH ROW EXECUTE FUNCTION pg_temp."{function}"();
+                    """;
+                await setup.ExecuteNonQueryAsync();
+            }
+            await using (var insert = connection.CreateCommand())
+            {
+                insert.Transaction = transaction;
+                insert.CommandText = $"INSERT INTO \"{table}\"(id,type_id) VALUES($1,$2)";
+                insert.Parameters.AddWithValue(id);
+                insert.Parameters.AddWithValue(type);
+                Assert.Equal(1, await insert.ExecuteNonQueryAsync());
+            }
+            await using (var inspect = connection.CreateCommand())
+            {
+                inspect.Transaction = transaction;
+                inspect.CommandText = """
+                    SELECT (SELECT count(*) FROM laplace.entities WHERE id=$1 AND tier=3 AND type_id=$2),
+                           (SELECT count(*) FROM laplace.entity_interpretations
+                            WHERE entity_id=$1 AND tier=3 AND type_id=$2)
+                    """;
+                inspect.Parameters.AddWithValue(id);
+                inspect.Parameters.AddWithValue(type);
+                await using var rows = await inspect.ExecuteReaderAsync();
+                Assert.True(await rows.ReadAsync());
+                Assert.Equal(1L, rows.GetInt64(0));
+                Assert.Equal(1L, rows.GetInt64(1));
+            }
+            await transaction.RollbackAsync();
+        }
+        await using var absent = pg.DataSource.CreateCommand("""
+            SELECT (SELECT count(*) FROM laplace.entities WHERE id=$1)
+                 + (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=$1)
+            """);
+        absent.Parameters.AddWithValue(id);
+        Assert.Equal(0L, (long)(await absent.ExecuteScalarAsync())!);
+    }
+
 }
