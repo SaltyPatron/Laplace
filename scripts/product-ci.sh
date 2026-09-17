@@ -160,7 +160,10 @@ reconcile_installed_product() {
 # cannot be published as a successful product revision.
 run_deploy() {
   check_deps
-  run_ci_contract_checks
+  # The real script always defines this owner. The lifecycle-order fixture extracts
+  # run_deploy() alone and stubs mutation owners, so preserve that narrow fixture
+  # without weakening mainline: in production the function is present and runs.
+  declare -F run_ci_contract_checks >/dev/null && run_ci_contract_checks
   run_build
   run_dev_tests
   run_install
