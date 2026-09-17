@@ -85,9 +85,10 @@ BEGIN
 END $$;
 
 -- Repeated canonical ids are interpretation observations, not new entities.
--- The ingest path deliberately still probes by the staged tier: a new tier for
--- an existing id reaches this trigger, is recorded, and the duplicate base row
--- is suppressed.  Compatibility summary fields are made order-invariant.
+-- This is a storage invariant fallback. The normal ingest spine is expected to
+-- publish interpretations set-wise; this trigger prevents direct SQL/legacy
+-- callers from manufacturing a second canonical entity while that migration is
+-- completed.
 CREATE OR REPLACE FUNCTION @extschema@.entity_identity_admit()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -104,17 +105,14 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    INSERT INTO @extschema@.entity_interpretations(
+    INSERT INTO @extschema@.entity_interpretations AS ei(
         entity_id, tier, type_id, first_observed_by)
     VALUES (NEW.id, NEW.tier, NEW.type_id, NEW.first_observed_by)
     ON CONFLICT (entity_id, tier, type_id) DO UPDATE
        SET first_observed_by = CASE
-             WHEN @extschema@.entity_interpretations.first_observed_by IS NULL
-               THEN EXCLUDED.first_observed_by
-             WHEN EXCLUDED.first_observed_by IS NULL
-               THEN @extschema@.entity_interpretations.first_observed_by
-             WHEN @extschema@.entity_interpretations.first_observed_by <= EXCLUDED.first_observed_by
-               THEN @extschema@.entity_interpretations.first_observed_by
+             WHEN ei.first_observed_by IS NULL THEN EXCLUDED.first_observed_by
+             WHEN EXCLUDED.first_observed_by IS NULL THEN ei.first_observed_by
+             WHEN ei.first_observed_by <= EXCLUDED.first_observed_by THEN ei.first_observed_by
              ELSE EXCLUDED.first_observed_by
            END;
 
