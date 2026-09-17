@@ -82,9 +82,14 @@ public static class IngestProcessRunner
         }
 
         // The process can exit between Process.Start and event registration. Close that
-        // race immediately; ReleaseOwnedProcess is idempotent.
-        if (process.HasExited)
-            ReleaseOwnedProcess(pid);
+        // race immediately; the event may also have removed/disposed the handle already.
+        try
+        {
+            if (process.HasExited)
+                ReleaseOwnedProcess(pid);
+        }
+        catch (InvalidOperationException) { }
+        catch (ObjectDisposedException) { }
 
         return new StartReceipt(pid, source, path, cliPath, args);
     }
