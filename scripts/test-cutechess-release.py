@@ -23,7 +23,7 @@ class CuteChessReleaseTests(unittest.TestCase):
         temporary_root.mkdir(parents=True, exist_ok=True)
         self.work = tempfile.TemporaryDirectory(prefix='cutechess-release-test-', dir=temporary_root)
         self.addCleanup(self.work.cleanup)
-        self.root = Path(self.work.name)
+        self.root = Path(self.work.name).resolve()
         self.lock = json.loads(cutechess.LOCK.read_text())
         self.remote = self.root / 'upstream'
         cutechess.run(['git', 'init', self.remote])
