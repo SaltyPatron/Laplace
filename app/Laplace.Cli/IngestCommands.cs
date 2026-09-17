@@ -736,7 +736,7 @@ internal static partial class IngestCommands
         await RegisterDynamicCanonicalsAsync(ds, dec);
         Console.WriteLine($"consensus: {accumulator.CellsFolded:N0} cells materialized during ingest "
                         + $"from {accumulator.ObservationsAccumulated:N0} observations "
-                        + "(queued folds drained before success)");
+                        + "(consensus completed with accepted working sets)");
 
         // Zero-novel re-ingest: ANALYZE + validation counts are multi-second (or hang) on a
         // populated box and are not part of the fold. Skip them so process exit matches the

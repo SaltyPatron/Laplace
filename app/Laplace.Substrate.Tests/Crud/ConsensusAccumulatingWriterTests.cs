@@ -163,7 +163,7 @@ public class ConsensusAccumulatingWriterTests
     }
 
     [Fact]
-    public async Task BulkRun_PipelinesFolds_AndDrainsAtComplete()
+    public async Task BulkRun_FoldsBeforeApplyReturns_AndCompletionHasNoConsensusDebt()
     {
         var src = H(900); var relType = H(901); var subj = H(910);
         var o1 = H(920); var o2 = H(921);
@@ -174,18 +174,18 @@ public class ConsensusAccumulatingWriterTests
         await accumulator.BeginBulkRunAsync();
         await accumulator.ApplyWorkingSetAsync(
             Change(src, "bulk-fold-a", Obs(H(930), subj, relType, o1, src, 900_000_000)));
+        Assert.Equal(1L, accumulator.CellsFolded);
+        Assert.NotNull(await ConsensusRowAsync(subj, relType, o1));
+
         await accumulator.ApplyWorkingSetAsync(
             Change(src, "bulk-fold-b", Obs(H(931), subj, relType, o2, src, 900_000_000)));
-        // Bulk-run folds are queued behind the apply lane; completing the run
-        // drains the pipeline, so both cells must be folded and visible here.
+        Assert.Equal(2L, accumulator.CellsFolded);
+        Assert.NotNull(await ConsensusRowAsync(subj, relType, o2));
+
         var completionPhases = new List<BulkRunCompletionPhase>();
         await accumulator.CompleteBulkRunAsync(completionPhases.Add);
-
-        Assert.Equal(2L, accumulator.CellsFolded);
-        Assert.Equal(
-            [BulkRunCompletionPhase.ConsensusDrain, BulkRunCompletionPhase.WriterMaintenance],
-            completionPhases);
-        Assert.True(accumulator.LastFoldDrainWallClock >= TimeSpan.Zero);
+        Assert.Equal([BulkRunCompletionPhase.WriterMaintenance], completionPhases);
+        Assert.Equal(TimeSpan.Zero, accumulator.LastFoldDrainWallClock);
         Assert.True(accumulator.LastWriterMaintenanceWallClock >= TimeSpan.Zero);
         Assert.True(accumulator.LastFoldSpanWallClock > TimeSpan.Zero);
         Assert.True(accumulator.ConsensusUpsertBackendWallClock > TimeSpan.Zero);
@@ -193,8 +193,26 @@ public class ConsensusAccumulatingWriterTests
         Assert.True(accumulator.ConsensusUpsertCalls >= 1);
         Assert.True(accumulator.HighwayMaskCalls >= 1);
         Assert.True(accumulator.HighwayMaskPairs >= 1);
-        Assert.NotNull(await ConsensusRowAsync(subj, relType, o1));
-        Assert.NotNull(await ConsensusRowAsync(subj, relType, o2));
+    }
+
+    [Fact]
+    public async Task ConsensusOnlyBulkRun_FoldsBeforeApplyReturns()
+    {
+        var src = H(940); var relType = H(941); var subj = H(942); var obj = H(943);
+        await EnsureScaffoldAsync(src, relType, subj, obj);
+
+        await using var accumulator = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource,
+            persistEvidence: false);
+        await accumulator.BeginBulkRunAsync();
+        await accumulator.ApplyWorkingSetAsync(
+            Change(src, "consensus-only-inline",
+                Obs(H(944), subj, relType, obj, src, 900_000_000)));
+
+        Assert.Equal(1L, accumulator.CellsFolded);
+        Assert.NotNull(await ConsensusRowAsync(subj, relType, obj));
+        await accumulator.CompleteBulkRunAsync();
+        Assert.Equal(TimeSpan.Zero, accumulator.LastFoldDrainWallClock);
     }
 
     [Fact]

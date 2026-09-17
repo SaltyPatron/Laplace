@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using global::Npgsql;
 using NpgsqlTypes;
@@ -91,17 +90,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private readonly Task[] _maskLanes =
         Enumerable.Repeat(Task.CompletedTask, MaskShards).ToArray();
 
-    // Fold pipeline (bulk runs only): the fold of batch N runs in the background
-    // so the apply lane starts probing/COPYing batch N+1 immediately — the fold
-    // leaves the critical path (it was the serial tail of every batch: 188s on an
-    // 11.9M-cell document delta). Ordering is now owned by the per-type lanes
-    // above, not by one global chain, so deltas whose types are disjoint overlap;
-    // this semaphore is purely RAM backpressure on how many deltas may be alive.
-    // Drained at FinalizeSource/CompleteBulkRun/Dispose so ingest completion is
-    // still fold completion. A fold failure poisons its lane and surfaces at the
-    // next apply call or at the drain — never silently. OUTSIDE a bulk run the
-    // fold is awaited inline: online lanes (feedback → immediate fold → next
-    // walk) require read-your-writes consensus.
+    // Consensus is part of each accepted working set. No source/run-level queue is
+    // allowed to turn a slower fold into terminal debt: an apply does not return until
+    // its accepted delta and highway-mask deposits are complete. Per-type lanes still
+    // parallelize one delta safely; they are execution lanes, not deferred ownership.
     // One sizing authority for the whole fold. The retired implementation fixed
     // chunk=65,536, pipeline depth=6, mask cap=8,388,608 and segment floor=2,048
     // independently, so none of them tracked RAM, row width, or connection fanout.
@@ -113,9 +105,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     // exist inside that transaction, multiplying serial calls for no memory gain.
     private static readonly int AtomicFoldChunkCells =
         IngestSizing.ResolveConsensusFold(1).ChunkCells;
-    private readonly SemaphoreSlim _foldDepth =
-        new(FoldSizing.PipelineDepth, FoldSizing.PipelineDepth);
-    private readonly object _foldChainLock = new();
     private readonly SemaphoreSlim _atomicWorkingSetGate = new(1, 1);
     private volatile bool _bulkRun;
 
@@ -348,10 +337,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             var delta = atomicWorkingSet ? null : BuildDelta(changes);
             bool hasEphemeralFolds = changes.Any(c => !c.EphemeralFoldInputs.IsDefaultOrEmpty);
 
-            // A fold that already failed in the background poisons the run
-            // NOW, before any more evidence lands.
-            await ObserveFoldFailureAsync();
-
             // Evidence lands FIRST; the fold runs only after it succeeds, so a
             // retried batch folds exactly once (a throw below leaves consensus
             // untouched for this batch).
@@ -437,8 +422,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 // Evidence has committed and its replay journal will suppress this delta
                 // forever. From here the fold is an owed continuation, not cancellable
                 // speculative work; completion/drain owns surfacing any failure.
-                if (_bulkRun) await EnqueueFoldAsync(delta, CancellationToken.None);
-                else await UpsertDeltaAsync(delta, CancellationToken.None);
+                await UpsertDeltaAsync(delta, CancellationToken.None);
             }
 
             return result;
@@ -1397,97 +1381,18 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     /// </summary>
     private Task UpsertDeltaAsync(
         Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta, CancellationToken ct)
-        => DispatchDeltaAsync(delta, ct);
-
-    /// <summary>
-    /// Bulk fold: dispatch onto the per-type lanes and return as soon as the
-    /// delta is QUEUED, so the apply lane starts probing/COPYing the next working
-    /// set immediately — the fold leaves the critical path. Bounded to
-    /// The machine-sized fold plan's outstanding deltas act as backpressure on RAM.
-    /// </summary>
-    private async Task EnqueueFoldAsync(
-        Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta, CancellationToken ct)
     {
-        await _foldDepth.WaitAsync(ct);
-        Task dispatched;
-        try
-        {
+        if (_bulkRun)
             Interlocked.CompareExchange(
                 ref _foldSpanStarted,
                 System.Diagnostics.Stopwatch.GetTimestamp(),
                 comparand: 0);
-            dispatched = DispatchDeltaAsync(delta, ct);
-        }
-        catch
-        {
-            _foldDepth.Release();
-            throw;
-        }
-
-        var tracked = Release(dispatched);
-        lock (_foldChainLock) _outstanding.Add(tracked);
-
-        async Task Release(Task fold)
-        {
-            try { await fold.ConfigureAwait(false); }
-            finally { _foldDepth.Release(); }
-        }
+        return DispatchDeltaAsync(delta, ct);
     }
 
-    /// <summary>
-    /// Every fold dispatched and not yet observed — the type lanes plus the mask
-    /// lane, per delta. Completed entries are swept on each snapshot; faulted ones
-    /// are retained until a drain or the next apply observes them, so a background
-    /// fold failure can never vanish silently.
-    /// </summary>
-    private readonly List<Task> _outstanding = new();
-
-    private Task[] SnapshotFolds()
-    {
-        lock (_foldChainLock)
-        {
-            _outstanding.RemoveAll(t => t.IsCompletedSuccessfully);
-            var lanes = new List<Task>(_outstanding);
-            lock (_laneLock)
-            {
-                foreach (var lane in _typeLanes.Values) lanes.Add(lane);
-                lanes.AddRange(_maskLanes);
-            }
-            return lanes.ToArray();
-        }
-    }
-
-    private async Task ObserveFoldFailureAsync()
-    {
-        foreach (var t in SnapshotFolds())
-            if (t.IsFaulted || t.IsCanceled) await t;
-    }
-
-    /// <summary>Awaits every queued fold. Ingest completion IS fold
-    /// completion: finalize/complete/dispose all pass through here.</summary>
-    public async Task DrainFoldsAsync()
-    {
-        // Re-snapshot until quiet: awaiting a lane can let a queued delta dispatch
-        // further segments onto lanes that were not in the first snapshot.
-        while (true)
-        {
-            var pending = SnapshotFolds().Where(t => !t.IsCompleted).ToArray();
-            if (pending.Length == 0)
-            {
-                foreach (var t in SnapshotFolds())
-                    if (t.IsFaulted || t.IsCanceled) await t;
-                return;
-            }
-            await Task.WhenAll(pending).ConfigureAwait(false);
-        }
-    }
-
-    public async Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
+    public Task<(int Entities, int Physicalities, int Attestations)> FinalizeSourceAsync(
         Hash128 sourceId, CancellationToken ct = default)
-    {
-        await DrainFoldsAsync();
-        return await _inner.FinalizeSourceAsync(sourceId, ct);
-    }
+    => _inner.FinalizeSourceAsync(sourceId, ct);
 
     public Task BeginBulkRunAsync(CancellationToken ct = default)
     {
@@ -1506,61 +1411,30 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     }
 
     public Task CompleteBulkRunAsync(CancellationToken ct = default)
-        => CompleteBulkRunAsync(null, ct);
+    => CompleteBulkRunAsync(null, ct);
 
     public async Task CompleteBulkRunAsync(
         Action<BulkRunCompletionPhase>? onPhase,
         CancellationToken ct = default)
     {
-        // Folds drain before the inner writer releases its run-scoped state.
-        Exception? foldFailure = null;
-        var phaseSw = System.Diagnostics.Stopwatch.StartNew();
-        onPhase?.Invoke(BulkRunCompletionPhase.ConsensusDrain);
-        try
-        {
-            await DrainFoldsAsync();
-        }
-        catch (Exception ex)
-        {
-            foldFailure = ex;
-        }
-        LastFoldDrainWallClock = phaseSw.Elapsed;
+        // Each accepted apply already completed its consensus work. Source completion
+        // has no consensus drain phase and cannot hide fold backlog.
+        LastFoldDrainWallClock = TimeSpan.Zero;
         LastFoldSpanWallClock = _foldSpanStarted == 0
             ? TimeSpan.Zero
             : System.Diagnostics.Stopwatch.GetElapsedTime(_foldSpanStarted);
-        bool wasBulk = _bulkRun;
         _bulkRun = false;
-        Exception? completionFailure = null;
-        phaseSw.Restart();
+
+        var phaseSw = System.Diagnostics.Stopwatch.StartNew();
         onPhase?.Invoke(BulkRunCompletionPhase.WriterMaintenance);
         try
         {
             await _inner.CompleteBulkRunAsync(ct);
         }
-        catch (Exception ex)
+        finally
         {
-            completionFailure = ex;
+            LastWriterMaintenanceWallClock = phaseSw.Elapsed;
         }
-        LastWriterMaintenanceWallClock = phaseSw.Elapsed;
-
-        // NO terminal mask pass (2026-07-21). Masks are deposited inline by every
-        // fold, in every lane — see UpsertDeltaAsync. There is nothing left to
-        // defer: by the time the last fold drains above, every pair this run
-        // touched has already had its bits OR'd in, spread across the run instead
-        // of landing as one serial recompute after the loader finishes.
-        //
-        // highway_mask_dirty / highway_mask_drain() survive as the REPAIR verbs
-        // (per-source evict has to CLEAR bits, which an OR-accumulate deposit
-        // cannot do), alongside highway_mask_rebuild for highway bit renumbering.
-        // Nothing on the ingest hot path populates or drains the queue.
-        _ = wasBulk;
-
-        if (foldFailure is not null && completionFailure is not null)
-            throw new AggregateException(foldFailure, completionFailure);
-        if (completionFailure is not null)
-            ExceptionDispatchInfo.Capture(completionFailure).Throw();
-        if (foldFailure is not null)
-            ExceptionDispatchInfo.Capture(foldFailure).Throw();
     }
 
     public async ValueTask DisposeAsync()
@@ -1578,15 +1452,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 waitSw.Restart();
             }
         }
-        try
-        {
-            await DrainFoldsAsync();
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "dispose: queued consensus fold failed");
-        }
-        _foldDepth.Dispose();
         _foldConnections.Dispose();
     }
 }
