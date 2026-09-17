@@ -1,47 +1,46 @@
-name: Read exact managed publication failure and recovery state
+name: Reproduce retained UCI seal and observe physical build
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
 permissions:
   contents: read
 jobs:
-  retained-managed-failure:
+  retained-uci:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 5
     steps:
-      - name: Read failed phase and current service transaction state
+      - name: Reproduce exact UCI sealing failure without publishing
         run: |
           python3 - <<'PY'
-          import hashlib,json,os,pathlib,re,subprocess
-          root=pathlib.Path("/build/laplace/recovery/chess-followthrough/35166221051-1")
-          receipt=root/"managed-before-gui/receipt.json"
-          raw=receipt.read_bytes();value=json.loads(raw)
-          print("MANAGED_FAILED_RECEIPT "+json.dumps(value,sort_keys=True),flush=True)
-          for phase in value.get("phases",[]):
-              if phase.get("status")!="failed":continue
-              name=phase["name"];assert re.fullmatch("[a-zA-Z0-9_-]+",name)
-              path=receipt.parent/(name+".log")
-              if not path.is_file():continue
-              data=path.read_bytes()
-              print("FAILED_PHASE_LOG "+json.dumps({"path":str(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()}),flush=True)
-              if len(data)>139264:print(data[:8192].decode("utf-8","replace")+"\n[bounded middle omitted]\n"+data[-131072:].decode("utf-8","replace"),flush=True)
-              else:print(data.decode("utf-8","replace"),flush=True)
-          source=pathlib.Path(value["source"].get("checkout","/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace"))
-          for path in [pathlib.Path("/var/lib/laplace-managed/transaction.json"),*[source/"build"/name for name in (".managed-publish-backup",".managed-publish-committed",".managed-publish-rolled-back",".application-publish-owner",".application-restore-pending",".api-publish-backup")]]:
-              row={"path":str(path),"exists":path.exists(),"symlink":path.is_symlink()}
-              if path.is_file():
-                  try:
-                      data=path.read_bytes();row.update(bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
-                      if len(data)<=65536:
-                          try:
-                              state=json.loads(data);row["jsonKeys"]=sorted(state) if isinstance(state,dict) else []
-                              row["state"]={k:state[k] for k in ("status","phase","stage","state","pid","source","release","previous_release","started","startedUtc") if isinstance(state,dict) and k in state}
-                          except ValueError:
-                              text=data.decode("utf-8","replace").strip()
-                              if "\n" not in text and text.startswith(("/opt/laplace/","/build/laplace/")):row["retainedPath"]=text
-                  except OSError as error:row["readError"]=type(error).__name__
-              print("PUBLICATION_RECOVERY_STATE "+json.dumps(row,sort_keys=True),flush=True)
-          for unit in ("laplace-api.service","laplace-mcp.service","laplace-lichess.service","laplace-postgresql.service"):
-              command=subprocess.run(["systemctl","show",unit,"--property=Id,ActiveState,SubState,MainPID,UnitFileState"],capture_output=True,text=True,timeout=10)
-              print("CURRENT_SERVICE "+json.dumps({"unit":unit,"exitCode":command.returncode,"properties":dict(line.split("=",1) for line in command.stdout.splitlines() if "=" in line)}),flush=True)
+          import hashlib,importlib.util,json,os,pathlib,subprocess,sys
+          root=pathlib.Path("/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace")
+          proof=pathlib.Path("/build/laplace/recovery/chess-followthrough/35166221051-1/managed-before-gui")
+          build=pathlib.Path("/build/laplace/build/laplace-d32928234be8f570")
+          def fact(p):
+              raw=p.read_bytes();s=p.stat()
+              return {"path":str(p),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),"device":s.st_dev,"inode":s.st_ino}
+          print("CURRENT_CHECKOUT "+json.dumps({"commit":subprocess.check_output(["git","-C",root,"rev-parse","HEAD"],text=True).strip(),"buildLink":str((root/"build").resolve()),"buildIsSymlink":(root/"build").is_symlink()}),flush=True)
+          for rel in ("CMakeCache.txt","cmake_install.cmake","build.ninja","engine/core/liblaplace_core.so","engine/dynamics/liblaplace_dynamics.so","engine/synthesis/liblaplace_synthesis.so"):
+              p=build/rel
+              try:print("RETAINED_PHYSICAL_BUILD "+json.dumps(fact(p)),flush=True)
+              except OSError as error:print("RETAINED_PHYSICAL_BUILD "+json.dumps({"path":str(p),"error":type(error).__name__}),flush=True)
+          source=root/"scripts/verify-api-payload.py"
+          raw=source.read_bytes()
+          actual=hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()
+          assert actual=="fa50997cce0157c8cc42217c5630b6770223707a",actual
+          spec=importlib.util.spec_from_file_location("retained_uci_verifier",source)
+          owner=importlib.util.module_from_spec(spec);sys.modules[spec.name]=owner;spec.loader.exec_module(owner)
+          expected=proof/"reference/uci"
+          print("RETAINED_UCI_FILES "+json.dumps({"required":list(owner.UCI_REQUIRED),"present":sorted(p.name for p in expected.iterdir() if p.is_file()),"publicTarget":str(pathlib.Path("/opt/laplace/app/laplace-uci").resolve(strict=True))}),flush=True)
+          try:
+              manifest=owner.seal_uci(expected,build/"engine",root)
+              print("RETAINED_UCI_SEAL "+json.dumps({"status":"passed","manifest":manifest}),flush=True)
+          except ValueError as error:
+              print("RETAINED_UCI_SEAL "+json.dumps({"status":"failed","type":type(error).__name__,"message":str(error)}),flush=True)
+          desktop=pathlib.Path("/opt/laplace/share/laplace/cutechess-desktop.json")
+          if desktop.is_file():
+              value=json.loads(desktop.read_text())
+              print("DESKTOP_STOCKFISH "+json.dumps({"manifest":fact(desktop),"stockfish":value.get("stockfish")}),flush=True)
+          for p in pathlib.Path("/opt/laplace/share/laplace").glob("*stockfish*.json"):
+              print("STOCKFISH_RECEIPT "+json.dumps(fact(p)),flush=True)
           PY
