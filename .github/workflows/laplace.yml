@@ -48,7 +48,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     concurrency:
-      group: laplace-mainline-ci
+      group: laplace-mainline-ci-${{ github.ref_name }}
       cancel-in-progress: false
     env:
       LICHESS_API: ${{ secrets.LICHESS_API }}
