@@ -1,16 +1,10 @@
--- Provenance of an interpretation belongs to entity_interpretations. The
--- canonical entity row carries only a deterministic compatibility summary, so
--- source/tier diagnostics and gates must not index or predicate on that summary.
-DO $do$
-BEGIN
-    BEGIN
-        EXECUTE format('ALTER EXTENSION %I DROP INDEX laplace.entities_first_observed_btree',
-                       'laplace_substrate');
-    EXCEPTION WHEN OTHERS THEN
-        NULL;
-    END;
-    EXECUTE 'DROP INDEX IF EXISTS laplace.entities_first_observed_btree';
-END $do$;
+-- first_observed_by on entities is a deterministic compatibility summary; exact
+-- interpretation provenance lives in entity_interpretations. Keep the legacy
+-- summary index until all readers migrate, while providing the authoritative
+-- source/tier route in parallel.
+CREATE INDEX IF NOT EXISTS entities_first_observed_btree
+    ON entities USING btree (first_observed_by)
+    WHERE first_observed_by IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS entity_interpretations_source_tier_btree
     ON entity_interpretations USING btree (first_observed_by, tier, entity_id, type_id)

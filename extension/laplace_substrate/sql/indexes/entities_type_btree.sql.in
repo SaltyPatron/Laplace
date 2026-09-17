@@ -1,16 +1,9 @@
--- Entity type/tier are plural structural interpretations, not columns that
--- define canonical identity. Retire the compatibility-summary index and index
--- the authoritative interpretation relation instead.
-DO $do$
-BEGIN
-    BEGIN
-        EXECUTE format('ALTER EXTENSION %I DROP INDEX laplace.entities_type_btree',
-                       'laplace_substrate');
-    EXCEPTION WHEN OTHERS THEN
-        NULL;
-    END;
-    EXECUTE 'DROP INDEX IF EXISTS laplace.entities_type_btree';
-END $do$;
+-- Authoritative structural typing lives in entity_interpretations. Keep the
+-- compatibility-summary index while legacy readers are migrated, and add the
+-- authoritative type/tier path beside it; deleting the former before every
+-- reader moves would turn a semantic repair into a read-path regression.
+CREATE INDEX IF NOT EXISTS entities_type_btree
+    ON entities USING btree (type_id);
 
 CREATE INDEX IF NOT EXISTS entity_interpretations_type_tier_btree
     ON entity_interpretations USING btree (type_id, tier, entity_id);
