@@ -6,6 +6,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 SEED = (WORKFLOWS / "seed.yml").read_text(encoding="utf-8")
+SEED_STEP = "Select source and run substrate mutation under one host reservation"
 
 
 def run_block(step_name: str) -> str:
@@ -38,8 +39,21 @@ class SeedHostOwnership(unittest.TestCase):
         self.assertIn("queue: max", SEED)
         self.assertIn("cancel-in-progress: false", SEED)
 
+    def test_checkout_environment_and_mutation_share_one_host_reservation(self):
+        block = run_block(SEED_STEP)
+        lock = block.index("flock 9")
+        fetch = block.index("git fetch --no-tags --depth=2 origin")
+        checkout = block.index("git checkout --no-overwrite-ignore --detach")
+        environment = block.index("source scripts/ci-environment.sh")
+        mutation = block.index('case "$MODE" in')
+        self.assertLess(lock, fetch)
+        self.assertLess(fetch, checkout)
+        self.assertLess(checkout, environment)
+        self.assertLess(environment, mutation)
+        self.assertNotIn("uses: ./.github/actions/setup-laplace-env", SEED)
+
     def test_mutation_holds_host_lock_before_reproving_source_and_build(self):
-        block = run_block("Run substrate mutation under host reservation")
+        block = run_block(SEED_STEP)
         lock_open = block.index('exec 9>"$workspace_lock_root/host-resource.lock"')
         lock_take = block.index("flock 9")
         source_proof = block.index('current_sha="$(git rev-parse HEAD)"')
@@ -51,9 +65,10 @@ class SeedHostOwnership(unittest.TestCase):
         self.assertLess(build_proof, mutation)
         self.assertIn('[[ "$current_sha" == "$TARGET_SHA" ]]', block)
         self.assertIn('[[ "$built_sha" == "$TARGET_SHA" ]]', block)
+        self.assertIn("LAPLACE_SETUP_REQUIRE_BUILT_REVISION=true", block)
 
     def test_evict_and_ingest_share_one_locked_step(self):
-        block = run_block("Run substrate mutation under host reservation")
+        block = run_block(SEED_STEP)
         eviction = block.index('scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict')
         ingest = block.index('scripts/ingest-source.sh "$SOURCE_KEY"')
         self.assertLess(block.index("flock 9"), eviction)
@@ -62,7 +77,7 @@ class SeedHostOwnership(unittest.TestCase):
         self.assertNotIn("- name: Evict selected source", SEED)
 
     def test_mutation_shell_does_not_interpolate_dispatch_inputs_directly(self):
-        block = run_block("Run substrate mutation under host reservation")
+        block = run_block(SEED_STEP)
         self.assertNotIn("${{", block)
         for name in ("MODE", "SOURCE_KEY", "PATH_INPUT", "LANGS_INPUT", "EVICT_CONFIRM"):
             self.assertIn(f"{name}:", SEED)
