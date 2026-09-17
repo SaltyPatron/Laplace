@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 120
     concurrency:
       group: laplace-code-player-validation
-      cancel-in-progress: false
+      cancel-in-progress: true
     steps:
       - name: Build exact triggering revision and run code-player tests
         env:
@@ -70,8 +70,8 @@ jobs:
 
           source scripts/ci-environment.sh
           bash scripts/product-ci.sh build
-          set_dev_perfcache=$(find -L build -type f -name 'laplace_t0_perfcache*.bin' -print 2>/dev/null | sort | tail -1 || true)
-          [[ -z "$set_dev_perfcache" ]] || export LAPLACE_PERFCACHE_BIN="$set_dev_perfcache"
+          dev_perfcache=$(find -L build -type f -name 'laplace_t0_perfcache*.bin' -print 2>/dev/null | sort | tail -1 || true)
+          [[ -z "$dev_perfcache" ]] || export LAPLACE_PERFCACHE_BIN="$dev_perfcache"
           bash scripts/sync-managed-native-artifacts.sh
           dotnet test app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj \
             -c Release --no-build --nologo --verbosity minimal \

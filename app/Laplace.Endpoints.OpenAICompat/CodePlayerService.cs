@@ -85,6 +85,13 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
             if (utf8.Length > MaxCandidateBytes)
                 return new Result(modality, candidate, null, false, "candidate_too_large", receipts);
 
+            // The candidate is checked by the same native Tree-sitter recipe before
+            // toolchain adjudication. The ordinary grammar admission below parses it
+            // again for retained composition; parser identity is the same governed
+            // recipe and diagnostics are witnessed alongside compiler output.
+            using var syntaxAst = GrammarDecomposer.Parse(utf8, modality);
+            GrammarAstDiagnostics syntax = GrammarSourceFileSupport.RequireNativeSourceAst(syntaxAst);
+
             var record = new GrammarComposeRecord(Utf8: utf8, Modality: modality, RequireSourceAst: true);
             var handler = new GrammarComposeHandler(CodePlayerSource, CodePlayerTrust, reader: null);
             using var unit = handler.CreateDeferredUnit(record);
@@ -110,7 +117,7 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
                 .ToArray();
             await writer.ApplyAsync(candidateChange, ct).ConfigureAwait(false);
 
-            var tool = await CodeToolchain.VerifyAsync(candidate, modality, ct).ConfigureAwait(false);
+            var tool = await CodeToolchain.VerifyAsync(candidate, modality, syntax, ct).ConfigureAwait(false);
             using var witnessBuilder = new SubstrateChangeBuilder(
                 ToolchainSource, $"toolchain-witness/{modality}/{attempt}/{Guid.NewGuid():N}")
                 .DeclareSourcePrior(ToolchainSource, ToolchainTrust);

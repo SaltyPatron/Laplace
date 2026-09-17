@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Laplace.Engine.Core;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -15,21 +16,29 @@ internal static partial class CodeToolchain
         string Modality,
         string Tool,
         bool ToolAvailable,
+        bool SyntaxComplete,
         bool Verified,
         bool TimedOut,
         int ExitCode,
+        ulong AstNodeCount,
+        ulong ErrorNodeCount,
+        ulong MissingNodeCount,
         string Stdout,
         string Stderr)
     {
         public string CanonicalJson => JsonSerializer.Serialize(new
         {
-            schema = "laplace.code-toolchain/v1",
+            schema = "laplace.code-toolchain/v2",
             modality = Modality,
             tool = Tool,
             tool_available = ToolAvailable,
+            syntax_complete = SyntaxComplete,
             verified = Verified,
             timed_out = TimedOut,
             exit_code = ExitCode,
+            ast_node_count = AstNodeCount,
+            tree_sitter_error_nodes = ErrorNodeCount,
+            tree_sitter_missing_nodes = MissingNodeCount,
             stdout = Stdout,
             stderr = Stderr,
         });
@@ -43,7 +52,11 @@ internal static partial class CodeToolchain
         string? BootstrapContents = null,
         IReadOnlyList<string>? BootstrapArguments = null);
 
-    public static async Task<Receipt> VerifyAsync(string source, string modality, CancellationToken ct)
+    public static async Task<Receipt> VerifyAsync(
+        string source,
+        string modality,
+        GrammarAstDiagnostics syntax,
+        CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(modality);
@@ -53,45 +66,76 @@ internal static partial class CodeToolchain
             try
             {
                 using var _ = JsonDocument.Parse(source);
-                return new Receipt(modality, "System.Text.Json", true, true, false, 0, "", "");
+                return CompleteReceipt(modality, "System.Text.Json", true, syntax,
+                    timedOut: false, exitCode: 0, stdout: "", stderr: "");
             }
             catch (JsonException ex)
             {
-                return new Receipt(modality, "System.Text.Json", true, false, false, 1, "", Trim(ex.Message));
+                return CompleteReceipt(modality, "System.Text.Json", true, syntax,
+                    timedOut: false, exitCode: 1, stdout: "", stderr: Trim(ex.Message));
             }
         }
 
         var invocation = ResolveInvocation(source, modality);
         if (invocation is null)
-            return new Receipt(modality, "", false, false, false, 127, "",
-                $"No compile/syntax verifier is governed for modality '{modality}'.");
+            return CompleteReceipt(modality, "", false, syntax,
+                timedOut: false, exitCode: 127, stdout: "",
+                stderr: $"No compile/syntax verifier is governed for modality '{modality}'.");
 
         var work = Path.Combine(Path.GetTempPath(), "laplace-code", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
         try
         {
             await File.WriteAllTextAsync(Path.Combine(work, invocation.FileName), source, Encoding.UTF8, ct);
-            if (invocation.BootstrapFileName is { } bootstrapName && invocation.BootstrapContents is { } bootstrapContents)
+            if (invocation.BootstrapFileName is { } bootstrapName
+                && invocation.BootstrapContents is { } bootstrapContents)
             {
-                await File.WriteAllTextAsync(Path.Combine(work, bootstrapName), bootstrapContents, Encoding.UTF8, ct);
+                await File.WriteAllTextAsync(
+                    Path.Combine(work, bootstrapName), bootstrapContents, Encoding.UTF8, ct);
                 if (invocation.BootstrapArguments is { Count: > 0 } bootstrapArgs)
                 {
                     var prepared = await RunAsync(invocation.Tool, bootstrapArgs, work, ct);
                     if (!prepared.ToolAvailable || prepared.TimedOut || prepared.ExitCode != 0)
-                        return new Receipt(modality, invocation.Tool, prepared.ToolAvailable, false,
-                            prepared.TimedOut, prepared.ExitCode, prepared.Stdout, prepared.Stderr);
+                        return CompleteReceipt(modality, invocation.Tool, prepared.ToolAvailable,
+                            syntax, prepared.TimedOut, prepared.ExitCode,
+                            prepared.Stdout, prepared.Stderr);
                 }
             }
 
             var result = await RunAsync(invocation.Tool, invocation.Arguments, work, ct);
-            return new Receipt(modality, invocation.Tool, result.ToolAvailable,
-                result.ToolAvailable && !result.TimedOut && result.ExitCode == 0,
-                result.TimedOut, result.ExitCode, result.Stdout, result.Stderr);
+            return CompleteReceipt(modality, invocation.Tool, result.ToolAvailable,
+                syntax, result.TimedOut, result.ExitCode, result.Stdout, result.Stderr);
         }
         finally
         {
             try { Directory.Delete(work, recursive: true); } catch { }
         }
+    }
+
+    private static Receipt CompleteReceipt(
+        string modality,
+        string tool,
+        bool toolAvailable,
+        GrammarAstDiagnostics syntax,
+        bool timedOut,
+        int exitCode,
+        string stdout,
+        string stderr)
+    {
+        bool verified = toolAvailable && syntax.SyntaxComplete && !timedOut && exitCode == 0;
+        if (!syntax.SyntaxComplete)
+        {
+            string treeDiagnostic =
+                $"Tree-sitter rejected complete syntax: root_has_error={syntax.RootHasError}, " +
+                $"error_nodes={syntax.ErrorNodeCount}, missing_nodes={syntax.MissingNodeCount}.";
+            stderr = string.IsNullOrWhiteSpace(stderr)
+                ? treeDiagnostic
+                : treeDiagnostic + "\n" + stderr;
+        }
+        return new Receipt(
+            modality, tool, toolAvailable, syntax.SyntaxComplete, verified, timedOut, exitCode,
+            syntax.AstNodeCount, syntax.ErrorNodeCount, syntax.MissingNodeCount,
+            Trim(stdout), Trim(stderr));
     }
 
     private static Invocation? ResolveInvocation(string source, string modality) => modality switch
@@ -136,7 +180,8 @@ internal static partial class CodeToolchain
 
     private sealed record ProcessReceipt(bool ToolAvailable, bool TimedOut, int ExitCode, string Stdout, string Stderr);
 
-    private static async Task<ProcessReceipt> RunAsync(string tool, IReadOnlyList<string> arguments, string workingDirectory, CancellationToken ct)
+    private static async Task<ProcessReceipt> RunAsync(
+        string tool, IReadOnlyList<string> arguments, string workingDirectory, CancellationToken ct)
     {
         var start = new ProcessStartInfo(tool)
         {
@@ -171,11 +216,13 @@ internal static partial class CodeToolchain
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
                 await Task.WhenAll(stdoutTask, stderrTask);
-                return new ProcessReceipt(true, true, 124, Trim(await stdoutTask), Trim(await stderrTask));
+                return new ProcessReceipt(true, true, 124,
+                    Trim(await stdoutTask), Trim(await stderrTask));
             }
 
             await Task.WhenAll(stdoutTask, stderrTask);
-            return new ProcessReceipt(true, false, process.ExitCode, Trim(await stdoutTask), Trim(await stderrTask));
+            return new ProcessReceipt(true, false, process.ExitCode,
+                Trim(await stdoutTask), Trim(await stderrTask));
         }
     }
 
