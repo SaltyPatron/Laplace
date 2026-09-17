@@ -191,6 +191,7 @@ typedef struct LaplacePromptStructuralKey
 {
     hash128_t source;
     hash128_t target;
+    uint32 relation;
 } LaplacePromptStructuralKey;
 
 typedef struct LaplacePromptStructuralIndex
@@ -199,11 +200,23 @@ typedef struct LaplacePromptStructuralIndex
     int index;
 } LaplacePromptStructuralIndex;
 
+static inline LaplacePromptStructuralKey
+laplace_prompt_structural_key(const hash128_t *source, const hash128_t *target,
+                              uint32 relation)
+{
+    LaplacePromptStructuralKey key;
+    MemSet(&key, 0, sizeof(key));
+    key.source = *source;
+    key.target = *target;
+    key.relation = relation;
+    return key;
+}
+
 /* The input scope has already bound exact occurrences at every canonical cut.
- * Pull their complete ordered successor set before ORIENT and merge that route
- * into the retained physicality response. This is not an n-gram edge and does
- * not synthesize testimony: it is the exact continuation of the whole admitted
- * observation at a witnessed trajectory occurrence. */
+ * Pull their complete ordered successor set before ORIENT and retain that route
+ * independently in the physicality response. This is not an n-gram edge and
+ * does not synthesize testimony: it is the exact continuation of the whole
+ * admitted observation at a witnessed trajectory occurrence. */
 static inline int
 laplace_prompt_merge_continuations(LaplacePromptIntent *intent,
                                    LaplaceTrajectoryScope *trajectory_scope)
@@ -240,21 +253,22 @@ laplace_prompt_merge_continuations(LaplacePromptIntent *intent,
 
     for (int i = 0; i < intent->structural_count; ++i)
     {
-        LaplacePromptStructuralKey key = {
-            .source = intent->structural[i].source,
-            .target = intent->structural[i].id};
+        LaplacePromptStructuralKey key = laplace_prompt_structural_key(
+            &intent->structural[i].source, &intent->structural[i].id,
+            intent->structural[i].relation_mask);
         bool found;
         LaplacePromptStructuralIndex *slot =
             hash_search(index, &key, HASH_ENTER, &found);
-        if (!found) slot->index = i;
+        if (found)
+            elog(ERROR, "prompt intent: duplicate structural route escaped native folding");
+        slot->index = i;
     }
 
     for (int i = 0; i < continuation_count; ++i)
     {
         const LaplaceContinuation *continuation = &continuations[i];
-        LaplacePromptStructuralKey key = {
-            .source = intent->root,
-            .target = continuation->id};
+        LaplacePromptStructuralKey key = laplace_prompt_structural_key(
+            &intent->root, &continuation->id, LAPLACE_STRUCTURAL_CONTINUATION);
         bool found;
         LaplacePromptStructuralIndex *slot =
             hash_search(index, &key, HASH_ENTER, &found);
@@ -268,9 +282,11 @@ laplace_prompt_merge_continuations(LaplacePromptIntent *intent,
             *target = (LaplaceStructuralCandidate) {
                 .source = intent->root,
                 .id = continuation->id,
+                .relation_mask = LAPLACE_STRUCTURAL_CONTINUATION,
                 .nearest_gap = 1};
         }
-        target->relation_mask |= LAPLACE_STRUCTURAL_CONTINUATION;
+        if (target->relation_mask != LAPLACE_STRUCTURAL_CONTINUATION)
+            elog(ERROR, "prompt intent: ordered continuation merged into another structural route");
         if (continuation->occurrences < 0 ||
             target->occurrences > PG_INT64_MAX - continuation->occurrences)
             ereport(ERROR,

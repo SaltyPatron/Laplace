@@ -455,10 +455,15 @@ laplace_trajectory_scope_bind_input(LaplaceTrajectoryScope *scope,
     MemoryContextDelete(work);
 }
 
+/* Keep each structural route independently addressable. A successor and a
+ * co-occurrence reaching the same target are different responses: their force,
+ * multiplicity and gap state must survive into COUPLE instead of being folded
+ * into one source/target cell. */
 typedef struct StructuralKey
 {
     hash128_t source;
     hash128_t target;
+    uint32 relation;
 } StructuralKey;
 
 typedef struct StructuralEntry
@@ -473,18 +478,23 @@ static void
 structural_add(HTAB *crossings, const hash128_t *source, const hash128_t *target,
                uint32 relation, int64 occurrences, uint64 gap)
 {
-    StructuralKey key = {*source, *target};
+    StructuralKey key;
     bool found;
+    MemSet(&key, 0, sizeof(key));
+    key.source = *source;
+    key.target = *target;
+    key.relation = relation;
     StructuralEntry *entry = hash_search(crossings, &key, HASH_ENTER, &found);
     if (!found)
     {
-        entry->relation_mask = 0;
+        entry->relation_mask = relation;
         entry->occurrences = 0;
         entry->nearest_gap = UINT64CONST(0xFFFFFFFFFFFFFFFF);
     }
+    if (entry->relation_mask != relation)
+        elog(ERROR, "trajectory structural crossings: route identity changed inside one cell");
     if (occurrences < 0 || entry->occurrences > PG_INT64_MAX - occurrences)
         ereport(ERROR, (errmsg("trajectory structural crossings: occurrence count overflow")));
-    entry->relation_mask |= relation;
     entry->occurrences += occurrences;
     if (gap < entry->nearest_gap) entry->nearest_gap = gap;
 }

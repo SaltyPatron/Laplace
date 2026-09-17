@@ -33,6 +33,9 @@ typedef struct LaplaceStructuralCandidate
 {
     hash128_t source;
     hash128_t id;
+    /* One retained route bit per row. Different structural routes that reach
+     * the same target remain separate responses with independent occurrence
+     * and gap state; they are never OR-folded before COUPLE. */
     uint32 relation_mask;
     int64 occurrences;
     uint64 nearest_gap;
@@ -62,9 +65,10 @@ LaplaceContinuation *laplace_trajectory_continuations_scoped(
 /* Enumerate exact structural crossings for active source identities over the
  * trajectories already retained in the request scope. RLE multiplicity and
  * logical ordinals are decoded natively; no SQL relation synthesis and no
- * trajectory-as-geometry shortcut. Results are deduplicated by source/target
- * identity pair while preserving which structural families responded and how
- * often. Occurrence-level prompt provenance remains the caller's responsibility. */
+ * trajectory-as-geometry shortcut. Results are deduplicated by exact
+ * source/target/route identity. Occurrence counts and nearest gaps are folded
+ * only within that route, so convergent routes remain independently visible to
+ * COUPLE. Occurrence-level prompt provenance remains the caller's responsibility. */
 LaplaceStructuralCandidate *laplace_trajectory_structural_candidates(
     LaplaceTrajectoryScope *scope, ArrayType *sources, uint32 relation_mask, int *count);
 
