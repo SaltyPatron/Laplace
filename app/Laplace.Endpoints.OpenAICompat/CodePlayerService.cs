@@ -80,7 +80,7 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
                 .DeclareSourcePrior(Source, Trust);
 
             builder.AddEntity(Source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId, Source);
-            Hash128 root = unit.DrainInto(builder, Trust, bitmap: null);
+            Hash128 root = unit.DrainInto(builder, Trust, null);
             if (root == default)
                 return new Result(modality, candidate, null, false, "candidate_not_composed", receipts);
             handler.WalkWitness(record, root, builder, unit);
@@ -88,7 +88,7 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
 
             builder.AddAttestation(NativeAttestation.Categorical(
                 root, "IS_TYPED_AS", EntityTypeRegistry.CodeConcept,
-                Source, contextId: null, sourceTrust: Trust));
+                Source, (Hash128?)null, Trust, true, 1));
 
             var tool = await CodeToolchain.VerifyAsync(candidate, modality, ct).ConfigureAwait(false);
             Hash128 resultRoot = ContentEmitter.Emit(builder, tool.CanonicalJson, Source)
