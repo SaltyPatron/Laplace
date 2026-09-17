@@ -100,10 +100,22 @@ DECLARE
     summary_type bytea;
     summary_source bytea;
 BEGIN
-    -- Direct ordinary INSERT/COPY shares the same canonical write ordering as
-    -- managed/native bulk owners. Lock before observing either the sidecar or E;
-    -- a waiter must see the prior committed facet before computing its summary.
-    PERFORM pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0));
+    -- The outer trigger redirects one logical write through a canonical-id UPSERT.
+    -- The recursive invocation is the actual row insert and returns immediately.
+    -- On a competing writer, the primary-key conflict blocks only on this content
+    -- id and then takes that row's lock; unrelated entity ids remain concurrent.
+    -- This replaces the former process-wide advisory transaction lock.
+    IF pg_trigger_depth() > 1 THEN
+        RETURN NEW;
+    END IF;
+
+    INSERT INTO @extschema@.entities AS e(
+        id, tier, type_id, first_observed_by, created_at, highway_mask)
+    VALUES (
+        NEW.id, NEW.tier, NEW.type_id, NEW.first_observed_by, NEW.created_at, NEW.highway_mask)
+    ON CONFLICT (id) DO UPDATE
+       SET id = e.id
+    RETURNING e.* INTO prior;
 
     INSERT INTO @extschema@.entity_interpretations AS ei(
         entity_id, tier, type_id, first_observed_by)
@@ -127,17 +139,6 @@ BEGIN
       FROM @extschema@.entity_interpretations i
      WHERE i.entity_id = NEW.id;
 
-    SELECT * INTO prior
-    FROM @extschema@.entities e
-    WHERE e.id = NEW.id;
-
-    IF NOT FOUND THEN
-        NEW.tier := summary_tier;
-        NEW.type_id := summary_type;
-        NEW.first_observed_by := summary_source;
-        RETURN NEW;
-    END IF;
-
     UPDATE @extschema@.entities e
        SET tier = summary_tier,
            type_id = summary_type,
@@ -147,6 +148,7 @@ BEGIN
            IS DISTINCT FROM
            (summary_tier, summary_type, summary_source);
 
+    -- The nested UPSERT already owns the canonical row for this statement.
     RETURN NULL;
 END;
 $$;
