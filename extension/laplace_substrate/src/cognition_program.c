@@ -175,7 +175,7 @@ program_channel_compare(const void *left, const void *right)
     PROGRAM_CHANNEL_CMP(distinct_sources);
     PROGRAM_CHANNEL_CMP(distinct_contexts);
 #undef PROGRAM_CHANNEL_CMP
-    return 0;
+    return memcmp(&a->provenance_root, &b->provenance_root, sizeof(hash128_t));
 }
 
 static void
@@ -266,6 +266,8 @@ program_fingerprint_channels(StringInfo bytes,
         program_fingerprint_u32(bytes, (uint32) channel->observation_rows);
         program_fingerprint_u32(bytes, (uint32) channel->distinct_sources);
         program_fingerprint_u32(bytes, (uint32) channel->distinct_contexts);
+        appendBinaryStringInfo(bytes, (const char *) &channel->provenance_root,
+                               sizeof(channel->provenance_root));
     }
     pfree(items);
 }
@@ -277,10 +279,10 @@ program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values,
                     int initial_channel_count)
 {
     StringInfoData bytes;
-    /* v6 adds the retained Glicko volatility coordinate to the semantic
-     * response-state identity. A standing change must change the program
-     * receipt even when rating/RD and selected output happen to remain equal. */
-    hash128_t domain = cognition_domain("laplace:cognition-program:v6");
+    /* v7 binds the canonical exact witness-provenance root for every semantic
+     * response channel. Equal source/context cardinalities are not equivalent
+     * response state when the responding witnesses differ. */
+    hash128_t domain = cognition_domain("laplace:cognition-program:v7");
     int member = -1;
     initStringInfo(&bytes);
     appendBinaryStringInfo(&bytes, (const char *) &domain, sizeof(domain));

@@ -31,7 +31,10 @@ typedef struct LaplaceQueryChannel
     int64 volatility;
     int64 witnesses;
 
-    /* Raw witnessed topology retained separately from pooled standing. */
+    /* Raw witnessed topology retained separately from pooled standing. The
+     * provenance root is a canonical digest over the exact bound witness rows,
+     * including source/context identity, outcome and occurrence count. It keeps
+     * equal-cardinality provenance substitutions from collapsing to one state. */
     int64 confirm_occurrences;
     int64 draw_occurrences;
     int64 refute_occurrences;
@@ -39,6 +42,7 @@ typedef struct LaplaceQueryChannel
     int32 observation_rows;
     int32 distinct_sources;
     int32 distinct_contexts;
+    hash128_t provenance_root;
 } LaplaceQueryChannel;
 
 typedef struct LaplaceQueryEvidenceStats
