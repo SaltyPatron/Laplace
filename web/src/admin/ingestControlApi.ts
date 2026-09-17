@@ -1,4 +1,4 @@
-import { apiPost, type ApiOptions } from '../api/client';
+import { apiGet, apiPost, type ApiOptions } from '../api/client';
 
 export interface IngestStartRequest {
   source: string;
@@ -6,15 +6,24 @@ export interface IngestStartRequest {
   arguments?: string[];
 }
 
-export interface IngestStartReceipt {
-  object: 'ingest.process';
+export interface IngestProcessReceipt {
   pid: number;
   source: string;
   path: string | null;
   cli: string;
   arguments: string[];
+  started_at: string;
+}
+
+export interface IngestStartReceipt extends IngestProcessReceipt {
+  object: 'ingest.process';
   status: 'started';
   note: string;
+}
+
+export interface IngestProcessList {
+  object: 'list';
+  data: IngestProcessReceipt[];
 }
 
 export interface IngestStopReceipt {
@@ -24,6 +33,10 @@ export interface IngestStopReceipt {
   was_running: boolean;
   stop_requested: boolean;
   note: string;
+}
+
+export function listIngestProcesses(opts: ApiOptions = {}) {
+  return apiGet<IngestProcessList>('/v1/admin/ingest/processes', opts);
 }
 
 export function startIngest(request: IngestStartRequest, opts: ApiOptions = {}) {
