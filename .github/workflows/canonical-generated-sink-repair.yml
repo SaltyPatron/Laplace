@@ -43,9 +43,9 @@ jobs:
           ! grep -R "SQ_LOCK\|pg_laplace_entity_write_lock" extension/laplace_substrate/src/generated_stage_sink.c extension/laplace_substrate/tests/generated_stage_sink_native_probe.c
           git config user.name "Laplace CI repair"
           git config user.email "actions@users.noreply.github.com"
-          git rm .github/workflows/canonical-generated-sink-repair.yml \
-                 .github/scripts/canonical_generated_sink_repair.py \
-                 .github/scripts/canonical_generated_sink_fixup.py
+          git rm -f .github/workflows/canonical-generated-sink-repair.yml \
+                    .github/scripts/canonical_generated_sink_repair.py \
+                    .github/scripts/canonical_generated_sink_fixup.py
           git add extension/laplace_substrate/src/generated_stage_sink.c \
                   extension/laplace_substrate/src/generated_stage_sink.h \
                   extension/laplace_substrate/tests/generated_stage_sink_native_probe.c \
