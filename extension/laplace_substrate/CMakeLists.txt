@@ -88,15 +88,40 @@ set(_ext_version_inputs
     "${CMAKE_CURRENT_SOURCE_DIR}/sql/manifest.upgrade")
 list(REMOVE_DUPLICATES _ext_version_inputs)
 list(SORT _ext_version_inputs)
-# The extension version is content-derived at configure time.  Every hashed SQL
-# input must therefore invalidate CMake's configure step; otherwise an incremental
-# build preprocesses changed SQL under the previous version and ALTER EXTENSION
-# correctly concludes there is nothing to install.
+# The extension version is content-derived at configure time. Every ordinary
+# shipped SQL input is hashed directly. Two manifest-generated seed fragments do
+# not exist yet in a pristine checkout: engine/core owns one build-time generator
+# that creates them together with the native law tables. Hash their canonical
+# generator inputs instead, unconditionally, so fresh and incremental configure
+# compute the same version and a clean checkout does not depend on stale files.
+set(_ext_codegen_script "${PROJECT_SOURCE_DIR}/scripts/codegen-attestation-law.py")
+set(_ext_relation_manifest "${PROJECT_SOURCE_DIR}/engine/manifest/relation_types.toml")
+set(_ext_pos_manifest "${PROJECT_SOURCE_DIR}/engine/manifest/pos_tags.toml")
+set(_ext_generated_relation_seed
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/generated/seed_relation_types.sql.in")
+set(_ext_generated_pos_seed
+    "${CMAKE_CURRENT_SOURCE_DIR}/sql/generated/seed_pos.sql.in")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    ${_ext_version_inputs})
+    ${_ext_version_inputs}
+    "${_ext_codegen_script}"
+    "${_ext_relation_manifest}"
+    "${_ext_pos_manifest}")
+file(SHA256 "${_ext_codegen_script}" _ext_codegen_hash)
+file(SHA256 "${_ext_relation_manifest}" _ext_relation_manifest_hash)
+file(SHA256 "${_ext_pos_manifest}" _ext_pos_manifest_hash)
 set(_ext_sql_hashes "")
 foreach(_f ${_ext_version_inputs})
-    file(SHA256 ${_f} _fh)
+    if(_f STREQUAL _ext_generated_relation_seed)
+        string(SHA256 _fh
+            "generated=seed_relation_types;generator=${_ext_codegen_hash};manifest=${_ext_relation_manifest_hash}")
+    elseif(_f STREQUAL _ext_generated_pos_seed)
+        string(SHA256 _fh
+            "generated=seed_pos;generator=${_ext_codegen_hash};manifest=${_ext_pos_manifest_hash}")
+    elseif(EXISTS "${_f}")
+        file(SHA256 "${_f}" _fh)
+    else()
+        message(FATAL_ERROR "Manifest-listed SQL input is missing: ${_f}")
+    endif()
     string(APPEND _ext_sql_hashes "${_fh}")
 endforeach()
 string(APPEND _ext_sql_hashes "module_pathname=${EXT_MODULE_PATHNAME};execution=${EXT_EXECUTION_MODULE}")
