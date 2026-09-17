@@ -1,6 +1,8 @@
 name: Laplace — operator lifecycle
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       stage:
@@ -36,7 +38,35 @@ env:
   LAPLACE_DATA_ROOT: /vault/Data
 
 jobs:
+  mainline:
+    if: github.event_name == 'push'
+    name: Mainline — build and dev verification
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 420
+    concurrency:
+      group: laplace-mainline-ci
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+
+      - uses: ./.github/actions/setup-laplace-env
+
+      - name: Build once and verify the same revision
+        run: |
+          set -euo pipefail
+          umask 0002
+          mkdir -p /build/laplace/work
+          exec 9>/build/laplace/work/host-resource.lock
+          flock 9
+          bash scripts/product-ci.sh check
+          bash scripts/product-ci.sh build
+          exec bash scripts/product-ci.sh test-dev
+
   operator:
+    if: github.event_name == 'workflow_dispatch'
     name: Operator — ${{ inputs.stage }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
