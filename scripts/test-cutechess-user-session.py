@@ -714,5 +714,110 @@ class UserInstallerTests(unittest.TestCase):
         self.assertEqual(linked.read_bytes(), original)
 
 
+    def logging_selection(self):
+        selected = {name: dict(item) for name, item in self.selected.items()}
+        data = (installer.LOG_OUTPUT + b"\nStandardError=inherit\n")
+        selected["unit"].update(data=data, sha256=installer.sha256(data),
+                                git_blob=installer.git_blob(data))
+        return selected
+
+    def test_log_unit_selects_exact_owned_append_sink(self):
+        unit = (ROOT / "deploy/linux/laplace-cutechess-user.service").read_bytes().splitlines()
+        self.assertIn(installer.LOG_OUTPUT, unit)
+        self.assertIn(b"StandardError=inherit", unit)
+        self.assertIn(b"UMask=0077", unit)
+
+    def test_log_creation_and_reinstall_preserve_private_log_without_hashing_contents(self):
+        selected = self.logging_selection()
+        files, _ = installer.make_plan(self.home, self.uid, selected, self.runtime)
+        self.assertTrue(installer.install_files(self.home, self.uid, files))
+        log = installer.private_log_path(self.home)
+        self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+        self.assertEqual(log.stat().st_uid, self.uid)
+        self.assertEqual(log.stat().st_nlink, 1)
+        content = b"diagnostic content must not enter source hashes\n"
+        log.write_bytes(content)
+        inode = log.stat().st_ino
+        original_sha = installer.sha256
+        def checked_hash(value):
+            self.assertNotEqual(value, content)
+            return original_sha(value)
+        with mock.patch.object(installer, "sha256", side_effect=checked_hash):
+            self.assertFalse(installer.install_files(self.home, self.uid, files))
+        self.assertEqual(log.read_bytes(), content)
+        self.assertEqual(log.stat().st_ino, inode)
+        self.assertNotIn(str(log), files)
+
+    def test_log_unknown_preexisting_file_is_preserved_before_any_update(self):
+        installer.install_files(self.home, self.uid, self.files)
+        log = installer.private_log_path(self.home)
+        self.write(log, b"unrelated operator notes\n")
+        selected = self.logging_selection()
+        files, _ = installer.make_plan(self.home, self.uid, selected, self.runtime)
+        before = self.snapshots()
+        with self.assertRaisesRegex(installer.SetupError, "no prior owned logging unit"):
+            installer.install_files(self.home, self.uid, files)
+        self.assertEqual(self.snapshots(), before)
+
+    def test_log_rejects_mode_drift_symlinks_hardlinks_and_foreign_owner(self):
+        selected = self.logging_selection()
+        files, _ = installer.make_plan(self.home, self.uid, selected, self.runtime)
+        installer.install_files(self.home, self.uid, files)
+        log = installer.private_log_path(self.home)
+        log.chmod(0o644)
+        with self.assertRaisesRegex(installer.SetupError, "private regular"):
+            installer.install_files(self.home, self.uid, files)
+        self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o644)
+        log.chmod(0o600)
+        with self.assertRaisesRegex(installer.SetupError, "private regular"):
+            installer.validate_private_log(self.home, self.uid + 1, files, files)
+        target = self.home / "unrelated-private-file"
+        self.write(target, b"preserved private bytes\n")
+        log.unlink()
+        log.symlink_to(target)
+        with self.assertRaises(OSError):
+            installer.install_files(self.home, self.uid, files)
+        self.assertTrue(log.is_symlink())
+        log.unlink()
+        os.link(target, log)
+        with self.assertRaisesRegex(installer.SetupError, "private regular"):
+            installer.install_files(self.home, self.uid, files)
+        self.assertEqual(target.read_bytes(), b"preserved private bytes\n")
+        self.assertEqual(log.stat().st_ino, target.stat().st_ino)
+
+    def test_log_failed_update_removes_only_new_log_and_restores_prior_installation(self):
+        installer.install_files(self.home, self.uid, self.files)
+        before = self.bytes_and_modes()
+        selected = self.logging_selection()
+        files, _ = installer.make_plan(self.home, self.uid, selected, self.runtime)
+        original = installer.atomic_replace
+        failed = False
+        def fail_after_unit(path, data, mode, uid):
+            nonlocal failed
+            original(path, data, mode, uid)
+            if str(path).endswith("/" + installer.UNIT_NAME) and not failed:
+                failed = True
+                raise OSError("injected error after unit rename")
+        with mock.patch.object(installer, "atomic_replace", side_effect=fail_after_unit):
+            with self.assertRaises(OSError):
+                installer.install_files(self.home, self.uid, files)
+        self.assertTrue(failed)
+        self.assertFalse(installer.private_log_path(self.home).exists())
+        self.assertEqual(self.bytes_and_modes(), before)
+
+    def test_log_missing_owned_sink_marks_activation_and_restarts_on_exact_start(self):
+        selected = self.logging_selection()
+        self.active_update(selected, self.runtime)
+        log = installer.private_log_path(self.home)
+        self.assertTrue(log.exists())
+        self.assertFalse(installer.pending_path(self.home).exists())
+        log.unlink()
+        result, calls = self.active_update(selected, self.runtime)
+        self.assertTrue(result["changed"])
+        self.assertTrue(log.exists())
+        self.assertEqual(sum("restart" in call for call in calls), 1)
+        self.assertFalse(installer.pending_path(self.home).exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

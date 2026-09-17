@@ -209,5 +209,46 @@ class UserSessionTests(unittest.TestCase):
         for forbidden in ("User=", "PrivateTmp=", "multi-user.target", "laplace-postgresql.service"):
             self.assertNotIn(forbidden, source)
 
+
+    def test_disabled_features_keep_flags_and_common_imports_enabled_after_sanitation(self):
+        password = self.password()
+        self.config.update(transport="loopback-password", password_file=str(password))
+        self.write_config()
+        application = self.home / "cutechess"
+        application.write_text("fixture executable\n")
+        application.chmod(0o700)
+        owner = mock.Mock()
+        owner.load.return_value = self.selected
+        def sanitized(selected, base):
+            self.assertEqual(selected, self.selected)
+            # The production runtime owner removes arbitrary XPRA_ variables.
+            result = {key: value for key, value in base.items()
+                      if not key.startswith("XPRA_") or key in ("XPRA_SESSION_DIR", "XPRA_PRIVATE_XAUTH")}
+            self.assertNotIn("XPRA_ENFORCE_FEATURES", result)
+            return result
+        owner.selected_environment.side_effect = sanitized
+        with mock.patch.object(module.pwd, "getpwuid", return_value=mock.Mock(pw_dir=str(self.home))), \
+             mock.patch.object(module, "private_directory"), \
+             mock.patch.object(module, "load_owner", return_value=owner), \
+             mock.patch.object(module, "LAUNCHER", application), \
+             mock.patch.dict(module.os.environ, {"XPRA_ENFORCE_FEATURES": "1", "XPRA_PASSWORD": "discard"}, clear=True), \
+             mock.patch.object(module.os, "chdir"), \
+             mock.patch.object(module.os, "umask"), \
+             mock.patch.object(module.os, "execve") as execute:
+            module.main()
+        execute.assert_called_once()
+        _, command, environment = execute.call_args.args
+        self.assertEqual(environment["XPRA_ENFORCE_FEATURES"], "0")
+        self.assertNotIn("XPRA_PASSWORD", environment)
+        self.assertIn("--mmap=no", command)
+        self.assertIn("--file-transfer=no", command)
+        self.assertIn("--webcam=no", command)
+        self.assertIn("--speaker=no", command)
+        self.assertIn("--microphone=no", command)
+        self.assertIn("--printing=no", command)
+        self.assertIn("--start-new-commands=no", command)
+        self.assertEqual([value for value in command if value.startswith("--bind-tcp=")],
+                         ["--bind-tcp=127.0.0.1:14501,auth=file(filename=" + str(password) + ")"])
+
 if __name__ == "__main__":
     unittest.main()

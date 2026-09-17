@@ -19,6 +19,7 @@ SCHEMA = "laplace.cutechess-user-install/v1"
 CONFIG_SCHEMA = "laplace.cutechess-user-session/v1"
 RUNTIME_ROOT = Path("/opt/laplace/tools/chess/xpra-runtime")
 UNIT_NAME = "laplace-cutechess.service"
+LOG_OUTPUT = b"StandardOutput=append:%h/.config/laplace/cutechess-session.log"
 MAX_SOURCE = 2 * 1024 * 1024
 X11_BLOB = "c31f1f4cce7da187e0706e2b028598673437b1c0"
 SOURCE_FILES = {
@@ -553,6 +554,38 @@ def clear_pending(home, uid, receipt_data):
         sync_directory(pending_path(home).parent)
 
 
+def private_log_path(home):
+    return layout(home)[1] / "cutechess-session.log"
+
+
+def wants_private_log(home, files):
+    if files is None:
+        return False
+    unit_path = str(layout(home)[2] / UNIT_NAME)
+    return LOG_OUTPUT in files[unit_path][0].splitlines()
+
+
+def validate_private_log(home, uid, previous, files):
+    """Reuse a log only when the prior receipt-backed unit owns this exact sink."""
+    if not wants_private_log(home, files):
+        return False
+    path = private_log_path(home)
+    if not os.path.lexists(path):
+        return True
+    require(wants_private_log(home, previous),
+            "existing log has no prior owned logging unit")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == uid
+                and stat.S_IMODE(info.st_mode) == 0o600 and info.st_nlink == 1,
+                "session log must be an owned private regular file")
+    finally:
+        os.close(descriptor)
+    # Log contents change while the service runs. Never read or hash them here.
+    return True
+
+
 def install_files(home, uid, files, *, generated_password=None):
     prefix, config_directory, unit_directory = layout(home)
     # All existing-file conflicts are found before creating a lock or new files.
@@ -562,6 +595,7 @@ def install_files(home, uid, files, *, generated_password=None):
             directory_chain(target, uid, private=private, boundary=home)
     validate_owned_receipt(home, uid, files)
     previous = existing_plan(home, files, uid)
+    validate_private_log(home, uid, previous, files)
     receipt_path = str(prefix / "install-receipt.json")
     read_pending(home, uid, previous[receipt_path][0] if previous else None)
     for target, private in ((prefix, True), (prefix / "lib", True),
@@ -571,6 +605,7 @@ def install_files(home, uid, files, *, generated_password=None):
     lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
     created = []
     password_created = False
+    log_created = False
     changed = False
     pending_before = None
     pending_wanted = None
@@ -582,13 +617,20 @@ def install_files(home, uid, files, *, generated_password=None):
                 and lock_info.st_size == 0, "invalid installer lock")
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         previous = existing_plan(home, files, uid)
+        logging = validate_private_log(home, uid, previous, files)
         pending_before = read_pending(home, uid, previous[receipt_path][0] if previous else None)
         if generated_password is not None:
             require(generated_password == config_directory / "cutechess-session-password",
                     "generated credential must use the fixed owned path")
             password_created = ensure_password_file(generated_password, uid)
+        if logging and not os.path.lexists(private_log_path(home)):
+            log_path = str(private_log_path(home))
+            inode = create_owned_file(log_path, b"", 0o600, uid)
+            created.append((log_path, inode))
+            sync_directory(private_log_path(home).parent)
+            log_created = True
         content_changed = previous is None or any(files[path] != previous[path] for path in files)
-        if content_changed or password_created:
+        if content_changed or password_created or log_created:
             pending_wanted = pending_bytes(home, uid, files[receipt_path][0])
             pending_attempted = pending_before != pending_wanted
             publish_pending(home, uid, pending_before, pending_wanted)
@@ -621,7 +663,7 @@ def install_files(home, uid, files, *, generated_password=None):
         raise
     finally:
         os.close(lock_fd)
-    return changed or password_created
+    return changed or password_created or log_created
 
 
 def service_is_active(environment, *, run=subprocess.run):

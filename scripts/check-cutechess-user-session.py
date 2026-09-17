@@ -17,6 +17,7 @@ import socket
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 
 SCHEMA = "laplace.cutechess-user-session-proof/v1"
@@ -252,7 +253,7 @@ def wait_for_client_window(child, tools, environment, deadline, native_window_id
     raise ProofError("gtk-client-window-did-not-map")
 
 
-def attach_once(selected, password, tools, environment, deadline, native_window_id):
+def attach_once(selected, password, tools, environment, deadline, native_window_id, diagnostics, redactions):
     command = xpra_command(selected, "attach", password) + [
         "--title=" + TITLE + " @windowid@", "--readonly=yes", "--clipboard=no", "--notifications=no",
         "--tray=no", "--system-tray=no", "--opengl=no", "--speaker=no", "--microphone=no",
@@ -260,8 +261,23 @@ def attach_once(selected, password, tools, environment, deadline, native_window_
         "--open-url=no", "--mmap=no", "--sharing=yes", "--encodings=rgb,png",
     ]
     child = subprocess.Popen(command, env=environment, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              start_new_session=True)
+    tail = bytearray()
+    digest = hashlib.sha256()
+    observed = [0]
+    def drain():
+        while True:
+            data = os.read(child.stdout.fileno(), 65536)
+            if not data:
+                return
+            digest.update(data)
+            observed[0] += len(data)
+            tail.extend(data)
+            if len(tail) > 16384:
+                del tail[:-16384]
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
     try:
         mapped = wait_for_client_window(child, tools, environment, deadline, native_window_id)
         # Xpra's own SIGINT handler sends disconnect, drains cleanup and exits
@@ -271,7 +287,22 @@ def attach_once(selected, password, tools, environment, deadline, native_window_
         require(status in (0, 130), "gtk-client-did-not-detach-cleanly")
         return {"client_pid": child.pid, "mapped_window": mapped, "detach_exit_code": status}
     finally:
+        exited_before_cleanup = child.poll()
         stop_owned(child)
+        reader.join(timeout=2)
+        diagnostics.update({"exit_before_cleanup": exited_before_cleanup,
+                            "exit_after_cleanup": child.returncode,
+                            "captured_bytes": observed[0],
+                            "output_drain_completed": not reader.is_alive()})
+        if not reader.is_alive():
+            child.stdout.close()
+            retained = bytes(tail)
+            for value in redactions:
+                if value:
+                    retained = retained.replace(value, b"[redacted]")
+            diagnostics.update({"output_sha256": digest.hexdigest(),
+                                "retained_tail": retained.decode("utf-8", errors="replace"),
+                                "retained_tail_maximum_bytes": 16384})
 
 
 def run_proof(deadline, checks):
@@ -357,15 +388,19 @@ def run_proof(deadline, checks):
                     break
                 require(time.monotonic() < end, "proof-xvfb-not-ready")
                 time.sleep(.1)
+            diagnostics = checks.setdefault("client_diagnostics", {})
+            diagnostics["first_attach"] = {}
+            redactions = (launcher.read_private(password, uid, 64), str(password).encode(), cookie.encode())
             checks["first_attach"] = attach_once(selected, password, x11["tools"], client_env, deadline,
-                                                  before[0]["window_id"])
+                                                  before[0]["window_id"], diagnostics["first_attach"], redactions)
             between = window_info(selected, password, environment, deadline)
             require(between == before and service_identity(environment, deadline, uid) == before_service
                     and process_identity(native["pid"], uid) == native,
                     "session-changed-after-first-detach")
             checks["persisted_after_first_detach"] = True
+            diagnostics["second_attach"] = {}
             checks["second_attach"] = attach_once(selected, password, x11["tools"], client_env, deadline,
-                                                  before[0]["window_id"])
+                                                  before[0]["window_id"], diagnostics["second_attach"], redactions)
             after = window_info(selected, password, environment, deadline)
             require(after == before and service_identity(environment, deadline, uid) == before_service
                     and process_identity(native["pid"], uid) == native,
