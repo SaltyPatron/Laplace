@@ -5,7 +5,7 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  provision|reconcile|check|build|install|database|foundation|applications|deploy|mainline|test-dev|test-db|test-live) ;;
+  provision|reconcile|check|build|install|applications|deploy|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
@@ -50,10 +50,6 @@ run_database_maintenance() {
   bash scripts/maintain-installed-database.sh "$@"
 }
 
-run_foundation() {
-  bash scripts/ensure-foundation.sh
-}
-
 run_db_tests() {
   bash scripts/test-parallel.sh --profile db --suite db-health
   rm -rf build/extension/*/tests/regress_output
@@ -74,26 +70,28 @@ run_live_tests() {
 }
 
 reconcile_installed_product() {
+  local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
-  curl -fsS http://127.0.0.1:5187/health/ready | grep -q '"ready":true'
+  python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
 }
 
+# Product lifecycle owns build/install/verification/publish. Corpus seeding is owned by seed.yml.
 run_deploy() {
   check_deps
   run_build
 
-  # A development-suite failure must remain visible and keep the workflow red,
-  # but it must not erase downstream install/database/application evidence. A
-  # genuine build/install/runtime failure still stops immediately under set -e.
+  # Preserve downstream product evidence even if a development suite fails.
+  # Build/install/runtime failures themselves still stop immediately under set -e.
   local dev_test_rc=0
   run_dev_tests || dev_test_rc=$?
 
   run_install
   run_database_maintenance --prepare
+  run_db_tests
   run_publish
   reconcile_installed_product
-  run_foundation
+  run_live_tests
 
   if (( dev_test_rc != 0 )); then
     echo "::error::development tests failed earlier (status $dev_test_rc); integrated lifecycle continued and retained downstream evidence" >&2
@@ -117,12 +115,6 @@ case "$stage" in
     ;;
   install)
     run_install
-    ;;
-  database)
-    run_database_maintenance
-    ;;
-  foundation)
-    run_foundation
     ;;
   applications)
     run_publish
