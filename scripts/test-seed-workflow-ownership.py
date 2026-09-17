@@ -40,6 +40,19 @@ class SharedHostQueue(unittest.TestCase):
                 self.assertEqual(text.count("queue: max"), count)
                 self.assertEqual(text.count("cancel-in-progress: false"), count)
 
+    def test_benchmark_is_dispatch_only_versioned_evidence(self):
+        text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
+        self.assertIn("on:\n  workflow_dispatch:\n", text)
+        self.assertNotIn("\n  push:\n", text)
+        self.assertNotIn("\n  workflow_call:\n", text)
+        self.assertIn("options: [quick, throughput, core, scale, moby, all]", text)
+        self.assertEqual(text.count("runs-on: [self-hosted, laplace]"), 1)
+        self.assertIn("python3 scripts/benchmark_suite.py validate", text)
+        self.assertIn('python3 scripts/benchmark_suite.py "${args[@]}"', text)
+        self.assertIn("name: laplace-benchmark-${{ github.run_id }}-${{ github.run_attempt }}", text)
+        self.assertIn("retention-days: 90", text)
+        self.assertNotIn("accept-chess-environment.py", text)
+
     def test_benchmark_checkout_preserves_retained_workspace_state(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
         self.assertIn("git diff --quiet", text)
