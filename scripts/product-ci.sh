@@ -5,7 +5,7 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  provision|reconcile|check|build|install|applications|deploy|proof|mainline|test-dev|test-db|test-live) ;;
+  provision|reconcile|check|build|install|applications|deploy|proof|release-candidate|release-activation|proof-model|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
@@ -170,18 +170,23 @@ run_release_activation() {
   run_live_tests
 }
 
+run_proof_model() {
+  require_built_revision
+  LAPLACE_MODEL_PROOF_CODE_CORPORA=1 bash scripts/model-synthesize-ci.sh
+}
+
 run_deploy() {
-  # Deploy composes two independently testable lifecycle modules. Static
-  # repository policy remains an explicit check operation.
+  # Local convenience composition. GitHub Actions composes these as separate
+  # reusable jobs so qualification and activation remain independently visible,
+  # retryable, and observable.
   run_release_candidate
   run_release_activation
 }
 
 run_proof() {
-  # Product proof adds competitive model synthesis between qualification and
-  # activation without reimplementing the delivery sequence in workflow YAML.
+  # Local convenience composition; CI uses the three modular stages directly.
   run_release_candidate
-  LAPLACE_MODEL_PROOF_CODE_CORPORA=1 bash scripts/model-synthesize-ci.sh
+  run_proof_model
   run_release_activation
 }
 
@@ -216,6 +221,15 @@ case "$stage" in
     ;;
   mainline)
     run_mainline
+    ;;
+  release-candidate)
+    run_release_candidate
+    ;;
+  release-activation)
+    run_release_activation
+    ;;
+  proof-model)
+    run_proof_model
     ;;
   deploy)
     run_deploy
