@@ -7,6 +7,8 @@ on:
       - "docs/**"
       - "**/*.md"
       - ".github/**"
+      - "scripts/api-diagnostics.py"
+      - "web/scripts/capture-ui-diagnostics.mjs"
   workflow_dispatch:
     inputs:
       stage:
