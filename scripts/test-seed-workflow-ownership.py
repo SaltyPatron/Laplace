@@ -32,11 +32,11 @@ class WorkflowOwnership(unittest.TestCase):
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
-    def test_mainline_validation_cancels_superseded_runs(self):
+    def test_mainline_validation_finishes_the_running_revision(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         mainline = text.split("  mainline:\n", 1)[1].split("\n  operator:\n", 1)[0]
         self.assertIn("group: laplace-mainline-validation", mainline)
-        self.assertIn("cancel-in-progress: true", mainline)
+        self.assertIn("cancel-in-progress: false", mainline)
         self.assertNotIn("group: laplace-host-lifecycle", mainline)
         self.assertIn("exec bash scripts/product-ci.sh mainline", mainline)
 
@@ -121,26 +121,13 @@ class SeedHostOwnership(unittest.TestCase):
             "seed-knowledge.yml",
             "seed-models.yml",
         }
-        chess_wrappers = {
-            "seed-chess-books.yml",
-            "seed-chess-eval.yml",
-            "seed-chess-games.yml",
-            "seed-chess-openings.yml",
-        }
         actual = {p.name for p in WORKFLOWS.glob("seed-*.yml")}
-        self.assertEqual(direct | chess_wrappers, actual)
+        self.assertEqual(direct, actual)
 
         for name in direct:
             with self.subTest(workflow=name):
                 text = (WORKFLOWS / name).read_text(encoding="utf-8")
                 self.assertIn("uses: ./.github/workflows/seed.yml", text)
-                self.assertNotIn("scripts/ingest-source.sh", text)
-                self.assertNotIn("scripts/measure-lane.sh", text)
-
-        for name in chess_wrappers:
-            with self.subTest(workflow=name):
-                text = (WORKFLOWS / name).read_text(encoding="utf-8")
-                self.assertIn("uses: ./.github/workflows/seed-chess.yml", text)
                 self.assertNotIn("scripts/ingest-source.sh", text)
                 self.assertNotIn("scripts/measure-lane.sh", text)
 

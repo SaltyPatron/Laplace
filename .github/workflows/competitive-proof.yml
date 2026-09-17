@@ -31,7 +31,7 @@ jobs:
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
     steps:
-      - name: Prove the exact selected product under one host reservation
+      - name: Run the canonical product proof under one host reservation
         env:
           TARGET_SHA: ${{ github.sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
@@ -66,14 +66,4 @@ jobs:
           git diff --cached --quiet
 
           source scripts/ci-environment.sh
-          bash scripts/product-ci.sh build
-          bash scripts/product-ci.sh test-dev
-          bash scripts/product-ci.sh install
-          bash scripts/maintain-installed-database.sh --prepare
-          bash scripts/product-ci.sh test-db
-
-          LAPLACE_MODEL_PROOF_CODE_CORPORA=1 bash scripts/model-synthesize-ci.sh
-
-          bash scripts/product-ci.sh applications
-          bash scripts/product-ci.sh reconcile
-          bash scripts/product-ci.sh test-live
+          exec bash scripts/product-ci.sh proof

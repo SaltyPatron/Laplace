@@ -110,22 +110,35 @@ class ProductStageOwnershipContract(unittest.TestCase):
         check_case = source.split('  check)\n', 1)[1].split('    ;;', 1)[0]
         self.assertIn("run_ci_contract_checks", check_case)
 
-    def test_deploy_is_product_work_not_policy_work(self):
-        owner = function("run_deploy")
-        self.assertNotIn("run_ci_contract_checks", owner)
-        order = [
+    def test_deploy_is_composed_from_release_modules_not_policy_work(self):
+        deploy = function("run_deploy")
+        self.assertNotIn("run_ci_contract_checks", deploy)
+        self.assertLess(deploy.index("run_release_candidate"),
+                        deploy.index("run_release_activation"))
+
+        candidate = function("run_release_candidate")
+        qualification = [
             "check_deps",
             "run_build",
             "run_dev_tests",
             "run_install",
             "run_database_maintenance --prepare",
             "run_db_tests",
-            "run_publish",
-            "reconcile_installed_product",
-            "run_live_tests",
         ]
-        positions = [owner.index(token) for token in order]
+        positions = [candidate.index(token) for token in qualification]
         self.assertEqual(positions, sorted(positions))
+
+        activation = function("run_release_activation")
+        delivery = ["run_publish", "reconcile_installed_product", "run_live_tests"]
+        positions = [activation.index(token) for token in delivery]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_competitive_proof_extends_the_same_release_modules(self):
+        proof = function("run_proof")
+        self.assertLess(proof.index("run_release_candidate"),
+                        proof.index("model-synthesize-ci.sh"))
+        self.assertLess(proof.index("model-synthesize-ci.sh"),
+                        proof.index("run_release_activation"))
 
     def test_mainline_is_only_build_and_development_tests(self):
         owner = function("run_mainline")
