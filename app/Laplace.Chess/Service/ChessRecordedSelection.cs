@@ -10,6 +10,8 @@ namespace Laplace.Chess.Service;
 public sealed class ChessRecordedSelection
 {
     public sealed record FileIdentity(string Path, long Bytes, string Sha256);
+    private sealed record SelectionReceipt(string Schema, FileIdentity Source,
+        FileIdentity SelectionManifest, ChessCorpusEvidence.Chunk[] Chunks);
     public FileIdentity Manifest { get; }
     public FileIdentity Source { get; }
     public FileIdentity SelectionManifest { get; }
@@ -64,47 +66,45 @@ public sealed class ChessRecordedSelection
         var manifest = await ChessCorpusPreparation.IdentifyAsync(manifestPath, ct);
         if (manifest.Sha256 != expectedSha256 || manifest.Bytes is <= 0 or > 32 * 1024 * 1024)
             throw new InvalidDataException("recorded selection manifest identity or size is invalid");
-        using var document = JsonDocument.Parse(await File.ReadAllBytesAsync(manifest.Path, ct));
-        RejectDuplicateProperties(document.RootElement);
-        var root = document.RootElement;
-        if (root.GetProperty("schema").GetString() != "laplace.chess-recorded-selection/v1")
+        var root = ChessCorpusEvidence.ReadSerialized<SelectionReceipt>(
+            await File.ReadAllBytesAsync(manifest.Path, ct));
+        if (root.Schema != "laplace.chess-recorded-selection/v1")
             throw new InvalidDataException("unsupported recorded selection schema");
-        var source = ReadFile(root.GetProperty("source"));
+        var source = ReadFile(root.Source);
         if (!source.Path.EndsWith(".pgn", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("recorded selection requires its original plain PGN source");
-        var selection = ReadFile(root.GetProperty("selectionManifest"));
+        var selection = ReadFile(root.SelectionManifest);
         await ChessCorpusPreparation.RequireUnchangedAsync(Internal(source), ct);
         await ChessCorpusPreparation.RequireUnchangedAsync(Internal(selection), ct);
 
         var chunks = new List<RetainedChunk>();
         var playingIds = new HashSet<string>(StringComparer.Ordinal);
         int selected = 0;
-        foreach (var item in root.GetProperty("chunks").EnumerateArray())
+        foreach (var item in root.Chunks)
         {
             ct.ThrowIfCancellationRequested();
-            int index = item.GetProperty("index").GetInt32();
-            int first = item.GetProperty("firstSelectedGame").GetInt32();
-            int count = item.GetProperty("games").GetInt32();
-            int novel = item.GetProperty("novelGames").GetInt32();
-            long plies = item.GetProperty("plies").GetInt64();
-            string? gameHash = item.GetProperty("gameBodiesSha256").GetString();
+            if (item is null) throw new InvalidDataException("retained chunk descriptor is null");
+            int index = item.Index;
+            int first = item.FirstSelectedGame;
+            int count = item.Games;
+            int novel = item.NovelGames;
+            long plies = item.Plies;
+            string? gameHash = item.GameBodiesSha256;
             if (index != chunks.Count + 1 || first != selected || count <= 0
                 || count > 1_000_000 - selected || novel != count || plies < count || !Hex(gameHash, 64))
                 throw new InvalidDataException("recorded selection contains a gap, incomplete chunk or invalid count");
-            var body = ReadFile(item.GetProperty("body"));
-            var scope = ReadFile(item.GetProperty("scope"));
+            var body = ReadFile(item.Body is null ? null : Public(item.Body));
+            var scope = ReadFile(item.Scope is null ? null : Public(item.Scope));
             await ChessCorpusPreparation.RequireUnchangedAsync(Internal(body), ct);
             await ChessCorpusPreparation.RequireUnchangedAsync(Internal(scope), ct);
-            using var chunkDocument = JsonDocument.Parse(await File.ReadAllBytesAsync(body.Path, ct));
-            RejectDuplicateProperties(chunkDocument.RootElement);
-            var value = chunkDocument.RootElement;
-            if (value.GetProperty("schema").GetString() != "laplace.chess-corpus-chunk/v1"
-                || value.GetProperty("index").GetInt32() != index
-                || value.GetProperty("firstSelectedGame").GetInt32() != first
-                || value.GetProperty("newlyRecordedGames").GetInt32() != count)
+            var value = ChessCorpusEvidence.ReadSerialized<ChessCorpusEvidence.ChunkBody>(
+                await File.ReadAllBytesAsync(body.Path, ct));
+            if (value.Schema != "laplace.chess-corpus-chunk/v1"
+                || value.Index != index
+                || value.FirstSelectedGame != first
+                || value.NewlyRecordedGames != count)
                 throw new InvalidDataException("retained chunk body does not match its selected manifest entry");
-            var games = value.GetProperty("games").Deserialize<ChessRecordingMeasurement.GameIdentity[]>(
-                ChessCorpusPreparation.Json) ?? throw new InvalidDataException("retained chunk has no game bodies");
+            var games = value.Games;
             if (games.Length != count || games.Any(g => g is null || !Hex(g.PlayingId, 32)
                 || !Hex(g.LineId, 32) || !Hex(g.StartPositionId, 32)
                 || g.MoveIds is null || g.MoveIds.Length == 0 || g.MoveIds.Any(id => !Hex(id, 32))
@@ -116,12 +116,11 @@ public sealed class ChessRecordedSelection
                 || Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(
                     games, ChessCorpusPreparation.Json))) != gameHash)
                 throw new InvalidDataException("retained game inventory is incomplete, duplicate or changed");
-            var scopes = value.GetProperty("scopes").Deserialize<ChessRecordingMeasurement.ScopeObservation[]>(
-                ChessCorpusPreparation.Json) ?? throw new InvalidDataException("retained chunk has no exact scope");
+            var scopes = value.Scopes;
             if (scopes.Length != 1 || scopes[0] is null)
                 throw new InvalidDataException("retained chunk must have one exact scope");
             ValidateScope(scopes[0]);
-            var writer = ReadWriter(value.GetProperty("writer"));
+            var writer = ReadWriter(value.Writer);
             if (writer.ApplyCalls < 1 || writer.JournalReplayHits != 0)
                 throw new InvalidDataException("retained fresh chunk has no acknowledged writer work");
             chunks.Add(new(new(index, first, count, novel, plies, gameHash!,
@@ -138,10 +137,8 @@ public sealed class ChessRecordedSelection
             {
                 string? line = await input.ReadLineAsync(ct);
                 if (line is null) throw new InvalidDataException("original source selection ends before retained chunks");
-                using var entryDocument = JsonDocument.Parse(line);
-                RejectDuplicateProperties(entryDocument.RootElement);
-                var entry = entryDocument.RootElement.Deserialize<ChessCorpusPreparation.Selection>(
-                    ChessCorpusPreparation.Json) ?? throw new InvalidDataException("invalid source selection entry");
+                var entry = ChessCorpusEvidence.ReadSerialized<ChessCorpusPreparation.Selection>(
+                    Encoding.UTF8.GetBytes(line));
                 if (entry.SourceOrdinal <= (entries.Count == 0 ? 0 : entries[^1].SourceOrdinal)
                     || !Hex(entry.FramedGameSha256, 64) || entry.PlayingId != game.PlayingId
                     || entry.LineId != game.LineId || entry.StartPositionId != game.StartPositionId
@@ -160,35 +157,16 @@ public sealed class ChessRecordedSelection
         return result;
     }
 
-    private static FileIdentity ReadFile(JsonElement value)
+    private static FileIdentity ReadFile(FileIdentity? value)
     {
-        string? path = value.GetProperty("path").GetString();
-        string? hash = value.GetProperty("sha256").GetString();
-        long bytes = value.GetProperty("bytes").GetInt64();
-        if (path is null || !Path.IsPathFullyQualified(path) || Path.GetFullPath(path) != path
-            || bytes < 0 || !Hex(hash, 64))
+        if (value is null || value.Path is null || !Path.IsPathFullyQualified(value.Path)
+            || Path.GetFullPath(value.Path) != value.Path || value.Bytes < 0 || !Hex(value.Sha256, 64))
             throw new InvalidDataException("recorded selection file identity is invalid");
-        return new(path, bytes, hash!);
+        return value;
     }
 
     internal static bool Hex(string? value, int length) => value is not null && value.Length == length
         && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
-
-    private static void RejectDuplicateProperties(JsonElement value)
-    {
-        if (value.ValueKind == JsonValueKind.Object)
-        {
-            var names = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var property in value.EnumerateObject())
-            {
-                if (!names.Add(property.Name))
-                    throw new InvalidDataException("recorded selection JSON has duplicate properties");
-                RejectDuplicateProperties(property.Value);
-            }
-        }
-        else if (value.ValueKind == JsonValueKind.Array)
-            foreach (var element in value.EnumerateArray()) RejectDuplicateProperties(element);
-    }
 
     private static void ValidateScope(ChessRecordingMeasurement.ScopeObservation scope)
     {
@@ -206,25 +184,26 @@ public sealed class ChessRecordedSelection
             scope.WitnessIds.Select(Convert.FromHexString).ToArray(), scope.After);
     }
 
-    private static ChessRecordingMeasurement.WriterCounts ReadWriter(JsonElement value)
+    private static ChessRecordingMeasurement.WriterCounts ReadWriter(ChessCorpusEvidence.WriterReceipt value)
     {
-        long Number(string key)
-        {
-            long number = value.GetProperty(key).GetInt64();
-            return number >= 0 ? number : throw new InvalidDataException("negative retained writer counter");
-        }
-        if (value.GetProperty("roundTripsKind").GetString() != "logical-writer-accounting/v1")
+        if (value.RoundTripsKind != "logical-writer-accounting/v1")
             throw new InvalidDataException("unknown retained writer counter scope");
+        if (new[] { value.ApplyCalls, value.EntitiesAttempted, value.EntitiesInserted,
+                value.PhysicalitiesAttempted, value.PhysicalitiesInserted, value.AttestationsAttempted,
+                value.AttestationsInserted, value.EntitiesSkippedAtMerge, value.PhysicalitiesSkippedAtMerge,
+                value.RoundTrips, value.CopyTransactionsStarted, value.CopyTransactionsCommitted,
+                value.JournalReplayHits }.Any(number => number < 0))
+            throw new InvalidDataException("negative retained writer counter");
         return new()
         {
-            ApplyCalls = Number("applyCalls"),
-            EntitiesAttempted = Number("entitiesAttempted"), EntitiesInserted = Number("entitiesInserted"),
-            PhysicalitiesAttempted = Number("physicalitiesAttempted"), PhysicalitiesInserted = Number("physicalitiesInserted"),
-            AttestationsAttempted = Number("attestationsAttempted"), AttestationsInserted = Number("attestationsInserted"),
-            EntitiesSkippedAtMerge = Number("entitiesSkippedAtMerge"),
-            PhysicalitiesSkippedAtMerge = Number("physicalitiesSkippedAtMerge"),
-            RoundTrips = Number("roundTrips"), CopyTransactionsStarted = Number("copyTransactionsStarted"),
-            CopyTransactionsCommitted = Number("copyTransactionsCommitted"), JournalReplayHits = Number("journalReplayHits"),
+            ApplyCalls = value.ApplyCalls,
+            EntitiesAttempted = value.EntitiesAttempted, EntitiesInserted = value.EntitiesInserted,
+            PhysicalitiesAttempted = value.PhysicalitiesAttempted, PhysicalitiesInserted = value.PhysicalitiesInserted,
+            AttestationsAttempted = value.AttestationsAttempted, AttestationsInserted = value.AttestationsInserted,
+            EntitiesSkippedAtMerge = value.EntitiesSkippedAtMerge,
+            PhysicalitiesSkippedAtMerge = value.PhysicalitiesSkippedAtMerge,
+            RoundTrips = value.RoundTrips, CopyTransactionsStarted = value.CopyTransactionsStarted,
+            CopyTransactionsCommitted = value.CopyTransactionsCommitted, JournalReplayHits = value.JournalReplayHits,
         };
     }
 }

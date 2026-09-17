@@ -88,6 +88,43 @@ public sealed class ChessRecordedSelectionTests : IDisposable
         return (path, identity.Sha256, value);
     }
 
+    [Theory]
+    [InlineData("source")]
+    [InlineData("selectionManifest")]
+    [InlineData("chunks")]
+    public async Task MissingRequiredManifestMemberCannotDefaultToAnEmptyValue(string member)
+    {
+        var input = await SelectionAsync();
+        Assert.True(input.Document.Remove(member));
+        input = await WriteManifestAsync(input.Document);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            ChessRecordedSelection.LoadAsync(input.Path, input.Sha, Ct));
+    }
+
+    [Theory]
+    [InlineData("missing-counter")]
+    [InlineData("quoted-counter")]
+    [InlineData("unknown-counter")]
+    [InlineData("null-writer")]
+    public async Task RetainedWriterUsesTheExactSerializedEvidenceContract(string mutation)
+    {
+        var input = await SelectionAsync();
+        var chunk = input.Document["chunks"]!.AsArray()[0]!.AsObject();
+        string bodyPath = chunk["body"]!["path"]!.GetValue<string>();
+        var body = JsonNode.Parse(await File.ReadAllTextAsync(bodyPath))!.AsObject();
+        var writer = body["writer"]!.AsObject();
+        if (mutation == "missing-counter") Assert.True(writer.Remove("applyCalls"));
+        else if (mutation == "quoted-counter") writer["applyCalls"] = "1";
+        else if (mutation == "unknown-counter") writer["unrecordedCounter"] = 0;
+        else body["writer"] = null;
+        await File.WriteAllTextAsync(bodyPath, body.ToJsonString());
+        chunk["body"] = JsonSerializer.SerializeToNode(
+            await ChessCorpusPreparation.IdentifyAsync(bodyPath, Ct), ChessCorpusPreparation.Json);
+        input = await WriteManifestAsync(input.Document);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            ChessRecordedSelection.LoadAsync(input.Path, input.Sha, Ct));
+    }
+
     [Fact]
     public async Task CompletePrefixExcludesUnsealedGamesAndKeepsOriginalSourceIdentity()
     {

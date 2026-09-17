@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Laplace.Chess.Service;
 
@@ -13,6 +14,40 @@ internal sealed class ChessCorpusEvidence
     public sealed record Receipt(string Directory, int Chunks, int ReadbackGames, int NewlyRecordedGames,
         ChessCorpusPreparation.FileIdentity? ChunkManifest, ChessCorpusScopeMerge.Result? ExactScopeState,
         bool Completed, string Scope);
+
+    // These are our serialized evidence envelopes, paired with AppendAsync below.
+    // Source PGN still belongs to its existing registered grammar/decomposer.
+    internal sealed record ChunkBody(string Schema, int Index, int FirstSelectedGame,
+        ChessRecordingMeasurement.GameIdentity[] Games, int NewlyRecordedGames,
+        WriterReceipt Writer, ChessRecordingMeasurement.ScopeObservation[] Scopes);
+    internal sealed record WriterReceipt(long ApplyCalls, long EntitiesAttempted, long EntitiesInserted,
+        long PhysicalitiesAttempted, long PhysicalitiesInserted, long AttestationsAttempted,
+        long AttestationsInserted, long EntitiesSkippedAtMerge, long PhysicalitiesSkippedAtMerge,
+        long RoundTrips, string RoundTripsKind, long CopyTransactionsStarted,
+        long CopyTransactionsCommitted, long JournalReplayHits);
+
+    private static readonly JsonSerializerOptions RetainedJson = new(ChessCorpusPreparation.Json)
+    {
+        AllowDuplicateProperties = false,
+        RespectRequiredConstructorParameters = true,
+        RespectNullableAnnotations = true,
+        PropertyNameCaseInsensitive = false,
+        NumberHandling = JsonNumberHandling.Strict,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+    };
+
+    internal static T ReadSerialized<T>(ReadOnlySpan<byte> bytes) where T : class
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(bytes, RetainedJson)
+                ?? throw new InvalidDataException("retained corpus evidence cannot be null");
+        }
+        catch (JsonException error)
+        {
+            throw new InvalidDataException("invalid serialized corpus evidence", error);
+        }
+    }
 
     private readonly string _directory;
     private readonly string _manifest;
@@ -83,9 +118,7 @@ internal sealed class ChessCorpusEvidence
         if (bytes.LongLength != identity.Bytes
             || Convert.ToHexStringLower(SHA256.HashData(bytes)) != identity.Sha256)
             throw new InvalidDataException("retained baseline chunk changed before scope verification");
-        using var document = JsonDocument.Parse(bytes);
-        var scopes = document.RootElement.GetProperty("scopes")
-            .Deserialize<ChessRecordingMeasurement.ScopeObservation[]>(ChessCorpusPreparation.Json);
+        var scopes = ReadSerialized<ChunkBody>(bytes).Scopes;
         if (scopes is not { Length: 1 })
             throw new InvalidDataException("retained baseline requires exactly one recording scope");
         return scopes[0];

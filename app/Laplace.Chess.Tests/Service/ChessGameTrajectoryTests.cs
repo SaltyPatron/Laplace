@@ -149,7 +149,7 @@ public sealed class ChessGameTrajectoryTests
         // it must not add another observation of the game's moves or outcome.
         var receipt = Assert.Single(ComposeBackfill().Attestations);
         var marker = ChessTrajectoryDecomposer.MarkerId(Parsed().LineId);
-        var type = Hash128.OfCanonical("substrate/type/HasUnitCompleted/21/v1");
+        var type = Laplace.Ingestion.IngestUnitCompletion.RelationTypeId(21);
         Assert.Equal(type, receipt.TypeId);
         Assert.Equal(marker, receipt.SubjectId);
         Assert.Equal(marker, receipt.ObjectId);
