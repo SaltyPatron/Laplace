@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Run the selected CuteChess app through an owned Xpra runtime and user manager."""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+from pathlib import Path
+import pwd
+import re
+import shlex
+import stat
+import sys
+
+SCHEMA = "laplace.cutechess-user-session/v1"
+RUNTIME_ROOT = Path("/opt/laplace/tools/chess/xpra-runtime")
+LAUNCHER = Path("/opt/laplace/bin/laplace-cutechess")
+DISPLAY = ":120"
+PASSWORD_PATH = re.compile(r"/[A-Za-z0-9_./-]+\Z")
+CONF_ENV = ("XPRA_DEFAULT_CONF_DIRS", "XPRA_SYSTEM_CONF_DIRS", "XPRA_USER_CONF_DIRS")
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise RuntimeError(message)
+
+
+def physical_parents(path: Path, uid: int) -> None:
+    require(path.is_absolute(), "session paths must be absolute")
+    for parent in (path, *path.parents):
+        info = parent.lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid in (0, uid)
+                and not info.st_mode & 0o002
+                and (not info.st_mode & 0o020
+                     or (info.st_uid == uid and info.st_gid == os.getgid())),
+                "session directory chain must stay within the existing account authority")
+
+
+def private_directory(path: Path, uid: int, *, create: bool = False) -> None:
+    if create:
+        physical_parents(path.parent, uid)
+        path.mkdir(mode=0o700, exist_ok=True)
+    physical_parents(path, uid)
+    info = path.lstat()
+    require(info.st_uid == uid and not info.st_mode & 0o077,
+            "session directory must be private and owned by the current user")
+
+
+def read_private(path: Path, uid: int, maximum: int) -> bytes:
+    physical_parents(path.parent, uid)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == uid and info.st_nlink == 1
+                and stat.S_IMODE(info.st_mode) == 0o600 and info.st_size <= maximum,
+                "session configuration or credential must be an owned private regular file")
+        value = os.read(fd, maximum + 1)
+        require(len(value) <= maximum, "session input exceeds its bound")
+        return value
+    finally:
+        os.close(fd)
+
+
+def configuration(home: Path, uid: int) -> dict:
+    path = home / ".config/laplace/cutechess-session.json"
+    value = json.loads(read_private(path, uid, 16384))
+    require(isinstance(value, dict) and value.get("schema") == SCHEMA,
+            "unsupported session configuration")
+    require(value.get("runtime_root") == str(RUNTIME_ROOT), "unexpected Xpra runtime selection")
+    transport = value.get("transport")
+    expected = {"schema", "runtime_root", "transport"}
+    if transport == "loopback-password":
+        expected.add("password_file")
+        filename = value.get("password_file")
+        require(isinstance(filename, str) and PASSWORD_PATH.fullmatch(filename) is not None
+                and ".." not in Path(filename).parts,
+                "credential path cannot add Xpra options")
+        password = read_private(Path(filename), uid, 64)
+        require(re.fullmatch(rb"[0-9a-f]{64}", password) is not None,
+                "credential must contain exactly 64 lowercase hexadecimal bytes without newline")
+    else:
+        require(transport == "unix", "unsupported session transport")
+    require(set(value) == expected, "unexpected session configuration field")
+    return value
+
+
+def load_owner(directory: Path, uid: int):
+    library = directory / "lib"
+    physical_parents(library, uid)
+    for name in ("chess_xpra_runtime.py", "chess_x11_runtime.py"):
+        path = library / name
+        info = path.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == uid
+                and not info.st_mode & 0o022,
+                "runtime owner must be an installed file owned by the current user")
+    spec = importlib.util.spec_from_file_location("laplace_private_xpra_runtime",
+                                                  library / "chess_xpra_runtime.py")
+    require(spec is not None and spec.loader is not None, "runtime owner cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    sys.dont_write_bytecode = True
+    spec.loader.exec_module(module)
+    return module
+
+
+def environment(home: Path, user_runtime: Path, session_runtime: Path, base: dict) -> dict:
+    env = dict(base)
+    for name in tuple(env):
+        if name.startswith("XPRA_"):
+            del env[name]
+    for name in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"):
+        env.pop(name, None)
+    env.update(HOME=str(home), XDG_RUNTIME_DIR=str(user_runtime),
+               DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(user_runtime / "bus"),
+               XPRA_SESSION_DIR=str(session_runtime), XPRA_PRIVATE_XAUTH="1",
+               QT_QPA_PLATFORM="xcb", PYTHONDONTWRITEBYTECODE="1")
+    for name in CONF_ENV:
+        env[name] = ""
+    return env
+
+
+def session_command(home: Path, selected: dict, config: dict) -> list[str]:
+    tools = selected["tools"]
+    require(tools.get("python") == "/usr/bin/python3", "unexpected Xpra Python interpreter")
+    xvfb = Path(tools["Xvfb"])
+    require(xvfb.is_absolute(), "selected Xvfb path must be absolute")
+    xvfb_arguments = [str(xvfb), "-screen", "0", "1920x1080x24"]
+    for extension in ("GLX", "RANDR", "RENDER", "Composite"):
+        xvfb_arguments += ["+extension", extension]
+    xvfb_arguments += ["-extension", "DOUBLE-BUFFER", "-nolisten", "tcp",
+                       "-noreset", "-auth", "$XAUTHORITY"]
+    command = [
+        tools["python"], tools["xpra"], "seamless", DISPLAY,
+        "--daemon=no", "--systemd-run=no", "--start-via-proxy=no",
+        "--backend=x11", "--session-name=Laplace CuteChess",
+        "--xvfb=" + shlex.join(xvfb_arguments),
+        "--socket-dir=" + str(home / ".xpra"),
+        "--socket-dirs=" + str(home / ".xpra"),
+        "--socket-permissions=600", "--bind=auto",
+        "--html=no", "--mdns=no", "--start-new-commands=no",
+        "--exit-with-client=no", "--exit-with-children=yes",
+        "--terminate-children=yes", "--pulseaudio=no",
+        "--speaker=no", "--microphone=no", "--webcam=no",
+        "--printing=no", "--file-transfer=no", "--open-files=no",
+        "--open-url=no", "--forward-xdg-open=no", "--mmap=no",
+        "--start-child=" + str(LAUNCHER),
+    ]
+    if config["transport"] == "loopback-password":
+        command.append("--bind-tcp=127.0.0.1:14501,auth=file(filename="
+                       + config["password_file"] + ")")
+    return command
+
+
+def main() -> None:
+    uid = os.getuid()
+    require(uid != 0 and os.geteuid() == uid, "session requires the current unprivileged user")
+    account = pwd.getpwuid(uid)
+    home = Path(account.pw_dir)
+    require(home.is_absolute(), "current user home must be absolute")
+    physical_parents(home, uid)
+    user_runtime = Path("/run/user") / str(uid)
+    session_runtime = user_runtime / "laplace-cutechess"
+    private_directory(user_runtime, uid)
+    private_directory(session_runtime, uid)
+    private_directory(home / ".xpra", uid, create=True)
+    config = configuration(home, uid)
+    directory = Path(__file__).absolute().parent
+    owner = load_owner(directory, uid)
+    selected = owner.load(RUNTIME_ROOT)
+    require(selected is not None, "authenticated Xpra runtime must be selected first")
+    launcher_info = LAUNCHER.lstat()
+    require(stat.S_ISREG(launcher_info.st_mode) and launcher_info.st_uid in (0, uid)
+            and not launcher_info.st_mode & 0o022 and os.access(LAUNCHER, os.X_OK),
+            "verified CuteChess launcher is unavailable")
+    env = environment(home, user_runtime, session_runtime, os.environ)
+    env = owner.selected_environment(selected, env)
+    command = session_command(home, selected, config)
+    os.umask(0o077)
+    os.chdir(home)
+    os.execve(command[0], command, env)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        # Decoder/import errors can include source bytes. Keep configuration and
+        # credential contents out of the journal even when input is malformed.
+        print("CuteChess user session refused: " + type(error).__name__, file=sys.stderr)
+        raise SystemExit(1)
