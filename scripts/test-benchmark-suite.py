@@ -209,6 +209,10 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual("scripts/benchmark-evidence-ci.sh", contract["workflow_driver"])
         self.assertTrue(contract["host_ownership"]["preserve_every_dispatch"])
         self.assertIsNone(contract["host_ownership"]["github_actions_concurrency_group"])
+        self.assertEqual("core-dag-scale", contract["scaling"]["single_dag_profile"])
+        self.assertTrue(contract["scaling"]["single_dag_fixed_work"])
+        self.assertTrue(contract["scaling"]["single_dag_require_complete_tree_parity"])
+        self.assertFalse(contract["scaling"]["replicated_streams_are_single_dag_proof"])
 
     def test_workflow_requires_explicit_saturation_and_records_scale_plan(self):
         workflow = (ROOT / ".github/workflows/benchmark-evidence.yml").read_text(encoding="utf-8")
@@ -221,6 +225,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn("--reserve-logical", driver)
         self.assertIn("--allow-saturation", driver)
         self.assertIn("resolved_workers_csv", driver)
+        self.assertIn('"$SUITE" == dag', driver)
 
     def test_workflow_driver_binds_built_core_t0_and_execution_identity(self):
         text = (ROOT / "scripts/benchmark-evidence-ci.sh").read_text(encoding="utf-8")
