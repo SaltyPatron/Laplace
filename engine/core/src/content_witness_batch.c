@@ -145,16 +145,19 @@ static int should_emit_compositional(const tier_tree_t* tree, uint32_t idx) {
 
 
 
-static int content_tree_build_mode(const uint8_t* utf8, size_t len,
-                                   int source_representation, tier_tree_t** out_tree) {
+static int content_tree_build_mode_workers(const uint8_t* utf8, size_t len,
+                                           int source_representation,
+                                           size_t worker_count,
+                                           tier_tree_t** out_tree) {
     if (len == 0) return -4;                          /* empty input */
+    if (worker_count == 0) return -1;
     if (!codepoint_table_is_loaded()) return -3;       /* perfcache not loaded */
 
     tier_tree_t* tree = NULL;
     if ((source_representation
             ? laplace_text_decomposer_run_source(utf8, len, &tree)
             : laplace_text_decomposer_run(utf8, len, &tree)) != 0 || !tree) return -5;
-    if (hash_composer_run(tree, codepoint_resolver, NULL) != 0) {
+    if (hash_composer_run_workers(tree, codepoint_resolver, NULL, worker_count) != 0) {
         tier_tree_free(tree);
         return -6;                                     /* hash-composer failure */
     }
@@ -166,8 +169,18 @@ static int content_tree_build_mode(const uint8_t* utf8, size_t len,
     return 0;
 }
 
+static int content_tree_build_mode(const uint8_t* utf8, size_t len,
+                                   int source_representation, tier_tree_t** out_tree) {
+    return content_tree_build_mode_workers(utf8, len, source_representation, 1, out_tree);
+}
+
+static int content_tree_build_workers(const uint8_t* utf8, size_t len,
+                                      size_t worker_count, tier_tree_t** out_tree) {
+    return content_tree_build_mode_workers(utf8, len, 0, worker_count, out_tree);
+}
+
 static int content_tree_build(const uint8_t* utf8, size_t len, tier_tree_t** out_tree) {
-    return content_tree_build_mode(utf8, len, 0, out_tree);
+    return content_tree_build_workers(utf8, len, 1, out_tree);
 }
 
 int laplace_content_tree_build_public(
@@ -467,12 +480,20 @@ static int emit_node(
     return 0;
 }
 
+int content_witness_tree_build_workers(
+    const uint8_t* utf8,
+    size_t         len,
+    size_t         worker_count,
+    tier_tree_t**  out_tree) {
+    if (!utf8 || !out_tree || worker_count == 0) return -1;
+    return content_tree_build_workers(utf8, len, worker_count, out_tree);
+}
+
 int content_witness_tree_build(
     const uint8_t* utf8,
     size_t         len,
     tier_tree_t**  out_tree) {
-    if (!utf8 || !out_tree) return -1;
-    return content_tree_build(utf8, len, out_tree);
+    return content_witness_tree_build_workers(utf8, len, 1, out_tree);
 }
 
 int content_witness_source_tree_build(
@@ -561,17 +582,18 @@ done:
     return rc;
 }
 
-int content_witness_batch_add(
+int content_witness_batch_add_workers(
     intent_stage_t*  stage,
     const uint8_t*   utf8,
     size_t           len,
     const hash128_t* source_id,
+    size_t           worker_count,
     hash128_t*       out_root_id) {
-    if (!stage || !utf8 || !source_id || !out_root_id) return -1;
+    if (!stage || !utf8 || !source_id || !out_root_id || worker_count == 0) return -1;
 
     tier_tree_t* tree = NULL;
     {
-        int rc = content_tree_build(utf8, len, &tree);
+        int rc = content_tree_build_workers(utf8, len, worker_count, &tree);
         if (rc != 0) {
             hash128_zero(out_root_id);
             return rc;
@@ -581,4 +603,14 @@ int content_witness_batch_add(
     int rc = content_witness_emit_tree(stage, tree, source_id, NULL, 0, out_root_id);
     tier_tree_free(tree);
     return rc;
+}
+
+int content_witness_batch_add(
+    intent_stage_t*  stage,
+    const uint8_t*   utf8,
+    size_t           len,
+    const hash128_t* source_id,
+    hash128_t*       out_root_id) {
+    return content_witness_batch_add_workers(
+        stage, utf8, len, source_id, 1, out_root_id);
 }
