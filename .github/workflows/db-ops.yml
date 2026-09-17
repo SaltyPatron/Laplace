@@ -74,6 +74,7 @@ jobs:
           # deploy, corpus restore, or release-qualification ceremony.
           export LAPLACE_SETUP_USE_CMAKE=false
           export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
+          export LAPLACE_DB_HEALTH_SCOPE=installed
           source scripts/ci-environment.sh
 
           if [[ "$LAPLACE_DB_OPERATION" == recreate ]]; then
@@ -87,7 +88,7 @@ jobs:
           fi
 
           health() {
-            bash scripts/check-database-health.sh --installed-runtime "$PGDATABASE"
+            bash scripts/check-database-health.sh "$PGDATABASE"
           }
 
           reindex_invalid() {
