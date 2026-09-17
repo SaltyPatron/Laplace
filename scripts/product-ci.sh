@@ -5,9 +5,44 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  provision|reconcile|check|build|install|applications|deploy|proof|release-candidate|release-activation|proof-model|mainline|test-dev|test-db|test-live) ;;
+  provision|reconcile|check|build|install|applications|deploy|proof|release-candidate|release-activation|proof-model|proof-transaction|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
+
+revision_scope_active=0
+
+restore_revision_scoped_build() {
+  local rc=$?
+  trap - EXIT
+  if [[ "$revision_scope_active" == 1 ]]; then
+    unset LAPLACE_BUILD_KEY LAPLACE_BUILD_ROOT LAPLACE_ENGINE_BUILD
+    if ! python3 scripts/place-build-directory.py "$ROOT" >/dev/null; then
+      echo "::error::failed to restore default persistent build placement" >&2
+      [[ "$rc" != 0 ]] || rc=1
+    fi
+  fi
+  exit "$rc"
+}
+
+prepare_revision_scoped_build() {
+  [[ "${LAPLACE_CI_REVISION_SCOPED_BUILD:-0}" == 1 ]] || return 0
+  case "$stage" in
+    mainline|check|provision|reconcile) return 0 ;;
+  esac
+
+  local revision candidate_root
+  revision="$(git rev-parse HEAD)"
+  candidate_root="${LAPLACE_CANDIDATE_ROOT:-${LAPLACE_WORK_ROOT:-/build/laplace/work}/candidates}"
+  mkdir -p "$candidate_root/$revision"
+  export LAPLACE_BUILD_KEY="$revision"
+  export LAPLACE_BUILD_ROOT="$candidate_root/$revision"
+  python3 scripts/place-build-directory.py "$ROOT" >/dev/null
+  export LAPLACE_ENGINE_BUILD="$ROOT/build/engine"
+  revision_scope_active=1
+  trap restore_revision_scoped_build EXIT
+}
+
+prepare_revision_scoped_build
 
 check_deps() {
   bash scripts/ci-deps.sh --check-only
@@ -35,6 +70,7 @@ run_ci_contract_checks() {
   python3 scripts/test-seed-workflow-ownership.py
   python3 scripts/test-workflow-architecture.py
   python3 scripts/test-benchmark-suite.py
+  python3 scripts/test-build-placement.py
 }
 
 require_built_revision() {
@@ -157,15 +193,19 @@ run_mainline() {
 }
 
 run_release_candidate() {
+  # Immutable qualification only. Shared installed/database state belongs to the
+  # activation transaction so another queued job cannot split one release.
   check_deps
   run_build
   run_dev_tests
-  run_install
-  run_database_maintenance --prepare
-  run_db_tests
 }
 
 run_release_activation() {
+  # One host reservation owns every shared-runtime mutation from installation
+  # through database qualification, publication and live verification.
+  run_install
+  run_database_maintenance --prepare
+  run_db_tests
   run_publish
   reconcile_installed_product
   run_live_tests
@@ -174,6 +214,18 @@ run_release_activation() {
 run_proof_model() {
   require_built_revision
   LAPLACE_MODEL_PROOF_CODE_CORPORA=1 bash scripts/model-synthesize-ci.sh
+}
+
+run_proof_transaction() {
+  # Competitive proof mutates the canonical substrate, so it belongs inside the
+  # same shared-runtime transaction as install, publication and live verification.
+  run_install
+  run_database_maintenance --prepare
+  run_db_tests
+  run_proof_model
+  run_publish
+  reconcile_installed_product
+  run_live_tests
 }
 
 run_deploy() {
@@ -185,10 +237,10 @@ run_deploy() {
 }
 
 run_proof() {
-  # Local convenience composition; CI uses the three modular stages directly.
+  # Local convenience composition mirrors CI's immutable-candidate / mutable-
+  # transaction boundary.
   run_release_candidate
-  run_proof_model
-  run_release_activation
+  run_proof_transaction
 }
 
 case "$stage" in
@@ -231,6 +283,9 @@ case "$stage" in
     ;;
   proof-model)
     run_proof_model
+    ;;
+  proof-transaction)
+    run_proof_transaction
     ;;
   deploy)
     run_deploy
