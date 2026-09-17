@@ -1,4 +1,4 @@
-name: Qualify PostgreSQL mapped native activation
+name: Qualify recovery native operator and restart failure propagation
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -22,7 +22,8 @@ jobs:
           root=pathlib.Path("qualification")
           files={"scripts/check-application-runtime.py":"3a21d103a3d9c09fe38754c8449d2769823d941a",
                  "scripts/test-application-runtime.py":"1f8c75d574cd3ca38dec36c90478a43db7498e24",
-                 "scripts/pipeline.sh":"1e7b3cfa1d58813458f19c97c11bb336fd6b24fb"}
+                 "scripts/pipeline.sh":"39d81ee6c9015e0a96fd90057ce35b831e557f39",
+                 "native-operator.yml":"7abb236299b0baa9b14e4cb8949485bd1bad8709"}
           for path,sha in files.items():
               req=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
               with urllib.request.urlopen(req,timeout=30) as response:item=json.load(response)
@@ -30,15 +31,32 @@ jobs:
               assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
               p=root/path;p.write_bytes(raw)
               if p.suffix==".py":ast.parse(raw)
-              else:subprocess.run(["bash","-n",p],check=True)
+              elif p.suffix==".sh":subprocess.run(["bash","-n",p],check=True)
               print("AUTHENTICATED "+path+" "+sha,flush=True)
           source=(root/"scripts/pipeline.sh").read_text()
           bodies=re.findall(r"<<'PY'\n(.*?)\nPY",source,re.S)
           for body in bodies:ast.parse(body)
           assert len(bodies)==1
-          subprocess.run(["python3",root/"scripts/test-application-runtime.py"],check=True)
+          import textwrap,yaml
+          document=yaml.safe_load((root/"native-operator.yml").read_text())
+          outer=inner=python=0
+          for job in document["jobs"].values():
+              for step in job.get("steps",[]):
+                  run=step.get("run")
+                  if run is None:continue
+                  outer+=1
+                  subprocess.run(["bash","-n"],input=run,text=True,check=True)
+                  for name,body in re.findall(r"<<'([A-Z_]+)'[^\\n]*\\n(.*?)^\\1$",run,re.M|re.S):
+                      if name=="PY":
+                          ast.parse(body);python+=1
+                      else:
+                          subprocess.run(["bash","-n"],input=body,text=True,check=True);inner+=1
+                          for child in re.findall(r"<<'PY'[^\\n]*\\n(.*?)^PY$",body,re.M|re.S):
+                              ast.parse(child);python+=1
+          assert (outer,inner,python)==(5,2,11),(outer,inner,python)
+          print("NATIVE_OPERATOR_SYNTAX_PASS "+json.dumps({"outerBash":outer,"innerBash":inner,"python":python}),flush=True)
           body=re.search(r"^phase_activate_postgres\(\) \{\n.*?^\}",source,re.M|re.S).group(0)
-          for case,expected,restarts in (("current",0,0),("stale",0,1),("still-stale",1,1),("read-error",2,0)):
+          for case,expected,restarts in (("current",0,0),("stale",0,1),("still-stale",1,1),("read-error",2,0),("restart-error",7,1)):
               script=body+r'''
           calls=0
           state=stale
@@ -50,6 +68,7 @@ jobs:
           }
           restart_postgres() {
             calls=$((calls+1))
+            [[ "$CASE" != restart-error ]] || return 7
             [[ "$CASE" == still-stale ]] || state=current
             return 0
           }
@@ -68,34 +87,3 @@ jobs:
           path: qualification/
           retention-days: 30
           if-no-files-found: error
-  actual-mappings:
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 5
-    steps:
-      - name: Read actual backend through the new canonical mapping guard
-        run: |
-          python3 - <<'PY'
-          import base64,hashlib,importlib.util,json,os,pathlib,urllib.request
-          root=pathlib.Path("/build/laplace/recovery/mapped-native-guard")/(os.environ["GITHUB_RUN_ID"]+"-"+os.environ["GITHUB_RUN_ATTEMPT"])
-          root.mkdir(parents=True,mode=0o700)
-          sha="3a21d103a3d9c09fe38754c8449d2769823d941a"
-          req=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
-          with urllib.request.urlopen(req,timeout=30) as response:item=json.load(response)
-          raw=base64.b64decode(item["content"])
-          assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
-          path=root/"guard.py";path.write_bytes(raw)
-          spec=importlib.util.spec_from_file_location("selected_mapping_guard",path)
-          guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
-          prefix=pathlib.Path("/opt/laplace")
-          selected={relative:None for relative in guard.MODULES.values()}
-          manifest=prefix/"share/postgresql/18/extension/laplace_execution_module.txt"
-          if manifest.is_file():
-              name=manifest.read_text().strip()
-              assert __import__("re").fullmatch("laplace_execution_[0-9a-f]{16}",name)
-              selected["lib/postgresql/18/"+name+".so"]=None
-          database=guard.read_database(pathlib.Path("/opt/laplace/pgsql-18"))
-          mapped=guard.mapped_native_identities(prefix,database,selected)
-          result={"guardBlob":sha,"nativeMappings":mapped,"database":database["database"],"serverVersion":database["server_version"],"postmasterStarted":database["postmaster_started"],"readOnly":True}
-          (root/"receipt.json").write_text(json.dumps(result,sort_keys=True)+"\n")
-          print("ACTUAL_BACKEND_MAPPINGS_PASS "+json.dumps(result,sort_keys=True),flush=True)
-          PY
