@@ -21,10 +21,19 @@ BEGIN ATOMIC
           ON c.subject_id = r.id
          AND c.type_id = laplace.relation_type_id('ENCODES')
         GROUP BY r.id, r.first_observed_by
+    ), numbered AS MATERIALIZED (
+        SELECT e.*,
+               row_number() OVER (ORDER BY e.id) AS rn
+        FROM encoded e
+        WHERE e.content_id IS NOT NULL
+    ), rendered AS MATERIALIZED (
+        SELECT realize.render_text_batch(array_agg(n.content_id ORDER BY n.rn), 16) AS bodies
+        FROM numbered n
     )
-    SELECT id,
-           realize.render_text_fast(content_id, 16),
-           first_observed_by
-    FROM encoded
-    WHERE content_id IS NOT NULL;
+    SELECT n.id,
+           r.bodies[n.rn],
+           n.first_observed_by
+    FROM numbered n
+    CROSS JOIN rendered r
+    ORDER BY n.rn;
 END;
