@@ -179,7 +179,7 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         (self.seed / "scripts/ci-environment.sh").write_text(
             ownership
             + '[[ "$LAPLACE_SETUP_USE_CMAKE" == false ]] || exit 95\n'
-            + '[[ "$LAPLACE_SETUP_REQUIRE_BUILT_REVISION" == true ]] || exit 96\n'
+            + '[[ "$LAPLACE_SETUP_REQUIRE_BUILT_REVISION" == false ]] || exit 96\n'
             + '[[ ! -v CHECKOUT_TOKEN && ! -v checkout_auth ]] || exit 94\n'
             + 'printf "environment\\n" >> "$TEST_EVENTS"\n')
         for name, label in (
@@ -191,6 +191,15 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
                 + 'event="' + label + ':$*"\n'
                 + 'printf "%s\\n" "$event" >> "$TEST_EVENTS"\n'
                 + '[[ "$event" != "$TEST_FAIL_EVENT" ]] || exit 23\n')
+        (self.seed / "scripts/check-installed-extension-current.py").write_text(
+            '#!/usr/bin/env python3\n'
+            'import os, pathlib, subprocess, sys\n'
+            'root = pathlib.Path.cwd()\n'
+            'head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()\n'
+            'if head != os.environ["TARGET_SHA"]:\n'
+            '    raise SystemExit(98)\n'
+            'with open(os.environ["TEST_EVENTS"], "a", encoding="utf-8") as stream:\n'
+            '    stream.write("artifact-proof\\n")\n')
 
     def setUp(self):
         super().setUp()
@@ -236,11 +245,11 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         pipeline = "pipeline:sync-extension tune-pg tune-laplace perfcache-guc api-env"
         cases = (
             ("status", ["migration:status"]),
-            ("create", ["migration:up", pipeline, "health:fixture_database"]),
+            ("create", ["artifact-proof", "migration:up", pipeline, "health:fixture_database"]),
             ("drop", ["migration:nuke --yes"]),
-            ("recreate", ["migration:nuke --yes", "migration:up", pipeline,
+            ("recreate", ["artifact-proof", "migration:nuke --yes", "migration:up", pipeline,
                            "health:fixture_database"]),
-            ("update", ["maintenance:"]),
+            ("update", ["artifact-proof", "maintenance:"]),
             ("verify", ["health:fixture_database"]),
         )
         for operation, expected in cases:
@@ -321,7 +330,7 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         result = self.execute_database("recreate")
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
         self.assertEqual(self.events.read_text().splitlines(),
-                         ["environment", "migration:nuke --yes", "migration:up"])
+                         ["environment", "artifact-proof", "migration:nuke --yes", "migration:up"])
 
     def test_seed_and_unknown_operations_never_start_database_work(self):
         for operation in ("seed", "unknown"):
@@ -339,7 +348,7 @@ class IntegratedLifecycle(unittest.TestCase):
         owner = source[start:finish]
         names = ("check_deps", "run_build", "run_dev_tests", "run_install",
                  "run_database_maintenance", "run_db_tests", "run_publish",
-                 "reconcile_installed_product", "run_live_tests")
+                 "reconcile_installed_product", "run_live_tests", "run_competitive_model_proof")
         with tempfile.TemporaryDirectory(prefix="laplace-lifecycle-order-") as directory:
             events = Path(directory) / "events"
             functions = []
@@ -359,7 +368,7 @@ class IntegratedLifecycle(unittest.TestCase):
     def expected_lifecycle():
         return ["check_deps", "run_build", "run_dev_tests", "run_install",
                 "run_database_maintenance:--prepare", "run_db_tests", "run_publish",
-                "reconcile_installed_product", "run_live_tests"]
+                "reconcile_installed_product", "run_live_tests", "run_competitive_model_proof"]
 
     def test_failed_dev_controls_preserve_failure_after_complete_product_lifecycle(self):
         result, events = self.execute(23)
@@ -370,7 +379,8 @@ class IntegratedLifecycle(unittest.TestCase):
     def test_build_and_runtime_failures_stop_before_later_phases(self):
         order = self.expected_lifecycle()
         for phase in ("run_build", "run_install", "run_database_maintenance", "run_db_tests",
-                      "run_publish", "reconcile_installed_product", "run_live_tests"):
+                      "run_publish", "reconcile_installed_product", "run_live_tests",
+                      "run_competitive_model_proof"):
             with self.subTest(phase=phase):
                 result, events = self.execute(23, phase)
                 self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
@@ -400,7 +410,7 @@ class IntegratedLifecycle(unittest.TestCase):
                 "scripts/test-parallel.sh --profile dev-managed --suite uci-dev",
                 "scripts/test-parallel.sh --profile dev-managed --suite browser-dev"])
 
-    def test_product_lifecycle_reaches_database_and_live_product_checks(self):
+    def test_product_lifecycle_reaches_database_live_and_competitive_product_checks(self):
         result, events = self.execute(0)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(events, self.expected_lifecycle())
