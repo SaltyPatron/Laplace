@@ -24,7 +24,7 @@ Benchmark meaning and receipts live in versioned source:
 | `quick` | `core-single`, `moby-roundtrip` | conservative core floor + bit-perfect realization proof |
 | `throughput` | `core-single`, `core-scale-streams` | one-worker floor + aggregate serviceable stream scaling |
 | `core` | `core-single` | one-worker native composition |
-| `scale` | `core-scale-streams` | aggregate independent-stream scaling |
+| `scale` | `core-dag-scale`, `core-scale-streams` | fixed-work single-DAG scaling + aggregate independent-stream scaling |
 | `moby` | `moby-roundtrip` | bit-perfect Moby Dick engine roundtrip |
 | `query` | `query-forward` | exact-installed-runtime canonical forward-program work receipts |
 | `all` | source/core profiles except `query-forward` | composition/scaling/roundtrip evidence without mutating or requiring installation |
@@ -124,7 +124,7 @@ Reducing that run to `440.4k tokens/s` hides the fact that the same measured int
 
 `core-scale` measures one finite corpus partitioned at whole-file grain. It exposes coarse scheduler/makespan behavior; it is not a whole-machine ceiling and not proof that one semantic DAG uses several workers.
 
-`core-scale-streams` gives each worker one complete real-corpus stream, so measured work grows with worker count. It measures aggregate concurrent composition capacity. It likewise does not prove single-object internal parallelism; #1451 owns that missing proof.
+`core-scale-streams` gives each worker one complete real-corpus stream, so measured work grows with worker count. It measures aggregate concurrent composition capacity and still does not prove single-object internal parallelism. `core-dag-scale` owns that stronger proof: one exact semantic object, explicit native dependency-frontier worker grants, fixed semantic work, and complete-tree fingerprint parity against the scalar oracle before any speedup is accepted.
 
 See `docs/benchmarks/SCALING_MODES.md` for the distinction.
 
