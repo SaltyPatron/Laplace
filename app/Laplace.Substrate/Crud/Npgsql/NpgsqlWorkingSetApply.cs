@@ -718,10 +718,9 @@ public sealed partial class NpgsqlSubstrateWriter
             // Empty-relation probe skip (under the apply advisory lock only).
             // If the whole phys|att heap has zero rows, every staged id for
             // that keyspace is absent — the bitmap probe would return an
-            // all-zero mask after paying full chunk round-trips. Entity tier
-            // emptiness is resolved by the bounded smaller-side verifier below;
-            // a separate EXISTS roster caused PostgreSQL to aggregate every
-            // entity partition once per apply on large targets.
+            // all-zero mask after paying full chunk round-trips. Canonical entity
+            // presence is id-only/HASH(id), so it goes directly through the
+            // content-id bitmap rather than a tier census or inversion.
             //
             // These probes do not run on the control transaction: pooled connections
             // release their AccessShare locks as soon as each probe completes while
@@ -757,8 +756,8 @@ public sealed partial class NpgsqlSubstrateWriter
             }
 
             // I/O locality — the load-bearing fix for large-DB probes. The native existence
-            // bitmaps do keyed lookups into the PARTITIONED tables (entities LIST(tier),
-            // physicalities HASH(id), attestations LIST(type_id)->HASH(subject)). Probing
+            // bitmaps read partitioned storage (entities HASH(id), physicalities HASH(id),
+            // attestations LIST(type_id)->HASH(subject)). Probing
             // in staged (content-hash-random) order scatters each 131k chunk across every
             // partition leaf and heap page — fine while the table fits cache, catastrophic once
             // it doesn't (MEASURED on Wiktionary: a single verify grew to 37-53 min of cache-cold
@@ -889,7 +888,7 @@ public sealed partial class NpgsqlSubstrateWriter
             // persisted, so cache-miss ⇒ novel stops being provable).
             _log.LogInformation(
                 "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
-                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {PEmpty:N0}p/{AEmpty:N0}a empty-relation, {EInv:N0}e smaller-side invert, {AStruct:N0}a novel-by-construction; "
+                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {PEmpty:N0}p/{AEmpty:N0}a empty-relation, {EInv:N0}e retired-tier-invert, {AStruct:N0}a novel-by-construction; "
                 + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a; "
                 + "epoch foreign-delta {EpochForeignDelta}, presence-cache-overflow {PresenceCacheOverflow})",
                 probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIdsUse.Count, phaseSw.ElapsedMilliseconds,
@@ -901,13 +900,11 @@ public sealed partial class NpgsqlSubstrateWriter
 
             using var filteringDiagnostic = MeasureApplyPhase("copy-survivor-selection");
 
-            // Entities: first occurrence of each id, minus stored rows.
-            // Kept rows carry their id so parallel COPY groups can own
-            // DISJOINT btree key ranges — content-addressed ids are
-            // uniformly random, and un-partitioned parallel inserts
-            // measured as LWLock:BufferContent pile-ups on shared index
-            // pages. Range-partitioned sorted groups fill leaves like a
-            // parallel bulk index build instead.
+            // Entities: one deterministic compatibility representative per
+            // canonical id, minus stored rows. Interpretations were published
+            // separately above. Kept rows carry content ids so parallel COPY
+            // groups stay uniform over HASH(id), while sorted ids walk each
+            // bucket's PK leaves forward.
             List<KeptRow> keptEnts;
             byte[][]? prebuiltEntPayloads = null;
             int[]? prebuiltEntRowsByLane = null;
