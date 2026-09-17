@@ -57,9 +57,6 @@ run_build() {
 
 run_dev_tests() {
   require_built_revision
-  # Run every development suite so one early failure does not hide another.
-  # The aggregate failure is still a hard pre-deployment gate: run_deploy never
-  # mutates the installed product after this function returns non-zero.
   local rc=0
   bash scripts/test-parallel.sh --profile dev-native --suite native-dev || rc=$?
   bash scripts/test-parallel.sh --profile dev-managed --suite managed-dev || rc=$?
@@ -77,8 +74,6 @@ run_database_maintenance() {
   bash scripts/maintain-installed-database.sh "$@"
 }
 
-# Database QA includes isolated regression databases and installed-runtime checks;
-# it does not own corpus ingestion or the canonical application database contents.
 run_db_tests() {
   require_built_revision
   bash scripts/test-parallel.sh --profile db --suite db-health
@@ -88,9 +83,6 @@ run_db_tests() {
 }
 
 run_publish() {
-  # Recovery belongs to the prior publication transaction and must remain possible
-  # even when the checkout has advanced. New publication may only consume artifacts
-  # produced by this checkout.
   bash scripts/publish-applications.sh recover
   require_built_revision
   bash scripts/publish-applications.sh deploy
@@ -136,8 +128,6 @@ check_t0_perfcache_runtime() {
 
 reconcile_installed_product() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
-  # Installed product reconciliation is deliberately seed-independent. Corpus
-  # admission remains a separate seed workflow and cannot be required to deploy code.
   bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
   check_application_live
@@ -145,16 +135,14 @@ reconcile_installed_product() {
   python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
 }
 
-# Product lifecycle owns build/install/database verification/publication/live checks.
-# Full corpus admission and competitive model proof belong to Seed-models, which
-# invokes model-synthesize-ci.sh under the shared host reservation. Missing model
-# inputs must not interrupt a code cutover before matching managed applications
-# are published. Existing database and live acceptance still run.
+run_mainline() {
+  check_deps
+  run_build
+  run_dev_tests
+}
+
 run_deploy() {
   check_deps
-  # The real script always defines this owner. The lifecycle-order fixture extracts
-  # run_deploy() alone and stubs mutation owners, so preserve that narrow fixture
-  # without weakening mainline: in production the function is present and runs.
   declare -F run_ci_contract_checks >/dev/null && run_ci_contract_checks
   run_build
   run_dev_tests
@@ -195,7 +183,10 @@ case "$stage" in
   test-live)
     run_live_tests
     ;;
-  deploy|mainline)
+  mainline)
+    run_mainline
+    ;;
+  deploy)
     run_deploy
     ;;
 esac
