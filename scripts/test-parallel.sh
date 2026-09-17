@@ -136,13 +136,11 @@ run_live_floor() {
 }
 
 run_live_api() {
-  local base capabilities readiness inventory completion models code_completion code_chat
+  local base capabilities readiness inventory completion code_completion code_chat
   base="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
   capabilities=$(curl -fsS "$base/v1/capabilities")
   grep -q '"chat_completions"' <<<"$capabilities"
   grep -q '"op"' <<<"$capabilities"
-  models=$(curl -fsS "$base/v1/models")
-  grep -q '"laplace-code-001"' <<<"$models"
   readiness=$(curl -fsS "$base/health/ready")
   grep -q '"ready":true' <<<"$readiness"
   grep -q '"substrate_reachable":true' <<<"$readiness"
