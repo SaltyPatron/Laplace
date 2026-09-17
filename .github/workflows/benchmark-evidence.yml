@@ -46,7 +46,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: laplace-shared-workspace
+  group: laplace-host-lifecycle
+  queue: max
   cancel-in-progress: false
 
 env:
@@ -71,19 +72,40 @@ jobs:
           mkdir -p "$receipt"
           printf 'LAPLACE_BENCH_RECEIPT=%s\n' "$receipt" >> "$GITHUB_ENV"
 
-      - name: Resolve and checkout exact revision
+      - name: Resolve and checkout exact revision without destroying retained workspace state
         shell: bash
         env:
           DISPATCH_SHA: ${{ github.sha }}
           REQUESTED_REF: ${{ inputs.target_ref }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           target="${REQUESTED_REF:-}"
           [[ -n "$target" ]] || target="$DISPATCH_SHA"
           printf 'requested_ref=%s\n' "$target" > "$LAPLACE_BENCH_RECEIPT/request.env"
-          git fetch --no-tags --prune origin "$target"
+
+          cd "$GITHUB_WORKSPACE"
+          if [[ ! -e .git ]]; then
+            [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+              echo "::error::nonempty benchmark workspace has no repository; preserving its files" >&2
+              exit 1
+            }
+            git init --initial-branch=main
+            git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+            git fetch --no-tags --prune origin "$target"
+          unset checkout_auth CHECKOUT_TOKEN
           resolved="$(git rev-parse FETCH_HEAD)"
-          git checkout --force "$resolved"
+          git checkout --no-overwrite-ignore --detach "$resolved"
+          [[ "$(git rev-parse HEAD)" == "$resolved" ]]
+          git diff --quiet
+          git diff --cached --quiet
           printf 'LAPLACE_BENCH_SHA=%s\n' "$resolved" >> "$GITHUB_ENV"
           printf 'resolved_sha=%s\n' "$resolved" >> "$LAPLACE_BENCH_RECEIPT/request.env"
 
