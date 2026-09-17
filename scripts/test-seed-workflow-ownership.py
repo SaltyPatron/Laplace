@@ -91,11 +91,37 @@ class SeedHostOwnership(unittest.TestCase):
         for name in ("MODE", "SOURCE_KEY", "PATH_INPUT", "LANGS_INPUT", "EVICT_CONFIRM"):
             self.assertIn(f"{name}:", SEED)
 
-    def test_operator_wrappers_delegate_mutation_to_reusable_seed(self):
-        chess = (WORKFLOWS / "seed-chess.yml").read_text(encoding="utf-8")
-        foundation = (WORKFLOWS / "seed-foundation.yml").read_text(encoding="utf-8")
-        self.assertIn("uses: ./.github/workflows/seed.yml", chess)
-        self.assertIn("uses: ./.github/workflows/seed.yml", foundation)
+    def test_every_seed_wrapper_delegates_to_one_shared_mutation_owner(self):
+        direct = {
+            "seed-chess.yml",
+            "seed-code.yml",
+            "seed-documents.yml",
+            "seed-foundation.yml",
+            "seed-knowledge.yml",
+            "seed-models.yml",
+        }
+        chess_wrappers = {
+            "seed-chess-books.yml",
+            "seed-chess-eval.yml",
+            "seed-chess-games.yml",
+            "seed-chess-openings.yml",
+        }
+        actual = {p.name for p in WORKFLOWS.glob("seed-*.yml")}
+        self.assertEqual(direct | chess_wrappers, actual)
+
+        for name in direct:
+            with self.subTest(workflow=name):
+                text = (WORKFLOWS / name).read_text(encoding="utf-8")
+                self.assertIn("uses: ./.github/workflows/seed.yml", text)
+                self.assertNotIn("scripts/ingest-source.sh", text)
+                self.assertNotIn("scripts/measure-lane.sh", text)
+
+        for name in chess_wrappers:
+            with self.subTest(workflow=name):
+                text = (WORKFLOWS / name).read_text(encoding="utf-8")
+                self.assertIn("uses: ./.github/workflows/seed-chess.yml", text)
+                self.assertNotIn("scripts/ingest-source.sh", text)
+                self.assertNotIn("scripts/measure-lane.sh", text)
 
 
 if __name__ == "__main__":
