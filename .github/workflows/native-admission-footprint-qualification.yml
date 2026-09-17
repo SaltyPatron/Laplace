@@ -1,50 +1,47 @@
-name: Qualify persistent managed policy regressions
+name: Read exact managed publication failure and recovery state
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
 permissions:
   contents: read
 jobs:
-  source:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 8
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
-      PYTHONDONTWRITEBYTECODE: '1'
+  retained-managed-failure:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 5
     steps:
-      - name: Run the persistent seven policy controls
+      - name: Read failed phase and current service transaction state
         run: |
-          set -euo pipefail
-          sudo mkdir -p /build/laplace
-          sudo chown "$(id -u):$(id -g)" /build/laplace
-          export TMPDIR=/build/laplace/work/policy-regressions/tmp
-          export TMP="$TMPDIR" TEMP="$TMPDIR"
-          mkdir -p "$TMPDIR" /build/laplace/work/policy-regressions/evidence
-          python3 - <<'PY' 2>&1 | tee /build/laplace/work/policy-regressions/evidence/tests.log
-          import base64,hashlib,json,os,pathlib,subprocess,sys,urllib.request
-          root=pathlib.Path("/build/laplace/work/policy-regressions/source")
-          subprocess.run(["git","init","-q",root],check=True)
-          subprocess.run(["git","-C",root,"fetch","--depth=1","--no-tags",
-              "https://github.com/SaltyPatron/Laplace.git","a754665d33952a60e5aeecaee0e542d1d3824671"],check=True)
-          subprocess.run(["git","-C",root,"checkout","--detach","FETCH_HEAD"],check=True)
-          for name,sha in {"scripts/test-managed-policy.py":"1c03ea6c888a37c134adb3d79d4a5dcb44c9ec7a",
-              "scripts/fixtures/laplace-managed-deploy-legacy-scratch.py":"dfade6c9b72277ed4d95e64376d283a4aa8821d2"}.items():
-              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
-                  headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
-              with urllib.request.urlopen(request,timeout=30) as response:item=json.load(response)
-              raw=base64.b64decode(item["content"])
-              assert item["sha"]==sha and item["encoding"]=="base64" and len(raw)==item["size"]
-              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
-              target=root/name
-              target.parent.mkdir(parents=True,exist_ok=True)
-              target.write_bytes(raw)
-          subprocess.run([sys.executable,root/"scripts/test-managed-policy.py"],check=True,cwd=root)
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re,subprocess
+          root=pathlib.Path("/build/laplace/recovery/chess-followthrough/35166221051-1")
+          receipt=root/"managed-before-gui/receipt.json"
+          raw=receipt.read_bytes();value=json.loads(raw)
+          print("MANAGED_FAILED_RECEIPT "+json.dumps(value,sort_keys=True),flush=True)
+          for phase in value.get("phases",[]):
+              if phase.get("status")!="failed":continue
+              name=phase["name"];assert re.fullmatch("[a-zA-Z0-9_-]+",name)
+              path=receipt.parent/(name+".log")
+              if not path.is_file():continue
+              data=path.read_bytes()
+              print("FAILED_PHASE_LOG "+json.dumps({"path":str(path),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()}),flush=True)
+              if len(data)>139264:print(data[:8192].decode("utf-8","replace")+"\n[bounded middle omitted]\n"+data[-131072:].decode("utf-8","replace"),flush=True)
+              else:print(data.decode("utf-8","replace"),flush=True)
+          source=pathlib.Path(value["source"].get("checkout","/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace"))
+          for path in [pathlib.Path("/var/lib/laplace-managed/transaction.json"),*[source/"build"/name for name in (".managed-publish-backup",".managed-publish-committed",".managed-publish-rolled-back",".application-publish-owner",".application-restore-pending",".api-publish-backup")]]:
+              row={"path":str(path),"exists":path.exists(),"symlink":path.is_symlink()}
+              if path.is_file():
+                  try:
+                      data=path.read_bytes();row.update(bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
+                      if len(data)<=65536:
+                          try:
+                              state=json.loads(data);row["jsonKeys"]=sorted(state) if isinstance(state,dict) else []
+                              row["state"]={k:state[k] for k in ("status","phase","stage","state","pid","source","release","previous_release","started","startedUtc") if isinstance(state,dict) and k in state}
+                          except ValueError:
+                              text=data.decode("utf-8","replace").strip()
+                              if "\n" not in text and text.startswith(("/opt/laplace/","/build/laplace/")):row["retainedPath"]=text
+                  except OSError as error:row["readError"]=type(error).__name__
+              print("PUBLICATION_RECOVERY_STATE "+json.dumps(row,sort_keys=True),flush=True)
+          for unit in ("laplace-api.service","laplace-mcp.service","laplace-lichess.service","laplace-postgresql.service"):
+              command=subprocess.run(["systemctl","show",unit,"--property=Id,ActiveState,SubState,MainPID,UnitFileState"],capture_output=True,text=True,timeout=10)
+              print("CURRENT_SERVICE "+json.dumps({"unit":unit,"exitCode":command.returncode,"properties":dict(line.split("=",1) for line in command.stdout.splitlines() if "=" in line)}),flush=True)
           PY
-      - name: Retain regression result
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: persistent-managed-policy-${{ github.run_id }}
-          path: /build/laplace/work/policy-regressions/evidence
-          if-no-files-found: error
-          retention-days: 30
