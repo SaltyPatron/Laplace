@@ -1,30 +1,41 @@
--- BEGIN ATOMIC: GH #764.
--- Planner-statistics form of ops.entity_type_counts(MCV x reltuples).
+-- BEGIN ATOMIC: GH #764/#1008.
+-- Planner-statistics form of ops.entity_type_counts over the authoritative
+-- interpretation leaves. Each HASH(entity_id) leaf contributes its type-id MCV
+-- frequencies weighted by that leaf's reltuples estimate.
 DROP FUNCTION IF EXISTS laplace.entity_type_counts_approx();
 CREATE OR REPLACE FUNCTION ops.entity_type_counts_approx()
     RETURNS TABLE(type text, type_id bytea, entities_approx bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    WITH st AS (
-        SELECT s.most_common_vals::text::bytea[] AS vals,
-               s.most_common_freqs               AS freqs
+    WITH leaves AS MATERIALIZED (
+        SELECT c.relname, c.reltuples
+        FROM pg_inherits h
+        JOIN pg_class p ON p.oid = h.inhparent
+        JOIN pg_namespace pn ON pn.oid = p.relnamespace
+        JOIN pg_class c ON c.oid = h.inhrelid
+        WHERE pn.nspname = '@extschema@'
+          AND p.relname = 'entity_interpretations'
+    ), st AS MATERIALIZED (
+        SELECT s.tablename,
+               s.most_common_vals::text::bytea[] AS vals,
+               s.most_common_freqs AS freqs
         FROM pg_stats s
+        JOIN leaves l ON l.relname = s.tablename
         WHERE s.schemaname = '@extschema@'
-          AND s.tablename  = 'entities'
-          AND s.attname    = 'type_id'
-    ), rt AS (
-        SELECT c.reltuples
-        FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = '@extschema@' AND c.relname = 'entities'
-    )
-    , raw AS MATERIALIZED (
-      SELECT m.tid AS type_id, (m.freq * rt.reltuples)::bigint AS entities_approx
-      FROM st, rt, LATERAL unnest(st.vals, st.freqs) AS m(tid, freq)
+          AND s.attname = 'type_id'
+          AND s.most_common_vals IS NOT NULL
+    ), raw AS MATERIALIZED (
+        SELECT m.tid AS type_id,
+               sum(m.freq * l.reltuples)::bigint AS entities_approx
+        FROM st
+        JOIN leaves l ON l.relname = st.tablename
+        CROSS JOIN LATERAL unnest(st.vals, st.freqs) AS m(tid, freq)
+        GROUP BY m.tid
     ), numbered AS MATERIALIZED (
-      SELECT r.*, row_number() OVER (ORDER BY entities_approx DESC, type_id) AS rn FROM raw r
+        SELECT r.*, row_number() OVER (ORDER BY entities_approx DESC, type_id) AS rn
+        FROM raw r
     ), batch AS MATERIALIZED (
-      SELECT realize.render_batch(array_agg(type_id ORDER BY rn)) AS labels FROM numbered
+        SELECT realize.render_batch(array_agg(type_id ORDER BY rn)) AS labels FROM numbered
     )
     SELECT b.labels[n.rn], n.type_id, n.entities_approx
     FROM numbered n CROSS JOIN batch b ORDER BY n.rn;

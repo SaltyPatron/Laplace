@@ -6,62 +6,53 @@ CREATE OR REPLACE FUNCTION generation.foundry_vocab(
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
 
-    -- Pillar 5 (2026-07-20): seed frequency comes from the GEOMETRY, not from
-    -- PRECEDES out-degree. Identical shape to corpus_word_vocab, which is already the
-    -- geometry-native vocabulary source.
-    --
-    -- `d` is DOCUMENT frequency, not corpus frequency. This comment used to claim the
-    -- latter, and it cannot be: ids are content hashes, physicality identity is
-    -- (entity_id, type) with no laplace.source_id column, so a sentence occurring a million times
-    -- is ONE row with ONE trajectory. `d` counts the distinct compositions a word appears
-    -- in. True occurrence mass lives in testimony (laplace.attestations.observation_count folded
-    -- into consensus.witness_count), and the text lane deliberately emits none, so there
-    -- is nothing else to read -- this is the only frequency signal that exists. Rank
-    -- accordingly, and do not describe it as corpus frequency again.
-    --
-    -- Role by TYPE, not tier, throughout. `tier = 2` was never "word": bootstrap mints
-    -- relation types, trust classes, POS tags, sources and languages at tier 2 as well,
-    -- so the seed vocabulary was admitting them; and single-grapheme words collapse to
-    -- tier 0, so it dropped 'a' and 'I'. type_id is stamped at compose time and indexed.
+    -- Seed frequency comes from geometry. Structural role is an interpretation,
+    -- never a tier or the singular compatibility type on laplace.entities.
     WITH traj AS (
         SELECT w.id AS entity_id, w.trajectory
         FROM laplace.v_word_points w
-        WHERE w.type_id IN (realize.canonical_id('Sentence'), realize.canonical_id('Document'))
+        WHERE EXISTS (
+                  SELECT 1 FROM laplace.entity_interpretations i
+                  WHERE i.entity_id = w.id
+                    AND i.type_id IN (realize.canonical_id('Sentence'),
+                                      realize.canonical_id('Document')))
           AND w.trajectory IS NOT NULL
-        -- Optional input work budget is explicit. NULL means the complete corpus;
-        -- a caller asking for a sample owns and can report that truncation.
         ORDER BY w.id, w.physicality_id
         LIMIT p_trajs
     ),
     freq AS (
         SELECT tc.entity_id AS id, sum(GREATEST(tc.run_length, 1)) AS d
         FROM traj CROSS JOIN LATERAL laplace_trajectory_constituents(traj.trajectory) tc
-        JOIN laplace.entities ew ON ew.id = tc.entity_id AND ew.type_id = realize.canonical_id('Word')
+        WHERE EXISTS (
+            SELECT 1 FROM laplace.entity_interpretations wi
+            WHERE wi.entity_id = tc.entity_id
+              AND wi.type_id = realize.canonical_id('Word'))
         GROUP BY tc.entity_id
     ),
     seeds AS (
         SELECT f.id, f.d
-        FROM freq f JOIN laplace.entities e ON e.id = f.id AND e.type_id = realize.canonical_id('Word')
+        FROM freq f
+        WHERE EXISTS (
+            SELECT 1 FROM laplace.entity_interpretations i
+            WHERE i.entity_id = f.id
+              AND i.type_id = realize.canonical_id('Word'))
         ORDER BY f.d DESC LIMIT p_size
     ),
     closure AS (
         SELECT DISTINCT c.object_id AS id
         FROM laplace.consensus c
         JOIN seeds s ON s.id = c.subject_id
-        JOIN laplace.entities e ON e.id = c.object_id AND e.type_id = realize.canonical_id('Word')
         WHERE c.object_id IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM laplace.entity_interpretations i
+              WHERE i.entity_id = c.object_id
+                AND i.type_id = realize.canonical_id('Word'))
           AND c.type_id IN (
               laplace.relation_type_id('IS_A'), laplace.relation_type_id('IS_SYNONYM_OF'),
               laplace.relation_type_id('RELATED_TO'), laplace.relation_type_id('HAS_PART'),
               laplace.relation_type_id('DERIVATIONALLY_RELATED'), laplace.relation_type_id('IS_COORDINATE_TERM_WITH'))
     ),
     ids AS (SELECT id FROM seeds UNION SELECT id FROM closure),
-
-
-
-
-
-
     ranked AS MATERIALIZED (
         SELECT i.id, COALESCE(f.d, 0) AS d,
                row_number() OVER (ORDER BY COALESCE(f.d, 0) DESC, i.id) AS rn
@@ -75,8 +66,6 @@ BEGIN ATOMIC
         GROUP BY ((rn - 1) / GREATEST(p_size, 1))
     ),
     named AS (
-
-
         SELECT u.id, u.s, r.d
         FROM pages p
         CROSS JOIN LATERAL unnest(p.ids, realize.render_text_batch(p.ids))
@@ -93,6 +82,5 @@ BEGIN ATOMIC
     SELECT c.id, c.s, c.d
     FROM clean c
     ORDER BY c.d DESC, c.id
-    LIMIT GREATEST(p_size, 0)
-;
+    LIMIT GREATEST(p_size, 0);
 END;

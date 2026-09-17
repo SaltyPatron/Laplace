@@ -1,14 +1,6 @@
--- Ranked surface sample for a source×tier (GH #813). Census answers "how many";
--- this answers "what do they look like?" — observation_count from that source's
--- attestations (fold input), not LIMIT-without-ORDER over entities.
---
--- Filter at the requested source×tier grain BEFORE ranking. The former plan took
--- an invented max(limit×200, 4000) attestation head, then discarded subjects that
--- did not belong to the source/tier. Besides doing unrelated work, it could still
--- underfill whenever valid rows fell outside that guess. The source index drives the
--- evidence side and entity identity decides admission before the exact aggregate.
--- Labels still run once over the final caller-sized set.
--- BEGIN ATOMIC: GH #764 beachhead.
+-- Ranked surface sample for a source×tier (GH #813/#1008). Census answers
+-- "how many"; this answers "what do they look like?". Source/tier/type are
+-- structural interpretations; canonical entity identity is id-only.
 DROP FUNCTION IF EXISTS laplace.surface_sample(bytea, smallint, int);
 
 CREATE OR REPLACE FUNCTION ops.surface_sample(
@@ -23,22 +15,24 @@ CREATE OR REPLACE FUNCTION ops.surface_sample(
     LANGUAGE sql
     STABLE
 BEGIN ATOMIC
-    WITH kept AS (
+    WITH eligible AS MATERIALIZED (
+        SELECT DISTINCT i.entity_id, i.type_id
+        FROM laplace.entity_interpretations i
+        WHERE i.tier = p_tier
+          AND i.first_observed_by = p_source
+    ), kept AS (
         SELECT a.subject_id AS id,
                e.type_id,
                sum(a.observation_count)::bigint AS observations
         FROM laplace.attestations a
-        JOIN laplace.entities e
-          ON e.id = a.subject_id
-         AND e.tier = p_tier
-         AND e.first_observed_by = p_source
+        JOIN eligible e ON e.entity_id = a.subject_id
         WHERE a.source_id = p_source
           AND consensus.relation_canonical(a.subject_id) IS NULL
         GROUP BY a.subject_id, e.type_id
-        ORDER BY sum(a.observation_count) DESC, a.subject_id
+        ORDER BY sum(a.observation_count) DESC, a.subject_id, e.type_id
         LIMIT p_limit
     ), numbered AS (
-        SELECT k.*, row_number() OVER (ORDER BY k.observations DESC, k.id) AS ix
+        SELECT k.*, row_number() OVER (ORDER BY k.observations DESC, k.id, k.type_id) AS ix
         FROM kept k
     ),
     ids AS (
@@ -57,5 +51,5 @@ BEGIN ATOMIC
            COALESCE(NULLIF(lbl.l[k.ix * 2], ''), 'Unrealized type'),
            k.observations
     FROM numbered k CROSS JOIN lbl
-    ORDER BY k.observations DESC, k.id;
+    ORDER BY k.observations DESC, k.id, k.type_id;
 END;
