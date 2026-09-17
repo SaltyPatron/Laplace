@@ -66,6 +66,7 @@ run_native_dev() {
 
 run_managed_dev() {
   set_dev_perfcache
+  python3 scripts/test-managed-policy.py
   dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
     --filter 'Tier!=db&Tier!=live&Tier!=perf'
 }
