@@ -27,7 +27,7 @@ REQUIRED = ("Laplace.Endpoints.OpenAICompat.dll", "Laplace.Core.dll",
 MAPPED = REQUIRED[:4]
 UCI_REQUIRED = ("laplace-uci", "laplace-uci.dll", "laplace-uci.deps.json",
                 "laplace-uci.runtimeconfig.json", "Laplace.Core.dll", "Laplace.Chess.dll",
-                "Laplace.Engine.Core.dll", *REQUIRED[3:])
+                *REQUIRED[3:])
 
 
 def owner(name, filename):

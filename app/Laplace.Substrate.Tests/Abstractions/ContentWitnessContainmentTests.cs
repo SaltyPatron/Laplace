@@ -1,5 +1,6 @@
 using System.Text;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
 using Xunit;
 
 namespace Laplace.Decomposers.Abstractions.Tests;
@@ -114,4 +115,55 @@ public sealed class ContentWitnessContainmentTests
             $"partial={partial.EntityCount} should be < full={fullEntities}");
         Assert.True(partial.EntityCount > 0, "a present word must not blank the whole tree");
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StoredRootDoesNotProveDescendantEntitiesOrSuppressTheirForms(bool cached)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes("partial parent keeps missing children");
+        using var tree = IntentStage.BuildContentTree(bytes);
+        Assert.NotNull(tree);
+        using var baseline = IntentStage.New(256);
+        Assert.True(baseline.TryAddContentWitness(bytes, Src, out var root));
+        var reader = new RootOnlyReader(root, cached);
+        var bitmaps = await TierTreeDescent.ProbeBatchEmitBitmapsAsync([tree], reader);
+        var bitmap = Assert.IsType<byte[]>(Assert.Single(bitmaps));
+
+        for (uint i = 0; i < tree!.NodeCount; i++)
+            Assert.Equal(tree.GetNode(i).Id == root, BitmapBits.IsSet(bitmap, (int)i));
+        Assert.Contains(reader.Probed, id => id != root);
+
+        using var repaired = IntentStage.New(256);
+        Assert.True(repaired.EmitContentTree(tree, Src, bitmap, out var repairedRoot));
+        Assert.Equal(root, repairedRoot);
+        Assert.Equal(baseline.EntityCount - 1, repaired.EntityCount);
+        Assert.True(repaired.EntityCount > 0);
+        Assert.Equal(baseline.PhysicalityCount, repaired.PhysicalityCount);
+        Assert.Equal(baseline.EmitCopyBinary(IntentStageTable.Physicalities),
+            repaired.EmitCopyBinary(IntentStageTable.Physicalities));
+    }
+
+    private sealed class RootOnlyReader(Hash128 root, bool cached) : ISubstrateReader
+    {
+        internal readonly HashSet<Hash128> Probed = [];
+        public Task<bool> HasSourceEverCompletedAsync(int layerOrder, CancellationToken ct = default) =>
+            Task.FromResult(false);
+        public Task<bool> HasSourceCompletedAsync(
+            Hash128 sourceId, int layerOrder, CancellationToken ct = default) => Task.FromResult(false);
+        public Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default) =>
+            Task.FromResult(0L);
+        public bool IsProvenPresent(Hash128 id) => cached && id == root;
+        public Task<byte[]> EntitiesExistBitmapAsync(
+            IReadOnlyList<Hash128> candidates, CancellationToken ct = default)
+        {
+            var bitmap = new byte[(candidates.Count + 7) / 8];
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                Probed.Add(candidates[i]);
+                if (candidates[i] == root) bitmap[i >> 3] |= (byte)(1 << (i & 7));
+            }
+            return Task.FromResult(bitmap);
+        }
+    }
+
 }

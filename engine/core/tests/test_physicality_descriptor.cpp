@@ -1317,7 +1317,7 @@ TEST(PhysicalityDescriptorStage, ConstantTimeProducerShapeBoundsExactRowsWithout
         EXPECT_EQ(upper.forms, exact.forms);
         EXPECT_GE(upper.stored_vertices, exact.stored_vertices);
         EXPECT_GE(upper.maximum_vertices, exact.maximum_vertices);
-        EXPECT_EQ(upper.stored_vertices, before_bytes / 32u);
+        EXPECT_EQ(upper.stored_vertices, (before_bytes - upper.forms * 141u) / 32u);
         const auto* after = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &after_bytes);
         ASSERT_EQ(after_bytes, before_bytes);
         EXPECT_EQ(std::memcmp(saved.data(), after, after_bytes), 0);
@@ -1333,6 +1333,100 @@ TEST(PhysicalityDescriptorStage, ConstantTimeProducerShapeBoundsExactRowsWithout
     EXPECT_EQ(upper.forms, 901u);
     EXPECT_EQ(upper.stored_vertices, 902u);
     EXPECT_EQ(upper.maximum_vertices, 903u);
+}
+
+
+TEST(PhysicalityDescriptorStage, MandatoryFramesDoNotBecomePhantomTrajectoryVertices) {
+    Stage stage(intent_stage_new(0), intent_stage_free);
+    ASSERT_NE(stage, nullptr);
+    auto input = body();
+    input.alignment_residual_is_null = 1;
+    input.source_dim_is_null = 1;
+    input.trajectory_xyzm = nullptr;
+    input.trajectory_vertices = 0u;
+    input.n_constituents = 0;
+    constexpr size_t forms = 4096u;
+    for (size_t i = 0u; i < forms; ++i)
+        stage_body(stage.get(), input, INTENT_STAGE_PG_EPOCH_UNIX_US + static_cast<int64_t>(i));
+    size_t bytes = 0u;
+    intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_PHYSICALITIES, &bytes);
+    ASSERT_EQ(bytes, forms * 141u);
+    physicality_descriptor_shape_t upper{}, exact{};
+    const intent_stage_t* stages[]{stage.get()};
+    ASSERT_EQ(physicality_descriptor_stage_shape_bound(stage.get(), &upper), PHYSICALITY_DESCRIPTOR_OK);
+    ASSERT_EQ(physicality_descriptor_stages_shape(stages, 1u, &exact), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_EQ(upper.forms, exact.forms);
+    EXPECT_EQ(upper.stored_vertices, 0u);
+    EXPECT_EQ(upper.maximum_vertices, 0u);
+    EXPECT_EQ(exact.stored_vertices, 0u);
+    size_t old_plan = 0u, corrected_plan = 0u;
+    const size_t old_vertices = bytes / 32u;
+    ASSERT_EQ(physicality_descriptor_plan_payload_bound(forms, old_vertices, old_vertices, &old_plan),
+        PHYSICALITY_DESCRIPTOR_OK);
+    ASSERT_EQ(physicality_descriptor_plan_payload_bound(forms, upper.stored_vertices,
+        upper.maximum_vertices, &corrected_plan), PHYSICALITY_DESCRIPTOR_OK);
+    EXPECT_LT(corrected_plan, old_plan);
+    const auto plan = build(std::vector<physicality_descriptor_input_t>(forms, input));
+    ASSERT_NE(plan, nullptr);
+    EXPECT_LE(physicality_descriptor_plan_peak_bytes(plan.get()), corrected_plan);
+    RecordProperty("actual_native_plan_peak_bytes",
+        std::to_string(physicality_descriptor_plan_peak_bytes(plan.get())));
+    RecordProperty("forms", static_cast<int>(forms));
+    RecordProperty("old_phantom_vertices", static_cast<int>(old_vertices));
+    RecordProperty("corrected_vertices", static_cast<int>(upper.stored_vertices));
+    RecordProperty("old_plan_bound_bytes", std::to_string(old_plan));
+    RecordProperty("corrected_plan_bound_bytes", std::to_string(corrected_plan));
+}
+
+TEST(PhysicalityDescriptorStage, ProducerBoundPreservesOptionalFieldsAndBothTrajectoryEncodings) {
+    const std::array<hash128_t, 3> operands{{{51, 61}, {52, 62}, {51, 61}}};
+    std::array<double, 12> trajectory{};
+    ASSERT_EQ(trajectory_build(operands.data(), operands.size(), trajectory.data()), 0);
+    for (unsigned nullable = 0u; nullable < 4u; ++nullable) {
+        Stage stage(intent_stage_new(0), intent_stage_free);
+        ASSERT_NE(stage, nullptr);
+        const intent_stage_t* stages[]{stage.get()};
+        for (size_t width : {0u, 1u, 3u}) {
+            auto input = body();
+            input.alignment_residual_is_null = (nullable & 1u) != 0u;
+            input.alignment_residual = 0.125;
+            input.source_dim_is_null = (nullable & 2u) != 0u;
+            input.source_dim = 4;
+            input.trajectory_xyzm = width == 0u ? nullptr : trajectory.data();
+            input.trajectory_vertices = width;
+            input.n_constituents = static_cast<int32_t>(width);
+            stage_body(stage.get(), input, INTENT_STAGE_PG_EPOCH_UNIX_US);
+            physicality_descriptor_shape_t upper{}, exact{};
+            ASSERT_EQ(physicality_descriptor_stage_shape_bound(stage.get(), &upper),
+                PHYSICALITY_DESCRIPTOR_OK);
+            ASSERT_EQ(physicality_descriptor_stages_shape(stages, 1u, &exact), PHYSICALITY_DESCRIPTOR_OK);
+            EXPECT_EQ(upper.forms, exact.forms);
+            EXPECT_GE(upper.stored_vertices, exact.stored_vertices);
+            EXPECT_GE(upper.maximum_vertices, exact.maximum_vertices);
+        }
+    }
+}
+
+
+TEST(PhysicalityDescriptorStage, ProducerBoundRejectsImpossibleMandatoryWidthWithoutPublishing) {
+    // COPY framing alone can represent ten NULL fields, but no physicality
+    // accepted by validate_fields can fit in this tuple. Import accepts framing;
+    // the constant-time minimum-width check must refuse before subtraction.
+    std::array<uint8_t, 42> tuple{};
+    tuple.fill(0xff);
+    tuple[0] = 0u;
+    tuple[1] = 10u;
+    intent_stage_t* raw = nullptr;
+    ASSERT_EQ(intent_stage_from_tuple_bytes(nullptr, 0u, tuple.data(), tuple.size(),
+        nullptr, 0u, 4096u, &raw), 0);
+    Stage stage(raw, intent_stage_free);
+    ASSERT_NE(stage, nullptr);
+    physicality_descriptor_shape_t unchanged{901u, 902u, 903u};
+    EXPECT_EQ(physicality_descriptor_stage_shape_bound(stage.get(), &unchanged),
+        PHYSICALITY_DESCRIPTOR_INVALID_BODY);
+    EXPECT_EQ(unchanged.forms, 901u);
+    EXPECT_EQ(unchanged.stored_vertices, 902u);
+    EXPECT_EQ(unchanged.maximum_vertices, 903u);
 }
 
 

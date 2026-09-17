@@ -265,8 +265,17 @@ physicality_descriptor_status_t physicality_descriptor_stage_shape_bound(
     if (stage == NULL || out_shape == NULL) return PHYSICALITY_DESCRIPTOR_INVALID;
     const size_t forms = intent_stage_physicality_count(stage);
     (void)intent_stage_tuple_ptr(stage, INTENT_STAGE_TABLE_PHYSICALITIES, &bytes);
-    if (forms == 0u && bytes != 0u) return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
-    const size_t vertices = forms == 0u ? 0u : bytes / (4u * sizeof(double));
+    /* Every valid tuple has the column count, ten field lengths, two IDs,
+     * the type, one mandatory PointZM coordinate, Hilbert ID, constituent
+     * count and observation time. None of those bytes encodes trajectory
+     * vertices. Optional scalars and either accepted trajectory EWKB header
+     * remain uncharged here, so their bytes still conservatively widen this
+     * constant-time bound. Full framing/body validation remains at capture. */
+    const size_t mandatory_row_bytes = 2u + 10u * 4u +
+        16u + 16u + 2u + (5u + 4u * sizeof(double)) + 16u + 4u + 8u;
+    if ((forms == 0u && bytes != 0u) || forms > bytes / mandatory_row_bytes)
+        return PHYSICALITY_DESCRIPTOR_INVALID_BODY;
+    const size_t vertices = (bytes - forms * mandatory_row_bytes) / (4u * sizeof(double));
     const physicality_descriptor_shape_t shape = {forms, vertices, vertices};
     *out_shape = shape;
     return PHYSICALITY_DESCRIPTOR_OK;

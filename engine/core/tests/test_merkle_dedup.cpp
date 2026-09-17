@@ -157,27 +157,26 @@ TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitAllAbsentEmitsEveryIndex) {
     tier_tree_free(t);
 }
 
-TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitRootPresentEmitsNothing) {
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitRootPresentStillEmitsMissingDescendants) {
     tier_tree_t* t = sample_tree();
     uint8_t bm[1] = { (uint8_t)(1u << 6) };
     uint32_t out[7];
     size_t n = 99;
     ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, out, &n));
-    EXPECT_EQ(0u, n);
+    ASSERT_EQ(6u, n);
+    for (uint32_t i = 0; i < 6; ++i) EXPECT_EQ(i, out[i]);
     tier_tree_free(t);
 }
 
-TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitInteriorPresentSkipsItsSubtree) {
+TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitInteriorPresenceSkipsOnlyThatNode) {
     tier_tree_t* t = sample_tree();
     uint8_t bm[1] = { (uint8_t)(1u << 4) };
     uint32_t out[7];
     size_t n = 0;
     ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, bm, 7, out, &n));
-    ASSERT_EQ(4u, n);
-    EXPECT_EQ(2u, out[0]);
-    EXPECT_EQ(3u, out[1]);
-    EXPECT_EQ(5u, out[2]);
-    EXPECT_EQ(6u, out[3]);
+    ASSERT_EQ(6u, n);
+    const uint32_t expected[] = {0, 1, 2, 3, 5, 6};
+    for (size_t i = 0; i < 6; ++i) EXPECT_EQ(expected[i], out[i]);
     tier_tree_free(t);
 }
 
@@ -221,5 +220,23 @@ TEST(LaplaceCoreMerkleDedup, TrunkShortcircuitRejectsTooSmallBitmap) {
     uint32_t out[7];
     size_t n = 0;
     EXPECT_NE(0, merkle_dedup_trunk_shortcircuit(t, &bm, 6, out, &n));
+    tier_tree_free(t);
+}
+
+TEST(LaplaceCoreMerkleDedup, EveryPartialCommitBitmapFiltersOnlyItsExactNodes) {
+    tier_tree_t* t = sample_tree();
+    for (unsigned mask = 0; mask < 128; ++mask) {
+        const uint8_t bm = (uint8_t)mask;
+        uint32_t out[7];
+        size_t n = 99;
+        ASSERT_EQ(0, merkle_dedup_trunk_shortcircuit(t, &bm, 7, out, &n));
+        size_t expected_count = 0;
+        for (uint32_t i = 0; i < 7; ++i) {
+            if ((mask & (1u << i)) != 0) continue;
+            ASSERT_LT(expected_count, n) << "mask=" << mask;
+            EXPECT_EQ(i, out[expected_count++]) << "mask=" << mask;
+        }
+        EXPECT_EQ(expected_count, n) << "mask=" << mask;
+    }
     tier_tree_free(t);
 }

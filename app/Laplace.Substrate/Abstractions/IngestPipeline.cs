@@ -272,13 +272,26 @@ public interface IMultiTreeIngestDeferredUnit : IIngestDeferredUnit
 }
 
 /// <summary>
-/// Record whose content-addressed trunk root is known before expensive compose work
-/// (chess GameId, content hash, grammar row root, …). Enables the existence gate to
-/// bulk-probe and short-circuit present roots without a deferred unit.
+/// Record whose content-addressed trunk root is known before expensive compose work.
+/// Entity presence proves only that identity exists; it does not prove that this
+/// record's physicalities, observations and consensus were admitted. A record may
+/// authorize a full-record skip only through <see cref="IIngestCompletionRecord"/>.
 /// </summary>
 public interface ITrunkRootRecord
 {
     Hash128 TrunkRootId { get; }
+}
+
+/// <summary>
+/// A record with an exact durable completion attestation. The owner must emit this
+/// receipt only after staging the complete source unit, in the same control transaction
+/// as its testimony and consensus. Content identity or a marker entity is insufficient.
+/// A missing receipt requires ordinary composition, even when the trunk is present.
+/// </summary>
+public interface IIngestCompletionRecord
+{
+    Hash128 CompletionAttestationTypeId { get; }
+    Hash128 CompletionAttestationId { get; }
 }
 
 public interface IIngestRecordHandler<TRecord>

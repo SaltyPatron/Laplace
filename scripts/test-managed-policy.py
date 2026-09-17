@@ -5,9 +5,11 @@ import importlib.util
 import os
 from pathlib import Path
 import re
+import sys
 import tempfile
 import unittest
 
+sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("managed_policy", ROOT / "scripts/managed-policy.py")
 policy = importlib.util.module_from_spec(SPEC)

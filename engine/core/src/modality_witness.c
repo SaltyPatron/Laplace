@@ -321,15 +321,18 @@ static int emit_node(
     uint32_t              idx,
     laplace_modality_t    modality,
     const hash128_t*      source_id,
-    int64_t               now_us) {
+    int64_t               now_us,
+    int                   emit_entity,
+    uint8_t*              emitted) {
     tier_node_view_t node;
     if (tier_tree_get_node(tree, idx, &node) != 0) return 0;
     if (!should_emit(tree, idx, modality)) return 0;
-    if (intent_stage_witness_record(stage, &node.id)) return 0;
-
-    hash128_t type_id = laplace_modality_tier_type_id(modality, node.tier);
-    if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
-        return -2;
+    if (emit_entity) {
+        if (intent_stage_witness_seen(stage, &node.id)) return 0;
+        hash128_t type_id = laplace_modality_tier_type_id(modality, node.tier);
+        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
+            return -2;
+    }
 
     double* traj = NULL;
     size_t m = node.child_count;
@@ -368,6 +371,11 @@ static int emit_node(
         return -2;
     }
     free(traj);
+    if (emit_entity) {
+        if (intent_stage_witness_record(stage, &node.id) != 0
+            || intent_stage_allocation_failed(stage)) return -2;
+    }
+    *emitted = 1;
     return 0;
 }
 
@@ -382,37 +390,47 @@ int laplace_modality_witness_emit_tree(
     if (!stage || !tree || !source_id || !out_root_id) return -1;
 
     size_t nc = tier_tree_node_count(tree);
+    if (nc == 0 || nc > UINT32_MAX) return -2;
     uint32_t root_idx = natural_unit_index(tree);
     tier_node_view_t root;
-    tier_tree_get_node(tree, root_idx, &root);
+    if (tier_tree_get_node(tree, root_idx, &root) != 0) return -2;
     *out_root_id = root.id;
 
-    if (intent_stage_witness_seen(stage, &root.id)) return 0;
-
     int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
+    uint8_t* emitted = (uint8_t*)calloc(nc, 1);
+    uint32_t* novel = NULL;
+    size_t novel_n = 0;
+    int rc = 0;
+    if (!emitted) return -2;
 
     if (existing_bitmap && bitmap_bits > 0) {
-        uint32_t* novel = (uint32_t*)malloc(nc * sizeof(uint32_t));
-        if (!novel) return -2;
-        size_t novel_n = 0;
+        if (nc > SIZE_MAX / sizeof(uint32_t)) { rc = -2; goto done; }
+        novel = (uint32_t*)malloc(nc * sizeof(uint32_t));
+        if (!novel) { rc = -2; goto done; }
         if (merkle_dedup_trunk_shortcircuit(
                 tree, existing_bitmap, bitmap_bits, novel, &novel_n) != 0) {
-            free(novel);
-            return -2;
+            rc = -2;
+            goto done;
         }
-        for (size_t k = 0; k < novel_n; ++k) {
-            int rc = emit_node(stage, tree, novel[k], modality, source_id, now_us);
-            if (rc != 0) { free(novel); return rc; }
-        }
-        free(novel);
-        return 0;
     }
 
-    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
-        int rc = emit_node(stage, tree, idx, modality, source_id, now_us);
-        if (rc != 0) return rc;
+    /* Keep canonical entity insertion separate from source-form observations.
+     * Preserve existing first-winner ordering, then retain every other computed
+     * occurrence, including nodes whose entity was already stored or staged. */
+    for (size_t k = 0; k < (novel ? novel_n : nc); ++k) {
+        const uint32_t idx = novel ? novel[k] : (uint32_t)k;
+        rc = emit_node(stage, tree, idx, modality, source_id, now_us, 1, &emitted[idx]);
+        if (rc != 0) goto done;
     }
-    return 0;
+    for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
+        if (emitted[idx]) continue;
+        rc = emit_node(stage, tree, idx, modality, source_id, now_us, 0, &emitted[idx]);
+        if (rc != 0) goto done;
+    }
+done:
+    free(novel);
+    free(emitted);
+    return rc;
 }
 
 int laplace_image_root_id(

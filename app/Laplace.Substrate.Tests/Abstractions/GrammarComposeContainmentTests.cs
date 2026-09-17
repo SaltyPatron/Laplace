@@ -65,7 +65,7 @@ public sealed class GrammarComposeContainmentTests
     [Theory]
     [InlineData("1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}")]
     [InlineData("7\tIsA\t/c/en/a moment in time\t/c/en/moment\t{}")]
-    public void PresentTrunk_EmitsZeroNovelEntitiesButKeepsEvidence(string row)
+    public void PresentEntities_StillMaterializeEveryPhysicalityAndWitness(string row)
     {
         byte[] utf8 = Encoding.UTF8.GetBytes(row);
         using var ast = GrammarDecomposer.Parse(utf8, "tsv");
@@ -80,10 +80,19 @@ public sealed class GrammarComposeContainmentTests
         var present = new byte[(ids.Length + 7) / 8];
         for (int i = 0; i < ids.Length; i++) present[i >> 3] |= (byte)(1 << (i & 7));
 
-        var (ents, phys, prec, _) = composer.Materialize(1.0, present);
+        // A new composer has only probed identities when its all-present bitmap
+        // arrives; it must still materialize the native source bodies.
+        using var known = new GrammarRowComposer(utf8, ast, Src, "tsv");
+        Assert.Equal(ids, known.EntityIds());
+        var (ents, phys, prec, _) = known.Materialize(1.0, present);
 
         Assert.Empty(ents);
-        Assert.Empty(phys);
+        Assert.Equal(basePhys.Length, phys.Length);
+        Assert.NotEmpty(phys);
+        Assert.Equal(basePhys.Select(row => row with { ObservedAtUnixUs = 0, TrajectoryXyzm = null }),
+            phys.Select(row => row with { ObservedAtUnixUs = 0, TrajectoryXyzm = null }));
+        for (int i = 0; i < basePhys.Length; i++)
+            Assert.Equal(basePhys[i].TrajectoryXyzm, phys[i].TrajectoryXyzm);
         Assert.Equal(basePrec.Length, prec.Length);
     }
 

@@ -125,9 +125,8 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             if (_compose != IntPtr.Zero) return;
 
             bool emitAll = existingBitmap is null || existingBitmap.Length == 0;
-            if (!emitAll && _probe != IntPtr.Zero && IsEntireTreePresent(existingBitmap, _probe))
-                return;
-
+            // Entity membership never proves that this source unit's forms were
+            // admitted. Materialize the native body even when every entity exists.
             if (_probe != IntPtr.Zero && !emitAll)
             {
                 fixed (byte* p = _utf8)
@@ -231,15 +230,9 @@ public sealed unsafe class GrammarRowComposer : IDisposable
     private readonly struct EmitFilter
     {
         private readonly bool[]? _novelEntity;
-        private readonly HashSet<Hash128>? _novelIds;
-        public EmitFilter(bool[] novelEntity, HashSet<Hash128> novelIds)
-        {
-            _novelEntity = novelEntity;
-            _novelIds = novelIds;
-        }
+        public EmitFilter(bool[] novelEntity) => _novelEntity = novelEntity;
         public bool EmitAll => _novelEntity is null;
         public bool EntityNovel(nuint i) => _novelEntity is null || _novelEntity[(int)i];
-        public bool PhysNovel(Hash128 entityId) => _novelIds is null || _novelIds.Contains(entityId);
     }
 
 
@@ -262,15 +255,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         int novelCount = MerkleDedup.TrunkShortcircuit(tree, existingBitmap, novelIdx);
         var novelEntity = new bool[nodeCount];
         for (int i = 0; i < novelCount; i++) novelEntity[novelIdx[i]] = true;
-        var novelIds = new HashSet<Hash128>(novelCount);
-        for (nuint i = 0; i < nEnt; i++)
-        {
-            if (!novelEntity[(int)i]) continue;
-            NativeInterop.ComposeEntityNative e;
-            NativeInterop.ComposeGetEntity(ActiveResult, i, &e);
-            novelIds.Add(e.Id);
-        }
-        return new EmitFilter(novelEntity, novelIds);
+        return new EmitFilter(novelEntity);
     }
 
     public (ImmutableArray<EntityRow> Entities,
@@ -314,7 +299,6 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         {
             NativeInterop.ComposePhysicalityNative ph;
             NativeInterop.ComposeGetPhysicality(ActiveResult, i, &ph);
-            if (!filter.PhysNovel(ph.EntityId)) continue;
             int trajLen = (int)ph.TrajectoryN.ToUInt64();
             double[] traj = trajLen > 0
                 ? new ReadOnlySpan<double>(ph.TrajectoryXyzm.ToPointer(), trajLen).ToArray()
@@ -381,7 +365,6 @@ public sealed unsafe class GrammarRowComposer : IDisposable
         {
             NativeInterop.ComposePhysicalityNative ph;
             NativeInterop.ComposeGetPhysicality(_compose, i, &ph);
-            if (!filter.PhysNovel(ph.EntityId)) continue;
             coord[0] = ph.Coord0; coord[1] = ph.Coord1; coord[2] = ph.Coord2; coord[3] = ph.Coord3;
             int trajLen = (int)ph.TrajectoryN.ToUInt64();
             var traj = trajLen > 0

@@ -129,6 +129,23 @@ set(LAPLACE_CODEGEN_OUTPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/seed_pos.sql.in
     ${LAPLACE_HIGHWAY_BIN}
 )
+# SQL manifests consume these generated seeds during configuration to derive
+# the extension version. Generate them before extension/ is configured, including
+# on a fresh checkout; a build-time custom command runs too late for that hash.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${LAPLACE_CODEGEN_SCRIPT}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../manifest/relation_types.toml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../manifest/pos_tags.toml")
+execute_process(
+    COMMAND "${LAPLACE_CODEGEN_PYTHON}" "${LAPLACE_CODEGEN_SCRIPT}"
+            "--bin-out-dir=${LAPLACE_PERFCACHE_DIR}"
+    RESULT_VARIABLE _laplace_codegen_result
+    OUTPUT_VARIABLE _laplace_codegen_output
+    ERROR_VARIABLE _laplace_codegen_error)
+if(NOT "${_laplace_codegen_result}" STREQUAL "0")
+    message(FATAL_ERROR "Attestation-law generation failed before SQL manifest hashing:\n${_laplace_codegen_output}\n${_laplace_codegen_error}")
+endif()
+
 add_custom_command(
     OUTPUT  ${LAPLACE_CODEGEN_OUTPUTS}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"

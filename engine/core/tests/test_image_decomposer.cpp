@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <vector>
+#include <memory>
 
 extern "C" {
 #include "laplace/core/content_witness_batch.h"
+#include "laplace/core/audio_decomposer.h"
 #include "laplace/core/image_decomposer.h"
 #include "laplace/core/modality_witness.h"
 #include "laplace/core/tier_tree.h"
@@ -142,4 +144,59 @@ TEST(ImageDecomposer, TypeIdsMatchLadderTiers) {
     got = laplace_modality_tier_type_id(LAPLACE_MODALITY_IMAGE, 6);
     hash128_blake3_str("Image", &expect);
     EXPECT_EQ(hash128_compare(&got, &expect), 0);
+}
+
+TEST(ImageDecomposer, ModalityFormsSurvivePresentEntitiesAndRepeatedSourceOccurrences) {
+    for (const auto modality : {LAPLACE_MODALITY_IMAGE, LAPLACE_MODALITY_AUDIO}) {
+        SCOPED_TRACE((int)modality);
+        tier_tree_t* raw_tree = nullptr;
+        if (modality == LAPLACE_MODALITY_IMAGE) {
+            const uint8_t rgba[] = {123, 123, 123, 255, 123, 123, 123, 255};
+            ASSERT_EQ(0, laplace_image_tree_build(rgba, 2, 1, &raw_tree));
+        } else {
+            const int16_t pcm[] = {1234, 1234, -4321, 1234};
+            ASSERT_EQ(0, laplace_audio_tree_build(pcm, 4, &raw_tree));
+        }
+        std::unique_ptr<tier_tree_t, decltype(&tier_tree_free)> tree(raw_tree, tier_tree_free);
+        ASSERT_NE(nullptr, tree.get());
+        std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)> full(
+            intent_stage_new(64), intent_stage_free);
+        std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)> known(
+            intent_stage_new(64), intent_stage_free);
+        ASSERT_NE(nullptr, full.get());
+        ASSERT_NE(nullptr, known.get());
+        hash128_t source{}, full_root{}, known_root{};
+        hash128_blake3_str("modality-source-occurrence-test", &source);
+        const size_t nodes = tier_tree_node_count(tree.get());
+        std::vector<uint8_t> present((nodes + 7) / 8, 255);
+        ASSERT_EQ(0, laplace_modality_witness_emit_tree(
+            full.get(), tree.get(), modality, &source, nullptr, 0, &full_root));
+        const size_t entities = intent_stage_entity_count(full.get());
+        const size_t forms = intent_stage_physicality_count(full.get());
+        ASSERT_GT(entities, 0u);
+        ASSERT_GT(forms, entities); // repeated content retains actual raw occurrences
+        ASSERT_EQ(0, laplace_modality_witness_emit_tree(
+            known.get(), tree.get(), modality, &source, present.data(), nodes, &known_root));
+        EXPECT_EQ(0, hash128_compare(&full_root, &known_root));
+        EXPECT_EQ(0u, intent_stage_entity_count(known.get()));
+        EXPECT_EQ(forms, intent_stage_physicality_count(known.get()));
+
+        // A stage-seen root suppresses no second observed form. Entity identity
+        // remains canonical while physicality source occurrence multiplicity doubles.
+        ASSERT_EQ(0, laplace_modality_witness_emit_tree(
+            full.get(), tree.get(), modality, &source, nullptr, 0, &full_root));
+        ASSERT_EQ(0, laplace_modality_witness_emit_tree(
+            known.get(), tree.get(), modality, &source, present.data(), nodes, &known_root));
+        EXPECT_EQ(entities, intent_stage_entity_count(full.get()));
+        EXPECT_EQ(2 * forms, intent_stage_physicality_count(full.get()));
+        EXPECT_EQ(2 * forms, intent_stage_physicality_count(known.get()));
+
+        // Compare every semantic body field and duplicate multiplicity independently
+        // of the historical first-winner row ordering used by entity insertion.
+        (void)intent_stage_retain_physicalities(full.get());
+        hash128_t full_digest{}, known_digest{};
+        ASSERT_EQ(0, intent_stage_semantic_digest(full.get(), &full_digest));
+        ASSERT_EQ(0, intent_stage_semantic_digest(known.get(), &known_digest));
+        EXPECT_EQ(0, hash128_compare(&full_digest, &known_digest));
+    }
 }

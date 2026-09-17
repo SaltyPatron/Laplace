@@ -334,7 +334,7 @@ def verify_protocol(log, pgn):
 def catalog_closure(catalog, laplace_native):
     require(catalog.is_file() and os.access(catalog, os.X_OK), "native PGN verifier executable is missing")
     result = {str(catalog): digest(catalog)}
-    for name in ("Laplace.Chess.dll", "Laplace.Core.dll", "Laplace.Engine.Core.dll",
+    for name in ("Laplace.Chess.dll", "Laplace.Core.dll",
                  "liblaplace_core.so", "liblaplace_dynamics.so",
                  "liblaplace_synthesis.so", "liblaplace_syzygy.so"):
         actual, expected = catalog.parent / name, laplace_native.parent / name

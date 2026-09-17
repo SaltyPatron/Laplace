@@ -130,6 +130,99 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         return rows.ToArray();
     }
 
+
+    [Fact]
+    public async Task EntityOnlyContentRootRecoversAllFormsAndMissingChildrenWithoutRefoldingReplay()
+    {
+        CodepointPerfcache.LoadDefault();
+        var source = SubstrateCanonicalIds.Source($"PartialContentTree-{Guid.NewGuid():N}");
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(
+            $"{Guid.NewGuid():N} {Guid.NewGuid():N}");
+        Assert.True(TextEntityBuilder.TryBuildRows(bytes, source, out var entities,
+            out var physicalities, out var root, out _));
+        Assert.True(entities.Length > 1);
+        var rootEntity = Assert.Single(entities, entity => entity.Id == root);
+
+        // Establish the exact interrupted-COPY state without relying on which
+        // detached lane happened to commit first: the root E exists, its P does not.
+        var ordinary = new NpgsqlSubstrateWriter(
+            pg.DataSource, durability: PostgresWriteDurability.Synchronous);
+        await ordinary.ApplyAsync(new SubstrateChangeBuilder(source, "partial-root")
+            .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId)
+            .AddEntity(rootEntity).Build());
+        await using (var missing = pg.DataSource.CreateCommand(
+            "SELECT count(*) FROM laplace.physicalities WHERE id=$1"))
+        {
+            missing.Parameters.AddWithValue(PhysicalityId.Compute(root, PhysicalityType.Content).ToBytes());
+            Assert.Equal(0L, (long)(await missing.ExecuteScalarAsync())!);
+        }
+
+        var reader = new NpgsqlSubstrateReader(pg.DataSource);
+        async Task<SubstrateChange> ComposeAsync()
+        {
+            using var builder = new SubstrateChangeBuilder(source, "same-source-unit")
+                .DeclareSourcePrior(SourceTrust.StructuredCorpus);
+            var records = new List<ContentIngestRecord> { new(bytes) };
+            var config = new IngestBatchConfig
+            {
+                SourceId = source, BatchLabelPrefix = "same-source-unit",
+                BatchSize = 1, ProbeChunkSize = 32, ContainmentReader = reader,
+            };
+            await IngestDescentFlush.ProbeAndDrainAsync(records, new ContentIngestHandler(source),
+                reader, builder, config, CancellationToken.None);
+            return builder.Build();
+        }
+        async Task<string[]> SnapshotAsync()
+        {
+            await using var command = pg.DataSource.CreateCommand("""
+                SELECT (to_jsonb(a) || jsonb_build_object('standing',to_jsonb(c)))::text,
+                       c.witness_count
+                FROM laplace.attestations a LEFT JOIN laplace.consensus c
+                  ON c.type_id=a.type_id AND c.subject_id=a.subject_id
+                 AND c.object_id IS NOT DISTINCT FROM a.object_id
+                WHERE a.source_id=$1 AND a.type_id=$2 ORDER BY a.id
+                """);
+            command.Parameters.AddWithValue(source.ToBytes());
+            command.Parameters.AddWithValue(HasPhysicality.ToBytes());
+            var rows = new List<string>();
+            await using var result = await command.ExecuteReaderAsync();
+            while (await result.ReadAsync())
+            {
+                Assert.False(result.IsDBNull(1));
+                rows.Add(result.GetString(0));
+            }
+            return rows.ToArray();
+        }
+
+        await using var writer = new ConsensusAccumulatingWriter(ordinary, pg.DataSource);
+        var repair = await ComposeAsync();
+        try
+        {
+            Assert.True(repair.IntentStages.Sum(stage => stage.EntityCount) > 0);
+            Assert.True(repair.IntentStages.Sum(stage => stage.PhysicalityCount) > 0);
+            await writer.ApplyWorkingSetAsync([repair]);
+        }
+        finally { foreach (var stage in repair.IntentStages) stage.Dispose(); }
+        await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(pg.DataSource,
+            entities.Select(entity => entity.Id), physicalities.Select(form => form.Id), []);
+        var accepted = await SnapshotAsync();
+        Assert.NotEmpty(accepted);
+
+        var replay = await ComposeAsync();
+        try
+        {
+            Assert.Equal(repair.Metadata.IntentId, replay.Metadata.IntentId);
+            Assert.Equal(0, replay.IntentStages.Sum(stage => stage.EntityCount));
+            Assert.True(replay.IntentStages.Sum(stage => stage.PhysicalityCount) > 0);
+            var result = await writer.ApplyWorkingSetAsync([replay]);
+            Assert.Equal(0, result.EntitiesInserted);
+            Assert.Equal(0, result.PhysicalitiesInserted);
+            Assert.Equal(0, result.AttestationsInserted);
+        }
+        finally { foreach (var stage in replay.IntentStages) stage.Dispose(); }
+        Assert.Equal(accepted, await SnapshotAsync());
+    }
+
     [Fact]
     public async Task OrdinaryWriterRetainsBothRawFormsAndReusesDurableDescriptorViewEvidence()
     {

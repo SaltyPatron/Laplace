@@ -231,42 +231,12 @@ public static class TierTreeDescent
     }
 
     /// <summary>
-    /// Uniform tier-by-tier, trunk-to-leaf, breadth-first batch existence
-    /// probe, applied identically to every tier (including tier 0 -- no
-    /// special-casing). For each tier, from the highest tier present in the
-    /// batch down to 0:
-    ///   1. Collect every not-yet-resolved node at that tier, across every
-    ///      tree in the batch, into one flat candidate list.
-    ///   2. Batch-check all of them in ONE round-trip
-    ///      (<see cref="ISubstrateReader.TierBatchExistenceProbeAsync"/>).
-    ///   3. For every id the round's bitmap actually confirmed present,
-    ///      mark its emit-bit AND mark its whole subtree "resolved" --
-    ///      children of a confirmed-present node are guaranteed present too
-    ///      by the content-addressing invariant (same content => same hash;
-    ///      an atomically-committed parent implies every committed child),
-    ///      so they are never enumerated, never queried, and never
-    ///      probed again in a later round.
-    ///
-    /// On a fresh DB this naturally degenerates to "everything absent, full
-    /// descent" -- the same total cost as an unconditional insert. On a DB
-    /// that already has the content, the top-tier (root) check short-
-    /// circuits almost immediately. This is the actual efficiency win, not
-    /// skipping checks for any particular tier.
-    ///
-    /// This replaces the previous scheme, which ran exactly one flat probe
-    /// covering every tier at once (no short-circuiting at all, so no
-    /// efficiency win from content-addressing) and then called
-    /// reader.MarkProven() on the ENTIRE unfiltered candidate list --
-    /// including ids that same call's own bitmap had just proven absent.
-    /// That unconditional MarkProven() call was a real, live-reproduced
-    /// cache self-poisoning bug (see dorian.txt repro in
-    /// .scratchpad/02_Identified_Issues.txt): NpgsqlSubstrateReader's
-    /// process-lifetime `_proven` cache would then falsely report those
-    /// ids as existing for the rest of the ingest run, so a common
-    /// grapheme/word's real entities row would never actually get written,
-    /// while its parent's trajectory kept referencing that id anyway. Here,
-    /// MarkProven is only ever called with the subset of a round's
-    /// candidates that round's own bitmap positively confirmed present.
+    /// Uniform tier-by-tier batch existence probing. Each round deduplicates exact
+    /// candidate IDs across all trees and checks them in one bounded reader call.
+    /// A stored parent does not prove its children were committed: parallel entity
+    /// COPY transactions can leave a partial tree after failure. Only each node's
+    /// own positive probe/cache answer suppresses that entity's insertion. Raw
+    /// physicality observations remain independent of this entity bitmap.
     /// </summary>
     public static Task<byte[]?[]> ProbeBatchEmitBitmapsAsync(
         IReadOnlyList<TierTree?> trees, ISubstrateReader reader, CancellationToken ct = default)
@@ -285,7 +255,7 @@ public static class TierTreeDescent
     /// protocol's in-transaction re-probe is what restores correctness at
     /// the boundary). Ids proven PRESENT are handled by the reader's own
     /// process-lifetime proven cache and are confirmed here without a DB
-    /// round trip, subtree-pruned exactly as a fresh confirmation would be.
+    /// round trip, handled exactly as a fresh confirmation of that node would be.
     /// </summary>
     public static async Task<byte[]?[]> ProbeBatchEmitBitmapsAsync(
         IReadOnlyList<TierTree?> trees, ISubstrateReader reader,
@@ -310,11 +280,8 @@ public static class TierTreeDescent
 
         int treeCount = probeTrees.Count;
         var perTreeBm = new byte[treeCount][];
-        // resolved[t][j]: node j of tree t either was itself confirmed
-        // present, or is a descendant of a node confirmed present in an
-        // earlier (higher-tier) round -- either way its subtree is fully
-        // covered by the content-addressing guarantee and must never be
-        // enumerated as a probe candidate again.
+        // A node is resolved only by its own exact identity answer. Parent
+        // presence carries no durable statement about descendants.
         var resolved = new bool[treeCount][];
         int maxTier = 0;
         for (int t = 0; t < treeCount; t++)
@@ -346,14 +313,12 @@ public static class TierTreeDescent
                     if (tree.GetNode((uint)j).Tier != tier) continue;
                     var id = tree.GetNode((uint)j).Id;
 
-                    // Already proven present (process-lifetime cache, only
-                    // ever populated from real positive results): confirm
-                    // and subtree-prune without a DB round trip.
+                    // An exact positive cache hit suppresses only this entity;
+                    // descendants retain their own probe/cache decisions.
                     if (reader.IsProvenPresent(id))
                     {
                         BitmapBits.Set(perTreeBm[t], j);
                         resolved[t][j] = true;
-                        MarkSubtreeResolvedPresent(probeTrees[t], perTreeBm[t], resolved[t], (uint)j);
                         continue;
                     }
 
@@ -395,7 +360,6 @@ public static class TierTreeDescent
                 {
                     BitmapBits.Set(perTreeBm[t], j);
                     resolved[t][j] = true;
-                    MarkSubtreeResolvedPresent(probeTrees[t], perTreeBm[t], resolved[t], (uint)j);
                 }
             }
 
@@ -410,31 +374,4 @@ public static class TierTreeDescent
         return results;
     }
 
-    /// <summary>
-    /// Marks every descendant of <paramref name="nodeIdx"/> (a node just
-    /// confirmed present) as resolved+present, without querying or
-    /// enumerating them individually. Uses the tree's own contiguous
-    /// child-range storage (FirstChildIdx/ChildCount) rather than a
-    /// parent-pointer search, so each node is visited by exactly one
-    /// covering walk for the whole probe -- total cost is O(subtree size),
-    /// and O(n) summed across every call for one tree, not O(n^2).
-    /// </summary>
-    private static void MarkSubtreeResolvedPresent(TierTree tree, byte[] emitBm, bool[] resolved, uint nodeIdx)
-    {
-        var stack = new Stack<uint>();
-        stack.Push(nodeIdx);
-        while (stack.Count > 0)
-        {
-            uint idx = stack.Pop();
-            var node = tree.GetNode(idx);
-            for (uint c = 0; c < node.ChildCount; c++)
-            {
-                uint childIdx = node.FirstChildIdx + c;
-                if (resolved[childIdx]) continue;
-                resolved[childIdx] = true;
-                BitmapBits.Set(emitBm, (int)childIdx);
-                stack.Push(childIdx);
-            }
-        }
-    }
 }

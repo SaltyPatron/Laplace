@@ -18,6 +18,8 @@ int merkle_dedup_filter_novel(
     hash128_t*       out_novel,
     size_t*          out_n);
 
+/* Historical ABI name: filters exact node-presence bits. A present parent
+ * does not imply that any descendant was committed. */
 int merkle_dedup_trunk_shortcircuit(
     const tier_tree_t* tree,
     const uint8_t*     existing_bitmap,
