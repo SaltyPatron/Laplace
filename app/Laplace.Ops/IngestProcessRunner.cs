@@ -88,14 +88,14 @@ public static class IngestProcessRunner
         }
 
         // The process can exit between Process.Start and event registration. Close that
-        // race immediately; the event may also have removed/disposed the handle already.
+        // race immediately; ObjectDisposedException derives from InvalidOperationException,
+        // so this one catch covers both the exited/disposed handle races.
         try
         {
             if (process.HasExited)
                 ReleaseOwnedProcess(pid);
         }
         catch (InvalidOperationException) { }
-        catch (ObjectDisposedException) { }
 
         return receipt;
     }
@@ -116,10 +116,8 @@ public static class IngestProcessRunner
             }
             catch (InvalidOperationException)
             {
-                ReleaseOwnedProcess(pair.Key);
-            }
-            catch (ObjectDisposedException)
-            {
+                // Includes ObjectDisposedException: both mean the cached handle is no
+                // longer a live process we can safely expose or control.
                 ReleaseOwnedProcess(pair.Key);
             }
         }
