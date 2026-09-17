@@ -1,210 +1,28 @@
-name: Qualify independent native GUI corpus delivery
+name: Read retained managed publication failure
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
 permissions:
   contents: read
 jobs:
-  source:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      PYTHONDONTWRITEBYTECODE: '1'
-      EVIDENCE: /build/laplace/work/final-gui-cache/evidence
-      TMPDIR: /build/laplace/work/final-gui-cache/tmp
-      TMP: /build/laplace/work/final-gui-cache/tmp
-      TEMP: /build/laplace/work/final-gui-cache/tmp
-    steps:
-      - name: Prepare permanent qualification directory
-        run: |
-          set -euo pipefail
-          sudo mkdir -p /build/laplace
-          sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$EVIDENCE" "$TMPDIR"
-      - name: Authenticate independent delivery and test component qualification
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/qualification.log"
-          import ast,base64,fcntl,hashlib,json,os,re,signal,subprocess,sys,textwrap,time,urllib.request,yaml
-          from pathlib import Path
-          evidence=Path(os.environ["EVIDENCE"])
-          selections={"workflow":"6b1dacd2bccc84af4b6b9af4210c07e4c273bcfc","gui":"9178c3936843b71d9bca6d3b1bdd20d8cba6c0f9","bootstrap":"73291772d83f569e6aa3de26d1fc109c35b3d856","cache":"9859fe785ba9208282d92a6135115ed161378323","follow":"6164858d1d14d75cbbc60c1bc4d19be5b0794f7b","managed":"ddf5d4c219cc386d52a44274394a8b0dff8251d6","accept":"b7846e06e1f9dc67c9ca0c06df93340f9dd7d697","stockfish":"50cadf5154a84005145023b1f9336cc0d0c1813e","phase_export":"814dbe22c1532763538695f0cf5adb8539127d12","phase_tests":"080176367b8f990afa3825d087ce8add1e2d8ff4"}
-          sources={}
-          for name,sha in selections.items():
-              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
-                  headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
-              with urllib.request.urlopen(request,timeout=30) as response:encoded=response.read((2<<20)+1)
-              assert len(encoded)<=2<<20
-              item=json.loads(encoded)
-              assert item["sha"]==sha and item["encoding"]=="base64"
-              raw=base64.b64decode(item["content"])
-              assert len(raw)==item["size"] and len(raw)<1<<20
-              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
-              sources[name]=raw.decode()
-              (evidence/(name+(".yml" if name=="workflow" else ".sh" if name=="pipeline" else ".py"))).write_bytes(raw)
-              if name not in ("workflow","pipeline"):ast.parse(raw,filename=name+".py")
-          document=yaml.safe_load(sources["workflow"])
-          counts={"outerBash":0,"innerBash":0,"pythonHeredocs":0}
-          for job in document["jobs"].values():
-              for step in job["steps"]:
-                  program=step.get("run")
-                  if program is None:continue
-                  subprocess.run(["bash","-n"],input=program,text=True,check=True)
-                  counts["outerBash"]+=1
-                  lines=program.splitlines()
-                  for i,line in enumerate(lines):
-                      match=re.search(r"<<'([A-Z_]+)'",line)
-                      if not match:continue
-                      delimiter=match.group(1)
-                      end=next(j for j in range(i+1,len(lines)) if lines[j].strip()==delimiter)
-                      body=textwrap.dedent("\n".join(lines[i+1:end]))+"\n"
-                      if delimiter=="PY":
-                          ast.parse(body)
-                          counts["pythonHeredocs"]+=1
-                      elif delimiter=="FOLLOW":
-                          subprocess.run(["bash","-n"],input=body,text=True,check=True)
-                          counts["innerBash"]+=1
-          assert counts=={"outerBash":3,"innerBash":1,"pythonHeredocs":3},counts
-          assert "foundation" not in document["jobs"]
-          assert len(document["jobs"]["chess"]["env"])==10
-          # Exercise only the affected component/default qualification boundary.
-          checkout=evidence/"selected-source"
-          subprocess.run(["git","init","-q",str(checkout)],check=True)
-          subprocess.run(["git","-C",str(checkout),"fetch","--no-tags","--depth=1",
-                          "https://github.com/SaltyPatron/Laplace.git",
-                          "2ef3f7ff885c8eccbc81d76caf8284436a482ffe"],check=True,timeout=120)
-          subprocess.run(["git","-C",str(checkout),"checkout","--detach","FETCH_HEAD"],check=True)
-          assert subprocess.check_output(["git","-C",str(checkout),"rev-parse","HEAD^{tree}"],text=True).strip()=="57ba79fb58d4dbb19f664eea688ac4e51d79868a"
-          (checkout/"scripts/export-qualified-chess-floors.py").write_text(sources["phase_export"])
-          (checkout/"scripts/test-qualified-chess-floor-export.py").write_text(sources["phase_tests"])
-          cases=[
-              "test_component_retains_actual_failed_pilot_and_completed_native_proof",
-              "test_component_mode_does_not_make_default_cache_accept_failed_run",
-              "test_component_still_rejects_incomplete_native_journal",
-              "test_component_rejects_changed_failed_pilot_receipt",
-              "test_component_rejects_unrelated_failure_even_when_receipt_reselected",
-              "test_component_does_not_require_failure_on_successful_native_run",
-              "test_native_installation_retains_independent_scope_and_optional_fetch",
-              "test_native_operator_remote_workflow_job_and_artifact_refusals"]
-          command=[sys.executable,"-B",str(checkout/"scripts/test-qualified-chess-floor-export.py"),"-v",
-                   *("NativeQualificationTests."+name for name in cases)]
-          subprocess.run(command,check=True,timeout=120)
-          receipt={"status":"passed","selections":selections,"syntax":counts,
-                   "scope":"Authenticated independent native component delivery and eight targeted validator controls; no host execution",
-                   "qualificationControls":cases}
-          (evidence/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
-          print(json.dumps(receipt))
-          
-          PY
-      - name: Retain final operational controls
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: independent-native-gui-corpus-controls
-          path: /build/laplace/work/final-gui-cache/evidence/
-          if-no-files-found: error
-          retention-days: 30
-  runtime-observation-and-orphan-cleanup:
+  retained-managed-failure:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 5
     steps:
-      - name: Release only the identity-checked orphan compiler descriptor
+      - name: Read exact managed publication receipt and phase logs
         run: |
           python3 - <<'PY'
-          import json,os,pathlib,re,select,signal,time
-          pid=901105
-          expected_ticks=85970188
-          expected_device=64774
-          expected_inode=354780545
-          result={"scope":"Identity-checked SIGTERM of the confirmed orphan compiler only","pid":pid,"signalSent":False}
-          def identity():
-              p=pathlib.Path("/proc")/str(pid)
-              state=(p/"stat").read_text()
-              begin=state.index("(");end=state.rindex(")")
-              fields=state[end+2:].split()
-              executable=pathlib.Path(os.readlink(p/"exe")).name.removesuffix(" (deleted)")
-              args=(p/"cmdline").read_bytes().split(b"\0")
-              compiler_argument=any(value.endswith(b"/Roslyn/bincore/VBCSCompiler.dll") or value.endswith(b"/Roslyn/bincore/VBCSCompiler") for value in args[:2])
-              recognized=executable=="VBCSCompiler" or (executable=="dotnet" and compiler_argument)
-              fd=(p/"fd/9").stat()
-              return {"uid":p.stat().st_uid,"ppid":int(fields[1]),"comm":state[begin+1:end],
-                      "startTicks":int(fields[19]),"recognizedCompiler":recognized,
-                      "fdDevice":fd.st_dev,"fdInode":fd.st_ino}
-          def expected(value):
-              return (value["uid"]==os.getuid() and value["ppid"]==1
-                      and value["comm"]=="VBCSCompiler" and value["startTicks"]==expected_ticks
-                      and value["recognizedCompiler"] and value["fdDevice"]==expected_device
-                      and value["fdInode"]==expected_inode)
-          try:
-              first=identity()
-              result["before"]=first
-              if not expected(first):result["outcome"]="identity-changed-no-signal"
+          import hashlib,json,pathlib
+          root=pathlib.Path("/build/laplace/recovery/chess-followthrough/35164475800-1")
+          for path in sorted(root.rglob("*")):
+              if not path.is_file() or path.suffix not in (".json",".log",".txt"):
+                  continue
+              if "tmp" in path.relative_to(root).parts:
+                  continue
+              raw=path.read_bytes()
+              print("RETAINED_FILE "+json.dumps({"path":str(path.relative_to(root)),"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()}),flush=True)
+              if len(raw)<=131072:
+                  print(raw.decode("utf-8","replace"),flush=True)
               else:
-                  descriptor=os.pidfd_open(pid,0)
-                  try:
-                      second=identity()
-                      if not expected(second):result["outcome"]="identity-changed-no-signal"
-                      else:
-                          signal.pidfd_send_signal(descriptor,signal.SIGTERM)
-                          result["signalSent"]=True
-                          poller=select.poll();poller.register(descriptor,select.POLLIN)
-                          result["exited"]=bool(poller.poll(8000))
-                          result["outcome"]="terminated" if result["exited"] else "term-sent-still-present"
-                  finally:os.close(descriptor)
-          except (FileNotFoundError,ProcessLookupError):result["outcome"]="already-exited-no-replacement-signaled"
-          except (OSError,AttributeError) as error:result["errorType"]=type(error).__name__
-          rows=[]
-          for line in pathlib.Path("/proc/locks").read_text().splitlines():
-              match=re.search(r"([0-9a-f]+):([0-9a-f]+):([0-9]+)",line)
-              if match and (int(match[1],16),int(match[2],16),int(match[3]))==(os.major(expected_device),os.minor(expected_device),expected_inode):rows.append(line)
-          result["kernelLockRecordsAfter"]=rows
-          print("EXACT_COMPILER_LOCK_CLEANUP "+json.dumps(result,sort_keys=True),flush=True)
-          PY
-      - name: Observe actual PostgreSQL backend and postmaster library mappings
-        run: |
-          python3 - <<'PY'
-          import hashlib,json,pathlib,subprocess
-          sql="""SET statement_timeout='20s';
-          SET default_transaction_read_only=on;
-          SELECT consensus.highway_ready();
-          SELECT json_build_object(
-            'backendPid',pg_backend_pid(),
-            'postmasterPid',split_part(pg_read_file('postmaster.pid'),chr(10),1),
-            'postmasterStarted',pg_postmaster_start_time(),
-            'sharedPreloadLibraries',current_setting('shared_preload_libraries'),
-            'substrateVersion',(SELECT extversion FROM pg_extension WHERE extname='laplace_substrate'),
-            'backendMaps',pg_read_file('/proc/self/maps',0,1048576,true),
-            'postmasterMaps',pg_read_file('/proc/'||split_part(pg_read_file('postmaster.pid'),chr(10),1)||'/maps',0,1048576,true));
-          """
-          result={"scope":"Read-only real PostgreSQL connection; native readiness called only to load its provider"}
-          command=["/opt/laplace/pgsql-18/bin/psql","-X","-q","-A","-t","-v","ON_ERROR_STOP=1",
-                   "-h","/var/run/postgresql","-U","laplace_admin","-d","laplace"]
-          observed=subprocess.run(command,input=sql,text=True,capture_output=True,timeout=30)
-          result["exitCode"]=observed.returncode
-          if observed.returncode:
-              result["diagnostic"]=observed.stderr[-2048:]
-          else:
-              value=json.loads(next(line for line in observed.stdout.splitlines() if line.startswith("{")))
-              current={}
-              for key in ("backendMaps","postmasterMaps"):
-                  selected=[]
-                  for line in (value.get(key) or "").splitlines():
-                      if not any(name in line for name in ("liblaplace_core","laplace_substrate","laplace_execution")):continue
-                      selected.append(line)
-                      fields=line.split(maxsplit=5)
-                      if len(fields)<6:continue
-                      name=fields[5].removesuffix(" (deleted)")
-                      if name in current:continue
-                      path=pathlib.Path(name)
-                      try:
-                          info=path.stat()
-                          current[name]={"device":info.st_dev,"inode":info.st_ino,"bytes":info.st_size,
-                                         "sha256":hashlib.sha256(path.read_bytes()).hexdigest()}
-                      except OSError as error:current[name]={"errorType":type(error).__name__}
-                  value[key]=selected
-              value["onDiskMappedPaths"]=current
-              result["observation"]=value
-          print("POSTGRES_ACTUAL_LIBRARY_MAPS "+json.dumps(result,sort_keys=True),flush=True)
+                  print("[bounded final 128 KiB]\n"+raw[-131072:].decode("utf-8","replace"),flush=True)
           PY
