@@ -87,7 +87,6 @@ class WorkspaceReservation(WorkspaceFixture):
                 self.assertEqual(process.stdout.readline(), "started\n")
                 time.sleep(0.25)
                 self.assertIsNone(process.poll())
-                # With the lock still held, source selection cannot occur.
                 self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
                 self.assertFalse(self.events.exists())
                 self.assertEqual(self.marker.read_text(), "existing qualified build\n")
@@ -148,13 +147,11 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
         self.assertFalse(self.events.exists())
 
-
     def test_mainline_and_operator_preserve_ignored_checkout_collisions(self):
         path = self.workspace / "new-source.txt"
         path.write_text("ignored local work\n")
         with (self.workspace / ".git/info/exclude").open("a") as stream:
             stream.write("\nnew-source.txt\n")
-        # This collision is invisible to the ordinary clean-worktree check.
         self.assertEqual(self.git(self.workspace, "status", "--porcelain",
                                   "--untracked-files=all").strip(), "")
         self.assertEqual(self.git(self.workspace, "check-ignore",
@@ -172,11 +169,8 @@ class WorkspaceReservation(WorkspaceFixture):
                 self.assertFalse(self.events.exists())
 
 
-
 class DatabaseWorkspaceReservation(WorkspaceFixture):
     def prepare_seed(self):
-        # Real Git and flock are exercised. Only the database commands are
-        # fixtures: this suite must not connect to or mutate a developer DB.
         ownership = (
             'exec 8>"$LAPLACE_WORK_ROOT/host-resource.lock"\n'
             'if flock -n 8; then echo "reservation was not inherited" >&2; exit 97; fi\n'
@@ -191,8 +185,7 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         for name, label in (
                 ("db-migrations.sh", "migration"), ("pipeline.sh", "pipeline"),
                 ("check-database-health.sh", "health"),
-                ("maintain-installed-database.sh", "maintenance"),
-                ("ingest-source.sh", "ingest"), ("ensure-foundation.sh", "foundation")):
+                ("maintain-installed-database.sh", "maintenance")):
             (self.seed / "scripts" / name).write_text(
                 '#!/usr/bin/env bash\nset -euo pipefail\n' + ownership
                 + 'event="' + label + ':$*"\n'
@@ -201,13 +194,11 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
 
     def setUp(self):
         super().setUp()
-        self.env.update(LAPLACE_DB_OPERATION="status", LAPLACE_DB_SEED_SOURCE="",
-                        LAPLACE_DB_SEED_LIMIT="", PGDATABASE="fixture_database",
+        self.env.update(LAPLACE_DB_OPERATION="status", PGDATABASE="fixture_database",
                         TEST_FAIL_EVENT="")
 
-    def execute_database(self, operation="status", seed=""):
-        environment = dict(self.env, LAPLACE_DB_OPERATION=operation,
-                           LAPLACE_DB_SEED_SOURCE=seed)
+    def execute_database(self, operation="status"):
+        environment = dict(self.env, LAPLACE_DB_OPERATION=operation)
         return subprocess.run(["bash", "-c", body("db", "db-ops.yml")],
                               cwd=self.workspace, env=environment,
                               text=True, capture_output=True, timeout=15)
@@ -241,24 +232,21 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.events.read_text().splitlines(), ["environment", "migration:status"])
         self.assertNotIn("extraheader", self.git(self.workspace, "config", "--local", "--list"))
 
-    def test_database_operations_keep_the_existing_dispatch_and_arguments(self):
+    def test_database_operations_own_lifecycle_only(self):
         pipeline = "pipeline:sync-extension tune-pg tune-laplace perfcache-guc api-env"
         cases = (
-            ("status", "", ["migration:status"]),
-            ("create", "", ["migration:up", pipeline, "health:fixture_database"]),
-            ("drop", "", ["migration:nuke --yes"]),
-            ("recreate", "", ["migration:nuke --yes", "migration:up", pipeline,
-                              "health:fixture_database"]),
-            ("update", "", ["maintenance:"]),
-            ("update", "selected source", ["maintenance:", "ingest:selected source"]),
-            ("seed", "", ["foundation:"]),
-            ("seed", "selected source", ["ingest:selected source"]),
-            ("verify", "", ["health:fixture_database"]),
+            ("status", ["migration:status"]),
+            ("create", ["migration:up", pipeline, "health:fixture_database"]),
+            ("drop", ["migration:nuke --yes"]),
+            ("recreate", ["migration:nuke --yes", "migration:up", pipeline,
+                           "health:fixture_database"]),
+            ("update", ["maintenance:"]),
+            ("verify", ["health:fixture_database"]),
         )
-        for operation, seed, expected in cases:
-            with self.subTest(operation=operation, seed=seed):
+        for operation, expected in cases:
+            with self.subTest(operation=operation):
                 self.events.unlink(missing_ok=True)
-                result = self.execute_database(operation, seed)
+                result = self.execute_database(operation)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(self.events.read_text().splitlines(), ["environment", *expected])
                 self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
@@ -335,10 +323,13 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.events.read_text().splitlines(),
                          ["environment", "migration:nuke --yes", "migration:up"])
 
-    def test_unknown_database_operation_never_starts_database_work(self):
-        result = self.execute_database("unknown")
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertEqual(self.events.read_text().splitlines(), ["environment"])
+    def test_seed_and_unknown_operations_never_start_database_work(self):
+        for operation in ("seed", "unknown"):
+            with self.subTest(operation=operation):
+                self.events.unlink(missing_ok=True)
+                result = self.execute_database(operation)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(self.events.read_text().splitlines(), ["environment"])
 
 class IntegratedLifecycle(unittest.TestCase):
     def execute(self, test_status, failure_phase=None):
@@ -347,8 +338,8 @@ class IntegratedLifecycle(unittest.TestCase):
         finish = source.index("\n}\n", start) + 3
         owner = source[start:finish]
         names = ("check_deps", "run_build", "run_dev_tests", "run_install",
-                 "run_database_maintenance", "run_publish", "reconcile_installed_product",
-                 "run_foundation")
+                 "run_database_maintenance", "run_db_tests", "run_publish",
+                 "reconcile_installed_product", "run_live_tests")
         with tempfile.TemporaryDirectory(prefix="laplace-lifecycle-order-") as directory:
             events = Path(directory) / "events"
             functions = []
@@ -364,20 +355,22 @@ class IntegratedLifecycle(unittest.TestCase):
                                     text=True, capture_output=True, timeout=10)
             return result, events.read_text().splitlines()
 
-    def test_failed_dev_controls_preserve_failure_after_the_complete_lifecycle(self):
+    @staticmethod
+    def expected_lifecycle():
+        return ["check_deps", "run_build", "run_dev_tests", "run_install",
+                "run_database_maintenance:--prepare", "run_db_tests", "run_publish",
+                "reconcile_installed_product", "run_live_tests"]
+
+    def test_failed_dev_controls_preserve_failure_after_complete_product_lifecycle(self):
         result, events = self.execute(23)
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
-        self.assertEqual(events, ["check_deps", "run_build", "run_dev_tests", "run_install",
-                                 "run_database_maintenance:--prepare", "run_publish",
-                                 "reconcile_installed_product", "run_foundation"])
+        self.assertEqual(events, self.expected_lifecycle())
         self.assertIn("development tests failed earlier (status 23)", result.stderr)
 
     def test_build_and_runtime_failures_stop_before_later_phases(self):
-        order = ["check_deps", "run_build", "run_dev_tests", "run_install",
-                 "run_database_maintenance:--prepare", "run_publish",
-                 "reconcile_installed_product", "run_foundation"]
-        for phase in ("run_build", "run_install", "run_database_maintenance",
-                      "run_publish", "reconcile_installed_product", "run_foundation"):
+        order = self.expected_lifecycle()
+        for phase in ("run_build", "run_install", "run_database_maintenance", "run_db_tests",
+                      "run_publish", "reconcile_installed_product", "run_live_tests"):
             with self.subTest(phase=phase):
                 result, events = self.execute(23, phase)
                 self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
@@ -407,12 +400,10 @@ class IntegratedLifecycle(unittest.TestCase):
                 "scripts/test-parallel.sh --profile dev-managed --suite uci-dev",
                 "scripts/test-parallel.sh --profile dev-managed --suite browser-dev"])
 
-    def test_publication_and_readiness_precede_resumable_foundation(self):
+    def test_product_lifecycle_reaches_database_and_live_product_checks(self):
         result, events = self.execute(0)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(events, ["check_deps", "run_build", "run_dev_tests", "run_install",
-                                 "run_database_maintenance:--prepare", "run_publish",
-                                 "reconcile_installed_product", "run_foundation"])
+        self.assertEqual(events, self.expected_lifecycle())
 
 class DatabaseMaintenanceMode(unittest.TestCase):
     def execute(self, arguments, pipeline_status=0, fresh=False):

@@ -5,7 +5,7 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  provision|reconcile|check|build|install|database|foundation|applications|deploy|mainline|test-dev|test-db|test-live) ;;
+  provision|reconcile|check|build|install|applications|deploy|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
@@ -50,11 +50,8 @@ run_database_maintenance() {
   bash scripts/maintain-installed-database.sh "$@"
 }
 
-run_foundation() {
-  bash scripts/ensure-foundation.sh
-  verify_seeded_product
-}
-
+# Database QA includes isolated regression databases and installed-runtime checks;
+# it does not own corpus ingestion or the canonical application database contents.
 run_db_tests() {
   bash scripts/test-parallel.sh --profile db --suite db-health
   rm -rf build/extension/*/tests/regress_output
@@ -75,17 +72,10 @@ run_live_tests() {
   bash scripts/test-parallel.sh --profile live --suite generation-eval
 }
 
-run_competitive_model_proof() {
-  # A file-sized GGUF is not a product proof. This gate admits the real code
-  # corpora and a local checkpoint, reads the resulting model testimony through
-  # SQL, synthesizes from the substrate, then requires the exported GGUF to load
-  # and produce substrate-attested behavior in llama.cpp.
-  bash scripts/model-synthesize-ci.sh
-}
-
 check_application_live() {
+  local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local body
-  body="$(curl -fsS http://127.0.0.1:5187/health)" || {
+  body="$(curl -fsS "$base/health")" || {
     echo "::error::installed laplace-api is not reachable after publication" >&2
     return 1
   }
@@ -112,50 +102,33 @@ check_t0_perfcache_runtime() {
 }
 
 reconcile_installed_product() {
-  # This phase is intentionally seed-agnostic. Database/schema installation,
-  # application liveness, and the T0 runtime must not depend on foundation ingest.
+  local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
+  # Installed product reconciliation is deliberately seed-independent. Corpus
+  # admission remains a separate seed workflow and cannot be required to deploy code.
   bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
   check_application_live
   check_t0_perfcache_runtime
+  python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
 }
 
-verify_seeded_product() {
-  local body
-  body="$(curl -sS http://127.0.0.1:5187/health/ready)" || {
-    echo "::error::laplace-api seeded readiness endpoint is unreachable after foundation" >&2
-    return 1
-  }
-  if ! grep -q '"ready":true' <<<"$body"; then
-    echo "::error::laplace-api is not product-ready after foundation: $body" >&2
-    return 1
-  fi
-  echo "PRODUCT_READY $body"
-}
-
+# Product lifecycle owns build/install/database verification/publication/live checks.
+# Corpus ingestion and foundation/model seeding are owned exclusively by seed.yml.
 run_deploy() {
   check_deps
   run_build
 
-  # A development-suite failure must remain visible and keep the workflow red,
-  # but it must not erase downstream install/database/application evidence. A
-  # genuine build/install/runtime failure still stops immediately under set -e.
+  # Preserve downstream product evidence even if a development suite fails.
+  # Build/install/runtime failures themselves still stop immediately under set -e.
   local dev_test_rc=0
   run_dev_tests || dev_test_rc=$?
 
   run_install
   run_database_maintenance --prepare
-
-  # Mainline means the installed product, not a compile receipt. Publish and
-  # reconcile first; then admit the foundation, exercise database + deployed API
-  # tests, and finally prove a real competitive model path through an external
-  # runtime. Any of those failures is a mainline failure.
+  run_db_tests
   run_publish
   reconcile_installed_product
-  run_foundation
-  run_db_tests
   run_live_tests
-  run_competitive_model_proof
 
   if (( dev_test_rc != 0 )); then
     echo "::error::development tests failed earlier (status $dev_test_rc); integrated lifecycle continued and retained downstream evidence" >&2
@@ -179,12 +152,6 @@ case "$stage" in
     ;;
   install)
     run_install
-    ;;
-  database)
-    run_database_maintenance
-    ;;
-  foundation)
-    run_foundation
     ;;
   applications)
     run_publish
