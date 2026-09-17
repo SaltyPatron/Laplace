@@ -95,15 +95,16 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    prior @extschema@.entities%ROWTYPE;
     summary_tier smallint;
     summary_type bytea;
     summary_source bytea;
 BEGIN
-    -- Direct ordinary INSERT/COPY shares the same canonical write ordering as
-    -- managed/native bulk owners. Lock before observing either the sidecar or E;
-    -- a waiter must see the prior committed facet before computing its summary.
-    PERFORM pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0));
+    -- The outer trigger owns interpretation admission. Its inner canonical upsert
+    -- re-enters this trigger only to let PostgreSQL's id primary key perform the
+    -- same-id serialization; do not recursively publish the facet a second time.
+    IF pg_trigger_depth() > 1 THEN
+        RETURN NEW;
+    END IF;
 
     INSERT INTO @extschema@.entity_interpretations AS ei(
         entity_id, tier, type_id, first_observed_by)
@@ -119,6 +120,10 @@ BEGIN
        AND (ei.first_observed_by IS NULL
             OR EXCLUDED.first_observed_by < ei.first_observed_by);
 
+    -- Include every already-committed interpretation, not only NEW, so an ordinary
+    -- insert also repairs a stale compatibility summary. A concurrent first writer
+    -- can still be invisible here; the canonical id upsert below combines this
+    -- summary monotonically with the row that won the primary-key race.
     SELECT min(i.tier)::smallint,
            (array_agg(i.type_id ORDER BY i.type_id))[1],
            (array_agg(i.first_observed_by ORDER BY i.first_observed_by)
@@ -127,26 +132,41 @@ BEGIN
       FROM @extschema@.entity_interpretations i
      WHERE i.entity_id = NEW.id;
 
-    SELECT * INTO prior
-    FROM @extschema@.entities e
-    WHERE e.id = NEW.id;
-
-    IF NOT FOUND THEN
-        NEW.tier := summary_tier;
-        NEW.type_id := summary_type;
-        NEW.first_observed_by := summary_source;
-        RETURN NEW;
-    END IF;
-
-    UPDATE @extschema@.entities e
-       SET tier = summary_tier,
-           type_id = summary_type,
-           first_observed_by = summary_source
-     WHERE e.id = NEW.id
-       AND (e.tier, e.type_id, e.first_observed_by)
+    -- Use the canonical entity row itself as the concurrency owner. Concurrent
+    -- inserts for different content ids stay independent; concurrent inserts for
+    -- the same id meet at the primary key and fold summaries by deterministic
+    -- minima after PostgreSQL resolves the conflict. No global advisory mutex is
+    -- required, and transaction-sized COPY batches do not accumulate per-id locks.
+    INSERT INTO @extschema@.entities AS e(
+        id, tier, type_id, first_observed_by, created_at, highway_mask)
+    VALUES (
+        NEW.id, summary_tier, summary_type, summary_source,
+        NEW.created_at, NEW.highway_mask)
+    ON CONFLICT (id) DO UPDATE
+       SET tier = LEAST(e.tier, EXCLUDED.tier),
+           type_id = CASE
+             WHEN e.type_id <= EXCLUDED.type_id THEN e.type_id
+             ELSE EXCLUDED.type_id
+           END,
+           first_observed_by = CASE
+             WHEN e.first_observed_by IS NULL THEN EXCLUDED.first_observed_by
+             WHEN EXCLUDED.first_observed_by IS NULL THEN e.first_observed_by
+             WHEN e.first_observed_by <= EXCLUDED.first_observed_by THEN e.first_observed_by
+             ELSE EXCLUDED.first_observed_by
+           END
+     WHERE (e.tier, e.type_id, e.first_observed_by)
            IS DISTINCT FROM
-           (summary_tier, summary_type, summary_source);
+           (LEAST(e.tier, EXCLUDED.tier),
+            CASE WHEN e.type_id <= EXCLUDED.type_id THEN e.type_id ELSE EXCLUDED.type_id END,
+            CASE
+              WHEN e.first_observed_by IS NULL THEN EXCLUDED.first_observed_by
+              WHEN EXCLUDED.first_observed_by IS NULL THEN e.first_observed_by
+              WHEN e.first_observed_by <= EXCLUDED.first_observed_by THEN e.first_observed_by
+              ELSE EXCLUDED.first_observed_by
+            END);
 
+    -- The inner upsert performed the physical insert/update. Suppress the outer
+    -- row so it cannot attempt a second insert after the same-id race is resolved.
     RETURN NULL;
 END;
 $$;
