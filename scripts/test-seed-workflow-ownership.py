@@ -32,13 +32,13 @@ class WorkflowOwnership(unittest.TestCase):
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
-    def test_mainline_validation_finishes_the_running_revision(self):
+    def test_mainline_delegates_to_one_reusable_product_stage(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         mainline = text.split("  mainline:\n", 1)[1].split("\n  operator:\n", 1)[0]
-        self.assertIn("group: laplace-mainline-validation", mainline)
-        self.assertIn("cancel-in-progress: false", mainline)
-        self.assertNotIn("group: laplace-host-lifecycle", mainline)
-        self.assertIn("exec bash scripts/product-ci.sh mainline", mainline)
+        self.assertIn("uses: ./.github/workflows/product-stage.yml", mainline)
+        self.assertIn("stage: mainline", mainline)
+        self.assertNotIn("cancel-in-progress:", mainline)
+        self.assertNotIn("runs-on:", mainline)
 
     def test_expensive_competitive_proof_is_dispatch_only(self):
         text = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
