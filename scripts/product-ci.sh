@@ -5,7 +5,7 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  provision|reconcile|check|build|install|database|applications|deploy|test-dev|test-db|test-live) ;;
+  provision|reconcile|check|build|install|database|foundation|applications|deploy|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
@@ -45,6 +45,10 @@ run_database_maintenance() {
   bash scripts/maintain-installed-database.sh
 }
 
+run_foundation() {
+  bash scripts/ensure-foundation.sh
+}
+
 run_db_tests() {
   bash scripts/test-parallel.sh --profile db --suite db-health
   rm -rf build/extension/*/tests/regress_output
@@ -70,6 +74,19 @@ reconcile_installed_product() {
   curl -fsS http://127.0.0.1:5187/health/ready | grep -q '"ready":true'
 }
 
+run_mainline() {
+  check_deps
+  run_build
+  run_dev_tests
+  run_install
+  run_database_maintenance
+  run_foundation
+  run_db_tests
+  run_publish
+  run_live_tests
+  reconcile_installed_product
+}
+
 case "$stage" in
   provision)
     provision_deps
@@ -90,6 +107,9 @@ case "$stage" in
   database)
     run_database_maintenance
     ;;
+  foundation)
+    run_foundation
+    ;;
   applications)
     run_publish
     ;;
@@ -108,5 +128,8 @@ case "$stage" in
     run_install
     run_database_maintenance
     run_publish
+    ;;
+  mainline)
+    run_mainline
     ;;
 esac
