@@ -31,10 +31,15 @@ run_build() {
 }
 
 run_dev_tests() {
-  bash scripts/test-parallel.sh --profile dev-native --suite native-dev
-  bash scripts/test-parallel.sh --profile dev-managed --suite managed-dev
-  bash scripts/test-parallel.sh --profile dev-managed --suite uci-dev
-  bash scripts/test-parallel.sh --profile dev-managed --suite browser-dev
+  # Development tests are evidence, not a reason to discard the rest of the
+  # integrated lifecycle. Run every suite, remember any failure, and return it
+  # after the remaining suites have had a chance to report their own state.
+  local rc=0
+  bash scripts/test-parallel.sh --profile dev-native --suite native-dev || rc=$?
+  bash scripts/test-parallel.sh --profile dev-managed --suite managed-dev || rc=$?
+  bash scripts/test-parallel.sh --profile dev-managed --suite uci-dev || rc=$?
+  bash scripts/test-parallel.sh --profile dev-managed --suite browser-dev || rc=$?
+  return "$rc"
 }
 
 run_install() {
@@ -77,12 +82,23 @@ reconcile_installed_product() {
 run_deploy() {
   check_deps
   run_build
-  run_dev_tests
+
+  # A development-suite failure must remain visible and keep the workflow red,
+  # but it must not erase downstream install/database/application evidence. A
+  # genuine build/install/runtime failure still stops immediately under set -e.
+  local dev_test_rc=0
+  run_dev_tests || dev_test_rc=$?
+
   run_install
   run_database_maintenance --prepare
   run_publish
   reconcile_installed_product
   run_foundation
+
+  if (( dev_test_rc != 0 )); then
+    echo "::error::development tests failed earlier (status $dev_test_rc); integrated lifecycle continued and retained downstream evidence" >&2
+    return "$dev_test_rc"
+  fi
 }
 
 case "$stage" in
