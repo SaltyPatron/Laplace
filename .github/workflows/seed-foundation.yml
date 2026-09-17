@@ -1,0 +1,44 @@
+name: Seed — foundation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "foundation source, or ladder for the ordered foundation campaign"
+        type: choice
+        required: true
+        options: [unicode, iso639, operational, cili, wordnet, verbnet, propbank, framenet, mapnet, wordframenet, semlink, ladder]
+      path:
+        description: "single-source optional path"
+        type: string
+        default: ""
+      database:
+        description: "target database"
+        type: choice
+        options: [laplace]
+        default: laplace
+      force:
+        description: "ladder only: re-ingest every rung"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    if: inputs.source != 'ladder'
+    uses: ./.github/workflows/seed.yml
+    with:
+      mode: source
+      source: ${{ inputs.source }}
+      path: ${{ inputs.path }}
+      database: ${{ inputs.database }}
+
+  ladder:
+    if: inputs.source == 'ladder'
+    uses: ./.github/workflows/seed.yml
+    with:
+      mode: foundation-ladder
+      database: ${{ inputs.database }}
+      force: ${{ inputs.force }}
