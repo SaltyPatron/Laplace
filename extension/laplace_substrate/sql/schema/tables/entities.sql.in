@@ -3,13 +3,13 @@
 --
 -- The compatibility columns on `entities` remain a deterministic summary for
 -- existing readers while `entity_interpretations` retains every distinct
--- (id,tier,type) observation.  On a repeated id the summary converges by byte/
+-- (id,tier,type) observation. On a repeated id the summary converges by byte/
 -- numeric minimum rather than arrival order; no second logical entity can be
--- created.  New readers that care about tier/type multiplicity must read the
+-- created. New readers that care about tier/type multiplicity must read the
 -- interpretation relation, not treat the compatibility summary as authority.
 --
 -- HASH(id) is the physical layout because ids are content hashes and therefore
--- distribute independently of modality-relative tier.  GREENFIELD: reset and
+-- distribute independently of modality-relative tier. GREENFIELD: reset and
 -- reseed is the upgrade path; an old LIST(tier)/(id,tier) database is rejected.
 CREATE TABLE IF NOT EXISTS entities (
     id                 bytea            NOT NULL CHECK (octet_length(id) = 16),
@@ -54,7 +54,7 @@ BEGIN
     END LOOP;
 END $$;
 
--- Explicit home for structural altitude/type observations.  Distinct sources
+-- Explicit home for structural altitude/type observations. Distinct sources
 -- witnessing the same interpretation converge on the same row; provenance of
 -- semantic claims remains in attestations, while first_observed_by is retained
 -- only as non-authoritative compatibility metadata.
@@ -84,27 +84,20 @@ BEGIN
     END LOOP;
 END $$;
 
--- Repeated canonical ids are interpretation observations, not new entities.
--- This is a storage invariant fallback. The normal ingest spine is expected to
--- publish interpretations set-wise; this trigger prevents direct SQL/legacy
--- callers from manufacturing a second canonical entity while that migration is
--- completed.
+-- Storage invariant fallback. The normal ingest spine publishes all
+-- interpretations set-wise before canonical COPY in the same control transaction.
+-- Direct SQL/legacy callers still pass through here, so no caller can create a
+-- second logical entity or lose a previously unseen tier/type interpretation.
 CREATE OR REPLACE FUNCTION @extschema@.entity_identity_admit()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
     prior @extschema@.entities%ROWTYPE;
-    source_min bytea;
+    summary_tier smallint;
+    summary_type bytea;
+    summary_source bytea;
 BEGIN
-    SELECT * INTO prior
-    FROM @extschema@.entities e
-    WHERE e.id = NEW.id;
-
-    IF NOT FOUND THEN
-        RETURN NEW;
-    END IF;
-
     INSERT INTO @extschema@.entity_interpretations AS ei(
         entity_id, tier, type_id, first_observed_by)
     VALUES (NEW.id, NEW.tier, NEW.type_id, NEW.first_observed_by)
@@ -116,35 +109,34 @@ BEGIN
              ELSE EXCLUDED.first_observed_by
            END;
 
-    source_min := CASE
-        WHEN prior.first_observed_by IS NULL THEN NEW.first_observed_by
-        WHEN NEW.first_observed_by IS NULL THEN prior.first_observed_by
-        WHEN prior.first_observed_by <= NEW.first_observed_by THEN prior.first_observed_by
-        ELSE NEW.first_observed_by
-    END;
+    SELECT min(i.tier)::smallint,
+           (array_agg(i.type_id ORDER BY i.type_id))[1],
+           (array_agg(i.first_observed_by ORDER BY i.first_observed_by)
+               FILTER (WHERE i.first_observed_by IS NOT NULL))[1]
+      INTO summary_tier, summary_type, summary_source
+      FROM @extschema@.entity_interpretations i
+     WHERE i.entity_id = NEW.id;
+
+    SELECT * INTO prior
+    FROM @extschema@.entities e
+    WHERE e.id = NEW.id;
+
+    IF NOT FOUND THEN
+        NEW.tier := summary_tier;
+        NEW.type_id := summary_type;
+        NEW.first_observed_by := summary_source;
+        RETURN NEW;
+    END IF;
 
     UPDATE @extschema@.entities e
-       SET tier = LEAST(e.tier, NEW.tier),
-           type_id = LEAST(e.type_id, NEW.type_id),
-           first_observed_by = source_min
+       SET tier = summary_tier,
+           type_id = summary_type,
+           first_observed_by = summary_source
      WHERE e.id = NEW.id
        AND (e.tier, e.type_id, e.first_observed_by)
            IS DISTINCT FROM
-           (LEAST(e.tier, NEW.tier), LEAST(e.type_id, NEW.type_id), source_min);
+           (summary_tier, summary_type, summary_source);
 
-    RETURN NULL;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION @extschema@.entity_identity_capture_initial()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    INSERT INTO @extschema@.entity_interpretations(
-        entity_id, tier, type_id, first_observed_by)
-    VALUES (NEW.id, NEW.tier, NEW.type_id, NEW.first_observed_by)
-    ON CONFLICT (entity_id, tier, type_id) DO NOTHING;
     RETURN NULL;
 END;
 $$;
@@ -153,11 +145,6 @@ DROP TRIGGER IF EXISTS entity_identity_admit ON entities;
 CREATE TRIGGER entity_identity_admit
 BEFORE INSERT ON entities
 FOR EACH ROW EXECUTE FUNCTION @extschema@.entity_identity_admit();
-
-DROP TRIGGER IF EXISTS entity_identity_capture_initial ON entities;
-CREATE TRIGGER entity_identity_capture_initial
-AFTER INSERT ON entities
-FOR EACH ROW EXECUTE FUNCTION @extschema@.entity_identity_capture_initial();
 
 SELECT pg_extension_config_dump('entities', '');
 SELECT pg_extension_config_dump('entity_interpretations', '');
