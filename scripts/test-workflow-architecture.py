@@ -105,22 +105,33 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("runs-on: [self-hosted, laplace]", lifecycle)
         self.assertNotIn("host-resource.lock", lifecycle)
 
-    def test_deploy_and_proof_are_composed_from_retryable_stage_jobs(self):
+    def test_deploy_and_proof_split_immutable_candidate_from_shared_transaction(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("deploy-candidate:", lifecycle)
         self.assertIn("deploy-activation:", lifecycle)
         self.assertIn("needs: deploy-candidate", lifecycle)
+        self.assertIn("stage: release-candidate", lifecycle)
+        self.assertIn("stage: release-activation", lifecycle)
+
         self.assertIn("proof-candidate:", lifecycle)
-        self.assertIn("proof-model:", lifecycle)
-        self.assertIn("proof-activation:", lifecycle)
+        self.assertIn("proof-transaction:", lifecycle)
         self.assertIn("needs: proof-candidate", lifecycle)
-        self.assertIn("needs: proof-model", lifecycle)
+        self.assertIn("stage: proof-transaction", lifecycle)
+        self.assertNotIn("proof-model:", lifecycle)
+        self.assertNotIn("proof-activation:", lifecycle)
 
         proof = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
-        for stage in ("release-candidate", "proof-model", "release-activation"):
-            self.assertIn(f"stage: {stage}", proof)
+        self.assertIn("stage: release-candidate", proof)
+        self.assertIn("stage: proof-transaction", proof)
+        self.assertNotIn("stage: proof-model", proof)
+        self.assertNotIn("stage: release-activation", proof)
         self.assertNotIn("scripts/product-ci.sh", proof)
         self.assertNotIn("runs-on: [self-hosted, laplace]", proof)
+
+    def test_reusable_product_owner_enables_revision_scoped_handoffs(self):
+        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
+        self.assertIn('LAPLACE_CI_REVISION_SCOPED_BUILD: "1"', reusable)
+
 
 
 if __name__ == "__main__":
