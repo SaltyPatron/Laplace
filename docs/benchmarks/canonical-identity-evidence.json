@@ -656,14 +656,226 @@
     "native_sql_qualified_ancestor": "174f87578dbc2f252ee4d0b0533774793ffb945c",
     "tree": "ad15f2fe26f8fefa54a42452f9f0cc07e65686db"
   },
+  "canonical_consensus_query_correction": {
+    "changes_excluded": [
+      "Global planner settings",
+      "Statistics policy",
+      "Schema/index definitions",
+      "Native arithmetic",
+      "Lock/write owner"
+    ],
+    "interpretation": "Read-only exact-output comparison, installed normal code/DB qualification and completed novel140 recording are separately established. The whole-product lifecycle and two failed current-chess preflights remain failed.",
+    "normal_deployment": {
+      "conclusion": "failure",
+      "evidenceClass": {
+        "blob": "917dff0b7e23ca4eae730dc4a1eb7ed8b7e48f09",
+        "path": "app/Laplace.Substrate.Tests/Crud/ConsensusEvidencePeriodTests.cs",
+        "scope": "Normal Tier=db assembly pass; minimal logger has no individually printed successful case list or TRX.",
+        "sourceEnumeratedCases": 12
+      },
+      "fullProductLifecyclePassed": false,
+      "job": 105296987616,
+      "managedDatabase": [
+        {
+          "assembly": "Laplace.Chess.Tests.dll",
+          "failed": 0,
+          "passed": 1,
+          "skipped": 0,
+          "total": 1
+        },
+        {
+          "assembly": "Laplace.Decomposers.Tests.dll",
+          "failed": 0,
+          "passed": 1,
+          "skipped": 1,
+          "total": 2
+        },
+        {
+          "assembly": "Laplace.Endpoints.OpenAICompat.Tests.dll",
+          "failed": 0,
+          "passed": 15,
+          "skipped": 0,
+          "total": 15
+        },
+        {
+          "assembly": "Laplace.Substrate.Tests.dll",
+          "failed": 0,
+          "passed": 195,
+          "skipped": 1,
+          "total": 196
+        }
+      ],
+      "managedDevelopment": [
+        {
+          "assembly": "Laplace.Agents.Tests.dll",
+          "failed": 0,
+          "passed": 73,
+          "skipped": 0,
+          "total": 73
+        },
+        {
+          "assembly": "Laplace.Cli.Tests.dll",
+          "failed": 0,
+          "passed": 111,
+          "skipped": 0,
+          "total": 111
+        },
+        {
+          "assembly": "Laplace.Endpoints.Lichess.Tests.dll",
+          "failed": 0,
+          "passed": 8,
+          "skipped": 0,
+          "total": 8
+        },
+        {
+          "assembly": "Laplace.Endpoints.Mcp.Tests.dll",
+          "failed": 0,
+          "passed": 20,
+          "skipped": 0,
+          "total": 20
+        },
+        {
+          "assembly": "Laplace.Core.Tests.dll",
+          "failed": 0,
+          "passed": 262,
+          "skipped": 0,
+          "total": 262
+        },
+        {
+          "assembly": "Laplace.Endpoints.OpenAICompat.Tests.dll",
+          "failed": 0,
+          "passed": 316,
+          "skipped": 0,
+          "total": 316
+        },
+        {
+          "assembly": "Laplace.Substrate.Tests.dll",
+          "failed": 0,
+          "passed": 1115,
+          "skipped": 2,
+          "total": 1117
+        },
+        {
+          "assembly": "Laplace.Chess.Tests.dll",
+          "failed": 0,
+          "passed": 1364,
+          "skipped": 2,
+          "total": 1366
+        },
+        {
+          "assembly": "Laplace.Decomposers.Tests.dll",
+          "failed": 0,
+          "passed": 409,
+          "skipped": 16,
+          "total": 425
+        }
+      ],
+      "native": {
+        "passed": 710,
+        "scheduled": 711,
+        "skip": "MediaDecode.Mp3FromTatoebaZipSample",
+        "skipped": 1
+      },
+      "nativeDatabase": {
+        "fixtureStages": 6,
+        "passed": 6
+      },
+      "normalLogBytes": 397974,
+      "preload": {
+        "currentInodesObservedAt": "2026-09-17T16:55:58Z",
+        "restartedAt": "2026-09-17T16:55:26Z"
+      },
+      "publication": {
+        "committedAt": "2026-09-17T17:13:46Z",
+        "healthyAt": "2026-09-17T17:13:47Z"
+      },
+      "reportedLogSha256": "98820d8270af5a4f0ee756ead8dd3d2beb76fed665ea027e11b3ec6f4ae7c4cd",
+      "run": 35249183993,
+      "source": {
+        "commit": "af8fd17bda55d3403f46b01a073a298ab6c69597",
+        "tree": "b0e2a671a9842ba734efad8f12b85c4b7db88461"
+      },
+      "terminalReason": "INGEST_JOURNAL_NONTERMINAL: paused Unicode import journal status=running,557056/1114112; native/source/database checks and publication completed"
+    },
+    "observed_mechanism": "Per-cell flags/evidence nested-loop rescan replaced by complete-partition bool_and window. Ordered aggregate, evidence multiplicity, exact per-row rounding, mixed-transient exclusion and final response joins unchanged.",
+    "pre_measurement_attempts": [
+      {
+        "artifact": 10511435213,
+        "artifactBytes": 381689,
+        "artifactSha256": "bd4fd7298befaa356df46f9fa739a1db9ab391952f59b44d5698aedfafd47faf",
+        "failedPhase": "verify-current-direct-engines",
+        "finishedUtc": "2026-09-17T17:19:22.610678+00:00",
+        "job": 105306086206,
+        "priorSuccessfulPhases": [
+          "retain-normal-lifecycle-log",
+          "authenticate-selected-export",
+          "runtime-before",
+          "build-and-select-catalog",
+          "verify-current-managed",
+          "verify-current-recorded-serving"
+        ],
+        "recordingStarted": false,
+        "reportedCause": "Public launcher refused preparing engine entries while the existing user CuteChess session holds its lock; exact nested reader owned by Original.",
+        "run": 35251888189,
+        "status": "failed-before-recording"
+      },
+      {
+        "actualReader": {
+          "job": 105309607009,
+          "run": 35252985589
+        },
+        "artifact": 10512100334,
+        "artifactBytes": 386783,
+        "artifactSha256": "edabf3ce6adc1daceb08d0f2ab967f5cfe0ba0e510ed2165a3bfa359341b26c8",
+        "directCheckExecuted": false,
+        "failedPhase": "verify-current-recorded-serving",
+        "finishedUtc": "2026-09-17T17:27:53.150353+00:00",
+        "job": 105308853130,
+        "recordingStarted": false,
+        "reportedCause": "no persistent transition hit observed; the legal frontier may already be cached",
+        "run": 35252739692
+      }
+    ],
+    "production": {
+      "base": "f542379731b1f8f6f859650bec026e44ec3fee50",
+      "blob": "ed749aa072baf8c8fc058286c4ed934c325e3f09",
+      "path": "extension/laplace_substrate/src/fold_route.c"
+    },
+    "query_evidence_path": "docs/benchmarks/CONSENSUS_EVIDENCE_QUERY.md",
+    "source": {
+      "commit": "af8fd17bda55d3403f46b01a073a298ab6c69597",
+      "tree": "b0e2a671a9842ba734efad8f12b85c4b7db88461"
+    },
+    "tests": {
+      "base": "09deb7e1c91c2adb26bafad7a33eb9ac5e856925",
+      "blob": "917dff0b7e23ca4eae730dc4a1eb7ed8b7e48f09",
+      "path": "app/Laplace.Substrate.Tests/Crud/ConsensusEvidencePeriodTests.cs"
+    }
+  },
   "claims": {
     "chess_runtime_activation": true,
+    "clocked_stockfish_comparison_completed": true,
+    "clocked_stockfish_comparison_laplace_wdl": {
+      "draws": 0,
+      "losses": 20,
+      "wins": 0
+    },
+    "completed_disjoint_corpus_games": 2420,
+    "completed_disjoint_recorded_games": 2440,
+    "completed_disjoint_recorded_games_scope": "2420 authentic original-PGN games plus20 complete clocked match games; current cache coverage separately reported",
     "current_four_payload_proof": true,
+    "current_recorded_cache_games": 2440,
+    "current_recorded_cache_generation": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955",
+    "current_recorded_cache_source": "af8fd17bda55d3403f46b01a073a298ab6c69597",
+    "elo_established": false,
     "first140_new_database_recorded_rate": 2.038443587109693,
     "full_product_lifecycle_passed": false,
     "full_product_lifecycle_status": "blocked",
     "full_recorded_2000_rate": 0.5961239726659999,
     "functional_gui_game": true,
+    "gauntlet_newly_recorded_games": 20,
+    "latest_completed_recorded_rate": 1.9036255672066538,
+    "latest_recorded_source": "af8fd17bda55d3403f46b01a073a298ab6c69597",
     "matching_managed_publication": true,
     "primitive_geometry_rate": "actual18cases passed; scope and medians in completed_first140.geometry",
     "production_activation": true,
@@ -671,20 +883,200 @@
     "recorded_cache_serving": true,
     "stockfish_source_corpus_119": true,
     "sustained_2500_recorded_games_per_second": false,
-    "latest_completed_recorded_rate": 0.5629891542073712,
-    "latest_recorded_source": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
-    "completed_disjoint_recorded_games": 2280,
-    "current_recorded_cache_games": 2280,
-    "current_recorded_cache_generation": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3",
-    "current_recorded_cache_source": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
-    "clocked_stockfish_comparison_completed": true,
-    "clocked_stockfish_comparison_laplace_wdl": {
-      "wins": 0,
-      "draws": 0,
-      "losses": 20
+    "current_recorded_cache_post_install_verification": true,
+    "current_gui_selected_cache_generation": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955",
+    "current_gui_generation_refresh_passed": true
+  },
+  "clocked_paired_comparison": {
+    "artifact": {
+      "bytes": 908391,
+      "id": 10506715000,
+      "sha256": "d81ae9b31a80db2a848a9d3c9cd5fd4cacf245cbcf1f04fa41f1eb93d8399b6b"
     },
-    "gauntlet_newly_recorded_games": 20,
-    "elo_established": false
+    "auth_owner": "12b23bfa42a9d36510afabc4e2e4771b5965a07c",
+    "cache_exported_games": 2280,
+    "cache_generation": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3",
+    "cache_unchanged": true,
+    "comparison_owner": "eb01ef8b398b41014473ce68a6ff0347698c48aa",
+    "credential_lifecycle": {
+      "issued_by_this_invocation": true,
+      "mode": "run-owned-key",
+      "receipt": {
+        "bytes": 440,
+        "path": "credential-lifecycle.json",
+        "sha256": "0bc73683e84b06e9b01c4d6f11fba91701fabc780d395e7ef89375442d772076"
+      },
+      "revocation": "completed",
+      "secret_retained": false,
+      "status": "completed"
+    },
+    "durability": {
+      "fsync": true,
+      "fullPageWrites": true,
+      "localWalFlushAcknowledged": true,
+      "synchronousCommit": "on",
+      "writeCommitAcknowledged": true
+    },
+    "elapsed_seconds": {
+      "collector_end_to_end": 199.41237090202048,
+      "commit": 78.4853853,
+      "match_and_replay": 202.55969442403875,
+      "overhead": 0.7997546000000131,
+      "play": 118.0003033,
+      "readback": 1.3654363,
+      "recording": 0.5364493999999951,
+      "total": 199.1873289
+    },
+    "experiment": {
+      "bytes": 42208,
+      "path": "comparison/match/experiment.json",
+      "sha256": "8a90c77c624dc5ed6c686ea9c329397bc0ee0c7e90d3e7831624afb0c43adf68"
+    },
+    "experiment_id": "32e0381e1f6847148e2549ca52d9e746",
+    "full_product_lifecycle_passed": false,
+    "gauntlet_games_added_to_cache": false,
+    "job": 105273945345,
+    "limits": [
+      "Twenty complete short-clock games do not establish Elo or long-time-control strength.",
+      "This includes game play and recording; it is not the 2500 recorded-games/s corpus ingestion benchmark.",
+      "The 20 new database games are separate from the unchanged 2280-game cache export."
+    ],
+    "operator": "ca97ce03f6c50e7d9d9701c4535eee461c97d244",
+    "pgn": {
+      "bytes": 31322,
+      "path": "comparison/match/games.pgn",
+      "sha256": "0c1af6e76406549f3e9493cc47445a6da496588187d7d5223f683315b6119099"
+    },
+    "reader": {
+      "artifact": 10506391918,
+      "bytes": 213580,
+      "job": 105277659109,
+      "run": 35243502065,
+      "sha256": "b22a2ac8c7f81aa020287fc93789ce65f64e1d8b52b63fbfa14e7300f2ef6b46"
+    },
+    "receipt": {
+      "bytes": 98619,
+      "path": "comparison/receipt.json",
+      "sha256": "f74dfc3efcea0149a5aba613464750a985f490c3c0b15d8252838d7ca4d38536"
+    },
+    "recording": {
+      "bytes": 59776,
+      "path": "comparison/match/recording.json",
+      "sha256": "f3af32df5c3459391780709998fd8cab2f57581dd0cbf33baa2b13d57e358b71"
+    },
+    "replay": {
+      "bytes": 544247,
+      "path": "comparison/replay.json",
+      "sha256": "a1b7e1ddf786e2d4d6da48a0460b642eb4cd2063266380808f5dd6b146d5f194"
+    },
+    "replay_verification": {
+      "all_13_writer_counters_zero": true,
+      "exact_game_bodies_unchanged": true,
+      "games": 20,
+      "plies": 1016,
+      "scope": "Exact explicit EntityRows emitted by the source game recorder and experiment builder; selected nonempty line Content physicalities; exact source playing/header/setup/result and experiment witnesses with observation_count. Native text-stage interior rows, calculated analysis lanes, shared bootstrap rows and unrelated service writes are outside this snapshot.",
+      "scope_snapshots": 3,
+      "status": "passed"
+    },
+    "result": {
+      "all_endings": "checkmate",
+      "by_color": {
+        "black": {
+          "draws": 0,
+          "losses": 10,
+          "wins": 0
+        },
+        "white": {
+          "draws": 0,
+          "losses": 10,
+          "wins": 0
+        }
+      },
+      "distinct_native_starts": 10,
+      "games": 20,
+      "laplace": {
+        "draws": 0,
+        "losses": 20,
+        "wins": 0
+      },
+      "maximum_plies": 103,
+      "minimum_plies": 18,
+      "newly_committed_and_readback_games": 20,
+      "pairs": 10,
+      "plies": 1016
+    },
+    "run": 35242394194,
+    "runtime_after": {
+      "bytes": 3651,
+      "path": "comparison/runtime-after.json",
+      "sha256": "20b2d5b36f1b8ded3fdbf69e0eb5ebeddf7ee23c84435e092307f6897a26de52"
+    },
+    "runtime_before": {
+      "bytes": 3651,
+      "path": "comparison/runtime-before.json",
+      "sha256": "20b2d5b36f1b8ded3fdbf69e0eb5ebeddf7ee23c84435e092307f6897a26de52"
+    },
+    "runtime_byte_identical": true,
+    "settings": {
+      "actual_starts_verified": true,
+      "adjudication": false,
+      "concurrency": 2,
+      "cutechess_time_margin_ms": 2000,
+      "depth_cap": 0,
+      "laplace": {
+        "mode": "substrate",
+        "nominal_tt_mib": 32,
+        "search_threads": 1
+      },
+      "move_cap": false,
+      "opening_depth_bound_plies": 10,
+      "opening_suite": {
+        "bytes": 569,
+        "error": null,
+        "path": "/pgtemp/laplace/chess-lab/32e0381e1f6847148e2549ca52d9e746/openings.epd",
+        "sha256": "a5bf95c1e610212ed66a280e9199d6590e0f553c469ddaf521b675e21361b2df"
+      },
+      "resource_scope": "Per engine: one search thread and nominal 32 MiB TT; concurrency 2. Laplace thread/TT fixed by selected implementation; Stockfish options observed. This does not equate whole-process RSS or database/provider work.",
+      "seconds_per_move": 0.25,
+      "stockfish": {
+        "hash_mib": 32,
+        "limit_strength": false,
+        "name": "Stockfish 19",
+        "numa_policy": "system",
+        "ponder": false,
+        "threads": 1
+      }
+    },
+    "source": {
+      "commit": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
+      "tree": "42c617bb6cded8c87ea83b2c55afc9af850dbc5d"
+    },
+    "source_unchanged": true,
+    "status": "completed",
+    "verification": {
+      "completedGames": true,
+      "exactExperimentBody": true,
+      "exactGameBodies": true,
+      "exactWitnessMembership": true,
+      "uniquePlayingIds": true
+    },
+    "workflow": "475a25431b3d80f9e5cf0aed6b47e447eb314fae",
+    "writer": {
+      "applyCalls": 3,
+      "attestationsAttempted": 10716,
+      "attestationsInserted": 9937,
+      "copyTransactionsCommitted": 39,
+      "copyTransactionsStarted": 39,
+      "entitiesAttempted": 214756,
+      "entitiesInserted": 90196,
+      "entitiesSkippedAtMerge": 124263,
+      "journalReplayHits": 0,
+      "physicalitiesAttempted": 225772,
+      "physicalitiesInserted": 90094,
+      "physicalitiesSkippedAtMerge": 124277,
+      "roundTrips": 54,
+      "roundTripsKind": "logical-writer-accounting/v1"
+    }
   },
   "completed_chess_delivery": {
     "artifacts": {
@@ -1977,6 +2369,325 @@
     },
     "status": "passed",
     "tree": "e78865ca05b2d79b4f1ee83b32a5bd806c58a52b"
+  },
+  "full_recorded_cache_after_followup": {
+    "artifact": 10505532233,
+    "artifact_sha256": "dbb27abb0f11789cbe0bb2cf05f13395f9a9bc2ad83a90d9153925978ab7be3a",
+    "built_pair": {
+      "coverage_note": "position records include finite alphabets and seed positions",
+      "export": {
+        "coverage": {
+          "exported_playings": 2280,
+          "position_occurrences": 163378,
+          "selected_playings": 2280,
+          "transition_occurrences": 161098,
+          "unique_transitions": 139276
+        },
+        "database": {
+          "database": "laplace",
+          "database_oid": "39589789",
+          "system_identifier": "7672946663471807927"
+        },
+        "receipt": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/export-receipt.json",
+        "receipt_sha256": "040e035efbd593cce0384f648a7c536eb0add9829cc437f72d84c88b4942ce3c",
+        "roles": {
+          "inventory-summary": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/inventory/summary.json",
+          "position-surfaces": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/positions.txt",
+          "transition-floor": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/transitions.bin",
+          "witnessed-inputs": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/inventory/hydrated-playings.jsonl"
+        }
+      },
+      "files": {
+        "laplace_chess_position_perfcache.bin": {
+          "bytes": 30062064,
+          "records": 375774,
+          "sha256": "45deaf71ac17eb4ec01005cfcf3102cdeabae536e8397ea394e375efa1cc7c79"
+        },
+        "laplace_chess_transition_perfcache.bin": {
+          "bytes": 4675568,
+          "records": 146109,
+          "sha256": "eaf539a173bb8ca19f1f2ee9d61633fb4692bd67317b95131dfbb7d3b920cdff"
+        }
+      },
+      "producer": {
+        "binary_sha256": "474e3aa2d8ba60be686253696f5f9aaac2b7e6502d84eb590ae08642da296b1e",
+        "seed_surfaces_sha256": "e99c1373d294e6ad5993ffacf25011b35147b7adc8db6f6446027b8706450015"
+      },
+      "schema": "laplace.chess-floor-pair/v1"
+    },
+    "committed_union": {
+      "exportedPlayings": 2280,
+      "games": 2280,
+      "includedInFullInventory": true,
+      "playingIdsSha256": "094bf4cb60a98d0599cca1cca3b89d259b40aa8481d711d7e28cdc982ba34bc0",
+      "scope": "Authenticated completed first140, next2000 and followup140 are a subset; other recorded playings may be present."
+    },
+    "export": {
+      "bounds": {
+        "inventory": {
+          "deadline_seconds": 3600,
+          "materialized_bytes": 134217728,
+          "output_directory": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export",
+          "page_size": 16,
+          "recorded_selection": null,
+          "recorded_selection_sha256": null,
+          "retained_bytes": 4294967296
+        },
+        "maximum_export_bytes": 4294967296,
+        "maximum_spill_bytes": 4294967296,
+        "merge_fan_in": 32,
+        "transition_buffer_records": 65536
+      },
+      "count_scope": "all-recorded-playings",
+      "database_after": {
+        "database": "laplace",
+        "database_oid": "39589789",
+        "system_identifier": "7672946663471807927"
+      },
+      "database_before": {
+        "database": "laplace",
+        "database_oid": "39589789",
+        "system_identifier": "7672946663471807927"
+      },
+      "export_work_bytes_reserved": 23591989,
+      "exported_playings": 2280,
+      "failure_detail": null,
+      "failure_type": null,
+      "files": [
+        {
+          "bytes": 18436773,
+          "path": "positions.txt",
+          "role": "position-surfaces",
+          "sha256": "4bcf741537fd7be8ac644b42372eeb1b938829d5fdf1fa5b3787e88ea047244f"
+        },
+        {
+          "bytes": 4456912,
+          "path": "transitions.bin",
+          "role": "transition-floor",
+          "sha256": "088304a6b221711e5868c04e3f05e29258096766a27b1d1225c20e416c2aadcd"
+        },
+        {
+          "bytes": 1693,
+          "path": "inventory/summary.json",
+          "role": "inventory-summary",
+          "sha256": "e512b06bc4f1bce6de9d244b6801bfe1b467812a19513e2a495dbb767ffe4f53"
+        },
+        {
+          "bytes": 13215733,
+          "path": "inventory/hydrated-playings.jsonl",
+          "role": "witnessed-inputs",
+          "sha256": "2632bc0f4ad0c4864d4c6699de451bb2aa96bc87c3a2317db97d5831bfc8c02e"
+        }
+      ],
+      "finished_utc": "2026-09-17T15:34:02.9324473+00:00",
+      "inventory_complete": true,
+      "observation_scope": "observed-read-interval",
+      "position_occurrences": 163378,
+      "schema": "laplace.chess-recorded-floor-export/v1",
+      "selected_playings": 2280,
+      "selection": null,
+      "snapshot": false,
+      "started_utc": "2026-09-17T15:33:46.1759875+00:00",
+      "status": "completed",
+      "transition_occurrences": 161098,
+      "transition_peak_spill_bytes": 9029344,
+      "unique_transitions": 139276
+    },
+    "files": [
+      {
+        "bytes": 28936,
+        "path": "cache/receipt.json",
+        "sha256": "ac1d70b0e6930841debcb5973bfc75dbe9a81349577c5a6041ac25605bb05284"
+      },
+      {
+        "bytes": 1374,
+        "path": "cache/refactor-front-door.json",
+        "sha256": "f595e5f23ccde5e12dfd8a45d35264ace6149c0186704637f4058d0957a96cbd"
+      },
+      {
+        "bytes": 10952,
+        "path": "cache/serving/receipt.json",
+        "sha256": "00973ce32d14b7e30e62e057b596410aab9d60c603e72023145b37831bec6aef"
+      },
+      {
+        "bytes": 3651,
+        "path": "cache/runtime-after-serving.json",
+        "sha256": "20b2d5b36f1b8ded3fdbf69e0eb5ebeddf7ee23c84435e092307f6897a26de52"
+      },
+      {
+        "bytes": 6375,
+        "path": "cache/managed/receipt.json",
+        "sha256": "f377cad22f5730a5260f1b91a89733785d0616bfeabe376d9878f6ce48fde799"
+      },
+      {
+        "bytes": 13062,
+        "path": "cache/direct/receipt.json",
+        "sha256": "b12e15c940ebcc6e35e223b717e2aabb7b7b0f6c80b50ab16be3fc942f620764"
+      },
+      {
+        "bytes": 1519,
+        "path": "cache/built-pair.json",
+        "sha256": "bdc5458aa98d6f2561c2c79b9c90f6d33daf87476972c79d7d16193fa5fd25f5"
+      },
+      {
+        "bytes": 185,
+        "path": "cache/selected-export-after.json",
+        "sha256": "304417e8d114523ff9f2333cee419b5962ed96d4712ffa531b097daf529ac689"
+      },
+      {
+        "bytes": 1794,
+        "path": "export/export/export-receipt.json",
+        "sha256": "040e035efbd593cce0384f648a7c536eb0add9829cc437f72d84c88b4942ce3c"
+      }
+    ],
+    "full_product_lifecycle_passed": false,
+    "installed_generation": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3",
+    "job": 105269191420,
+    "limits": [
+      "Position/transition pair counts include finite and seed records, not newly recorded game counts.",
+      "Actual serving counter deltas do not exclude concurrent requests.",
+      "Raw transition-v1 header unchanged; external pair/export receipts supply generation provenance.",
+      "Full product foundation and model proof remain unfinished."
+    ],
+    "managed_refresh": {
+      "bytes": 6375,
+      "path": "/build/laplace/recovery/post-main-chess/35240399243-1-cache/managed/receipt.json",
+      "sha256": "f377cad22f5730a5260f1b91a89733785d0616bfeabe376d9878f6ce48fde799"
+    },
+    "phase_results": [
+      {
+        "elapsedSeconds": 1.4540024360176176,
+        "finishedUtc": "2026-09-17T15:33:41.017033+00:00",
+        "name": "authenticate-current-followup-and-baselines",
+        "startedUtc": "2026-09-17T15:33:39.562828+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 4.240637672017328,
+        "finishedUtc": "2026-09-17T15:33:45.259354+00:00",
+        "name": "build-current-export-catalog",
+        "startedUtc": "2026-09-17T15:33:41.017948+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 18.421594079001807,
+        "finishedUtc": "2026-09-17T15:34:03.682834+00:00",
+        "name": "export-all-recorded-playings",
+        "startedUtc": "2026-09-17T15:33:45.260469+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 0.3321411090437323,
+        "finishedUtc": "2026-09-17T15:34:05.437745+00:00",
+        "name": "select-full-export",
+        "startedUtc": "2026-09-17T15:34:05.104941+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 63.142577240942046,
+        "finishedUtc": "2026-09-17T15:35:08.581794+00:00",
+        "name": "normal-cache-build",
+        "startedUtc": "2026-09-17T15:34:05.438804+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 17.19873884599656,
+        "finishedUtc": "2026-09-17T15:35:25.791847+00:00",
+        "name": "normal-cache-install",
+        "startedUtc": "2026-09-17T15:35:08.592447+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 1.0667466369923204,
+        "finishedUtc": "2026-09-17T15:35:26.859842+00:00",
+        "name": "installed-cache-settings",
+        "startedUtc": "2026-09-17T15:35:25.792657+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 28.985434264992364,
+        "finishedUtc": "2026-09-17T15:35:57.518908+00:00",
+        "name": "api-publication",
+        "startedUtc": "2026-09-17T15:35:28.530677+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 5.92816499795299,
+        "finishedUtc": "2026-09-17T15:36:03.450364+00:00",
+        "name": "uci-publication",
+        "startedUtc": "2026-09-17T15:35:57.521668+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 17.251912591047585,
+        "finishedUtc": "2026-09-17T15:36:20.704813+00:00",
+        "name": "managed-cache-refresh",
+        "startedUtc": "2026-09-17T15:36:03.452404+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 6.055178101989441,
+        "finishedUtc": "2026-09-17T15:36:26.766144+00:00",
+        "name": "fresh-direct-engine-serving",
+        "startedUtc": "2026-09-17T15:36:20.709476+00:00",
+        "status": "passed"
+      },
+      {
+        "elapsedSeconds": 19.40958733507432,
+        "finishedUtc": "2026-09-17T15:36:46.176892+00:00",
+        "name": "live-recorded-serving",
+        "startedUtc": "2026-09-17T15:36:26.766794+00:00",
+        "status": "passed"
+      }
+    ],
+    "reader": {
+      "artifact": 10506245962,
+      "artifact_bytes": 20637,
+      "artifact_sha256": "97ef365952381d97297b7bc46c6b85ef96fb447d0df7d23a2ec0bf3654335305",
+      "job": 105271760105,
+      "run": 35241779535
+    },
+    "receipt": {
+      "bytes": 28936,
+      "path": "cache/receipt.json",
+      "sha256": "ac1d70b0e6930841debcb5973bfc75dbe9a81349577c5a6041ac25605bb05284"
+    },
+    "run": 35240399243,
+    "runtime_after": {
+      "bytes": 3651,
+      "path": "/build/laplace/recovery/post-main-chess/35240399243-1-cache/runtime-after-serving.json",
+      "sha256": "20b2d5b36f1b8ded3fdbf69e0eb5ebeddf7ee23c84435e092307f6897a26de52"
+    },
+    "serving": {
+      "canonical_recorded_witness_verified": true,
+      "counter_deltas": {
+        "position": {
+          "lookup_hits": 0,
+          "lookup_misses": 0
+        },
+        "transition": {
+          "lookup_misses": 21,
+          "novel_hits": 0,
+          "persistent_hits": 6
+        }
+      },
+      "counter_scope": "Serving process lifetime deltas around one request; concurrent requests are not excluded.",
+      "exclusive_request_attribution": false,
+      "generation": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3",
+      "receipt": {
+        "bytes": 10952,
+        "path": "/build/laplace/recovery/post-main-chess/35240399243-1-cache/serving/receipt.json",
+        "sha256": "00973ce32d14b7e30e62e057b596410aab9d60c603e72023145b37831bec6aef"
+      },
+      "serving_installed_generation_mapped": true,
+      "serving_persistent_transition_hit_observed": true,
+      "status": "passed"
+    },
+    "source": {
+      "commit": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
+      "tree": "42c617bb6cded8c87ea83b2c55afc9af850dbc5d"
+    },
+    "status": "completed"
   },
   "historical_e8_private": {
     "completed": [
@@ -5199,6 +5910,53 @@
       "theoretical_gps_if_all_provider_time_removed": 2.5783762567231485,
       "writer_seconds": 57.98128308
     },
+    "consensus_backend_diagnostics": {
+      "files": [
+        {
+          "base": "7aed6a72b79d695805138cb2db7a05eed2853c18",
+          "blob": "04097be43b35f61561a4b32a13fbb14ff40cfdff",
+          "mode": "100644",
+          "path": "app/Laplace.Chess/Service/ChessPgnIngestor.cs"
+        },
+        {
+          "base": "6d4d4ee63b43f61fbd31c0cfd6d95d605af1e898",
+          "blob": "f3208043506382f5b5dd8244347b89ea50c7a09e",
+          "mode": "100644",
+          "path": "app/Laplace.Chess/Service/ChessRecordingMeasurement.Diagnostics.cs"
+        },
+        {
+          "base": "0d21ae2c250588379e102e8aab1a0b5dd1b590c0",
+          "blob": "1411c4e0286e12ed5f1b1a62c4e0d708326a281a",
+          "mode": "100644",
+          "path": "app/Laplace.Chess.Tests/Service/ChessRecordingDiagnosticsTests.cs"
+        }
+      ],
+      "installed": true,
+      "installed_measurement": "post_main_followup140",
+      "interpretation": "Completed followup140 exposes 197.3125603 seconds consensus upsert versus 1.7247646 seconds highway mask, nested within 243.73376588 seconds WriterApply and 248.6726413 seconds fresh admission. This separates existing backend windows, not SQL planning/locking/scanning/math within upsert.",
+      "manifest": "0c950d4aa3609eeb30c438f5242f757ed0dd5315",
+      "qualification": {
+        "artifact": 10501600373,
+        "artifact_bytes": 51975,
+        "artifact_sha256": "29c0a9b3c5cf78ddb970625732d52e624dee757579a1c357fb2ef3f251b72656",
+        "expected": {
+          "ChessPgnChunkTests": 11,
+          "ChessRecordingDiagnosticsTests": 10
+        },
+        "failed": 0,
+        "head": "d16abdc6ca1f03ddb1097bcce01a3da09fde2c34",
+        "job": 105234291377,
+        "limits": "Hosted managed/native-backed controls; installed runtime diagnostic measurement has not yet occurred.",
+        "mapped_core_sha256": "ef8d177eb4e7e6f75798377c3b7d9301dfa6954c490e15d1a156adf3adadecbf",
+        "passed": 21,
+        "run": 35230866293,
+        "skipped": 0,
+        "source_review": "Root PASS",
+        "status": "actual passed",
+        "workflow": "be6e13802a010e487a1dae5f8141c068a607b928"
+      },
+      "scope": "Per-owned measured apply deltas of existing ConsensusAccumulatingWriter upsert/mask clocks, calls, cells and pairs. No additional timer, native/query/math/acceptance change. Borrowed shared writers are not sampled."
+    },
     "current_provider_validation": {
       "accounting": {
         "blob": "dd9cb6c641c8890bef31858ddca423b6a0b8b1a7",
@@ -5719,6 +6477,10 @@
         }
       ],
       "installed": true,
+      "installed_source": {
+        "commit": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
+        "tree": "42c617bb6cded8c87ea83b2c55afc9af850dbc5d"
+      },
       "limits": [
         "The original hosted qualification made no installed source/database change; later eeb103 deployment and followup140 are recorded separately.",
         "Completed next2000 baseline remains immutable on ea9",
@@ -5729,11 +6491,7 @@
       ],
       "root_inclusion_approved": true,
       "source": "ea9f60a1c2bac9fcc36491a6f26403d95c2b8359",
-      "tree": "ad15f2fe26f8fefa54a42452f9f0cc07e65686db",
-      "installed_source": {
-        "commit": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
-        "tree": "42c617bb6cded8c87ea83b2c55afc9af850dbc5d"
-      }
+      "tree": "ad15f2fe26f8fefa54a42452f9f0cc07e65686db"
     },
     "representation_fanout": {
       "first140_entity_rows_per_ply": 52.834060307225485,
@@ -5744,117 +6502,85 @@
     },
     "source": "69cc059a6f5b0407df33d0604ae65a47c555067c",
     "status": "Performance6 and counter diagnostics deployed on eeb103; followup140 completed with exact readback/replay. Upsert dominates this observed workload; no controlled speedup or target attainment claim.",
-    "unchanged_in_selected_source": "ea9f60a1c2bac9fcc36491a6f26403d95c2b8359",
-    "consensus_backend_diagnostics": {
-      "manifest": "0c950d4aa3609eeb30c438f5242f757ed0dd5315",
-      "files": [
-        {
-          "base": "7aed6a72b79d695805138cb2db7a05eed2853c18",
-          "blob": "04097be43b35f61561a4b32a13fbb14ff40cfdff",
-          "mode": "100644",
-          "path": "app/Laplace.Chess/Service/ChessPgnIngestor.cs"
-        },
-        {
-          "base": "6d4d4ee63b43f61fbd31c0cfd6d95d605af1e898",
-          "blob": "f3208043506382f5b5dd8244347b89ea50c7a09e",
-          "mode": "100644",
-          "path": "app/Laplace.Chess/Service/ChessRecordingMeasurement.Diagnostics.cs"
-        },
-        {
-          "base": "0d21ae2c250588379e102e8aab1a0b5dd1b590c0",
-          "blob": "1411c4e0286e12ed5f1b1a62c4e0d708326a281a",
-          "mode": "100644",
-          "path": "app/Laplace.Chess.Tests/Service/ChessRecordingDiagnosticsTests.cs"
-        }
-      ],
-      "scope": "Per-owned measured apply deltas of existing ConsensusAccumulatingWriter upsert/mask clocks, calls, cells and pairs. No additional timer, native/query/math/acceptance change. Borrowed shared writers are not sampled.",
-      "qualification": {
-        "artifact": 10501600373,
-        "artifact_bytes": 51975,
-        "artifact_sha256": "29c0a9b3c5cf78ddb970625732d52e624dee757579a1c357fb2ef3f251b72656",
-        "expected": {
-          "ChessPgnChunkTests": 11,
-          "ChessRecordingDiagnosticsTests": 10
-        },
-        "failed": 0,
-        "head": "d16abdc6ca1f03ddb1097bcce01a3da09fde2c34",
-        "job": 105234291377,
-        "limits": "Hosted managed/native-backed controls; installed runtime diagnostic measurement has not yet occurred.",
-        "mapped_core_sha256": "ef8d177eb4e7e6f75798377c3b7d9301dfa6954c490e15d1a156adf3adadecbf",
-        "passed": 21,
-        "run": 35230866293,
-        "skipped": 0,
-        "source_review": "Root PASS",
-        "status": "actual passed",
-        "workflow": "be6e13802a010e487a1dae5f8141c068a607b928"
-      },
-      "installed": true,
-      "interpretation": "Completed followup140 exposes 197.3125603 seconds consensus upsert versus 1.7247646 seconds highway mask, nested within 243.73376588 seconds WriterApply and 248.6726413 seconds fresh admission. This separates existing backend windows, not SQL planning/locking/scanning/math within upsert.",
-      "installed_measurement": "post_main_followup140"
-    }
+    "unchanged_in_selected_source": "ea9f60a1c2bac9fcc36491a6f26403d95c2b8359"
   },
-  "prior_private_pg": {
-    "artifact": 10487468298,
-    "artifact_sha256": "d6a8985d36bda0814ca474b055de71a7c791fe912af8da8f227274f54cd162c8",
-    "completed": [
-      "native_build",
-      "managed_build",
-      "isolated_inputs",
-      "fresh_pg18_cluster",
-      "all_loaded_native_identities",
-      "all_9_ctest_stages",
-      "geometry_4_sql_cases",
-      "substrate_52_sql_cases",
-      "all_3_native_helpers",
-      "actual_library_transport_acl_upgrade"
-    ],
-    "install_receipt_sha256": "153afcc0fdf2a489d325ab13314a855a9c7eb0f08993a70b92531dfc8a6c9915",
-    "job": 105133610562,
-    "managed": {
-      "diagnosis": {
-        "fixtures": [
-          "two nullable DataSource transaction setters",
-          "two successful native stage lifetime uses",
-          "parameterized multi-command setup"
-        ],
-        "native_product": "recall called retired lower-surface SQL function; corrected shared native batched owner needs actual new-generation test"
-      },
-      "failed": 6,
-      "passed": 66,
-      "reader_job": 105136763290,
-      "reader_run": 35201405069,
-      "skipped": 0,
-      "total": 72,
-      "trx_sha256": "7d592fb7f40af3bfcd5b8675377fd99cc98c8056ba4a0849cc14c0153d685ac6"
-    },
-    "run": 35200422595,
-    "source": "40ee7a676cb5944a86f8a7054454ae54d8b79556",
-    "status": "failed",
-    "tree": "469f6f6da4e0ac4f335d4f418063f7f8c3b0d636"
-  },
-  "report_path": "docs/benchmarks/canonical-identity-evidence.json",
-  "schema": "laplace.canonical-identity-evidence-index/v1",
   "post_main_followup140": {
-    "status": "completed",
-    "source": {
-      "commit": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
-      "tree": "42c617bb6cded8c87ea83b2c55afc9af850dbc5d"
-    },
-    "run": 35240399243,
-    "job": 105267117639,
     "artifact": 10505097671,
     "artifact_sha256": "a182c361b71404f2a74f731d37a3f3ae5e0fec19e3c8c54fec84900bb6c3d36c",
-    "reader": {
-      "run": 35241247332,
-      "job": 105269933782,
-      "artifact": 10505362379,
-      "artifact_bytes": 77858,
-      "artifact_sha256": "9f8fd9ec0dd1825f87304dbb0294a21e559e2842c4db7ac840d21b16f6ee429f"
+    "chunks": [
+      {
+        "games": 80,
+        "plies": 4167
+      },
+      {
+        "games": 60,
+        "plies": 3360
+      }
+    ],
+    "consensus_backend": {
+      "cellsFolded": 25340,
+      "consensusUpsertCalls": 40,
+      "consensusUpsertSeconds": 197.3125603,
+      "highwayMaskCalls": 2,
+      "highwayMaskPairs": 40847,
+      "highwayMaskSeconds": 1.7247646,
+      "observedApplyWindows": 2,
+      "scope": "Deltas of the owned ConsensusAccumulatingWriter's existing cumulative counters around measured ApplyManyAsync calls. Backend wall-clock times are nested in WriterApply and consensus acceptance, not additional exclusive time or pure CPU time. The writer publishes atomic counters only after successful apply; failed or cancelled backend work can therefore be absent. Cells and pairs count processed work, not unique durable objects. Setup and other admission windows are excluded; borrowed shared writers are not sampled."
     },
-    "receipt": {
-      "bytes": 73260,
-      "path": "followup/receipt.json",
-      "sha256": "db453119c3fb42a63efa7ffaaeb5111fd40cf87ddcfc09c5b0e93d93b6a4d05b"
+    "current_installed_proof": {
+      "installedGeneration": "/opt/laplace/share/laplace/chess-floor/generations/851c577c8156f696583b47dff1980ab14284e60b78822d5e262b7429e1e04355",
+      "managedCurrent": {
+        "bytes": 6101,
+        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/managed/receipt.json",
+        "sha256": "a8a76fe9c7424bcc0d2e1b4d6c9b47dba1b57d1c658b2631893661652d7c65f9"
+      },
+      "normalLifecycle": {
+        "conclusion": "failure",
+        "jobId": 105245102357,
+        "log": {
+          "bytes": 403684,
+          "path": "/build/laplace/recovery/post-main-chess/35240399243-1/normal-lifecycle.log",
+          "sha256": "b151afac3c98eb948c8e1cb431790a42935cb733f3446bb0f4a51564487a2cc9"
+        },
+        "runId": 35233999242
+      },
+      "receipt": {
+        "bytes": 9002,
+        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/receipt.json",
+        "sha256": "023608325332f935aa81d78e1bc4c45da28a0f9c0a9dbbe6067f0d3b639a44c2"
+      },
+      "runtimeAfter": {
+        "bytes": 3651,
+        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/runtime-after.json",
+        "sha256": "0f1349d620630261fafcad5cdec7d2bc976fd247201c19e35cf0eaa307c4ba28"
+      },
+      "runtimeBefore": {
+        "bytes": 3651,
+        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/runtime-before.json",
+        "sha256": "0f1349d620630261fafcad5cdec7d2bc976fd247201c19e35cf0eaa307c4ba28"
+      },
+      "selectedExport": {
+        "bytes": 182,
+        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/selected-export-config.json",
+        "sha256": "ad6f4f729341d4815e674db863829022956dd35beefd43789a905addfac79213"
+      },
+      "serving": {
+        "bytes": 11743,
+        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/serving/receipt.json",
+        "sha256": "20e8159bbad6bd17db7e04337b62a14f5e419a5c21efe5246e8984b9e939d20f"
+      }
+    },
+    "exclusive_work": {
+      "AfterScopeProbe": 0.486197337,
+      "BeforeScopeProbe": 0.646118163,
+      "ChangeMaterializationAndWitnessPreparation": 0.02214136,
+      "ChunkEvidenceOutput": 0.074513855,
+      "CompositionAndNoveltyProbe": 1.178585322,
+      "ExactReadback": 1.184056353,
+      "FinalSourceVerificationAndEvidenceCompletion": 0.753538379,
+      "SourceReadParseAndValidation": 0.064974226,
+      "Syzygy": 0.081364446,
+      "WriterApply": 243.73376588
     },
     "files": [
       {
@@ -5943,6 +6669,82 @@
         "sha256": "da8d8be2e3dbb3f8fed4bbdd58947671f376e85a801cfb89cd02d03feedd636d"
       }
     ],
+    "full_product_lifecycle_passed": false,
+    "job": 105267117639,
+    "limits": [
+      "Different novel games, shorter mean length, greater occupied database and changed grouping prevent a controlled old/new throughput claim.",
+      "Existing backend clocks include packing and database calls; no pure kernel/planning/locking attribution.",
+      "Normal main publication passed before missing-foundation live-gate failure; actual failure preserved.",
+      "Subsequent full recorded cache completion is separately established in full_recorded_cache_after_followup."
+    ],
+    "machine_snapshots": [
+      {
+        "path": "followup/machine-before-recording.json",
+        "value": {
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "loadavg": "1.13 0.47 0.99 3/1055 1958810\n",
+          "logicalProcessors": 12,
+          "meminfo": "MemTotal:       131799164 kB\nMemFree:        40668204 kB\nMemAvailable:   82704932 kB\nBuffers:            1528 kB\nCached:         44627408 kB\nSwapCached:       468488 kB\nActive:         25756984 kB\nInactive:       29596688 kB\nActive(anon):    7342892 kB\nInactive(anon):  5239744 kB\nActive(file):   18414092 kB\nInactive(file): 24356944 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12670948 kB\nDirty:             10640 kB\nWriteback:             0 kB\nAnonPages:      10337408 kB\nMapped:          2362124 kB\nShmem:           1857912 kB\nKReclaimable:     618360 kB\nSlab:             887248 kB\nSReclaimable:     618360 kB\nSUnreclaim:       268888 kB\nKernelStack:       17056 kB\nPageTables:        60200 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23292456 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      197184 kB\nVmallocChunk:          0 kB\nPercpu:            15040 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:     6733\nHugePages_Rsvd:     6593\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
+          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=11057041588\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+          "pressure/io": "some avg10=0.56 avg60=0.73 avg300=0.79 total=40985534221\nfull avg10=0.55 avg60=0.66 avg300=0.74 total=39176791680\n",
+          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605097180\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2514805640\n",
+          "scope": "Observed host load/resources; no idle-machine or process-isolation inference",
+          "utc": "2026-09-17T15:29:01Z"
+        }
+      },
+      {
+        "path": "followup/machine-after-recording.json",
+        "value": {
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "loadavg": "1.29 1.08 1.12 2/1041 1959331\n",
+          "logicalProcessors": 12,
+          "meminfo": "MemTotal:       131799164 kB\nMemFree:        40132068 kB\nMemAvailable:   82700960 kB\nBuffers:            1528 kB\nCached:         45158540 kB\nSwapCached:       463780 kB\nActive:         27687280 kB\nInactive:       28168292 kB\nActive(anon):    7342972 kB\nInactive(anon):  5209400 kB\nActive(file):   20344308 kB\nInactive(file): 22958892 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12680420 kB\nDirty:             13708 kB\nWriteback:             0 kB\nAnonPages:      10312940 kB\nMapped:          2352056 kB\nShmem:           1856892 kB\nKReclaimable:     618360 kB\nSlab:             888024 kB\nSReclaimable:     618360 kB\nSUnreclaim:       269664 kB\nKernelStack:       16848 kB\nPageTables:        60092 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23198016 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      196992 kB\nVmallocChunk:          0 kB\nPercpu:            15040 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:     6733\nHugePages_Rsvd:     6593\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
+          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=11057258510\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+          "pressure/io": "some avg10=3.46 avg60=1.10 avg300=0.84 total=40988376585\nfull avg10=3.07 avg60=1.00 avg300=0.79 total=39179523335\n",
+          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605097317\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2514805777\n",
+          "scope": "Observed host load/resources; no idle-machine or process-isolation inference",
+          "utc": "2026-09-17T15:33:25Z"
+        }
+      }
+    ],
+    "reader": {
+      "artifact": 10505362379,
+      "artifact_bytes": 77858,
+      "artifact_sha256": "9f8fd9ec0dd1825f87304dbb0294a21e559e2842c4db7ac840d21b16f6ee429f",
+      "job": 105269933782,
+      "run": 35241247332
+    },
+    "receipt": {
+      "bytes": 73260,
+      "path": "followup/receipt.json",
+      "sha256": "db453119c3fb42a63efa7ffaaeb5111fd40cf87ddcfc09c5b0e93d93b6a4d05b"
+    },
     "recording": {
       "capacityReceipt": {
         "bytes": 67523,
@@ -5970,6 +6772,41 @@
       "status": "completed",
       "targetMet": false,
       "targetVerdict": "below-target-for-this-workload"
+    },
+    "replay": {
+      "elapsed_seconds": 3.8682856,
+      "exact_scope_state": {
+        "file": {
+          "bytes": 260208,
+          "path": "/build/laplace/recovery/canonical-recorded-followup/35240399243-1/recording/measurement/replay-01/scope-fold/state.jsonl",
+          "sha256": "7a16fd69c44a17298523480ec9b780053468bab9833661736452d8f819a1caf8"
+        },
+        "rows": 3614
+      },
+      "games": 140,
+      "plies": 7527,
+      "status": "completed",
+      "writer": {
+        "applyCalls": 0,
+        "attestationsAttempted": 0,
+        "attestationsInserted": 0,
+        "copyTransactionsCommitted": 0,
+        "copyTransactionsStarted": 0,
+        "entitiesAttempted": 0,
+        "entitiesInserted": 0,
+        "entitiesSkippedAtMerge": 0,
+        "journalReplayHits": 0,
+        "physicalitiesAttempted": 0,
+        "physicalitiesInserted": 0,
+        "physicalitiesSkippedAtMerge": 0,
+        "roundTrips": 0,
+        "roundTripsKind": "logical-writer-accounting/v1"
+      }
+    },
+    "run": 35240399243,
+    "source": {
+      "commit": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
+      "tree": "42c617bb6cded8c87ea83b2c55afc9af850dbc5d"
     },
     "source_inventory": {
       "distinctLines": 140,
@@ -6000,6 +6837,7 @@
         "sha256": "9eafc83ed9a97f9dcfc82135448d45653d325a742e497e8d08c3085a6a48b0ea"
       }
     },
+    "status": "completed",
     "writer": {
       "applyCalls": 2,
       "attestationsAttempted": 43020,
@@ -6016,28 +6854,7 @@
       "roundTrips": 36,
       "roundTripsKind": "logical-writer-accounting/v1"
     },
-    "consensus_backend": {
-      "cellsFolded": 25340,
-      "consensusUpsertCalls": 40,
-      "consensusUpsertSeconds": 197.3125603,
-      "highwayMaskCalls": 2,
-      "highwayMaskPairs": 40847,
-      "highwayMaskSeconds": 1.7247646,
-      "observedApplyWindows": 2,
-      "scope": "Deltas of the owned ConsensusAccumulatingWriter's existing cumulative counters around measured ApplyManyAsync calls. Backend wall-clock times are nested in WriterApply and consensus acceptance, not additional exclusive time or pure CPU time. The writer publishes atomic counters only after successful apply; failed or cancelled backend work can therefore be absent. Cells and pairs count processed work, not unique durable objects. Setup and other admission windows are excluded; borrowed shared writers are not sampled."
-    },
-    "exclusive_work": {
-      "AfterScopeProbe": 0.486197337,
-      "BeforeScopeProbe": 0.646118163,
-      "ChangeMaterializationAndWitnessPreparation": 0.02214136,
-      "ChunkEvidenceOutput": 0.074513855,
-      "CompositionAndNoveltyProbe": 1.178585322,
-      "ExactReadback": 1.184056353,
-      "FinalSourceVerificationAndEvidenceCompletion": 0.753538379,
-      "SourceReadParseAndValidation": 0.064974226,
-      "Syzygy": 0.081364446,
-      "WriterApply": 243.73376588
-    },
+    "writer_log_dropped_entries": 0,
     "writer_phase_aggregates": [
       {
         "interruptedExits": 0,
@@ -6138,47 +6955,300 @@
         "returnedExits": 2,
         "totalMilliseconds": 3130.3467
       }
-    ],
-    "writer_log_dropped_entries": 0,
-    "replay": {
-      "status": "completed",
-      "games": 140,
-      "plies": 7527,
-      "elapsed_seconds": 3.8682856,
-      "writer": {
-        "applyCalls": 0,
-        "attestationsAttempted": 0,
-        "attestationsInserted": 0,
-        "copyTransactionsCommitted": 0,
-        "copyTransactionsStarted": 0,
-        "entitiesAttempted": 0,
-        "entitiesInserted": 0,
-        "entitiesSkippedAtMerge": 0,
-        "journalReplayHits": 0,
-        "physicalitiesAttempted": 0,
-        "physicalitiesInserted": 0,
-        "physicalitiesSkippedAtMerge": 0,
-        "roundTrips": 0,
-        "roundTripsKind": "logical-writer-accounting/v1"
-      },
-      "exact_scope_state": {
-        "file": {
-          "bytes": 260208,
-          "path": "/build/laplace/recovery/canonical-recorded-followup/35240399243-1/recording/measurement/replay-01/scope-fold/state.jsonl",
-          "sha256": "7a16fd69c44a17298523480ec9b780053468bab9833661736452d8f819a1caf8"
-        },
-        "rows": 3614
-      }
-    },
+    ]
+  },
+  "post_query_followup140": {
+    "artifact": 10511237549,
+    "artifact_bytes": 1396345,
+    "artifact_sha256": "4a7a238d67fdde9be4f91cc49b97bbd3c7bd2e0f6adbe51a678dc71ddfa827d8",
     "chunks": [
       {
-        "games": 80,
-        "plies": 4167
+        "path": "followup/recording/measurement/fresh/chunks.jsonl",
+        "rows": [
+          {
+            "firstSelectedGame": 0,
+            "games": 76,
+            "index": 1,
+            "novelGames": 76,
+            "plies": 4121
+          },
+          {
+            "firstSelectedGame": 76,
+            "games": 64,
+            "index": 2,
+            "novelGames": 64,
+            "plies": 3737
+          }
+        ]
       },
       {
-        "games": 60,
-        "plies": 3360
+        "path": "followup/recording/measurement/replay-01/chunks.jsonl",
+        "rows": [
+          {
+            "firstSelectedGame": 0,
+            "games": 76,
+            "index": 1,
+            "novelGames": 0,
+            "plies": 4121
+          },
+          {
+            "firstSelectedGame": 76,
+            "games": 64,
+            "index": 2,
+            "novelGames": 0,
+            "plies": 3737
+          }
+        ]
       }
+    ],
+    "comparison": {
+      "controlled_end_to_end_speedup": false,
+      "current_upsert_seconds": 7.5415379,
+      "observed_rate_ratio": 3.381282841739209,
+      "observed_upsert_reduction_percent": 96.17787236223907,
+      "prior_games_per_second": 0.5629891542073712,
+      "prior_run": 35240399243,
+      "prior_upsert_seconds": 197.3125603
+    },
+    "completed_disjoint_recorded_union": 2440,
+    "completed_games": 140,
+    "configuration": {
+      "admissionLanes": 1,
+      "chunkMemoryScope": "Producer staged-payload threshold, not measured process RSS or a downstream allocation grant. A complete game may cross the threshold; native capture/materialization retain their actual finite grants. Batch grouping determines intent/source-unit context IDs; canonical game/object IDs and raw source-body multiplicity are preserved, without claiming identical generated entity/physicality/attestation sets across different fresh groupings. Fresh corpusEvidence.chunkManifest retains actual sealed chunk sizes; replay reuses those boundaries.",
+      "logicalProcessors": 12,
+      "operatingSystem": "Ubuntu 22.04.5 LTS",
+      "resolvedChunkStagedBytes": 3374058598,
+      "resolvedGamesPerChunk": 8624,
+      "resolvedGamesPerChunkRole": "Nominal source parse/novelty-probe width; actual admission chunks close by complete-game staged payload.",
+      "runtime": ".NET 10.0.10",
+      "wholeMachineMaximumClaimed": false
+    },
+    "consensus_backend": {
+      "cellsFolded": 27306,
+      "consensusUpsertCalls": 40,
+      "consensusUpsertSeconds": 7.5415379,
+      "highwayMaskCalls": 2,
+      "highwayMaskPairs": 43949,
+      "highwayMaskSeconds": 2.4197664,
+      "observedApplyWindows": 2,
+      "scope": "Deltas of the owned ConsensusAccumulatingWriter's existing cumulative counters around measured ApplyManyAsync calls. Backend wall-clock times are nested in WriterApply and consensus acceptance, not additional exclusive time or pure CPU time. The writer publishes atomic counters only after successful apply; failed or cancelled backend work can therefore be absent. Cells and pairs count processed work, not unique durable objects. Setup and other admission windows are excluded; borrowed shared writers are not sampled."
+    },
+    "current_installed_evidence": {
+      "floorFiles": {
+        "laplace_chess_position_perfcache.bin": {
+          "bytes": 30062064,
+          "path": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3/laplace_chess_position_perfcache.bin",
+          "sha256": "45deaf71ac17eb4ec01005cfcf3102cdeabae536e8397ea394e375efa1cc7c79"
+        },
+        "laplace_chess_transition_perfcache.bin": {
+          "bytes": 4675568,
+          "path": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3/laplace_chess_transition_perfcache.bin",
+          "sha256": "eaf539a173bb8ca19f1f2ee9d61633fb4692bd67317b95131dfbb7d3b920cdff"
+        }
+      },
+      "installedGeneration": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3",
+      "managedCurrent": {
+        "bytes": 6098,
+        "path": "/build/laplace/recovery/post-main-chess/35251888189-1/managed/receipt.json",
+        "sha256": "992d425db4dedfdc23262a84c65210837a2c466b5e4c07b49b7525941ca84be7"
+      },
+      "normalLifecycle": {
+        "conclusion": "failure",
+        "jobId": 105296987616,
+        "log": {
+          "bytes": 397974,
+          "path": "/build/laplace/recovery/post-main-chess/35251888189-1/normal-lifecycle.log",
+          "sha256": "98820d8270af5a4f0ee756ead8dd3d2beb76fed665ea027e11b3ec6f4ae7c4cd"
+        },
+        "runId": 35249183993
+      },
+      "pairReceipt": {
+        "bytes": 1519,
+        "path": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3/receipt.json",
+        "sha256": "bdc5458aa98d6f2561c2c79b9c90f6d33daf87476972c79d7d16193fa5fd25f5"
+      },
+      "receipt": {
+        "bytes": 8122,
+        "path": "/build/laplace/recovery/post-main-chess/35251888189-1/receipt.json",
+        "sha256": "8b61971440d0fe554d65c9af16938ce3f5e39b168b52b6b156ae48deca254516"
+      },
+      "retainedBundleStatus": "failed",
+      "retainedPhases": [
+        {
+          "elapsedSeconds": 0.004093009978532791,
+          "finishedUtc": "2026-09-17T17:18:36.086742+00:00",
+          "name": "retain-normal-lifecycle-log",
+          "startedUtc": "2026-09-17T17:18:36.082425+00:00",
+          "status": "passed"
+        },
+        {
+          "elapsedSeconds": 0.11596991098485887,
+          "finishedUtc": "2026-09-17T17:18:36.203597+00:00",
+          "name": "authenticate-selected-export",
+          "startedUtc": "2026-09-17T17:18:36.087396+00:00",
+          "status": "passed"
+        },
+        {
+          "elapsedSeconds": 1.6681097039254382,
+          "finishedUtc": "2026-09-17T17:18:37.872499+00:00",
+          "name": "runtime-before",
+          "startedUtc": "2026-09-17T17:18:36.204217+00:00",
+          "status": "passed"
+        },
+        {
+          "elapsedSeconds": 7.248364613042213,
+          "finishedUtc": "2026-09-17T17:18:45.122443+00:00",
+          "name": "build-and-select-catalog",
+          "startedUtc": "2026-09-17T17:18:37.873413+00:00",
+          "status": "passed"
+        },
+        {
+          "elapsedSeconds": 16.251780794002116,
+          "finishedUtc": "2026-09-17T17:19:01.375125+00:00",
+          "name": "verify-current-managed",
+          "startedUtc": "2026-09-17T17:18:45.122947+00:00",
+          "status": "passed"
+        },
+        {
+          "elapsedSeconds": 19.965110147022642,
+          "finishedUtc": "2026-09-17T17:19:21.341388+00:00",
+          "name": "verify-current-recorded-serving",
+          "startedUtc": "2026-09-17T17:19:01.375835+00:00",
+          "status": "passed"
+        },
+        {
+          "elapsedSeconds": 1.2674977390561253,
+          "failureType": "RuntimeError",
+          "finishedUtc": "2026-09-17T17:19:22.610678+00:00",
+          "name": "verify-current-direct-engines",
+          "startedUtc": "2026-09-17T17:19:21.342416+00:00",
+          "status": "failed"
+        }
+      ],
+      "runtimeBefore": {
+        "bytes": 3651,
+        "path": "/build/laplace/recovery/post-main-chess/35251888189-1/runtime-before.json",
+        "sha256": "1d372d6129f63c65e73a308dfefe8f774da75ac40a1f84c332e48fe71776b10b"
+      },
+      "runtimeReference": {
+        "bytes": 3651,
+        "path": "/build/laplace/recovery/post-main-chess/35251888189-1/runtime-before.json",
+        "sha256": "1d372d6129f63c65e73a308dfefe8f774da75ac40a1f84c332e48fe71776b10b"
+      },
+      "runtimeReferenceField": "runtimeBefore",
+      "scope": "authenticated-source-runtime-four-payload-recording-prerequisites",
+      "selectedExport": {
+        "bytes": 185,
+        "path": "/build/laplace/recovery/post-main-chess/35251888189-1/selected-export-config.json",
+        "sha256": "304417e8d114523ff9f2333cee419b5962ed96d4712ffa531b097daf529ac689"
+      },
+      "wholeCurrentChessVerificationClaimed": false
+    },
+    "distinct_lines": 140,
+    "durability": {
+      "fsync": true,
+      "fullPageWrites": true,
+      "localWalFlushAcknowledged": true,
+      "synchronousCommit": "on",
+      "writeCommitAcknowledged": true
+    },
+    "elapsed_seconds": {
+      "freshAdmission": 73.5438746,
+      "preparation": 5.6098497,
+      "setup": 1.0313001,
+      "total": 85.1015802
+    },
+    "exclusive_work": {
+      "AfterScopeProbe": 0.626165769,
+      "BeforeScopeProbe": 1.331043285,
+      "ChangeMaterializationAndWitnessPreparation": 0.022607056,
+      "ChunkEvidenceOutput": 0.084729654,
+      "CompositionAndNoveltyProbe": 1.186096842,
+      "ExactReadback": 1.495277762,
+      "FinalSourceVerificationAndEvidenceCompletion": 0.76426065,
+      "SourceReadParseAndValidation": 0.067965523,
+      "Syzygy": 0.073925561,
+      "WriterApply": 67.744737905
+    },
+    "files": [
+      {
+        "bytes": 78295,
+        "path": "followup/receipt.json",
+        "sha256": "1d6d0f0e42cd0d7851602da81f7492c70b22bfd6f793a16dda82e8b07f809ea2"
+      },
+      {
+        "bytes": 2536,
+        "path": "followup/recording/receipt.json",
+        "sha256": "4d3bf761d3de3eb806d89df480378c767a7131457f5bab9ddfe5c283e0dad344"
+      },
+      {
+        "bytes": 67496,
+        "path": "followup/recording/measurement/corpus-recording.json",
+        "sha256": "16f0ea3444e32a2bff80542b8f1f24200c61049e48bf25954a47eee09b94c1ee"
+      },
+      {
+        "bytes": 3651,
+        "path": "followup/publication-before.json",
+        "sha256": "1d372d6129f63c65e73a308dfefe8f774da75ac40a1f84c332e48fe71776b10b"
+      },
+      {
+        "bytes": 3651,
+        "path": "followup/publication-after.json",
+        "sha256": "1d372d6129f63c65e73a308dfefe8f774da75ac40a1f84c332e48fe71776b10b"
+      },
+      {
+        "bytes": 87336,
+        "path": "followup/machine-before-recording.json",
+        "sha256": "d4fac2d8abfc44a3c13dc272e7c0763b17aac8bfe24a5324f3da4f2470324054"
+      },
+      {
+        "bytes": 88142,
+        "path": "followup/machine-after-recording.json",
+        "sha256": "2b1184dfeaabb83725a777916a80bbd3ed67dc36185993062296729df5ec9ac3"
+      },
+      {
+        "bytes": 48126,
+        "path": "followup/recording/measurement/fresh/recording.json",
+        "sha256": "0a4e60520c02c9c6329b60ab21ae7cfc7dcac39610695f38656c783d5002b88a"
+      },
+      {
+        "bytes": 1213,
+        "path": "followup/recording/measurement/fresh/chunks.jsonl",
+        "sha256": "22dd192a445c247a139813ead833809fb17ed71e3c662718d69194590dcd555b"
+      },
+      {
+        "bytes": 10184,
+        "path": "followup/recording/measurement/replay-01/recording.json",
+        "sha256": "dd6d8d9e466ab215b83a17db892a5c0bbb82d1fc1c8aa24df8e8dac426fae7ad"
+      },
+      {
+        "bytes": 1227,
+        "path": "followup/recording/measurement/replay-01/chunks.jsonl",
+        "sha256": "44ec5a646cbf33b9e09917b69d37726ba7e2804ea79c52c98c196d7e1d851dac"
+      },
+      {
+        "bytes": 4946,
+        "path": "followup/recording/measurement.log",
+        "sha256": "2cb28ef7bf01c2953916c64e811426fcd3f7c4e66a766d98227462d352bd372d"
+      }
+    ],
+    "fresh_inner_elapsed_seconds": {
+      "commit": 67.74468379999999,
+      "overhead": 0.8386796999999935,
+      "play": 0,
+      "readback": 3.4196114000000004,
+      "recording": 1.4687527000000102,
+      "total": 73.4717276
+    },
+    "full_product_lifecycle_passed": false,
+    "job": 105311542220,
+    "limits": [
+      "Different novel games, higher mean length and database population including partial Unicode ingestion limit before/after end-to-end comparison.",
+      "Nested writer windows are not additive exclusive time or pure CPU/database execution time.",
+      "The retained current-chess prerequisite receipt remains failed; recording authenticated completed source/runtime/four-payload facts plus fresh native/DB checks and does not claim whole current-chess verification.",
+      "The original corpus already-present count2280 excludes the separately generated match20; explicit disjointness binds all2300 prior games.",
+      "Cache export of the resulting2440-game union is separately recorded only after completion.",
+      "The2500 recorded-games/s target remains unmet."
     ],
     "machine_snapshots": [
       {
@@ -6198,14 +7268,14 @@
             10,
             11
           ],
-          "loadavg": "1.13 0.47 0.99 3/1055 1958810\n",
+          "loadavg": "0.30 0.24 0.87 2/1064 2040998\n",
           "logicalProcessors": 12,
-          "meminfo": "MemTotal:       131799164 kB\nMemFree:        40668204 kB\nMemAvailable:   82704932 kB\nBuffers:            1528 kB\nCached:         44627408 kB\nSwapCached:       468488 kB\nActive:         25756984 kB\nInactive:       29596688 kB\nActive(anon):    7342892 kB\nInactive(anon):  5239744 kB\nActive(file):   18414092 kB\nInactive(file): 24356944 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12670948 kB\nDirty:             10640 kB\nWriteback:             0 kB\nAnonPages:      10337408 kB\nMapped:          2362124 kB\nShmem:           1857912 kB\nKReclaimable:     618360 kB\nSlab:             887248 kB\nSReclaimable:     618360 kB\nSUnreclaim:       268888 kB\nKernelStack:       17056 kB\nPageTables:        60200 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23292456 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      197184 kB\nVmallocChunk:          0 kB\nPercpu:            15040 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:     6733\nHugePages_Rsvd:     6593\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
-          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=11057041588\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
-          "pressure/io": "some avg10=0.56 avg60=0.73 avg300=0.79 total=40985534221\nfull avg10=0.55 avg60=0.66 avg300=0.74 total=39176791680\n",
-          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605097180\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2514805640\n",
+          "meminfo": "MemTotal:       131799164 kB\nMemFree:        32640108 kB\nMemAvailable:   82946968 kB\nBuffers:            1528 kB\nCached:         52470020 kB\nSwapCached:       442340 kB\nActive:         32173876 kB\nInactive:       31166376 kB\nActive(anon):    7156080 kB\nInactive(anon):  5263124 kB\nActive(file):   25017796 kB\nInactive(file): 25903252 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12736740 kB\nDirty:              1060 kB\nWriteback:             0 kB\nAnonPages:      10512696 kB\nMapped:          2205216 kB\nShmem:           1550512 kB\nKReclaimable:     640176 kB\nSlab:             908472 kB\nSReclaimable:     640176 kB\nSUnreclaim:       268296 kB\nKernelStack:       17216 kB\nPageTables:        61320 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23507768 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      197360 kB\nVmallocChunk:          0 kB\nPercpu:            15232 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:     7130\nHugePages_Rsvd:     6990\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
+          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=11084018952\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+          "pressure/io": "some avg10=1.35 avg60=0.84 avg300=0.61 total=41182618212\nfull avg10=1.31 avg60=0.82 avg300=0.59 total=39367013287\n",
+          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605735985\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2515335266\n",
           "scope": "Observed host load/resources; no idle-machine or process-isolation inference",
-          "utc": "2026-09-17T15:29:01Z"
+          "utc": "2026-09-17T17:34:39Z"
         }
       },
       {
@@ -6225,150 +7295,853 @@
             10,
             11
           ],
-          "loadavg": "1.29 1.08 1.12 2/1041 1959331\n",
+          "loadavg": "1.56 0.65 0.96 4/1072 2041275\n",
           "logicalProcessors": 12,
-          "meminfo": "MemTotal:       131799164 kB\nMemFree:        40132068 kB\nMemAvailable:   82700960 kB\nBuffers:            1528 kB\nCached:         45158540 kB\nSwapCached:       463780 kB\nActive:         27687280 kB\nInactive:       28168292 kB\nActive(anon):    7342972 kB\nInactive(anon):  5209400 kB\nActive(file):   20344308 kB\nInactive(file): 22958892 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12680420 kB\nDirty:             13708 kB\nWriteback:             0 kB\nAnonPages:      10312940 kB\nMapped:          2352056 kB\nShmem:           1856892 kB\nKReclaimable:     618360 kB\nSlab:             888024 kB\nSReclaimable:     618360 kB\nSUnreclaim:       269664 kB\nKernelStack:       16848 kB\nPageTables:        60092 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23198016 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      196992 kB\nVmallocChunk:          0 kB\nPercpu:            15040 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:     6733\nHugePages_Rsvd:     6593\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
-          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=11057258510\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
-          "pressure/io": "some avg10=3.46 avg60=1.10 avg300=0.84 total=40988376585\nfull avg10=3.07 avg60=1.00 avg300=0.79 total=39179523335\n",
-          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605097317\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2514805777\n",
+          "meminfo": "MemTotal:       131799164 kB\nMemFree:        31072676 kB\nMemAvailable:   82954516 kB\nBuffers:            1528 kB\nCached:         54045192 kB\nSwapCached:       442372 kB\nActive:         33240576 kB\nInactive:       31681596 kB\nActive(anon):    7156160 kB\nInactive(anon):  5269984 kB\nActive(file):   26084416 kB\nInactive(file): 26411612 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      16777212 kB\nSwapFree:       12736740 kB\nDirty:             21528 kB\nWriteback:             0 kB\nAnonPages:      10519132 kB\nMapped:          2206200 kB\nShmem:           1550704 kB\nKReclaimable:     640176 kB\nSlab:             908628 kB\nSReclaimable:     640176 kB\nSUnreclaim:       268452 kB\nKernelStack:       17344 kB\nPageTables:        61444 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    65530936 kB\nCommitted_AS:   23499836 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:      197472 kB\nVmallocChunk:          0 kB\nPercpu:            15232 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nHugePages_Total:   16744\nHugePages_Free:     7130\nHugePages_Rsvd:     6990\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:        34291712 kB\nDirectMap4k:     5419328 kB\nDirectMap2M:    40615936 kB\nDirectMap1G:    91226112 kB\n",
+          "pressure/cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=11084292016\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+          "pressure/io": "some avg10=4.06 avg60=3.99 avg300=1.79 total=41187549800\nfull avg10=3.92 avg60=3.91 avg300=1.75 total=39371867621\n",
+          "pressure/memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=2605738551\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=2515337832\n",
           "scope": "Observed host load/resources; no idle-machine or process-isolation inference",
-          "utc": "2026-09-17T15:33:25Z"
+          "utc": "2026-09-17T17:36:10Z"
         }
       }
     ],
-    "current_installed_proof": {
-      "installedGeneration": "/opt/laplace/share/laplace/chess-floor/generations/851c577c8156f696583b47dff1980ab14284e60b78822d5e262b7429e1e04355",
-      "managedCurrent": {
-        "bytes": 6101,
-        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/managed/receipt.json",
-        "sha256": "a8a76fe9c7424bcc0d2e1b4d6c9b47dba1b57d1c658b2631893661652d7c65f9"
-      },
-      "normalLifecycle": {
-        "conclusion": "failure",
-        "jobId": 105245102357,
-        "log": {
-          "bytes": 403684,
-          "path": "/build/laplace/recovery/post-main-chess/35240399243-1/normal-lifecycle.log",
-          "sha256": "b151afac3c98eb948c8e1cb431790a42935cb733f3446bb0f4a51564487a2cc9"
+    "no_overlap_with_prior_2300": true,
+    "plies_maximum": 96,
+    "plies_mean": 56.128571428571426,
+    "plies_minimum": 22,
+    "provider_observations": [
+      {
+        "admissionElapsedSeconds": 9.7296821,
+        "exceptionType": null,
+        "fields": {
+          "AvailableViews": 168835,
+          "Forms": 168835,
+          "MissingReferences": 0,
+          "MissingViews": 0,
+          "Operations": 4,
+          "PeakBytes": 487660047,
+          "Rounds": 1,
+          "TupleBytes": 128777672,
+          "{OriginalFormat}": "PHYSICALITY_ADMISSION forms={Forms} available_views={AvailableViews} missing_views={MissingViews} missing_reference_entries={MissingReferences} provider_rounds={Rounds} database_operations={Operations} peak_bytes={PeakBytes} tuple_bytes={TupleBytes}"
         },
-        "runId": 35233999242
-      },
-      "receipt": {
-        "bytes": 9002,
-        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/receipt.json",
-        "sha256": "023608325332f935aa81d78e1bc4c45da28a0f9c0a9dbbe6067f0d3b639a44c2"
-      },
-      "runtimeAfter": {
-        "bytes": 3651,
-        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/runtime-after.json",
-        "sha256": "0f1349d620630261fafcad5cdec7d2bc976fd247201c19e35cf0eaa307c4ba28"
-      },
-      "runtimeBefore": {
-        "bytes": 3651,
-        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/runtime-before.json",
-        "sha256": "0f1349d620630261fafcad5cdec7d2bc976fd247201c19e35cf0eaa307c4ba28"
-      },
-      "selectedExport": {
-        "bytes": 182,
-        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/selected-export-config.json",
-        "sha256": "ad6f4f729341d4815e674db863829022956dd35beefd43789a905addfac79213"
-      },
-      "serving": {
-        "bytes": 11743,
-        "path": "/build/laplace/recovery/post-main-chess/35240399243-1/serving/receipt.json",
-        "sha256": "20e8159bbad6bd17db7e04337b62a14f5e419a5c21efe5246e8984b9e939d20f"
-      }
-    },
-    "full_product_lifecycle_passed": false,
-    "limits": [
-      "Different novel games, shorter mean length, greater occupied database and changed grouping prevent a controlled old/new throughput claim.",
-      "Existing backend clocks include packing and database calls; no pure kernel/planning/locking attribution.",
-      "Normal main publication passed before missing-foundation live-gate failure; actual failure preserved.",
-      "Subsequent full recorded cache completion is separately established in full_recorded_cache_after_followup."
-    ]
-  },
-  "full_recorded_cache_after_followup": {
-    "status": "completed",
-    "source": {
-      "commit": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
-      "tree": "42c617bb6cded8c87ea83b2c55afc9af850dbc5d"
-    },
-    "run": 35240399243,
-    "job": 105269191420,
-    "artifact": 10505532233,
-    "artifact_sha256": "dbb27abb0f11789cbe0bb2cf05f13395f9a9bc2ad83a90d9153925978ab7be3a",
-    "reader": {
-      "run": 35241779535,
-      "job": 105271760105,
-      "artifact": 10506245962,
-      "artifact_bytes": 20637,
-      "artifact_sha256": "97ef365952381d97297b7bc46c6b85ef96fb447d0df7d23a2ec0bf3654335305"
-    },
-    "receipt": {
-      "bytes": 28936,
-      "path": "cache/receipt.json",
-      "sha256": "ac1d70b0e6930841debcb5973bfc75dbe9a81349577c5a6041ac25605bb05284"
-    },
-    "files": [
-      {
-        "bytes": 28936,
-        "path": "cache/receipt.json",
-        "sha256": "ac1d70b0e6930841debcb5973bfc75dbe9a81349577c5a6041ac25605bb05284"
+        "level": "Information",
+        "message": "PHYSICALITY_ADMISSION forms=168835 available_views=168835 missing_views=0 missing_reference_entries=0 provider_rounds=1 database_operations=4 peak_bytes=487660047 tuple_bytes=128777672"
       },
       {
-        "bytes": 1374,
-        "path": "cache/refactor-front-door.json",
-        "sha256": "f595e5f23ccde5e12dfd8a45d35264ace6149c0186704637f4058d0957a96cbd"
-      },
-      {
-        "bytes": 10952,
-        "path": "cache/serving/receipt.json",
-        "sha256": "00973ce32d14b7e30e62e057b596410aab9d60c603e72023145b37831bec6aef"
-      },
-      {
-        "bytes": 3651,
-        "path": "cache/runtime-after-serving.json",
-        "sha256": "20b2d5b36f1b8ded3fdbf69e0eb5ebeddf7ee23c84435e092307f6897a26de52"
-      },
-      {
-        "bytes": 6375,
-        "path": "cache/managed/receipt.json",
-        "sha256": "f377cad22f5730a5260f1b91a89733785d0616bfeabe376d9878f6ce48fde799"
-      },
-      {
-        "bytes": 13062,
-        "path": "cache/direct/receipt.json",
-        "sha256": "b12e15c940ebcc6e35e223b717e2aabb7b7b0f6c80b50ab16be3fc942f620764"
-      },
-      {
-        "bytes": 1519,
-        "path": "cache/built-pair.json",
-        "sha256": "bdc5458aa98d6f2561c2c79b9c90f6d33daf87476972c79d7d16193fa5fd25f5"
-      },
-      {
-        "bytes": 185,
-        "path": "cache/selected-export-after.json",
-        "sha256": "304417e8d114523ff9f2333cee419b5962ed96d4712ffa531b097daf529ac689"
-      },
-      {
-        "bytes": 1794,
-        "path": "export/export/export-receipt.json",
-        "sha256": "040e035efbd593cce0384f648a7c536eb0add9829cc437f72d84c88b4942ce3c"
+        "admissionElapsedSeconds": 52.8112561,
+        "exceptionType": null,
+        "fields": {
+          "AvailableViews": 148356,
+          "Forms": 148356,
+          "MissingReferences": 0,
+          "MissingViews": 0,
+          "Operations": 4,
+          "PeakBytes": 452341853,
+          "Rounds": 1,
+          "TupleBytes": 111710339,
+          "{OriginalFormat}": "PHYSICALITY_ADMISSION forms={Forms} available_views={AvailableViews} missing_views={MissingViews} missing_reference_entries={MissingReferences} provider_rounds={Rounds} database_operations={Operations} peak_bytes={PeakBytes} tuple_bytes={TupleBytes}"
+        },
+        "level": "Information",
+        "message": "PHYSICALITY_ADMISSION forms=148356 available_views=148356 missing_views=0 missing_reference_entries=0 provider_rounds=1 database_operations=4 peak_bytes=452341853 tuple_bytes=111710339"
       }
     ],
-    "committed_union": {
-      "exportedPlayings": 2280,
-      "games": 2280,
-      "includedInFullInventory": true,
-      "playingIdsSha256": "094bf4cb60a98d0599cca1cca3b89d259b40aa8481d711d7e28cdc982ba34bc0",
-      "scope": "Authenticated completed first140, next2000 and followup140 are a subset; other recorded playings may be present."
+    "qualified_window": true,
+    "readback_operations": {
+      "operations": [
+        {
+          "interruptedCalls": 0,
+          "operation": "ExactWitnessBodies",
+          "returnedCalls": 2,
+          "totalSeconds": 0.146097024
+        },
+        {
+          "interruptedCalls": 0,
+          "operation": "CanonicalCarrierVertices",
+          "returnedCalls": 2,
+          "totalSeconds": 0.035290357
+        },
+        {
+          "interruptedCalls": 0,
+          "operation": "HydrationAndLegalReplay",
+          "returnedCalls": 2,
+          "totalSeconds": 1.251593494
+        },
+        {
+          "interruptedCalls": 0,
+          "operation": "ResultAndReceiptText",
+          "returnedCalls": 2,
+          "totalSeconds": 0.022779531
+        }
+      ],
+      "scope": "Nested wall-clock windows for the four existing exact-readback operations, including interrupted calls. HydrationAndLegalReplay includes database reads, native decoding and managed legal replay. These are not pure database or CPU times, and are already included in ExactReadback and elapsedSeconds.readback. Returning does not establish successful validation or durable-game acceptance."
     },
+    "readback_plies": 7858,
+    "reader": {
+      "artifact": 10511572946,
+      "artifact_bytes": 66318,
+      "artifact_sha256": "3ae6e53ecf1abf5762de376bd06685938a04cce4bb1cdc8eedf1f67646ae974a",
+      "job": 105314204579,
+      "run": 35254357749
+    },
+    "receipt": {
+      "bytes": 78295,
+      "path": "/build/laplace/recovery/canonical-recorded-followup/35253536658-1/receipt.json",
+      "sha256": "1d6d0f0e42cd0d7851602da81f7492c70b22bfd6f793a16dda82e8b07f809ea2"
+    },
+    "recorded_games_per_second": 1.9036255672066538,
+    "replay": {
+      "elapsed_seconds": 4.8728463,
+      "exact_scope_state": {
+        "file": {
+          "bytes": 272592,
+          "path": "/build/laplace/recovery/canonical-recorded-followup/35253536658-1/recording/measurement/replay-01/scope-fold/state.jsonl",
+          "sha256": "d26bf8e67a14816bcb2474fec93866bc5d785c191e8ad7ea5d51444454f981ab"
+        },
+        "rows": 3786
+      },
+      "games": 140,
+      "plies": 7858,
+      "status": "completed",
+      "writer": {
+        "applyCalls": 0,
+        "attestationsAttempted": 0,
+        "attestationsInserted": 0,
+        "copyTransactionsCommitted": 0,
+        "copyTransactionsStarted": 0,
+        "entitiesAttempted": 0,
+        "entitiesInserted": 0,
+        "entitiesSkippedAtMerge": 0,
+        "journalReplayHits": 0,
+        "physicalitiesAttempted": 0,
+        "physicalitiesInserted": 0,
+        "physicalitiesSkippedAtMerge": 0,
+        "roundTrips": 0,
+        "roundTripsKind": "logical-writer-accounting/v1"
+      }
+    },
+    "run": 35253536658,
+    "runtime_snapshots": [
+      {
+        "path": "followup/publication-before.json",
+        "value": {
+          "artifacts": {
+            "chess_floor_pair_receipt": "bdc5458aa98d6f2561c2c79b9c90f6d33daf87476972c79d7d16193fa5fd25f5",
+            "laplace_chess_transition_perfcache.bin": "eaf539a173bb8ca19f1f2ee9d61633fb4692bd67317b95131dfbb7d3b920cdff",
+            "laplace_modality_number_perfcache.bin": "c28aa5c7dffe7e9d9fd773468a7725e008eec57684ed6e4ef2dea7ec214f1501",
+            "laplace_substrate.chess_position_perfcache_path": "45deaf71ac17eb4ec01005cfcf3102cdeabae536e8397ea394e375efa1cc7c79",
+            "laplace_substrate.highway_perfcache_path": "9d5cf766978f959778182686507de7f1b6d2e80290fa2297c1131cdd1da0c343",
+            "laplace_substrate.perfcache_path": "4371cb8d73cf74b432a34e3bc77d80ff0e4ac5b84eddd7e0f668a9b6a28c4e0c",
+            "lib/liblaplace_core.so": "78abc908211399e85a0251f82f4cedc1ac857bcc9e1ad0dfd8a85f0e2f87f364",
+            "lib/liblaplace_dynamics.so": "2b1fc460d8cb1b1f95ead20f4604227c6db463e960a8994fce65426cf388a15a",
+            "lib/liblaplace_synthesis.so": "e64b472888da58b1fa78b3d4d85c3fa91ec9e52bad49a07da6eb68c171a4785f",
+            "lib/postgresql/18/laplace_execution_1b128fac3b0b6199.so": "c8058256e777e5c8837cbb80b4c3bc5d82aabd3858eae8476881daca6a018f46",
+            "lib/postgresql/18/laplace_geom.so": "9ffd20817e9caa6e1208feff6753edb7a160f60db2d763591b5aac1b03a7905a",
+            "lib/postgresql/18/laplace_substrate.so": "5c132fd45aebcdd7f7602dbcdd7ad87b38b2d50a0bbae06d50ce95930de36aeb",
+            "share/postgresql/18/extension/laplace_execution_module.txt": "056293100e67f6dcc44502dd1978dc36700fd3309ce6402e36c22341f958431d"
+          },
+          "build": {
+            "cacheSha256": "5b13ebcd89e8a6ce00dd739cdcd6fbca421a9633642fd92302ae0d6830462270",
+            "directory": "/build/laplace/build/laplace-d32928234be8f570",
+            "installPrefix": "/opt/laplace",
+            "installProgramSha256": "a48cca3d6c9420d268dfc73536e2ec26b4dd553d61b08841884f35498c696bb4",
+            "sourceDirectory": "/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace"
+          },
+          "database": {
+            "database": "laplace",
+            "database_oid": 39589789,
+            "extension_functions": "9911ef5b9ba9ed2ab735531446614b34",
+            "extensions": {
+              "laplace_geom": "538e6efdccae61fe",
+              "laplace_substrate": "99420ff07d789a19"
+            },
+            "migrations": [
+              "20260606000000_layer1_database.sql",
+              "20260611000000_app_billing.sql",
+              "20260722000000_app_billing_identity.sql",
+              "20260724000000_ops_logs.sql",
+              "20260725000000_ops_app_log.sql",
+              "20260801000000_pg_stat_statements.sql",
+              "20260807000000_ops_sql_gap.sql",
+              "20260807010000_ops_chess_drops.sql",
+              "20260807020000_app_consume_credit.sql",
+              "20260808000000_drop_ops_sql_gap.sql",
+              "20260915000000_app_identity_sessions.sql",
+              "20260916000000_app_workspace_invitations.sql",
+              "20260916000100_app_subscription_sync.sql",
+              "20260916000200_browser_ticket_identity_binding.sql"
+            ],
+            "native_mappings": {
+              "lib/liblaplace_core.so": {
+                "device": 64770,
+                "inode": 25185489,
+                "path": "/opt/laplace/lib/liblaplace_core.so.0.1.0"
+              },
+              "lib/liblaplace_dynamics.so": {
+                "device": 64770,
+                "inode": 25212903,
+                "path": "/opt/laplace/lib/liblaplace_dynamics.so.0.1.0"
+              },
+              "lib/postgresql/18/laplace_geom.so": {
+                "device": 64770,
+                "inode": 16917627,
+                "path": "/opt/laplace/lib/postgresql/18/laplace_geom.so"
+              },
+              "lib/postgresql/18/laplace_substrate.so": {
+                "device": 64770,
+                "inode": 16917629,
+                "path": "/opt/laplace/lib/postgresql/18/laplace_substrate.so"
+              }
+            },
+            "postmaster_started": "2026-09-17T16:55:58.259554+00:00",
+            "roms": {
+              "laplace_substrate.chess_position_perfcache_path": "/opt/laplace/share/laplace/laplace_chess_position_perfcache.bin",
+              "laplace_substrate.highway_perfcache_path": "/opt/laplace/share/laplace/laplace_highway_perfcache.bin",
+              "laplace_substrate.perfcache_path": "/opt/laplace/share/laplace/laplace_t0_perfcache_17.0.0.bin"
+            },
+            "running_ingests": 1,
+            "server_version": "180006",
+            "system_identifier": "7672946663471807927"
+          },
+          "format": 3,
+          "purpose": "recording"
+        }
+      },
+      {
+        "path": "followup/publication-after.json",
+        "value": {
+          "artifacts": {
+            "chess_floor_pair_receipt": "bdc5458aa98d6f2561c2c79b9c90f6d33daf87476972c79d7d16193fa5fd25f5",
+            "laplace_chess_transition_perfcache.bin": "eaf539a173bb8ca19f1f2ee9d61633fb4692bd67317b95131dfbb7d3b920cdff",
+            "laplace_modality_number_perfcache.bin": "c28aa5c7dffe7e9d9fd773468a7725e008eec57684ed6e4ef2dea7ec214f1501",
+            "laplace_substrate.chess_position_perfcache_path": "45deaf71ac17eb4ec01005cfcf3102cdeabae536e8397ea394e375efa1cc7c79",
+            "laplace_substrate.highway_perfcache_path": "9d5cf766978f959778182686507de7f1b6d2e80290fa2297c1131cdd1da0c343",
+            "laplace_substrate.perfcache_path": "4371cb8d73cf74b432a34e3bc77d80ff0e4ac5b84eddd7e0f668a9b6a28c4e0c",
+            "lib/liblaplace_core.so": "78abc908211399e85a0251f82f4cedc1ac857bcc9e1ad0dfd8a85f0e2f87f364",
+            "lib/liblaplace_dynamics.so": "2b1fc460d8cb1b1f95ead20f4604227c6db463e960a8994fce65426cf388a15a",
+            "lib/liblaplace_synthesis.so": "e64b472888da58b1fa78b3d4d85c3fa91ec9e52bad49a07da6eb68c171a4785f",
+            "lib/postgresql/18/laplace_execution_1b128fac3b0b6199.so": "c8058256e777e5c8837cbb80b4c3bc5d82aabd3858eae8476881daca6a018f46",
+            "lib/postgresql/18/laplace_geom.so": "9ffd20817e9caa6e1208feff6753edb7a160f60db2d763591b5aac1b03a7905a",
+            "lib/postgresql/18/laplace_substrate.so": "5c132fd45aebcdd7f7602dbcdd7ad87b38b2d50a0bbae06d50ce95930de36aeb",
+            "share/postgresql/18/extension/laplace_execution_module.txt": "056293100e67f6dcc44502dd1978dc36700fd3309ce6402e36c22341f958431d"
+          },
+          "build": {
+            "cacheSha256": "5b13ebcd89e8a6ce00dd739cdcd6fbca421a9633642fd92302ae0d6830462270",
+            "directory": "/build/laplace/build/laplace-d32928234be8f570",
+            "installPrefix": "/opt/laplace",
+            "installProgramSha256": "a48cca3d6c9420d268dfc73536e2ec26b4dd553d61b08841884f35498c696bb4",
+            "sourceDirectory": "/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace"
+          },
+          "database": {
+            "database": "laplace",
+            "database_oid": 39589789,
+            "extension_functions": "9911ef5b9ba9ed2ab735531446614b34",
+            "extensions": {
+              "laplace_geom": "538e6efdccae61fe",
+              "laplace_substrate": "99420ff07d789a19"
+            },
+            "migrations": [
+              "20260606000000_layer1_database.sql",
+              "20260611000000_app_billing.sql",
+              "20260722000000_app_billing_identity.sql",
+              "20260724000000_ops_logs.sql",
+              "20260725000000_ops_app_log.sql",
+              "20260801000000_pg_stat_statements.sql",
+              "20260807000000_ops_sql_gap.sql",
+              "20260807010000_ops_chess_drops.sql",
+              "20260807020000_app_consume_credit.sql",
+              "20260808000000_drop_ops_sql_gap.sql",
+              "20260915000000_app_identity_sessions.sql",
+              "20260916000000_app_workspace_invitations.sql",
+              "20260916000100_app_subscription_sync.sql",
+              "20260916000200_browser_ticket_identity_binding.sql"
+            ],
+            "native_mappings": {
+              "lib/liblaplace_core.so": {
+                "device": 64770,
+                "inode": 25185489,
+                "path": "/opt/laplace/lib/liblaplace_core.so.0.1.0"
+              },
+              "lib/liblaplace_dynamics.so": {
+                "device": 64770,
+                "inode": 25212903,
+                "path": "/opt/laplace/lib/liblaplace_dynamics.so.0.1.0"
+              },
+              "lib/postgresql/18/laplace_geom.so": {
+                "device": 64770,
+                "inode": 16917627,
+                "path": "/opt/laplace/lib/postgresql/18/laplace_geom.so"
+              },
+              "lib/postgresql/18/laplace_substrate.so": {
+                "device": 64770,
+                "inode": 16917629,
+                "path": "/opt/laplace/lib/postgresql/18/laplace_substrate.so"
+              }
+            },
+            "postmaster_started": "2026-09-17T16:55:58.259554+00:00",
+            "roms": {
+              "laplace_substrate.chess_position_perfcache_path": "/opt/laplace/share/laplace/laplace_chess_position_perfcache.bin",
+              "laplace_substrate.highway_perfcache_path": "/opt/laplace/share/laplace/laplace_highway_perfcache.bin",
+              "laplace_substrate.perfcache_path": "/opt/laplace/share/laplace/laplace_t0_perfcache_17.0.0.bin"
+            },
+            "running_ingests": 1,
+            "server_version": "180006",
+            "system_identifier": "7672946663471807927"
+          },
+          "format": 3,
+          "purpose": "recording"
+        }
+      }
+    ],
+    "source": {
+      "commit": "af8fd17bda55d3403f46b01a073a298ab6c69597",
+      "tree": "b0e2a671a9842ba734efad8f12b85c4b7db88461"
+    },
+    "source_input": {
+      "distinctLines": 140,
+      "distinctStartPositions": 1,
+      "framing": "existing PgnGames.StreamGames, strict UTF-8, original headers and full movetext, UTF-8 BOM removed if present and line endings normalized to LF",
+      "inventory": {
+        "alreadyPresentGames": 2280,
+        "completeLegalSourceGames": 8624,
+        "duplicateSelectionCandidates": 0,
+        "eligibleNovelGamesBeyondRequest": 6204,
+        "emptyGames": 0,
+        "rejectedGames": 0,
+        "selectedGames": 140,
+        "sourceGamesScanned": 8624
+      },
+      "maximumPlies": 96,
+      "minimumPlies": 22,
+      "plies": 7858,
+      "provenanceScope": "Observed immutable local source bytes and original PGN occurrence metadata; this receipt does not authenticate a remote download.",
+      "selectionManifest": {
+        "bytes": 39196,
+        "path": "/build/laplace/recovery/canonical-recorded-followup/35253536658-1/recording/measurement/selection.jsonl",
+        "sha256": "9b2643bec81b9761254c8db03494a2913ff7a0d81ffe18ded64576b65c3dc344"
+      },
+      "source": {
+        "bytes": 256162073,
+        "path": "/vault/Data/Games/Chess/Lumbras/otb/LumbrasGigaBase_OTB_2025.pgn",
+        "sha256": "9eafc83ed9a97f9dcfc82135448d45653d325a742e497e8d08c3085a6a48b0ea"
+      }
+    },
+    "status": "completed",
+    "target_met": false,
+    "target_verdict": "below-target-for-this-workload",
+    "writer": {
+      "applyCalls": 2,
+      "attestationsAttempted": 45355,
+      "attestationsInserted": 42713,
+      "copyTransactionsCommitted": 26,
+      "copyTransactionsStarted": 26,
+      "entitiesAttempted": 452149,
+      "entitiesInserted": 318373,
+      "entitiesSkippedAtMerge": 133665,
+      "journalReplayHits": 0,
+      "physicalitiesAttempted": 472577,
+      "physicalitiesInserted": 317516,
+      "physicalitiesSkippedAtMerge": 133615,
+      "roundTrips": 36,
+      "roundTripsKind": "logical-writer-accounting/v1"
+    },
+    "writer_copy_lane_observations": [
+      {
+        "admissionElapsedSeconds": 15.6319842,
+        "exceptionType": null,
+        "fields": {
+          "BytesByLane": "1958196,1925624,1966492,1943644,1934940,1958468",
+          "ElapsedMsByLane": "2252.818,2322.592,2043.332,2314.864,2268.990,2338.048",
+          "Groups": 6,
+          "Ms": 2342,
+          "Rows": 171873,
+          "RowsByLane": "28797,28318,28919,28583,28455,28801",
+          "Rps": 73384.4620304482,
+          "SortMs": 51,
+          "Table": "entities",
+          "{OriginalFormat}": "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s; sort {SortMs:N0}ms; lane rows {RowsByLane}; lane bytes {BytesByLane}; lane elapsed_ms {ElapsedMsByLane})"
+        },
+        "level": "Information",
+        "message": "WS_APPLY copy entities: 171,873 rows across 6 id-range connection(s) in 2,342ms (73,384 rows/s; sort 51ms; lane rows 28797,28318,28919,28583,28455,28801; lane bytes 1958196,1925624,1966492,1943644,1934940,1958468; lane elapsed_ms 2252.818,2322.592,2043.332,2314.864,2268.990,2338.048)"
+      },
+      {
+        "admissionElapsedSeconds": 24.8478118,
+        "exceptionType": null,
+        "fields": {
+          "BytesByLane": "11974156,12061360,12185924,12121880,12189322,12096722",
+          "ElapsedMsByLane": "9030.885,8971.543,9022.417,8951.131,8993.037,9018.977",
+          "Groups": 6,
+          "Ms": 9030,
+          "Rows": 171412,
+          "RowsByLane": "28440,28432,28762,28450,28845,28483",
+          "Rps": 18980.52652369462,
+          "SortMs": 183,
+          "Table": "physicalities",
+          "{OriginalFormat}": "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s; sort {SortMs:N0}ms; lane rows {RowsByLane}; lane bytes {BytesByLane}; lane elapsed_ms {ElapsedMsByLane})"
+        },
+        "level": "Information",
+        "message": "WS_APPLY copy physicalities: 171,412 rows across 6 id-range connection(s) in 9,030ms (18,981 rows/s; sort 183ms; lane rows 28440,28432,28762,28450,28845,28483; lane bytes 11974156,12061360,12185924,12121880,12189322,12096722; lane elapsed_ms 9030.885,8971.543,9022.417,8951.131,8993.037,9018.977)"
+      },
+      {
+        "admissionElapsedSeconds": 56.2069415,
+        "exceptionType": null,
+        "fields": {
+          "BytesByLane": "1654848,1660492,1661920,1665796,1665252,1653692",
+          "ElapsedMsByLane": "658.499,714.240,687.576,760.934,708.405,714.284",
+          "Groups": 6,
+          "Ms": 761,
+          "Rows": 146500,
+          "RowsByLane": "24336,24419,24440,24497,24489,24319",
+          "Rps": 192476.4186825889,
+          "SortMs": 29,
+          "Table": "entities",
+          "{OriginalFormat}": "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s; sort {SortMs:N0}ms; lane rows {RowsByLane}; lane bytes {BytesByLane}; lane elapsed_ms {ElapsedMsByLane})"
+        },
+        "level": "Information",
+        "message": "WS_APPLY copy entities: 146,500 rows across 6 id-range connection(s) in 761ms (192,476 rows/s; sort 29ms; lane rows 24336,24419,24440,24497,24489,24319; lane bytes 1654848,1660492,1661920,1665796,1665252,1653692; lane elapsed_ms 658.499,714.240,687.576,760.934,708.405,714.284)"
+      },
+      {
+        "admissionElapsedSeconds": 60.1560008,
+        "exceptionType": null,
+        "fields": {
+          "BytesByLane": "10260862,10350402,10307630,10283842,10295338,10398734",
+          "ElapsedMsByLane": "3815.801,3846.090,3717.096,3705.613,3901.247,3873.371",
+          "Groups": 6,
+          "Ms": 3901,
+          "Rows": 146104,
+          "RowsByLane": "24217,24443,24453,24337,24229,24425",
+          "Rps": 37449.42223608402,
+          "SortMs": 47,
+          "Table": "physicalities",
+          "{OriginalFormat}": "WS_APPLY copy {Table}: {Rows:N0} rows across {Groups} id-range connection(s) in {Ms:N0}ms ({Rps:N0} rows/s; sort {SortMs:N0}ms; lane rows {RowsByLane}; lane bytes {BytesByLane}; lane elapsed_ms {ElapsedMsByLane})"
+        },
+        "level": "Information",
+        "message": "WS_APPLY copy physicalities: 146,104 rows across 6 id-range connection(s) in 3,901ms (37,449 rows/s; sort 47ms; lane rows 24217,24443,24453,24337,24229,24425; lane bytes 10260862,10350402,10307630,10283842,10295338,10398734; lane elapsed_ms 3815.801,3846.090,3717.096,3705.613,3901.247,3873.371)"
+      }
+    ],
+    "writer_log_dropped_entries": 0,
+    "writer_phase_aggregates": [
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 13.186,
+        "minimumMilliseconds": 0.8593,
+        "observedExits": 2,
+        "phase": "connection-and-apply-lock",
+        "returnedExits": 2,
+        "totalMilliseconds": 14.0453
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 6179.2307,
+        "minimumMilliseconds": 3989.6168,
+        "observedExits": 2,
+        "phase": "consensus-acceptance-participant",
+        "returnedExits": 2,
+        "totalMilliseconds": 10168.8475
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 71.7881,
+        "minimumMilliseconds": 26.0957,
+        "observedExits": 2,
+        "phase": "control-transaction-commit",
+        "returnedExits": 2,
+        "totalMilliseconds": 97.88380000000001
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 12835.1671,
+        "minimumMilliseconds": 5147.5224,
+        "observedExits": 2,
+        "phase": "copy-and-copy-transaction-commits",
+        "returnedExits": 2,
+        "totalMilliseconds": 17982.6895
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 153.0068,
+        "minimumMilliseconds": 65.3649,
+        "observedExits": 2,
+        "phase": "copy-survivor-selection",
+        "returnedExits": 2,
+        "totalMilliseconds": 218.3717
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 12798.4432,
+        "minimumMilliseconds": 7129.3795,
+        "observedExits": 2,
+        "phase": "entity-interpretation-publication",
+        "returnedExits": 2,
+        "totalMilliseconds": 19927.8227
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 70.9721,
+        "minimumMilliseconds": 19.6023,
+        "observedExits": 2,
+        "phase": "managed-staging",
+        "returnedExits": 2,
+        "totalMilliseconds": 90.5744
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 401.4818,
+        "minimumMilliseconds": 222.1599,
+        "observedExits": 2,
+        "phase": "native-tuples-and-merge-preparation",
+        "returnedExits": 2,
+        "totalMilliseconds": 623.6417
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 217.9798,
+        "minimumMilliseconds": 171.0756,
+        "observedExits": 2,
+        "phase": "physicality-capture",
+        "returnedExits": 2,
+        "totalMilliseconds": 389.0554
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 7603.6715,
+        "minimumMilliseconds": 5648.5567,
+        "observedExits": 2,
+        "phase": "physicality-provider-admission",
+        "returnedExits": 2,
+        "totalMilliseconds": 13252.228200000001
+      },
+      {
+        "interruptedExits": 0,
+        "maximumMilliseconds": 2171.3918,
+        "minimumMilliseconds": 1719.7279,
+        "observedExits": 2,
+        "phase": "presence-verification",
+        "returnedExits": 2,
+        "totalMilliseconds": 3891.1197
+      }
+    ]
+  },
+  "prior_private_pg": {
+    "artifact": 10487468298,
+    "artifact_sha256": "d6a8985d36bda0814ca474b055de71a7c791fe912af8da8f227274f54cd162c8",
+    "completed": [
+      "native_build",
+      "managed_build",
+      "isolated_inputs",
+      "fresh_pg18_cluster",
+      "all_loaded_native_identities",
+      "all_9_ctest_stages",
+      "geometry_4_sql_cases",
+      "substrate_52_sql_cases",
+      "all_3_native_helpers",
+      "actual_library_transport_acl_upgrade"
+    ],
+    "install_receipt_sha256": "153afcc0fdf2a489d325ab13314a855a9c7eb0f08993a70b92531dfc8a6c9915",
+    "job": 105133610562,
+    "managed": {
+      "diagnosis": {
+        "fixtures": [
+          "two nullable DataSource transaction setters",
+          "two successful native stage lifetime uses",
+          "parameterized multi-command setup"
+        ],
+        "native_product": "recall called retired lower-surface SQL function; corrected shared native batched owner needs actual new-generation test"
+      },
+      "failed": 6,
+      "passed": 66,
+      "reader_job": 105136763290,
+      "reader_run": 35201405069,
+      "skipped": 0,
+      "total": 72,
+      "trx_sha256": "7d592fb7f40af3bfcd5b8675377fd99cc98c8056ba4a0849cc14c0153d685ac6"
+    },
+    "run": 35200422595,
+    "source": "40ee7a676cb5944a86f8a7054454ae54d8b79556",
+    "status": "failed",
+    "tree": "469f6f6da4e0ac4f335d4f418063f7f8c3b0d636"
+  },
+  "report_path": "docs/benchmarks/canonical-identity-evidence.json",
+  "schema": "laplace.canonical-identity-evidence-index/v1",
+  "full_recorded_cache_after_query": {
+    "artifact": {
+      "bytes": 4674686,
+      "id": 10511939932,
+      "sha256": "80c3a9fa238a18fddd0da613f5d948ae8403dbaec5c9622eda971141dd44c5f3"
+    },
+    "built_pair": {
+      "coverage_note": "position records include finite alphabets and seed positions",
+      "export": {
+        "coverage": {
+          "exported_playings": 2440,
+          "position_occurrences": 172412,
+          "selected_playings": 2440,
+          "transition_occurrences": 169972,
+          "unique_transitions": 146896
+        },
+        "database": {
+          "database": "laplace",
+          "database_oid": "39589789",
+          "system_identifier": "7672946663471807927"
+        },
+        "receipt": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/export-receipt.json",
+        "receipt_sha256": "e7190eac03b2f92e7479c1c4d9dde98afc2e106fdae7df8584b535a456832bf0",
+        "roles": {
+          "inventory-summary": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/inventory/summary.json",
+          "position-surfaces": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/positions.txt",
+          "transition-floor": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/transitions.bin",
+          "witnessed-inputs": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/inventory/hydrated-playings.jsonl"
+        }
+      },
+      "files": {
+        "laplace_chess_position_perfcache.bin": {
+          "bytes": 30663184,
+          "records": 383288,
+          "sha256": "49aae01a148fb52d35015339fb2fccddd909e0a6ca73414c457205262ccde387"
+        },
+        "laplace_chess_transition_perfcache.bin": {
+          "bytes": 4918608,
+          "records": 153704,
+          "sha256": "a3ecd757286c0f62756f8dba1ac90bad6d4c07a9fd5836b3ebe3ddecf58df171"
+        }
+      },
+      "producer": {
+        "binary_sha256": "474e3aa2d8ba60be686253696f5f9aaac2b7e6502d84eb590ae08642da296b1e",
+        "seed_surfaces_sha256": "e99c1373d294e6ad5993ffacf25011b35147b7adc8db6f6446027b8706450015"
+      },
+      "schema": "laplace.chess-floor-pair/v1"
+    },
+    "committed_union": {
+      "exportedPlayings": 2440,
+      "games": 2440,
+      "includedInFullInventory": true,
+      "playingIdsSha256": "9e4d964582c542f6e2aaa294f57b9a155c8dcb6fa1feb704a66dbd2767e9408b",
+      "scope": "Authenticated completed first140, next2000, prior followup140, clocked match20 and current followup140 are a subset; other recorded playings may be present."
+    },
+    "database_contract_changes": [],
+    "direct": {
+      "configuration_fixture": {
+        "base_checker_git_blob": "d1f075951262c145cb6f360e97d5ed307919d347",
+        "catalog_sha256": "f2913ff55bb32198adc32e1a59fab48c6e496a6eec4b2604b6934a2842cfb6b6",
+        "config_sha256": "9615b0041bcf14c897fb51da565066baeb04bbfba63003e0ee8dcc4ac01f85d6",
+        "engine_entry_installation_proven": false,
+        "source": "authenticated-installed-catalog",
+        "source_root": "/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace",
+        "usual_gui_settings_modified": false
+      },
+      "database_route": {
+        "database": "laplace",
+        "host": "/var/run/postgresql",
+        "port": 5432,
+        "role": "laplace_admin",
+        "source": "public UCI defaults; conflicting ambient hints refused"
+      },
+      "desktop_receipt_sha256": "34934f954e08a9c96ae92c6d978ce6c804b78951bda30e1aa3e59eabe619bf94",
+      "elapsed_seconds": 5.3083540259394795,
+      "engine_manager": {
+        "config": "/build/laplace/recovery/post-main-chess/35256901378-1-cache/direct/xdg/cutechess/engines.json",
+        "names": [
+          "Stockfish (official)",
+          "Laplace (substrate)"
+        ],
+        "sha256": "9615b0041bcf14c897fb51da565066baeb04bbfba63003e0ee8dcc4ac01f85d6"
+      },
+      "engines": [
+        {
+          "applied_uci_options": [
+            {
+              "name": "Threads",
+              "value": 8
+            },
+            {
+              "name": "Hash",
+              "value": 16
+            }
+          ],
+          "bestmove": "d2d4",
+          "cold_boot_proven": false,
+          "command": "/build/external/stockfish/src/stockfish",
+          "complete_game_proven": false,
+          "completed_depth": 2,
+          "elapsed_seconds": 0.8692696170182899,
+          "initialization_seconds": 0.6155711299506947,
+          "name": "Stockfish (official)",
+          "process": {
+            "executable": "/build/external/stockfish/src/stockfish",
+            "pid": 2048414,
+            "sha256": "1a488f087c4af7a41c1f737703541752a38831592886e7f3956ffaa7bc8e0871",
+            "start_ticks": 92599998,
+            "uid": 994
+          },
+          "search_seconds": 0.0007608920568600297,
+          "uci_option_scope": "sent before readyok; UCI has no general option-value readback",
+          "working_directory": "/build/laplace/work/chess-tools/cutechess-user-994"
+        },
+        {
+          "applied_uci_options": [],
+          "bestmove": "c2c4",
+          "cold_boot_proven": false,
+          "command": "/opt/laplace/app/laplace-uci",
+          "complete_game_proven": false,
+          "completed_depth": 2,
+          "elapsed_seconds": 2.116781100980006,
+          "initialization_seconds": 1.627500512986444,
+          "mapped_floor_pair": {
+            "files": {
+              "position": {
+                "bytes": 30663184,
+                "device_major": 253,
+                "device_minor": 2,
+                "inode": 8914880,
+                "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_position_perfcache.bin",
+                "sha256": "49aae01a148fb52d35015339fb2fccddd909e0a6ca73414c457205262ccde387"
+              },
+              "transition": {
+                "bytes": 4918608,
+                "device_major": 253,
+                "device_minor": 2,
+                "inode": 8914881,
+                "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_transition_perfcache.bin",
+                "sha256": "a3ecd757286c0f62756f8dba1ac90bad6d4c07a9fd5836b3ebe3ddecf58df171"
+              }
+            },
+            "process": {
+              "executable": {
+                "bytes": 77040,
+                "device_major": 253,
+                "device_minor": 2,
+                "inode": 13003987,
+                "path": "/opt/laplace/app/releases/runtime.LREs0M/uci/laplace-uci.native",
+                "sha256": "4dc6e4898fdf057dcd0bee0bd60f88fa30ddf324490440a228d458fce39ead7c"
+              },
+              "mappings": {
+                "position": [
+                  {
+                    "address": "7fae222c1000-7fae24000000",
+                    "offset": 0,
+                    "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_position_perfcache.bin",
+                    "permissions": "r--p"
+                  }
+                ],
+                "transition": [
+                  {
+                    "address": "7fae415de000-7fae41a8f000",
+                    "offset": 0,
+                    "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_transition_perfcache.bin",
+                    "permissions": "r--s"
+                  }
+                ]
+              },
+              "pid": 2048425,
+              "start_ticks": 92600085
+            },
+            "scope": "Read-only kernel device/inode mappings of the selected pair after a real UCI search"
+          },
+          "name": "Laplace (substrate)",
+          "native_closure": {
+            "core": {
+              "mapped": true,
+              "path": "/opt/laplace/app/releases/runtime.LREs0M/uci/liblaplace_core.so",
+              "sha256": "9e134f49b433ee5df86c1a31abb8ea8da9ab9c86514d0f5eecf092e62e03d7a2"
+            },
+            "dynamics": {
+              "mapped": false,
+              "path": "/opt/laplace/app/releases/runtime.LREs0M/uci/liblaplace_dynamics.so",
+              "sha256": "3bd50f82105708830dfcd95bae5015bbc41220d2835b35d40e52d35e80c65226"
+            },
+            "synthesis": {
+              "mapped": false,
+              "path": "/opt/laplace/app/releases/runtime.LREs0M/uci/liblaplace_synthesis.so",
+              "sha256": "b085b37d0603709328fd305205714ea499abbba4822ab3703e641234ce6abf63"
+            },
+            "syzygy": {
+              "mapped": true,
+              "path": "/opt/laplace/app/releases/runtime.LREs0M/uci/liblaplace_syzygy.so",
+              "sha256": "b77472550c161a78a32877fbd6ebaf04e028595593a0d731ee544d8a91e62a65"
+            }
+          },
+          "process": {
+            "executable": "/opt/laplace/app/releases/runtime.LREs0M/uci/laplace-uci.native",
+            "pid": 2048425,
+            "sha256": "4dc6e4898fdf057dcd0bee0bd60f88fa30ddf324490440a228d458fce39ead7c",
+            "start_ticks": 92600085,
+            "uid": 994
+          },
+          "providers": {
+            "position_reads": 428,
+            "root_reads": 1,
+            "scope": "one fresh UCI process; provider-instance deltas, not recorded games",
+            "summary": "root=1/11 position=428/428(atoms:770) learned-pst=428/261(cells:215) tactics=428/5(patterns:153) syzygy=0/441(5-men) root-work-scope=provider-instance-deltas root-backend=1 root-cache=0 root-frontiers=1 root-transitions=20/0/0 root-ms-inclusive=38.989 frontier-ms=2.007 evidence-read-ms=8.255 snapshot-prepare=1/1.078ms"
+          },
+          "search_seconds": 0.1553270120639354,
+          "uci_option_scope": "sent before readyok; UCI has no general option-value readback",
+          "working_directory": "/build/laplace/work/chess-tools/cutechess-user-994"
+        }
+      ],
+      "floor_generation": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955",
+      "gui_engine_game_proven": false,
+      "operator": "laplace-runner",
+      "operator_desktop_tested": false,
+      "public_launcher_seconds": 0.28600157308392227,
+      "recorded_games_proven": false,
+      "schema": "laplace.cutechess-user-engine-acceptance/v1",
+      "scope": "installed-configuration-and-direct-uci",
+      "selected_files": {
+        "/build/cutechess/laplace-cutechess-build.json": "ae8ec3e529660e2ba0a6bf00db0146f1dcaccafa9fca199ef399a377bc32d038",
+        "/build/cutechess/laplace-cutechess-gui-build.json": "1ba7b5d2d955e4edd4babdbcd456e57ec080de33f2c51c4330fe03952be33257",
+        "/build/external/stockfish/src/stockfish": "1a488f087c4af7a41c1f737703541752a38831592886e7f3956ffaa7bc8e0871",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/CommunityToolkit.HighPerformance.dll": "196607c6d4d704b5ee95c80f8e3cd799595b7d8a08108701894c211b138d2839",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/K4os.Compression.LZ4.dll": "e282aadc2353b864fe95cd5fb525a1a093d99a30a5bf2530b7ab831d56179816",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Laplace.Chess.dll": "529f0010e314dd283c1554a10e31da4f053a87474555282ce87db7c4ed700c2f",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Laplace.Core.dll": "3f77b3ca198cc079de3263712ad9ee949e39a583dd73ac89f98542641c12e5a5",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Laplace.Ops.dll": "e9f84e5ad159c74c19e31c37df400c513726a1c731f1e173b412df406f96fe42",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Laplace.Substrate.dll": "bddb2a5cfb514b632b056f5c85cf60d82553b7487a95c0772729c32eb44219a1",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Microsoft.Extensions.DependencyInjection.Abstractions.dll": "7c97c4463fe0fc11d1f22f4d160b2bd2288981adf1de2717a6ff3fb993ddf294",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Microsoft.Extensions.DependencyInjection.dll": "d646a5cca5e8116ae46b43715297083fa8a38db636eab60e66eeef350d74cd5d",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Microsoft.Extensions.Logging.Abstractions.dll": "a76a735b63e6ef3b0bf41ff92423cbd16103b8952e8306140a9bd650346034dc",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Microsoft.Extensions.Logging.dll": "faed6cb5c9ca0d6077feaeb2df251251adccf0241f7a80b91c58e014cd5ad48f",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Microsoft.Extensions.Options.dll": "1e832bccb1b02d454ff3661b936f057673d38d167533f477334641b9fda29e6f",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Microsoft.Extensions.Primitives.dll": "c6d27b3e63d2eb232a2f766a9a9b3a840c97f87b94c9438092c09a10ab0b3c41",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Microsoft.IO.RecyclableMemoryStream.dll": "631a5fc41df9498d032c0655ebd0e1209430ccffbec55667d89c2566b338ccc0",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Npgsql.dll": "6c74f02211d3c2323db73c7c3c88bf610e9ee95e3f84dd6ea5d630eef9895c1b",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Parquet.dll": "45f730aa23d40de811dde11c77dde43e7aee1813c469762bf69acb6c532a4419",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Serilog.Extensions.Logging.dll": "803bf40d75656812d9961967e0ebb5469cedd1a65293faa77dcd203aa33214a3",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Serilog.Sinks.Console.dll": "cd84c110a96a28b969f9b75873801ded483ff8e2396507e2a53ab977584f39c6",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Serilog.Sinks.File.dll": "4f4282671c2ac68284b4dc99f7a76eac9cbd4e659978cef642cff9e6c01b676d",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Serilog.dll": "ba73b4bf7c8ef54303ad3ce540ac61855e0cd0d8396ad622059d43ccdea1c854",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/Snappier.dll": "cfccfe3683587e56a8ae91b69a3a036d1cf45291334bf6760de857ebf2db0b35",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/ZstdSharp.dll": "b285bb9f59928becb8e048bf2a75e872f6555f8773d7b72386a9f77f447f425c",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/laplace-uci": "72dbd8d1c709a82a304dbff5d1fd27271ab7120a32508ca15c24fff36a817926",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/laplace-uci.deps.json": "ffb116deb80e7329b537ff75f615e1d0931b846644de8074a8634c87c37eb0e2",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/laplace-uci.dll": "225405566f5d24f7ef31c17776732d4c1c6006f07a01b1faf62d3e62fb1d20f6",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/laplace-uci.native": "4dc6e4898fdf057dcd0bee0bd60f88fa30ddf324490440a228d458fce39ead7c",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/laplace-uci.runtimeconfig.json": "52eccff0b97c55480c64b3a6d8dcb244f5fd098d0645dba8581d3e2190d4ea4a",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/liblaplace_core.so": "9e134f49b433ee5df86c1a31abb8ea8da9ab9c86514d0f5eecf092e62e03d7a2",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/liblaplace_dynamics.so": "3bd50f82105708830dfcd95bae5015bbc41220d2835b35d40e52d35e80c65226",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/liblaplace_synthesis.so": "b085b37d0603709328fd305205714ea499abbba4822ab3703e641234ce6abf63",
+        "/opt/laplace/app/releases/runtime.LREs0M/uci/liblaplace_syzygy.so": "b77472550c161a78a32877fbd6ebaf04e028595593a0d731ee544d8a91e62a65",
+        "/opt/laplace/bin/cutechess": "1e2cd123a954f17ba7ac281835796a0a6dcf0af74d0813aaf0cf8b0793bb81a8",
+        "/opt/laplace/bin/cutechess-cli": "4da6f7e0c1fc32fd7724301d4c4cb70f6a09f39c59e6d4f89211894d970196e2",
+        "/opt/laplace/bin/laplace-cutechess": "4fff47ed19e7dfc2e8f0f8da0f89d9a4ddcf9266b7f8b9d06fa93609a894adae",
+        "/opt/laplace/share/applications/laplace-cutechess.desktop": "6fa4058457556b8b9721c524c2e30e4533503ec7b421e729997224b767e6092a",
+        "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_position_perfcache.bin": "49aae01a148fb52d35015339fb2fccddd909e0a6ca73414c457205262ccde387",
+        "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_transition_perfcache.bin": "a3ecd757286c0f62756f8dba1ac90bad6d4c07a9fd5836b3ebe3ddecf58df171",
+        "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/receipt.json": "6a193859dbd82eb19b2a1224c5e5a01cc8dc3125ad77b5809c8ab82a12f17c30",
+        "/opt/laplace/share/laplace/cutechess-desktop.json": "34934f954e08a9c96ae92c6d978ce6c804b78951bda30e1aa3e59eabe619bf94",
+        "/opt/laplace/share/laplace/cutechess-engines.json": "f2913ff55bb32198adc32e1a59fab48c6e496a6eec4b2604b6934a2842cfb6b6",
+        "/opt/laplace/share/laplace/cutechess-user-engines.py": "ac047c33118253c6ac4b1b76710c03fdf62528ea5ea55fbb0ef08fb4a12bc802",
+        "/opt/laplace/share/laplace/laplace_t0_perfcache_17.0.0.bin": "4371cb8d73cf74b432a34e3bc77d80ff0e4ac5b84eddd7e0f668a9b6a28c4e0c"
+      },
+      "status": "passed",
+      "uid": 994
+    },
+    "direct_failure_type": "ModuleNotFoundError",
     "export": {
       "bounds": {
         "inventory": {
           "deadline_seconds": 3600,
           "materialized_bytes": 134217728,
-          "output_directory": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export",
+          "output_directory": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export",
           "page_size": 16,
           "recorded_selection": null,
           "recorded_selection_sha256": null,
@@ -6390,190 +8163,287 @@
         "database_oid": "39589789",
         "system_identifier": "7672946663471807927"
       },
-      "export_work_bytes_reserved": 23591989,
-      "exported_playings": 2280,
+      "export_work_bytes_reserved": 24980031,
+      "exported_playings": 2440,
       "failure_detail": null,
       "failure_type": null,
       "files": [
         {
-          "bytes": 18436773,
+          "bytes": 19540847,
           "path": "positions.txt",
           "role": "position-surfaces",
-          "sha256": "4bcf741537fd7be8ac644b42372eeb1b938829d5fdf1fa5b3787e88ea047244f"
+          "sha256": "f304e1f1e77282741cbcbe5c158c0d0995f18937746ee6e73c5f67110d21b9b1"
         },
         {
-          "bytes": 4456912,
+          "bytes": 4700752,
           "path": "transitions.bin",
           "role": "transition-floor",
-          "sha256": "088304a6b221711e5868c04e3f05e29258096766a27b1d1225c20e416c2aadcd"
+          "sha256": "825183db761012c08f2ab7987cbf23c04ae91e7ef40ab0dbfac71f334efde14b"
         },
         {
-          "bytes": 1693,
+          "bytes": 1698,
           "path": "inventory/summary.json",
           "role": "inventory-summary",
-          "sha256": "e512b06bc4f1bce6de9d244b6801bfe1b467812a19513e2a495dbb767ffe4f53"
+          "sha256": "891988d738a7b6d0deb6b73999de90aeccf1cfd63c6059749da4ddcb2abdc1cb"
         },
         {
-          "bytes": 13215733,
+          "bytes": 13969430,
           "path": "inventory/hydrated-playings.jsonl",
           "role": "witnessed-inputs",
-          "sha256": "2632bc0f4ad0c4864d4c6699de451bb2aa96bc87c3a2317db97d5831bfc8c02e"
+          "sha256": "a75a95a2f92f49bec5ef4447fa710bea7e27a6c4bd065f257cb0315be6a000d0"
         }
       ],
-      "finished_utc": "2026-09-17T15:34:02.9324473+00:00",
+      "finished_utc": "2026-09-17T17:54:19.6090053+00:00",
       "inventory_complete": true,
       "observation_scope": "observed-read-interval",
-      "position_occurrences": 163378,
+      "position_occurrences": 172412,
       "schema": "laplace.chess-recorded-floor-export/v1",
-      "selected_playings": 2280,
+      "selected_playings": 2440,
       "selection": null,
       "snapshot": false,
-      "started_utc": "2026-09-17T15:33:46.1759875+00:00",
+      "started_utc": "2026-09-17T17:54:00.4809463+00:00",
       "status": "completed",
-      "transition_occurrences": 161098,
-      "transition_peak_spill_bytes": 9029344,
-      "unique_transitions": 139276
+      "transition_occurrences": 169972,
+      "transition_peak_spill_bytes": 9529184,
+      "unique_transitions": 146896
     },
-    "installed_generation": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3",
-    "built_pair": {
-      "coverage_note": "position records include finite alphabets and seed positions",
-      "export": {
-        "coverage": {
-          "exported_playings": 2280,
-          "position_occurrences": 163378,
-          "selected_playings": 2280,
-          "transition_occurrences": 161098,
-          "unique_transitions": 139276
-        },
-        "database": {
-          "database": "laplace",
-          "database_oid": "39589789",
-          "system_identifier": "7672946663471807927"
-        },
-        "receipt": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/export-receipt.json",
-        "receipt_sha256": "040e035efbd593cce0384f648a7c536eb0add9829cc437f72d84c88b4942ce3c",
-        "roles": {
-          "inventory-summary": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/inventory/summary.json",
-          "position-surfaces": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/positions.txt",
-          "transition-floor": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/transitions.bin",
-          "witnessed-inputs": "/build/laplace/corpus-exports/chess/post-main-35240399243-1/export/inventory/hydrated-playings.jsonl"
-        }
-      },
-      "files": {
-        "laplace_chess_position_perfcache.bin": {
-          "bytes": 30062064,
-          "records": 375774,
-          "sha256": "45deaf71ac17eb4ec01005cfcf3102cdeabae536e8397ea394e375efa1cc7c79"
-        },
-        "laplace_chess_transition_perfcache.bin": {
-          "bytes": 4675568,
-          "records": 146109,
-          "sha256": "eaf539a173bb8ca19f1f2ee9d61633fb4692bd67317b95131dfbb7d3b920cdff"
-        }
-      },
-      "producer": {
-        "binary_sha256": "474e3aa2d8ba60be686253696f5f9aaac2b7e6502d84eb590ae08642da296b1e",
-        "seed_surfaces_sha256": "e99c1373d294e6ad5993ffacf25011b35147b7adc8db6f6446027b8706450015"
-      },
-      "schema": "laplace.chess-floor-pair/v1"
-    },
-    "phase_results": [
+    "facts": [
       {
-        "elapsedSeconds": 1.4540024360176176,
-        "finishedUtc": "2026-09-17T15:33:41.017033+00:00",
-        "name": "authenticate-current-followup-and-baselines",
-        "startedUtc": "2026-09-17T15:33:39.562828+00:00",
-        "status": "passed"
+        "bytes": 25651,
+        "path": "cache/receipt.json",
+        "sha256": "2620fd9cde3a465fe6aa79614dc368d9029be1904ceb6fcb7286efe29b6c10c3"
       },
       {
-        "elapsedSeconds": 4.240637672017328,
-        "finishedUtc": "2026-09-17T15:33:45.259354+00:00",
-        "name": "build-current-export-catalog",
-        "startedUtc": "2026-09-17T15:33:41.017948+00:00",
-        "status": "passed"
+        "bytes": 1519,
+        "path": "cache/built-pair.json",
+        "sha256": "6a193859dbd82eb19b2a1224c5e5a01cc8dc3125ad77b5809c8ab82a12f17c30"
       },
       {
-        "elapsedSeconds": 18.421594079001807,
-        "finishedUtc": "2026-09-17T15:34:03.682834+00:00",
-        "name": "export-all-recorded-playings",
-        "startedUtc": "2026-09-17T15:33:45.260469+00:00",
-        "status": "passed"
+        "bytes": 777,
+        "path": "cache/direct/receipt.json",
+        "sha256": "f9029bafea520a8d869ba41f20c550a0e5db877608a63d68173d1b20a689996f"
       },
       {
-        "elapsedSeconds": 0.3321411090437323,
-        "finishedUtc": "2026-09-17T15:34:05.437745+00:00",
-        "name": "select-full-export",
-        "startedUtc": "2026-09-17T15:34:05.104941+00:00",
-        "status": "passed"
+        "bytes": 6378,
+        "path": "cache/managed/receipt.json",
+        "sha256": "168b033136564e12e024ce3d7b70cef70cd517f129128cab0efe469459b76f52"
       },
       {
-        "elapsedSeconds": 63.142577240942046,
-        "finishedUtc": "2026-09-17T15:35:08.581794+00:00",
-        "name": "normal-cache-build",
-        "startedUtc": "2026-09-17T15:34:05.438804+00:00",
-        "status": "passed"
+        "bytes": 3651,
+        "path": "cache/runtime-before-export.json",
+        "sha256": "1d372d6129f63c65e73a308dfefe8f774da75ac40a1f84c332e48fe71776b10b"
       },
       {
-        "elapsedSeconds": 17.19873884599656,
-        "finishedUtc": "2026-09-17T15:35:25.791847+00:00",
-        "name": "normal-cache-install",
-        "startedUtc": "2026-09-17T15:35:08.592447+00:00",
-        "status": "passed"
-      },
-      {
-        "elapsedSeconds": 1.0667466369923204,
-        "finishedUtc": "2026-09-17T15:35:26.859842+00:00",
-        "name": "installed-cache-settings",
-        "startedUtc": "2026-09-17T15:35:25.792657+00:00",
-        "status": "passed"
-      },
-      {
-        "elapsedSeconds": 28.985434264992364,
-        "finishedUtc": "2026-09-17T15:35:57.518908+00:00",
-        "name": "api-publication",
-        "startedUtc": "2026-09-17T15:35:28.530677+00:00",
-        "status": "passed"
-      },
-      {
-        "elapsedSeconds": 5.92816499795299,
-        "finishedUtc": "2026-09-17T15:36:03.450364+00:00",
-        "name": "uci-publication",
-        "startedUtc": "2026-09-17T15:35:57.521668+00:00",
-        "status": "passed"
-      },
-      {
-        "elapsedSeconds": 17.251912591047585,
-        "finishedUtc": "2026-09-17T15:36:20.704813+00:00",
-        "name": "managed-cache-refresh",
-        "startedUtc": "2026-09-17T15:36:03.452404+00:00",
-        "status": "passed"
-      },
-      {
-        "elapsedSeconds": 6.055178101989441,
-        "finishedUtc": "2026-09-17T15:36:26.766144+00:00",
-        "name": "fresh-direct-engine-serving",
-        "startedUtc": "2026-09-17T15:36:20.709476+00:00",
-        "status": "passed"
-      },
-      {
-        "elapsedSeconds": 19.40958733507432,
-        "finishedUtc": "2026-09-17T15:36:46.176892+00:00",
-        "name": "live-recorded-serving",
-        "startedUtc": "2026-09-17T15:36:26.766794+00:00",
-        "status": "passed"
+        "bytes": 1794,
+        "path": "export/export/export-receipt.json",
+        "sha256": "e7190eac03b2f92e7479c1c4d9dde98afc2e106fdae7df8584b535a456832bf0"
       }
     ],
-    "serving": {
-      "receipt": {
-        "bytes": 10952,
-        "path": "/build/laplace/recovery/post-main-chess/35240399243-1-cache/serving/receipt.json",
-        "sha256": "00973ce32d14b7e30e62e057b596410aab9d60c603e72023145b37831bec6aef"
+    "forwarder": {
+      "checks": [
+        {
+          "authorized": false,
+          "bytes": 0,
+          "path": "/refactor",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "status": 308
+        },
+        {
+          "authorized": false,
+          "bytes": 12113,
+          "path": "/refactor/",
+          "sha256": "1900422bf39c2e6cad336775f32dc09a34c1d10c05a5881f7a841de36f97a9db",
+          "status": 200
+        },
+        {
+          "authorized": false,
+          "bytes": 27575,
+          "path": "/refactor/app.js",
+          "sha256": "4a9beb8222c9fc1715cf57fe60a4eb854aa85726efdd08a1b7bcfcf6d7cf664e",
+          "status": 200
+        },
+        {
+          "authorized": false,
+          "bytes": 10655,
+          "path": "/refactor/styles.css",
+          "sha256": "8b069b99f28dd022777eb1716fb159cc2e614ff52d47937c8f76e889d9307c30",
+          "status": 200
+        },
+        {
+          "authorized": false,
+          "bytes": 113,
+          "path": "/refactor/health",
+          "sha256": "53a3d3fae9f8d681a6826e3f13dbce3dba72f58b5e1d19cc31ad6abd4d6937d1",
+          "status": 401
+        },
+        {
+          "authorized": false,
+          "bytes": 113,
+          "path": "/refactor/api/v1/summary",
+          "sha256": "53a3d3fae9f8d681a6826e3f13dbce3dba72f58b5e1d19cc31ad6abd4d6937d1",
+          "status": 401
+        },
+        {
+          "authorized": true,
+          "bytes": 386,
+          "path": "/refactor/health",
+          "sha256": "4da99a9e9f6b3d2c11eaf8a64eb7541fa7e2486e40fca6d6548144b232f1ad6f",
+          "status": 200
+        },
+        {
+          "authorized": true,
+          "bytes": 731,
+          "path": "/refactor/api/v1/summary",
+          "sha256": "4f6a8a7f7624018200f1abd8f6a7e345d8d1126aa6cee2b544a303dcdffcd786",
+          "status": 200
+        },
+        {
+          "authorized": true,
+          "bytes": 1066,
+          "path": "/refactor/api/v1/stream",
+          "sha256": "87436756664c8cf257ac6b35ef6a579792668321b1284bcc412f1ba99a6bf652",
+          "status": 200
+        }
+      ],
+      "deadline_seconds": 30,
+      "elapsed_seconds": 0.725121,
+      "endpoint": "http://127.0.0.1:5187",
+      "expected_refactor_package_id": "c7cd0ecfd651480ebb36f13932325f2f4c7d9da29a5c6257f97cb7b8d4393c20",
+      "health": {
+        "cognition_status": "ready",
+        "highway_present": true,
+        "package_id": "c7cd0ecfd651480ebb36f13932325f2f4c7d9da29a5c6257f97cb7b8d4393c20",
+        "schema": "laplace.product.health/v1",
+        "status": "ready",
+        "unicode_present": true
+      },
+      "response_limit_bytes": 4194304,
+      "schema": "laplace.installed-refactor-forwarder/v1",
+      "scope": "GET-only installed forwarder, public assets, bearer boundary and first product SSE frame",
+      "sse": {
+        "complete_frame": true,
+        "kind": "product-snapshot",
+        "package_id": "c7cd0ecfd651480ebb36f13932325f2f4c7d9da29a5c6257f97cb7b8d4393c20",
+        "schema": "laplace.product.event/v1"
       },
       "status": "passed",
-      "generation": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3",
+      "summary_schema": "laplace.inspect.summary/v1"
+    },
+    "fresh_serving_proven": true,
+    "full_product_lifecycle_passed": false,
+    "installed_generation": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955",
+    "job": 105317990958,
+    "managed_refresh": {
+      "bytes": 6378,
+      "path": "/build/laplace/recovery/post-main-chess/35255471485-1-cache/managed/receipt.json",
+      "sha256": "168b033136564e12e024ce3d7b70cef70cd517f129128cab0efe469459b76f52"
+    },
+    "new_games_admitted_during_export": false,
+    "non_chess_artifact_changes": [],
+    "original_failed_phase": "fresh-direct-engine-serving",
+    "original_receipt": {
+      "bytes": 25651,
+      "path": "cache/receipt.json",
+      "sha256": "2620fd9cde3a465fe6aa79614dc368d9029be1904ceb6fcb7286efe29b6c10c3"
+    },
+    "original_run_status": "failed",
+    "reader": {
+      "job": 105319331635,
+      "run": 35255895073,
+      "artifact": {
+        "id": 10513635117,
+        "sha256": "d67274937c0e1df0731c2b2b4d8ca12210060c258743025341212871ebf4207b"
+      }
+    },
+    "recorded_header_limitation": "Transition-v1 header has no source identity fields; the sealed generation pair/export receipts supply source and database binding.",
+    "run": 35255471485,
+    "running_gui_new_generation_proven": true,
+    "runtime_after": {
+      "artifacts": {
+        "chess_floor_pair_receipt": "6a193859dbd82eb19b2a1224c5e5a01cc8dc3125ad77b5809c8ab82a12f17c30",
+        "laplace_chess_transition_perfcache.bin": "a3ecd757286c0f62756f8dba1ac90bad6d4c07a9fd5836b3ebe3ddecf58df171",
+        "laplace_modality_number_perfcache.bin": "c28aa5c7dffe7e9d9fd773468a7725e008eec57684ed6e4ef2dea7ec214f1501",
+        "laplace_substrate.chess_position_perfcache_path": "49aae01a148fb52d35015339fb2fccddd909e0a6ca73414c457205262ccde387",
+        "laplace_substrate.highway_perfcache_path": "9d5cf766978f959778182686507de7f1b6d2e80290fa2297c1131cdd1da0c343",
+        "laplace_substrate.perfcache_path": "4371cb8d73cf74b432a34e3bc77d80ff0e4ac5b84eddd7e0f668a9b6a28c4e0c",
+        "lib/liblaplace_core.so": "78abc908211399e85a0251f82f4cedc1ac857bcc9e1ad0dfd8a85f0e2f87f364",
+        "lib/liblaplace_dynamics.so": "2b1fc460d8cb1b1f95ead20f4604227c6db463e960a8994fce65426cf388a15a",
+        "lib/liblaplace_synthesis.so": "e64b472888da58b1fa78b3d4d85c3fa91ec9e52bad49a07da6eb68c171a4785f",
+        "lib/postgresql/18/laplace_execution_1b128fac3b0b6199.so": "c8058256e777e5c8837cbb80b4c3bc5d82aabd3858eae8476881daca6a018f46",
+        "lib/postgresql/18/laplace_geom.so": "9ffd20817e9caa6e1208feff6753edb7a160f60db2d763591b5aac1b03a7905a",
+        "lib/postgresql/18/laplace_substrate.so": "5c132fd45aebcdd7f7602dbcdd7ad87b38b2d50a0bbae06d50ce95930de36aeb",
+        "share/postgresql/18/extension/laplace_execution_module.txt": "056293100e67f6dcc44502dd1978dc36700fd3309ce6402e36c22341f958431d"
+      },
+      "build": {
+        "cacheSha256": "7d3e9c866b319873a5d058f1d53d2a597bcd2892c1b27ec7844f97e14a352d2d",
+        "directory": "/build/laplace/build/laplace-d32928234be8f570",
+        "installPrefix": "/opt/laplace",
+        "installProgramSha256": "a48cca3d6c9420d268dfc73536e2ec26b4dd553d61b08841884f35498c696bb4",
+        "sourceDirectory": "/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace"
+      },
+      "database": {
+        "database": "laplace",
+        "database_oid": 39589789,
+        "extension_functions": "9911ef5b9ba9ed2ab735531446614b34",
+        "extensions": {
+          "laplace_geom": "538e6efdccae61fe",
+          "laplace_substrate": "99420ff07d789a19"
+        },
+        "migrations": [
+          "20260606000000_layer1_database.sql",
+          "20260611000000_app_billing.sql",
+          "20260722000000_app_billing_identity.sql",
+          "20260724000000_ops_logs.sql",
+          "20260725000000_ops_app_log.sql",
+          "20260801000000_pg_stat_statements.sql",
+          "20260807000000_ops_sql_gap.sql",
+          "20260807010000_ops_chess_drops.sql",
+          "20260807020000_app_consume_credit.sql",
+          "20260808000000_drop_ops_sql_gap.sql",
+          "20260915000000_app_identity_sessions.sql",
+          "20260916000000_app_workspace_invitations.sql",
+          "20260916000100_app_subscription_sync.sql",
+          "20260916000200_browser_ticket_identity_binding.sql"
+        ],
+        "native_mappings": {
+          "lib/liblaplace_core.so": {
+            "device": 64770,
+            "inode": 25185494,
+            "path": "/opt/laplace/lib/liblaplace_core.so.0.1.0"
+          },
+          "lib/liblaplace_dynamics.so": {
+            "device": 64770,
+            "inode": 25213175,
+            "path": "/opt/laplace/lib/liblaplace_dynamics.so.0.1.0"
+          },
+          "lib/postgresql/18/laplace_geom.so": {
+            "device": 64770,
+            "inode": 16913543,
+            "path": "/opt/laplace/lib/postgresql/18/laplace_geom.so"
+          },
+          "lib/postgresql/18/laplace_substrate.so": {
+            "device": 64770,
+            "inode": 16917611,
+            "path": "/opt/laplace/lib/postgresql/18/laplace_substrate.so"
+          }
+        },
+        "postmaster_started": "2026-09-17T17:55:41.5174+00:00",
+        "roms": {
+          "laplace_substrate.chess_position_perfcache_path": "/opt/laplace/share/laplace/laplace_chess_position_perfcache.bin",
+          "laplace_substrate.highway_perfcache_path": "/opt/laplace/share/laplace/laplace_highway_perfcache.bin",
+          "laplace_substrate.perfcache_path": "/opt/laplace/share/laplace/laplace_t0_perfcache_17.0.0.bin"
+        },
+        "running_ingests": 1,
+        "server_version": "180006",
+        "system_identifier": "7672946663471807927"
+      },
+      "format": 3,
+      "purpose": "recording"
+    },
+    "serving": {
       "canonical_recorded_witness_verified": true,
-      "serving_installed_generation_mapped": true,
-      "serving_persistent_transition_hit_observed": true,
+      "canonical_scope": "Full typed replay of one retained completed playing; selected position and transition absent from reproduced seed floors.",
+      "collector_sha256": "00f8123b5384675bae690289dbd43c44750ded8705ce4dbc04124e9f31f07b22",
       "counter_deltas": {
         "position": {
           "lookup_hits": 0,
@@ -6586,215 +8456,575 @@
         }
       },
       "counter_scope": "Serving process lifetime deltas around one request; concurrent requests are not excluded.",
-      "exclusive_request_attribution": false
-    },
-    "managed_refresh": {
-      "bytes": 6375,
-      "path": "/build/laplace/recovery/post-main-chess/35240399243-1-cache/managed/receipt.json",
-      "sha256": "f377cad22f5730a5260f1b91a89733785d0616bfeabe376d9878f6ce48fde799"
-    },
-    "runtime_after": {
-      "bytes": 3651,
-      "path": "/build/laplace/recovery/post-main-chess/35240399243-1-cache/runtime-after-serving.json",
-      "sha256": "20b2d5b36f1b8ded3fdbf69e0eb5ebeddf7ee23c84435e092307f6897a26de52"
-    },
-    "full_product_lifecycle_passed": false,
-    "limits": [
-      "Position/transition pair counts include finite and seed records, not newly recorded game counts.",
-      "Actual serving counter deltas do not exclude concurrent requests.",
-      "Raw transition-v1 header unchanged; external pair/export receipts supply generation provenance.",
-      "Full product foundation and model proof remain unfinished."
-    ]
-  },
-  "clocked_paired_comparison": {
-    "status": "completed",
-    "source": {
-      "commit": "eeb103178b593670a5f204b7c0daca4ef8eab32b",
-      "tree": "42c617bb6cded8c87ea83b2c55afc9af850dbc5d"
-    },
-    "run": 35242394194,
-    "job": 105273945345,
-    "operator": "ca97ce03f6c50e7d9d9701c4535eee461c97d244",
-    "workflow": "475a25431b3d80f9e5cf0aed6b47e447eb314fae",
-    "comparison_owner": "eb01ef8b398b41014473ce68a6ff0347698c48aa",
-    "auth_owner": "12b23bfa42a9d36510afabc4e2e4771b5965a07c",
-    "artifact": {
-      "id": 10506715000,
-      "bytes": 908391,
-      "sha256": "d81ae9b31a80db2a848a9d3c9cd5fd4cacf245cbcf1f04fa41f1eb93d8399b6b"
-    },
-    "reader": {
-      "run": 35243502065,
-      "job": 105277659109,
-      "artifact": 10506391918,
-      "bytes": 213580,
-      "sha256": "b22a2ac8c7f81aa020287fc93789ce65f64e1d8b52b63fbfa14e7300f2ef6b46"
-    },
-    "receipt": {
-      "bytes": 98619,
-      "path": "comparison/receipt.json",
-      "sha256": "f74dfc3efcea0149a5aba613464750a985f490c3c0b15d8252838d7ca4d38536"
-    },
-    "recording": {
-      "bytes": 59776,
-      "path": "comparison/match/recording.json",
-      "sha256": "f3af32df5c3459391780709998fd8cab2f57581dd0cbf33baa2b13d57e358b71"
-    },
-    "replay": {
-      "bytes": 544247,
-      "path": "comparison/replay.json",
-      "sha256": "a1b7e1ddf786e2d4d6da48a0460b642eb4cd2063266380808f5dd6b146d5f194"
-    },
-    "pgn": {
-      "bytes": 31322,
-      "path": "comparison/match/games.pgn",
-      "sha256": "0c1af6e76406549f3e9493cc47445a6da496588187d7d5223f683315b6119099"
-    },
-    "experiment": {
-      "bytes": 42208,
-      "path": "comparison/match/experiment.json",
-      "sha256": "8a90c77c624dc5ed6c686ea9c329397bc0ee0c7e90d3e7831624afb0c43adf68"
-    },
-    "experiment_id": "32e0381e1f6847148e2549ca52d9e746",
-    "full_product_lifecycle_passed": false,
-    "result": {
-      "laplace": {
-        "wins": 0,
-        "draws": 0,
-        "losses": 20
-      },
-      "by_color": {
-        "white": {
-          "wins": 0,
-          "draws": 0,
-          "losses": 10
+      "exclusive_request_attribution": false,
+      "files": {
+        "Laplace.Chess.dll": {
+          "bytes": 1832448,
+          "device_major": 253,
+          "device_minor": 2,
+          "inode": 409157,
+          "path": "/opt/laplace/app/Laplace.Chess.dll",
+          "sha256": "529f0010e314dd283c1554a10e31da4f053a87474555282ce87db7c4ed700c2f"
         },
-        "black": {
-          "wins": 0,
-          "draws": 0,
-          "losses": 10
+        "Laplace.Core.dll": {
+          "bytes": 388608,
+          "device_major": 253,
+          "device_minor": 2,
+          "inode": 409159,
+          "path": "/opt/laplace/app/Laplace.Core.dll",
+          "sha256": "3f77b3ca198cc079de3263712ad9ee949e39a583dd73ac89f98542641c12e5a5"
+        },
+        "api": {
+          "bytes": 1608704,
+          "device_major": 253,
+          "device_minor": 2,
+          "inode": 409164,
+          "path": "/opt/laplace/app/Laplace.Endpoints.OpenAICompat.dll",
+          "sha256": "5deefc76e59d76d2bcccf12720f58b0acadfa0bb298afefc07a0f2060e1b502a"
+        },
+        "catalog": {
+          "bytes": 12800,
+          "device_major": 253,
+          "device_minor": 9,
+          "inode": 251693765,
+          "path": "/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace/app/ChessCatalogSurfaces/bin/Release/net10.0/ChessCatalogSurfaces.dll",
+          "sha256": "51b4acc168d6d612583564f3122d5645e66b8bb4341c5a738a9749db36b497d4"
+        },
+        "catalog_Laplace.Chess.dll": {
+          "bytes": 1832448,
+          "device_major": 253,
+          "device_minor": 9,
+          "inode": 251741279,
+          "path": "/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace/app/ChessCatalogSurfaces/bin/Release/net10.0/Laplace.Chess.dll",
+          "sha256": "529f0010e314dd283c1554a10e31da4f053a87474555282ce87db7c4ed700c2f"
+        },
+        "catalog_Laplace.Core.dll": {
+          "bytes": 388608,
+          "device_major": 253,
+          "device_minor": 9,
+          "inode": 251693817,
+          "path": "/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace/app/ChessCatalogSurfaces/bin/Release/net10.0/Laplace.Core.dll",
+          "sha256": "3f77b3ca198cc079de3263712ad9ee949e39a583dd73ac89f98542641c12e5a5"
+        },
+        "catalog_native": {
+          "bytes": 66572712,
+          "device_major": 253,
+          "device_minor": 9,
+          "inode": 251750642,
+          "path": "/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace/app/ChessCatalogSurfaces/bin/Release/net10.0/liblaplace_core.so",
+          "sha256": "9e134f49b433ee5df86c1a31abb8ea8da9ab9c86514d0f5eecf092e62e03d7a2"
+        },
+        "native": {
+          "bytes": 66572712,
+          "device_major": 253,
+          "device_minor": 2,
+          "inode": 226509,
+          "path": "/opt/laplace/app/liblaplace_core.so",
+          "sha256": "9e134f49b433ee5df86c1a31abb8ea8da9ab9c86514d0f5eecf092e62e03d7a2"
+        },
+        "pair_receipt": {
+          "bytes": 1519,
+          "device_major": 253,
+          "device_minor": 2,
+          "inode": 8914882,
+          "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/receipt.json",
+          "sha256": "6a193859dbd82eb19b2a1224c5e5a01cc8dc3125ad77b5809c8ab82a12f17c30"
+        },
+        "position": {
+          "bytes": 30663184,
+          "device_major": 253,
+          "device_minor": 2,
+          "inode": 8914880,
+          "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_position_perfcache.bin",
+          "sha256": "49aae01a148fb52d35015339fb2fccddd909e0a6ca73414c457205262ccde387"
+        },
+        "position_emitter": {
+          "bytes": 535000,
+          "device_major": 253,
+          "device_minor": 6,
+          "inode": 296723726,
+          "path": "/build/laplace/build/laplace-d32928234be8f570/engine/core/tools/chess_position_tables_emit/laplace_chess_position_tables_emit",
+          "sha256": "474e3aa2d8ba60be686253696f5f9aaac2b7e6502d84eb590ae08642da296b1e"
+        },
+        "transition": {
+          "bytes": 4918608,
+          "device_major": 253,
+          "device_minor": 2,
+          "inode": 8914881,
+          "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_transition_perfcache.bin",
+          "sha256": "a3ecd757286c0f62756f8dba1ac90bad6d4c07a9fd5836b3ebe3ddecf58df171"
         }
       },
-      "games": 20,
-      "pairs": 10,
-      "distinct_native_starts": 10,
-      "all_endings": "checkmate",
-      "newly_committed_and_readback_games": 20,
-      "plies": 1016,
-      "minimum_plies": 18,
-      "maximum_plies": 103
-    },
-    "settings": {
-      "seconds_per_move": 0.25,
-      "cutechess_time_margin_ms": 2000,
-      "concurrency": 2,
-      "depth_cap": 0,
-      "move_cap": false,
-      "adjudication": false,
-      "stockfish": {
-        "name": "Stockfish 19",
-        "threads": 1,
-        "hash_mib": 32,
-        "numa_policy": "system",
-        "limit_strength": false,
-        "ponder": false
+      "generation": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955",
+      "pair": {
+        "coverage_note": "position records include finite alphabets and seed positions",
+        "export": {
+          "coverage": {
+            "exported_playings": 2440,
+            "position_occurrences": 172412,
+            "selected_playings": 2440,
+            "transition_occurrences": 169972,
+            "unique_transitions": 146896
+          },
+          "database": {
+            "database": "laplace",
+            "database_oid": "39589789",
+            "system_identifier": "7672946663471807927"
+          },
+          "receipt": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/export-receipt.json",
+          "receipt_sha256": "e7190eac03b2f92e7479c1c4d9dde98afc2e106fdae7df8584b535a456832bf0",
+          "roles": {
+            "inventory-summary": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/inventory/summary.json",
+            "position-surfaces": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/positions.txt",
+            "transition-floor": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/transitions.bin",
+            "witnessed-inputs": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/inventory/hydrated-playings.jsonl"
+          }
+        },
+        "files": {
+          "laplace_chess_position_perfcache.bin": {
+            "bytes": 30663184,
+            "records": 383288,
+            "sha256": "49aae01a148fb52d35015339fb2fccddd909e0a6ca73414c457205262ccde387"
+          },
+          "laplace_chess_transition_perfcache.bin": {
+            "bytes": 4918608,
+            "records": 153704,
+            "sha256": "a3ecd757286c0f62756f8dba1ac90bad6d4c07a9fd5836b3ebe3ddecf58df171"
+          }
+        },
+        "producer": {
+          "binary_sha256": "474e3aa2d8ba60be686253696f5f9aaac2b7e6502d84eb590ae08642da296b1e",
+          "seed_surfaces_sha256": "e99c1373d294e6ad5993ffacf25011b35147b7adc8db6f6446027b8706450015"
+        },
+        "schema": "laplace.chess-floor-pair/v1"
       },
-      "laplace": {
-        "mode": "substrate",
-        "search_threads": 1,
-        "nominal_tt_mib": 32
+      "position_hit_in_serving_process_claimed": false,
+      "process": {
+        "executable": {
+          "bytes": 70368,
+          "device_major": 253,
+          "device_minor": 10,
+          "inode": 203185479,
+          "path": "/usr/lib/dotnet/dotnet",
+          "sha256": "ad8456c9b71cd5c69b6b091c1ae5a9e86455c5907bc47dc525fd036fdb5b9033"
+        },
+        "mappings": {
+          "Laplace.Chess.dll": [
+            {
+              "address": "7f246e8ba000-7f246ea7a000",
+              "offset": 0,
+              "path": "/opt/laplace/app/Laplace.Chess.dll",
+              "permissions": "r--s"
+            }
+          ],
+          "Laplace.Core.dll": [
+            {
+              "address": "7f658b037000-7f658b096000",
+              "offset": 0,
+              "path": "/opt/laplace/app/Laplace.Core.dll",
+              "permissions": "r--s"
+            }
+          ],
+          "api": [
+            {
+              "address": "7f65901e4000-7f659036d000",
+              "offset": 0,
+              "path": "/opt/laplace/app/Laplace.Endpoints.OpenAICompat.dll",
+              "permissions": "r--s"
+            }
+          ],
+          "native": [
+            {
+              "address": "7f24140a2000-7f241410e000",
+              "offset": 0,
+              "path": "/opt/laplace/app/liblaplace_core.so",
+              "permissions": "r--p"
+            },
+            {
+              "address": "7f241410e000-7f2414530000",
+              "offset": 442368,
+              "path": "/opt/laplace/app/liblaplace_core.so",
+              "permissions": "r-xp"
+            },
+            {
+              "address": "7f2414530000-7f2417fca000",
+              "offset": 4775936,
+              "path": "/opt/laplace/app/liblaplace_core.so",
+              "permissions": "r--p"
+            },
+            {
+              "address": "7f2417fca000-7f2417fcb000",
+              "offset": 66224128,
+              "path": "/opt/laplace/app/liblaplace_core.so",
+              "permissions": "---p"
+            },
+            {
+              "address": "7f2417fcb000-7f2417feb000",
+              "offset": 66224128,
+              "path": "/opt/laplace/app/liblaplace_core.so",
+              "permissions": "r--p"
+            },
+            {
+              "address": "7f2417feb000-7f2417ff4000",
+              "offset": 66355200,
+              "path": "/opt/laplace/app/liblaplace_core.so",
+              "permissions": "rw-p"
+            }
+          ],
+          "position": [
+            {
+              "address": "7f23fa2c1000-7f23fc000000",
+              "offset": 0,
+              "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_position_perfcache.bin",
+              "permissions": "r--p"
+            }
+          ],
+          "transition": [
+            {
+              "address": "7f240819b000-7f240864c000",
+              "offset": 0,
+              "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_transition_perfcache.bin",
+              "permissions": "r--s"
+            }
+          ]
+        },
+        "pid": 2046027,
+        "start_ticks": 92529018
       },
-      "resource_scope": "Per engine: one search thread and nominal 32 MiB TT; concurrency 2. Laplace thread/TT fixed by selected implementation; Stockfish options observed. This does not equate whole-process RSS or database/provider work.",
-      "opening_suite": {
-        "bytes": 569,
-        "error": null,
-        "path": "/pgtemp/laplace/chess-lab/32e0381e1f6847148e2549ca52d9e746/openings.epd",
-        "sha256": "a5bf95c1e610212ed66a280e9199d6590e0f553c469ddaf521b675e21361b2df"
+      "records_games": false,
+      "request_seconds": 1.706219314946793,
+      "schema": "laplace.chess-floor-serving/v1",
+      "seed": {
+        "floors": {
+          "position": {
+            "bytes": 19121264,
+            "records": 239014,
+            "sha256": "badd56e924f050fb0f280222b24e0753dc0179ac3acedd9e43fb7f40b08889a5"
+          },
+          "transition": {
+            "bytes": 251920,
+            "records": 7870,
+            "sha256": "9e5a77d0fb1f4e571809a677d97a97e009073204bb0b5c599a31041eb0c04e60"
+          }
+        },
+        "openings_directory": "/vault/Data/Games/Chess/openings",
+        "surfaces_sha256": "e99c1373d294e6ad5993ffacf25011b35147b7adc8db6f6446027b8706450015"
       },
-      "opening_depth_bound_plies": 10,
-      "actual_starts_verified": true
+      "serving_installed_generation_mapped": true,
+      "serving_persistent_transition_hit_observed": true,
+      "status": "passed",
+      "throughput_measured": false,
+      "wall_seconds": 19.60988976608496,
+      "witness": {
+        "bounds": {
+          "maximum_line_bytes": 8388608,
+          "maximum_replay_bytes": 134217728,
+          "skip_eligible": 0
+        },
+        "eligible_transitions": 1,
+        "files": {
+          "installed_position": {
+            "bytes": 30663184,
+            "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_position_perfcache.bin",
+            "sha256": "49aae01a148fb52d35015339fb2fccddd909e0a6ca73414c457205262ccde387"
+          },
+          "installed_transition": {
+            "bytes": 4918608,
+            "path": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_transition_perfcache.bin",
+            "sha256": "a3ecd757286c0f62756f8dba1ac90bad6d4c07a9fd5836b3ebe3ddecf58df171"
+          },
+          "seed_position": {
+            "bytes": 19121264,
+            "path": "/build/laplace/recovery/post-main-chess/35256901378-1-cache/serving/seed/laplace_chess_position_perfcache.bin",
+            "sha256": "badd56e924f050fb0f280222b24e0753dc0179ac3acedd9e43fb7f40b08889a5"
+          },
+          "seed_transition": {
+            "bytes": 251920,
+            "path": "/build/laplace/recovery/post-main-chess/35256901378-1-cache/serving/seed/laplace_chess_transition_perfcache.bin",
+            "sha256": "9e5a77d0fb1f4e571809a677d97a97e009073204bb0b5c599a31041eb0c04e60"
+          },
+          "witnessed_inputs": {
+            "bytes": 13969430,
+            "path": "/build/laplace/corpus-exports/chess/post-main-35255471485-1/export/inventory/hydrated-playings.jsonl",
+            "sha256": "a75a95a2f92f49bec5ef4447fa710bea7e27a6c4bd065f257cb0315be6a000d0"
+          }
+        },
+        "installed": {
+          "coordinate_bits": [
+            4595261021948186600,
+            4604177426040261600,
+            4599811683698072600,
+            4603950837951562000
+          ],
+          "n_constituents": 35,
+          "physicality_id": "8edbddd702d00cb75b876eeabf565bc3",
+          "position_verified": true,
+          "tier": 2,
+          "transition_lookup_source": "Persistent"
+        },
+        "native_modules": [
+          {
+            "bytes": 66572712,
+            "path": "/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace/app/ChessCatalogSurfaces/bin/Release/net10.0/liblaplace_core.so",
+            "sha256": "9e134f49b433ee5df86c1a31abb8ea8da9ab9c86514d0f5eecf092e62e03d7a2"
+          }
+        ],
+        "observed_playings": 1,
+        "schema": "laplace.chess-recorded-floor-witness/v1",
+        "seed": {
+          "position_absent": true,
+          "transition_absent": true
+        },
+        "selected": {
+          "from_fen": "rnbqkbnr/ppp2ppp/4p3/3p4/2P5/2N5/PP1PPPPP/R1BQKBNR w KQkq d6 0 3",
+          "from_position_id": "991d1659c867af29d1cdbcae98cc06ef",
+          "legal_uci": [
+            "a1b1",
+            "d1c2",
+            "d1b3",
+            "d1a4",
+            "g1h3",
+            "g1f3",
+            "a2a3",
+            "a2a4",
+            "b2b3",
+            "b2b4",
+            "d2d3",
+            "d2d4",
+            "e2e3",
+            "e2e4",
+            "f2f3",
+            "f2f4",
+            "g2g3",
+            "g2g4",
+            "h2h3",
+            "h2h4",
+            "c3d5",
+            "c3b5",
+            "c3e4",
+            "c3a4",
+            "c3b1",
+            "c4c5",
+            "c4d5"
+          ],
+          "line_id": "1d94b4debfacaab5141c4918ea1719f1",
+          "move_id": "8c1c455f3fe1580906b5cc4ff039d962",
+          "move_uci": "d2d4",
+          "playing_id": "0007b98a784afa6a732a5ef25b5a6bd6",
+          "ply": 5,
+          "start_position_id": "6e209f78d66f64f1405d9184f65065bb",
+          "to_fen": "rnbqkbnr/ppp2ppp/4p3/3p4/2PP4/2N5/PP2PPPP/R1BQKBNR b KQkq d3 0 3",
+          "to_position_id": "42ea719633df8ca4eac14516fa494a08",
+          "transition_key": "70c5c7b703c64e33ff441689dcffeb93"
+        },
+        "status": "passed"
+      }
     },
-    "elapsed_seconds": {
-      "commit": 78.4853853,
-      "overhead": 0.7997546000000131,
-      "play": 118.0003033,
-      "readback": 1.3654363,
-      "recording": 0.5364493999999951,
-      "total": 199.1873289,
-      "collector_end_to_end": 199.41237090202048,
-      "match_and_replay": 202.55969442403875
+    "source": {
+      "commit": "af8fd17bda55d3403f46b01a073a298ab6c69597",
+      "tree": "b0e2a671a9842ba734efad8f12b85c4b7db88461"
     },
-    "writer": {
-      "applyCalls": 3,
-      "attestationsAttempted": 10716,
-      "attestationsInserted": 9937,
-      "copyTransactionsCommitted": 39,
-      "copyTransactionsStarted": 39,
-      "entitiesAttempted": 214756,
-      "entitiesInserted": 90196,
-      "entitiesSkippedAtMerge": 124263,
-      "journalReplayHits": 0,
-      "physicalitiesAttempted": 225772,
-      "physicalitiesInserted": 90094,
-      "physicalitiesSkippedAtMerge": 124277,
-      "roundTrips": 54,
-      "roundTripsKind": "logical-writer-accounting/v1"
-    },
-    "durability": {
-      "fsync": true,
-      "fullPageWrites": true,
-      "localWalFlushAcknowledged": true,
-      "synchronousCommit": "on",
-      "writeCommitAcknowledged": true
+    "status": "completed-export-install-and-post-install-verification",
+    "tls": {
+      "address": "192.168.1.2",
+      "caSha256": "1422b5402a5ac4bec83073f4854cc5f95474e735097500837d418ebea1275f43",
+      "certificateHostnameVerificationRequired": true,
+      "certificateHostnameVerified": true,
+      "checks": [
+        {
+          "authorized": false,
+          "bytes": 12113,
+          "path": "/refactor/",
+          "sha256": "1900422bf39c2e6cad336775f32dc09a34c1d10c05a5881f7a841de36f97a9db",
+          "status": 200
+        },
+        {
+          "authorized": true,
+          "bytes": 386,
+          "packageId": "c7cd0ecfd651480ebb36f13932325f2f4c7d9da29a5c6257f97cb7b8d4393c20",
+          "path": "/refactor/health",
+          "sha256": "4da99a9e9f6b3d2c11eaf8a64eb7541fa7e2486e40fca6d6548144b232f1ad6f",
+          "status": 200
+        },
+        {
+          "authorized": true,
+          "bytes": 731,
+          "path": "/refactor/api/v1/summary",
+          "sha256": "4f6a8a7f7624018200f1abd8f6a7e345d8d1126aa6cee2b544a303dcdffcd786",
+          "status": 200
+        }
+      ],
+      "deadlineSeconds": 50,
+      "elapsedSeconds": 0.318895903066732,
+      "endpoint": "https://hart-server:8443/refactor/",
+      "expectedRefactorPackageId": "c7cd0ecfd651480ebb36f13932325f2f4c7d9da29a5c6257f97cb7b8d4393c20",
+      "ownerGitBlob": "dfade6c9b72277ed4d95e64376d283a4aa8821d2",
+      "remoteClientReachabilityVerified": false,
+      "schema": "laplace.refactor-lan-tls/v1",
+      "scope": "Server-local request to the existing configured LAN TLS front door",
+      "status": "passed"
     },
     "verification": {
-      "completedGames": true,
-      "exactExperimentBody": true,
-      "exactGameBodies": true,
-      "exactWitnessMembership": true,
-      "uniquePlayingIds": true
-    },
-    "replay_verification": {
-      "status": "passed",
-      "games": 20,
-      "plies": 1016,
-      "all_13_writer_counters_zero": true,
-      "scope_snapshots": 3,
-      "exact_game_bodies_unchanged": true,
-      "scope": "Exact explicit EntityRows emitted by the source game recorder and experiment builder; selected nonempty line Content physicalities; exact source playing/header/setup/result and experiment witnesses with observation_count. Native text-stage interior rows, calculated analysis lanes, shared bootstrap rows and unrelated service writes are outside this snapshot."
-    },
-    "runtime_before": {
-      "bytes": 3651,
-      "path": "comparison/runtime-before.json",
-      "sha256": "20b2d5b36f1b8ded3fdbf69e0eb5ebeddf7ee23c84435e092307f6897a26de52"
-    },
-    "runtime_after": {
-      "bytes": 3651,
-      "path": "comparison/runtime-after.json",
-      "sha256": "20b2d5b36f1b8ded3fdbf69e0eb5ebeddf7ee23c84435e092307f6897a26de52"
-    },
-    "runtime_byte_identical": true,
-    "source_unchanged": true,
-    "cache_unchanged": true,
-    "cache_generation": "/opt/laplace/share/laplace/chess-floor/generations/681ba884d7af8ca8f7d61bf38101a90b7382c6db4d3374764fc796a3eace4dc3",
-    "cache_exported_games": 2280,
-    "gauntlet_games_added_to_cache": false,
-    "credential_lifecycle": {
-      "receipt": {
-        "bytes": 440,
-        "path": "credential-lifecycle.json",
-        "sha256": "0bc73683e84b06e9b01c4d6f11fba91701fabc780d395e7ef89375442d772076"
+      "artifact": 10513146983,
+      "artifact_bytes": 376993,
+      "artifact_sha256": "74af349ac137e8e9ffcb75b01700c2ea492d2a542d3737caea3f826ae220f6c9",
+      "cache_mutation_reexecuted": false,
+      "forwarder_checks": 9,
+      "job": 105322736940,
+      "origin_cache_status": "failed",
+      "phases": [
+        {
+          "elapsedSeconds": 2.335225284099579,
+          "finishedUtc": "2026-09-17T18:07:56.803408+00:00",
+          "name": "authenticate-completed-cache-install",
+          "startedUtc": "2026-09-17T18:07:54.468044+00:00",
+          "status": "passed"
+        },
+        {
+          "elapsedSeconds": 5.471035507041961,
+          "finishedUtc": "2026-09-17T18:08:02.277004+00:00",
+          "name": "fresh-direct-engine-serving",
+          "startedUtc": "2026-09-17T18:07:56.804780+00:00",
+          "status": "passed"
+        },
+        {
+          "elapsedSeconds": 19.758244188968092,
+          "finishedUtc": "2026-09-17T18:08:22.036277+00:00",
+          "name": "live-recorded-serving",
+          "startedUtc": "2026-09-17T18:08:02.277559+00:00",
+          "status": "passed"
+        },
+        {
+          "elapsedSeconds": 1.618784322985448,
+          "finishedUtc": "2026-09-17T18:08:23.658505+00:00",
+          "name": "runtime-after-verification",
+          "startedUtc": "2026-09-17T18:08:22.037771+00:00",
+          "status": "passed"
+        }
+      ],
+      "reader": {
+        "artifact": 10513512208,
+        "artifact_bytes": 28975,
+        "artifact_sha256": "fe755f4a7e766e2462b1f4f3ea1cdb0636f0887558b3d04738da845fc5902059",
+        "job": 105323434653,
+        "run": 35257134152
       },
-      "status": "completed",
-      "mode": "run-owned-key",
-      "issued_by_this_invocation": true,
-      "revocation": "completed",
-      "secret_retained": false
+      "receipt": {
+        "bytes": 24954,
+        "path": "/build/laplace/recovery/post-main-chess/35256901378-1-cache/receipt.json",
+        "sha256": "0479c57cace085ea8f46ef8fbaadd685269aa6091c6f937ea982679a62f41427"
+      },
+      "remote_client_reachability_verified": false,
+      "run": 35256901378,
+      "schema": "laplace.recorded-floor-post-install-verification/v1",
+      "status": "success",
+      "tls_checks": 3
     },
-    "limits": [
-      "Twenty complete short-clock games do not establish Elo or long-time-control strength.",
-      "This includes game play and recording; it is not the 2500 recorded-games/s corpus ingestion benchmark.",
-      "The 20 new database games are separate from the unchanged 2280-game cache export."
-    ]
+    "verification_files": [
+      {
+        "bytes": 24954,
+        "path": "cache/receipt.json",
+        "sha256": "0479c57cace085ea8f46ef8fbaadd685269aa6091c6f937ea982679a62f41427"
+      },
+      {
+        "bytes": 13580,
+        "path": "cache/direct/receipt.json",
+        "sha256": "0486914acd3bde7dbf103c017ddb67256d1ed6b78893bd64e9105e3eb92345ea"
+      },
+      {
+        "bytes": 10957,
+        "path": "cache/serving/receipt.json",
+        "sha256": "95bb6dcccad5597c8e4ca4a60b9ef9131836d74585a393756cf264ced34d205f"
+      },
+      {
+        "bytes": 3649,
+        "path": "cache/runtime-after-verification.json",
+        "sha256": "c90779b97e0394209b55a29a9aa22fef8f98fc508c61725f75375aae7d0d1b0c"
+      },
+      {
+        "bytes": 25651,
+        "path": "cache/original-cache-failure.json",
+        "sha256": "2620fd9cde3a465fe6aa79614dc368d9029be1904ceb6fcb7286efe29b6c10c3"
+      },
+      {
+        "bytes": 185,
+        "path": "cache/selected-export-after.json",
+        "sha256": "1e27dff6c65f5ed601f18cbd3aaa90a0e4bd9414ad31fc4dc267c5be9ffec97b"
+      },
+      {
+        "bytes": 2748,
+        "path": "cache/refactor-forwarder.json",
+        "sha256": "c58dd756ed8807536fc142a3fcedd80b4ee1b1245b9a2cb0298be0ab318884fb"
+      },
+      {
+        "bytes": 1372,
+        "path": "cache/refactor-front-door.json",
+        "sha256": "b7dfb760a1cc1655638bf00b624642a7c406651999663aa2d2fd6dcca43bf54d"
+      }
+    ],
+    "gui_refresh": {
+      "run": 35257240110,
+      "job": 105323827508,
+      "artifact": 10512957713,
+      "artifact_bytes": 4372,
+      "artifact_sha256": "01abe80ce895c4df6c4bc8e1d4709caf8b08fb35baa5727728c9bd1e2094fbaa",
+      "receipt": {
+        "checks": {
+          "floor_generation": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955",
+          "native_processes": [
+            {
+              "process": {
+                "pid": 2048907,
+                "start_ticks": 92619945
+              },
+              "selected_floor_paths": {
+                "LAPLACE_CHESS_PERFCACHE_BIN": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_position_perfcache.bin",
+                "LAPLACE_CHESS_TRANSITION_BIN": "/opt/laplace/share/laplace/chess-floor/generations/02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955/laplace_chess_transition_perfcache.bin"
+              }
+            }
+          ],
+          "native_windows": [
+            {
+              "pid": 2048907,
+              "window_id": 4194311
+            }
+          ],
+          "service_after": {
+            "pid": 2048830,
+            "start_ticks": 92619011
+          },
+          "service_before": {
+            "pid": 1990859,
+            "start_ticks": 92025406
+          },
+          "tcp_listeners": [
+            {
+              "address": "127.0.0.1",
+              "inode": 36546534,
+              "port": 14501
+            }
+          ]
+        },
+        "configuration_changed": false,
+        "elapsed_seconds": 11.046,
+        "full_attach_or_game_proof": false,
+        "operation": "existing-cutechess-user-session-floor-refresh",
+        "status": "passed"
+      },
+      "scope": "Supported user-unit restart and exact native-window/process/floor-environment observation; no new game or full client-attach proof."
+    },
+    "pre_export_observer_failure": {
+      "artifact": 10511429184,
+      "artifactBytes": 1540811,
+      "artifactSha256": "9b752664303fa59073c89547239362458dd8277f4a0f67d225f4657446edfdcb",
+      "cacheExportStarted": false,
+      "failedPhase": "reuse-authenticated-recorded-serving",
+      "failureType": "ValueError",
+      "finishedUtc": "2026-09-17T17:48:21.312563+00:00",
+      "job": 105316007979,
+      "newRecordingRepeated": false,
+      "run": 35254878489,
+      "status": "failed"
+    }
   }
 }

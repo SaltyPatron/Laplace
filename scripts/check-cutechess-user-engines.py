@@ -27,6 +27,7 @@ import time
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
+BASE_CHECKER_GIT_BLOB = "d1f075951262c145cb6f360e97d5ed307919d347"
 SCHEMA = "laplace.cutechess-user-engine-acceptance/v1"
 MAX_OUTPUT = 1024 * 1024
 START_MOVES = {f + "2" + f + rank for f in "abcdefgh" for rank in "34"} | {
@@ -484,13 +485,44 @@ def main(argv=None):
                     cli_environment, cwd, output / "cli-verification.log", deadline)
             files[str(args.cli_build_receipt)] = digest(args.cli_build_receipt)
             files[str(args.cli_binary)] = digest(args.cli_binary)
+            helper = load_module("installed_cutechess_session", desktop["session_helper"]["path"])
+            # Seed only this fresh private fixture from authenticated installed
+            # selection. The public launcher still prepares and verifies it;
+            # its guard against changing a running GUI's settings stays intact.
+            catalog_path = Path(desktop["engine_catalog"]["path"])
+            catalog = read_json(catalog_path)
+            work = helper.owned_directory(
+                Path(desktop["session_work_root"]) / ("cutechess-user-" + str(os.geteuid())),
+                private=True)
+            fixture = configured_engines(
+                [{**entry, "workingDirectory": str(work)} for entry in catalog], catalog, work)
+            config_directory = helper.owned_directory(xdg / "cutechess", private=True)
+            config_path = config_directory / "engines.json"
+            require(not config_path.exists() and not config_path.is_symlink(),
+                    "isolated engine fixture must not replace an existing file")
+            helper.atomic_text(config_path,
+                               (json.dumps(fixture, ensure_ascii=False, indent=2,
+                                           allow_nan=False) + "\n").encode("utf-8"))
+            fixture_sha256 = digest(config_path)
+            result["configuration_fixture"] = {
+                "source": "authenticated-installed-catalog",
+                "catalog_sha256": files[str(catalog_path)],
+                "config_sha256": fixture_sha256,
+                "base_checker_git_blob": BASE_CHECKER_GIT_BLOB,
+                "source_root": str(ROOT),
+                "usual_gui_settings_modified": False,
+                "engine_entry_installation_proven": False}
             launch_started = time.monotonic()
             command([desktop["launcher"]["path"], "-platform", "offscreen", "--version"],
                     dict(os.environ), cwd, output / "public-launcher.log", deadline)
             result["public_launcher_seconds"] = time.monotonic() - launch_started
-            helper = load_module("installed_cutechess_session", desktop["session_helper"]["path"])
             lock, private, config_receipt = helper.prepare(
                 desktop["engine_catalog"]["path"], Path(desktop["binary"]), desktop["session_work_root"])
+            require(config_receipt["config_sha256"] == fixture_sha256
+                    and not config_receipt["added_names"]
+                    and not config_receipt["added_option_names"]
+                    and not config_receipt["migrated_stockfish_names"],
+                    "public preparation changed the authenticated isolated fixture")
             environment = helper.launch_environment(desktop["launch"], private)
             require(environment["LAPLACE_UCI_SUBSTRATE"] == "substrate",
                     "public launch environment did not select substrate")
