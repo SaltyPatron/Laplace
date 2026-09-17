@@ -53,12 +53,16 @@ class WorkflowArchitecture(unittest.TestCase):
             self.assertIn("workflow_dispatch:", text)
             self.assertNotIn("\n  push:\n", text)
 
-    def test_benchmark_uses_the_real_host_lock_not_actions_queue_replacement(self):
+    def test_benchmark_uses_immutable_driver_under_real_host_lock(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
+        driver = (ROOT / "scripts/benchmark-evidence-ci.sh").read_text(encoding="utf-8")
         self.assertNotIn("\nconcurrency:\n", text)
         self.assertEqual(1, text.count("host-resource.lock"))
-        self.assertIn("Build and measure under one real host reservation", text)
-        self.assertIn("scripts/benchmark_scale_plan.py", text)
+        self.assertIn('git fetch --no-tags --depth=1 origin "$DISPATCH_SHA"', text)
+        self.assertIn('git show "$workflow_sha:scripts/benchmark-evidence-ci.sh"', text)
+        self.assertIn('git fetch --no-tags --prune origin "$target"', text)
+        self.assertIn('exec bash "$driver"', text)
+        self.assertIn("scripts/benchmark_scale_plan.py", driver)
         self.assertNotIn('echo "- Commit: `$sha`"', text)
         self.assertIn('echo "- Commit: \\`$sha\\`"', text)
 

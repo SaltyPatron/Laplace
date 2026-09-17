@@ -167,41 +167,59 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual(12, cap)
         self.assertEqual("derived", source)
 
-    def test_workflow_explicit_invocations_route_through_owned_runners(self):
-        path = ROOT / ".github/workflows/benchmark-evidence.yml"
-        text = path.read_text(encoding="utf-8")
+    def test_workflow_stages_immutable_driver_and_preserves_every_dispatch(self):
+        workflow = (ROOT / ".github/workflows/benchmark-evidence.yml").read_text(encoding="utf-8")
+        driver = (ROOT / "scripts/benchmark-evidence-ci.sh").read_text(encoding="utf-8")
+        contract = json.loads((ROOT / "scripts/benchmark-suite-contract.json").read_text(encoding="utf-8"))
         registry_suites = {item["id"] for item in self.registry["suites"]}
 
-        self.assertIn("on:\n  workflow_dispatch:", text)
-        self.assertNotIn("\n  push:\n", text)
-        self.assertNotIn("\n  workflow_call:\n", text)
+        self.assertIn("on:\n  workflow_dispatch:", workflow)
+        self.assertNotIn("\n  push:\n", workflow)
+        self.assertNotIn("\n  workflow_call:\n", workflow)
         for suite in registry_suites:
-            self.assertIn(suite, text)
+            self.assertIn(suite, workflow)
 
-        self.assertEqual(1, text.count("runs-on: [self-hosted, laplace]"))
-        self.assertEqual(1, text.count("host-resource.lock"))
-        self.assertNotIn("\nconcurrency:\n", text)
-        self.assertIn("python3 scripts/benchmark_suite.py validate", text)
-        self.assertIn('python3 scripts/benchmark_suite.py "${run_args[@]}"', text)
-        self.assertIn("scripts/benchmark_scale_plan.py", text)
-        self.assertNotIn("python3 scripts/bench-compose.py", text)
-        self.assertNotIn("python3 scripts/bench-compose-scale.py", text)
-        self.assertNotIn("python3 scripts/bench-compose-stream-scale.py", text)
-        self.assertNotIn("python3 scripts/bench-forward-program.py", text)
+        self.assertEqual(1, workflow.count("runs-on: [self-hosted, laplace]"))
+        self.assertEqual(1, workflow.count("host-resource.lock"))
+        self.assertNotIn("\nconcurrency:\n", workflow)
+
+        lock = workflow.index('exec 9>"$lock_root/host-resource.lock"')
+        workflow_fetch = workflow.index('git fetch --no-tags --depth=1 origin "$DISPATCH_SHA"')
+        stage = workflow.index('git show "$workflow_sha:scripts/benchmark-evidence-ci.sh"')
+        target_fetch = workflow.index('git fetch --no-tags --prune origin "$target"')
+        checkout = workflow.index('git checkout --no-overwrite-ignore --detach "$resolved"')
+        execute = workflow.index('exec bash "$driver"')
+        self.assertEqual(
+            [lock, workflow_fetch, stage, target_fetch, checkout, execute],
+            sorted([lock, workflow_fetch, stage, target_fetch, checkout, execute]),
+        )
+
+        self.assertIn("python3 scripts/benchmark_suite.py validate", driver)
+        self.assertIn('python3 scripts/benchmark_suite.py "${run_args[@]}"', driver)
+        self.assertNotIn("python3 scripts/bench-compose.py", workflow)
+        self.assertNotIn("python3 scripts/bench-compose-scale.py", workflow)
+        self.assertNotIn("python3 scripts/bench-compose-stream-scale.py", workflow)
+        self.assertNotIn("python3 scripts/bench-forward-program.py", workflow)
+
+        self.assertEqual(["workflow_dispatch"], contract["triggers"])
+        self.assertEqual("scripts/benchmark-evidence-ci.sh", contract["workflow_driver"])
+        self.assertTrue(contract["host_ownership"]["preserve_every_dispatch"])
+        self.assertIsNone(contract["host_ownership"]["github_actions_concurrency_group"])
 
     def test_workflow_requires_explicit_saturation_and_records_scale_plan(self):
-        text = (ROOT / ".github/workflows/benchmark-evidence.yml").read_text(encoding="utf-8")
-        self.assertIn("reserve_logical_cpus:", text)
-        self.assertIn('default: "2"', text)
-        self.assertIn("allow_saturation:", text)
-        self.assertIn("default: false", text)
-        self.assertIn("scale-plan.json", text)
-        self.assertIn("--reserve-logical", text)
-        self.assertIn("--allow-saturation", text)
-        self.assertIn("resolved_workers_csv", text)
+        workflow = (ROOT / ".github/workflows/benchmark-evidence.yml").read_text(encoding="utf-8")
+        driver = (ROOT / "scripts/benchmark-evidence-ci.sh").read_text(encoding="utf-8")
+        self.assertIn("reserve_logical_cpus:", workflow)
+        self.assertIn('default: "2"', workflow)
+        self.assertIn("allow_saturation:", workflow)
+        self.assertIn("default: false", workflow)
+        self.assertIn("scale-plan.json", driver)
+        self.assertIn("--reserve-logical", driver)
+        self.assertIn("--allow-saturation", driver)
+        self.assertIn("resolved_workers_csv", driver)
 
-    def test_workflow_binds_built_core_t0_and_content_versioned_execution_identity(self):
-        text = (ROOT / ".github/workflows/benchmark-evidence.yml").read_text(encoding="utf-8")
+    def test_workflow_driver_binds_built_core_t0_and_execution_identity(self):
+        text = (ROOT / "scripts/benchmark-evidence-ci.sh").read_text(encoding="utf-8")
         self.assertIn("build/engine/core/liblaplace_core.so", text)
         self.assertIn("build/engine/core/perfcache/laplace_t0_perfcache.bin", text)
         self.assertIn("build/extension/laplace_substrate/laplace_substrate.control", text)
