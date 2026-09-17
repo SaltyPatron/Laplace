@@ -1,8 +1,8 @@
-name: Laplace — operator lifecycle
+name: Laplace — product lifecycle
 
 on:
   push:
-    branches: [main]
+    branches: [main, repair/consolidate-ci-ingest-20260916]
     paths-ignore:
       - ".github/**"
       - "docs/**"
@@ -10,11 +10,11 @@ on:
   workflow_dispatch:
     inputs:
       stage:
-        description: "explicit operator lifecycle stage"
+        description: "explicit product lifecycle stage"
         type: choice
         required: true
         default: build
-        options: [provision, build, install, database, foundation, applications, deploy, mainline, test-dev, test-db, test-live, reconcile, check]
+        options: [provision, build, install, applications, deploy, test-dev, test-db, test-live, reconcile, check]
       full_clean:
         description: "build/deploy: wipe build/ before building"
         type: boolean
@@ -44,7 +44,7 @@ env:
 jobs:
   mainline:
     if: github.event_name == 'push'
-    name: Mainline — integrated product lifecycle
+    name: Mainline — build, install, database checks, publish, live checks
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     concurrency:
@@ -62,7 +62,7 @@ jobs:
       LAPLACE_AUTH_GOOGLE_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_ID }}
       LAPLACE_AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_SECRET }}
     steps:
-      - name: Select source and exercise the whole product under one host reservation
+      - name: Select source and exercise the product under one host reservation
         env:
           TARGET_SHA: ${{ github.sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
@@ -122,7 +122,7 @@ jobs:
       LAPLACE_AUTH_GOOGLE_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_ID }}
       LAPLACE_AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_SECRET }}
     steps:
-      - name: Select source and run the requested reserved lifecycle
+      - name: Select source and run the requested product lifecycle
         env:
           TARGET_SHA: ${{ github.sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
