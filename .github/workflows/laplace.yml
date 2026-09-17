@@ -94,8 +94,7 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
           source scripts/ci-environment.sh
-          bash scripts/product-ci.sh build
-          exec bash scripts/product-ci.sh test-dev
+          exec bash scripts/product-ci.sh mainline
 
   operator:
     if: github.event_name == 'workflow_dispatch'
