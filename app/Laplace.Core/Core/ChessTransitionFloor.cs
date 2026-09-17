@@ -54,6 +54,10 @@ public static unsafe class ChessTransitionFloor
             Path = System.IO.Path.GetFullPath(path);
             using var source = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.Read | FileShare.Delete);
+            // Installed catalogs are selected through symlinks. Validate the opened
+            // target, not the length of the link's stored path.
+            if (source.Length < HeaderSize + TrailerBytes)
+                throw new InvalidOperationException($"chess transition floor missing/short: {path}");
             _file = MemoryMappedFile.CreateFromFile(source, null, 0,
                 MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: true);
             try
@@ -179,8 +183,7 @@ public static unsafe class ChessTransitionFloor
     public static void Load(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
-        var file = new FileInfo(path);
-        if (!file.Exists || file.Length < HeaderSize + TrailerBytes)
+        if (!File.Exists(path))
             throw new InvalidOperationException($"chess transition floor missing/short: {path}");
         // Fully validate privately. A rejected replacement must not discard a valid map.
         var candidate = new MappedFloor(path);

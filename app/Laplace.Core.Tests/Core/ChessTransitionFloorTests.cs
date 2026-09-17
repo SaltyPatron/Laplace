@@ -32,6 +32,84 @@ public sealed class ChessTransitionFloorTests
         Path.Combine(Path.GetTempPath(), $"chess-transition-{Guid.NewGuid():N}.bin");
 
     [Fact]
+    public void RelativeSymlinkLoadsTheSamePersistentTransitionsAsItsTarget()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"chess-transition-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string target = Path.Combine(directory, "floor.bin");
+        string selected = Path.Combine(directory, "selected.bin");
+        var pairs = Pairs("linked-a", "linked-b", "linked-c");
+        try
+        {
+            ChessTransitionFloor.WriteBlob(target, pairs);
+            File.CreateSymbolicLink(selected, Path.GetFileName(target));
+            ChessTransitionFloor.Load(target);
+            var direct = ChessTransitionFloor.Observe();
+            ChessTransitionFloor.Unload();
+
+            // On Unix this short link has less than a header's worth of metadata,
+            // while its opened target contains a complete validated catalog.
+            ChessTransitionFloor.Load(selected);
+            var linked = ChessTransitionFloor.Observe();
+            Assert.True(linked.IsLoaded);
+            Assert.Equal(direct.RecordCount, linked.RecordCount);
+            Assert.Equal(pairs.Count, linked.RecordCount);
+            foreach (var (key, to) in pairs)
+            {
+                Assert.True(ChessTransitionFloor.TryLookup(key, out var actual, out var source));
+                Assert.Equal(to, actual);
+                Assert.Equal(ChessTransitionFloor.LookupSource.Persistent, source);
+            }
+        }
+        finally
+        {
+            ChessTransitionFloor.Unload();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(79)]
+    public void SymlinkToShortTargetPreservesThePublishedMapAndNovelGeneration(int length)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"chess-transition-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string valid = Path.Combine(directory, "valid.bin");
+        // A long link target must not disguise a short or empty opened file.
+        string shortTarget = Path.Combine(directory, new string('s', 96) + ".bin");
+        string selected = Path.Combine(directory, "selected.bin");
+        try
+        {
+            ChessTransitionFloor.WriteBlob(valid, Pairs("stable"));
+            ChessTransitionFloor.Load(valid);
+            ChessTransitionFloor.Remember(K("computed"), V("computed"));
+            File.WriteAllBytes(shortTarget, new byte[length]);
+            File.CreateSymbolicLink(selected, Path.GetFileName(shortTarget));
+
+            foreach (string path in new[] { shortTarget, selected })
+            {
+                var error = Assert.Throws<InvalidOperationException>(() => ChessTransitionFloor.Load(path));
+                Assert.Contains("missing/short", error.Message, StringComparison.Ordinal);
+                Assert.True(ChessTransitionFloor.IsLoaded);
+                Assert.Equal(1, ChessTransitionFloor.RecordCount);
+                Assert.Equal(1, ChessTransitionFloor.NovelCount);
+                Assert.True(ChessTransitionFloor.TryLookup(K("stable"), out var stable, out var persistent));
+                Assert.Equal(V("stable"), stable);
+                Assert.Equal(ChessTransitionFloor.LookupSource.Persistent, persistent);
+                Assert.True(ChessTransitionFloor.TryLookup(K("computed"), out var computed, out var novel));
+                Assert.Equal(V("computed"), computed);
+                Assert.Equal(ChessTransitionFloor.LookupSource.Novel, novel);
+            }
+        }
+        finally
+        {
+            ChessTransitionFloor.Unload();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void RejectedReplacementPreservesThePublishedMapAndNovelGeneration()
     {
         string valid = TempBlob(), invalid = TempBlob();

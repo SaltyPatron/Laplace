@@ -213,6 +213,41 @@ class GuiGameControls(unittest.TestCase):
                     owner.act(Node(action, enabled))
                 self.assertEqual([0] if not ack and enabled else [], action.invoked)
 
+
+    def test_accessibility_vanished_sibling_preserves_the_actual_named_control(self):
+        class Node:
+            def __init__(self, name, role, children=()):
+                self.name, self.role, self.children = name, role, list(children)
+            def clear_cache(self): pass
+            def get_child_count(self): return len(self.children)
+            def get_child_at_index(self, index): return self.children[index]
+            def get_name(self): return self.name
+            def get_role(self): return self.role
+        owner = OWNER.Accessibility(None, 41, types.SimpleNamespace(remaining=lambda: 1))
+        target = Node("&View", 7)
+        root = Node("Cute Chess", 1, [None, target, None])
+        self.assertEqual([root, target], list(owner.walk(root)))
+        self.assertIs(target, owner.one(root, role=7, name="View"))
+        for children in ([None], [target, None, Node("&View", 7)]):
+            with self.subTest(children=len(children)), self.assertRaisesRegex(ValueError, "absent or ambiguous"):
+                owner.one(Node("Cute Chess", 1, children), role=7, name="View")
+
+    def test_accessibility_missing_slots_preserve_root_and_remote_tree_bounds(self):
+        class Node:
+            def __init__(self, children=()): self.children = list(children)
+            def clear_cache(self): pass
+            def get_child_count(self): return len(self.children)
+            def get_child_at_index(self, index): return self.children[index]
+        owner = OWNER.Accessibility(None, 41, types.SimpleNamespace(remaining=lambda: 1))
+        with self.assertRaisesRegex(ValueError, "root is unavailable"):
+            list(owner.walk(None))
+        with self.assertRaisesRegex(ValueError, "child count exceeds"):
+            list(owner.walk(Node([None] * 513)))
+        root = Node()
+        root.children = [None, root]
+        with self.assertRaisesRegex(ValueError, "tree exceeds"):
+            list(owner.walk(root))
+
     def package_tools(self):
         tools = self.root / "bin"
         tools.mkdir()

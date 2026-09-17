@@ -81,13 +81,17 @@ class Accessibility:
         self.api, self.pid, self.session = api, pid, session
 
     def walk(self, root):
+        require(root is not None, "accessible root is unavailable")
         pending, count = [(root, 0)], 0
         while pending:
             self.session.remaining()
             item, depth = pending.pop()
             require(depth <= 32 and count < 2048, "accessible widget tree exceeds its envelope")
             count += 1
-            require(item is not None, "accessible child disappeared")
+            # Qt may destroy a popup between child-count and child-index reads.
+            # Missing slots are not controls; named target uniqueness is checked below.
+            if item is None:
+                continue
             item.clear_cache()
             yield item
             children = item.get_child_count()
