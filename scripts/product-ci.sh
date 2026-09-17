@@ -76,7 +76,8 @@ reconcile_installed_product() {
   python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
 }
 
-# Product lifecycle owns build/install/verification/publish. Corpus seeding is owned by seed.yml.
+# Product lifecycle owns build/install/database verification/publication/live checks.
+# Corpus ingestion and foundation/model seeding are owned exclusively by seed.yml.
 run_deploy() {
   check_deps
   run_build
