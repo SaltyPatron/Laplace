@@ -14,7 +14,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "scripts/sql-catalog-baseline.json"
-CATALOG = ROOT / "engine/core/src/sql_catalog.def"
+CATALOGS = sorted((ROOT / "engine/core/src").glob("sql_catalog*.def"))
 # Comments and character literals must be consumed before strings, so their
 # quotes cannot start a fictitious string across later source code. A character
 # literal cannot start at a C++ numeric separator (for example, 1'000).
@@ -82,7 +82,7 @@ def excess(current, allowed):
 
 
 def catalog_entries(source):
-    """Parse the complete SQL_QUERY-only file; comments cannot hide an entry.
+    """Parse one SQL_QUERY-only catalog shard; comments cannot hide an entry.
 
     Strip comments through the existing literal-aware tokenizer, so comment-like
     text and parentheses inside SQL strings keep their original meaning. Match
@@ -135,15 +135,19 @@ def main():
         for digest, count in excess(actual, allowed.get(rel, {})).items():
             errors.append(f"{rel}: {count} new/changed inline SQL statement(s), {digest[:12]}; use the native catalog")
     entries = []
-    try:
-        entries = catalog_entries(CATALOG.read_text())
-        errors.extend(catalog_errors(entries))
-    except ValueError as error:
-        errors.append(str(error))
+    if not CATALOGS:
+        errors.append("native SQL catalog is missing")
+    else:
+        for path in CATALOGS:
+            try:
+                entries.extend(catalog_entries(path.read_text()))
+            except ValueError as error:
+                errors.append(f"{path.relative_to(ROOT).as_posix()}: {error}")
+    errors.extend(catalog_errors(entries))
     if errors:
         print('\n'.join(errors), file=sys.stderr)
         return 1
-    print(f"SQL_CATALOG_OK queries={len(entries)} legacy_runtime_literals={debt}")
+    print(f"SQL_CATALOG_OK queries={len(entries)} catalogs={len(CATALOGS)} legacy_runtime_literals={debt}")
     return 0
 
 
