@@ -1,4 +1,4 @@
-name: Qualify installed managed policy compatibility
+name: Qualify persistent managed policy regressions
 on:
   push:
     branches: [qualify/native-admission-footprint-20260916]
@@ -7,167 +7,44 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 8
     env:
-      PYTHONDONTWRITEBYTECODE: '1'
       GITHUB_TOKEN: ${{ github.token }}
-      EVIDENCE: /build/laplace/work/managed-policy-controls/evidence
-      TMPDIR: /build/laplace/work/managed-policy-controls/tmp
-      TMP: /build/laplace/work/managed-policy-controls/tmp
-      TEMP: /build/laplace/work/managed-policy-controls/tmp
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Prepare retained controls
+      - name: Run the persistent seven policy controls
         run: |
           set -euo pipefail
           sudo mkdir -p /build/laplace
           sudo chown "$(id -u):$(id -g)" /build/laplace
-          mkdir -p "$EVIDENCE" "$TMPDIR"
-      - name: Exercise actual compatibility and publication owners
-        run: |
-          set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$EVIDENCE/qualification.log"
-          import ast,base64,hashlib,importlib.util,json,os,re,subprocess,sys,textwrap,types,unittest,urllib.request,yaml
-          from pathlib import Path
-          evidence=Path(os.environ["EVIDENCE"])
-          selections={"workflow":"cc075df4fe45df0efe1aa36f62b0eb4f1f710cc3","managed":"069bddb8a2e812b82372b45f3936b88703de8692","follow":"14ce8c3ff91d5b8f784d10e513b6ddb96fa7ff52","helper":"f76c6685e773ebb9e01f39d4893eb3ea20964420","managed_shell":"11d4a90ec70faf763b67fbfacbec204736c2ef7c","deploy_shell":"a1be91e56e2d1b6c3cf9ad2f4e2c26c2ce2c2f9d","installed":"dfade6c9b72277ed4d95e64376d283a4aa8821d2","service":"14d7470f276ed33562451a12c0724767bd43aa82","source_policy":"c87daff9fc8a8e4a48657a3a55bfed41dd9bb46d"}
-          sources={}
-          for name,sha in selections.items():
+          export TMPDIR=/build/laplace/work/policy-regressions/tmp
+          export TMP="$TMPDIR" TEMP="$TMPDIR"
+          mkdir -p "$TMPDIR" /build/laplace/work/policy-regressions/evidence
+          python3 - <<'PY' 2>&1 | tee /build/laplace/work/policy-regressions/evidence/tests.log
+          import base64,hashlib,json,os,pathlib,subprocess,sys,urllib.request
+          root=pathlib.Path("/build/laplace/work/policy-regressions/source")
+          subprocess.run(["git","init","-q",root],check=True)
+          subprocess.run(["git","-C",root,"fetch","--depth=1","--no-tags",
+              "https://github.com/SaltyPatron/Laplace.git","a754665d33952a60e5aeecaee0e542d1d3824671"],check=True)
+          subprocess.run(["git","-C",root,"checkout","--detach","FETCH_HEAD"],check=True)
+          for name,sha in {"scripts/test-managed-policy.py":"1c03ea6c888a37c134adb3d79d4a5dcb44c9ec7a",
+              "scripts/fixtures/laplace-managed-deploy-legacy-scratch.py":"dfade6c9b72277ed4d95e64376d283a4aa8821d2"}.items():
               request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
                   headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
-              with urllib.request.urlopen(request,timeout=30) as response:encoded=response.read((2<<20)+1)
-              assert len(encoded)<=2<<20
-              item=json.loads(encoded);raw=base64.b64decode(item["content"])
+              with urllib.request.urlopen(request,timeout=30) as response:item=json.load(response)
+              raw=base64.b64decode(item["content"])
               assert item["sha"]==sha and item["encoding"]=="base64" and len(raw)==item["size"]
               assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
-              sources[name]=raw.decode()
-              (evidence/(name+".source")).write_bytes(raw)
-              if name.endswith("_shell"):subprocess.run(["bash","-n"],input=raw,check=True)
-              elif name!="workflow":ast.parse(raw,filename=name)
-          document=yaml.safe_load(sources["workflow"])
-          for job in document["jobs"].values():
-              for step in job["steps"]:
-                  if "run" in step:subprocess.run(["bash","-n"],input=step["run"],text=True,check=True)
-          assert "foundation" not in document["jobs"]
-          assert document["env"]["MANAGED_BLOCK_BLOB"]==selections["managed"]
-          assert document["env"]["FOLLOW_BLOCK_BLOB"]==selections["follow"]
-          assert document["env"]["MANAGED_POLICY_HELPER_BLOB"]==selections["helper"]
-          assert document["env"]["MANAGED_PUBLISH_OWNER_BLOB"]==selections["managed_shell"]
-          assert document["env"]["MANAGED_DEPLOY_OWNER_BLOB"]==selections["deploy_shell"]
-          root=evidence/"selected-source"
-          subprocess.run(["git","init","-q",root],check=True)
-          subprocess.run(["git","-C",root,"fetch","--no-tags","--depth=1",
-              "https://github.com/SaltyPatron/Laplace.git","2ef3f7ff885c8eccbc81d76caf8284436a482ffe"],check=True)
-          subprocess.run(["git","-C",root,"checkout","--detach","FETCH_HEAD"],check=True)
-          policy=types.ModuleType("policy")
-          exec(compile(sources["helper"],"managed-policy.py","exec"),policy.__dict__)
-          installed=evidence/"installed-policy"
-          installed.mkdir(mode=0o700)
-          for name,key in (("laplace-managed-deploy","installed"),("laplace-service-control","service")):
-              p=installed/name;p.write_text(sources[key]);p.chmod(0o755)
-          selected_source={name:(root/"deploy/linux"/name).read_bytes() for name in policy.NAMES}
-          selected_installed={name:(installed/name).read_bytes() for name in policy.NAMES}
-          assert policy.blob(selected_source[policy.NAMES[0]])==selections["source_policy"]
-          validate_ast=next(node for node in ast.parse(sources["installed"]).body if isinstance(node,ast.FunctionDef) and node.name=="validate_unit")
-          validator={"re":re,"UNITS":("mcp","lichess")}
-          exec(compile(ast.Module(body=[validate_ast],type_ignores=[]),"installed-unit-validator","exec"),validator)
-          class Compatibility(unittest.TestCase):
-              def test_installed_exact_predecessor(self):
-                  raw,units,receipt=policy.select(root,installed,os.getuid())
-                  self.assertEqual(receipt["profile"],"retained-legacy-scratch")
-                  self.assertEqual(raw,selected_installed)
-                  self.assertFalse(receipt["privilegedPolicyReplaced"])
-              def test_equal_current_policy(self):
-                  self.assertEqual(policy.select_profile(selected_source,selected_source),"same-policy")
-              def test_unknown_managed_policy_rejected(self):
-                  changed=dict(selected_installed);changed[policy.NAMES[0]]+=b"\n# unreviewed drift\n"
-                  with self.assertRaises(ValueError):policy.select_profile(selected_source,changed)
-              def test_service_control_drift_rejected(self):
-                  changed=dict(selected_installed);changed[policy.NAMES[1]]+=b"\n"
-                  with self.assertRaises(ValueError):policy.select_profile(selected_source,changed)
-              def test_only_four_directives_and_real_installed_validator(self):
-                  for name in ("mcp","lichess"):
-                      before=(root/"deploy/linux/managed-services"/("laplace-"+name+".service")).read_text()
-                      after=policy.unit_text(before,name,"retained-legacy-scratch")
-                      changes=[(a,b) for a,b in zip(before.splitlines(),after.splitlines()) if a!=b]
-                      self.assertEqual(len(changes),4)
-                      self.assertEqual(len(before.splitlines()),len(after.splitlines()))
-                      self.assertTrue(all(b==a.replace("/work/"+name,"/work/legacy-"+name) for a,b in changes))
-                      validator["validate_unit"](after,name)
-                      with self.assertRaises(ValueError):validator["validate_unit"](before,name)
-              def test_ambiguous_or_missing_directive_rejected(self):
-                  before=(root/"deploy/linux/managed-services/laplace-mcp.service").read_text()
-                  for text in (before.replace("ReadWritePaths=/build/laplace/work/mcp\n",""),
-                               before+"ReadWritePaths=/build/laplace/work/mcp\n"):
-                      with self.assertRaises(ValueError):policy.unit_text(text,"mcp","retained-legacy-scratch")
-              def test_untrusted_permissions_or_symlink_rejected(self):
-                  path=installed/policy.NAMES[0]
-                  path.chmod(0o775)
-                  try:
-                      with self.assertRaises(ValueError):policy.trusted_bytes(path,os.getuid())
-                  finally:path.chmod(0o755)
-                  link=installed/"linked";link.symlink_to(path)
-                  with self.assertRaises(ValueError):policy.trusted_bytes(link,os.getuid())
-          result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(Compatibility))
-          if not result.wasSuccessful():raise SystemExit(1)
-          # Execute the actual retained-owner binder, including live selected-blob authentication.
-          output=evidence/"bound-publication";output.mkdir(mode=0o700)
-          receipt={}
-          def sha256(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-          def save(path,value):Path(path).write_text(json.dumps(value,indent=2)+"\n")
-          owner=types.SimpleNamespace(sha256=sha256,save=save)
-          environment=dict(os.environ)
-          environment.update(MANAGED_POLICY_HELPER_BLOB=selections["helper"],
-              MANAGED_PUBLISH_OWNER_BLOB=selections["managed_shell"],MANAGED_DEPLOY_OWNER_BLOB=selections["deploy_shell"])
-          source="2ef3f7ff885c8eccbc81d76caf8284436a482ffe"
-          tree=subprocess.check_output(["git","-C",root,"rev-parse","HEAD^{tree}"],text=True).strip()
-          binder=next(node for node in ast.parse(sources["managed"]).body if isinstance(node,ast.FunctionDef) and node.name=="publication_owners")
-          ns=dict(globals())
-          exec(compile(ast.Module(body=[binder],type_ignores=[]),"actual-publication-binder","exec"),ns)
-          bound=ns["publication_owners"]()
-          assert len(bound["owners"])==6
-          assert bound["source"]=={"commit":source,"tree":tree}
-          assert not subprocess.check_output(["git","-C",root,"status","--porcelain","--untracked-files=all"],text=True)
-          for name,row in bound["owners"].items():
-              assert Path(row["boundPath"]).parent==output/"publication-owners"
-              assert row["boundSha256"]==sha256(row["boundPath"])
-          publisher=Path(bound["publisher"]).read_text()
-          pipeline=(output/"publication-owners/pipeline.sh").read_text()
-          deploy=(output/"publication-owners/deploy.sh").read_text()
-          assert str(bound["managed"]) in publisher and str(output/"publication-owners/pipeline.sh") in publisher
-          assert str(output/"publication-owners/deploy.sh") in pipeline
-          assert str(output/"publication-owners/managed-policy.py") in deploy
-          assert str(bound["managed"]) in Path(bound["startup"]).read_text()
-          print("PASS: 7 actual compatibility controls, actual installed unit validator, exact full-publication owner bindings and unchanged frozen source")
+              target=root/name
+              target.parent.mkdir(parents=True,exist_ok=True)
+              target.write_bytes(raw)
+          subprocess.run([sys.executable,root/"scripts/test-managed-policy.py"],check=True,cwd=root)
           PY
-      - name: Retain controls
+      - name: Retain regression result
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: managed-policy-controls-${{ github.run_id }}
-          path: ${{ env.EVIDENCE }}
+          name: persistent-managed-policy-${{ github.run_id }}
+          path: /build/laplace/work/policy-regressions/evidence
           if-no-files-found: error
           retention-days: 30
-  installed:
-    runs-on: [self-hosted, laplace]
-    timeout-minutes: 2
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
-      PYTHONDONTWRITEBYTECODE: '1'
-    steps:
-      - name: Validate actual installed compatible policy without mutation
-        run: |
-          python3 - <<'PY'
-          import base64,hashlib,json,os,pathlib,subprocess,urllib.request
-          sha="f76c6685e773ebb9e01f39d4893eb3ea20964420"
-          request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
-              headers={"Authorization":"Bearer "+os.environ["GITHUB_TOKEN"],"Accept":"application/vnd.github+json"})
-          with urllib.request.urlopen(request,timeout=30) as response:row=json.load(response)
-          raw=base64.b64decode(row["content"])
-          assert row["sha"]==sha and row["encoding"]=="base64" and len(raw)==row["size"]
-          assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
-          root=pathlib.Path("/var/lib/agents/laplace-runner/actions-runner/_work/Laplace/Laplace")
-          assert subprocess.check_output(["git","-C",root,"rev-parse","HEAD"],text=True).strip()=="2ef3f7ff885c8eccbc81d76caf8284436a482ffe"
-          # Check only: no staging, setup, sudo, restart, lock or host mutation.
-          result=subprocess.run(["python3","-","--root",str(root)],input=raw,capture_output=True,check=True,timeout=30)
-          print("ACTUAL_INSTALLED_POLICY_COMPATIBILITY "+result.stdout.decode(),flush=True)
-          PY
