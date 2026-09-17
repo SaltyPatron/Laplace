@@ -87,12 +87,14 @@ class SeedHostOwnership(unittest.TestCase):
         self.assertLess(checkout, environment)
         self.assertLess(environment, mutation)
 
-    def test_seed_consumes_the_built_cli_without_exact_commit_gate(self):
+    def test_seed_consumes_the_built_cli_without_help_rendering_or_exact_commit_gate(self):
         block = run_block(SEED_STEP)
         self.assertIn("LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false", block)
-        self.assertIn("scripts/laplace --help >/dev/null", block)
+        self.assertNotIn("scripts/laplace --help", block)
+        self.assertNotIn("scripts/laplace -h", block)
         self.assertNotIn("built_sha=", block)
         self.assertNotIn('[[ "$built_sha" == "$TARGET_SHA" ]]', block)
+        self.assertIn('case "$MODE" in', block)
 
     def test_evict_and_ingest_share_one_locked_step(self):
         block = run_block(SEED_STEP)
