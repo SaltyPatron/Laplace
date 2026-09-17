@@ -22,7 +22,10 @@ public sealed class RecipeDecomposer : ComposeDecomposer<RecipeExtractor.RecipeI
         _ = recipePath ?? throw new ArgumentNullException(nameof(recipePath));
         _recipe = RecipeExtractor.Parse(recipePath);
         _sourceName = $"recipe/{_recipe.Name}";
-        _source = Hash128.OfCanonical($"substrate/source/recipe/{_recipe.Name}/v1");
+        // The witness source names the actual supplied artifact bytes. Two recipes with
+        // the same display name but different contents are different witnesses; formatting
+        // changes remain provenance-visible even when canonical recipe semantics agree.
+        _source = SourceEntityIdConventions.ContentHashSourceId("recipe", [recipePath]);
         _manifest = new RecipeRuntimeManifest(_source, _sourceName);
     }
 
