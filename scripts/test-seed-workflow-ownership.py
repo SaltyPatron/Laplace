@@ -26,19 +26,19 @@ class SharedHostQueue(unittest.TestCase):
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
-    def test_all_host_owners_preserve_pending_operations(self):
-        expected_groups = {
-            "laplace.yml": 2,
-            "db-ops.yml": 1,
-            "seed.yml": 1,
-            "benchmark-evidence.yml": 1,
-        }
-        for name, count in expected_groups.items():
-            with self.subTest(workflow=name):
-                text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    def test_every_self_hosted_job_shares_lifecycle_concurrency(self):
+        host_jobs = 0
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            text = path.read_text(encoding="utf-8")
+            count = text.count("runs-on: [self-hosted, laplace]")
+            if count == 0:
+                continue
+            host_jobs += count
+            with self.subTest(workflow=path.name):
                 self.assertEqual(text.count("group: laplace-host-lifecycle"), count)
                 self.assertEqual(text.count("queue: max"), count)
                 self.assertEqual(text.count("cancel-in-progress: false"), count)
+        self.assertGreater(host_jobs, 0)
 
     def test_benchmark_is_dispatch_only_versioned_evidence(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
