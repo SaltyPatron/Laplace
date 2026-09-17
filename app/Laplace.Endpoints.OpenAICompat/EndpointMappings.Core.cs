@@ -40,8 +40,12 @@ internal static class CoreEndpoints
         app.MapGet("/v1/capabilities", () =>
         {
             var endpoints = new CapabilityEndpoints(
-                ChatCompletions: new CapabilityStatus("live", Backend: "converse.recall_session", Billing: "preflight_quote_required"),
-                Completions: new CapabilityStatus("live", Backend: "consensus.completions", Billing: "preflight_quote_required"),
+                // Normal chat and text completion both execute the same canonical
+                // substrate-resident forward program. Keep this metadata tied to
+                // the semantic owner so product discovery cannot regress to stale
+                // recall/template or consensus-completion descriptions (#922).
+                ChatCompletions: new CapabilityStatus("live", Backend: "converse.forward_turn -> generation.forward_program (native)", Billing: "preflight_quote_required"),
+                Completions: new CapabilityStatus("live", Backend: "converse.forward_turn -> generation.forward_program (native streaming)", Billing: "preflight_quote_required"),
                 Embeddings: new CapabilityStatus("live", Backend: "ops.entity_physicalities (form) + ops.consensus_out_readable (meaning)", Billing: "embeddings"),
                 AuditReports: new CapabilityStatus("live", Backend: "ops.substrate_counts + consensus.stats + consensus.top_relations", Billing: "audit.deep_report"),
                 Visualizations: new CapabilityStatus("live", Backend: "consensus.top_relations + ops.entity_physicalities", Billing: "visualization.deep_export"),
