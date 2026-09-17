@@ -99,9 +99,11 @@ class SeedHostOwnership(unittest.TestCase):
     def test_evict_and_ingest_share_one_locked_step(self):
         block = run_block(SEED_STEP)
         eviction = block.index('scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict')
-        ingest = block.index('scripts/ingest-source.sh "$SOURCE_KEY"')
+        ingest = block.index('ingest_one "$SOURCE_KEY" "$PATH_INPUT"')
         self.assertLess(block.index("flock 9"), eviction)
         self.assertLess(eviction, ingest)
+        self.assertIn('scripts/ingest-source.sh "$key" "$path"', block)
+        self.assertIn('scripts/ingest-source.sh "$key"', block)
         self.assertIn("export LAPLACE_INGEST_FORCE=1", block)
         self.assertNotIn("- name: Evict selected source", SEED)
 
