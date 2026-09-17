@@ -53,10 +53,29 @@ class WorkflowArchitecture(unittest.TestCase):
             self.assertIn("workflow_dispatch:", text)
             self.assertNotIn("\n  push:\n", text)
 
-    def test_benchmark_concurrency_uses_only_supported_keys(self):
+    def test_benchmark_uses_real_host_transaction_not_actions_concurrency(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
-        self.assertNotIn("queue:", text)
-        self.assertIn("cancel-in-progress: false", text)
+        self.assertNotIn("\nconcurrency:\n", text)
+        lock = text.index('exec 9>"$lock_root/host-resource.lock"')
+        fetch_driver = text.index('git fetch --no-tags --depth=1 origin "$DISPATCH_SHA"')
+        fetch_target = text.index('git fetch --no-tags --prune origin "$target"')
+        checkout = text.index('git checkout --no-overwrite-ignore --detach "$resolved"')
+        execute = text.index('exec bash "$benchmark_driver"')
+        self.assertEqual([lock, fetch_driver, fetch_target, checkout, execute],
+                         sorted([lock, fetch_driver, fetch_target, checkout, execute]))
+        self.assertIn('git show "$workflow_sha:scripts/benchmark-evidence-ci.sh"', text)
+
+    def test_observability_is_host_isolated_and_reports_collector_failure(self):
+        for name in ("api-observability.yml", "ui-observability.yml"):
+            with self.subTest(workflow=name):
+                text = (WORKFLOWS / name).read_text(encoding="utf-8")
+                self.assertIn("host-resource.lock", text)
+                self.assertIn("flock 9", text)
+                self.assertIn("continue-on-error: true", text)
+                self.assertIn("steps.collector.outcome == 'failure'", text)
+        ui = (WORKFLOWS / "ui-observability.yml").read_text(encoding="utf-8")
+        self.assertNotIn("build/.stamps/npm-lock", ui)
+        self.assertIn("ui-observability/npm-lock.sha256", ui)
 
     def test_seed_preflight_is_not_coupled_to_cli_help_rendering(self):
         text = (WORKFLOWS / "seed.yml").read_text(encoding="utf-8")

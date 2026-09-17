@@ -2,7 +2,7 @@
 
 Tracking: `#1432`, `#1436`, `#1451`, `#1561`.
 
-Run the named suites through `scripts/benchmark_suite.py` on the selected machine and runtime. The former `benchmark-evidence.yml` dispatcher has been removed. Reuse an existing host operator when execution must go through Actions; do not create another branch or checkout for each measurement. The current product workflow selects build, installation, database maintenance, application publication and tests explicitly. A completed build is not a completed benchmark.
+Run named suites through `scripts/benchmark_suite.py` on the selected machine and runtime. The dispatch-only `.github/workflows/benchmark-evidence.yml` operator exposes the source/core suites `quick`, `throughput`, `core`, `scale`, `moby`, and `all`. It stages its orchestration driver from the workflow revision, then holds `/build/laplace/work/host-resource.lock` across exact target selection, build, and measurement. Installed-runtime profiles such as `query`, `chess`, `geometry`, and `recorded` remain explicit tools/operators rather than being silently coupled to source/core evidence. A completed build is not a completed benchmark.
 
 Benchmark meaning and receipts live in versioned source:
 

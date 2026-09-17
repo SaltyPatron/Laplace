@@ -52,8 +52,11 @@ class WorkflowOwnership(unittest.TestCase):
         self.assertNotIn("\n  workflow_call:\n", text)
         self.assertIn("options: [quick, throughput, core, scale, moby, all]", text)
         self.assertEqual(text.count("runs-on: [self-hosted, laplace]"), 1)
-        self.assertIn("python3 scripts/benchmark_suite.py validate", text)
-        self.assertIn('python3 scripts/benchmark_suite.py "${args[@]}"', text)
+        self.assertIn("host-resource.lock", text)
+        self.assertIn('exec bash "$benchmark_driver"', text)
+        driver = (ROOT / "scripts/benchmark-evidence-ci.sh").read_text(encoding="utf-8")
+        self.assertIn("python3 scripts/benchmark_suite.py validate", driver)
+        self.assertIn('python3 scripts/benchmark_suite.py "${args[@]}"', driver)
         self.assertIn("retention-days: 90", text)
 
     def test_database_surface_is_direct_and_operator_visible(self):
