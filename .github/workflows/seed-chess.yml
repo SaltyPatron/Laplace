@@ -40,6 +40,47 @@ on:
         description: "exact decomposer source name required for eviction"
         type: string
         default: ""
+      run_idempotency:
+        description: "re-ingest the selected source and prove evidence does not double-count"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      source:
+        type: string
+        required: true
+      corpus:
+        type: string
+        required: false
+        default: lumbras-elite
+      slice:
+        type: string
+        required: false
+        default: all
+      path:
+        type: string
+        required: false
+        default: ""
+      database:
+        type: string
+        required: false
+        default: laplace
+      derive_after_games:
+        type: boolean
+        required: false
+        default: true
+      evict_before_ingest:
+        type: boolean
+        required: false
+        default: false
+      evict_confirm:
+        type: string
+        required: false
+        default: ""
+      run_idempotency:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -156,3 +197,5 @@ jobs:
       chess_derived: ${{ inputs.source == 'chess' && inputs.derive_after_games }}
       evict_before_ingest: ${{ inputs.evict_before_ingest }}
       evict_confirm: ${{ inputs.evict_confirm }}
+      run_gate: true
+      run_idempotency: ${{ inputs.run_idempotency }}

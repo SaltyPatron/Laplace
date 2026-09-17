@@ -1,0 +1,68 @@
+name: Seed — documents
+
+on:
+  workflow_dispatch:
+    inputs:
+      corpus:
+        description: "document collection"
+        type: choice
+        required: true
+        default: project-gutenberg
+        options: [project-gutenberg, fixtures, electronics, smoke-alice, path-override]
+      path:
+        description: "explicit path; overrides corpus"
+        type: string
+        default: ""
+      database:
+        description: "target database"
+        type: choice
+        options: [laplace]
+        default: laplace
+      run_idempotency:
+        description: "re-ingest and prove no double-count"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 2
+    outputs:
+      path: ${{ steps.pick.outputs.path }}
+    steps:
+      - id: pick
+        env:
+          CORPUS_INPUT: ${{ inputs.corpus }}
+          PATH_INPUT: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          root="${LAPLACE_DATA_ROOT:-/vault/Data}"
+          if [[ -n "$PATH_INPUT" ]]; then
+            [[ -e "$PATH_INPUT" ]] || { echo "::error::$PATH_INPUT does not exist"; exit 1; }
+            echo "path=$PATH_INPUT" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$CORPUS_INPUT" in
+            project-gutenberg) p="$root/ProjectGutenberg/text" ;;
+            fixtures) p="$root/test-data/text" ;;
+            electronics) p="$root/test-data/electronics" ;;
+            smoke-alice) p="$root/ProjectGutenberg/text/alice.txt" ;;
+            path-override) echo "::error::path-override requires path"; exit 1 ;;
+            *) echo "::error::unknown corpus $CORPUS_INPUT"; exit 1 ;;
+          esac
+          [[ -e "$p" ]] || { echo "::error::$p does not exist"; exit 1; }
+          echo "path=$p" >> "$GITHUB_OUTPUT"
+
+  seed:
+    needs: resolve
+    uses: ./.github/workflows/seed.yml
+    with:
+      mode: source
+      source: document
+      path: ${{ needs.resolve.outputs.path }}
+      database: ${{ inputs.database }}
+      run_gate: true
+      run_idempotency: ${{ inputs.run_idempotency }}

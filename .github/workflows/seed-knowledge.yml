@@ -1,0 +1,52 @@
+name: Seed — knowledge
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "knowledge source"
+        type: choice
+        required: true
+        options: [omw, conceptnet, atomic2020, ud, wiktionary, tatoeba, opensubtitles]
+      path:
+        description: "optional path; blank uses source default"
+        type: string
+        default: ""
+      langs:
+        description: "optional language scope; blank means all"
+        type: string
+        default: ""
+      database:
+        description: "target database"
+        type: choice
+        options: [laplace]
+        default: laplace
+      run_idempotency:
+        description: "re-ingest and prove no double-count"
+        type: boolean
+        default: false
+      evict_before_ingest:
+        description: "retract this source before full re-ingest"
+        type: boolean
+        default: false
+      evict_confirm:
+        description: "exact decomposer source name required for eviction"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    uses: ./.github/workflows/seed.yml
+    with:
+      mode: source
+      source: ${{ inputs.source }}
+      path: ${{ inputs.path }}
+      langs: ${{ inputs.langs }}
+      database: ${{ inputs.database }}
+      evict_before_ingest: ${{ inputs.evict_before_ingest }}
+      evict_confirm: ${{ inputs.evict_confirm }}
+      run_gate: true
+      run_idempotency: ${{ inputs.run_idempotency }}
