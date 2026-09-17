@@ -1,3 +1,304 @@
+-- The forward pass selects semantic identities. REALIZE must project those identities
+-- back to truthful user-facing surfaces; a selected synset/frame/sense is not text just
+-- because it has a hash. The old adapter called realize.batch() directly and accepted a
+-- NULL as a generated token. That produced the live failure "1 trajectory token, 0 words".
+--
+-- bubble_down is the inverse lexical projection required by the invention: a concept
+-- stays the same identity while language/band/temperature constrain which witnessed
+-- surface represents it. The batch body is the owner; the scalar form is an adapter.
+CREATE OR REPLACE FUNCTION taxonomy.bubble_down_batch(
+        p_concepts bytea[],
+        p_lang bytea DEFAULT NULL,
+        p_k integer DEFAULT 8,
+        p_bands bytea DEFAULT NULL,
+        p_temp numeric DEFAULT 0)
+RETURNS TABLE(
+        concept bytea,
+        surface_id bytea,
+        via_relation text,
+        score numeric,
+        rd numeric,
+        witnesses bigint)
+LANGUAGE plpgsql VOLATILE
+AS $bubble_down$
+BEGIN
+    IF p_k IS NULL OR p_k < 0 THEN
+        RAISE EXCEPTION 'bubble_down: k must be non-negative';
+    END IF;
+    IF p_temp IS NULL OR p_temp < 0 THEN
+        RAISE EXCEPTION 'bubble_down: temperature must be non-negative';
+    END IF;
+    IF p_lang IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+        FROM laplace.entity_interpretations i
+        WHERE i.entity_id = p_lang
+          AND i.type_id = realize.canonical_id('Language')) THEN
+        RAISE EXCEPTION 'bubble_down: language % is not a Language entity', encode(p_lang, 'hex');
+    END IF;
+    IF p_k = 0 OR COALESCE(cardinality(p_concepts), 0) = 0 THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+    WITH concepts AS MATERIALIZED (
+        SELECT DISTINCT c AS concept_id
+        FROM unnest(COALESCE(p_concepts, ARRAY[]::bytea[])) AS c
+        WHERE c IS NOT NULL
+    ),
+    allowed AS MATERIALIZED (
+        SELECT CASE
+                 WHEN p_bands IS NULL THEN '{}'::bytea[]
+                 ELSE consensus.relation_mask_types(p_bands)
+               END AS ids
+    ),
+    root_candidates AS MATERIALIZED (
+        SELECT c.concept_id, c.concept_id AS root_id,
+               NULL::text AS bridge_relation,
+               NULL::numeric AS bridge_score,
+               NULL::numeric AS bridge_rd,
+               NULL::bigint AS bridge_witnesses,
+               0 AS direct_rank
+        FROM concepts c
+        UNION ALL
+        SELECT c.concept_id, b.object_id,
+               consensus.relation_canonical(b.type_id),
+               consensus.eff_mu_display(b.rating, b.rd),
+               b.rd::numeric / 1000000000::numeric,
+               b.witness_count,
+               1
+        FROM concepts c
+        JOIN laplace.v_consensus_unrefuted b ON b.subject_id = c.concept_id
+        CROSS JOIN allowed a
+        WHERE b.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND (p_bands IS NULL OR b.type_id = ANY(a.ids))
+        UNION ALL
+        SELECT c.concept_id, b.subject_id,
+               consensus.relation_canonical(b.type_id),
+               consensus.eff_mu_display(b.rating, b.rd),
+               b.rd::numeric / 1000000000::numeric,
+               b.witness_count,
+               1
+        FROM concepts c
+        JOIN laplace.v_consensus_unrefuted b ON b.object_id = c.concept_id
+        CROSS JOIN allowed a
+        WHERE b.type_id = laplace.relation_type_id('CORRESPONDS_TO')
+          AND (p_bands IS NULL OR b.type_id = ANY(a.ids))
+    ),
+    roots AS MATERIALIZED (
+        SELECT DISTINCT ON (r.concept_id, r.root_id)
+               r.concept_id, r.root_id, r.bridge_relation,
+               r.bridge_score, r.bridge_rd, r.bridge_witnesses
+        FROM root_candidates r
+        ORDER BY r.concept_id, r.root_id, r.direct_rank,
+                 r.bridge_score DESC NULLS LAST, r.bridge_rd, r.root_id
+    ),
+    lexical AS MATERIALIZED (
+        SELECT r.concept_id, r.root_id, c.subject_id AS surface_id,
+               'IS_SYNONYM_OF'::text AS via_relation,
+               consensus.eff_mu_display(c.rating, c.rd) AS lexical_score,
+               c.rd::numeric / 1000000000::numeric AS lexical_rd,
+               c.witness_count AS lexical_witnesses,
+               r.bridge_relation, r.bridge_score, r.bridge_rd, r.bridge_witnesses
+        FROM roots r
+        JOIN laplace.v_consensus_unrefuted c ON c.object_id = r.root_id
+        CROSS JOIN allowed a
+        WHERE c.type_id = laplace.relation_type_id('IS_SYNONYM_OF')
+          AND (p_bands IS NULL OR c.type_id = ANY(a.ids))
+        UNION ALL
+        SELECT r.concept_id, r.root_id, c.subject_id,
+               'HAS_SENSE'::text,
+               consensus.eff_mu_display(c.rating, c.rd),
+               c.rd::numeric / 1000000000::numeric,
+               c.witness_count,
+               r.bridge_relation, r.bridge_score, r.bridge_rd, r.bridge_witnesses
+        FROM roots r
+        JOIN laplace.v_consensus_unrefuted c ON c.object_id = r.root_id
+        CROSS JOIN allowed a
+        WHERE c.type_id = laplace.relation_type_id('HAS_SENSE')
+          AND (p_bands IS NULL OR c.type_id = ANY(a.ids))
+        UNION ALL
+        SELECT r.concept_id, r.root_id, hs.subject_id,
+               'HAS_SENSE→IS_SENSE_OF'::text,
+               LEAST(consensus.eff_mu_display(hs.rating, hs.rd),
+                     consensus.eff_mu_display(so.rating, so.rd)),
+               GREATEST(hs.rd, so.rd)::numeric / 1000000000::numeric,
+               LEAST(hs.witness_count, so.witness_count),
+               r.bridge_relation, r.bridge_score, r.bridge_rd, r.bridge_witnesses
+        FROM roots r
+        JOIN laplace.v_consensus_unrefuted so
+          ON so.object_id = r.root_id
+         AND so.type_id = laplace.relation_type_id('IS_SENSE_OF')
+        JOIN laplace.v_consensus_unrefuted hs
+          ON hs.object_id = so.subject_id
+         AND hs.type_id = laplace.relation_type_id('HAS_SENSE')
+        CROSS JOIN allowed a
+        WHERE p_bands IS NULL
+           OR (so.type_id = ANY(a.ids) AND hs.type_id = ANY(a.ids))
+        UNION ALL
+        SELECT r.concept_id, r.root_id, COALESCE(n.object_id, c.subject_id),
+               'EVOKES_FRAME'::text,
+               consensus.eff_mu_display(c.rating, c.rd),
+               c.rd::numeric / 1000000000::numeric,
+               c.witness_count,
+               r.bridge_relation, r.bridge_score, r.bridge_rd, r.bridge_witnesses
+        FROM roots r
+        JOIN laplace.v_consensus_unrefuted c ON c.object_id = r.root_id
+        LEFT JOIN laplace.v_consensus_unrefuted n
+          ON n.subject_id = c.subject_id
+         AND n.type_id = ANY(consensus.relation_set_ids('NAME_ALIAS_EDGE'))
+        CROSS JOIN allowed a
+        WHERE c.type_id = laplace.relation_type_id('EVOKES_FRAME')
+          AND (p_bands IS NULL OR c.type_id = ANY(a.ids))
+    ),
+    path_candidates AS MATERIALIZED (
+        SELECT l.concept_id,
+               l.surface_id,
+               CASE WHEN l.bridge_relation IS NULL THEN l.via_relation
+                    ELSE l.bridge_relation || '→' || l.via_relation END AS via_relation,
+               CASE WHEN l.bridge_score IS NULL THEN l.lexical_score
+                    ELSE LEAST(l.bridge_score, l.lexical_score) END AS score,
+               CASE WHEN l.bridge_rd IS NULL THEN l.lexical_rd
+                    ELSE GREATEST(l.bridge_rd, l.lexical_rd) END AS rd,
+               CASE WHEN l.bridge_witnesses IS NULL THEN l.lexical_witnesses
+                    ELSE LEAST(l.bridge_witnesses, l.lexical_witnesses) END AS witnesses
+        FROM lexical l
+        WHERE l.surface_id IS NOT NULL
+    ),
+    candidate_ids AS MATERIALIZED (
+        SELECT ARRAY(SELECT DISTINCT p.surface_id FROM path_candidates p ORDER BY p.surface_id) AS ids
+    ),
+    lang_any AS MATERIALIZED (
+        SELECT DISTINCT a.subject_id AS surface_id
+        FROM candidate_ids ci
+        JOIN laplace.attestations a ON a.subject_id = ANY(ci.ids)
+        JOIN laplace.entity_interpretations i
+          ON i.entity_id = a.context_id
+         AND i.type_id = realize.canonical_id('Language')
+        WHERE p_lang IS NOT NULL
+    ),
+    lang_hit AS MATERIALIZED (
+        SELECT DISTINCT a.subject_id AS surface_id
+        FROM candidate_ids ci
+        JOIN laplace.attestations a ON a.subject_id = ANY(ci.ids)
+        WHERE p_lang IS NOT NULL
+          AND a.context_id = p_lang
+    ),
+    scoped AS MATERIALIZED (
+        SELECT p.*
+        FROM path_candidates p
+        WHERE p_lang IS NULL
+           OR NOT EXISTS (SELECT 1 FROM lang_any la WHERE la.surface_id = p.surface_id)
+           OR EXISTS (SELECT 1 FROM lang_hit lh WHERE lh.surface_id = p.surface_id)
+    ),
+    dedup AS MATERIALIZED (
+        SELECT DISTINCT ON (s.concept_id, s.surface_id)
+               s.concept_id, s.surface_id, s.via_relation,
+               s.score, s.rd, s.witnesses
+        FROM scoped s
+        ORDER BY s.concept_id, s.surface_id,
+                 s.score DESC NULLS LAST, s.rd, s.witnesses DESC, s.via_relation
+    ),
+    sampled AS MATERIALIZED (
+        SELECT d.*,
+               CASE WHEN p_temp = 0 THEN 0::double precision
+                    ELSE d.score::double precision /
+                         (p_temp::double precision * GREATEST(d.rd::double precision, 1.0))
+                         - ln(-ln(GREATEST(1.0e-12,
+                                  LEAST(1.0 - 1.0e-12, random()))))
+               END AS sample_key
+        FROM dedup d
+    ),
+    ranked AS (
+        SELECT s.*,
+               row_number() OVER (
+                   PARTITION BY s.concept_id
+                   ORDER BY
+                     CASE WHEN p_temp = 0 THEN s.score END DESC NULLS LAST,
+                     CASE WHEN p_temp > 0 THEN s.sample_key END DESC NULLS LAST,
+                     s.score DESC NULLS LAST, s.rd, s.witnesses DESC, s.surface_id) AS rn
+        FROM sampled s
+    )
+    SELECT r.concept_id, r.surface_id, r.via_relation,
+           r.score, r.rd, r.witnesses
+    FROM ranked r
+    WHERE r.rn <= p_k
+    ORDER BY r.concept_id, r.rn;
+END;
+$bubble_down$;
+
+CREATE OR REPLACE FUNCTION taxonomy.bubble_down(
+        p_concept bytea,
+        p_lang bytea,
+        p_k integer,
+        p_bands bytea DEFAULT NULL,
+        p_temp numeric DEFAULT 0)
+RETURNS TABLE(surface_id bytea, via_relation text, score numeric, rd numeric, witnesses bigint)
+LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    SELECT d.surface_id, d.via_relation, d.score, d.rd, d.witnesses
+    FROM taxonomy.bubble_down_batch(ARRAY[p_concept], p_lang, p_k, p_bands, p_temp) d
+    WHERE d.concept = p_concept;
+END;
+
+CREATE OR REPLACE FUNCTION realize.forward_text_batch(
+        p_ids bytea[], p_lang bytea DEFAULT NULL)
+RETURNS text[]
+LANGUAGE plpgsql VOLATILE
+AS $forward_realize$
+DECLARE
+    direct_text text[];
+    concepts bytea[];
+    down_concepts bytea[];
+    down_surfaces bytea[];
+    surface_text text[];
+    surface_labels text[];
+    realized text[];
+    idx integer;
+BEGIN
+    IF p_ids IS NULL THEN
+        RETURN NULL;
+    END IF;
+    IF cardinality(p_ids) = 0 THEN
+        RETURN ARRAY[]::text[];
+    END IF;
+    direct_text := realize.batch(p_ids);
+    IF direct_text IS NULL OR cardinality(direct_text) <> cardinality(p_ids) THEN
+        RAISE EXCEPTION 'forward realization: realize.batch violated positional cardinality';
+    END IF;
+    SELECT array_agg(DISTINCT p_ids[g.i] ORDER BY p_ids[g.i])
+    INTO concepts
+    FROM generate_subscripts(p_ids, 1) AS g(i)
+    WHERE p_ids[g.i] IS NOT NULL;
+    SELECT array_agg(d.concept ORDER BY d.concept),
+           array_agg(d.surface_id ORDER BY d.concept)
+    INTO down_concepts, down_surfaces
+    FROM taxonomy.bubble_down_batch(concepts, p_lang, 1, NULL, 0) d;
+    IF down_surfaces IS NOT NULL THEN
+        surface_text := realize.render_text_batch(down_surfaces);
+        surface_labels := realize.batch(down_surfaces);
+    END IF;
+    WITH down_map AS (
+        SELECT dc.concept_id,
+               COALESCE(surface_text[dc.ord], surface_labels[dc.ord]) AS txt
+        FROM unnest(COALESCE(down_concepts, ARRAY[]::bytea[]))
+             WITH ORDINALITY AS dc(concept_id, ord)
+    )
+    SELECT array_agg(COALESCE(dm.txt, direct_text[g.i]) ORDER BY g.i)
+    INTO realized
+    FROM generate_subscripts(p_ids, 1) AS g(i)
+    LEFT JOIN down_map dm ON dm.concept_id = p_ids[g.i];
+    FOR idx IN 1..cardinality(p_ids) LOOP
+        IF p_ids[idx] IS NOT NULL AND realized[idx] IS NULL THEN
+            RAISE EXCEPTION
+                'forward realization: selected entity % has no truthful text surface',
+                encode(p_ids[idx], 'hex')
+                USING ERRCODE = '22000';
+        END IF;
+    END LOOP;
+    RETURN realized;
+END;
+$forward_realize$;
+
 DROP FUNCTION IF EXISTS laplace.walk_text(text, int, int, float8, int, bigint);
 CREATE OR REPLACE FUNCTION generation.forward_text(
         p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
@@ -7,20 +308,11 @@ CREATE OR REPLACE FUNCTION generation.forward_text(
     RETURNS TABLE(step int, entity text, stride_used int)
     LANGUAGE sql VOLATILE
 BEGIN ATOMIC
-    -- One native invocation owns admission, routing, exact candidate evidence,
-    -- completion and the semantic-act receipt. Realization is allowed only after
-    -- that invocation has closed every required prompt obligation. Raw emitted
-    -- identities from an exhausted search are not silently promoted to an answer.
     WITH execution AS MATERIALIZED (
         SELECT g.*
         FROM generation.forward_program(
                  p_prompt, p_steps, p_max_stride, p_spread, p_top_k,
-                 -- The native program owns the omitted-seed policy, exactly
-                 -- as on forward_program/forward_trace/forward_prompt. A text
-                 -- adapter must not silently elect a different semantic act.
-                 p_seed,
-                 p_hops, p_fanout, p_prior_frontier,
-                 NULL::bytea[]) g
+                 p_seed, p_hops, p_fanout, p_prior_frontier, NULL::bytea[]) g
     ), receipt AS MATERIALIZED (
         SELECT completion, disposition, semantic_act_id, output_fingerprint
         FROM execution
@@ -39,10 +331,8 @@ BEGIN ATOMIC
                array_agg(sep_entity ORDER BY step) AS separators
         FROM walked
     ), txt AS MATERIALIZED (
-        -- The semantic act has already been selected in hash space. This is a
-        -- lazy, positional realization of only that completed act; rendering
-        -- cannot alter standing, obligation closure, or act identity.
-        SELECT realize.batch(entities) AS entities,
+        SELECT realize.forward_text_batch(
+                   entities, converse.prompt_language_top(p_prompt)) AS entities,
                realize.render_text_batch(separators) AS separators
         FROM ids
         WHERE entities IS NOT NULL
@@ -71,9 +361,6 @@ BEGIN ATOMIC
         FROM (SELECT array_agg(DISTINCT o.turn_id) AS ids FROM occurrences o) batch,
              converse.message_content_ids(batch.ids) c
     ), history AS MATERIALIZED (
-        -- Occurrence identities retain provenance; their exact content roots
-        -- make the prior messages' evidence addressable by the forward pass.
-        -- Do not render and reparse a transcript or substitute metadata text.
         SELECT array_agg(h.id ORDER BY h.ordinal, h.branch) AS ids
         FROM (
             SELECT o.ordinal, 0 AS branch, o.turn_id AS id FROM occurrences o
@@ -91,9 +378,6 @@ BEGIN ATOMIC
     ORDER BY g.step;
 END;
 
--- Compatibility surface: preserve the installed `p_breadth` name for named
--- callers and extension upgrades. The canonical operator owns the semantic name
--- `p_top_k`; this wrapper translates only the legacy API spelling.
 CREATE OR REPLACE FUNCTION generation.walk_text(
         p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
@@ -105,10 +389,6 @@ BEGIN ATOMIC
         p_prompt, p_steps, p_max_stride, p_spread, p_breadth, p_seed, 2, 8, NULL);
 END;
 
--- Upgrade retirement. These text routing surfaces had no callers outside the
--- recursive chain removed above. They must be dropped only AFTER forward_text is
--- rebound to the native forward program: BEGIN ATOMIC records pg_depend, so dropping
--- them earlier would make an in-place extension upgrade fail under RESTRICT.
 DROP FUNCTION IF EXISTS generation.forward_frontier(text, integer, integer, integer);
 DROP FUNCTION IF EXISTS generation.forward_route_trace(text, integer, integer, integer);
 DROP FUNCTION IF EXISTS generation.forward_frontier_ids(bytea[], integer, integer, integer);
