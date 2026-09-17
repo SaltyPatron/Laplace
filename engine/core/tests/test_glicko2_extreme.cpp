@@ -387,3 +387,64 @@ TEST(LaplaceCoreGlicko2Extreme, CanonicalRetainedEvidenceKeepsExactSixtyGroupInp
         LAPLACE_GLICKO2_DEFAULT_TAU, 1000));
     ExpectSameState(reversed, actual);
 }
+
+TEST(LaplaceCoreGlicko2Extreme, RepeatedOpponentGroupsPreserveEachRowsFractionalRounding) {
+    const int64_t pair_ratings[] = {1756000000000LL,1756000000000LL,1890000000000LL,1400000000000LL};
+    const int64_t pair_rds[] = {62000000000LL,95000000000LL,62000000000LL,350000000000LL};
+    for (int pattern=0;pattern<3;++pattern) {
+        for (int prior=0;prior<2;++prior) {
+            SCOPED_TRACE(::testing::Message() << "pattern=" << pattern << " prior=" << prior);
+            std::vector<int64_t> ratings,rds,games,sums;
+            std::vector<glicko2_observation_t> observations;
+            for (int row=0;row<40;++row) {
+                // Uniform hits, repeated runs with pair changes, and all misses.
+                // The pair table changes rating and RD independently.
+                const int pair=pattern==0?0:(pattern==1?(row/4)%4:row%4);
+                const int64_t n=2+row%7;
+                const int64_t sum=n*SCALE*(row%3)/2+(row%3==1?row%11:0);
+                const int64_t q=sum/n,rem=sum-q*(n-1);
+                ASSERT_GE(rem,0);
+                ASSERT_LE(rem,SCALE);
+                ratings.push_back(pair_ratings[pair]);rds.push_back(pair_rds[pair]);
+                games.push_back(n);sums.push_back(sum);
+                for (int64_t at=0;at<n;++at)
+                    observations.push_back({ratings.back(),rds.back(),at+1==n?rem:q});
+            }
+            glicko2_state_t actual,expected;
+            glicko2_init(&actual,prior==0?1500000000000LL:1600000000000LL,
+                        prior==0?350000000000LL:100000000000LL,60000000LL);
+            actual.observation_count=17;actual.last_observed_at_unix_ns=19;
+            expected=actual;
+            // This observation owner recomputes g and E for every observation;
+            // it does not call the grouped-period path or share its pair cache.
+            glicko2_update_period(&expected,observations.data(),observations.size(),
+                                  LAPLACE_GLICKO2_DEFAULT_TAU,23);
+            ASSERT_EQ(expected.observation_count,17+static_cast<int64_t>(observations.size()));
+            ASSERT_EQ(0,glicko2_fold_grouped_period(
+                &actual,ratings.data(),rds.data(),games.data(),sums.data(),games.size(),
+                LAPLACE_GLICKO2_DEFAULT_TAU,23));
+            ExpectSameState(actual,expected);
+        }
+    }
+}
+
+TEST(LaplaceCoreGlicko2Extreme, RepeatedOpponentDoesNotBypassLaterRowValidation) {
+    for (int invalid=0;invalid<4;++invalid) {
+        SCOPED_TRACE(invalid);
+        int64_t ratings[]={1756000000000LL,1756000000000LL};
+        int64_t rds[]={62000000000LL,62000000000LL};
+        int64_t games[]={3,3};
+        int64_t sums[]={1000000000LL,1000000001LL};
+        if(invalid==0)games[1]=0;
+        if(invalid==1)rds[1]=-1;
+        if(invalid==2)sums[1]=-1;
+        if(invalid==3)sums[1]=3000000001LL;
+        glicko2_state_t actual;
+        glicko2_init(&actual,1500000000000LL,350000000000LL,60000000LL);
+        actual.observation_count=17;actual.last_observed_at_unix_ns=19;
+        const auto before=actual;
+        EXPECT_NE(0,glicko2_fold_grouped_period(
+            &actual,ratings,rds,games,sums,2,LAPLACE_GLICKO2_DEFAULT_TAU,23));
+        ExpectSameState(actual,before);
+    }
+}

@@ -9,6 +9,73 @@ namespace Laplace.SubstrateCRUD.Tests;
 [Trait("Tier", "db")]
 public sealed class EntityInterpretationDirectWriteTests(LocalPgFixture pg)
 {
+    [Fact]
+    public async Task ExistingPlainCompositeIdentityTableIsRefusedWithoutChangingItsData()
+    {
+        Assert.True(Laplace.Engine.Core.LaplaceInstall.TryRepoRoot(out string root));
+        string sql = await File.ReadAllTextAsync(Path.Combine(root, "extension",
+            "laplace_substrate", "sql", "schema", "tables", "entities.sql.in"));
+        string schema = "identity_legacy_" + Guid.NewGuid().ToString("N");
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] type = Enumerable.Repeat((byte)0x31,16).ToArray();
+        await using var connection = await pg.DataSource.OpenConnectionAsync();
+        try
+        {
+            await using (var setup = connection.CreateCommand())
+            {
+                setup.CommandText = $"""
+                    CREATE SCHEMA "{schema}";
+                    CREATE TABLE "{schema}".entities(
+                        id bytea NOT NULL, tier smallint NOT NULL, type_id bytea NOT NULL,
+                        first_observed_by bytea, created_at timestamptz DEFAULT now(), highway_mask bytea,
+                        PRIMARY KEY(id,tier));
+                    INSERT INTO "{schema}".entities(id,tier,type_id) VALUES($1,3,$2),($1,5,$2);
+                    """;
+                setup.Parameters.AddWithValue(id);
+                setup.Parameters.AddWithValue(type);
+                await setup.ExecuteNonQueryAsync();
+            }
+            await using (var transaction = await connection.BeginTransactionAsync())
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = $"SET LOCAL search_path TO \"{schema}\",pg_catalog;\n"
+                    + sql.Replace("@extschema@",schema,StringComparison.Ordinal);
+                var error = await Assert.ThrowsAsync<PostgresException>(
+                    () => command.ExecuteNonQueryAsync());
+                Assert.Equal(PostgresErrorCodes.RaiseException,error.SqlState);
+                Assert.Contains("legacy non-partitioned layout",error.MessageText);
+                await transaction.RollbackAsync();
+            }
+            await using var verify = connection.CreateCommand();
+            verify.CommandText = $"""
+                SELECT (SELECT count(*) FROM "{schema}".entities WHERE id=$1 AND type_id=$2),
+                       (SELECT array_agg(tier ORDER BY tier) FROM "{schema}".entities WHERE id=$1),
+                       to_regclass($3)::text IS NULL,
+                       (SELECT pg_get_constraintdef(oid)
+                        FROM pg_constraint WHERE conrelid=$4::regclass AND contype='p'),
+                       (SELECT relkind::text FROM pg_class WHERE oid=$4::regclass)
+                """;
+            verify.Parameters.AddWithValue(id);
+            verify.Parameters.AddWithValue(type);
+            verify.Parameters.AddWithValue(schema+".entity_interpretations");
+            verify.Parameters.AddWithValue(schema+".entities");
+            await using var rows = await verify.ExecuteReaderAsync();
+            Assert.True(await rows.ReadAsync());
+            Assert.Equal(2L,rows.GetInt64(0));
+            Assert.Equal(new short[]{3,5},rows.GetFieldValue<short[]>(1));
+            Assert.True(rows.GetBoolean(2));
+            Assert.Equal("PRIMARY KEY (id, tier)",rows.GetString(3));
+            Assert.Equal("r",rows.GetString(4));
+        }
+        finally
+        {
+            await using var cleanup = connection.CreateCommand();
+            cleanup.CommandText = $"DROP SCHEMA IF EXISTS \"{schema}\" CASCADE";
+            await cleanup.ExecuteNonQueryAsync();
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

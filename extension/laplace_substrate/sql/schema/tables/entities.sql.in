@@ -31,7 +31,8 @@ DECLARE
 BEGIN
     IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = current_schema() AND c.relname = 'entities') <> 'p' THEN
-        RETURN;
+        RAISE EXCEPTION
+            'entities uses a legacy non-partitioned layout; canonical entity identity is id-only and this version requires HASH(id). Create a new canonical database and retain the existing database for transfer or rollback.';
     END IF;
 
     SELECT p.partstrat INTO strategy

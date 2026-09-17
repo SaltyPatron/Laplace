@@ -759,6 +759,15 @@ int glicko2_fold_grouped_period(glicko2_state_t* st,
     __int128 delta_wide = 0;
     __int128 total_games_wide = 0;
 
+    /* Every group in this period has the same prior mu. Reuse only the pure
+     * opponent-dependent terms for adjacent equal pairs; each row retains its
+     * own score quotient/remainder and fixed-point rounding below. */
+    int64_t last_opponent_rating = 0;
+    int64_t last_opponent_phi = 0;
+    int64_t g_j = 0;
+    int64_t E_j = 0;
+    int64_t information_per_game = 0;
+
     for (size_t i = 0; i < group_count; ++i) {
         int64_t n = games[i];
         if (n <= 0 || opponent_phis[i] < 0) return -1;
@@ -766,15 +775,21 @@ int glicko2_fold_grouped_period(glicko2_state_t* st,
         if (score_sums[i] < 0 || (__int128)score_sums[i] > maximum_score)
             return -1;
 
-        int64_t mu_j = g1_to_mu(opponent_ratings[i]);
-        int64_t phi_j = g1_to_phi(opponent_phis[i]);
-        int64_t g_j = laplace_glicko2_g(phi_j);
-        int64_t E_j = laplace_glicko2_E(mu, mu_j, g_j);
-        int64_t g_sq = laplace_fp_mul(g_j, g_j);
-        int64_t E_1mE = laplace_fp_mul(
-            E_j, sat_sub_i64(LAPLACE_FP_ONE, E_j));
+        if (i == 0 || opponent_ratings[i] != last_opponent_rating ||
+            opponent_phis[i] != last_opponent_phi) {
+            int64_t mu_j = g1_to_mu(opponent_ratings[i]);
+            int64_t phi_j = g1_to_phi(opponent_phis[i]);
+            g_j = laplace_glicko2_g(phi_j);
+            E_j = laplace_glicko2_E(mu, mu_j, g_j);
+            int64_t g_sq = laplace_fp_mul(g_j, g_j);
+            int64_t E_1mE = laplace_fp_mul(
+                E_j, sat_sub_i64(LAPLACE_FP_ONE, E_j));
+            information_per_game = laplace_fp_mul(g_sq, E_1mE);
+            last_opponent_rating = opponent_ratings[i];
+            last_opponent_phi = opponent_phis[i];
+        }
 
-        v_inv_wide += (__int128)n * laplace_fp_mul(g_sq, E_1mE);
+        v_inv_wide += (__int128)n * information_per_game;
 
         /* Score enters linearly, but fixed-point multiplication rounds per
          * observation. q/rem reproduces exactly the observation sequence

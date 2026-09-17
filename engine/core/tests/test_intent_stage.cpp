@@ -956,6 +956,78 @@ TEST(LaplaceCoreIntentStage, InterpretationImportIsExplicitCompleteValidatedAndN
     EXPECT_EQ(entities,stage_tuple_bytes(legacy.get(),INTENT_STAGE_TABLE_ENTITIES));
 }
 
+TEST(LaplaceCoreIntentStage, NullableInterpretationProvenanceSurvivesImportPromotionAndPartition) {
+    const auto id=make_hash(91),other=make_hash(92),type=make_hash(93),source=make_hash(94);
+    InterpretationStage original(intent_stage_new(0),intent_stage_free);
+    ASSERT_NE(nullptr,original.get());
+    ASSERT_EQ(0,intent_stage_add_entity(original.get(),&id,2,&type,nullptr));
+    ASSERT_EQ(0,intent_stage_add_entity(original.get(),&other,3,&type,&source));
+    const auto entities=stage_tuple_bytes(original.get(),INTENT_STAGE_TABLE_ENTITIES);
+    const auto facets=interpretation_bytes(original.get());
+    ASSERT_EQ(120u,facets.size()); // one NULL source row (52), one sourced row (68)
+    EXPECT_EQ(UINT32_MAX,read_be32(facets.data()+48));
+    hash128_t before{},after{};
+    ASSERT_EQ(0,intent_stage_semantic_digest(original.get(),&before));
+
+    intent_stage_t* raw=nullptr;
+    ASSERT_EQ(0,intent_stage_from_tuple_bytes(
+        entities.data(),entities.size(),nullptr,0,nullptr,0,SIZE_MAX,&raw));
+    InterpretationStage imported(raw,intent_stage_free);
+    ASSERT_EQ(0,intent_stage_import_entity_interpretations(imported.get(),facets.data(),facets.size()));
+    EXPECT_TRUE(intent_stage_entity_interpretations_complete(imported.get()));
+    EXPECT_EQ(2u,intent_stage_entity_interpretation_count(imported.get()));
+    EXPECT_EQ(facets,interpretation_bytes(imported.get()));
+    EXPECT_EQ(entities,stage_tuple_bytes(imported.get(),INTENT_STAGE_TABLE_ENTITIES));
+    ASSERT_EQ(0,intent_stage_semantic_digest(imported.get(),&after));
+    EXPECT_EQ(0,hash128_compare(&before,&after));
+
+    raw=nullptr;
+    ASSERT_EQ(0,intent_stage_from_tuple_bytes(
+        entities.data(),entities.size(),nullptr,0,nullptr,0,SIZE_MAX,&raw));
+    InterpretationStage legacy(raw,intent_stage_free);
+    ASSERT_FALSE(intent_stage_entity_interpretations_complete(legacy.get()));
+    ASSERT_EQ(0,intent_stage_add_entity_interpretation(legacy.get(),&id,4,&type,nullptr));
+    EXPECT_TRUE(intent_stage_entity_interpretations_complete(legacy.get()));
+    EXPECT_EQ(3u,intent_stage_entity_interpretation_count(legacy.get()));
+    EXPECT_EQ(entities,stage_tuple_bytes(legacy.get(),INTENT_STAGE_TABLE_ENTITIES));
+    const auto promoted=interpretation_bytes(legacy.get());
+    ASSERT_EQ(172u,promoted.size());
+    EXPECT_TRUE(std::equal(facets.begin(),facets.end(),promoted.begin()));
+    ASSERT_EQ(0,intent_stage_semantic_digest(legacy.get(),&after));
+    EXPECT_EQ(0,hash128_compare(&before,&after));
+
+    intent_stage_t* raw_parts[2]={};
+    ASSERT_EQ(0,intent_stage_partition(legacy.get(),2,raw_parts));
+    std::vector<std::vector<uint8_t>> combined;
+    for(auto* part:raw_parts) {
+        InterpretationStage owner(part,intent_stage_free);
+        ASSERT_TRUE(intent_stage_entity_interpretations_complete(owner.get()));
+        const auto bytes=interpretation_bytes(owner.get());
+        InterpretationStage roundtrip(intent_stage_new(0),intent_stage_free);
+        ASSERT_EQ(0,intent_stage_import_entity_interpretations(roundtrip.get(),bytes.data(),bytes.size()));
+        EXPECT_EQ(bytes,interpretation_bytes(roundtrip.get()));
+        auto rows=interpretation_rows(roundtrip.get());
+        combined.insert(combined.end(),rows.begin(),rows.end());
+    }
+    std::sort(combined.begin(),combined.end());
+    EXPECT_EQ(interpretation_rows(legacy.get()),combined);
+
+    // Only provenance may be NULL; malformed lengths and required NULL fields
+    // must preserve the previously accepted mixed-source stream.
+    auto bad=facets;bad[51]=0xfe; // -2 is not the COPY null marker.
+    EXPECT_EQ(-1,intent_stage_import_entity_interpretations(imported.get(),bad.data(),bad.size()));
+    for(unsigned field=0;field<3;++field) {
+        const size_t prefix[]={2,22,28},width[]={16,2,16};
+        bad=facets;
+        bad.erase(bad.begin()+prefix[field]+4,bad.begin()+prefix[field]+4+width[field]);
+        std::fill(bad.begin()+prefix[field],bad.begin()+prefix[field]+4,0xff);
+        EXPECT_EQ(-1,intent_stage_import_entity_interpretations(imported.get(),bad.data(),bad.size()));
+        EXPECT_EQ(facets,interpretation_bytes(imported.get()));
+        EXPECT_TRUE(intent_stage_entity_interpretations_complete(imported.get()));
+        EXPECT_EQ(2u,intent_stage_entity_interpretation_count(imported.get()));
+    }
+}
+
 TEST(LaplaceCoreIntentStage, InterpretationPartitionBudgetAndRetentionFollowStageOwnership) {
     InterpretationStage stage(intent_stage_new(0),intent_stage_free);
     const auto type=make_hash(71),source=make_hash(72);

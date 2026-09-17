@@ -6,8 +6,13 @@
 -- the exact former 22-column contract; no CASCADE or unrelated owner is removed.
 -- Fresh installs and already-upgraded functions keep normal replacement.
 DO $physicality_transport_upgrade$
-DECLARE old_shape pg_catalog.pg_proc%ROWTYPE;
+DECLARE
+    old_shape pg_catalog.pg_proc%ROWTYPE;
+    old_acl jsonb;
 BEGIN
+    -- This scratch value belongs only to this execution of the upgrade. Never
+    -- consume a caller-provided or earlier transaction's value.
+    PERFORM pg_catalog.set_config('laplace.physicality_transport_upgrade', '', true);
     SELECT * INTO old_shape FROM pg_catalog.pg_proc
     WHERE oid = pg_catalog.to_regprocedure('ops.physicality_descriptor_materialize(bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],bigint,bigint,integer,bigint)');
     IF FOUND
@@ -15,6 +20,21 @@ BEGIN
        AND old_shape.proargnames[14:35] = ARRAY['entities','physicalities','attestations','descriptor_ids','view_ids','floor_receipt','snapshot_receipt','source_form_count','current_content_count','missing_content_count','provider_rounds','database_operations','reserved_peak_bytes','tuple_bytes','floor_index_added_bytes','raw_logical_work','stored_vertices','generated_source_id','view_states','view_missing_first','view_missing_count','view_missing_ids']::text[]
        AND old_shape.proallargtypes[14:35] = ARRAY['bytea[]'::regtype,'bytea[]'::regtype,'bytea[]'::regtype,'bytea[]'::regtype,'bytea[]'::regtype,'bytea'::regtype,'text'::regtype,'bigint'::regtype,'bigint'::regtype,'bigint'::regtype,'integer'::regtype,'integer'::regtype,'bigint'::regtype,'bigint'::regtype,'bigint'::regtype,'bigint'::regtype,'bigint'::regtype,'bytea'::regtype,'smallint[]'::regtype,'bigint[]'::regtype,'bigint[]'::regtype,'bytea[]'::regtype]::oid[]
        AND old_shape.proargmodes[14:35] = array_fill('t'::"char", ARRAY[22]) THEN
+        SELECT coalesce(jsonb_agg(jsonb_build_object(
+                   'grantor', grantor, 'grantee', grantee,
+                   'privilege', privilege_type, 'grantable', is_grantable)
+                   ORDER BY grantor, grantee, privilege_type, is_grantable), '[]'::jsonb)
+          INTO old_acl
+          FROM pg_catalog.aclexplode(coalesce(old_shape.proacl,
+                    pg_catalog.acldefault('f', old_shape.proowner)));
+        IF EXISTS (SELECT 1 FROM jsonb_array_elements(old_acl) AS a
+                   WHERE a->>'privilege' <> 'EXECUTE') THEN
+            RAISE EXCEPTION 'unexpected materializer function privilege';
+        END IF;
+        PERFORM pg_catalog.set_config('laplace.physicality_transport_upgrade',
+            jsonb_build_object('owner', old_shape.proowner,
+                               'role', pg_catalog.current_setting('role'),
+                               'acl', old_acl)::text, true);
         DROP FUNCTION ops.physicality_descriptor_materialize(bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],bigint,bigint,integer,bigint);
     END IF;
 END
@@ -61,6 +81,123 @@ RETURNS TABLE (
     entity_interpretations_complete boolean[])
 AS 'EXECUTION_LIBRARY', 'pg_laplace_physicality_descriptor_materialize'
 LANGUAGE C STABLE STRICT PARALLEL RESTRICTED;
+
+-- DROP/CREATE is needed only for the former OUT shape. Preserve its actual
+-- owner and grants, including delegated grantors, inside the same extension
+-- update transaction. Fresh installs and same-shape replacement do no work.
+DO $physicality_transport_privileges$
+DECLARE
+    signature constant text := 'ops.physicality_descriptor_materialize(bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],bigint,bigint,integer,bigint)';
+    saved_text text := pg_catalog.current_setting('laplace.physicality_transport_upgrade', true);
+    saved jsonb;
+    original_role text;
+    owner_id oid;
+    owner_name text;
+    function_id oid;
+    pending jsonb;
+    entry jsonb;
+    grantee_name text;
+    grantor_name text;
+    actual_acl jsonb;
+    actual_owner oid;
+    selected integer;
+    changed boolean;
+BEGIN
+    IF coalesce(saved_text, '') = '' THEN
+        RETURN;
+    END IF;
+    saved := saved_text::jsonb;
+    original_role := saved->>'role';
+    owner_id := (saved->>'owner')::oid;
+    SELECT rolname INTO STRICT owner_name FROM pg_catalog.pg_roles WHERE oid = owner_id;
+    function_id := pg_catalog.to_regprocedure(signature);
+    IF function_id IS NULL THEN
+        RAISE EXCEPTION 'replacement materializer function is absent';
+    END IF;
+    BEGIN
+        EXECUTE format('ALTER FUNCTION %s OWNER TO %I', signature, owner_name);
+        PERFORM pg_catalog.set_config('role', owner_name, true);
+        -- A new function can inherit ALTER DEFAULT PRIVILEGES grants. They
+        -- have no dependents yet; remove them without CASCADE before replay.
+        FOR entry IN
+            SELECT DISTINCT jsonb_build_object('grantee', grantee)
+            FROM pg_catalog.pg_proc AS p,
+                 LATERAL pg_catalog.aclexplode(coalesce(p.proacl,
+                           pg_catalog.acldefault('f', p.proowner)))
+            WHERE p.oid = function_id
+        LOOP
+            IF (entry->>'grantee')::oid = 0 THEN
+                grantee_name := 'PUBLIC';
+            ELSE
+                SELECT quote_ident(rolname) INTO STRICT grantee_name
+                  FROM pg_catalog.pg_roles WHERE oid = (entry->>'grantee')::oid;
+            END IF;
+            EXECUTE format('REVOKE ALL PRIVILEGES ON FUNCTION %s FROM %s',
+                           signature, grantee_name);
+        END LOOP;
+        PERFORM pg_catalog.set_config('role', original_role, true);
+        pending := saved->'acl';
+        WHILE jsonb_array_length(pending) > 0 LOOP
+            changed := false;
+            FOR entry, selected IN
+                SELECT value, (ordinality - 1)::integer
+                  FROM jsonb_array_elements(pending) WITH ORDINALITY
+            LOOP
+                IF (entry->>'grantor')::oid <> owner_id AND NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_proc AS p,
+                         LATERAL pg_catalog.aclexplode(p.proacl) AS a
+                    WHERE p.oid = function_id
+                      AND a.grantee = (entry->>'grantor')::oid
+                      AND a.privilege_type = 'EXECUTE' AND a.is_grantable) THEN
+                    CONTINUE;
+                END IF;
+                SELECT rolname INTO STRICT grantor_name FROM pg_catalog.pg_roles
+                  WHERE oid = (entry->>'grantor')::oid;
+                IF (entry->>'grantee')::oid = 0 THEN
+                    grantee_name := 'PUBLIC';
+                ELSE
+                    SELECT quote_ident(rolname) INTO STRICT grantee_name
+                      FROM pg_catalog.pg_roles WHERE oid = (entry->>'grantee')::oid;
+                END IF;
+                -- Superuser GRANT alone would record the owner as grantor.
+                -- Use the historical grantor, then restore the caller's role.
+                PERFORM pg_catalog.set_config('role', grantor_name, true);
+                EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %s%s',
+                               signature, grantee_name,
+                               CASE WHEN (entry->>'grantable')::boolean
+                                    THEN ' WITH GRANT OPTION' ELSE '' END);
+                PERFORM pg_catalog.set_config('role', original_role, true);
+                pending := pending - selected;
+                changed := true;
+                EXIT;
+            END LOOP;
+            IF NOT changed THEN
+                RAISE EXCEPTION 'materializer privilege grantor chain cannot be restored';
+            END IF;
+        END LOOP;
+        SELECT p.proowner, coalesce(jsonb_agg(jsonb_build_object(
+                   'grantor', a.grantor, 'grantee', a.grantee,
+                   'privilege', a.privilege_type, 'grantable', a.is_grantable)
+                   ORDER BY a.grantor, a.grantee, a.privilege_type, a.is_grantable)
+                   FILTER (WHERE a.grantor IS NOT NULL), '[]'::jsonb)
+          INTO actual_owner, actual_acl
+          FROM pg_catalog.pg_proc AS p
+          LEFT JOIN LATERAL pg_catalog.aclexplode(coalesce(p.proacl,
+                    pg_catalog.acldefault('f', p.proowner))) AS a ON true
+          WHERE p.oid = function_id GROUP BY p.proowner;
+        IF actual_owner IS DISTINCT FROM owner_id
+           OR actual_acl IS DISTINCT FROM saved->'acl' THEN
+            RAISE EXCEPTION 'materializer owner or exact privileges changed during OUT-shape upgrade';
+        END IF;
+        PERFORM pg_catalog.set_config('role', original_role, true);
+        PERFORM pg_catalog.set_config('laplace.physicality_transport_upgrade', '', true);
+    EXCEPTION WHEN OTHERS THEN
+        PERFORM pg_catalog.set_config('role', original_role, true);
+        PERFORM pg_catalog.set_config('laplace.physicality_transport_upgrade', '', true);
+        RAISE;
+    END;
+END
+$physicality_transport_privileges$;
 
 COMMENT ON FUNCTION ops.physicality_descriptor_materialize(
     bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],float8[],

@@ -46,71 +46,34 @@ jobs:
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: '10.0.x'
-      - name: Reconcile reviewed canonical identity changes with current main
+      - name: Validate the exact corrected source generation
         shell: bash
         run: |
           set -euo pipefail
           cp .github/workflows/canonical-identity-qualification.yml "$QUALIFICATION_DIR/evidence/workflow.yml"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = 87ea18cb2247f7f305b801427fe0365cfed90bd7
+          test "$(git rev-parse HEAD^)" = 52e0dbdcfd6d567a2979d65f2b15e444bb32055a
           test -z "$(git status --porcelain --untracked-files=all)"
-          git config user.name "Laplace qualification"
-          git config user.email "qualification@users.noreply.github.com"
-          git_auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $git_auth"
-          unset git_auth
-          git fetch --no-tags origin 96a02adb064ad221e17ae275e076b11816b6a517
-          git merge --no-commit --no-ff 96a02adb064ad221e17ae275e076b11816b6a517 2>&1 | tee "$QUALIFICATION_DIR/evidence/main-merge.log"
-          python3 - <<'PY' 2>&1 | tee "$QUALIFICATION_DIR/evidence/overlay.log"
-          import ast,base64,concurrent.futures,hashlib,json,os,re,subprocess,urllib.request
+          python3 - <<'PY' 2>&1 | tee "$QUALIFICATION_DIR/evidence/source.log"
+          import ast,base64,hashlib,json,os,re,subprocess,urllib.request
           from pathlib import Path
           root=Path(os.environ["QUALIFICATION_SOURCE"])
           evidence=Path(os.environ["QUALIFICATION_DIR"])/"evidence"
-          manifest_sha="022b7a48cfb0fdf346927cbae1af7022f17bbb24"
-          def git(*args): return subprocess.check_output(["git",*args],cwd=root,text=True).strip()
-          def fetch(sha):
-              request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+sha,
-                  headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
-              with urllib.request.urlopen(request,timeout=60) as response: obj=json.load(response)
-              raw=base64.b64decode(obj["content"],validate=False)
-              assert obj["sha"]==sha and obj["encoding"]=="base64" and len(raw)==obj["size"]
-              assert hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==sha
-              return raw
-          raw=fetch(manifest_sha); manifest=json.loads(raw); leaves=manifest["leaves"]
-          assert len(leaves)==87 and len({item["path"] for item in leaves})==87
+          manifest_sha="7a6fd6cdbe2ca92945e64b0ab2825aa930c37e91"
+          request=urllib.request.Request("https://api.github.com/repos/SaltyPatron/Laplace/git/blobs/"+manifest_sha,
+              headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
+          with urllib.request.urlopen(request,timeout=60) as response: obj=json.load(response)
+          raw=base64.b64decode(obj["content"],validate=False)
+          assert obj["sha"]==manifest_sha and hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()==manifest_sha
+          manifest=json.loads(raw)
+          for item in manifest["files"]:
+              path=Path(item["path"]);assert not path.is_absolute() and ".." not in path.parts
+              body=(root/path).read_bytes()
+              actual=hashlib.sha1(b"blob "+str(len(body)).encode()+b"\0"+body).hexdigest()
+              assert actual==item["sha"],(item,actual)
           (evidence/"manifest.json").write_bytes(raw)
-          required={item["sha"] for item in leaves}|{item["base"] for item in leaves if item["base"]}
-          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-              bodies=dict(zip(sorted(required),pool.map(fetch,sorted(required))))
-          applied=[]
-          for index,item in enumerate(leaves):
-              path=Path(item["path"]); assert not path.is_absolute() and ".." not in path.parts
-              target=root/path
-              observed=git("hash-object",str(path)) if target.exists() else None
-              assert observed==item["merge_current"], ("unreviewed changed input",str(path),observed,item)
-              if observed==item["base"]:
-                  target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(bodies[item["sha"]])
-                  method="exact reviewed replacement"
-              else:
-                  assert observed and item["base"], ("unexpected added-path conflict",item)
-                  prefix=evidence/("merge-"+str(index));prefix.mkdir()
-                  (prefix/"current").write_bytes(target.read_bytes())
-                  (prefix/"base").write_bytes(bodies[item["base"]])
-                  (prefix/"candidate").write_bytes(bodies[item["sha"]])
-                  result=subprocess.run(["git","merge-file","-p",str(prefix/"current"),str(prefix/"base"),str(prefix/"candidate")],
-                      stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-                  (prefix/"result").write_bytes(result.stdout)
-                  (prefix/"stderr").write_bytes(result.stderr)
-                  assert result.returncode==0, ("three-way source conflict",str(path),str(prefix))
-                  target.write_bytes(result.stdout);method="git merge-file current/base/candidate"
-              target.chmod(int(item["mode"],8))
-              applied.append({**item,"result":git("hash-object",str(path)),"method":method})
-          for path in manifest["excluded_automation"]: assert not (root/path).exists(),path
-          builder=(root/"app/Laplace.Substrate/Crud/SubstrateChangeBuilder.cs").read_text()
-          assert "MeasureGrowingBuilder" in builder and "AddEntityInterpretation(EntityInterpretationRow row)" in builder
-          subprocess.run(["git","diff","--check"],cwd=root,check=True)
-          # Parse every shell body and its actual Python here-docs before building.
+          (evidence/"source.json").write_text(json.dumps({"source_commit":os.environ["GITHUB_SHA"],**manifest},indent=2)+"\n")
+          (evidence/"source-commit.txt").write_text(os.environ["GITHUB_SHA"]+"\n")
           lines=(evidence/"workflow.yml").read_text().splitlines();index=0;blocks=0;py=0
           while index<len(lines):
               if lines[index]!="        run: |":index+=1;continue
@@ -121,22 +84,8 @@ jobs:
               subprocess.run(["bash","-n"],input=script,text=True,check=True,timeout=10)
               for match in re.finditer(r"^python3 - <<'PY'[^\n]*\n(.*?)^PY$",script,re.M|re.S):
                   ast.parse(match.group(1));py+=1
-          receipt={"operator":os.environ["GITHUB_SHA"],"manifest_blob":manifest_sha,
-              "base_merge":manifest["merge_commit"],"main":manifest["main_commit"],"files":applied,
-              "shell_blocks":blocks,"python_bodies":py,
-              "scope":"reviewed source assembled by real three-way merge; execution pending"}
-          (evidence/"source.json").write_text(json.dumps(receipt,indent=2)+"\n")
-          print(json.dumps({"reviewed_leaves":len(applied),"three_way":[x for x in applied if x["method"].startswith("git")]}),flush=True)
+          print(json.dumps({"verified_files":len(manifest["files"]),"shell_blocks":blocks,"python_bodies":py}),flush=True)
           PY
-          git add --all
-          git diff --cached --check
-          git diff --cached --binary > "$QUALIFICATION_DIR/evidence/reconciled.patch"
-          git commit -m "Preserve canonical entity identity and all observed interpretations"
-          git ls-tree -r HEAD > "$QUALIFICATION_DIR/evidence/source-tree.txt"
-          git rev-parse HEAD > "$QUALIFICATION_DIR/evidence/source-commit.txt"
-          test "$(git ls-remote origin refs/heads/review/canonical-identity-20260917 | cut -f1)" = "$GITHUB_SHA"
-          git push origin HEAD:refs/heads/review/canonical-identity-20260917
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           printf 'LAPLACE_BUILD_ROOT=%s/managed\nLAPLACE_ENGINE_BUILD=%s\nLAPLACE_PERFCACHE_BIN=%s/core/perfcache/laplace_t0_perfcache.bin\nLAPLACE_CHESS_PERFCACHE_BIN=%s/core/perfcache/laplace_chess_position_perfcache.bin\nLAPLACE_CHESS_TRANSITION_BIN=%s/core/perfcache/laplace_chess_transition_perfcache.bin\nLD_LIBRARY_PATH=%s/core\n' "$QUALIFICATION_BUILD" "$QUALIFICATION_BUILD" "$QUALIFICATION_BUILD" "$QUALIFICATION_BUILD" "$QUALIFICATION_BUILD" "$QUALIFICATION_BUILD" >> "$GITHUB_ENV"
           printf 'LAPLACE_EXTERNAL=%s/external\n' "$QUALIFICATION_DIR" >> "$GITHUB_ENV"
           dotnet --info | tee "$QUALIFICATION_DIR/evidence/dotnet.txt"
@@ -252,7 +201,8 @@ jobs:
           required={"InterpretationsRetainOriginalPairsWithoutChangingLegacySemanticBytes",
                     "InterpretationImportIsExplicitCompleteValidatedAndNondestructive",
                     "InterpretationPartitionBudgetAndRetentionFollowStageOwnership",
-                    "PresentContentRetainsInterpretationsAndExactPhysicalityObservations"}
+                    "PresentContentRetainsInterpretationsAndExactPhysicalityObservations",
+                    "NullableInterpretationProvenanceSurvivesImportPromotionAndPartition"}
           assert required <= {x.attrib["name"] for x in cases if x.find("skipped") is None}
           receipt={"selected":len(cases),"passed":sum(x.find("skipped") is None for x in cases),
               "skipped":[{"class":x.attrib.get("classname"),"name":x.attrib["name"],
@@ -334,13 +284,13 @@ jobs:
           native_hash=hashlib.file_digest(native.open("rb"),"sha256").hexdigest()
           suites=[
               ("Laplace.Core.Tests",["IntentStageEntityInterpretationTests","IntentStageTests"]),
-              ("Laplace.Chess.Tests",["ChessGraphPresenceObservationTests","ChessPgnChunkTests","ChessUnitCompletionTests"]),
+              ("Laplace.Chess.Tests",["ChessGraphPresenceObservationTests","ChessPgnChunkTests","ChessUnitCompletionTests","ChessRecordingProgressTests","ChessRecordingDiagnosticsTests"]),
               ("Laplace.Substrate.Tests",["EntityInterpretationIdentityTests","EntityInterpretationChangeTests",
                   "PhysicalityAdmissionTransportTests","TextEntityBuilderEmissionTests","IngestAdmissionSizingTests",
                   "ContentWitnessContainmentTests","GrammarComposeContainmentTests","CopyTupleParserTests",
                   "IngestUnitCompletionIdentityTests","IngestCompletionGateTests"])]
           excluded=["TextEntityBuilderEmissionTests.FullGalileo_InMemory_RoundtripsFromPhysicalities"]
-          results=[]
+          results=[];failures=[]
           for project,classes in suites:
               project_path=root/"app"/project/(project+".csproj")
               output=Path(os.environ["LAPLACE_BUILD_ROOT"])/"app/bin"/project/"Release/net10.0"
@@ -406,7 +356,10 @@ jobs:
                               os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=5)
               print((trx_dir/"output.log").read_text(),flush=True)
               trx=trx_dir/"results.trx"
-              assert returncode==0 and trx.is_file(), (project,returncode)
+              if returncode!=0: failures.append({"project":project,"exit_code":returncode})
+              if not trx.is_file():
+                  failures.append({"project":project,"missing_trx":str(trx)})
+                  continue
               ns={"t":"http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
               document=ET.parse(trx)
               definitions={}
@@ -418,17 +371,18 @@ jobs:
               for result in document.findall(".//t:Results/t:UnitTestResult",ns):
                   case={"name":definitions[result.attrib["testId"]],"display_name":result.attrib["testName"],
                         "outcome":result.attrib["outcome"]}
-                  assert case["outcome"]=="Passed", case
+                  if case["outcome"]!="Passed": failures.append(case)
                   assert not any(item in case["name"] for item in excluded), case
                   cases.append(case)
-              assert cases and all(any(name in case["name"] for case in cases) for name in classes), (classes,cases)
-              assert mappings, "actual executing test process native mapping was not observed"
-              receipt={"project":project,"filter":selection,"passed":len(cases),"tests":cases,
+              missing=[name for name in classes if not any(name in case["name"] for case in cases)]
+              if not cases or missing: failures.append({"project":project,"missing_classes":missing})
+              if not mappings: failures.append({"project":project,"native_mapping_missing":True})
+              receipt={"project":project,"filter":selection,"passed":sum(x["outcome"]=="Passed" for x in cases),"tests":cases,
                        "assembly":str(assembly),"app_core_sha256":copied_hash,
                        "native_mappings":list(mappings.values())}
               results.append(receipt)
               (trx_dir/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
-              print(json.dumps({"project":project,"passed":len(cases),"observed_native_mappings":len(mappings)}),flush=True)
+              print(json.dumps({"project":project,"passed":receipt["passed"],"total":len(cases),"observed_native_mappings":len(mappings)}),flush=True)
           floors={}
           for name in ["laplace_t0_perfcache.bin","laplace_modality_number_perfcache.bin",
                        "laplace_highway_perfcache.bin","laplace_chess_position_perfcache.bin",
@@ -441,15 +395,16 @@ jobs:
           receipt={"schema":"laplace.hosted-canonical-identity-controls/v1",
                    "scope":"managed compilation and selected controls using genuine hosted native producers",
                    "source_commit":(evidence/"source-commit.txt").read_text().strip(),
-                   "manifest_blob":"022b7a48cfb0fdf346927cbae1af7022f17bbb24",
+                   "manifest_blob":"7a6fd6cdbe2ca92945e64b0ab2825aa930c37e91",
                    "core_sha256":native_hash,"native_floors":floors,"chess_seed_input":"NONE",
                    "opening_classifier_fixture":json.loads((evidence/"opening-fixture.json").read_text()),
                    "excluded_external_corpus_tests":excluded,
                    "not_executed":["installed PostgreSQL interruption/re-admission and catalog-order tests",
                                    "installed host corpus, Stockfish calibration and recorded throughput"],
-                   "results":results}
+                   "results":results,"failures":failures}
           (evidence/"result.json").write_text(json.dumps(receipt,indent=2)+"\n")
           print(json.dumps(receipt,sort_keys=True),flush=True)
+          assert not failures, failures
           PY
       - name: Retain build and executed-control evidence
         if: always()

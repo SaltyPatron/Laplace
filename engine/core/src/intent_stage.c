@@ -669,19 +669,25 @@ static int import_tuples(byte_buf_t* out, const uint8_t* data, size_t bytes, uin
 static int interpretations_valid(const byte_buf_t* buffer) {
     size_t offset = 0u;
     while (offset < buffer->len) {
-        const size_t row_len = row_byte_len(buffer->data,buffer->len,offset);
-        if (row_len == 0u) return 0;
-        for (int field = 1; field <= 4; ++field) {
-            const uint8_t* value = NULL;
-            int32_t length = 0;
-            if (row_field_at(buffer->data,buffer->len,offset,field,&value,&length) != 0)
+        if (buffer->len - offset < 2u ||
+            ((uint16_t)buffer->data[offset] << 8u | buffer->data[offset+1u]) != ENTITY_COL_COUNT)
+            return 0;
+        offset += 2u;
+        for (int field = 1; field <= ENTITY_COL_COUNT; ++field) {
+            if (buffer->len - offset < 4u) return 0;
+            const int32_t length = (int32_t)be32_at(buffer->data+offset);
+            offset += 4u;
+            /* row_field_at deliberately rejects NULL for its existing callers.
+             * This stream's provenance column alone permits the COPY null marker. */
+            if (field == 4 && length == -1) continue;
+            if (length != (field == 2 ? 2 : 16) ||
+                (size_t)length > buffer->len - offset)
                 return 0;
-            if (field == 2) {
-                if (length != 2 || ((uint16_t)value[0] << 8u | value[1]) > UINT8_MAX)
-                    return 0;
-            } else if (length != 16 && !(field == 4 && length == -1)) return 0;
+            if (field == 2 &&
+                ((uint16_t)buffer->data[offset] << 8u | buffer->data[offset+1u]) > UINT8_MAX)
+                return 0;
+            offset += (size_t)length;
         }
-        offset += row_len;
     }
     return 1;
 }

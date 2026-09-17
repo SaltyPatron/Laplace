@@ -14,7 +14,7 @@ internal sealed partial class ChessRecordingMeasurement
     // logger receive immutable scalar copies and never inspect a game/change graph.
     internal async Task StartProgressAsync(string path, Action<string>? log = null)
     {
-        _progress = new ProgressSink(path, _started, log);
+        _progress = new ProgressSink(path, _started, log, timingAggregates: CaptureProgressTimings);
         Checkpoint("admission", "started");
         await _progress.FlushAsync();
         try { _progress.Start(); }
@@ -49,7 +49,12 @@ internal sealed partial class ChessRecordingMeasurement
                 Writer.ApplyCalls, Writer.CopyTransactionsCommitted, CommittedGames,
                 _streamedReadbackGames + Games.Count, _corpusEvidence?.ReadbackGames ?? 0,
                 _corpusEvidence?.NewlyRecordedGames ?? 0);
-            progress.Publish(phase, boundary, Status, counters);
+            // Work timing belongs to the admission owner, just like its counters.
+            // Only this detached snapshot reaches the heartbeat.
+            var workTiming = new ProgressWorkTiming(_workPhase?.ToString(),
+                _workPhase is null ? 0 : Stopwatch.GetElapsedTime(_workPhaseStarted, now).TotalSeconds,
+                Work.ExclusiveSeconds);
+            progress.Publish(phase, boundary, Status, counters, workTiming);
         }
         catch (Exception failure) { progress.Diagnostics.ObservationFailed(failure); }
     }
@@ -67,7 +72,29 @@ internal sealed partial class ChessRecordingMeasurement
 
     public sealed record ProgressCheckpoint(long Sequence, double ObservedElapsedSeconds,
         double PhaseEnteredElapsedSeconds, string Phase, string Boundary, string AdmissionStatus,
-        ProgressCounters Counters, WriterProgress? LastWriterBoundary = null);
+        ProgressCounters Counters, WriterProgress? LastWriterBoundary = null,
+        ProgressWorkTiming? WorkTiming = null);
+
+    public sealed record ProgressWorkTiming(string? ActivePhase, double ActiveUnclosedSeconds,
+        IReadOnlyDictionary<string, double> ClosedExclusiveSeconds)
+    {
+        public string Scope => "Admission-owner timing at this checkpoint. ClosedExclusiveSeconds contains exclusive work windows already closed by phase switches. ActiveUnclosedSeconds is the current open segment at that same checkpoint, not at heartbeat time. Neither establishes completed or durable games.";
+    }
+
+    public sealed record ProgressTimingAggregates(double ObservedElapsedSeconds,
+        IReadOnlyList<WriterPhaseAggregate> WriterPhaseAggregates,
+        long UnaggregatedWriterPhaseExits, long RejectedWriterPhaseExits,
+        IReadOnlyList<ReadbackOperationAggregate> ReadbackOperations)
+    {
+        public string Scope => "Cumulative closed writer and readback windows sampled through their synchronized aggregate owners. Writer and readback durations may overlap or nest inside admission work; do not add them to exclusive work or total elapsed time. Open calls are excluded. Returning does not establish successful validation or durable games.";
+    }
+
+    // These aggregate owners synchronize their reads and return detached arrays.
+    // This callback never reads admission counters, games, changes, or Work.
+    private ProgressTimingAggregates CaptureProgressTimings() => new(
+        Stopwatch.GetElapsedTime(_started).TotalSeconds,
+        WriterLog.PhaseAggregates, WriterLog.UnaggregatedPhaseExits,
+        WriterLog.RejectedPhaseExits, ReadbackOperations.Operations);
 
     public sealed record WriterProgress(string OwnerPhase, string Phase, string Boundary,
         double ObservedElapsedSeconds, double? ElapsedMilliseconds, bool? Returned);
@@ -111,6 +138,7 @@ internal sealed partial class ChessRecordingMeasurement
         private readonly long _started;
         private readonly Action<string>? _log;
         private readonly Func<string, string, Task> _write;
+        private readonly Func<ProgressTimingAggregates>? _timingAggregates;
         private readonly object _stateLock = new();
         private readonly SemaphoreSlim _writeGate = new(1, 1);
         private readonly CancellationTokenSource _stop = new();
@@ -123,12 +151,14 @@ internal sealed partial class ChessRecordingMeasurement
         public ProgressDiagnostics Diagnostics { get; } = new();
 
         internal ProgressSink(string path, long started, Action<string>? log = null,
-            Func<string, string, Task>? write = null)
+            Func<string, string, Task>? write = null,
+            Func<ProgressTimingAggregates>? timingAggregates = null)
         {
             _path = path;
             _started = started;
             _log = log;
             _write = write ?? AtomicWriteAsync;
+            _timingAggregates = timingAggregates;
             try
             {
                 using var process = Process.GetCurrentProcess();
@@ -137,14 +167,15 @@ internal sealed partial class ChessRecordingMeasurement
             catch { _processStartedAt = null; }
         }
 
-        internal void Publish(string phase, string boundary, string status, ProgressCounters counters)
+        internal void Publish(string phase, string boundary, string status, ProgressCounters counters,
+            ProgressWorkTiming? workTiming = null)
         {
             lock (_stateLock)
             {
                 double now = Stopwatch.GetElapsedTime(_started).TotalSeconds;
                 double entered = _latest?.Phase == phase ? _latest.PhaseEnteredElapsedSeconds : now;
                 _latest = new((_latest?.Sequence ?? 0) + 1, now, entered,
-                    phase, boundary, status, counters, _latest?.LastWriterBoundary);
+                    phase, boundary, status, counters, _latest?.LastWriterBoundary, workTiming);
             }
         }
 
@@ -188,13 +219,16 @@ internal sealed partial class ChessRecordingMeasurement
                 ProgressCheckpoint? snapshot;
                 lock (_stateLock) snapshot = _latest;
                 if (snapshot is null) return;
+                ProgressTimingAggregates? timingAggregates = null;
+                try { timingAggregates = _timingAggregates?.Invoke(); }
+                catch (Exception failure) { Diagnostics.ObservationFailed(failure); }
                 var document = new
                 {
                     schema = "laplace.chess-recording-progress/v1",
                     processId = _processId, processStartedAt = _processStartedAt,
                     heartbeatAt = DateTimeOffset.UtcNow,
                     heartbeatElapsedSeconds = Stopwatch.GetElapsedTime(_started).TotalSeconds,
-                    checkpoint = snapshot, diagnostics = Diagnostics,
+                    checkpoint = snapshot, timingAggregates, diagnostics = Diagnostics,
                 };
                 try
                 {
