@@ -10,7 +10,7 @@ on:
         type: choice
         required: true
         default: build
-        options: [provision, build, install, database, applications, deploy, test-dev, test-db, test-live, reconcile, check]
+        options: [provision, build, install, database, foundation, applications, deploy, mainline, test-dev, test-db, test-live, reconcile, check]
       full_clean:
         description: "build/deploy: wipe build/ before building"
         type: boolean
@@ -40,14 +40,25 @@ env:
 jobs:
   mainline:
     if: github.event_name == 'push'
-    name: Mainline — build and dev verification
+    name: Mainline — integrated product lifecycle
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     concurrency:
       group: laplace-mainline-ci
       cancel-in-progress: true
+    env:
+      LICHESS_API: ${{ secrets.LICHESS_API }}
+      LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
+      LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
+      STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
+      LAPLACE_AUTH_MICROSOFT_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_ID }}
+      LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET }}
+      LAPLACE_AUTH_GOOGLE_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_ID }}
+      LAPLACE_AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_SECRET }}
     steps:
-      - name: Select source, build, and verify under one host reservation
+      - name: Select source and exercise the whole product under one host reservation
         env:
           TARGET_SHA: ${{ github.sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
@@ -67,8 +78,6 @@ jobs:
             git init --initial-branch=main
             git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
           fi
-          # Source selection and environment setup share the build reservation.
-          # Never clean ignored build trees or overwrite tracked local work.
           git diff --quiet
           git diff --cached --quiet
           checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
@@ -82,9 +91,7 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
           source scripts/ci-environment.sh
-          bash scripts/product-ci.sh check
-          bash scripts/product-ci.sh build
-          exec bash scripts/product-ci.sh test-dev
+          exec bash scripts/product-ci.sh mainline
 
   operator:
     if: github.event_name == 'workflow_dispatch'
@@ -131,8 +138,6 @@ jobs:
             git init --initial-branch=main
             git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
           fi
-          # Source selection and environment setup share the build reservation.
-          # Never clean ignored build trees or overwrite tracked local work.
           git diff --quiet
           git diff --cached --quiet
           checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
