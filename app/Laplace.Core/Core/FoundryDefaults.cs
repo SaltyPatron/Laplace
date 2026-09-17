@@ -48,7 +48,11 @@ public static class FoundryDefaults
     public const double GateZ = 6.0;
     public const double CtxQk = 8.0;
     public const double CapFrac = 0.05;
-    public const bool Ppmi = true;
+    /// PPMI is a declared association operator, not an implicit trajectory-export
+    /// policy. Trajectory synthesis must carry the substrate's rated continuation
+    /// evidence unchanged; enabling this silently reweighted it and dropped every
+    /// non-positive PMI edge before target-operator construction (#928).
+    public const bool Ppmi = false;
     public const bool Procrustes = true;
     /// Plan Phase 0 (2026-07-08 rope-probe verdict: CORRUPTS, 191% drift): synthesized
     /// QK operators are content-relational; llama-arch RoPE rotates them by absolute
