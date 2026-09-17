@@ -1,0 +1,101 @@
+name: Laplace — reusable product stage
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        description: "canonical product lifecycle stage"
+        type: string
+        required: true
+      target_sha:
+        description: "exact repository revision to execute"
+        type: string
+        required: true
+      full_clean:
+        type: boolean
+        required: false
+        default: false
+      force_codegen:
+        type: boolean
+        required: false
+        default: false
+      serial_tests:
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  LAPLACE_EXTERNAL: ${{ vars.LAPLACE_EXTERNAL || '/build/external' }}
+  LAPLACE_INSTALL_PREFIX: ${{ vars.LAPLACE_INSTALL_PREFIX || '/opt/laplace' }}
+  LAPLACE_PG_PREFIX: ${{ vars.LAPLACE_PG_PREFIX || '/opt/laplace/pgsql-18' }}
+  PGHOST: /var/run/postgresql
+  PGPORT: 5432
+  PGUSER: laplace_admin
+  PGDATABASE: laplace
+  LAPLACE_DATA_ROOT: /vault/Data
+
+jobs:
+  stage:
+    name: Product — ${{ inputs.stage }}
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 420
+    env:
+      LAPLACE_STAGE: ${{ inputs.stage }}
+      LAPLACE_PROVISION_TOOLS: ${{ inputs.stage == 'provision' && '1' || '0' }}
+      LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
+      LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
+      LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
+      LICHESS_API: ${{ secrets.LICHESS_API }}
+      LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
+      LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
+      STRIPE_API_SECRET: ${{ secrets.STRIPE_API_SECRET }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_API_Publishable: ${{ vars.STRIPE_API_PUBLISHABLE }}
+      LAPLACE_AUTH_MICROSOFT_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_ID }}
+      LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET }}
+      LAPLACE_AUTH_GOOGLE_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_ID }}
+      LAPLACE_AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_SECRET }}
+    steps:
+      - name: Reserve host, select exact source, execute one lifecycle stage
+        shell: bash
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 0002
+
+          workspace_lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          mkdir -p "$workspace_lock_root"
+          exec 9>"$workspace_lock_root/host-resource.lock"
+          flock 9
+
+          cd "$GITHUB_WORKSPACE"
+          if [[ ! -e .git ]]; then
+            [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+              echo "::error::nonempty workspace has no repository; preserving its files" >&2
+              exit 1
+            }
+            git init --initial-branch=main
+            git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          fi
+
+          git diff --quiet
+          git diff --cached --quiet
+          checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+            git fetch --no-tags --depth=2 origin "$TARGET_SHA"
+          unset checkout_auth CHECKOUT_TOKEN
+
+          git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+          git diff --quiet
+          git diff --cached --quiet
+
+          source scripts/ci-environment.sh
+          exec bash scripts/product-ci.sh "$LAPLACE_STAGE"
