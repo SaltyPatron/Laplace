@@ -65,7 +65,7 @@ A larger throughput number from a point that starves the required service/contro
 
 ## 3. Single-semantic-DAG frontier scaling
 
-Tracking: #1451.
+Profile: `core-dag-scale`. Tracking: #1451.
 
 This is the stronger architecture proof:
 
@@ -85,7 +85,7 @@ Worker count, task identity, scheduling order and transport partitioning are phy
 
 A valid single-DAG benchmark runs the same large object under multiple admitted worker grants and verifies semantic parity before reporting speedup.
 
-Until that implementation lands, neither file-grain makespan nor replicated independent streams may be cited as proof of intra-object parallelism.
+The implementation now executes one canonical content DAG through explicit native dependency-frontier worker grants. The benchmark accepts a worker point only when the complete tree fingerprint (structure, every id, every binary64 coordinate and every Hilbert value) matches the scalar oracle. File-grain makespan and replicated independent streams remain distinct measurements and may not be cited as substitutes for this intra-object proof.
 
 ## Why all three meanings matter
 
@@ -93,7 +93,7 @@ Until that implementation lands, neither file-grain makespan nor replicated inde
 | --- | --- | --- | --- |
 | `core-scale` | yes | whole input files | how badly does coarse file scheduling constrain one finite batch? |
 | `core-scale-streams` | no; one full stream per worker | independent streams | how much aggregate work can the admitted host resource envelope sustain? |
-| #1451 single-DAG scale | yes; one exact object | dependency frontier / DAG nodes | can one semantic object use several workers without changing meaning? |
+| `core-dag-scale` | yes; one exact object | dependency frontier / DAG nodes | can one semantic object use several workers without changing meaning? |
 
 For managed-host scaling, every published curve additionally names whether it is **serviceable** or **saturation** evidence.
 

@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "scripts/benchmark-profiles.json"
 DEFAULT_CORE = ROOT / "build/engine/core/liblaplace_core.so"
 DEFAULT_T0 = ROOT / "build/engine/core/perfcache/laplace_t0_perfcache.bin"
-VALID_KINDS = {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment", "postgres-geometry", "recorded-chess"}
+VALID_KINDS = {"core-single", "core-scale", "core-scale-streams", "core-dag-scale", "moby-roundtrip", "query-forward", "chess-environment", "postgres-geometry", "recorded-chess"}
 
 
 def sha256(path: Path) -> str:
@@ -92,6 +92,7 @@ def validate_registry(registry: dict[str, Any]) -> None:
         "core-single": ROOT / "scripts/bench-compose.py",
         "core-scale": ROOT / "scripts/bench-compose-scale.py",
         "core-scale-streams": ROOT / "scripts/bench-compose-stream-scale.py",
+        "core-dag-scale": ROOT / "scripts/bench-compose-dag-scale.py",
         "query-forward": ROOT / "scripts/bench-forward-program.py",
         "chess-environment": ROOT / "scripts/benchmark-chess-environment.py",
         "postgres-geometry": ROOT / "scripts/benchmark-postgres-geometry.py",
@@ -297,6 +298,9 @@ def scaling_command(kind: str, corpus_dir: Path, repeats: int, receipt_dir: Path
     elif kind == "core-scale-streams":
         script = "scripts/bench-compose-stream-scale.py"
         json_path = receipt_dir / "core-scale-streams.json"
+    elif kind == "core-dag-scale":
+        script = "scripts/bench-compose-dag-scale.py"
+        json_path = receipt_dir / "core-dag-scale.json"
     else:
         raise ValueError(f"not a scaling benchmark kind: {kind}")
     command = [
@@ -329,7 +333,7 @@ def run_profile(
 
     if kind == "core-single":
         command = [sys.executable, "scripts/bench-compose.py", str(corpus_dir), "--repeats", str(repeats)]
-    elif kind in {"core-scale", "core-scale-streams"}:
+    elif kind in {"core-scale", "core-scale-streams", "core-dag-scale"}:
         command, result_json = scaling_command(kind, corpus_dir, repeats, receipt_dir, scale_workers)
     elif kind == "moby-roundtrip":
         if not moby_path.is_file():
@@ -377,7 +381,7 @@ def run_profile(
 
     if kind == "core-single":
         result = parse_core_single(log_path)
-    elif kind in {"core-scale", "core-scale-streams", "query-forward", "chess-environment", "postgres-geometry", "recorded-chess"}:
+    elif kind in {"core-scale", "core-scale-streams", "core-dag-scale", "query-forward", "chess-environment", "postgres-geometry", "recorded-chess"}:
         assert result_json is not None
         result = json.loads(result_json.read_text(encoding="utf-8"))
         if kind == "core-scale":

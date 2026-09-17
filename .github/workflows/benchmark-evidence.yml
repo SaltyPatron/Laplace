@@ -16,7 +16,7 @@ on:
         type: choice
         required: true
         default: quick
-        options: [quick, throughput, core, scale, moby, query, chess, geometry, recorded, all]
+        options: [quick, throughput, core, scale, dag, moby, query, chess, geometry, recorded, all]
       repeats:
         description: "repeats per core/scaling point; all runs retained, best reported"
         type: string
@@ -179,6 +179,17 @@ jobs:
                   print(f"- best measured workers: {best['workers']}")
                   print(f"- best 4-char BPE-equivalent/s: {best['bpe_equivalent_tokens_per_second_4chars']:,.0f}")
                   print(f"- speedup vs 1 worker: {best['speedup_vs_1_worker']:.3f}x")
+                  print(f"- physical cores / allowed logical CPUs: {result['physical_cores']} / {result['allowed_logical_cpus']}")
+              elif profile == 'core-dag-scale':
+                  best = max(result['points'], key=lambda p: p['speedup_vs_1_worker'])
+                  semantic = result['semantic_oracle']
+                  print(f"- fixed semantic objects/repeat: {result['semantic_objects_per_repeat']}")
+                  print(f"- input sha256: {result['input_sha256']}")
+                  print(f"- root id: {semantic['root_id']}")
+                  print(f"- complete tree sha256: {semantic['tree_fingerprint_sha256']}")
+                  print(f"- best measured workers: {best['workers']}")
+                  print(f"- speedup vs 1 worker: {best['speedup_vs_1_worker']:.3f}x")
+                  print(f"- parallel efficiency: {best['parallel_efficiency']:.3f}")
                   print(f"- physical cores / allowed logical CPUs: {result['physical_cores']} / {result['allowed_logical_cpus']}")
               elif profile == 'moby-roundtrip':
                   print(f"- codepoints: {result['codepoints']:,}")

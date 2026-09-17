@@ -25,7 +25,7 @@ python3 scripts/benchmark_suite.py list | tee "$LAPLACE_BENCH_RECEIPT/suite-list
 
 out="$LAPLACE_BENCH_RECEIPT"
 resolved_scale=""
-if [[ "$SUITE" == throughput || "$SUITE" == scale || "$SUITE" == all ]]; then
+if [[ "$SUITE" == throughput || "$SUITE" == scale || "$SUITE" == dag || "$SUITE" == all ]]; then
   scale_plan_args=(
     --reserve-logical "$RESERVE_LOGICAL_CPUS"
     --github-env "$GITHUB_ENV"

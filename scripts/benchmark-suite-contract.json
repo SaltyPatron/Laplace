@@ -31,7 +31,12 @@
     "may_not_extrapolate_single_worker": true,
     "physical_cores_before_smt": true,
     "require_affinity_receipt": true,
-    "require_speedup_and_efficiency": true
+    "require_speedup_and_efficiency": true,
+    "single_dag_profile": "core-dag-scale",
+    "single_dag_fixed_work": true,
+    "single_dag_require_complete_tree_parity": true,
+    "single_dag_physical_grain": "dependency-frontier nodes inside one canonical semantic object",
+    "replicated_streams_are_single_dag_proof": false
   },
   "sparse_complexity": {
     "representative_form": "O(log N)+O(K)",
