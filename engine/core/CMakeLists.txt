@@ -118,7 +118,11 @@ set(LAPLACE_HIGHWAY_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_highway_perfcache.bin"
     CACHE FILEPATH "Built highway perf-cache blob (consumed by tests + installed)" FORCE)
 
 find_program(LAPLACE_CODEGEN_PYTHON NAMES python python3 REQUIRED)
-set(LAPLACE_CODEGEN_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/codegen-attestation-law.py)
+# Use the same canonical input paths as the extension configure owner.
+# Aliases containing /../ produce duplicate Ninja regeneration rules when the
+# same manifest is also registered by its project-root path.
+get_filename_component(_laplace_codegen_root "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+set(LAPLACE_CODEGEN_SCRIPT "${_laplace_codegen_root}/scripts/codegen-attestation-law.py")
 set(LAPLACE_CODEGEN_OUTPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/relation_law.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/laplace/core/pos_law.h
@@ -134,8 +138,8 @@ set(LAPLACE_CODEGEN_OUTPUTS
 # on a fresh checkout; a build-time custom command runs too late for that hash.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${LAPLACE_CODEGEN_SCRIPT}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../manifest/relation_types.toml"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../manifest/pos_tags.toml")
+    "${_laplace_codegen_root}/engine/manifest/relation_types.toml"
+    "${_laplace_codegen_root}/engine/manifest/pos_tags.toml")
 execute_process(
     COMMAND "${LAPLACE_CODEGEN_PYTHON}" "${LAPLACE_CODEGEN_SCRIPT}"
             "--bin-out-dir=${LAPLACE_PERFCACHE_DIR}"
@@ -152,8 +156,8 @@ add_custom_command(
     COMMAND ${LAPLACE_CODEGEN_PYTHON} ${LAPLACE_CODEGEN_SCRIPT}
             "--bin-out-dir=${LAPLACE_PERFCACHE_DIR}"
     DEPENDS ${LAPLACE_CODEGEN_SCRIPT}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../manifest/relation_types.toml
-            ${CMAKE_CURRENT_SOURCE_DIR}/../manifest/pos_tags.toml
+            ${_laplace_codegen_root}/engine/manifest/relation_types.toml
+            ${_laplace_codegen_root}/engine/manifest/pos_tags.toml
     COMMENT "Codegen attestation law + highway perfcache from manifest TOML"
     VERBATIM
 )
