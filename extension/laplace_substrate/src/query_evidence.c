@@ -9,6 +9,7 @@
 
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/relation_law.h"
 
 #include "consensus_scan.h"
 #include "observation_read.h"
@@ -491,6 +492,237 @@ bind_channel_provenance_roots(QueryEvidenceState *state, int channel_count)
         start = end;
     }
     pfree(items);
+}
+
+typedef struct QueryCalculationClassify
+{
+    HTAB *sources;
+    hash128_t relation;
+    hash128_t trust_class;
+} QueryCalculationClassify;
+
+static void
+query_calculation_source(const LaplaceConsensusRow *row, void *opaque)
+{
+    QueryCalculationClassify *state = (QueryCalculationClassify *) opaque;
+    bool found;
+
+    if (row->object_is_null ||
+        !hash128_eq(&row->type, &state->relation) ||
+        !hash128_eq(&row->object, &state->trust_class) ||
+        !(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
+        return;
+    (void) hash_search(state->sources, &row->subject, HASH_ENTER, &found);
+}
+
+static void
+bind_calculation_source_classes(QueryEvidenceState *state, MemoryContext work)
+{
+    HASHCTL ctl = {0};
+    HTAB *unique;
+    HASH_SEQ_STATUS sequence;
+    QueryEvidenceKey *source;
+    hash128_t *ids;
+    long count;
+    long used = 0;
+    ArrayType *subjects, *objects, *types;
+    QueryCalculationClassify classify;
+
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = work;
+    unique = hash_create("query evidence unique witness sources",
+                         Max((int) hash_get_num_entries(state->sources), 16),
+                         &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    hash_seq_init(&sequence, state->sources);
+    while ((source = (QueryEvidenceKey *) hash_seq_search(&sequence)) != NULL)
+    {
+        bool found;
+        (void) hash_search(unique, &source->id, HASH_ENTER, &found);
+    }
+    count = hash_get_num_entries(unique);
+    if (count <= 0)
+    {
+        hash_destroy(unique);
+        return;
+    }
+    if ((uint64) count > MaxAllocSize / sizeof(hash128_t))
+        ereport(ERROR,
+                (errmsg("query evidence: witness source set exceeds allocation capacity")));
+
+    ids = (hash128_t *) palloc(sizeof(*ids) * (Size) count);
+    {
+        hash128_t *id;
+        hash_seq_init(&sequence, unique);
+        while ((id = (hash128_t *) hash_seq_search(&sequence)) != NULL)
+            ids[used++] = *id;
+    }
+    if (used != count)
+        ereport(ERROR, (errmsg("query evidence: witness source set changed during classification")));
+    hash_destroy(unique);
+
+    if (laplace_relation_type_id("HAS_TRUST_CLASS", &classify.relation) != 0)
+        ereport(ERROR, (errmsg("query evidence: HAS_TRUST_CLASS identity is unavailable")));
+    hash128_blake3_str("substrate/trust_class/DerivedCalculation/v1",
+                       &classify.trust_class);
+    classify.sources = state->calculation_sources;
+
+    subjects = hash128_array_from_ids(ids, (int) count);
+    objects = hash128_array_from_ids(&classify.trust_class, 1);
+    types = hash128_array_from_ids(&classify.relation, 1);
+    laplace_consensus_scan(subjects, objects, types,
+                           query_calculation_source, &classify,
+                           state->stats ? &state->stats->calculation_sources : NULL);
+    pfree(subjects);
+    pfree(objects);
+    pfree(types);
+    pfree(ids);
+}
+
+static void
+bind_channel_calculation_roots(QueryEvidenceState *state, int channel_count)
+{
+    long total = hash_get_num_entries(state->calculation_provenance);
+    QueryEvidenceKey *items;
+    HASH_SEQ_STATUS sequence;
+    QueryEvidenceKey *entry;
+    long used = 0;
+    hash128_t domain;
+
+    if (total <= 0)
+        return;
+    if ((uint64) total > MaxAllocSize / sizeof(QueryEvidenceKey))
+        ereport(ERROR,
+                (errmsg("query evidence: calculation provenance exceeds allocation capacity")));
+    items = (QueryEvidenceKey *) palloc(sizeof(*items) * (Size) total);
+    hash_seq_init(&sequence, state->calculation_provenance);
+    while ((entry = (QueryEvidenceKey *) hash_seq_search(&sequence)) != NULL)
+        items[used++] = *entry;
+    if (used != total)
+        ereport(ERROR,
+                (errmsg("query evidence: calculation provenance changed during reduction")));
+    qsort(items, (size_t) total, sizeof(*items), query_evidence_key_order);
+    hash128_blake3_str("laplace:query-channel-calculation-provenance:v1", &domain);
+
+    for (long start = 0; start < total; )
+    {
+        long end = start + 1;
+        int channel_index = items[start].channel_index;
+        hash128_t *parts;
+        Size member_count;
+
+        while (end < total && items[end].channel_index == channel_index)
+            ++end;
+        if (channel_index < 0 || channel_index >= channel_count)
+            ereport(ERROR,
+                    (errmsg("query evidence: calculation channel index is invalid")));
+        member_count = (Size) (end - start);
+        if (member_count >= MaxAllocSize / sizeof(hash128_t))
+            ereport(ERROR,
+                    (errmsg("query evidence: calculation witness set exceeds allocation capacity")));
+        parts = (hash128_t *) palloc(sizeof(*parts) * (member_count + 1));
+        parts[0] = domain;
+        for (Size i = 0; i < member_count; ++i)
+            parts[i + 1] = items[start + (long) i].id;
+        hash128_merkle(0, parts, member_count + 1,
+                       &state->channels[channel_index].calculation_provenance_root);
+        pfree(parts);
+        start = end;
+    }
+    pfree(items);
+}
+
+static void
+bind_channel_calculations(QueryEvidenceState *state, int channel_count)
+{
+    HASH_SEQ_STATUS sequence;
+    QueryEvidenceWitness *witness;
+
+    bind_calculation_source_classes(state, CurrentMemoryContext);
+    hash_seq_init(&sequence, state->witnesses);
+    while ((witness = (QueryEvidenceWitness *) hash_seq_search(&sequence)) != NULL)
+    {
+        LaplaceQueryChannel *channel;
+        QueryEvidenceKey key;
+        bool found;
+
+        if (witness->source_null ||
+            !hash_search(state->calculation_sources, &witness->source, HASH_FIND, NULL))
+            continue;
+        if (witness->key.channel_index < 0 ||
+            witness->key.channel_index >= channel_count)
+            ereport(ERROR,
+                    (errmsg("query evidence: calculation witness channel index is invalid")));
+
+        channel = &state->channels[witness->key.channel_index];
+        if (channel->calculation_rows == INT_MAX)
+            ereport(ERROR, (errmsg("query evidence: calculation row count overflow")));
+        channel->calculation_rows++;
+        if (!add_occurrences(&channel->calculation_occurrences, witness->occurrences))
+            ereport(ERROR,
+                    (errmsg("query evidence: calculation occurrence count overflow")));
+
+        switch (witness->outcome)
+        {
+            case LAPLACE_ATTESTATION_OUTCOME_CONFIRM:
+                if (!add_occurrences(&channel->calculation_confirm_occurrences,
+                                     witness->occurrences))
+                    ereport(ERROR,
+                            (errmsg("query evidence: calculation confirmation count overflow")));
+                break;
+            case LAPLACE_ATTESTATION_OUTCOME_DRAW:
+                if (!add_occurrences(&channel->calculation_draw_occurrences,
+                                     witness->occurrences))
+                    ereport(ERROR,
+                            (errmsg("query evidence: calculation draw count overflow")));
+                break;
+            case LAPLACE_ATTESTATION_OUTCOME_REFUTE:
+                if (!add_occurrences(&channel->calculation_refute_occurrences,
+                                     witness->occurrences))
+                    ereport(ERROR,
+                            (errmsg("query evidence: calculation refutation count overflow")));
+                break;
+            default:
+                ereport(ERROR,
+                        (errmsg("query evidence: invalid calculation outcome %d",
+                                witness->outcome)));
+        }
+
+        MemSet(&key, 0, sizeof(key));
+        key.channel_index = witness->key.channel_index;
+        key.id = witness->source;
+        (void) hash_search(state->calculation_channel_sources,
+                           &key, HASH_ENTER, &found);
+        if (!found)
+        {
+            if (channel->distinct_calculation_sources == INT_MAX)
+                ereport(ERROR,
+                        (errmsg("query evidence: calculation source count overflow")));
+            channel->distinct_calculation_sources++;
+        }
+
+        if (!witness->context_null)
+        {
+            key.id = witness->context;
+            (void) hash_search(state->calculation_contexts,
+                               &key, HASH_ENTER, &found);
+            if (!found)
+            {
+                if (channel->distinct_calculation_contexts == INT_MAX)
+                    ereport(ERROR,
+                            (errmsg("query evidence: calculation context count overflow")));
+                channel->distinct_calculation_contexts++;
+            }
+        }
+
+        key.id = witness->key.id;
+        (void) hash_search(state->calculation_provenance,
+                           &key, HASH_ENTER, NULL);
+        if (state->stats)
+            state->stats->calculation_bindings++;
+    }
+    bind_channel_calculation_roots(state, channel_count);
 }
 
 static void
