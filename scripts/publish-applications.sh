@@ -6,6 +6,7 @@ cd "$ROOT"
 managed() { bash "$ROOT/deploy/linux/managed-publish.sh" "$@"; }
 
 recover() {
+  local keep_api_stopped="${1:-0}"
   if [[ -f "$ROOT/build/.api-publish-backup" ]]; then
     application_api_recover "${GITHUB_RUN_ID:-local-$$}"
     return $?
@@ -15,13 +16,28 @@ recover() {
     return $?
   fi
   local rc=0
+  if [[ "$keep_api_stopped" == 1 ]]; then
+    # A native/schema cutover cannot run the restored older API. Stop any
+    # partially activated new API before the existing payload rollback owner.
+    sudo -n systemctl stop laplace-api || return 1
+  fi
   managed rollback || rc=$?
-  sudo -n systemctl start laplace-api || rc=1
+  if [[ "$keep_api_stopped" != 1 ]]; then
+    sudo -n systemctl start laplace-api || rc=1
+  fi
   return "$rc"
 }
 
 main() {
-  local mode="${1:-}"
+  local mode="${1:-}" keep_api_stopped=0
+  if [[ "$#" -gt 1 ]]; then
+    if [[ "$#" == 2 && "$mode" == deploy && "$2" == --keep-api-stopped-on-failure ]]; then
+      keep_api_stopped=1
+    else
+      echo "unexpected application publication arguments" >&2
+      return 2
+    fi
+  fi
   case "$mode" in
     api-deploy|api-recover)
       application_api_main "$mode"
@@ -40,7 +56,9 @@ main() {
       }
       managed preflight
       managed begin
-      trap 'rc=$?; trap - EXIT; recover || rc=1; exit "$rc"' EXIT INT TERM HUP
+      trap 'rc=$?; trap - EXIT; trap "" INT TERM HUP; recover '"$keep_api_stopped"' || rc=1; exit "$rc"' EXIT
+      trap 'exit 143' TERM HUP
+      trap 'exit 130' INT
       bash "$ROOT/scripts/pipeline.sh" publish
       managed reconcile
       managed activate
@@ -64,7 +82,7 @@ main() {
       return 1
       ;;
     *)
-      echo "usage: publish-applications.sh check|deploy|recover|api-deploy|api-recover" >&2
+      echo "usage: publish-applications.sh check|deploy [--keep-api-stopped-on-failure]|recover|api-deploy|api-recover" >&2
       return 2
       ;;
   esac

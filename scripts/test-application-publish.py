@@ -23,10 +23,14 @@ sudo() { event "systemctl ${*: -2}"; }
 bash() { event "pipeline ${*: -1}"; }
 curl() {
   event readiness >&2 || return 9
-  printf '{"ready":%s}\n' "${READY:-true}"
+  if [[ "${READY:-true}" == true ]]; then
+    printf '{"status":"ok"}\n'
+  else
+    printf '{"status":"starting"}\n'
+  fi
 }
 sleep() { :; }
-main "$3"
+main "${@:3}"
 '''
 
 def load_module(name: str, path: Path):
@@ -46,10 +50,10 @@ class ApplicationTransactionTests(unittest.TestCase):
         self.root = Path(temporary.name)
         (self.root / "build").mkdir()
 
-    def run_release(self, mode="deploy", fail="", ready="true", script=SCRIPT):
+    def run_release(self, mode="deploy", fail="", ready="true", script=SCRIPT, extra=(), adapter=ADAPTERS):
         (self.root / "events").unlink(missing_ok=True)
         return subprocess.run(
-            ["bash", "-c", ADAPTERS, "test", str(script), str(self.root), mode],
+            ["bash", "-c", adapter, "test", str(script), str(self.root), mode, *extra],
             env=dict(os.environ, FAIL_AT=fail, READY=ready),
             capture_output=True, text=True, timeout=10)
 
@@ -107,6 +111,76 @@ class ApplicationTransactionTests(unittest.TestCase):
             with self.subTest(fail=fail):
                 result = self.run_release("recover", fail=fail)
                 self.assertNotEqual(0, result.returncode)
+
+
+    def test_cutover_failures_stop_api_before_rollback_without_old_restart(self):
+        for fail in ("pipeline publish", "managed reconcile", "managed activate",
+                     "systemctl restart laplace-api", "managed commit"):
+            with self.subTest(fail=fail):
+                result = self.run_release(
+                    fail=fail, extra=("--keep-api-stopped-on-failure",))
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(
+                    ["systemctl stop laplace-api", "managed rollback"], self.events()[-2:])
+                self.assertNotIn("systemctl start laplace-api", self.events())
+
+    def test_cutover_success_still_activates_and_commits_matching_api(self):
+        result = self.run_release(extra=("--keep-api-stopped-on-failure",))
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([
+            "managed preflight", "managed begin", "pipeline publish", "managed reconcile",
+            "managed activate", "systemctl restart laplace-api", "readiness", "managed commit"],
+            self.events())
+
+    def test_cutover_readiness_failure_restores_payload_but_keeps_api_stopped(self):
+        result = self.run_release(
+            ready="false", extra=("--keep-api-stopped-on-failure",))
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(60, self.events().count("readiness"))
+        self.assertNotIn("managed commit", self.events())
+        self.assertEqual(
+            ["systemctl stop laplace-api", "managed rollback"], self.events()[-2:])
+        self.assertNotIn("systemctl start laplace-api", self.events())
+
+    def test_cutover_cleanup_failure_never_restarts_old_api(self):
+        for fail in ("systemctl stop laplace-api", "managed rollback"):
+            with self.subTest(fail=fail):
+                result = self.run_release(
+                    fail=fail, ready="false", extra=("--keep-api-stopped-on-failure",))
+                self.assertNotEqual(0, result.returncode)
+                self.assertNotIn("systemctl start laplace-api", self.events())
+                if fail == "systemctl stop laplace-api":
+                    self.assertNotIn("managed rollback", self.events())
+
+
+    def test_cutover_term_is_failure_and_repeated_term_does_not_interrupt_rollback(self):
+        adapter = ADAPTERS.replace(
+            'bash() { event "pipeline ${*: -1}"; }',
+            'bash() { event "pipeline ${*: -1}"; kill -TERM "$$"; }').replace(
+            'managed() { event "managed $1"; }',
+            'managed() { event "managed $1" || return; '
+            'if [[ "$1" == rollback ]]; then kill -TERM "$$"; '
+            'event "managed rollback completed"; fi; }')
+        result = self.run_release(
+            extra=("--keep-api-stopped-on-failure",), adapter=adapter)
+        self.assertEqual(143, result.returncode, result.stderr)
+        self.assertEqual([
+            "managed preflight", "managed begin", "pipeline publish",
+            "systemctl stop laplace-api", "managed rollback", "managed rollback completed"],
+            self.events())
+        self.assertNotIn("managed commit", self.events())
+        self.assertNotIn("systemctl start laplace-api", self.events())
+
+    def test_cutover_option_refuses_wrong_owner_or_unknown_arguments(self):
+        for mode, extra in (
+                ("recover", ("--keep-api-stopped-on-failure",)),
+                ("api-deploy", ("--keep-api-stopped-on-failure",)),
+                ("deploy", ("--unknown",)),
+                ("deploy", ("--keep-api-stopped-on-failure", "extra"))):
+            with self.subTest(mode=mode, extra=extra):
+                result = self.run_release(mode=mode, extra=extra)
+                self.assertEqual(2, result.returncode, result.stderr)
+                self.assertEqual([], self.events())
 
     def test_pending_api_transaction_refuses_full_deploy_before_any_action(self):
         for name in (".api-publish-backup", ".application-publish-owner", ".uci-publish-pending"):
