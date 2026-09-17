@@ -292,8 +292,9 @@ public sealed partial class IntentStage : SafeHandle
             Hash128 root = default;
             fixed (byte* utf8 = canonical)
             {
-                int rc = NativeInterop.ContentWitnessBatchAdd(
-                    handle, utf8, (nuint)canonical.Length, &src, &root);
+                int rc = NativeInterop.ContentWitnessBatchAddWorkers(
+                    handle, utf8, (nuint)canonical.Length, &src,
+                    (nuint)Math.Max(1, IngestTopology.Current.ComposeWorkers), &root);
                 if (rc == -3) throw new InvalidOperationException(
                     "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
                 if (rc != 0) return false;
@@ -305,14 +306,25 @@ public sealed partial class IntentStage : SafeHandle
     }
 
     public static TierTree? BuildContentTree(ReadOnlySpan<byte> canonical)
+        => BuildContentTree(canonical, Math.Max(1, IngestTopology.Current.ComposeWorkers));
+
+    /// <summary>
+    /// Build one exact semantic content DAG using an explicit native physical worker
+    /// grant. Worker count affects only scheduling; identity and placement remain the
+    /// scalar hash-composer law. This overload is also the parity/benchmark control for
+    /// single-object frontier scaling.
+    /// </summary>
+    public static TierTree? BuildContentTree(ReadOnlySpan<byte> canonical, int workerCount)
     {
         if (canonical.IsEmpty) return null;
+        if (workerCount <= 0) throw new ArgumentOutOfRangeException(nameof(workerCount));
         unsafe
         {
             IntPtr treePtr = IntPtr.Zero;
             fixed (byte* p = canonical)
             {
-                int rc = NativeInterop.ContentWitnessTreeBuild(p, (nuint)canonical.Length, &treePtr);
+                int rc = NativeInterop.ContentWitnessTreeBuildWorkers(
+                    p, (nuint)canonical.Length, (nuint)workerCount, &treePtr);
                 if (rc == -3) throw new InvalidOperationException(
                     "content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
                 if (rc != 0 || treePtr == IntPtr.Zero) return null;
