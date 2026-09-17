@@ -61,6 +61,16 @@ class SharedHostQueue(unittest.TestCase):
         self.assertNotIn("git checkout --force", text)
         self.assertIn("AUTHORIZATION: basic $checkout_auth", text)
 
+    def test_destructive_database_ops_require_exact_confirmation(self):
+        text = (WORKFLOWS / "db-ops.yml").read_text(encoding="utf-8")
+        self.assertIn('LAPLACE_DB_CONFIRM: ${{ inputs.confirm }}', text)
+        drop_guard = text.index('[[ "$LAPLACE_DB_CONFIRM" == "DROP $PGDATABASE" ]]')
+        recreate_guard = text.index('[[ "$LAPLACE_DB_CONFIRM" == "RECREATE $PGDATABASE" ]]')
+        drop_nuke = text.index('exec bash scripts/db-migrations.sh nuke --yes')
+        recreate_nuke = text.index('bash scripts/db-migrations.sh nuke --yes', drop_nuke + 1)
+        self.assertLess(drop_guard, drop_nuke)
+        self.assertLess(recreate_guard, recreate_nuke)
+
 
 class SeedHostOwnership(unittest.TestCase):
     def test_reusable_seed_shares_actions_lifecycle_group(self):
