@@ -3,6 +3,236 @@
 The `recorded` benchmark suite measures ordinary Chess Lab jobs from game generation through synchronous PostgreSQL writer completion and exact native game readback. The API, native parser/composer, shared writer and native readback remain the production implementations. The collector checks their receipts and aggregates measured work.
 
 
+## Full recorded cache after the query-corrected sample — 2026-09-17
+
+The ordinary unselected recorded-game export in
+[run 35255471485](https://github.com/SaltyPatron/Laplace/actions/runs/35255471485)
+completed the full current inventory of **2,440 games and 169,972 transition
+occurrences**. It includes the initial 140, the completed 2,000-game sample,
+both subsequent 140-game samples, and all 20 complete Stockfish-match games.
+The exporter checked those five authenticated, disjoint scopes against its
+authoritative full inventory; it did not create a synthetic union receipt or
+readmit any games.
+
+The export contains 146,896 unique recorded transitions and 172,412 position
+occurrences. The installed paired floors contain 383,288 position records and
+153,704 transition records, including finite and seed coverage. Those floor
+record counts are not counts of novel games. The selected generation is
+`02862b6cd9d2719d82dd5dd970a982d735747301d260193178e4f9647670d955`.
+
+Ordinary cache build and installation, API and UCI publication, and all four
+managed payloads passed. The data-only installation changed neither the
+non-chess artifacts nor the database contract. The first cache run then stopped
+in its detached direct-engine observer on a Python import-path error before an
+engine launched. Its failed receipt remains unchanged.
+
+[The verification-only continuation](https://github.com/SaltyPatron/Laplace/actions/runs/35256901378)
+then passed fresh direct-engine startup, actual API recorded-cache serving and
+the final runtime comparison. It authenticated the preceding installation's
+receipt and completed phases without repeating export, build, installation or
+recording. The original failed receipt and the separate successful
+post-installation verification receipt remain distinct. Nine installed
+forwarder checks and three TLS front-door checks also passed; reachability
+from a separate remote client was not tested.
+
+The fresh Laplace UCI process and serving API process mapped both exact files
+from that generation. The API revalidated a canonical recorded witness whose
+position and transition are absent from reproduced seed floors. Its persistent
+transition-hit counter increased by six around the request. Concurrent requests
+were not excluded, so this is a process-lifetime counter observation, not
+exclusive request attribution. No API position-hit or throughput claim is made.
+The direct check used an isolated configuration from the authenticated installed
+catalog; it did not test engine-entry installation or change the user's usual
+GUI settings. The raw transition-v1 header still lacks source identity fields;
+the sealed pair and export receipts supply that binding.
+
+The export receipt SHA-256 is
+`e7190eac03b2f92e7479c1c4d9dde98afc2e106fdae7df8584b535a456832bf0`.
+The original failed installation receipt is
+`2620fd9cde3a465fe6aa79614dc368d9029be1904ceb6fcb7286efe29b6c10c3`;
+the completed verification receipt is
+`0479c57cace085ea8f46ef8fbaadd685269aa6091c6f937ea982679a62f41427`.
+[The final authenticated reader](https://github.com/SaltyPatron/Laplace/actions/runs/35257134152)
+retains the exact direct, serving, runtime, proxy and TLS receipts.
+
+[The running GUI refresh](https://github.com/SaltyPatron/Laplace/actions/runs/35257240110)
+then restarted the supported user service and observed the new native CuteChess
+process and its window. Both selected floor environment paths point to the
+same `02862b6c…70d955` generation. The service remained bound only to
+`127.0.0.1:14501`; the user's configuration was unchanged. This 11.046-second
+check proves the running GUI's generation selection, not a new played game or
+a full remote-client attach. The earlier complete GUI-game and paired-match
+results remain the relevant gameplay evidence.
+
+Whole-product lifecycle completion remains false because the independent
+foundation journal is paused. The cache export and serving result is separate
+from the recorded-games/s measurements above, and changes neither their
+denominators nor the unmet 2,500 games/s target.
+
+## Completed recording after the consensus query correction — 2026-09-17
+
+[Run 35253536658](https://github.com/SaltyPatron/Laplace/actions/runs/35253536658)
+completed **140 further novel games at 1.903625567 recorded games/s** on
+installed source `af8fd17bda55d3403f46b01a073a298ab6c69597`.
+All 7,858 plies passed exact readback. The complete replay inserted nothing
+and reported zero for all 13 writer counters. The new Playing IDs are disjoint
+from the previously verified 2,300 games, including the 20-game Stockfish match.
+This brings the verified database union to **2,440 complete games**; a cache
+export is a separate operation and is not implied by that count.
+
+| Observed result | Value |
+|---|---:|
+| New complete games / distinct lines | 140 / 140 |
+| Full plies; minimum / mean / maximum per game | 7,858; 22 / 56.129 / 96 |
+| Published fresh-admission denominator | 73.5438746 s |
+| Recorded rate | 1.903625567 games/s |
+| Preparation + setup + fresh admission + replay workflow | 85.1015802 s |
+| Preparation / setup | 5.6098497 / 1.0313001 s |
+| Exact zero-writer replay | 4.8728463 s |
+| Committed, verified chunks | 2: 76 and 64 games |
+| Inserted entity / physicality / attestation rows | 318,373 / 317,516 / 42,713 |
+| COPY transactions started / committed | 26 / 26 |
+| Minimum 30-second window satisfied / 2,500 games/s target attained | Yes / No |
+
+The rate is exactly `140 / 73.5438746`. The inner fresh recording receipt's
+73.4717276-second interval is narrower and is not substituted for that
+denominator. Preparation authenticated the same original 256,162,073-byte PGN,
+scanned its 8,624 complete legal games, found 2,280 of those source games
+already present, selected 140, and observed 6,204 further eligible novel games.
+The 20 separately generated match games belong to the explicit disjointness
+union, not the original PGN's already-present count.
+
+Fresh writes acknowledged synchronous commit and local WAL flush, with
+`fsync` and `full_page_writes` enabled. Replay preserved the recorder's exact
+3,786-row evidence/standing scope, SHA-256
+`d26bf8e67a14816bcb2474fec93866bc5d785c191e8ad7ea5d51444454f981ab`.
+The source, installed native runtime and database incarnation checks passed
+before and after recording. No previous partial games were reused as new work.
+The actual fresh chunks
+contained 76 games / 4,121 plies and 64 games / 3,737 plies; replay reused
+those exact boundaries. The 3,374,058,598-byte producer threshold and nominal
+8,624-game parse/probe width were unchanged. These are byte-based admission
+chunks, not a fixed number of games per commit.
+
+The existing counters show that consensus upsert is no longer the dominant
+window in this sample:
+
+| Nested writer work | Previous 140-game sample | Query-corrected 140-game sample |
+|---|---:|---:|
+| Consensus upsert, including packing and database calls | 197.3125603 s | 7.5415379 s |
+| Highway-mask updates | 1.7247646 s | 2.4197664 s |
+| Full consensus acceptance participant | 199.2070600 s | 10.1688475 s |
+| Interpretation publication | 14.8722338 s | 19.9278227 s |
+| COPY and its transaction commits | 13.1872114 s | 17.9826895 s |
+| Physicality provider admission | 11.0317571 s | 13.2522282 s |
+| Presence verification | 3.1303467 s | 3.8911197 s |
+
+Both samples made 40 consensus-upsert calls. The processed cell count increased
+from 25,340 to 27,306 while their observed upsert wall time decreased by 96.18%.
+The query-corrected sample's exclusive `WriterApply` time was 67.744737905
+seconds, 92.11% of fresh admission. All named phase exits returned, and the
+diagnostic journal dropped zero entries. These nested windows must not be
+added to the enclosing writer or admission totals.
+
+The observed recorded rate is 3.38 times the previous sample's rate. This is
+not a controlled end-to-end speedup measurement: the newly selected games are
+different, mean length increased from 53.764 to 56.129 plies, and database
+population includes the prior games and partial Unicode foundation ingestion.
+The separate same-input PostgreSQL comparison below isolates the query change.
+The complete-game run establishes the actual installed result; the remaining
+interpretation, COPY and provider windows identify the next costs to inspect.
+
+The 678,602 inserted table rows average 4,847.16 per complete game. They are
+separate E/P/A write counters, not 678,602 independent chess concepts. Native
+descriptor and selected-view structures contribute expansion; the receipt
+does not provide a category breakdown that would justify dropping those rows.
+No schema, statistics policy, index or durability setting was changed for this
+measurement.
+
+Before/after machine snapshots retained the same 12-CPU affinity. Observed
+one-minute load changed from 0.30 to 1.56; available memory was 82,946,968 and
+82,954,516 KiB. CPU and memory PSI averages were zero, while I/O `some`
+avg10 rose from 1.35 to 4.06. These are resource observations, not proof that
+all unrelated machine activity was excluded.
+
+Two preceding current-chess preflights stopped before admission: one attempted
+engine-entry preparation while the user's GUI was open, and one did not observe
+a fresh persistent-cache hit on a repeated witness. Their failed receipts remain
+retained. This recorder authenticated the successful source/runtime/four-payload
+facts without relabelling either preflight as completed; a fresh native/DB
+comparison gated recording directly. GUI/HTTP serving closure and full cache
+publication remain separately reported. Whole-product lifecycle completion is
+still false because the paused foundation journal is nonterminal.
+
+The primary artifact is `10511237549`, ZIP SHA-256
+`4a7a238d67fdde9be4f91cc49b97bbd3c7bd2e0f6adbe51a678dc71ddfa827d8`.
+The followup receipt is
+`1d6d0f0e42cd0d7851602da81f7492c70b22bfd6f793a16dda82e8b07f809ea2`;
+the complete corpus measurement receipt is
+`16f0ea3444e32a2bff80542b8f1f24200c61049e48bf25954a47eee09b94c1ee`.
+
+[The authenticated reader](https://github.com/SaltyPatron/Laplace/actions/runs/35254357749)
+retains the complete phase receipts, exact chunk manifests and machine
+observations. The before/after runtime files have identical SHA-256
+`1d372d6129f63c65e73a308dfefe8f774da75ac40a1f84c332e48fe71776b10b`.
+
+## Canonical consensus query correction — 2026-09-17
+
+The recorded upsert counters above led to an actual PostgreSQL plan diagnosis.
+The evidence lookup itself was relatively short, but a join inside the fold
+repeatedly compared every retained evidence row with every requested cell.
+On authenticated bulk chess inputs, the MOVE case rejected 25,835,200 candidate
+row pairs and the OUTCOME case rejected 115,621,648. Both custom and generic
+plans exhibited the same problem.
+
+The permanent correction in source
+`af8fd17bda55d3403f46b01a073a298ab6c69597` computes the replayability decision
+once over each complete cell partition and filters on that result. It preserves
+every included evidence row, the ordered native aggregate, each row's fixed-point
+rounding, witness counts, maximum timestamp and mixed-transient exclusion.
+It changes neither global planner settings nor the database's statistics or
+index definitions. The final joins and native target-lock/write owners remain
+unchanged.
+
+[The same-snapshot query comparison](https://github.com/SaltyPatron/Laplace/actions/runs/35248243244)
+returned exactly the same eight output fields in all four cases. It used
+3,351 MOVE cells with 7,712 retained attestations and 525 OUTCOME cells with
+220,652 retained attestations. Direct query times changed as follows:
+
+| Actual query workload | Prior query | Corrected query |
+|---|---:|---:|
+| MOVE, custom plan | 1,515.851 ms | 100.663 ms |
+| MOVE, generic plan | 1,452.866 ms | 51.990 ms |
+| OUTCOME, custom plan | 6,654.230 ms | 327.167 ms |
+| OUTCOME, generic plan | 6,696.168 ms | 337.024 ms |
+
+These are sequential read-only query observations on retained inputs, not
+complete-game throughput or an estimate of the complete ingestion speedup.
+The retained analyzed plans show that the corrected window scans each
+evidence row once and removes the repeated pair comparisons. No temporary I/O
+was observed. The complete source, plans, output hashes and limitations are in
+[the consensus query evidence](CONSENSUS_EVIDENCE_QUERY.md).
+
+[Normal deployment 35249183993](https://github.com/SaltyPatron/Laplace/actions/runs/35249183993)
+compiled and installed the correction, restarted PostgreSQL after detecting its
+old deleted preload, and verified the current mapped native files. Native
+development completed 710 passes and one external-input skip; all six native
+database fixture stages passed. The managed database suites completed
+212 passes, zero failures and two external-input skips. This includes the
+source-bound 12-case evidence-period class and its new mixed-cell, null-object,
+missing-evidence and exact-rounding controls. The normal logger emits assembly
+totals, not a separate list of successful case names.
+
+The application publication and health checks passed. The overall normal
+lifecycle nevertheless failed on the already paused Unicode import's
+`INGEST_JOURNAL_NONTERMINAL` check: its journal still recorded 557,056 of
+1,114,112 input units. This failure remains in the evidence, and whole-product
+completion is not claimed. The subsequent recorder authenticated the successful
+source/runtime and
+managed-payload evidence, then passed its fresh native/DB checks before and
+after the complete measurement above.
+
+
 ## Paired complete-game comparison with Stockfish — 2026-09-17
 
 [Run 35242394194](https://github.com/SaltyPatron/Laplace/actions/runs/35242394194)
