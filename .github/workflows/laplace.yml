@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - ".github/**"
       - "docs/**"
       - "**/*.md"
   workflow_dispatch:
@@ -48,7 +47,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     concurrency:
-      group: laplace-mainline-ci-${{ github.ref_name }}
+      group: laplace-host-lifecycle
       cancel-in-progress: false
     env:
       LICHESS_API: ${{ secrets.LICHESS_API }}
@@ -103,7 +102,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     concurrency:
-      group: laplace-substrate-lifecycle
+      group: laplace-host-lifecycle
       cancel-in-progress: false
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}

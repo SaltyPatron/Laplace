@@ -65,7 +65,7 @@ run_publish() {
 }
 
 run_live_tests() {
-  export LAPLACE_API_BASE="${LAPLACE_API_BASE:-http://127.0.0.1:8080}"
+  export LAPLACE_API_BASE="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
   bash scripts/test-parallel.sh --profile live --suite live-floor
   bash scripts/test-parallel.sh --profile live --suite live-api
   bash scripts/test-parallel.sh --profile live --suite managed-live

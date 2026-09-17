@@ -28,7 +28,7 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     concurrency:
-      group: laplace-database-lifecycle
+      group: laplace-host-lifecycle
       cancel-in-progress: false
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}
