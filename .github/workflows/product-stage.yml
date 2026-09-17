@@ -53,6 +53,7 @@ jobs:
       LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
+      LAPLACE_SKIP_IF_SUPERSEDED: ${{ inputs.skip_if_superseded && '1' || '0' }}
       LICHESS_API: ${{ secrets.LICHESS_API }}
       LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
       LAPLACE_OPERATOR_TOKEN: ${{ secrets.LAPLACE_OPERATOR_TOKEN }}
@@ -92,7 +93,7 @@ jobs:
           git diff --cached --quiet
 
           checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
-          if [[ "${{ inputs.skip_if_superseded }}" == true ]]; then
+          if [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]]; then
             latest_main="$(GIT_CONFIG_COUNT=1 \
               GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
               GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \

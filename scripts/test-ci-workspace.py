@@ -95,6 +95,7 @@ class WorkspaceFixture(unittest.TestCase):
         environment = dict(self.env)
         if job == "mainline":
             environment["LAPLACE_STAGE"] = "mainline"
+            environment["LAPLACE_SKIP_IF_SUPERSEDED"] = "1"
         return subprocess.run(
             ["bash", "-c", body(job)], cwd=self.workspace, env=environment,
             text=True, capture_output=True, timeout=15,
@@ -105,7 +106,7 @@ class WorkspaceReservation(WorkspaceFixture):
     def test_mainline_waits_for_real_host_lock_and_preserves_build_cache(self):
         with (self.work / "host-resource.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            environment = dict(self.env, LAPLACE_STAGE="mainline")
+            environment = dict(self.env, LAPLACE_STAGE="mainline", LAPLACE_SKIP_IF_SUPERSEDED="1")
             process = subprocess.Popen(
                 ["bash", "-c", 'printf "started\\n";\n' + body("mainline")],
                 cwd=self.workspace, env=environment, text=True,
@@ -130,7 +131,7 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])
 
     def test_superseded_mainline_is_auditable_noop(self):
-        environment = dict(self.env, LAPLACE_STAGE="mainline", TARGET_SHA=self.old)
+        environment = dict(self.env, LAPLACE_STAGE="mainline", LAPLACE_SKIP_IF_SUPERSEDED="1", TARGET_SHA=self.old)
         result = subprocess.run(
             ["bash", "-c", body("mainline")],
             cwd=self.workspace, env=environment,
