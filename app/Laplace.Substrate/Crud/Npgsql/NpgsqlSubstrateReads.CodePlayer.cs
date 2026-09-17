@@ -46,7 +46,7 @@ public static partial class NpgsqlSubstrateReads
                 WHERE c.type_id = laplace.relation_type_id('HAS_RESULT')
                   AND c.subject_id = ANY(ARRAY(SELECT m.root_id FROM matched m))
                 GROUP BY c.subject_id
-            ), ranked AS MATERIALIZED (
+            ), ast_ranked AS MATERIALIZED (
                 SELECT m.root_id,
                        row_number() OVER (
                          ORDER BY COALESCE(v.eff_mu, consensus.glicko2_neutral_mu()) DESC,
@@ -58,14 +58,40 @@ public static partial class NpgsqlSubstrateReads
                          m.relation_kinds DESC, m.evidence_mass DESC,
                          m.witnesses DESC, m.root_id
                 LIMIT $6
+            ), model_candidates AS MATERIALIZED (
+                -- COMPLETES_TO is the model-ingestion continuation testimony. This is
+                -- the pooled consensus read: incompatible checkpoint witnesses have
+                -- already folded into one standing before proposal selection. No
+                -- runtime ensemble, answer vote, or tensor arithmetic is introduced.
+                SELECT ar.object AS id,
+                       max(ar.eff_mu) AS eff_mu,
+                       min(ar.rd) AS rd,
+                       sum(ar.witness_count)::bigint AS witnesses
+                FROM prompt_ids p
+                CROSS JOIN LATERAL generation.adjudicated_row(
+                    p.id, GREATEST(8, $5 * 2), 'COMPLETES_TO') ar
+                WHERE ar.object IS NOT NULL
+                GROUP BY ar.object
+            ), model_ranked AS MATERIALIZED (
+                SELECT m.id,
+                       row_number() OVER (
+                         ORDER BY m.eff_mu DESC, m.rd, m.witnesses DESC, m.id) AS ord
+                FROM model_candidates m
+                ORDER BY m.eff_mu DESC, m.rd, m.witnesses DESC, m.id
+                LIMIT $6
             ), feedback AS MATERIALIZED (
                 SELECT f.id, f.ord
                 FROM unnest($7::bytea[]) WITH ORDINALITY AS f(id, ord)
                 WHERE f.id IS NOT NULL
             ), frontier_rows AS MATERIALIZED (
+                -- WITNESS feedback has highest priority, then pooled model continuation
+                -- evidence, then exact Tree-sitter code roots. The canonical forward
+                -- program receives one combined frontier and owns the actual election.
                 SELECT f.id, 0 AS branch, f.ord::bigint AS ord FROM feedback f
                 UNION ALL
-                SELECT r.root_id, 1, r.ord FROM ranked r
+                SELECT m.id, 1, m.ord FROM model_ranked m
+                UNION ALL
+                SELECT r.root_id, 2, r.ord FROM ast_ranked r
             ), frontier AS MATERIALIZED (
                 SELECT array_agg(x.id ORDER BY x.branch, x.ord, x.id) AS ids
                 FROM (
