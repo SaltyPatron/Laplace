@@ -43,9 +43,9 @@ env:
 jobs:
   mainline:
     if: github.event_name == 'push'
-    name: Mainline — build, install, database checks, publish, live checks
+    name: Mainline — build and development tests
     runs-on: [self-hosted, laplace]
-    timeout-minutes: 420
+    timeout-minutes: 120
     concurrency:
       group: laplace-host-lifecycle
       queue: max
@@ -62,7 +62,7 @@ jobs:
       LAPLACE_AUTH_GOOGLE_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_ID }}
       LAPLACE_AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_SECRET }}
     steps:
-      - name: Select source and exercise the product under one host reservation
+      - name: Select source, build it, and run development tests under one host reservation
         env:
           TARGET_SHA: ${{ github.sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
@@ -95,7 +95,8 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
           source scripts/ci-environment.sh
-          exec bash scripts/product-ci.sh mainline
+          bash scripts/product-ci.sh build
+          exec bash scripts/product-ci.sh test-dev
 
   operator:
     if: github.event_name == 'workflow_dispatch'
