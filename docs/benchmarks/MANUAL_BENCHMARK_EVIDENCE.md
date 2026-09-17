@@ -2,12 +2,13 @@
 
 Tracking: `#1432`, `#1436`, `#1451`, `#1561`.
 
-Run the named suites through `scripts/benchmark_suite.py` on the selected machine and runtime. The former `benchmark-evidence.yml` dispatcher has been removed. Reuse an existing host operator when execution must go through Actions; do not create another branch or checkout for each measurement. The current product workflow selects build, installation, database maintenance, application publication and tests explicitly. A completed build is not a completed benchmark.
+Run named suites through the dispatch-only `.github/workflows/benchmark-evidence.yml` operator or directly through `scripts/benchmark_suite.py` on the selected machine. The workflow holds the authoritative host reservation across driver staging, target checkout, build/observation and measurement. Its orchestration driver is staged from the workflow dispatch revision before an arbitrary `target_ref` is checked out, so the selected benchmark target cannot silently replace the operator logic that governs the run. A completed build is not a completed benchmark.
 
 Benchmark meaning and receipts live in versioned source:
 
 - `scripts/benchmark-profiles.json` — named profiles and suites;
 - `scripts/benchmark_suite.py` — registry validator, suite runner and suite receipt;
+- `scripts/benchmark-evidence-ci.sh` — immutable Actions orchestration driver staged from the dispatch revision;
 - `scripts/benchmark_scale_plan.py` — managed-host serviceable/saturation worker planning;
 - `scripts/bench-compose.py` — conservative one-worker composition floor;
 - `scripts/bench-compose-scale.py` — finite unique-corpus/file-grain scaling diagnostic;
