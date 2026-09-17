@@ -46,8 +46,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
         marker = owner.index("git rev-parse HEAD > build/.laplace-source-revision")
         self.assertLess(build, marker)
 
-    def test_operator_check_runs_the_repository_ci_contracts(self):
-        source = PRODUCT.read_text(encoding="utf-8")
+    def test_repository_contract_owner_contains_every_static_control(self):
         owner = function("run_ci_contract_checks")
         for command in (
             "python3 scripts/validate-pipeline.py",
@@ -57,9 +56,24 @@ class ProductStageOwnershipContract(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertIn(command, owner)
+
+    def test_operator_check_runs_the_repository_ci_contracts(self):
+        source = PRODUCT.read_text(encoding="utf-8")
         check_case = source.split('  check)\n', 1)[1].split('    ;;', 1)[0]
         self.assertIn("run_ci_contract_checks", check_case)
         self.assertNotIn("bash -n scripts/product-ci.sh", check_case)
+
+    def test_mainline_runs_repository_contracts_before_build_and_install(self):
+        owner = function("run_deploy")
+        dependencies = owner.index("check_deps")
+        contracts = owner.index("run_ci_contract_checks")
+        build = owner.index("run_build")
+        development = owner.index("run_dev_tests")
+        install = owner.index("run_install")
+        self.assertLess(dependencies, contracts)
+        self.assertLess(contracts, build)
+        self.assertLess(build, development)
+        self.assertLess(development, install)
 
 
 class ProductRevisionProofExecution(unittest.TestCase):

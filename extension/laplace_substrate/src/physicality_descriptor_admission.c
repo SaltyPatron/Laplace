@@ -143,6 +143,39 @@ static void admission_cleanup(void *arg)
     }
 }
 
+
+/* SQL output datums own copies of every native result by this point. Retire
+ * only the native allocations cleanup actually frees before reserving the
+ * tuplestore's copy. PG buffers, list storage and the floor-owned index remain
+ * charged; the prior high-water observation must never move backwards. */
+static void admission_retire_sql_native(admission_state *s)
+{
+    stage_list *lists[3] = {&s->source, &s->admitted, &s->current};
+    size_t bytes = 0;
+
+    /* This preliminary plan is peak-only work and is freed before successful
+     * materialization. It cannot participate in a retained-byte refund. */
+    if (s->source_validation != NULL)
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                       errmsg("physicality descriptor SQL output retained a transient source plan")));
+
+    bytes = admission_add(bytes, physicality_descriptor_capture_bytes(s->capture));
+    /* take_stage removed each transferred stage from its former owner's
+     * getter. The output stage loop below accounts for those allocations once. */
+    bytes = admission_add(bytes, physicality_descriptor_materialization_bytes(s->materialization));
+    bytes = admission_add(bytes, physicality_descriptor_vocabulary_bytes(s->vocabulary));
+    for (size_t i = 0; i < 3; ++i) {
+        for (size_t j = 0; j < lists[i]->count; ++j)
+            bytes = admission_add(bytes, intent_stage_memory_bytes(lists[i]->items[j]));
+        bytes = admission_add(bytes, intent_stage_memory_bytes(s->output[i]));
+    }
+    if (bytes > s->bytes)
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                       errmsg("physicality descriptor SQL native release exceeds retained accounting")));
+    admission_cleanup(s);
+    s->bytes -= bytes;
+}
+
 static intent_stage_t **admission_stage_slot(admission_state *s, stage_list *list)
 {
     if (list->count == list->capacity) {
@@ -988,6 +1021,10 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
     values[9] = Int64GetDatum((int64_t)s->missing_count);
     values[10] = Int32GetDatum(s->rounds);
     values[11] = Int32GetDatum(s->operations);
+    /* Every pass-by-reference result now lives in its own PG datum. The
+     * native-return API keeps its borrowed outputs; this SQL path no longer
+     * reads forms, captured inputs or any generated stage. */
+    admission_retire_sql_native(s);
     /* The tuplestore receives another serialized result; reserve its payload
      * copy before constructing it. Backend allocator/SPI executor bookkeeping
      * and the separately reported floor-owned index are not process RSS. */

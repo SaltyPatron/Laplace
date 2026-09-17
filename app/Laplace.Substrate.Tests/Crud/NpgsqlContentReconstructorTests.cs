@@ -269,11 +269,26 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         var change = builder.Build();
         try
         {
-            await new NpgsqlSubstrateWriter(_pg.DataSource).ApplyAsync(change);
+            // Recipe election reads durable ENCODES standings, so fixture admission
+            // must use the same atomic evidence-and-consensus owner as production.
+            await using var writer = new ConsensusAccumulatingWriter(
+                new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
+            await writer.ApplyAsync(change);
         }
         finally
         {
             foreach (var stage in change.IntentStages) stage.Dispose();
+        }
+
+        await using (var standing = _pg.DataSource.CreateCommand("""
+            SELECT count(*) FROM laplace.consensus
+            WHERE type_id = @encodes AND subject_id = ANY(@recipes)
+            """))
+        {
+            standing.Parameters.Add("encodes", NpgsqlDbType.Bytea).Value = encodes.ToBytes();
+            standing.Parameters.Add("recipes", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value =
+                recipes.Select(id => id.ToBytes()).ToArray();
+            Assert.Equal(5L, (long)(await standing.ExecuteScalarAsync())!);
         }
 
         await using (var scalar = _pg.DataSource.CreateCommand(
@@ -356,11 +371,28 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         var change = builder.Build();
         try
         {
-            await new NpgsqlSubstrateWriter(_pg.DataSource).ApplyAsync(change);
+            // Recipe election reads durable ENCODES standings, so fixture admission
+            // must use the same atomic evidence-and-consensus owner as production.
+            await using var writer = new ConsensusAccumulatingWriter(
+                new NpgsqlSubstrateWriter(_pg.DataSource), _pg.DataSource);
+            await writer.ApplyAsync(change);
         }
         finally
         {
             foreach (var stage in change.IntentStages) stage.Dispose();
+        }
+
+        await using (var standing = _pg.DataSource.CreateCommand("""
+            SELECT EXISTS (
+                SELECT 1 FROM laplace.consensus
+                WHERE type_id = @encodes AND subject_id = @recipe AND object_id = @content)
+            """))
+        {
+            standing.Parameters.Add("encodes", NpgsqlDbType.Bytea).Value =
+                RelationTypeRegistry.RelationTypeId("ENCODES").ToBytes();
+            standing.Parameters.Add("recipe", NpgsqlDbType.Bytea).Value = recipe.ToBytes();
+            standing.Parameters.Add("content", NpgsqlDbType.Bytea).Value = content.ToBytes();
+            Assert.True((bool)(await standing.ExecuteScalarAsync())!);
         }
 
         await using var command = _pg.DataSource.CreateCommand("""

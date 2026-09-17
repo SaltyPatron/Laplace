@@ -66,6 +66,40 @@ public class WorkingSetApplyTests
         return (rd.GetInt64(0), rd.GetDateTime(1));
     }
 
+    private async Task<(string Token, string Kind, DateTime AppliedAt, bool SourceOwned)[]>
+        JournalStateAsync(Hash128 source)
+    {
+        await using var cmd = _pg.DataSource.CreateCommand("""
+            SELECT encode(j.working_set_id, 'hex'), j.receipt_kind, j.applied_at,
+                   EXISTS (SELECT 1 FROM laplace.ingest_flush_journal_sources AS owner
+                           WHERE owner.working_set_id = j.working_set_id
+                             AND owner.source_id = j.source_id)
+            FROM laplace.ingest_flush_journal AS j
+            WHERE j.source_id = $1
+            ORDER BY j.working_set_id
+            """);
+        cmd.Parameters.AddWithValue(source.ToBytes());
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var rows = new List<(string, string, DateTime, bool)>();
+        while (await reader.ReadAsync())
+            rows.Add((reader.GetString(0), reader.GetString(1), reader.GetDateTime(2), reader.GetBoolean(3)));
+        return rows.ToArray();
+    }
+
+    private static void AssertAppliedReceiptPair(
+        (string Token, string Kind, DateTime AppliedAt, bool SourceOwned)[] receipts)
+    {
+        // One source-semantic receipt suppresses repeated participant work; the
+        // distinct full receipt also binds the accepted interpretation payload.
+        Assert.Equal(2, receipts.Length);
+        Assert.NotEqual(receipts[0].Token, receipts[1].Token);
+        Assert.All(receipts, receipt =>
+        {
+            Assert.Equal("applied", receipt.Kind);
+            Assert.True(receipt.SourceOwned);
+        });
+    }
+
     [Fact]
     public async Task RepeatApply_PreservesContentAndTestimony()
     {
@@ -237,12 +271,11 @@ public class WorkingSetApplyTests
             Assert.Equal(1L, await CountEntityAsync(novel.Id));
             Assert.Equal(4L, (await AttStateAsync(witness.Id)).Games);
 
+            var receipts = await JournalStateAsync(source);
+            AssertAppliedReceiptPair(receipts);
             Assert.True((await writer.ApplyWorkingSetAsync(change)).JournalReplayHit);
             Assert.Equal(4L, (await AttStateAsync(witness.Id)).Games);
-            await using var committed = _pg.DataSource.CreateCommand(
-                "SELECT count(*) FROM laplace.ingest_flush_journal WHERE source_id = $1");
-            committed.Parameters.AddWithValue(source.ToBytes());
-            Assert.Equal(1L, (long)(await committed.ExecuteScalarAsync())!);
+            Assert.Equal(receipts, await JournalStateAsync(source));
         }
         finally
         {
@@ -355,20 +388,18 @@ public class WorkingSetApplyTests
         var first = await writer.ApplyWorkingSetAsync(change);
         Assert.Equal(1, first.EntitiesInserted);
         Assert.Equal(1, first.AttestationsInserted);
-        await using (var sourceClaim = _pg.DataSource.CreateCommand(
-            "SELECT count(*) FROM laplace.ingest_flush_journal WHERE source_id = $1"))
-        {
-            sourceClaim.Parameters.AddWithValue(src.ToBytes());
-            Assert.Equal(1L, (long)(await sourceClaim.ExecuteScalarAsync())!);
-        }
+        var receipts = await JournalStateAsync(src);
+        AssertAppliedReceiptPair(receipts);
 
         // Retry after commit-ambiguity: same change, same intent hash. The
         // journal token must block the additive attestation merge that a
         // plain re-apply would perform.
         var replay = await writer.ApplyWorkingSetAsync(new[] { change });
         Assert.True(replay.TrunkShortcircuitHit);
+        Assert.True(replay.JournalReplayHit);
         Assert.Equal(0, replay.EntitiesInserted);
         Assert.Equal(0, replay.AttestationsInserted);
+        Assert.Equal(receipts, await JournalStateAsync(src));
 
         var (games, _) = await AttStateAsync(H("att/journal"));
         Assert.Equal(4, games); // NOT 8 — replay did not double-count
@@ -382,6 +413,7 @@ public class WorkingSetApplyTests
         Assert.True((await writer.ApplyWorkingSetAsync(laterReplay)).JournalReplayHit);
         (games, _) = await AttStateAsync(H("att/journal"));
         Assert.Equal(4, games);
+        Assert.Equal(receipts, await JournalStateAsync(src));
 
         // A changed aggregate with the same row IDs is new semantic payload, so v2
         // admits it instead of mistaking the legacy ID-only token for an exact replay.

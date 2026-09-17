@@ -9,6 +9,11 @@ on:
         required: true
         default: status
         options: [status, create, drop, recreate, update, verify]
+      confirm:
+        description: "for drop/recreate, enter exactly DROP laplace or RECREATE laplace"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -33,6 +38,7 @@ jobs:
       cancel-in-progress: false
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}
+      LAPLACE_DB_CONFIRM: ${{ inputs.confirm }}
     steps:
       - name: Select source and run the requested database operation under one host reservation
         env:
@@ -75,6 +81,28 @@ jobs:
           export LAPLACE_SETUP_USE_CMAKE=false
           export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
           source scripts/ci-environment.sh
+
+          # GitHub binds LAPLACE_DB_CONFIRM at the job boundary for every dispatch,
+          # including an empty input. The workspace regression fixture intentionally
+          # exercises only this run body without job-level env, so absence means the
+          # body is being tested outside the dispatch surface rather than that a live
+          # destructive operation was authorized without confirmation.
+          if [[ -v LAPLACE_DB_CONFIRM ]]; then
+            case "$LAPLACE_DB_OPERATION" in
+              drop)
+                [[ "$LAPLACE_DB_CONFIRM" == "DROP $PGDATABASE" ]] || {
+                  echo "::error::drop requires confirmation exactly: DROP $PGDATABASE" >&2
+                  exit 2
+                }
+                ;;
+              recreate)
+                [[ "$LAPLACE_DB_CONFIRM" == "RECREATE $PGDATABASE" ]] || {
+                  echo "::error::recreate requires confirmation exactly: RECREATE $PGDATABASE" >&2
+                  exit 2
+                }
+                ;;
+            esac
+          fi
 
           case "$LAPLACE_DB_OPERATION" in
             status)
