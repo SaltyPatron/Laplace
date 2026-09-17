@@ -11,10 +11,10 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      BASE: 711f9d71d739d22589d960b0d37b9920f845e742
+      BASE: 88be3027d36150bc551698dae9d6a66690bb6bcd
       EXTERNAL: 5fbcaca34fc882fa376e49fe595302dd092a098d
       COMMON: ea4cfa7382086feddeb608723b7c72164e5e1499
-      MANIFEST: e586efa601c175c05ac718e891a7a7b8a54a3dbd
+      MANIFEST: 877d4ae006362f43becbb421193716253c12e05e
       CANDIDATE_REF: review/canonical-identity-20260917
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
