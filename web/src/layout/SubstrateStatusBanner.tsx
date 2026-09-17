@@ -41,7 +41,7 @@ export function SubstrateStatusBanner() {
           entities: 0,
           consensus_relations: 0,
           perfcache_ready: false,
-          detail: 'Could not reach /health/ready.',
+          detail: 'Could not reach /health/status.',
         });
       }
     };
