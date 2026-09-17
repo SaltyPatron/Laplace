@@ -44,6 +44,7 @@ jobs:
     timeout-minutes: 420
     env:
       LAPLACE_STAGE: ${{ inputs.stage }}
+      LAPLACE_CI_REVISION_SCOPED_BUILD: "1"
       LAPLACE_PROVISION_TOOLS: ${{ inputs.stage == 'provision' && '1' || '0' }}
       LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
