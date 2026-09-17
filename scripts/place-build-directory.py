@@ -34,6 +34,15 @@ def inventory(root):
     return result
 
 
+def placement_identity(checkout):
+    """Preserve the legacy checkout cache unless an explicit revision key is selected."""
+    payload = os.fsencode(str(checkout))
+    key = os.environ.get('LAPLACE_BUILD_KEY', '').strip()
+    if key:
+        payload += b'\0' + os.fsencode(key)
+    return hashlib.sha256(payload).hexdigest()[:16]
+
+
 def canonicalize_cmake_cache(target, lock_root, identity):
     cache = target / 'CMakeCache.txt'
     if not cache.is_file():
@@ -56,7 +65,7 @@ def place(checkout):
     if subprocess.run(['mountpoint', '-q', '/build']).returncode:
         raise RuntimeError('/build must be mounted')
     checkout = checkout.resolve(strict=True)
-    identity = hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16]
+    identity = placement_identity(checkout)
     target = Path('/build/laplace/build') / ('laplace-' + identity)
     old_target = Path('/build/laplace/build') / ('legacy-' + identity)
     source = checkout / 'build'
