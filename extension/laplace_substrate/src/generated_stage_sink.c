@@ -749,6 +749,15 @@ void laplace_generated_stage_sink_lock(void)
     if (SPI_finish()!=SPI_OK_FINISH) elog(ERROR,"generated stage sink: SPI_finish failed");
 }
 
+/* Ordinary entity INSERT/COPY uses the same bounded transaction lock as
+ * generated native writes. Keep the SQL key and isolation rule in one owner. */
+PG_FUNCTION_INFO_V1(pg_laplace_entity_write_lock);
+Datum pg_laplace_entity_write_lock(PG_FUNCTION_ARGS)
+{
+    laplace_generated_stage_sink_lock();
+    PG_RETURN_VOID();
+}
+
 static void sink_validate_bodies(SinkState *s,const intent_stage_t *const *stages,size_t stage_count)
 {
     size_t count=0,vertices=0,logical=0;

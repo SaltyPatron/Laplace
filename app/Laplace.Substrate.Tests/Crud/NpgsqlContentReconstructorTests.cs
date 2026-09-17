@@ -232,6 +232,153 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         for (int i = 0; i < 5; i++) Assert.True(reader.GetBoolean(i));
     }
 
+
+    [Fact]
+    public async Task ModelRecipes_BatchPreservesElectionNullsAndAlignedProvenance()
+    {
+        CodepointPerfcache.LoadDefault();
+        string nonce = Guid.NewGuid().ToString("N");
+        Hash128 source = Hash128.OfCanonical($"model-recipes/source/{nonce}");
+        Hash128 otherSource = Hash128.OfCanonical($"model-recipes/other-source/{nonce}");
+        Hash128[] recipes = Enumerable.Range(0, 5)
+            .Select(i => Hash128.OfCanonical($"model-recipes/{nonce}/{i}")).ToArray();
+        string[] json = ["{\"name\":\"alpha-" + nonce + "\"}", "{\"name\":\"beta-" + nonce + "\"}"];
+        using var builder = new SubstrateChangeBuilder(source, "test/model-recipes/aligned")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
+            .DeclareSourcePrior(otherSource, SourceTrust.StructuredCorpus);
+        Assert.True(builder.ContentStage.TryAddContentWitness(
+            Encoding.UTF8.GetBytes(json[0]), source, out Hash128 a));
+        Assert.True(builder.ContentStage.TryAddContentWitness(
+            Encoding.UTF8.GetBytes(json[1]), source, out Hash128 b));
+        // Valid binary content that has no PostgreSQL text representation keeps
+        // its recipe row with a NULL body; it must not shift the other columns.
+        Assert.True(builder.ContentStage.TryAddContentWitness([0], source, out Hash128 nul));
+
+        builder.AddEntity(recipes[0], EntityTier.Word, EntityTypeRegistry.ModelRecipe, source)
+            .AddEntity(recipes[0], EntityTier.Sentence, EntityTypeRegistry.ModelRecipe, otherSource)
+            .AddEntity(recipes[1], EntityTier.Word, EntityTypeRegistry.ModelRecipe)
+            .AddEntity(recipes[2], EntityTier.Word, EntityTypeRegistry.ModelRecipe, otherSource)
+            .AddEntity(recipes[3], EntityTier.Word, EntityTypeRegistry.ModelRecipe, source)
+            .AddEntity(recipes[4], EntityTier.Word, EntityTypeRegistry.ModelRecipe, source);
+        Hash128 encodes = RelationTypeRegistry.RelationTypeId("ENCODES");
+        foreach (var (recipe, content) in new[]
+                 { (recipes[0], a), (recipes[0], b), (recipes[1], b), (recipes[2], b), (recipes[3], nul) })
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                recipe, encodes, content, source, null, 1.0));
+
+        var change = builder.Build();
+        try
+        {
+            await new NpgsqlSubstrateWriter(_pg.DataSource).ApplyAsync(change);
+        }
+        finally
+        {
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
+
+        await using (var scalar = _pg.DataSource.CreateCommand(
+            "SELECT realize.render_text_fast(@a, 16), realize.render_text_fast(@b, 16)"))
+        {
+            scalar.Parameters.Add("a", NpgsqlDbType.Bytea).Value = a.ToBytes();
+            scalar.Parameters.Add("b", NpgsqlDbType.Bytea).Value = b.ToBytes();
+            await using var reader = await scalar.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(json[0], reader.GetString(0));
+            Assert.Equal(json[1], reader.GetString(1));
+        }
+
+        string Hex(Hash128 id) => Convert.ToHexString(id.ToBytes());
+        string firstSource = new[] { Hex(source), Hex(otherSource) }
+            .OrderBy(value => value, StringComparer.Ordinal).First();
+        string chosenJson = StringComparer.Ordinal.Compare(Hex(a), Hex(b)) < 0 ? json[0] : json[1];
+        var expected = new Dictionary<string, (string? Json, string? Source)>
+        {
+            [Hex(recipes[0])] = (chosenJson, firstSource),
+            [Hex(recipes[1])] = (json[1], null),
+            [Hex(recipes[2])] = (json[1], Hex(otherSource)),
+            [Hex(recipes[3])] = (null, Hex(source)),
+        };
+        await using var command = _pg.DataSource.CreateCommand("""
+            SELECT recipe_id, recipe_json, first_observed_by
+            FROM structural.model_recipes()
+            WHERE recipe_id = ANY(@ids)
+            """);
+        command.Parameters.Add("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value =
+            recipes.Select(id => id.ToBytes()).ToArray();
+        await using var rows = await command.ExecuteReaderAsync();
+        var actual = new Dictionary<string, (string? Json, string? Source)>();
+        while (await rows.ReadAsync())
+            actual.Add(Convert.ToHexString((byte[])rows[0]),
+                (rows.IsDBNull(1) ? null : rows.GetString(1),
+                 rows.IsDBNull(2) ? null : Convert.ToHexString((byte[])rows[2])));
+        Assert.Equal(expected.Count, actual.Count);
+        foreach (var row in expected)
+        {
+            Assert.True(actual.TryGetValue(row.Key, out var value), row.Key);
+            Assert.Equal(row.Value, value);
+        }
+        Assert.DoesNotContain(Hex(recipes[4]), actual.Keys);
+    }
+
+    [Fact]
+    public async Task ModelRecipes_ReconstructsCompleteJsonBeyondTheFormerPreviewDepth()
+    {
+        CodepointPerfcache.LoadDefault();
+        string nonce = Guid.NewGuid().ToString("N");
+        string json = "{\"name\":\"deep-" + nonce + "\"}";
+        Hash128 source = Hash128.OfCanonical($"model-recipes/deep-source/{nonce}");
+        Hash128 recipe = Hash128.OfCanonical($"model-recipes/deep/{nonce}");
+        using var builder = new SubstrateChangeBuilder(source, "test/model-recipes/deep")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus);
+        Hilbert128 hilbert = Hilbert128.Encode([1, 0, 0, 0]);
+        Hash128 content = default;
+        for (int i = 0; i < json.Length; ++i)
+        {
+            Assert.True(builder.ContentStage.TryAddContentWitness(
+                Encoding.UTF8.GetBytes(json[i].ToString()), source, out Hash128 atom));
+            if (i == 0)
+            {
+                content = atom;
+                continue;
+            }
+            // Every parent has two real children and their native Merkle identity.
+            // This is a valid deep constituent DAG, not a corrupt unary wrapper.
+            Hash128[] children = [content, atom];
+            byte tier = checked((byte)(i + 1));
+            content = Hash128.Merkle(tier, children);
+            builder.AddEntity(content, tier, EntityTypeRegistry.Text, source)
+                .AddPhysicality(Composition(content, children, source, hilbert));
+        }
+        Assert.True(json.Length > 17);
+        builder.AddEntity(recipe, EntityTier.Word, EntityTypeRegistry.ModelRecipe, source)
+            .AddAttestation(NativeAttestation.CategoricalResolved(
+                recipe, RelationTypeRegistry.RelationTypeId("ENCODES"), content, source, null, 1.0));
+        var change = builder.Build();
+        try
+        {
+            await new NpgsqlSubstrateWriter(_pg.DataSource).ApplyAsync(change);
+        }
+        finally
+        {
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
+
+        await using var command = _pg.DataSource.CreateCommand("""
+            SELECT realize.render_text_fast(@content, 16) IS NULL,
+                   m.recipe_json, m.first_observed_by
+            FROM structural.model_recipes() m
+            WHERE m.recipe_id = @recipe
+            """);
+        command.Parameters.Add("content", NpgsqlDbType.Bytea).Value = content.ToBytes();
+        command.Parameters.Add("recipe", NpgsqlDbType.Bytea).Value = recipe.ToBytes();
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.True(reader.GetBoolean(0), "fixture must exceed the former scalar preview depth");
+        Assert.Equal(json, reader.GetString(1));
+        Assert.Equal(source.ToBytes(), (byte[])reader[2]);
+        Assert.False(await reader.ReadAsync());
+    }
+
     private static PhysicalityRow Composition(
         Hash128 entity, Hash128[] children, Hash128 source, Hilbert128 hilbert) =>
         new(

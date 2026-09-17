@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Laplace.Chess.Service;
 
@@ -24,12 +25,12 @@ public static class ChessCalibration
             return new("not-selected", "No installed calibration has been selected.");
         try
         {
-            using var manifest = JsonDocument.Parse(await ReadBoundedAsync(manifestPath, 1 << 20, ct));
-            if (!manifest.RootElement.TryGetProperty("calibration", out var selection)
-                || !selection.TryGetProperty("reportSha256", out var hashValue))
+            var manifest = JsonSerializer.Deserialize<DesktopManifest>(
+                await ReadBoundedAsync(manifestPath, 1 << 20, ct), DesktopJson);
+            var selection = manifest?.Calibration;
+            if (selection?.ReportSha256 is not { } hash)
                 return new("not-selected", "No measured calibration has been selected.");
-            string? hash = hashValue.GetString();
-            if (hash is null || hash.Length != 64
+            if (hash.Length != 64
                 || hash.Any(c => c is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
                 return new("invalid", "The selected calibration identifier is invalid.");
             // The hash selects a fixed installed location; no caller or manifest path is opened.
@@ -37,14 +38,11 @@ public static class ChessCalibration
             byte[] raw = await ReadBoundedAsync(reportPath, 32 << 20, ct);
             if (!string.Equals(Convert.ToHexStringLower(SHA256.HashData(raw)), hash, StringComparison.Ordinal))
                 return new("invalid", "The saved report does not match its selected checksum.", hash);
-            using var document = JsonDocument.Parse(raw);
-            var report = document.RootElement;
-            if (Text(report, "schema") != "laplace.benchmark.chess-environment/v1")
+            var report = JsonSerializer.Deserialize<CalibrationReport>(raw, ReportJson);
+            if (report?.Schema != "laplace.benchmark.chess-environment/v1")
                 return new("unsupported", "This calibration report uses an unsupported format.", hash);
-            string? selectionStatus = Text(selection, "status");
             bool? engineMatches = null;
-            if (report.TryGetProperty("stockfish_identity", out var identity)
-                && Text(identity, "sha256") is { } expected)
+            if (report.StockfishIdentity?.Sha256 is { } expected)
             {
                 engineMatches = false;
                 if (!string.IsNullOrWhiteSpace(stockfish) && File.Exists(stockfish))
@@ -54,26 +52,9 @@ public static class ChessCalibration
                         await SHA256.HashDataAsync(executable, ct)), expected, StringComparison.Ordinal);
                 }
             }
-            // Project documented measurement fields only. Process logs, environment and
-            // unrelated runtime observations are never part of this browser response.
-            var visible = Pick(report, "schema", "status", "started_utc", "finished_utc",
-                "elapsed_wall_seconds", "evidence_invalid");
-            visible["host"] = Pick(Property(report, "host"), "hostname", "cpu_models",
-                "logical_cpus_reported", "physical_memory_bytes", "effective_cpu_capacity");
-            visible["parameters"] = Pick(Property(report, "parameters"), "repeats", "bench_limit",
-                "bench_limit_type", "match_depth", "max_moves", "match_threads", "match_hash_mb");
-            visible["plan"] = Pick(Property(report, "plan"), "reserved_cpu_capacity",
-                "games_per_match_sample", "match_threads_per_engine", "match_hash_mib_per_engine");
-            visible["stockfish_identity"] = Pick(Property(report, "stockfish_identity"),
-                "sha256", "source_commit", "source_networks");
-            visible["recommendations"] = Pick(Property(report, "recommendations"),
-                "bench_suite_latency", "search_node_throughput", "bounded_tournament_throughput");
-            visible["stockfish_bench"] = Rows(report, "stockfish_bench", "status", "threads",
-                "hash_mib", "steady_engine_seconds", "steady_nodes_per_second");
-            visible["cutechess_matches"] = Rows(report, "cutechess_matches", "status", "concurrency",
-                "steady_games_per_second", "steady_plies_per_second");
-            return new("available", ReportSha256: hash, SelectionStatus: selectionStatus,
-                CurrentEngineMatches: engineMatches, Report: JsonSerializer.SerializeToElement(visible));
+            return new("available", ReportSha256: hash, SelectionStatus: selection.Status,
+                CurrentEngineMatches: engineMatches,
+                Report: JsonSerializer.SerializeToElement(report, ReportJson));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException
             or JsonException or InvalidOperationException or ArgumentException)
@@ -97,18 +78,57 @@ public static class ChessCalibration
         return result.ToArray();
     }
 
-    private static string? Text(JsonElement value, string key)
-        => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out var field)
-            && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
+    // These are the application-owned measurement envelopes emitted by
+    // benchmark-chess-environment.py and the desktop installer.
+    // Like ChessExperimentEvidence, this boundary reads typed receipt fields;
+    // source chess containers continue through their registered grammar.
+    // Omitted members (process logs, environment, runtime observations) are never
+    // deserialized into the browser projection, including inside nested records.
+    private static readonly JsonSerializerOptions DesktopJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+    private static readonly JsonSerializerOptions ReportJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
-    private static JsonElement Property(JsonElement value, string key)
-        => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out var field) ? field : default;
+    private sealed record DesktopManifest(CalibrationSelection? Calibration);
+    private sealed record CalibrationSelection(string? Status, string? ReportSha256);
 
-    private static Dictionary<string, object?> Pick(JsonElement value, params string[] keys)
-        => keys.Where(key => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out _))
-            .ToDictionary(key => key, key => (object?)value.GetProperty(key).Clone(), StringComparer.Ordinal);
+    private sealed record CalibrationReport(string? Schema, string? Status,
+        string? StartedUtc, string? FinishedUtc, double? ElapsedWallSeconds,
+        bool? EvidenceInvalid, MeasuredHost? Host, Parameters? Parameters,
+        ResourcePlan? Plan, EngineIdentity? StockfishIdentity,
+        Recommendations? Recommendations, BenchCase[]? StockfishBench,
+        MatchCase[]? CutechessMatches);
 
-    private static object[] Rows(JsonElement value, string key, params string[] fields)
-        => Property(value, key) is { ValueKind: JsonValueKind.Array } rows
-            ? rows.EnumerateArray().Select(row => (object)Pick(row, fields)).ToArray() : [];
+    private sealed record MeasuredHost(string? Hostname, string[]? CpuModels,
+        int? LogicalCpusReported, long? PhysicalMemoryBytes, double? EffectiveCpuCapacity);
+    private sealed record Parameters(int? Repeats, int? BenchLimit, string? BenchLimitType,
+        int? MatchDepth, int? MaxMoves, int? MatchThreads, int? MatchHashMb);
+    private sealed record ResourcePlan(double? ReservedCpuCapacity, int? GamesPerMatchSample,
+        int? MatchThreadsPerEngine, int? MatchHashMibPerEngine);
+    private sealed record EngineIdentity(string? Sha256, string? SourceCommit,
+        NetworkIdentity[]? SourceNetworks);
+    private sealed record NetworkIdentity(string? Name, string? Path, bool? Present,
+        long? SizeBytes, string? Sha256);
+
+    private sealed record Distribution(int? Count, double? Median, double? Min,
+        double? Max, double? Mean, double? Stdev, double? RelativeRange);
+    private sealed record BenchCase(string? Status, int? Threads, int? HashMib,
+        Distribution? SteadyEngineSeconds, Distribution? SteadyNodesPerSecond);
+    private sealed record MatchCase(string? Status, int? Concurrency,
+        Distribution? SteadyGamesPerSecond, Distribution? SteadyPliesPerSecond);
+
+    private sealed record Recommendations(BenchLatency? BenchSuiteLatency,
+        SearchThroughput? SearchNodeThroughput, TournamentThroughput? BoundedTournamentThroughput);
+    private sealed record BenchLatency(int? Threads, int? HashMib, double? MedianSeconds,
+        string? Scope);
+    private sealed record SearchThroughput(int? Threads, int? HashMib,
+        double? MedianNodesPerSecond, bool? ObservedRangeOverlapsAnotherConfiguration);
+    private sealed record TournamentThroughput(int? Concurrency, int? ThreadsPerEngine,
+        int? HashMibPerEngine, double? MedianPliesPerSecond,
+        bool? ObservedRangeOverlapsAnotherConfiguration, string? Scope);
 }

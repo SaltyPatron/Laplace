@@ -21,10 +21,20 @@ BEGIN ATOMIC
           ON c.subject_id = r.id
          AND c.type_id = laplace.relation_type_id('ENCODES')
         GROUP BY r.id, r.first_observed_by
+    ), selected AS MATERIALIZED (
+        SELECT array_agg(id ORDER BY id) AS recipe_ids,
+               array_agg(content_id ORDER BY id) AS content_ids,
+               array_agg(first_observed_by ORDER BY id) AS sources
+        FROM encoded
+        WHERE content_id IS NOT NULL
+    ), rendered AS MATERIALIZED (
+        -- These are complete recipe documents consumed as JSON, not previews.
+        -- Elect all content ids first, then resolve the aligned set once.
+        SELECT recipe_ids, sources,
+               realize.render_text_batch(content_ids) AS bodies
+        FROM selected
     )
-    SELECT id,
-           realize.render_text_fast(content_id, 16),
-           first_observed_by
-    FROM encoded
-    WHERE content_id IS NOT NULL;
+    SELECT r.recipe_ids[n.ord], r.bodies[n.ord], r.sources[n.ord]
+    FROM rendered r
+    CROSS JOIN LATERAL generate_subscripts(r.recipe_ids, 1) AS n(ord);
 END;

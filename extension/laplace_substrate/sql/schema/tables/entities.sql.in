@@ -86,6 +86,14 @@ BEGIN
     END LOOP;
 END $$;
 
+-- Reuse the existing native generated-write boundary; one transaction lock
+-- covers any number of direct rows. Its READ COMMITTED requirement also keeps
+-- the post-wait facet snapshot current before the trigger writes its summary.
+CREATE OR REPLACE FUNCTION @extschema@.entity_write_lock()
+RETURNS void
+AS 'EXECUTION_LIBRARY', 'pg_laplace_entity_write_lock'
+LANGUAGE C VOLATILE PARALLEL UNSAFE;
+
 -- Storage invariant fallback. The normal ingest spine publishes all
 -- interpretations set-wise after canonical COPY in the same control transaction.
 -- Direct SQL/legacy callers still pass through here, so no caller can create a
@@ -100,10 +108,11 @@ DECLARE
     summary_type bytea;
     summary_source bytea;
 BEGIN
-    -- Direct ordinary INSERT/COPY shares the same canonical write ordering as
-    -- managed/native bulk owners. Lock before observing either the sidecar or E;
-    -- a waiter must see the prior committed facet before computing its summary.
-    PERFORM pg_advisory_xact_lock(hashtextextended('laplace_apply_batch', 0));
+    -- Direct ordinary INSERT/COPY shares the generated native writer boundary.
+    -- Managed content-addressed COPY retains its separate presence/retry route.
+    -- Lock before observing either the sidecar or E so a waiter sees committed
+    -- facets; do not duplicate the native owner's key or grow per-entity locks.
+    PERFORM @extschema@.entity_write_lock();
 
     INSERT INTO @extschema@.entity_interpretations AS ei(
         entity_id, tier, type_id, first_observed_by)

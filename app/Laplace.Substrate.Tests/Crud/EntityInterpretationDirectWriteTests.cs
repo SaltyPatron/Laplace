@@ -1,6 +1,7 @@
 using global::Npgsql;
 using NpgsqlTypes;
 using System.Diagnostics;
+using System.Data;
 using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
@@ -208,4 +209,136 @@ public sealed class EntityInterpretationDirectWriteTests(LocalPgFixture pg)
             await cleanup.ExecuteNonQueryAsync();
         }
     }
+    [Fact]
+    public async Task DirectRowsShareTheNativeWriterBoundaryWithOneTransactionLock()
+    {
+        byte[] type = Enumerable.Repeat((byte)0x47, 16).ToArray();
+        byte[][] batch = Enumerable.Range(0, 512).Select(_ => Guid.NewGuid().ToByteArray()).ToArray();
+        byte[] secondId = Guid.NewGuid().ToByteArray();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var first = await pg.DataSource.OpenConnectionAsync(stop.Token);
+        await using var second = await pg.DataSource.OpenConnectionAsync(stop.Token);
+        await using var observer = await pg.DataSource.OpenConnectionAsync(stop.Token);
+        await using var tx1 = await first.BeginTransactionAsync(stop.Token);
+        await using var tx2 = await second.BeginTransactionAsync(stop.Token);
+        await using (var take = first.CreateCommand())
+        {
+            take.Transaction = tx1;
+            // This SQL entry calls the exact C owner used by generated native writes.
+            take.CommandText = "SELECT laplace.entity_write_lock()";
+            await take.ExecuteNonQueryAsync(stop.Token);
+        }
+        await using var insertSecond = second.CreateCommand();
+        insertSecond.Transaction = tx2;
+        insertSecond.CommandText = "INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,5,$2)";
+        insertSecond.Parameters.AddWithValue(secondId);
+        insertSecond.Parameters.AddWithValue(type);
+        Task pending = insertSecond.ExecuteNonQueryAsync(stop.Token);
+        try
+        {
+            var wait = Stopwatch.StartNew();
+            bool blocked = false;
+            while (wait.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                await using var observe = observer.CreateCommand();
+                observe.CommandText = "SELECT $1=ANY(pg_blocking_pids($2))";
+                observe.Parameters.AddWithValue(first.ProcessID);
+                observe.Parameters.AddWithValue(second.ProcessID);
+                blocked = (bool)(await observe.ExecuteScalarAsync(stop.Token))!;
+                if (blocked) break;
+                Assert.False(pending.IsCompleted, "ordinary insert escaped the native write boundary");
+                await Task.Delay(20, stop.Token);
+            }
+            Assert.True(blocked, "ordinary insert did not wait behind the actual native lock owner");
+            await using (var insertBatch = first.CreateCommand())
+            {
+                insertBatch.Transaction = tx1;
+                insertBatch.CommandText = """
+                    INSERT INTO laplace.entities(id,tier,type_id)
+                    SELECT id,3,$2 FROM unnest($1::bytea[]) AS ids(id)
+                    """;
+                insertBatch.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, batch);
+                insertBatch.Parameters.AddWithValue(type);
+                Assert.Equal(512, await insertBatch.ExecuteNonQueryAsync(stop.Token));
+            }
+            await using (var inspect = first.CreateCommand())
+            {
+                inspect.Transaction = tx1;
+                inspect.CommandText = """
+                    SELECT (SELECT count(*) FROM pg_locks
+                            WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted),
+                           (SELECT count(*) FROM laplace.entities WHERE id=ANY($1)),
+                           (SELECT count(*) FROM laplace.entity_interpretations
+                            WHERE entity_id=ANY($1) AND tier=3 AND type_id=$2)
+                    """;
+                inspect.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, batch);
+                inspect.Parameters.AddWithValue(type);
+                await using var rows = await inspect.ExecuteReaderAsync(stop.Token);
+                Assert.True(await rows.ReadAsync(stop.Token));
+                Assert.Equal(1L, rows.GetInt64(0));
+                Assert.Equal(512L, rows.GetInt64(1));
+                Assert.Equal(512L, rows.GetInt64(2));
+            }
+            await tx1.RollbackAsync(stop.Token);
+            await pending;
+            await using (var inspect = second.CreateCommand())
+            {
+                inspect.Transaction = tx2;
+                inspect.CommandText = """
+                    SELECT (SELECT count(*) FROM laplace.entities WHERE id=$1),
+                           (SELECT count(*) FROM laplace.entity_interpretations
+                            WHERE entity_id=$1 AND tier=5 AND type_id=$2)
+                    """;
+                inspect.Parameters.AddWithValue(secondId);
+                inspect.Parameters.AddWithValue(type);
+                await using var rows = await inspect.ExecuteReaderAsync(stop.Token);
+                Assert.True(await rows.ReadAsync(stop.Token));
+                Assert.Equal(1L, rows.GetInt64(0));
+                Assert.Equal(1L, rows.GetInt64(1));
+            }
+            await tx2.RollbackAsync(stop.Token);
+            await using var absent = observer.CreateCommand();
+            absent.CommandText = """
+                SELECT (SELECT count(*) FROM laplace.entities WHERE id=ANY($1))
+                     + (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=ANY($1))
+                """;
+            absent.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                batch.Append(secondId).ToArray());
+            Assert.Equal(0L, (long)(await absent.ExecuteScalarAsync(stop.Token))!);
+        }
+        finally
+        {
+            if (!pending.IsCompleted) stop.Cancel();
+            try { await pending; } catch { /* Preserve the primary failure; dispose rolls back owned rows. */ }
+        }
+    }
+
+    [Theory]
+    [InlineData(IsolationLevel.RepeatableRead)]
+    [InlineData(IsolationLevel.Serializable)]
+    public async Task TransactionSnapshotDirectWriteRefusesBeforeFacetOrEntityMutation(IsolationLevel isolation)
+    {
+        byte[] id = Guid.NewGuid().ToByteArray();
+        byte[] type = Enumerable.Repeat((byte)0x48, 16).ToArray();
+        await using var connection = await pg.DataSource.OpenConnectionAsync();
+        await using (var transaction = await connection.BeginTransactionAsync(isolation))
+        {
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO laplace.entities(id,tier,type_id) VALUES($1,3,$2)";
+            insert.Parameters.AddWithValue(id);
+            insert.Parameters.AddWithValue(type);
+            var error = await Assert.ThrowsAsync<PostgresException>(() => insert.ExecuteNonQueryAsync());
+            Assert.Equal(PostgresErrorCodes.FeatureNotSupported, error.SqlState);
+            Assert.Contains("requires READ COMMITTED", error.MessageText);
+            await transaction.RollbackAsync();
+        }
+        await using var absent = pg.DataSource.CreateCommand("""
+            SELECT (SELECT count(*) FROM laplace.entities WHERE id=$1)
+                 + (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=$1)
+            """);
+        absent.Parameters.AddWithValue(id);
+        Assert.Equal(0L, (long)(await absent.ExecuteScalarAsync())!);
+    }
+
 }
