@@ -135,7 +135,7 @@ public class HashComposerTests
             TierNodeView expected = scalar.GetNode(i);
             TierNodeView actual = parallel.GetNode(i);
             Assert.Equal(expected.Id, actual.Id);
-            Assert.Equal(expected.Hilbert, actual.Hilbert);
+            Assert.Equal(0, expected.Hilbert.CompareToBytewise(actual.Hilbert));
             for (int axis = 0; axis < 4; ++axis)
                 Assert.Equal(expected.Coord[axis], actual.Coord[axis]);
         }
