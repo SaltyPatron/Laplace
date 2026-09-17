@@ -76,6 +76,14 @@ public sealed class JsonAstDocument : IDisposable
     public static JsonAstDocument? TryParse(string text) =>
         TryParse(Encoding.UTF8.GetBytes(text));
 
+    /// <summary>
+    /// Whether the registered JSON grammar parsed the complete source without
+    /// recovery error or missing syntax nodes. Consumers that authenticate a
+    /// persisted artifact can require this while tolerant ingestion lanes may
+    /// continue to inspect recoverable trees.
+    /// </summary>
+    public bool SyntaxComplete => _ast.Diagnostics.SyntaxComplete;
+
     /// <summary>Navigate an already parsed source without reparsing or owning its AST.</summary>
     public static JsonAstDocument FromBorrowedAst(GrammarAst ast, byte[] utf8)
     {
