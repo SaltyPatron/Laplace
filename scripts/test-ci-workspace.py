@@ -149,6 +149,29 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertFalse(self.events.exists())
 
 
+    def test_mainline_and_operator_preserve_ignored_checkout_collisions(self):
+        path = self.workspace / "new-source.txt"
+        path.write_text("ignored local work\n")
+        with (self.workspace / ".git/info/exclude").open("a") as stream:
+            stream.write("\nnew-source.txt\n")
+        # This collision is invisible to the ordinary clean-worktree check.
+        self.assertEqual(self.git(self.workspace, "status", "--porcelain",
+                                  "--untracked-files=all").strip(), "")
+        self.assertEqual(self.git(self.workspace, "check-ignore",
+                                  "new-source.txt").strip(), "new-source.txt")
+        before = path.stat()
+        for job in ("mainline", "operator"):
+            with self.subTest(job=job):
+                result = self.execute(job)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(path.read_text(), "ignored local work\n")
+                self.assertEqual(path.stat().st_ino, before.st_ino)
+                self.assertEqual(path.stat().st_mtime_ns, before.st_mtime_ns)
+                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
+                self.assertEqual(self.marker.read_text(), "existing qualified build\n")
+                self.assertFalse(self.events.exists())
+
+
 
 class DatabaseWorkspaceReservation(WorkspaceFixture):
     def prepare_seed(self):
@@ -318,7 +341,7 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.events.read_text().splitlines(), ["environment"])
 
 class IntegratedLifecycle(unittest.TestCase):
-    def execute(self, test_status):
+    def execute(self, test_status, failure_phase=None):
         source = (ROOT / "scripts/product-ci.sh").read_text()
         start = source.index("run_deploy() {\n")
         finish = source.index("\n}\n", start) + 3
@@ -330,7 +353,8 @@ class IntegratedLifecycle(unittest.TestCase):
             events = Path(directory) / "events"
             functions = []
             for name in names:
-                status = test_status if name == "run_dev_tests" else 0
+                status = (test_status if name == "run_dev_tests" else
+                          31 if name == failure_phase else 0)
                 event = name + (":$*" if name == "run_database_maintenance" else "")
                 functions.append(name + '() { printf "%s\\n" "' + event
                                  + '" >> "$TEST_EVENTS"; return ' + str(status) + '; }')
@@ -340,10 +364,48 @@ class IntegratedLifecycle(unittest.TestCase):
                                     text=True, capture_output=True, timeout=10)
             return result, events.read_text().splitlines()
 
-    def test_failed_dev_controls_prevent_installation(self):
+    def test_failed_dev_controls_preserve_failure_after_the_complete_lifecycle(self):
         result, events = self.execute(23)
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
-        self.assertEqual(events, ["check_deps", "run_build", "run_dev_tests"])
+        self.assertEqual(events, ["check_deps", "run_build", "run_dev_tests", "run_install",
+                                 "run_database_maintenance:--prepare", "run_publish",
+                                 "reconcile_installed_product", "run_foundation"])
+        self.assertIn("development tests failed earlier (status 23)", result.stderr)
+
+    def test_build_and_runtime_failures_stop_before_later_phases(self):
+        order = ["check_deps", "run_build", "run_dev_tests", "run_install",
+                 "run_database_maintenance:--prepare", "run_publish",
+                 "reconcile_installed_product", "run_foundation"]
+        for phase in ("run_build", "run_install", "run_database_maintenance",
+                      "run_publish", "reconcile_installed_product", "run_foundation"):
+            with self.subTest(phase=phase):
+                result, events = self.execute(23, phase)
+                self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
+                index = next(i for i, event in enumerate(order)
+                             if event.split(":", 1)[0] == phase)
+                self.assertEqual(events, order[:index + 1])
+
+    def test_each_development_suite_runs_after_an_earlier_suite_failure(self):
+        source = (ROOT / "scripts/product-ci.sh").read_text()
+        start = source.index("run_dev_tests() {\n")
+        finish = source.index("\n}\n", start) + 3
+        owner = source[start:finish]
+        with tempfile.TemporaryDirectory(prefix="laplace-dev-suite-order-") as directory:
+            events = Path(directory) / "events"
+            fixture = (
+                'bash() { printf "%s\\n" "$*" >> "$TEST_EVENTS"; '
+                'case "$*" in *native-dev) return 7;; *uci-dev) return 11;; '
+                '*) return 0;; esac; }\n')
+            result = subprocess.run(
+                ["bash", "-c", "set -euo pipefail\n" + fixture + owner + "\nrun_dev_tests\n"],
+                env=dict(os.environ, TEST_EVENTS=str(events)),
+                text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 11, result.stdout + result.stderr)
+            self.assertEqual(events.read_text().splitlines(), [
+                "scripts/test-parallel.sh --profile dev-native --suite native-dev",
+                "scripts/test-parallel.sh --profile dev-managed --suite managed-dev",
+                "scripts/test-parallel.sh --profile dev-managed --suite uci-dev",
+                "scripts/test-parallel.sh --profile dev-managed --suite browser-dev"])
 
     def test_publication_and_readiness_precede_resumable_foundation(self):
         result, events = self.execute(0)
