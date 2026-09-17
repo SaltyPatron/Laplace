@@ -34,6 +34,7 @@ run_ci_contract_checks() {
   python3 scripts/test-product-ci-artifact-ownership.py
   python3 scripts/test-seed-workflow-ownership.py
   python3 scripts/test-workflow-architecture.py
+  python3 scripts/test-benchmark-suite.py
 }
 
 require_built_revision() {
