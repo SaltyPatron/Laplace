@@ -102,29 +102,60 @@ public sealed class ChessRecordingDiagnosticsTests
     {
         var measurement = new ChessRecordingMeasurement(null, 1);
         ILogger logger = new ChessRecordingMeasurement.WriterDiagnosticLogger { Measurement = measurement };
+        const string parent = "copy-and-copy-transaction-commits";
+        const string entities = "entities-copy-lane-write";
+        const string physicalities = "physicalities-copy-lane-write";
+        logger.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", parent, "entered");
         Parallel.For(0, 1024, i =>
         {
-            logger.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", "copy", "entered");
-            LogPhaseExit(logger, "copy", i + 1, returned: i % 3 != 0);
+            string phase = i % 2 == 0 ? entities : physicalities;
+            string table = i % 2 == 0 ? "entities" : "physicalities";
+            logger.LogInformation(
+                "WS_APPLY phase: {Phase} boundary={Boundary} table={Table} lane={Lane} rows={Rows}",
+                phase, "entered", table, i % 6, 10);
+            logger.LogInformation(
+                "WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs} table={Table} lane={Lane} rows={Rows}",
+                phase, "exited", i % 3 != 0, (double)(i + 1), table, i % 6, 10);
         });
+        LogPhaseExit(logger, parent, 1234, returned: true);
 
-        var phase = Assert.Single(measurement.WriterLog.PhaseAggregates);
-        Assert.Equal("copy", phase.Phase);
-        Assert.Equal(1024, phase.ObservedExits);
-        Assert.Equal(682, phase.ReturnedExits);
-        Assert.Equal(342, phase.InterruptedExits);
-        Assert.Equal(524800, phase.TotalMilliseconds);
-        Assert.Equal(1, phase.MinimumMilliseconds);
-        Assert.Equal(1024, phase.MaximumMilliseconds);
+        // Nested/parallel child totals are observations, never charged again to
+        // the enclosing window or interpreted as exclusive writer time.
+        Assert.Equal(3, measurement.WriterLog.PhaseAggregates.Count);
+        var enclosing = Assert.Single(measurement.WriterLog.PhaseAggregates.Where(p => p.Phase == parent));
+        Assert.Equal(1, enclosing.ObservedExits);
+        Assert.Equal(1234, enclosing.TotalMilliseconds);
+        Assert.Equal(1, enclosing.ReturnedExits);
+        Assert.Equal(0, enclosing.InterruptedExits);
+        var entity = Assert.Single(measurement.WriterLog.PhaseAggregates.Where(p => p.Phase == entities));
+        var physicality = Assert.Single(measurement.WriterLog.PhaseAggregates.Where(p => p.Phase == physicalities));
+        foreach (var child in new[] { entity, physicality })
+        {
+            Assert.Equal(512, child.ObservedExits);
+            Assert.Equal(341, child.ReturnedExits);
+            Assert.Equal(171, child.InterruptedExits);
+        }
+        Assert.Equal(262144, entity.TotalMilliseconds);
+        Assert.Equal(1, entity.MinimumMilliseconds);
+        Assert.Equal(1023, entity.MaximumMilliseconds);
+        Assert.Equal(262656, physicality.TotalMilliseconds);
+        Assert.Equal(2, physicality.MinimumMilliseconds);
+        Assert.Equal(1024, physicality.MaximumMilliseconds);
         Assert.Equal(128, measurement.WriterLog.Entries.Count);
-        Assert.Equal(1920, measurement.WriterLog.DroppedEntries);
+        Assert.Equal(1922, measurement.WriterLog.DroppedEntries);
         Assert.Equal(0, measurement.WriterLog.UnaggregatedPhaseExits);
         Assert.Equal(0, measurement.WriterLog.RejectedPhaseExits);
+        Assert.Contains(measurement.WriterLog.Entries, entry =>
+            entry.Fields.ContainsKey("Lane") && entry.Fields.ContainsKey("Table")
+            && Equals(entry.Fields.GetValueOrDefault("Rows"), 10));
 
         // Immutable snapshots stay coherent while later observations accumulate.
-        LogPhaseExit(logger, "copy", 7, returned: true);
-        Assert.Equal(1024, phase.ObservedExits);
-        Assert.Equal(1025, Assert.Single(measurement.WriterLog.PhaseAggregates).ObservedExits);
+        LogPhaseExit(logger, entities, 7, returned: true);
+        Assert.Equal(512, entity.ObservedExits);
+        Assert.Equal(513, Assert.Single(measurement.WriterLog.PhaseAggregates.Where(
+            p => p.Phase == entities)).ObservedExits);
+        Assert.Equal(1234, Assert.Single(measurement.WriterLog.PhaseAggregates.Where(
+            p => p.Phase == parent)).TotalMilliseconds);
         Assert.Equal(0, measurement.Writer.ApplyCalls);
         Assert.Equal(0, measurement.ReadbackGames);
         Assert.Null(measurement.Durability);

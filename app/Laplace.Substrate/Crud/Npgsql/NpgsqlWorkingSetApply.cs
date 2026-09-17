@@ -1995,9 +1995,16 @@ public sealed partial class NpgsqlSubstrateWriter
                 // overlapping phases share one budget, so a group waits on a semaphore
                 // (cheap, fair, cancellable) instead of on a 15s pool-rent timeout that
                 // ends the whole ingest batch.
-                await CopyConnectionBudget.WaitAsync(ct).ConfigureAwait(false);
+                using (var waitDiagnostic = MeasureApplyPhase(
+                    "copy-lane-wait", tableName, lane: group, rows: rowsByLane[group]))
+                {
+                    await CopyConnectionBudget.WaitAsync(ct).ConfigureAwait(false);
+                    waitDiagnostic?.Complete();
+                }
                 try
                 {
+                using var setupDiagnostic = MeasureApplyPhase(
+                    "copy-lane-setup", tableName, lane: group, rows: rowsByLane[group]);
                 await using var conn = await _ds.OpenConnectionAsync(ct);
                 await using var tx = await conn.BeginTransactionAsync(ct);
                 Interlocked.Increment(ref copyTransactions.Started);
@@ -2018,12 +2025,32 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 if (epochBump) Interlocked.Increment(ref _epochOwnBumpsSinceBaseline);
                 string cols = IntentStage.CopyColumnList(table);
-                await using (var stream = await conn.BeginRawBinaryCopyAsync(
-                    $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct))
+                var stream = await conn.BeginRawBinaryCopyAsync(
+                    $"COPY laplace.{tableName} ({cols}) FROM STDIN (FORMAT BINARY)", ct);
+                // This try/finally is the original await-using disposal boundary.
+                // Finish includes COPY completion/acknowledgement even when writing
+                // throws; the transaction and budget retain their original owners.
+                try
                 {
+                    setupDiagnostic?.Complete();
+                    using var writeDiagnostic = MeasureApplyPhase(
+                        "copy-lane-write", tableName, lane: group, rows: rowsByLane[group]);
                     await CopyTupleParser.WritePackedAsync(stream, payload, ct);
+                    writeDiagnostic?.Complete();
                 }
-                await tx.CommitAsync(ct);
+                finally
+                {
+                    using var finishDiagnostic = MeasureApplyPhase(
+                        "copy-lane-finish", tableName, lane: group, rows: rowsByLane[group]);
+                    await stream.DisposeAsync();
+                    finishDiagnostic?.Complete();
+                }
+                using (var commitDiagnostic = MeasureApplyPhase(
+                    "copy-lane-commit", tableName, lane: group, rows: rowsByLane[group]))
+                {
+                    await tx.CommitAsync(ct);
+                    commitDiagnostic?.Complete();
+                }
                 Interlocked.Increment(ref copyTransactions.Committed);
                 }
                 finally
