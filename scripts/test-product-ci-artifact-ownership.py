@@ -46,6 +46,21 @@ class ProductStageOwnershipContract(unittest.TestCase):
         marker = owner.index("git rev-parse HEAD > build/.laplace-source-revision")
         self.assertLess(build, marker)
 
+    def test_operator_check_runs_the_repository_ci_contracts(self):
+        source = PRODUCT.read_text(encoding="utf-8")
+        owner = function("run_ci_contract_checks")
+        for command in (
+            "python3 scripts/validate-pipeline.py",
+            "python3 scripts/test-ci-workspace.py",
+            "python3 scripts/test-product-ci-artifact-ownership.py",
+            "python3 scripts/test-seed-workflow-ownership.py",
+        ):
+            with self.subTest(command=command):
+                self.assertIn(command, owner)
+        check_case = source.split('  check)\n', 1)[1].split('    ;;', 1)[0]
+        self.assertIn("run_ci_contract_checks", check_case)
+        self.assertNotIn("bash -n scripts/product-ci.sh", check_case)
+
 
 class ProductRevisionProofExecution(unittest.TestCase):
     def setUp(self):
