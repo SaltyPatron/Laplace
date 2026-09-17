@@ -29,14 +29,13 @@ typedef struct LaplaceGeneratedStageSinkReceipt {
     size_t peak_reserved_bytes;
     /* Actual sink SPI prepares + executions. Existing consensus/mask owners'
      * internal SPI operations are outside this counter; their input cardinality
-     * is bounded above by inserted attestations. This includes the sink's
-     * reentrant writer lock. A caller's earlier explicit lock remains separate. */
+     * is bounded above by inserted attestations. */
     uint32 operations;
 } LaplaceGeneratedStageSinkReceipt;
 
-/* Call before locking a session row. The existing shared apply lock is
- * transaction scoped and reentrant. This operation owns a nested SPI frame.
- * READ COMMITTED is required; callers pin provider snapshots AFTER this lock. */
+/* Compatibility isolation check used before session-row admission. It does
+ * not acquire a database lock. READ COMMITTED is required so transaction retry
+ * can re-probe after a concurrent canonical writer wins. */
 void laplace_generated_stage_sink_lock(void);
 
 /* Persist native-generated source/vocabulary/descriptor Content stages, an

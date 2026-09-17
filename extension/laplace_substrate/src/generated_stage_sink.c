@@ -300,15 +300,17 @@ static void sink_parse(SinkState *s, const intent_stage_t *const *stages, size_t
 
 /* These are the only database statements owned by this sink. Plans are fixed
  * catalog entries and retained per backend; no statement depends on row data. */
-enum SinkQuery { SQ_LOCK, SQ_EPOCH, SQ_PRESENCE, SQ_ENTITIES, SQ_PHYSICALITIES,
+enum SinkQuery { SQ_EPOCH, SQ_ENTITY_PRESENCE, SQ_PHYSICALITY_PRESENCE,
+                 SQ_ATTESTATION_PRESENCE, SQ_ENTITIES, SQ_PHYSICALITIES,
                  SQ_ATTESTATIONS, SQ_FOLD, SQ_MASKS, SQ_INTERPRETATIONS, SQ_COUNT };
 static SPIPlanPtr sink_plans[SQ_COUNT];
 static const char *const sink_keys[SQ_COUNT] = {
-    "ingest.generated_stage_sink.lock", "ingest.generated_stage_sink.epoch",
-    "ingest.generated_stage_sink.presence", "ingest.generated_stage_sink.entities",
-    "ingest.generated_stage_sink.physicalities", "ingest.generated_stage_sink.attestations",
-    "ingest.generated_stage_sink.fold", "ingest.generated_stage_sink.masks",
-    "ingest.entity_interpretations"};
+    "ingest.generated_stage_sink.epoch", "ingest.generated_stage_sink.presence",
+    "ingest.generated_stage_sink.physicality_presence",
+    "ingest.generated_stage_sink.attestation_presence",
+    "ingest.generated_stage_sink.entities", "ingest.generated_stage_sink.physicalities",
+    "ingest.generated_stage_sink.attestations", "ingest.generated_stage_sink.fold",
+    "ingest.generated_stage_sink.masks", "ingest.entity_interpretations"};
 static const unsigned sink_column_counts[3] = {4,10,14};
 static const Oid sink_types[3][14] = {
     {BYTEAOID,INT2OID,BYTEAOID,BYTEAOID},
@@ -433,7 +435,7 @@ static Datum sink_column(SinkState *s, unsigned table, unsigned column, size_t c
     SinkTable *t=all_entity_rows ? &s->interpretations : &s->tables[table];
     for (size_t i=0;i<t->count;++i) {
         SinkRow *row=t->index[i];
-        if (!all_entity_rows && (row->duplicate || (table == 0 && row->present))) continue;
+        if (!all_entity_rows && (row->duplicate || row->present)) continue;
         if (at == count) sink_invalid("column count mismatch");
         const SinkRow *observed=!all_entity_rows && table == 0 && row->interpretation
             ? row->interpretation : row;
@@ -451,7 +453,7 @@ static void sink_insert(SinkState *s, unsigned table)
     size_t count=0;
     SinkTable *t=&s->tables[table];
     for (size_t i=0;i<t->count;++i)
-        if (!t->rows[i].duplicate && !(table == 0 && t->rows[i].present)) ++count;
+        if (!t->rows[i].duplicate && !t->rows[i].present) ++count;
     if (count == 0) return;
     Datum values[14];
     Oid types[14];
@@ -475,7 +477,7 @@ static void sink_insert(SinkState *s, unsigned table)
         hash128_t id;
         memcpy(&id,VARDATA_ANY(bytes),16);
         SinkRow *row=sink_find(t,&id);
-        if (row == NULL || row->accepted || row->duplicate || (table == 0 && row->present))
+        if (row == NULL || row->accepted || row->duplicate || row->present)
             sink_invalid("unexpected inserted identity");
         row->accepted=true;
         ++s->receipt.inserted_rows[table];
@@ -591,7 +593,7 @@ static void sink_presence(SinkState *s,const physicality_descriptor_input_t *bod
     Datum array=sink_array(s,values,NULL,unique,BYTEAOID);
     Oid type=BYTEAARRAYOID;
     sink_charge(s,sink_multiply(unique,sizeof(HeapTupleData)+128));
-    sink_execute(s,SQ_PRESENCE,1,&type,&array,SPI_OK_SELECT);
+    sink_execute(s,SQ_ENTITY_PRESENCE,1,&type,&array,SPI_OK_SELECT);
     if (SPI_processed > unique || (SPI_processed && SPI_tuptable == NULL))
         sink_invalid("invalid entity presence cardinality");
     hash128_t *present=sink_alloc(s,sink_multiply((size_t)SPI_processed,sizeof(hash128_t)));
@@ -615,6 +617,71 @@ static void sink_presence(SinkState *s,const physicality_descriptor_input_t *bod
         ereport(ERROR,(errcode(ERRCODE_FOREIGN_KEY_VIOLATION),
                        errmsg("generated stage sink: referenced entity is not admitted")));
     }
+}
+
+static void sink_physicality_presence(SinkState *s)
+{
+    SinkTable *t=&s->tables[1];
+    size_t count=0;
+    for(size_t i=0;i<t->count;++i) if(!t->rows[i].duplicate) ++count;
+    if(count==0) return;
+    Datum *ids=sink_alloc(s,sink_multiply(count,sizeof(Datum)));
+    size_t at=0;
+    for(size_t i=0;i<t->count;++i) if(!t->rows[i].duplicate)
+        ids[at++]=sink_bytea(s,&t->rows[i].id,16);
+    Datum array=sink_array(s,ids,NULL,count,BYTEAOID); Oid type=BYTEAARRAYOID;
+    sink_charge(s,sink_multiply(count,sizeof(HeapTupleData)+128));
+    sink_execute(s,SQ_PHYSICALITY_PRESENCE,1,&type,&array,SPI_OK_SELECT);
+    if(SPI_processed>count || (SPI_processed && SPI_tuptable==NULL))
+        sink_invalid("invalid physicality presence cardinality");
+    for(uint64 i=0;i<SPI_processed;++i) {
+        bool is_null; Datum value=SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,1,&is_null);
+        if(is_null) sink_invalid("null present physicality");
+        bytea *bytes=DatumGetByteaPP(value); hash128_t id;
+        if(VARSIZE_ANY_EXHDR(bytes)!=16) sink_invalid("invalid present physicality identity");
+        memcpy(&id,VARDATA_ANY(bytes),16);
+        SinkRow *row=sink_find(t,&id);
+        if(row==NULL || row->duplicate) sink_invalid("unrequested physicality presence");
+        row->present=true;
+    }
+    sink_clear_result();
+}
+
+static void sink_attestation_presence(SinkState *s)
+{
+    SinkTable *t=&s->tables[2];
+    size_t count=0;
+    for(size_t i=0;i<t->count;++i) if(!t->rows[i].duplicate) ++count;
+    if(count==0) return;
+    Datum *ids=sink_alloc(s,sink_multiply(count,sizeof(Datum)));
+    Datum *types=sink_alloc(s,sink_multiply(count,sizeof(Datum)));
+    Datum *subjects=sink_alloc(s,sink_multiply(count,sizeof(Datum)));
+    size_t at=0;
+    for(size_t i=0;i<t->count;++i) {
+        SinkRow *row=&t->rows[i]; if(row->duplicate) continue;
+        ids[at]=sink_bytea(s,&row->id,16);
+        subjects[at]=sink_field_value(s,&row->fields[1],BYTEAOID);
+        types[at]=sink_field_value(s,&row->fields[2],BYTEAOID); ++at;
+    }
+    Datum values[3]={sink_array(s,ids,NULL,count,BYTEAOID),
+                     sink_array(s,types,NULL,count,BYTEAOID),
+                     sink_array(s,subjects,NULL,count,BYTEAOID)};
+    Oid argtypes[3]={BYTEAARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID};
+    sink_charge(s,sink_multiply(count,sizeof(HeapTupleData)+128));
+    sink_execute(s,SQ_ATTESTATION_PRESENCE,3,argtypes,values,SPI_OK_SELECT);
+    if(SPI_processed>count || (SPI_processed && SPI_tuptable==NULL))
+        sink_invalid("invalid attestation presence cardinality");
+    for(uint64 i=0;i<SPI_processed;++i) {
+        bool is_null; Datum value=SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,1,&is_null);
+        if(is_null) sink_invalid("null present attestation");
+        bytea *bytes=DatumGetByteaPP(value); hash128_t id;
+        if(VARSIZE_ANY_EXHDR(bytes)!=16) sink_invalid("invalid present attestation identity");
+        memcpy(&id,VARDATA_ANY(bytes),16);
+        SinkRow *row=sink_find(t,&id);
+        if(row==NULL || row->duplicate) sink_invalid("unrequested attestation presence");
+        row->present=true;
+    }
+    sink_clear_result();
 }
 
 /* Group exact accepted observations, never average opponent ratings or RD.
@@ -739,23 +806,9 @@ static void sink_require_isolation(void)
 
 void laplace_generated_stage_sink_lock(void)
 {
+    /* Compatibility entry for the session caller: validate isolation only.
+     * Exact-row conflicts abort and retry the whole transaction. */
     sink_require_isolation();
-    SinkState state;
-    memset(&state,0,sizeof(state));
-    state.limits.maximum_operations=2;
-    if (SPI_connect()!=SPI_OK_CONNECT) elog(ERROR,"generated stage sink: SPI_connect failed");
-    sink_execute(&state,SQ_LOCK,0,NULL,NULL,SPI_OK_SELECT);
-    sink_clear_result();
-    if (SPI_finish()!=SPI_OK_FINISH) elog(ERROR,"generated stage sink: SPI_finish failed");
-}
-
-/* Ordinary entity INSERT/COPY uses the same bounded transaction lock as
- * generated native writes. Keep the SQL key and isolation rule in one owner. */
-PG_FUNCTION_INFO_V1(pg_laplace_entity_write_lock);
-Datum pg_laplace_entity_write_lock(PG_FUNCTION_ARGS)
-{
-    laplace_generated_stage_sink_lock();
-    PG_RETURN_VOID();
 }
 
 static void sink_validate_bodies(SinkState *s,const intent_stage_t *const *stages,size_t stage_count)
@@ -855,12 +908,15 @@ void laplace_generated_stage_sink(const intent_stage_t *const *stages,
                            errmsg("generated stage sink: row grant exhausted")));
         sink_parse(s,stages,stage_count);
         if (SPI_connect()!=SPI_OK_CONNECT) elog(ERROR,"generated stage sink: SPI_connect failed");
-        sink_execute(s,SQ_LOCK,0,NULL,NULL,SPI_OK_SELECT);
-        sink_clear_result();
         /* SPI-owned temporary allocations remain under owner until SPI_finish;
          * exported native allocations are covered by the reset callback. */
         sink_validate_bodies(s,stages,stage_count);
         if (total != 0) {
+            /* Same probe-then-write law as canonical working-set apply. A
+             * post-probe race raises 23505; the caller retries this transaction
+             * and re-probes rather than arbitrating identity inside INSERT. */
+            sink_physicality_presence(s);
+            sink_attestation_presence(s);
             sink_execute(s,SQ_EPOCH,0,NULL,NULL,SPI_OK_SELECT);
             (void)sink_scalar();
             sink_insert(s,0);

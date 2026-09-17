@@ -89,8 +89,7 @@ static HeapTuple result_rows[256];
 static SPITupleTable result_table;
 static unsigned query_calls[SQ_COUNT],prepares;
 static hash128_t novel_entity,missing_entity;
-static bool omit_reference,all_present,accept_none;
-static size_t accept_limit=SIZE_MAX;
+static bool omit_reference,all_present;
 static size_t actual_cells,actual_groups;
 static int64 actual_games,actual_score;
 static int64 period_games[8],period_scores[8],period_ratings[8],period_phis[8];
@@ -158,7 +157,7 @@ int SPI_execute_plan(SPIPlanPtr plan,Datum *values,const char *nulls,bool read_o
     CHECK(plan!=NULL && nulls==NULL && !read_only && count==0);
     enum SinkQuery query=(enum SinkQuery)((uintptr_t)plan-1);
     CHECK(query<SQ_COUNT);++query_calls[query];result_begin();
-    if(query==SQ_PRESENCE) {
+    if(query==SQ_ENTITY_PRESENCE) {
         Datum *ids=array_values(values[0]);size_t n=array_count(values[0]);
         for(size_t i=0;i<n;++i) {
             bytea *value=DatumGetByteaPP(ids[i]);hash128_t id;
@@ -169,18 +168,24 @@ int SPI_execute_plan(SPIPlanPtr plan,Datum *values,const char *nulls,bool read_o
         }
         return SPI_OK_SELECT;
     }
+    if(query==SQ_PHYSICALITY_PRESENCE || query==SQ_ATTESTATION_PRESENCE) {
+        size_t n=array_count(values[0]); Datum *ids=array_values(values[0]);
+        if(query==SQ_ATTESTATION_PRESENCE)
+            CHECK(array_count(values[1])==n && array_count(values[2])==n);
+        if(all_present) for(size_t i=0;i<n;++i) result_add(ids[i]);
+        return SPI_OK_SELECT;
+    }
     if(query>=SQ_ENTITIES && query<=SQ_ATTESTATIONS) {
         size_t n=array_count(values[0]);Datum *ids=array_values(values[0]);
         for(unsigned c=0;c<sink_column_counts[query-SQ_ENTITIES];++c)
             CHECK(array_count(values[c])==n);
         if(query==SQ_ENTITIES)CHECK(n==1 && DatumGetInt16(array_values(values[1])[0])==expected_canonical_tier);
         if(query==SQ_PHYSICALITIES)CHECK(n==1);
-        if(!(query==SQ_ATTESTATIONS && accept_none))
-            for(size_t i=0;i<n && (query!=SQ_ATTESTATIONS || i<accept_limit);++i) {
-                result_add(ids[i]);
-                if(query==SQ_ATTESTATIONS && i==0)
-                    memcpy(&first_accepted,VARDATA_ANY(DatumGetByteaPP(ids[i])),16);
-            }
+        for(size_t i=0;i<n;++i) {
+            result_add(ids[i]);
+            if(query==SQ_ATTESTATIONS && i==0)
+                memcpy(&first_accepted,VARDATA_ANY(DatumGetByteaPP(ids[i])),16);
+        }
         return SPI_OK_INSERT_RETURNING;
     }
     if(query==SQ_INTERPRETATIONS) {
@@ -219,7 +224,7 @@ int SPI_execute_plan(SPIPlanPtr plan,Datum *values,const char *nulls,bool read_o
         CHECK(array_count(values[0])==2*actual_cells && array_count(values[1])==2*actual_cells);
         result_add(Int64GetDatum((int64)(2*actual_cells)));return SPI_OK_SELECT;
     }
-    CHECK(query==SQ_EPOCH || query==SQ_LOCK);result_add(Int64GetDatum(1));return SPI_OK_SELECT;
+    CHECK(query==SQ_EPOCH);result_add(Int64GetDatum(1));return SPI_OK_SELECT;
 }
 
 static SinkState *probe_state(const intent_stage_t *const *stages,size_t count)
@@ -237,7 +242,7 @@ static SinkState *probe_state(const intent_stage_t *const *stages,size_t count)
 static void reset_spi(void)
 {
     memset(query_calls,0,sizeof(query_calls));actual_cells=actual_groups=0;actual_games=actual_score=0;
-    accept_none=all_present=omit_reference=interpretation_missing=false;accept_limit=SIZE_MAX;
+    all_present=omit_reference=interpretation_missing=false;
     interpretation_rows=0;interpretation_tiers=0;
 }
 static void add_witness(intent_stage_t *stage,const hash128_t *subject,const hash128_t *object,
@@ -275,6 +280,7 @@ int main(void)
     CHECK(s->receipt.distinct_rows[0]==1 && s->receipt.distinct_rows[1]==1 && s->receipt.distinct_rows[2]==3);
     reset_spi();sink_validate_bodies(s,stages,1);
     CHECK(s->receipt.logical_work==4 && s->receipt.stored_vertices==4);
+    sink_physicality_presence(s);sink_attestation_presence(s);
     sink_insert(s,0);sink_interpretations(s);
     for(unsigned i=1;i<3;++i)sink_insert(s,i);
     sink_fold(s);
@@ -284,18 +290,21 @@ int main(void)
     CHECK((period_games[0]==4 && period_phis[0]==100 && period_ratings[0]==1500000000000) ||
           (period_games[1]==4 && period_phis[1]==100 && period_ratings[1]==1500000000000));
     CHECK(s->receipt.folded_cells==1 && s->receipt.folded_observations==6 && s->receipt.mask_pairs==2);
-    CHECK(query_calls[SQ_PRESENCE]==1 && query_calls[SQ_ENTITIES]==1 && query_calls[SQ_PHYSICALITIES]==1 &&
-          query_calls[SQ_ATTESTATIONS]==1 && query_calls[SQ_FOLD]==1 && query_calls[SQ_MASKS]==1);
+    CHECK(query_calls[SQ_ENTITY_PRESENCE]==1 && query_calls[SQ_PHYSICALITY_PRESENCE]==1 &&
+          query_calls[SQ_ATTESTATION_PRESENCE]==1 && query_calls[SQ_ENTITIES]==1 &&
+          query_calls[SQ_PHYSICALITIES]==1 && query_calls[SQ_ATTESTATIONS]==1 &&
+          query_calls[SQ_FOLD]==1 && query_calls[SQ_MASKS]==1);
     CHECK(query_calls[SQ_INTERPRETATIONS]==1 && interpretation_rows==2 && interpretation_tiers==6);
-    CHECK(s->receipt.operations==14 && prepares==7);
+    CHECK(s->receipt.operations==18 && prepares==9);
     CHECK(sink_word(s->tables[0].rows[0].fields[1].data,2)==0);
     CHECK(sink_word(s->tables[0].rows[1].fields[1].data,2)==1);
     sink_cleanup(s);
 
     /* Conflicts returned by PostgreSQL are replays. No accepted A means no
      * consensus or highway call, even when other stage rows are present. */
-    reset_spi();all_present=accept_none=true;
+    reset_spi();all_present=true;
     s=probe_state(stages,1);sink_parse(s,stages,1);sink_validate_bodies(s,stages,1);
+    sink_physicality_presence(s);sink_attestation_presence(s);
     sink_insert(s,0);sink_interpretations(s);
     for(unsigned i=1;i<3;++i) { sink_insert(s,i); }
     sink_fold(s);
@@ -309,15 +318,8 @@ int main(void)
     REFUSES(sink_interpretations(s),"byte grant");
     sink_cleanup(s);
 
-    /* Only the exact subset returned by INSERT participates in the fold. */
-    reset_spi();accept_limit=1;s=probe_state(stages,1);sink_parse(s,stages,1);
-    sink_validate_bodies(s,stages,1);sink_insert(s,2);sink_fold(s);
-    SinkRow *accepted=sink_find(&s->tables[2],&first_accepted);CHECK(accepted!=NULL);
-    CHECK(actual_games==sink_integer(&accepted->fields[8]) && actual_score==sink_integer(&accepted->fields[9]));
-    CHECK(actual_groups==1 && s->receipt.inserted_rows[2]==1);sink_cleanup(s);
-
     reset_spi();s=probe_state(stages,1);sink_parse(s,stages,1);s->limits.maximum_logical_occurrences=3;
-    REFUSES(sink_validate_bodies(s,stages,1),"logical work grant");CHECK(query_calls[SQ_PRESENCE]==0);
+    REFUSES(sink_validate_bodies(s,stages,1),"logical work grant");CHECK(query_calls[SQ_ENTITY_PRESENCE]==0);
     s->limits.maximum_logical_occurrences=100;s->limits.maximum_bytes=s->bytes+1;
     REFUSES(sink_validate_bodies(s,stages,1),"native export byte grant");
     s=probe_state(stages,1);sink_parse(s,stages,1);s->limits.maximum_operations=0;
@@ -325,8 +327,8 @@ int main(void)
     reset_spi();omit_reference=true;missing_entity=children[1];s=probe_state(stages,1);sink_parse(s,stages,1);
     REFUSES(sink_validate_bodies(s,stages,1),"referenced entity");sink_cleanup(s);
 
-    /* Exercise the exported entry, including context cleanup and the actual
-     * reentrant lock, prepare and execution receipt. PostgreSQL services remain
+    /* Exercise the exported entry, including context cleanup and the explicit
+     * presence probes, prepare and execution receipt. PostgreSQL services remain
      * explicit doubles; transaction rollback belongs to the backend fixture. */
     reset_spi();LaplaceGeneratedStageSinkReceipt receipt;
     LaplaceGeneratedStageSinkLimits limits={1000,64*1024*1024,1000,100};
@@ -334,7 +336,7 @@ int main(void)
     laplace_generated_stage_sink(stages,1,&limits,&receipt);
     unsigned executions=0;for(unsigned i=0;i<SQ_COUNT;++i)executions+=query_calls[i];
     CHECK(receipt.operations==executions+prepares-prepares_before);
-    CHECK(query_calls[SQ_LOCK]==1 && query_calls[SQ_EPOCH]==1);
+    CHECK(query_calls[SQ_EPOCH]==1 && query_calls[SQ_PHYSICALITY_PRESENCE]==1 && query_calls[SQ_ATTESTATION_PRESENCE]==1);
     CHECK(receipt.inserted_rows[2]==3 && deleted_contexts==contexts_before+1);
 
     /* Session admission supplies its own source declaration alongside the
@@ -375,10 +377,10 @@ int main(void)
     CHECK(receipt.operations==executions+prepares-prepares_before);
     reset_spi();LaplaceGeneratedStageSinkReceipt four_stage_receipt=receipt;
     REFUSES(laplace_generated_stage_sink(session_stages,5,&limits,&receipt),"at most four");
-    CHECK(query_calls[SQ_LOCK]==0 && memcmp(&receipt,&four_stage_receipt,sizeof(receipt))==0);
+    CHECK(memcmp(&receipt,&four_stage_receipt,sizeof(receipt))==0);
     limits.maximum_rows=combined.input_rows[0]+combined.input_rows[1]+combined.input_rows[2]-1;
     REFUSES(laplace_generated_stage_sink(session_stages,4,&limits,&receipt),"row grant");
-    CHECK(query_calls[SQ_LOCK]==0 && memcmp(&receipt,&four_stage_receipt,sizeof(receipt))==0);
+    CHECK(memcmp(&receipt,&four_stage_receipt,sizeof(receipt))==0);
     limits.maximum_rows=1000;
     for(unsigned i=0;i<4;++i)intent_stage_free(parts[i]);
 
@@ -386,7 +388,7 @@ int main(void)
     LaplaceGeneratedStageSinkReceipt unchanged=receipt;
     limits.maximum_operations=0;
     REFUSES(laplace_generated_stage_sink(stages,1,&limits,&receipt),"operation grant");
-    CHECK(memcmp(&receipt,&unchanged,sizeof(receipt))==0 && query_calls[SQ_LOCK]==0);
+    CHECK(memcmp(&receipt,&unchanged,sizeof(receipt))==0);
     limits.maximum_operations=100;limits.maximum_rows=1;
     REFUSES(laplace_generated_stage_sink(stages,1,&limits,&receipt),"row grant");
     CHECK(memcmp(&receipt,&unchanged,sizeof(receipt))==0);
@@ -398,7 +400,7 @@ int main(void)
     const intent_stage_t *omitted_stages[1]={omitted};
     reset_spi();s=probe_state(omitted_stages,1);
     REFUSES(sink_parse(s,omitted_stages,1),"omits staged entity");
-    CHECK(query_calls[SQ_LOCK]==0);
+
     intent_stage_free(omitted);
 
     /* A positive entity probe suppresses canonical E, not the actual source's
@@ -441,7 +443,7 @@ int main(void)
     const intent_stage_t *forged_stages[1]={forged};
     reset_spi();s=probe_state(forged_stages,1);sink_parse(s,forged_stages,1);
     REFUSES(sink_validate_bodies(s,forged_stages,1),"Content identity");
-    CHECK(query_calls[SQ_PRESENCE]==0);sink_cleanup(s);intent_stage_free(forged);
+    CHECK(query_calls[SQ_ENTITY_PRESENCE]==0);sink_cleanup(s);intent_stage_free(forged);
 
     /* Descriptor retention keeps the same canonical E and exact operands in a
      * distinct typed body. The public sink admits that real body while still
@@ -461,7 +463,7 @@ int main(void)
     reset_spi();s=probe_state(retention_stages,1);sink_parse(s,retention_stages,1);
     s->limits.maximum_logical_occurrences=1;
     REFUSES(sink_validate_bodies(s,retention_stages,1),"logical work grant");
-    CHECK(query_calls[SQ_PRESENCE]==0);sink_cleanup(s);
+    CHECK(query_calls[SQ_ENTITY_PRESENCE]==0);sink_cleanup(s);
     reset_spi();omit_reference=true;missing_entity=children[1];
     s=probe_state(retention_stages,1);sink_parse(s,retention_stages,1);
     REFUSES(sink_validate_bodies(s,retention_stages,1),"referenced entity");sink_cleanup(s);
@@ -476,7 +478,7 @@ int main(void)
     pfree(corrupt);forged_stages[0]=forged;
     reset_spi();s=probe_state(forged_stages,1);sink_parse(s,forged_stages,1);
     REFUSES(sink_validate_bodies(s,forged_stages,1),"retention identity");
-    CHECK(query_calls[SQ_PRESENCE]==0);sink_cleanup(s);intent_stage_free(forged);
+    CHECK(query_calls[SQ_ENTITY_PRESENCE]==0);sink_cleanup(s);intent_stage_free(forged);
     intent_stage_free(retention);
     forged=intent_stage_new(1);
     hash128_t relation,wrong_id={111,222};CHECK(laplace_relation_resolve("HAS_PHYSICALITY",&relation)==0);
@@ -486,7 +488,6 @@ int main(void)
     REFUSES(sink_parse(s,forged_stages,1),"five-tuple");intent_stage_free(forged);
     XactIsoLevel=XACT_REPEATABLE_READ;REFUSES(laplace_generated_stage_sink_lock(),"READ COMMITTED");
     XactIsoLevel=XACT_READ_COMMITTED;laplace_generated_stage_sink_lock();laplace_generated_stage_sink_lock();
-    CHECK(query_calls[SQ_LOCK]==2);
     REFUSES((void)sink_sum(INT64_MAX,1),"aggregate overflow");
     intent_stage_free(stage);
     printf("%u checks passed: production sink parsing, budgets, references, actual accepted-subset grouping, replay and lock contract; controlled PostgreSQL services only\n",checks);

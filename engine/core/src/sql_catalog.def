@@ -294,74 +294,22 @@ SQL_QUERY("ingest.selected_chess_scope", "bytea[],bytea[],bytea[],bytea[]",
 /* Shared setwise facet publication. Input includes every actual interpretation;
  * canonical identity rows must already exist in this transaction. */
 SQL_QUERY("ingest.entity_interpretations", "bytea[],int2[],bytea[],bytea[],bool[]",
-    "WITH input AS MATERIALIZED ( "
-    "SELECT DISTINCT ON (u.entity_id, u.tier, u.type_id) "
-    "u.entity_id, u.tier, u.type_id, "
-    "CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END AS first_observed_by "
-    "FROM unnest($1::bytea[], $2::smallint[], $3::bytea[], $4::bytea[], $5::boolean[]) "
-    "AS u(entity_id, tier, type_id, source_id, source_is_null) "
-    "ORDER BY u.entity_id, u.tier, u.type_id, "
-    "CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END NULLS LAST "
-    "), persisted AS ( "
-    "INSERT INTO laplace.entity_interpretations AS ei "
-    "(entity_id, tier, type_id, first_observed_by) "
-    "SELECT entity_id, tier, type_id, first_observed_by "
-    "FROM input "
-    "ON CONFLICT (entity_id, tier, type_id) DO UPDATE "
-    "SET first_observed_by = CASE "
-    "WHEN ei.first_observed_by IS NULL THEN EXCLUDED.first_observed_by "
-    "WHEN EXCLUDED.first_observed_by IS NULL THEN ei.first_observed_by "
-    "WHEN ei.first_observed_by <= EXCLUDED.first_observed_by THEN ei.first_observed_by "
-    "ELSE EXCLUDED.first_observed_by "
-    "END "
-    "WHERE EXCLUDED.first_observed_by IS NOT NULL "
-    "AND (ei.first_observed_by IS NULL OR EXCLUDED.first_observed_by < ei.first_observed_by) "
-    "RETURNING entity_id "
-    "), summary AS MATERIALIZED ( "
-    "SELECT i.entity_id, "
-    "min(i.tier)::smallint AS tier, "
-    "(array_agg(i.type_id ORDER BY i.type_id))[1] AS type_id, "
-    "(array_agg(i.first_observed_by ORDER BY i.first_observed_by) "
-    "FILTER (WHERE i.first_observed_by IS NOT NULL))[1] AS first_observed_by "
-    "FROM input i "
-    "GROUP BY i.entity_id "
-    "), updated AS ( "
-    "UPDATE laplace.entities e "
-    "SET tier = LEAST(e.tier, s.tier), "
-    "type_id = LEAST(e.type_id, s.type_id), "
-    "first_observed_by = CASE "
-    "WHEN e.first_observed_by IS NULL THEN s.first_observed_by "
-    "WHEN s.first_observed_by IS NULL THEN e.first_observed_by "
-    "WHEN e.first_observed_by <= s.first_observed_by THEN e.first_observed_by "
-    "ELSE s.first_observed_by "
-    "END "
-    "FROM summary s "
-    "WHERE e.id = s.entity_id "
-    "AND (e.tier, e.type_id, e.first_observed_by) IS DISTINCT FROM "
-    "(LEAST(e.tier, s.tier), LEAST(e.type_id, s.type_id), "
-    "CASE "
-    "WHEN e.first_observed_by IS NULL THEN s.first_observed_by "
-    "WHEN s.first_observed_by IS NULL THEN e.first_observed_by "
-    "WHEN e.first_observed_by <= s.first_observed_by THEN e.first_observed_by "
-    "ELSE s.first_observed_by "
-    "END) "
-    "RETURNING e.id "
-    ") "
-    "SELECT EXISTS ( "
-    "SELECT 1 FROM input i "
-    "WHERE NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = i.entity_id)) ")
-SQL_QUERY("ingest.generated_stage_sink.lock", "",
-    "SELECT pg_advisory_xact_lock(hashtextextended('laplace_apply_batch',0))")
+    "SELECT laplace.entity_interpretations_publish($1,$2,$3,$4,$5)")
 SQL_QUERY("ingest.generated_stage_sink.epoch", "",
     "SELECT nextval('laplace.apply_write_epoch')")
 SQL_QUERY("ingest.generated_stage_sink.presence", "bytea[]",
     "SELECT DISTINCT id FROM laplace.entities WHERE id=ANY($1)")
+SQL_QUERY("ingest.generated_stage_sink.physicality_presence", "bytea[]",
+    "SELECT id FROM laplace.physicalities WHERE id=ANY($1)")
+SQL_QUERY("ingest.generated_stage_sink.attestation_presence", "bytea[],bytea[],bytea[]",
+    "SELECT a.id FROM laplace.attestations a JOIN unnest($1,$2,$3) r(id,type_id,subject_id) "
+    "ON a.id=r.id AND a.type_id=r.type_id AND a.subject_id=r.subject_id")
 SQL_QUERY("ingest.generated_stage_sink.entities", "bytea[],int2[],bytea[],bytea[]",
-    "INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) SELECT r.* FROM unnest($1,$2,$3,$4) r(id,tier,type_id,source) WHERE NOT EXISTS(SELECT 1 FROM laplace.entities e WHERE e.id=r.id) ORDER BY r.id ON CONFLICT(id) DO NOTHING RETURNING id")
+    "INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) SELECT r.* FROM unnest($1,$2,$3,$4) r(id,tier,type_id,source) ORDER BY r.id RETURNING id")
 SQL_QUERY("ingest.generated_stage_sink.physicalities", "bytea[],bytea[],int2[],bytea[],bytea[],bytea[],int4[],float8[],int4[],timestamptz[]",
-    "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT r.id,r.entity,r.type,public.ST_GeomFromEWKB(r.coord),r.hilbert,public.ST_GeomFromEWKB(r.trajectory),r.n,r.residual,r.dim,r.observed FROM unnest($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) r(id,entity,type,coord,hilbert,trajectory,n,residual,dim,observed) ORDER BY r.id ON CONFLICT(id) DO NOTHING RETURNING id")
+    "INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,source_dim,observed_at) SELECT r.id,r.entity,r.type,public.ST_GeomFromEWKB(r.coord),r.hilbert,public.ST_GeomFromEWKB(r.trajectory),r.n,r.residual,r.dim,r.observed FROM unnest($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) r(id,entity,type,coord,hilbert,trajectory,n,residual,dim,observed) ORDER BY r.id RETURNING id")
 SQL_QUERY("ingest.generated_stage_sink.attestations", "bytea[],bytea[],bytea[],bytea[],bytea[],bytea[],int2[],timestamptz[],int8[],int8[],int8[],int8[],bool[],bytea[]",
-    "INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,fold_replayable,highway_mask) SELECT r.* FROM unnest($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) r(id,subject,type,object,source,context,outcome,observed,games,score,rd,rating,replayable,mask) ORDER BY r.type,r.subject,r.id ON CONFLICT(id,type_id,subject_id) DO NOTHING RETURNING id")
+    "INSERT INTO laplace.attestations(id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,fold_replayable,highway_mask) SELECT r.* FROM unnest($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) r(id,subject,type,object,source,context,outcome,observed,games,score,rd,rating,replayable,mask) ORDER BY r.type,r.subject,r.id RETURNING id")
 SQL_QUERY("ingest.generated_stage_sink.fold", "bytea[],bytea[],bytea[],int8[],int8[],int8[],timestamptz[],int8[],int8[],int8[],int8[],int8[],int8[]",
     "SELECT consensus.upsert($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
 SQL_QUERY("ingest.generated_stage_sink.masks", "bytea[],bytea[]",

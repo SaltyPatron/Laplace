@@ -205,7 +205,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     public Task<ApplyResult> ApplyWorkingSetAsync(SubstrateChange change, CancellationToken ct = default)
         => ApplyWorkingSetAsync(new[] { change }, ct);
 
-    public Task<ApplyResult> ApplyConversationTurnAsync(
+    public async Task<ApplyResult> ApplyConversationTurnAsync(
         SubstrateChange change, Hash128 sessionId, IReadOnlyList<Hash128> turnIds,
         CancellationToken ct = default)
     {
@@ -214,37 +214,47 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         if (sessionId == Hash128.Zero || turnIds.Count == 0)
             throw new ArgumentException("A conversation append requires a session and ordered turn ids.");
         var ids = turnIds.Select(id => id.ToBytes()).ToArray();
-        return ApplyCoreAsync(
-            [change], workingSet: true, append: false, default,
-            reconciliation: null, precommitVerifier: null, ct,
-            async (connection, transaction, token) =>
+        var retry = Laplace.Ingestion.TransientErrorRetryPolicy.ConcurrencyRetry;
+        for (int attempt = 0; ; attempt++)
+        {
+            try
             {
-                await using var command = new NpgsqlCommand(
-                    SqlCatalog.Get("conversation.append_turns").Text,
-                    connection, transaction);
-                command.Parameters.AddWithValue(NpgsqlDbType.Bytea, sessionId.ToBytes());
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
-                command.Parameters.AddWithValue(NpgsqlDbType.TimestampTz,
-                    change.Metadata.BuiltAt.ToUniversalTime());
-                command.Parameters.AddWithValue(NpgsqlDbType.Bytea, change.Metadata.IntentId.ToBytes());
-                long physicalityBudget = IngestSizing.ResolveWorkingSetBudgetBytes();
-                command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget);
-                command.Parameters.AddWithValue(NpgsqlDbType.Integer, 512);
-                command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget / MemoryTopology.Hash128Bytes);
-                void OnSessionNotice(object sender, NpgsqlNoticeEventArgs notice)
-                {
-                    const string prefix = "session descriptor view unavailable; transaction pending: ";
-                    if (notice.Notice.MessageText.StartsWith(prefix, StringComparison.Ordinal))
-                        _log.LogInformation("SESSION_PHYSICALITY_VIEW transaction_pending=true receipt={Receipt}",
-                            notice.Notice.MessageText[prefix.Length..]);
-                }
-                // The native appender keeps its scalar turn-count ABI. Expose its
-                // bounded missing-view receipt for this operation and detach on
-                // failure as well as success before the connection is reused.
-                connection.Notice += OnSessionNotice;
-                try { await command.ExecuteScalarAsync(token).ConfigureAwait(false); }
-                finally { connection.Notice -= OnSessionNotice; }
-            });
+                return await ApplyCoreAsync(
+                    [change], workingSet: true, append: false, default,
+                    reconciliation: null, precommitVerifier: null, ct,
+                    async (connection, transaction, token) =>
+                    {
+                        await using var command = new NpgsqlCommand(
+                            SqlCatalog.Get("conversation.append_turns").Text,
+                            connection, transaction);
+                        command.Parameters.AddWithValue(NpgsqlDbType.Bytea, sessionId.ToBytes());
+                        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
+                        command.Parameters.AddWithValue(NpgsqlDbType.TimestampTz,
+                            change.Metadata.BuiltAt.ToUniversalTime());
+                        command.Parameters.AddWithValue(NpgsqlDbType.Bytea, change.Metadata.IntentId.ToBytes());
+                        long physicalityBudget = IngestSizing.ResolveWorkingSetBudgetBytes();
+                        command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget);
+                        command.Parameters.AddWithValue(NpgsqlDbType.Integer, 512);
+                        command.Parameters.AddWithValue(NpgsqlDbType.Bigint, physicalityBudget / MemoryTopology.Hash128Bytes);
+                        void OnSessionNotice(object sender, NpgsqlNoticeEventArgs notice)
+                        {
+                            const string prefix = "session descriptor view unavailable; transaction pending: ";
+                            if (notice.Notice.MessageText.StartsWith(prefix, StringComparison.Ordinal))
+                                _log.LogInformation("SESSION_PHYSICALITY_VIEW transaction_pending=true receipt={Receipt}",
+                                    notice.Notice.MessageText[prefix.Length..]);
+                        }
+                        connection.Notice += OnSessionNotice;
+                        try { await command.ExecuteScalarAsync(token).ConfigureAwait(false); }
+                        finally { connection.Notice -= OnSessionNotice; }
+                    }).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (attempt + 1 < retry.MaxAttempts && retry.IsTransient(ex))
+            {
+                TimeSpan delay = retry.DelayBeforeAttempt(attempt, Random.Shared);
+                if (delay > TimeSpan.Zero)
+                    await Task.Delay(delay, ct).ConfigureAwait(false);
+            }
+        }
     }
 
     public async Task<ApplyResult> ApplyWorkingSetAsync(
