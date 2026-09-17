@@ -87,7 +87,15 @@ run_db_tests() {
   require_built_revision
   bash scripts/test-parallel.sh --profile db --suite db-health
   rm -rf build/extension/*/tests/regress_output
-  bash scripts/test-parallel.sh --profile db --suite native-db
+  local native_rc=0
+  bash scripts/test-parallel.sh --profile db --suite native-db || native_rc=$?
+  if (( native_rc != 0 )); then
+    while IFS= read -r diff; do
+      echo "===== REGRESSION DIFF: $diff =====" >&2
+      cat "$diff" >&2 || true
+    done < <(find build -path '*/tests/regress_output/regression.diffs' -type f -print | sort)
+    return "$native_rc"
+  fi
   bash scripts/test-parallel.sh --profile db --suite managed-db
 }
 
