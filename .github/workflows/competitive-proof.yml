@@ -15,20 +15,11 @@ jobs:
       target_sha: ${{ github.sha }}
     secrets: inherit
 
-  synthesize:
-    name: Synthesize competitive model proof
+  prove:
+    name: Install, prove, activate and verify qualified product
     needs: qualify
     uses: ./.github/workflows/product-stage.yml
     with:
-      stage: proof-model
-      target_sha: ${{ github.sha }}
-    secrets: inherit
-
-  activate:
-    name: Activate and verify qualified product
-    needs: synthesize
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-activation
+      stage: proof-transaction
       target_sha: ${{ github.sha }}
     secrets: inherit
