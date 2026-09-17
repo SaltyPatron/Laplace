@@ -124,4 +124,17 @@ psql -h "$PGHOST" -U "$PGUSER" -d "$DB" -v ON_ERROR_STOP=1 -c \
    FROM laplace.ingest_run_journal
    ORDER BY source_name, started_at DESC;"
 
+remaining=0
+for entry in "${FOUNDATION[@]}"; do
+  IFS=':' read -r cli decomposer layer <<< "$entry"
+  if ! layer_ok "$decomposer" "$layer"; then
+    if [[ "$remaining" -eq 0 ]]; then
+      echo "foundation incomplete after ingest on $DB" >&2
+    fi
+    echo "  missing: ${cli} (source=${decomposer} layer=${layer})" >&2
+    remaining=1
+  fi
+done
+[[ "$remaining" -eq 0 ]] || exit 1
+
 echo "foundation complete: $DB"

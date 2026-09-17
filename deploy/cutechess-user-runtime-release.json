@@ -1,0 +1,52 @@
+{
+  "schema": "laplace.cutechess-user-runtime-release/v1",
+  "version": "6.5.3",
+  "debian_version": "6.5.3-r0-1",
+  "distribution": "jammy",
+  "architecture": "amd64",
+  "repository": "https://xpra.org",
+  "signing_fingerprint": "B4993B57323148E37977E5D873254CAD17978FAF",
+  "source": {
+    "repository": "https://github.com/Xpra-org/xpra",
+    "tag": "v6.5.3",
+    "tree": "c1a20f10f6be17b29392193c8e538b2e9db9eaae"
+  },
+  "packages": [
+    {
+      "name": "xpra-common",
+      "size": 7811512,
+      "sha256": "e09ec4801a6b806a97d372bd8d28cbe15057e9d8b7ea38b086cec7a63d160f35"
+    },
+    {
+      "name": "xpra-server",
+      "size": 417084,
+      "sha256": "60fa28fb8def36311bd65cb3d06ef0f74ed058fe7c98dbb1cdb5c836bbd9a73a"
+    },
+    {
+      "name": "xpra-x11",
+      "size": 831272,
+      "sha256": "18c8a2ba4863995a5553706fae9105f61e4b2c935b55a2b11ca6f59ce7541213"
+    },
+    {
+      "name": "xpra-client",
+      "size": 132840,
+      "sha256": "97fca25d2679497473580cbc5aa1199ba4e135af1b0d52ff61759b4fcb29b531"
+    },
+    {
+      "name": "xpra-client-gtk3",
+      "size": 248652,
+      "sha256": "2323e3f29961641badcf03b99f03268d45e158f7e2dac6d14e480016bd94f015"
+    }
+  ],
+  "runtime_dependencies": [
+    "python3-gi",
+    "python3-gi-cairo",
+    "python3-cairo",
+    "python3-pil",
+    "python3-dbus",
+    "gir1.2-gtk-3.0",
+    "dbus-x11",
+    "xauth",
+    "x11-xkb-utils"
+  ]
+}
