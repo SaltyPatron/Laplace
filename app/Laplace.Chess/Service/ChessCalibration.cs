@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Laplace.Decomposers.Abstractions;
 
 namespace Laplace.Chess.Service;
 
@@ -24,11 +26,17 @@ public static class ChessCalibration
             return new("not-selected", "No installed calibration has been selected.");
         try
         {
-            using var manifest = JsonDocument.Parse(await ReadBoundedAsync(manifestPath, 1 << 20, ct));
-            if (!manifest.RootElement.TryGetProperty("calibration", out var selection)
-                || !selection.TryGetProperty("reportSha256", out var hashValue))
+            using var manifest = JsonAstDocument.TryParse(
+                await ReadBoundedAsync(manifestPath, 1 << 20, ct));
+            if (manifest is null || !manifest.SyntaxComplete)
+                throw new InvalidDataException("Installed calibration selection is not complete JSON.");
+            var selection = manifest.Root.Property("calibration");
+            if (!selection.IsObject)
                 return new("not-selected", "No measured calibration has been selected.");
-            string? hash = hashValue.GetString();
+            var hashValue = selection.Property("reportSha256");
+            if (!hashValue.IsValid)
+                return new("not-selected", "No measured calibration has been selected.");
+            string? hash = hashValue.AsString();
             if (hash is null || hash.Length != 64
                 || hash.Any(c => c is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
                 return new("invalid", "The selected calibration identifier is invalid.");
@@ -37,14 +45,16 @@ public static class ChessCalibration
             byte[] raw = await ReadBoundedAsync(reportPath, 32 << 20, ct);
             if (!string.Equals(Convert.ToHexStringLower(SHA256.HashData(raw)), hash, StringComparison.Ordinal))
                 return new("invalid", "The saved report does not match its selected checksum.", hash);
-            using var document = JsonDocument.Parse(raw);
-            var report = document.RootElement;
-            if (Text(report, "schema") != "laplace.benchmark.chess-environment/v1")
+            using var document = JsonAstDocument.TryParse(raw);
+            if (document is null || !document.SyntaxComplete)
+                throw new InvalidDataException("Installed calibration report is not complete JSON.");
+            var report = document.Root;
+            if (report.String("schema") != "laplace.benchmark.chess-environment/v1")
                 return new("unsupported", "This calibration report uses an unsupported format.", hash);
-            string? selectionStatus = Text(selection, "status");
+            string? selectionStatus = selection.String("status");
             bool? engineMatches = null;
-            if (report.TryGetProperty("stockfish_identity", out var identity)
-                && Text(identity, "sha256") is { } expected)
+            var identity = report.Property("stockfish_identity");
+            if (identity.IsObject && identity.String("sha256") is { } expected)
             {
                 engineMatches = false;
                 if (!string.IsNullOrWhiteSpace(stockfish) && File.Exists(stockfish))
@@ -58,15 +68,15 @@ public static class ChessCalibration
             // unrelated runtime observations are never part of this browser response.
             var visible = Pick(report, "schema", "status", "started_utc", "finished_utc",
                 "elapsed_wall_seconds", "evidence_invalid");
-            visible["host"] = Pick(Property(report, "host"), "hostname", "cpu_models",
+            visible["host"] = Pick(report.Property("host"), "hostname", "cpu_models",
                 "logical_cpus_reported", "physical_memory_bytes", "effective_cpu_capacity");
-            visible["parameters"] = Pick(Property(report, "parameters"), "repeats", "bench_limit",
+            visible["parameters"] = Pick(report.Property("parameters"), "repeats", "bench_limit",
                 "bench_limit_type", "match_depth", "max_moves", "match_threads", "match_hash_mb");
-            visible["plan"] = Pick(Property(report, "plan"), "reserved_cpu_capacity",
+            visible["plan"] = Pick(report.Property("plan"), "reserved_cpu_capacity",
                 "games_per_match_sample", "match_threads_per_engine", "match_hash_mib_per_engine");
-            visible["stockfish_identity"] = Pick(Property(report, "stockfish_identity"),
+            visible["stockfish_identity"] = Pick(identity,
                 "sha256", "source_commit", "source_networks");
-            visible["recommendations"] = Pick(Property(report, "recommendations"),
+            visible["recommendations"] = Pick(report.Property("recommendations"),
                 "bench_suite_latency", "search_node_throughput", "bounded_tournament_throughput");
             visible["stockfish_bench"] = Rows(report, "stockfish_bench", "status", "threads",
                 "hash_mib", "steady_engine_seconds", "steady_nodes_per_second");
@@ -76,7 +86,7 @@ public static class ChessCalibration
                 CurrentEngineMatches: engineMatches, Report: JsonSerializer.SerializeToElement(visible));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException
-            or JsonException or InvalidOperationException or ArgumentException)
+            or InvalidDataException or JsonException or InvalidOperationException or ArgumentException)
         {
             return new("unavailable", "The installed calibration report could not be read.");
         }
@@ -97,18 +107,50 @@ public static class ChessCalibration
         return result.ToArray();
     }
 
-    private static string? Text(JsonElement value, string key)
-        => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out var field)
-            && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
+    private static Dictionary<string, object?> Pick(JsonAstCursor value, params string[] keys)
+    {
+        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (!value.IsObject) return result;
+        foreach (string key in keys)
+        {
+            var field = value.Property(key);
+            if (field.IsValid) result[key] = Materialize(field);
+        }
+        return result;
+    }
 
-    private static JsonElement Property(JsonElement value, string key)
-        => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out var field) ? field : default;
+    private static object[] Rows(JsonAstCursor value, string key, params string[] fields)
+    {
+        var rows = value.Property(key);
+        return rows.IsArray
+            ? rows.Items().Select(row => (object)Pick(row, fields)).ToArray()
+            : [];
+    }
 
-    private static Dictionary<string, object?> Pick(JsonElement value, params string[] keys)
-        => keys.Where(key => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out _))
-            .ToDictionary(key => key, key => (object?)value.GetProperty(key).Clone(), StringComparer.Ordinal);
+    private static object? Materialize(JsonAstCursor value) => value.Kind switch
+    {
+        JsonAstKind.Object => value.Pairs().ToDictionary(
+            pair => pair.Key, pair => Materialize(pair.Value), StringComparer.Ordinal),
+        JsonAstKind.Array => value.Items().Select(Materialize).ToArray(),
+        JsonAstKind.String => value.AsString(),
+        JsonAstKind.Number => MaterializeNumber(value),
+        JsonAstKind.True => true,
+        JsonAstKind.False => false,
+        JsonAstKind.Null => null,
+        _ => throw new InvalidDataException("Calibration JSON contains an unsupported recovered node."),
+    };
 
-    private static object[] Rows(JsonElement value, string key, params string[] fields)
-        => Property(value, key) is { ValueKind: JsonValueKind.Array } rows
-            ? rows.EnumerateArray().Select(row => (object)Pick(row, fields)).ToArray() : [];
+    private static object MaterializeNumber(JsonAstCursor value)
+    {
+        string raw = value.RawText()
+            ?? throw new InvalidDataException("Calibration JSON number has no source text.");
+        if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out long integer))
+            return integer;
+        if (decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal exact))
+            return exact;
+        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double approximate)
+            && double.IsFinite(approximate))
+            return approximate;
+        throw new InvalidDataException("Calibration JSON number cannot be represented safely.");
+    }
 }
