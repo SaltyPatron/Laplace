@@ -13,6 +13,8 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
     private static readonly Hash128 CodePlayerTrustClass = SubstrateCanonicalIds.TrustClass("AppDerived");
     private static readonly Hash128 ToolchainTrustClass = SubstrateCanonicalIds.TrustClass("StandardsDerived");
     private static readonly Hash128 DefinesRelation = RelationTypeRegistry.RelationTypeId("DEFINES");
+    private static readonly IComparer<Hash128> Hash128Bytewise =
+        Comparer<Hash128>.Create(static (left, right) => left.CompareToBytewise(right));
     private const double CodePlayerTrust = SourceTrust.AppDerived;
     private const double ToolchainTrust = SourceTrust.StandardsDerived;
     private const int DefaultAttempts = 4;
@@ -99,17 +101,12 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
                 root, "IS_TYPED_AS", EntityTypeRegistry.CodeConcept,
                 CodePlayerSource, (Hash128?)null, CodePlayerTrust, true, 1));
 
-            // Capture the function/type definition entities emitted by the exact same
-            // Tree-sitter witness pass before persisting the immutable candidate change.
-            // Tool outcomes are then deposited on both the translation-unit root and the
-            // constituent definitions, so success/failure propagates across AST altitude
-            // without re-parsing source or minting a second code identity.
             SubstrateChange candidateChange = candidateBuilder.Build();
             Hash128[] definitionIds = candidateChange.Attestations
                 .Where(a => a.TypeId == DefinesRelation && a.ContextId == root)
                 .Select(a => a.SubjectId)
                 .Distinct()
-                .OrderBy(id => id)
+                .OrderBy(id => id, Hash128Bytewise)
                 .ToArray();
             await writer.ApplyAsync(candidateChange, ct).ConfigureAwait(false);
 
