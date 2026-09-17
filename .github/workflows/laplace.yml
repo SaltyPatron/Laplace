@@ -47,9 +47,9 @@ jobs:
     runs-on: [self-hosted, laplace]
     timeout-minutes: 120
     concurrency:
-      group: laplace-host-lifecycle
+      group: laplace-mainline-validation
       queue: max
-      cancel-in-progress: false
+      cancel-in-progress: true
     env:
       LICHESS_API: ${{ secrets.LICHESS_API }}
       LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
