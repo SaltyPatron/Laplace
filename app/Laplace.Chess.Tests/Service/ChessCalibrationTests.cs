@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Laplace.Chess.Service;
 using Xunit;
 
@@ -25,11 +26,16 @@ public sealed class ChessCalibrationTests : IDisposable
             parameters = new { repeats = 3, max_moves = 0, bench_limit = 12, bench_limit_type = "depth" },
             host = new { hostname = "measured-host", cpu_models = new[] { "measured-cpu" } },
             stockfish_bench = new[] { new { status = "complete", threads = 8, hash_mib = 16,
-                steady_engine_seconds = new { median = 1.6 } } },
+                steady_engine_seconds = new { median = 1.6, private_process_log = "nested-private-log" } } },
             cutechess_matches = new[] { new { status = "complete", concurrency = 10,
                 steady_games_per_second = new { median = 5.7 }, process = new { log = "private-process-log" } } },
             runtime_capabilities = new { private_test_value = "must-not-be-exposed" }
         });
+        return SelectReport(report, selection);
+    }
+
+    private string SelectReport(byte[] report, string selection = "selected")
+    {
         string hash = Convert.ToHexStringLower(SHA256.HashData(report));
         string directory = Path.Combine(_root, "share", "laplace");
         _report = Path.Combine(directory, "chess-calibrations", hash, "report.json");
@@ -53,9 +59,23 @@ public sealed class ChessCalibrationTests : IDisposable
         var report = Assert.IsType<JsonElement>(result.Report);
         Assert.Equal(1.6, report.GetProperty("stockfish_bench")[0]
             .GetProperty("steady_engine_seconds").GetProperty("median").GetDouble());
+        Assert.False(report.GetProperty("stockfish_bench")[0]
+            .GetProperty("steady_engine_seconds").TryGetProperty("private_process_log", out _));
         Assert.False(report.TryGetProperty("runtime_capabilities", out _));
         Assert.False(report.GetProperty("cutechess_matches")[0].TryGetProperty("process", out _));
         Assert.False(report.TryGetProperty("recorded_games_per_second", out _));
+    }
+
+    [Fact]
+    public async Task ChecksumValidReportWithUntypedMeasurementIsUnavailable()
+    {
+        Install();
+        var report = JsonNode.Parse(File.ReadAllBytes(_report))!;
+        report["stockfish_bench"]![0]!["steady_engine_seconds"]!["median"] = "unmeasured";
+        SelectReport(JsonSerializer.SerializeToUtf8Bytes(report));
+        var result = await ChessCalibration.ReadInstalledAsync(_root, _engine);
+        Assert.Equal("unavailable", result.Status);
+        Assert.Null(result.Report);
     }
 
     [Fact]

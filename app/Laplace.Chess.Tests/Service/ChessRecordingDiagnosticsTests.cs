@@ -192,6 +192,53 @@ public sealed class ChessRecordingDiagnosticsTests
         Assert.Null(replay.Durability);
     }
 
+
+    [Fact]
+    public void ConsensusBackendDeltasExcludeSetupAndSeparateAdmissions()
+    {
+        var fresh = new ChessRecordingMeasurement(null, 1);
+        // Nonzero initial values represent setup on the same owned writer.
+        fresh.ObserveConsensusBackend(new(100, 200, 30, 4, 5, 60),
+            new(140, 220, 37, 6, 8, 69));
+        var retained = fresh.ConsensusBackend;
+        // Work outside the measured call must not enter the next delta.
+        fresh.ObserveConsensusBackend(new(900, 900, 900, 900, 900, 900),
+            new(960, 980, 903, 901, 902, 905));
+        Assert.Equal(2, fresh.ConsensusBackend.ObservedApplyWindows);
+        Assert.Equal(100.0 / TimeSpan.TicksPerSecond, fresh.ConsensusBackend.ConsensusUpsertSeconds, 12);
+        Assert.Equal(100.0 / TimeSpan.TicksPerSecond, fresh.ConsensusBackend.HighwayMaskSeconds, 12);
+        Assert.Equal(10, fresh.ConsensusBackend.CellsFolded);
+        Assert.Equal(3, fresh.ConsensusBackend.ConsensusUpsertCalls);
+        Assert.Equal(5, fresh.ConsensusBackend.HighwayMaskCalls);
+        Assert.Equal(14, fresh.ConsensusBackend.HighwayMaskPairs);
+        Assert.Equal(1, retained.ObservedApplyWindows);
+        Assert.Equal(7, retained.CellsFolded);
+
+        var replay = new ChessRecordingMeasurement(null, 1);
+        Assert.Equal(new ChessRecordingMeasurement.ConsensusBackendDiagnostics(0, 0, 0, 0, 0, 0, 0),
+            replay.ConsensusBackend);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(fresh,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(2, json.RootElement.GetProperty("consensusBackend")
+            .GetProperty("observedApplyWindows").GetInt64());
+        Assert.Equal(14, json.RootElement.GetProperty("consensusBackend")
+            .GetProperty("highwayMaskPairs").GetInt64());
+        Assert.Equal(0, fresh.Writer.ApplyCalls);
+        Assert.Null(fresh.Durability);
+    }
+
+    [Fact]
+    public void ConsensusBackendWindowDoesNotInventUnpublishedFailedWork()
+    {
+        var measurement = new ChessRecordingMeasurement(null, 1);
+        var unchanged = new ChessRecordingMeasurement.ConsensusBackendSnapshot(10, 20, 30, 40, 50, 60);
+        measurement.ObserveConsensusBackend(unchanged, unchanged);
+        Assert.Equal(new ChessRecordingMeasurement.ConsensusBackendDiagnostics(1, 0, 0, 0, 0, 0, 0),
+            measurement.ConsensusBackend);
+        Assert.Equal(0, measurement.Writer.ApplyCalls);
+        Assert.Null(measurement.Durability);
+    }
+
     private static void LogPhaseExit(ILogger logger, string phase, double milliseconds, bool returned) =>
         logger.LogInformation(
             "WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs}",

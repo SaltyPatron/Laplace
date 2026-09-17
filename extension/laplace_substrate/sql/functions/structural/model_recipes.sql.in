@@ -32,8 +32,10 @@ BEGIN ATOMIC
         FROM encoded
         WHERE content_id IS NOT NULL
     ), rendered AS MATERIALIZED (
+        -- Callers consume complete recipe JSON, so render the elected content
+        -- without a preview depth ceiling. The three arrays stay position-aligned.
         SELECT recipe_ids,
-               realize.render_text_batch(content_ids, 16) AS recipe_jsons,
+               realize.render_text_batch(content_ids) AS recipe_jsons,
                first_observers
         FROM selected
         WHERE content_ids IS NOT NULL

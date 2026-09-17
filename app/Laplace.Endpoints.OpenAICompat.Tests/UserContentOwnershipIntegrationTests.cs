@@ -150,8 +150,11 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
         Assert.Equal(Encoding.UTF8.GetString(source), body.Text);
     }
 
-    [Fact]
-    public async Task SharedArtifact_ExportsForEveryTenantThatAdmittedIt_ButNoOtherTenant()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SharedArtifact_ExportsForEveryTenantThatAdmittedIt_ButNoOtherTenant(
+        bool firstTenantHasMinimumSource)
     {
         await using var factory = new UserContentEndpointFactory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
@@ -160,10 +163,16 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
         });
 
         string suffix = Guid.NewGuid().ToString("N");
-        string tenantA = $"artifact-a-{suffix}";
-        string tenantB = $"artifact-b-{suffix}";
+        string[] tenants = new[] { $"artifact-a-{suffix}", $"artifact-b-{suffix}" }
+            .OrderBy(tenant => Convert.ToHexString(UserArtifactContent.Resolve(tenant).Source.ToBytes()),
+                StringComparer.Ordinal).ToArray();
+        string tenantA = tenants[firstTenantHasMinimumSource ? 0 : 1];
+        string tenantB = tenants[firstTenantHasMinimumSource ? 1 : 0];
         string tenantC = $"artifact-c-{suffix}";
-        const string text = "Exact shared tenant artifact.\nSecond line survives reconstruction.";
+        byte[] sourceA = UserArtifactContent.Resolve(tenantA).Source.ToBytes();
+        byte[] sourceB = UserArtifactContent.Resolve(tenantB).Source.ToBytes();
+        Assert.False(sourceA.SequenceEqual(sourceB));
+        string text = $"Exact shared tenant artifact {suffix}.\nSecond line survives reconstruction.";
         var modifiedAt = new DateTimeOffset(2026, 9, 5, 12, 0, 0, TimeSpan.Zero);
         var request = new UserTextArtifactWriteRequest(
             Name: "shared.txt",
@@ -189,11 +198,17 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
         byte[] fileId = Convert.FromHexString(admittedByA.FileId);
         await using (var conn = await pg.DataSource.OpenConnectionAsync())
         await using (var command = new NpgsqlCommand(
-            "SELECT first_observed_by FROM laplace.entities WHERE id = @file", conn))
+            "SELECT first_observed_by, type_id FROM laplace.entities WHERE id = @file", conn))
         {
             command.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
-            byte[] firstObservedBy = Assert.IsType<byte[]>(await command.ExecuteScalarAsync());
-            Assert.Equal(UserArtifactContent.Resolve(tenantA).Source.ToBytes(), firstObservedBy);
+            await using var reader = await command.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            // Compatibility provenance converges by bytewise minimum, independent
+            // of admission order. Tenant authorization comes from its own claim.
+            Assert.Equal(firstTenantHasMinimumSource ? sourceA : sourceB,
+                reader.GetFieldValue<byte[]>(0));
+            Assert.Equal(EntityTypeRegistry.SourceFile.ToBytes(), reader.GetFieldValue<byte[]>(1));
+            Assert.False(await reader.ReadAsync());
         }
 
         await using (var conn = await pg.DataSource.OpenConnectionAsync())
@@ -219,33 +234,74 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
             Assert.True(await containers.ExecuteScalarAsync() is true);
         }
 
-        using var tenantBExport = await ExportAsync(client, tenantB, admittedByA.FileId);
-        Assert.Equal(HttpStatusCode.OK, tenantBExport.StatusCode);
-        UserContentExportResponse body = (await tenantBExport.Content
-            .ReadFromJsonAsync<UserContentExportResponse>())!;
-        Assert.Equal(admittedByA.FileId, body.FileId);
-        Assert.Equal(admittedByA.ContentId, body.ContentId);
-        Assert.Equal(admittedByA.ContentId, body.DocumentId);
-        Assert.Equal(admittedByA.MetadataId, body.MetadataId);
-        Assert.Equal(
-            Convert.ToHexStringLower(UserArtifactContent.Resolve(tenantB).Source.ToBytes()),
-            body.SourceId);
-        AssertCanonicalIds(
-            body.RequestedId,
-            body.FileId!,
-            body.DocumentId!,
-            body.ContentId,
-            body.MetadataId!,
-            body.SourceId);
-        Assert.Equal($"UserContent@{tenantB}", body.Source);
-        Assert.Equal("shared.txt", body.Name);
-        Assert.Equal("proof/shared.txt", body.Path);
-        Assert.Equal("document", body.Kind);
-        Assert.Null(body.Modality);
-        Assert.Equal(Encoding.UTF8.GetByteCount(text), body.Bytes);
-        Assert.Equal(modifiedAt, body.ModifiedAt);
-        Assert.Equal(text, body.Text);
-        Assert.Equal(Encoding.UTF8.GetBytes(text), Convert.FromBase64String(body.ContentBase64));
+        // An unrelated recorded interpretation can become the canonical summary.
+        // It must not erase SourceFile membership or either tenant's authorization.
+        await using (var conn = await pg.DataSource.OpenConnectionAsync())
+        {
+            await using var lowerType = new NpgsqlCommand("""
+                SELECT type_id FROM laplace.entity_interpretations
+                WHERE type_id < @file_type ORDER BY type_id LIMIT 1
+                """, conn);
+            lowerType.Parameters.Add("file_type", NpgsqlDbType.Bytea).Value =
+                EntityTypeRegistry.SourceFile.ToBytes();
+            byte[] unrelatedType = Assert.IsType<byte[]>(await lowerType.ExecuteScalarAsync());
+
+            await using var observe = new NpgsqlCommand("""
+                INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+                SELECT id, tier, @type, NULL FROM laplace.entities WHERE id = @file
+                """, conn);
+            observe.Parameters.Add("type", NpgsqlDbType.Bytea).Value = unrelatedType;
+            observe.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
+            await observe.ExecuteNonQueryAsync();
+
+            await using var verify = new NpgsqlCommand("""
+                SELECT e.type_id, e.first_observed_by, EXISTS (
+                    SELECT 1 FROM laplace.entity_interpretations ei
+                    WHERE ei.entity_id = e.id AND ei.type_id = @file_type)
+                FROM laplace.entities e WHERE e.id = @file
+                """, conn);
+            verify.Parameters.Add("file_type", NpgsqlDbType.Bytea).Value =
+                EntityTypeRegistry.SourceFile.ToBytes();
+            verify.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
+            await using var reader = await verify.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(unrelatedType, reader.GetFieldValue<byte[]>(0));
+            Assert.Equal(firstTenantHasMinimumSource ? sourceA : sourceB,
+                reader.GetFieldValue<byte[]>(1));
+            Assert.True(reader.GetBoolean(2));
+            Assert.False(await reader.ReadAsync());
+        }
+
+        foreach (string tenant in new[] { tenantA, tenantB })
+        {
+            using var tenantExport = await ExportAsync(client, tenant, admittedByA.FileId);
+            Assert.Equal(HttpStatusCode.OK, tenantExport.StatusCode);
+            UserContentExportResponse body = (await tenantExport.Content
+                .ReadFromJsonAsync<UserContentExportResponse>())!;
+            Assert.Equal(admittedByA.FileId, body.FileId);
+            Assert.Equal(admittedByA.ContentId, body.ContentId);
+            Assert.Equal(admittedByA.ContentId, body.DocumentId);
+            Assert.Equal(admittedByA.MetadataId, body.MetadataId);
+            Assert.Equal(
+                Convert.ToHexStringLower(UserArtifactContent.Resolve(tenant).Source.ToBytes()),
+                body.SourceId);
+            AssertCanonicalIds(
+                body.RequestedId,
+                body.FileId!,
+                body.DocumentId!,
+                body.ContentId,
+                body.MetadataId!,
+                body.SourceId);
+            Assert.Equal($"UserContent@{tenant}", body.Source);
+            Assert.Equal("shared.txt", body.Name);
+            Assert.Equal("proof/shared.txt", body.Path);
+            Assert.Equal("document", body.Kind);
+            Assert.Null(body.Modality);
+            Assert.Equal(Encoding.UTF8.GetByteCount(text), body.Bytes);
+            Assert.Equal(modifiedAt, body.ModifiedAt);
+            Assert.Equal(text, body.Text);
+            Assert.Equal(Encoding.UTF8.GetBytes(text), Convert.FromBase64String(body.ContentBase64));
+        }
 
         using var tenantCExport = await ExportAsync(client, tenantC, admittedByA.FileId);
         Assert.Equal(HttpStatusCode.NotFound, tenantCExport.StatusCode);

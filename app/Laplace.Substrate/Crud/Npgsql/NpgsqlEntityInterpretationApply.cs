@@ -23,6 +23,8 @@ public sealed partial class NpgsqlSubstrateWriter
     {
         if (rows.Count == 0) return 0;
 
+        using var diagnostic = MeasureApplyPhase("entity-interpretation-publication");
+
         // Five parallel arrays carry 16+2+16+16+1 payload bytes per row before
         // protocol/container overhead. Reuse the machine-derived flush envelope;
         // this changes transport grain only, never the admitted interpretation set.
@@ -70,6 +72,7 @@ public sealed partial class NpgsqlSubstrateWriter
             roundTrips++;
         }
 
+        diagnostic?.Complete();
         return roundTrips;
     }
 

@@ -372,6 +372,147 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
             + "missing_result_preserved=true competing_line_preserved=true "
             + "resource_refusal_preserved=true resumed_without_double_observation=true "
             + "context_substitution_rebuilt=true");
+
+        await AssertPlayingInterpretationEnumerationAsync(
+            [Hash128.FromBytes(Convert.FromHexString(firstPlaying)),
+             Hash128.FromBytes(Convert.FromHexString(secondPlaying))]);
+    }
+
+    private async Task AssertPlayingInterpretationEnumerationAsync(Hash128[] playingIds)
+    {
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var ct = stop.Token;
+        var source = Hash128.OfCanonical("test/chess/playing-interpretations/" + Guid.NewGuid().ToString("N"));
+        byte[][] ids = playingIds.Select(id => id.ToBytes()).ToArray();
+        byte[][] sources = [source.ToBytes()];
+        byte[] playingType = ChessVocabulary.PlayingType.ToBytes();
+        byte[] playsLineType = ChessVocabulary.PlaysLineType.ToBytes();
+        var lines = await NpgsqlSubstrateReads.AttestationsBySubjectsAndTypeAsync(
+            pg.DataSource, ids, playsLineType, ct);
+        var byPlaying = lines.GroupBy(row => Hash128.FromBytes(row.SubjectId))
+            .ToDictionary(group => group.Key,
+                group => Assert.Single(group.Select(row => Hash128.FromBytes(row.ObjectId)).Distinct()));
+        Assert.Equal(playingIds.Length, byPlaying.Count);
+        Hash128 nonPlaying = byPlaying[playingIds[0]];
+        await using (var check = pg.DataSource.CreateCommand("""
+            SELECT EXISTS (SELECT FROM laplace.entity_interpretations
+                           WHERE entity_id=$1 AND type_id=$2)
+            """))
+        {
+            check.Parameters.AddWithValue(nonPlaying.ToBytes());
+            check.Parameters.AddWithValue(playingType);
+            Assert.False((bool)(await check.ExecuteScalarAsync(ct))!);
+        }
+
+        // Isolate the count/page scope while retaining the actual complete PGN
+        // bodies for ordinary strict hydration. The negative witness has the same
+        // source/relation but its subject is a line, without a Playing interpretation.
+        using var builder = new SubstrateChangeBuilder(source, "test/chess/playing-interpretations")
+            .DeclareSourcePrior(SourceTrust.StructuredCorpus)
+            .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId, source);
+        foreach (var playing in playingIds)
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(playing,
+                ChessVocabulary.PlaysLineType, byPlaying[playing], source, null, 0.9));
+        builder.AddAttestation(NativeAttestation.CategoricalResolved(nonPlaying,
+            ChessVocabulary.PlaysLineType, nonPlaying, source, null, 0.9));
+        await using (var writer = new ConsensusAccumulatingWriter(
+            new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource, persistEvidence: true))
+            await writer.ApplyAsync(builder.Build(), ct);
+
+        async Task AssertEnumerationAsync()
+        {
+            Assert.Equal(2L, await NpgsqlSubstrateReads.CountChessEventsWithPlaysLineAsync(
+                pg.DataSource, playingType, playsLineType, sources, ct));
+            byte[] after = [];
+            var observed = new List<Hash128>();
+            for (int pageNumber = 0; pageNumber <= playingIds.Length; pageNumber++)
+            {
+                var page = await NpgsqlSubstrateReads.ChessEventIdPageAsync(
+                    pg.DataSource, playingType, playsLineType, sources, after, 1, ct);
+                if (pageNumber == playingIds.Length)
+                {
+                    Assert.Empty(page);
+                    break;
+                }
+                byte[] next = Assert.Single(page);
+                observed.Add(Hash128.FromBytes(next));
+                after = next;
+            }
+            Assert.Equal(playingIds.OrderBy(id => id.ToString(), StringComparer.Ordinal),
+                observed.OrderBy(id => id.ToString(), StringComparer.Ordinal));
+            Assert.DoesNotContain(nonPlaying, observed);
+            Assert.Equal(0L, await NpgsqlSubstrateReads.CountChessEventsWithPlaysLineAsync(
+                pg.DataSource, playingType, playsLineType, [], ct));
+            Assert.Empty(await NpgsqlSubstrateReads.ChessEventIdPageAsync(
+                pg.DataSource, playingType, playsLineType, [], [], 1, ct));
+        }
+
+        await AssertEnumerationAsync();
+        var ordinary = new ChessStartingSideInventory.DatabaseSource(pg.DataSource);
+        long? originalCount = await ordinary.CountAsync(ct);
+        var before = await ordinary.HydrateAsync(playingIds, 64L * 1024 * 1024, ct);
+
+        // Choose a real already-declared named type, not a made-up hash. Admit the
+        // alternate through the ordinary entity trigger so its smaller byte order
+        // actually replaces the compatibility summary while preserving both facets.
+        byte[] lowerType;
+        await using (var choose = pg.DataSource.CreateCommand("""
+            SELECT DISTINCT i.type_id
+            FROM laplace.entity_interpretations i
+            JOIN laplace.canonical_names n ON n.id=i.type_id
+            WHERE i.type_id < $1
+            ORDER BY i.type_id LIMIT 1
+            """))
+        {
+            choose.Parameters.AddWithValue(playingType);
+            lowerType = Assert.IsType<byte[]>(await choose.ExecuteScalarAsync(ct));
+        }
+        await using (var admit = pg.DataSource.CreateCommand("""
+            INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+            SELECT e.id,e.tier,$2,$3
+            FROM laplace.entities e WHERE e.id=ANY($1)
+            ON CONFLICT(id) DO NOTHING
+            """))
+        {
+            admit.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
+            admit.Parameters.AddWithValue(lowerType);
+            admit.Parameters.AddWithValue(source.ToBytes());
+            await admit.ExecuteNonQueryAsync(ct);
+        }
+        await using (var verify = pg.DataSource.CreateCommand("""
+            SELECT count(*) FROM laplace.entities e
+            WHERE e.id=ANY($1) AND e.type_id=$2
+              AND EXISTS (SELECT FROM laplace.entity_interpretations i
+                          WHERE i.entity_id=e.id AND i.type_id=$2)
+              AND EXISTS (SELECT FROM laplace.entity_interpretations i
+                          WHERE i.entity_id=e.id AND i.type_id=$3)
+            """))
+        {
+            verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
+            verify.Parameters.AddWithValue(lowerType);
+            verify.Parameters.AddWithValue(playingType);
+            Assert.Equal(2L, (long)(await verify.ExecuteScalarAsync(ct))!);
+        }
+
+        await AssertEnumerationAsync();
+        Assert.Equal(originalCount, await ordinary.CountAsync(ct));
+        var afterHydration = await ordinary.HydrateAsync(playingIds, 64L * 1024 * 1024, ct);
+        Assert.Equal(2, afterHydration.Games.Count);
+        foreach (var game in afterHydration.Games)
+        {
+            var expected = Assert.Single(before.Games, item => item.PlayingId == game.PlayingId);
+            Assert.Equal(expected.LineId, game.LineId);
+            Assert.Equal(expected.StartPositionId, game.StartPositionId);
+            Assert.Equal(expected.Result, game.Result);
+            Assert.Equal<string>(expected.Moves, game.Moves);
+            Assert.Equal<Hash128>(expected.MoveIds, game.MoveIds);
+            Assert.Equal(154, game.MoveIds.Count);
+            Assert.NotNull(game.AdmittedReplay);
+            Assert.Null(game.AdmittedReplay.Truncated);
+            Assert.Equal(154, game.AdmittedReplay.Plies.Count);
+        }
+        Console.WriteLine("CHESS_PLAYING_INTERPRETATIONS counted=2 paged=2 hydrated=2 "
+            + "plies_per_game=154 lower_summary_preserved=true non_playing_excluded=true");
     }
 
     private static object RowIdentity(Evidence row) => (row.Id, row.Subject, row.Context, row.Count, row.Score);

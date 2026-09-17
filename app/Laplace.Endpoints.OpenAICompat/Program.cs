@@ -92,6 +92,7 @@ forwardedHeaders.KnownProxies.Clear();
 forwardedHeaders.KnownProxies.Add(IPAddress.Loopback);
 forwardedHeaders.KnownProxies.Add(IPAddress.IPv6Loopback);
 app.UseForwardedHeaders(forwardedHeaders);
+app.UseMiddleware<RefactorProxyMiddleware>();
 
 // Static assets never need a browser authentication ticket. Serve them before
 // cookie authentication so one page load does not turn every hashed JS/CSS/font

@@ -206,6 +206,104 @@ public sealed class ChessPgnChunkTests
         finally { Dispose(expected); Dispose(split); }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OwnedSerialWindowUsesItsExistingShareAndRetainsMixedRepairReplay(bool budgetIsSmaller)
+    {
+        var games = Games();
+        var novel = new HashSet<Hash128> { games[0].PlayingId };
+        long firstBytes;
+        int probeOffset = 0;
+        using (var probe = ChessPgnChunk.ComposeNext(games, novel, ref probeOffset, 1))
+        {
+            firstBytes = Math.Max(probe.StagedBytes, probe.ModeledSourceAdmissionBytes);
+            Assert.Single(probe.Games);
+        }
+
+        // Derive the finite boundary from actual native-backed first-game composition.
+        // Either existing machine limit may be tighter; neither is multiplied.
+        long envelope = checked(firstBytes + 1);
+        long larger = checked(envelope * 2);
+        long budget = budgetIsSmaller ? envelope : larger;
+        long flush = budgetIsSmaller ? larger : envelope;
+        const int configuredWorkers = 6;
+        long ownedGrant = ChessPgnIngestor.ResolveChunkStagedBytes(
+            true, configuredWorkers, budget, flush);
+        long attachedGrant = ChessPgnIngestor.ResolveChunkStagedBytes(
+            false, configuredWorkers, budget, flush);
+        Assert.Equal(envelope, ownedGrant);
+        Assert.Equal(envelope / configuredWorkers, attachedGrant);
+
+        int expectedOffset = 0;
+        using var expectedChunk = ChessPgnChunk.ComposeNext(games, novel, ref expectedOffset, long.MaxValue);
+        var expected = Build(expectedChunk);
+        var owned = new List<SubstrateChange>();
+        var attached = new List<SubstrateChange>();
+        var replayed = new List<SubstrateChange>();
+        try
+        {
+            int offset = 0;
+            using (var chunk = ChessPgnChunk.ComposeNext(games, novel, ref offset, ownedGrant))
+            {
+                Assert.Equal<ChessGameRecord>(games, chunk.Games);
+                Assert.Equal(1, chunk.NovelGames);
+                Assert.Equal(games[1].PlayingId, Assert.Single(chunk.RepairPlayings));
+                Assert.True(chunk.StagedBytesBeforeLastGame < ownedGrant);
+                Assert.True(chunk.ModeledSourceAdmissionBytesBeforeLastGame < ownedGrant);
+                // Every simultaneously held builder contributes to this same window.
+                Assert.All(new[] { chunk.Record, chunk.Analyze, chunk.Repair, chunk.RepairAnalyze },
+                    builder => Assert.True(builder.StagedBytesEstimate > 0));
+                owned.AddRange(Build(chunk));
+            }
+            Assert.Equal(games.Length, offset);
+
+            var attachedGames = new List<ChessGameRecord>();
+            offset = 0;
+            while (offset < games.Length)
+            {
+                using var chunk = ChessPgnChunk.ComposeNext(games, novel, ref offset, attachedGrant);
+                Assert.Single(chunk.Games);
+                attachedGames.AddRange(chunk.Games);
+                attached.AddRange(Build(chunk));
+            }
+            Assert.Equal<ChessGameRecord>(games, attachedGames);
+            Assert.Equal(games.Sum(game => game.MoveIds.Length),
+                attachedGames.Sum(game => game.MoveIds.Length));
+
+            // A sealed owned window is replayed intact even in a smaller shared grant.
+            offset = 0;
+            using (var replay = ChessPgnChunk.ComposeNext(games, novel, ref offset,
+                attachedGrant, exactGameCount: games.Length))
+            {
+                Assert.Equal<ChessGameRecord>(games, replay.Games);
+                replayed.AddRange(Build(replay));
+            }
+            Assert.Equal(games.Length, offset);
+            foreach (var actual in new[] { owned, attached, replayed })
+            {
+                Assert.Equal(Observations(expected), Observations(actual));
+                Assert.Equal(Attestations(expected), Attestations(actual));
+                Assert.Equal(EvidenceFacts(expected), EvidenceFacts(actual));
+                Assert.Equal(expected.SelectMany(change => change.Entities)
+                        .Select(row => row.Id).Distinct().OrderBy(id => id.ToString()),
+                    actual.SelectMany(change => change.Entities)
+                        .Select(row => row.Id).Distinct().OrderBy(id => id.ToString()));
+                Assert.Equal(expected.SelectMany(change => change.IntentStages)
+                        .Sum(stage => stage.PhysicalityCount),
+                    actual.SelectMany(change => change.IntentStages)
+                        .Sum(stage => stage.PhysicalityCount));
+            }
+        }
+        finally
+        {
+            Dispose(expected);
+            Dispose(owned);
+            Dispose(attached);
+            Dispose(replayed);
+        }
+    }
+
     [Fact]
     public void SharedByteEstimatesCloseAfterTheCrossingGameWithoutANewGameCountCap()
     {

@@ -208,8 +208,8 @@ physicality_descriptor_status_t materialize(
     External<physicality_descriptor_capture_t, physicality_descriptor_capture_free> current(memory);
     physicality_descriptor_limits_t limits{memory.remaining()};
     if (stage_count != 0) {
-        const auto status = physicality_descriptor_capture_stages_cancelable(current_stages, stage_count,
-            &vocabulary.basis, &limits, memory.remaining(), cancellation, &current.value);
+        const auto status = physicality_descriptor_capture_stage_rows_cancelable(current_stages, stage_count,
+            memory.remaining(), cancellation, &current.value);
         if (status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED && diagnostics != nullptr) {
             diagnostics->refusal_kind = PHYSICALITY_MATERIALIZATION_REFUSAL_CAPTURE;
             diagnostics->maximum_bytes = memory.remaining();
@@ -217,10 +217,9 @@ physicality_descriptor_status_t materialize(
             // Its discarded allocation counts are unavailable, not zero work.
         }
         require(status == PHYSICALITY_DESCRIPTOR_OK, status);
-        /* Full validation has completed, including bodies excluded from provider
-         * selection. Keep decoded rows/trajectories and the original peak, but
-         * retire this unused plan before the next native allocation. */
-        physicality_descriptor_capture_release_plan(current.value);
+        /* Every decoded current row is appended below without winner filtering.
+         * The combined plan authenticates all of them before provider indexing;
+         * an independent preliminary plan would repeat the same validation. */
         current.account(physicality_descriptor_capture_bytes(current.value),
             physicality_descriptor_capture_peak_bytes(current.value));
     }

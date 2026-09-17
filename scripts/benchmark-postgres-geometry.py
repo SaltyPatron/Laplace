@@ -330,7 +330,7 @@ def run(args):
             "hostname": platform.node(), "cpu_affinity": sorted(os.sched_getaffinity(0)),
             "psql": artifact(Path(pg.executable).resolve())}
         report["server"] = pg.json("""SELECT jsonb_build_object('version',version(),
-            'database',current_database(),'database_oid',(SELECT oid FROM pg_database WHERE datname=current_database()),
+            'database',current_database(),'database_oid',(SELECT oid::bigint FROM pg_database WHERE datname=current_database()),
             'address',inet_server_addr(),'port',inet_server_port(),'postmaster_started',pg_postmaster_start_time(),
             'postgis',postgis_full_version(),'recovery',pg_is_in_recovery())""")
         report["settings"] = pg.json("SELECT jsonb_object_agg(name,setting) FROM pg_settings WHERE name IN ("

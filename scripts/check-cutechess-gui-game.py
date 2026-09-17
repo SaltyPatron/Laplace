@@ -171,8 +171,9 @@ class Accessibility:
         item = self.one(app, name="Engine Debug", role=self.api.Role.MENU_ITEM)
         if not item.get_state_set().contains(self.api.StateType.CHECKED):
             self.act(item)
-        else:
-            self.session.key("Escape")
+        # Qt's accessible Press triggers the QAction without dismissing QMenu.
+        # Release that popup's keyboard grab before the later normal Quit action.
+        self.session.key("Escape")
         dock = self.one(app, name="Engine Debug", role=self.api.Role.PANEL)
         texts = [item for item in self.walk(dock) if item.get_text_iface() is not None
                  and item.get_role() in (self.api.Role.TEXT, self.api.Role.ENTRY)]
@@ -205,6 +206,21 @@ class GuiOutput:
             require(self.bytes <= MAX_TEXT, "Qt diagnostics exceeded their byte envelope")
             self.target.write(data)
             self.target.flush()
+
+
+    def wait_for_exit(self, deadline):
+        # Waiting first can deadlock Qt during plugin teardown on this same pipe.
+        # Keep the existing finite exit window and retain every bounded byte.
+        while True:
+            self.drain()
+            returncode = self.process.poll()
+            if returncode is not None:
+                self.drain()
+                return returncode
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("GUI did not exit normally after its complete game")
+            time.sleep(min(.02, remaining))
 
 
 class GuiSession(x11.X11Session):
@@ -472,9 +488,24 @@ def worker(args):
                                              "engine_debug_sha256": digest(output / "engine-debug.log")})
             session.focus(main["id"])
             session.key("ctrl+q")
-            require(gui.wait(timeout=min(10, max(.001, deadline - time.monotonic()))) == 0,
-                    "GUI did not exit normally after its complete game")
-            gui_output.drain()
+            exit_deadline = min(deadline, time.monotonic() + 10)
+            try:
+                returncode = gui_output.wait_for_exit(exit_deadline)
+            except TimeoutError:
+                result["normal_exit_qt_output_bytes"] = gui_output.bytes
+                # Observe only this owned GUI, without acknowledging any modal.
+                # Diagnostic collection has its own two-second upper bound.
+                previous_deadline = session.deadline
+                session.deadline = min(deadline, time.monotonic() + 2)
+                try:
+                    result["normal_exit_windows"] = [
+                        session.describe(window) for window in session.windows()]
+                except Exception as observation_error:
+                    result["normal_exit_window_observation_failure"] = type(observation_error).__name__
+                finally:
+                    session.deadline = previous_deadline
+                raise
+            require(returncode == 0, "GUI did not exit normally after its complete game")
         qt_plugin = Path(desktop["qt_prefix"]) / "plugins/platforms/libqxcb.so"
         loaded = []
         for line in (output / "gui.log").read_text(encoding="utf-8", errors="replace").splitlines():

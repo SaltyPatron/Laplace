@@ -51,6 +51,8 @@ Usage: sudo bash $0
   storage                  Repair shared storage and runner environment; verify both writers.
   managed-services         Reconcile managed host policy only; no DB rebuild or app restart.
   managed-services-status  Read-only managed host configuration/drift report.
+  cutechess-session        Prepare and start the persistent operator Qt session over SSH.
+                          Add --prepare-only to qualify dependencies before starting.
   status / reset           Debug / teardown.
 
 managed-services optionally accepts --address, --network and --hostname. Settings
@@ -351,12 +353,16 @@ case "$MODE" in
         ;;
     managed-services) managed_services_setup "${@:2}" ;;
     managed-services-status) managed_services_status ;;
+    cutechess-session)
+        python3 "$REPO_DIR/deploy/linux/laplace-cutechess-bootstrap" \
+            --operator "$LAPLACE_OPERATOR" "${@:2}"
+        ;;
     status)         do_status ;;
     reset)          do_reset ;;
     stripe)         do_stripe ;;
     -h|--help|help) usage ;;
     *)
-        red "Unknown mode: $MODE — use setup/managed-services/managed-services-status/status/reset"
+        red "Unknown mode: $MODE — use setup/managed-services/managed-services-status/cutechess-session/status/reset"
         usage
         exit 64
         ;;

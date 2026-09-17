@@ -147,6 +147,69 @@ class GuiGameControls(unittest.TestCase):
             OWNER.engine.stop_group(process)
             process.stdout.close()
 
+    def test_normal_exit_drains_real_pipe_beyond_kernel_capacity_and_retains_status(self):
+        size = 1024 * 1024
+        for expected in (0, 7):
+            with self.subTest(returncode=expected):
+                process = subprocess.Popen(
+                    [sys.executable, "-c",
+                     "import sys;sys.stdout.buffer.write(b'x'*" + str(size)
+                     + ");sys.stdout.buffer.flush();sys.exit(" + str(expected) + ")"],
+                    stdout=subprocess.PIPE, start_new_session=True)
+                try:
+                    target = io.BytesIO()
+                    output = OWNER.GuiOutput(process, target)
+                    self.assertEqual(expected, output.wait_for_exit(time.monotonic() + 5))
+                    self.assertEqual(size, output.bytes)
+                    self.assertEqual(b"x" * size, target.getvalue())
+                    self.assertEqual(expected, process.returncode)
+                finally:
+                    OWNER.engine.stop_group(process)
+                    process.stdout.close()
+
+    def test_normal_exit_timeout_never_terminates_or_accepts_the_live_process(self):
+        process = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"],
+                                   stdout=subprocess.PIPE, start_new_session=True)
+        try:
+            output = OWNER.GuiOutput(process, io.BytesIO())
+            began = time.monotonic()
+            with self.assertRaisesRegex(TimeoutError, "did not exit normally"):
+                output.wait_for_exit(began + .1)
+            self.assertLess(time.monotonic() - began, 2)
+            self.assertIsNone(process.poll())
+        finally:
+            OWNER.engine.stop_group(process)
+            process.stdout.close()
+
+    def test_debug_menu_releases_popup_after_both_existing_and_new_dock_visibility(self):
+        roles = types.SimpleNamespace(MENU_ITEM=1, PANEL=2, TEXT=3, ENTRY=4)
+        api = types.SimpleNamespace(Role=roles, StateType=types.SimpleNamespace(CHECKED=5))
+        for checked in (False, True):
+            with self.subTest(already_checked=checked):
+                calls = []
+                session = types.SimpleNamespace(key=lambda key: calls.append(("key", key)))
+                owner = OWNER.Accessibility(api, 41, session)
+                view, dock = object(), object()
+                toggle = types.SimpleNamespace(
+                    get_state_set=lambda: types.SimpleNamespace(contains=lambda _: checked))
+                text = types.SimpleNamespace(get_text_iface=lambda: object(), get_role=lambda: roles.TEXT)
+                def one(root, *, name, role):
+                    if name == "View":
+                        return view
+                    if role == roles.MENU_ITEM:
+                        return toggle
+                    self.assertEqual(("key", "Escape"), calls[-1])
+                    return dock
+                with mock.patch.object(owner, "one", side_effect=one), \
+                     mock.patch.object(owner, "act", side_effect=lambda node, *args: calls.append(
+                         ("act", "view" if node is view else "toggle"))), \
+                     mock.patch.object(owner, "walk", return_value=iter([text])):
+                    self.assertIs(text, owner.show_debug(object()))
+                expected = [("act", "view")]
+                if not checked:
+                    expected.append(("act", "toggle"))
+                self.assertEqual(expected + [("key", "Escape")], calls)
+
     def test_accessibility_refuses_unrelated_pid_and_ambiguous_or_disabled_named_control(self):
         class Node:
             def __init__(self, name, role, children=(), pid=41, enabled=True):

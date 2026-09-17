@@ -227,7 +227,7 @@ class ManagedResultsTests(unittest.TestCase):
     def test_every_requested_class_and_fixed_case_count_required(self):
         with tempfile.TemporaryDirectory() as temp:
             result = module.validate_trx(self.write_trx(temp))
-            self.assertEqual(result["total"], 22)
+            self.assertEqual(result["total"], 26)
             self.assertEqual(set(result["classes"]), set(module.MANAGED_CLASSES))
 
     def test_skip_is_failure_even_if_summary_claims_pass(self):

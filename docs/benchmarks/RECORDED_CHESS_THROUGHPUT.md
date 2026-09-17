@@ -3,6 +3,346 @@
 The `recorded` benchmark suite measures ordinary Chess Lab jobs from game generation through synchronous PostgreSQL writer completion and exact native game readback. The API, native parser/composer, shared writer and native readback remain the production implementations. The collector checks their receipts and aggregates measured work.
 
 
+## Completed 2,000-game baseline — 2026-09-17
+
+[Run 35223192542](https://github.com/SaltyPatron/Laplace/actions/runs/35223192542)
+completed **2,000 new complete games at 0.596123973 recorded games/s**.
+It used unchanged source `ea9f60a1c2bac9fcc36491a6f26403d95c2b8359`,
+the same canonical database OID `39589789` and system
+`7672946663471807927`, and the original 256,162,073-byte PGN with SHA-256
+`9eafc83ed9a97f9dcfc82135448d45653d325a742e497e8d08c3085a6a48b0ea`.
+All selected Playing IDs were distinct and excluded the earlier 140 games.
+
+| Complete recorded-game measurement | Actual result |
+| --- | ---: |
+| Newly recorded games / distinct lines | 2,000 / 2,000 |
+| Ordered plies checked by exact readback | 143,025 |
+| Plies per game, minimum / mean / maximum | 11 / 71.5125 / 252 |
+| Completed chunks | 237 |
+| Games per chunk, minimum / median / maximum | 5 / 8 / 34 |
+| Fresh admission wall time used for rate | 3,355.0068303 s |
+| **Complete recorded games per second** | **0.596123973** |
+| Minimum 30-second window satisfied | Yes |
+| 2,500 recorded-games/s target attained | **No** |
+| Exact replay games / plies | 2,000 / 143,025 |
+| Replay writer calls and all 12 other writer counters | 0 |
+| Exact replay wall time | 95.1072662 s |
+| Complete corpus owner, including setup, preparation and replay | 3,456.8500822 s |
+
+The published rate is exactly `2000 / 3355.0068303`. The enclosing fresh
+admission interval is slightly wider than the inner recording phase's
+3,354.9111026 seconds; these denominators are not substituted for each other.
+Setup took 1.0120514 seconds and preparation 5.6620029 seconds. Preparation
+scanned 8,624 complete legal source games, identified the 140 already present
+games, selected 2,000, and observed 6,484 further eligible novel games in that
+scan. It did not shorten complete games or add synthetic occurrence headers.
+
+Fresh writes acknowledged synchronous commit with `fsync` and
+`full_page_writes` enabled. Every game was read back in full. Replay
+preserved the exact game bodies and the 29,423-row evidence/standing scope
+(byte SHA-256 `6afbb371bacb7f9d8b71ca59e00b54ac8659af5d6bbb4fbf651e8bf024a5e054`).
+The final runtime comparison passed; publication-before and publication-after
+have the same SHA-256
+`97d4fcca107aa1ca9584957bd7120dd4da42754677e7cc3c57656490ca6b421b`.
+The whole workflow succeeded. Target attainment was not required for completion.
+
+The larger baseline identifies consensus acceptance as the dominant measured
+cost:
+
+| Timing window | Seconds | Scope |
+| --- | ---: | --- |
+| Writer apply | 3,251.179962 | Exclusive; 96.91% of fresh admission |
+| Consensus acceptance | 2,515.565909 | Inside writer; 74.98% of fresh admission |
+| Provider admission | 202.144723 | Inside writer; 6.03% of fresh admission |
+| Presence verification | 134.755843 | Inside writer |
+| COPY and its transaction commits | 113.101556 | Inside writer |
+| Exact game readback | 32.090912 | Exclusive, outside writer |
+| Before/after scope probes | 44.741568 | Exclusive, outside writer |
+| Composition and novelty probe | 16.860300 | Exclusive, outside writer |
+
+All 237 observations for every named writer phase returned; none was
+interrupted or rejected. Named writer windows total 2,984.420805 seconds,
+leaving 266.759158 seconds of unclassified writer time. Nested times must not
+be added to the enclosing writer or admission totals.
+
+This participant contains both consensus upsert/folding and highway-mask work;
+this receipt does not separate them. Existing counters can distinguish those
+costs in a subsequent measurement.
+
+| Nested cost per complete game | First 140 | Next 2,000 |
+| --- | ---: | ---: |
+| Consensus acceptance | 0.091999 s | 1.257783 s |
+| Provider admission | 0.102729 s | 0.101072 s |
+| COPY and transaction commits | 0.065838 s | 0.056551 s |
+| Presence verification | 0.024374 s | 0.067378 s |
+
+Consensus cost per game was 13.67 times the earlier sample's value, while
+provider cost per game stayed nearly unchanged. Mean game length decreased
+from 75.329 to 71.513 plies. These are different novel samples and database
+populations, not a controlled causal comparison. The current native consensus
+owner reads and folds the complete retained evidence for each touched cell;
+that history-dependent work is the next measured optimization target.
+An order-sensitive incremental rating update would not preserve the current
+canonical-period semantics.
+
+The retained final five consensus calls took 24.640, 22.297, 23.080, 9.163
+and 6.990 seconds. Their chunks contained respectively 5/657, 5/593, 5/668,
+32/411 and 10/228 games/plies. Their different shapes preclude treating these
+five times as a monotonic history trend. The bounded log dropped 6,508 older
+entries; all phase totals/minima/maxima remain, but the overwritten heartbeat
+file and console phase messages do not reconstruct every earlier chunk's
+timing.
+
+The writer inserted 5,587,526 entities, 5,574,826 physicalities and 876,217
+attestations: 12,038,569 table rows, or 6,019.2845 per complete game for this
+sample. It acknowledged 3,081 COPY transactions and counted 4,266 logical
+writer round trips. These counters remain distinct from semantic objects,
+network packets and complete games. The lower table-row fanout per game did
+not prevent the higher consensus cost.
+
+Before/after snapshots showed 12 logical processors, one-minute load averages
+0.11 and 1.13, and available memory 83,567,660 and 83,462,192 kB. The snapshots
+do not establish exclusive host ownership or continuous resource utilization.
+The unchanged installed recorded cache still covered the previously exported
+140 games; completion of these 2,000 admissions does not claim they were
+already exported into that cache.
+
+Artifact `10500925768`, 27,057,496 bytes, has SHA-256
+`dd223da16b6172d440ed10978a9356771ae34bc19d4259ee7385077a988f545f`.
+Evidence is under
+`/build/laplace/recovery/canonical-next2000/35223192542-1`.
+The completed root receipt SHA-256 is
+`7bfb9ac3e021c5c0d4b0644da2ca45bbfd720d3a17a94ce70b8b0301658e19ff`;
+the capacity receipt is
+`6ebd269f6fb12aa89a3d7a2f67d3ebaeeeeb805ce8b5b4c3e0e26db86cb44ae0`.
+The [authenticated reader](https://github.com/SaltyPatron/Laplace/actions/runs/35229354961)
+retains the exact component files, chunk manifests, machine snapshots and logs.
+The evidence index records all corresponding file identities.
+
+
+## Completed canonical recording and geometry baseline — 2026-09-17
+
+[Run 35220694099](https://github.com/SaltyPatron/Laplace/actions/runs/35220694099)
+completed a new 140-game admission in canonical database OID `39589789`,
+PostgreSQL system `7672946663471807927`, using source
+`ea9f60a1c2bac9fcc36491a6f26403d95c2b8359`. The input was the exact
+140 original complete PGN frames retained by the earlier failed attempt,
+exported without changing their game identities. They were new admissions in
+this database, with new chunk and scope receipts.
+
+| Complete recorded-game measurement | Actual result |
+| --- | ---: |
+| Newly recorded games / distinct lines | 140 / 140 |
+| Ordered plies checked by exact readback | 10,546 |
+| Completed chunks | 18 |
+| Fresh admission wall time | 68.6798501 s |
+| **Complete recorded games per second** | **2.038443587** |
+| Minimum 30-second window satisfied | Yes |
+| 2,500 recorded-games/s target attained | **No** |
+| Replay readback games / plies | 140 / 10,546 |
+| Replay writer calls and all 12 other writer counters | 0 |
+| Fresh+replay corpus owner elapsed time | 81.3785449 s |
+
+The recorded rate is exactly `140 / 68.6798501`. Its fresh-admission
+denominator includes composition, provider admission, canonical writes,
+consensus, exact game readback, scope checks and evidence completion.
+Preparation and the subsequent zero-write replay are reported separately;
+they are not relabelled as novel recorded games. The replay's complete game
+bodies and 4,435-row exact evidence/standing scope matched the fresh admission.
+Fresh writes acknowledged synchronous commit with `fsync` and
+`full_page_writes` enabled.
+
+The exclusive recording windows identify the main cost:
+
+| Exclusive child window | Seconds |
+| --- | ---: |
+| Writer apply | 57.981283 |
+| Exact readback | 6.235710 |
+| Composition and novelty probe | 1.495123 |
+| Before/after scope probes combined | 1.936238 |
+| Remaining measured child windows | 0.799585 |
+
+Writer apply accounts for 84.42% of the fresh-admission wall time. Its complete
+nested phase aggregates cover all 18 applies: provider admission 14.382112 s,
+consensus acceptance 12.879812 s, COPY and its transaction commits 9.217334 s,
+presence verification 3.412339 s, and other named writer windows 1.948677 s.
+These are already included in writer apply. The remaining 16.141010 s is
+unclassified writer time. The retained tail shows substantial interpretation
+publication between COPY and consensus, but its five complete windows do not
+establish that operation's total over all 18 applies. The full aggregates remain
+available despite 376 older entries being dropped from the bounded log tail.
+
+The retained before/after host snapshots report 12 logical processors and
+affinity to all 12. One-minute load average changed from 0.51 to 1.23 across
+recording and reached 1.51 after geometry; available memory remained about
+83.5 million kB. CPU and memory pressure averages were zero in those snapshots,
+while I/O pressure was nonzero. These are observed machine conditions, not a
+claim of an exclusively idle machine or a continuous process-level resource
+audit. The four complete machine JSON files are retained with the measurements.
+
+The fresh writer inserted 557,188 canonical entity rows, 556,267 physicality
+rows and 66,825 attestation rows. It acknowledged 234 COPY transactions and
+reported 324 logical writer round trips. That is 8,430.571 inserted rows across
+those three tables per complete game for this exact novelty mix. These are
+separate table and logical operation counters, not a count of independent
+semantic objects or network packets. No provider or SQL optimization is
+inferred to remove all of these costs.
+
+The entity and physicality counts average about 52.8 rows each per recorded
+ply. The source trace identifies substantial descriptor graphs, content
+carriers and view receipts in that expansion; these are not 52.8 independent
+chess concepts. Canonical body identity uses ordered content, while observation
+and source-unit context belong to views and testimony. The counters do not
+separate exact category shares. Reducing unnecessary representation expansion
+remains an optimization opportunity; the measured fanout is not an immutable
+lower bound on the work needed to record a game.
+
+The same database then passed all 18 primitive geometry cases. Each case
+inserted 100,000 exact existing physicality payloads in ten synchronous
+10,000-row COPY transactions, followed by exact committed binary readback.
+The table below reports the median of three repeats for each concurrency.
+
+| Concurrent connections | Minimal logged geometry heap, rows/s | Logged full physicality clone, rows/s |
+| ---: | ---: | ---: |
+| 1 | 230,087 | 32,865 |
+| 2 | 400,563 | 50,175 |
+| 4 | 540,749 | 72,845 |
+
+The minimal heap stores `id`, `coord` (`PointZM`) and `trajectory`
+(`GeometryZM`) without indexes. The full clone carries the actual physicality
+columns, checks, generated radius and 15 indexes: seven B-tree, two GiST,
+five GIN and one BRIN. Both use the same observed durability settings as the
+recording: `synchronous_commit=on`, `fsync=on`,
+`full_page_writes=on`. The selected payload contains 31,517,368 geometry
+EWKB bytes and 841,174 trajectory vertices; median trajectory length is five
+vertices, 95th percentile 27, maximum 254. These are mixed existing database
+rows selected by ascending physicality ID, not a chess-only sample.
+
+Geometry rows/s measures warm, empty-target COPY plus connection, check/index
+work and acknowledged commits. Source capture, table/index creation, TRUNCATE,
+readback and cleanup are outside that write-rate denominator and separately
+reported. The clone excludes foreign keys, user triggers, canonical partition
+routing and occupied-table/index effects. Neither target performs game
+composition, interpretation publication, evidence folding or legal game
+readback. These are primitive storage baselines, not ordinary full canonical
+admission rates and not recorded-game rates.
+
+The recording and geometry receipts both completed. The outer workflow remains
+**failed**: its final geometry identity check compared the JSON string
+`"39589789"` with integer `39589789` and stopped before its extra
+publication-after check. The authenticated
+[result reader](https://github.com/SaltyPatron/Laplace/actions/runs/35221177028)
+confirmed the same database, all 18 passing geometry cases and the completed
+recording. A separate
+[read-only finalization in run 35221551456](https://github.com/SaltyPatron/Laplace/actions/runs/35221551456)
+completed at 12:31:22 UTC, authenticated both completed component receipts and
+passed the publication-after comparison against the same source and database.
+It retained the original failed receipt. Neither admission nor geometry was
+reexecuted.
+
+Evidence is retained in artifact `10497405601`,
+SHA-256 `028faf189822ae7a1a25f1c01d8625c485e585d84b7080d9d17151ad33ec03b3`,
+under
+`/build/laplace/recovery/canonical-first140/35220694099-1`.
+The completed recording wrapper is `recording/receipt.json`, SHA-256
+`6714589eab654c2a468515d8ef8e8f33347b43189ee389f7bac466a73da63c98`;
+the geometry receipt is `geometry/receipt.json`, SHA-256
+`91925e73bb05a3a726cfcd6f812bbdfd6d37c76eb9f7e42b0ee511f8333638fc`.
+The detailed identity and validation history is in
+[canonical-identity-evidence.json](canonical-identity-evidence.json).
+
+The installed generation has completed scoped chess-runtime activation.
+Its receipt explicitly retains `fullProductLifecyclePassed: false`:
+competitive model and corpus-dependent whole-product qualification remain
+blocked by absent Stack-v2 source payloads. The later 2,000-game result above is a larger completed baseline, not proof
+of sustained 2,500 games/s.
+Qualifying that rate for at least 30 seconds requires at least 75,000 novel
+complete games.
+
+
+## Hosted-qualified performance followup — 2026-09-17
+
+A separate candidate removes the redundant preliminary plan for current
+provider bodies. Every current body still reaches the combined authenticated
+plan before provider selection, and the preliminary validation for filtered
+admitted bodies remains. It also gives the standalone serial PGN owner its
+actual single resident share; shared API/lab producers keep their existing
+allocation. A named writer phase measures interpretation publication without
+changing its SQL or acceptance semantics.
+
+[Native comparison 35225151054](https://github.com/SaltyPatron/Laplace/actions/runs/35225151054)
+passed 549 core tests and nine Syzygy tests for both baseline and candidate,
+with the same three pre-existing media skips. All 33 exported ordered binary
+streams matched, including the auxiliary interpretation streams. The actual
+PostgreSQL-header helper passed 438 checks for each version; its backend doubles
+do not establish a PostgreSQL runtime pass. That workflow retains its failed
+status because its subsequent managed setup lacked the required opening data.
+
+The corrected
+[managed continuation 35225959742](https://github.com/SaltyPatron/Laplace/actions/runs/35225959742)
+used the existing finite opening fixture and passed all 11 chunk tests with
+zero skips and the actual candidate core mapped. It changed no production
+or test assertions.
+
+Five sequential hosted samples put the shared-provider materialization median
+at 9.477464 ms before and 9.287374 ms after, and the small current-capture
+median at 0.241704 ms before and 0.228063 ms after. The no-provider control
+was 0.75% slower and another unchanged plan control varied by 9.7%.
+These are finite native timing observations with visible run-order variation,
+not a complete-game speedup. The completed 2,000-game baseline used the unchanged source. A comparable completed recording after deployment is still required to
+measure the candidate's effect.
+
+
+## Recorded cache and functional chess delivery — 2026-09-17
+
+[Run 35221551456](https://github.com/SaltyPatron/Laplace/actions/runs/35221551456)
+completed the matching chess tools and recorded-floor deployment on source
+`ea9f60a1` in database OID `39589789`. Normal export legally hydrated
+exactly the newly recorded 140 games: 10,546 transition occurrences and
+10,058 unique transitions. It built and installed generation
+`851c577c8156f696583b47dff1980ab14284e60b78822d5e262b7429e1e04355`.
+
+The paired floors contain 248,869 position records and 17,793 transition
+records, including the existing finite and seed coverage. These are not counts
+of newly recorded games. All 15 cache deployment phases passed, including
+exact UCI mapping of both selected files and actual API serving. The API
+process mapped both files, and its persistent transition-hit counter increased
+by one around a request for a canonical recorded witness whose position and
+transition were absent from reproduced seed floors. Concurrent requests were
+not excluded; this is a process-counter observation, not exclusive attribution.
+No API position-hit or cache-throughput claim is made. The raw transition-v1
+header still has no source identity fields; the generation's pair and export
+receipts provide that binding.
+
+The independent tools job completed all 119 tracked files from official
+Stockfish commit `edb0d9db6731067ec50ce619ff372b463bc4dd5d`, with exact
+byte/native readback and a repeat inserting zero entity, physicality and
+attestation rows. It revalidated and reused calibration report
+`19fddbd62f90999398cc8f7efc32230505f35e8002496d5a217702345266fbe1`;
+the sweep was not repeated. The GUI actually applied Threads 8, Hash 16 MiB
+and Ponder false, then completed a 60+1 game: 75 plies, Stockfish 1–0 Laplace,
+158.694 seconds. Native PGN/protocol validation and normal GUI exit passed.
+This is one functional game in the owned Xvfb session, not a playing-strength,
+persistent-desktop or durable-recording measurement. Service restart to
+authenticated readiness took 3.504492 seconds; an OS boot was not measured.
+
+The current source inventory found the requested
+`/vault/External/Stockfish/SF_19` directory and source layout, but no Git
+marker in its bounded depth-two scan. The configured clean official checkout
+remained `/build/external/stockfish`.
+
+Cache evidence is artifact `10496819383`, SHA-256
+`ea0f4a613ebc61a4cb4a6bef2f39311015655ec3e50a45767347d80ca6ed8e29`.
+The inner cache receipt SHA-256 is
+`e4a7299e25f6ff32ac4bd0949d4656314de74d52cfd21dc29c3e5dcd0414ad39`;
+the serving receipt is
+`6a84a4bc17b5b0b2bf0ab085bb248f417a0bd54ebf8906c4eac00c0a9c12829e`.
+Tools evidence is artifact `10497043626`, SHA-256
+`db0b9ea5a21e7b89c57449704062995543e8e793f14966c2b0d0b3c51f5dfec1`.
+The evidence index retains the exact runtime, file, calibration, GUI, source
+and publication identities.
+
+
 ## Installed recording attempt — 2026-09-17
 
 [Run 35184890182, attempt 1](https://github.com/SaltyPatron/Laplace/actions/runs/35184890182)
