@@ -1,5 +1,7 @@
 using System.Data;
 using System.Diagnostics;
+using System.Text.Json;
+using Laplace.Decomposers.Abstractions.Tests;
 using Laplace.Engine.Core;
 using Laplace.Decomposers.Abstractions;
 using Npgsql;
@@ -16,17 +18,20 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
     private static Hash128 Id(string value) => Hash128.OfCanonical("test/evidence-period/" + value);
     private sealed record Witness(int Index, long Games, long Score, long Opponent = 1_756_000_000_000,
         long Rd = 62_000_000_000, bool Replayable = true);
-    private sealed record Cell(Hash128 Subject, Hash128 Type, Hash128 Object, Hash128 Source);
+    private sealed record Cell(Hash128 Subject, Hash128 Type, Hash128? Object, Hash128 Source);
     private sealed record Standing(long Rating, long Rd, long Volatility, long Witnesses, DateTime Time);
 
     private static Cell Target(string name) => new(Id(name + "/subject"), Id(name + "/type"),
         Id(name + "/object"), Id(name + "/source"));
     private static readonly DateTime Epoch = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    [Fact]
-    public async Task IdenticalAcceptedEvidenceIsExactAcrossChunkPartitionsShuffleReplayAndCanonicalFold()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IdenticalAcceptedEvidenceIsExactAcrossChunkPartitionsShuffleReplayAndCanonicalFold(bool unary)
     {
-        var cell = Target("partition");
+        var cell = Target("partition-" + unary);
+        if (unary) cell = cell with { Object = null };
         Witness[] rows = [
             new(0,458,458*Scale),new(1,458,0),new(2,458,458*Scale),
             new(3,37,18*Scale,1_600_000_000_000,90_000_000_000),
@@ -251,6 +256,132 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
         Assert.Equal(0L,(long)(await check.ExecuteScalarAsync())!);
     }
 
+
+    [Fact]
+    public async Task ProductionEvidenceQueryPreservesWholeCellsOrdinalsAndEveryObservation()
+    {
+        // Execute the SQL owned by the C route with the installed native aggregate.
+        // Missing and duplicate requested cells are query-level cases; the public
+        // mutating route separately owns missing-evidence/duplicate-target refusal.
+        string name = "query-guard-" + Guid.NewGuid().ToString("N");
+        var good = Target(name + "/good");
+        var mixed = Target(name + "/mixed") with { Type = good.Type };
+        var transient = Target(name + "/transient") with { Type = good.Type };
+        var unary = Target(name + "/unary") with { Type = good.Type, Object = null };
+        var missing = Target(name + "/missing") with { Type = good.Type };
+        await using var connection = await OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        Witness[] rows = [
+            new(0,1,0,1_500_000_000_000,350_000_000_000),
+            new(1,2,2*Scale,1_500_000_000_000,350_000_000_000),
+            new(2,5,2*Scale,1_600_000_000_000,90_000_000_000),
+            new(3,3,Scale,1_300_000_000_000,170_000_000_000)];
+        await InsertAsync(connection, good, rows);
+        await using (var equalTimes = Command(connection,
+            "UPDATE laplace.attestations SET last_observed_at=@time "
+            + "WHERE type_id=@type AND subject_id=@subject", good))
+        {
+            equalTimes.Parameters.AddWithValue("time", NpgsqlDbType.TimestampTz, Epoch);
+            Assert.Equal(rows.Length, await equalTimes.ExecuteNonQueryAsync());
+        }
+        // These retained mathematical inputs are deliberately invalid. A false
+        // flag excludes its whole cell before the native aggregate is evaluated,
+        // including the true row in the mixed cell. Filtering individual false
+        // rows, or testing bool_and only after folding, would reach invalid math.
+        await InsertAsync(connection, mixed,
+            [new(0,1,long.MaxValue,Replayable:false), new(1,1,long.MaxValue)]);
+        await InsertAsync(connection, transient,
+            [new(0,1,long.MaxValue,Replayable:false), new(1,2,long.MaxValue,Replayable:false)]);
+        await InsertAsync(connection, unary, [new(0,3,Scale), new(1,7,5*Scale)]);
+        var goodExpected = await CanonicalAsync(connection, good);
+        var unaryExpected = await CanonicalAsync(connection, unary);
+        Assert.Equal(11L, goodExpected.Witnesses);
+        Assert.Equal(Epoch, goodExpected.Time);
+        Assert.Equal(10L, unaryExpected.Witnesses);
+        Cell[] requested = [good, mixed, transient, unary, missing, good];
+
+        string source = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
+            "extension", "laplace_substrate", "src", "fold_route.c"));
+        const string marker = "static const char *EVIDENCE_FOLD_SQL =";
+        int start = source.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start >= 0, "the native evidence query owner must exist");
+        start += marker.Length;
+        int end = source.IndexOf(";\n", start, StringComparison.Ordinal);
+        Assert.True(end > start, "the native query must have a complete literal");
+        string query = string.Concat(source[start..end]
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => JsonSerializer.Deserialize<string>(line.Trim())
+                ?? throw new InvalidDataException("null native SQL fragment")));
+        query = query.Replace("'\\x%s'::bytea", "@type", StringComparison.Ordinal)
+            .Replace("$1", "@subjects", StringComparison.Ordinal)
+            .Replace("$2", "@objects", StringComparison.Ordinal);
+        Assert.DoesNotContain("%s", query, StringComparison.Ordinal);
+
+        foreach (string mode in new[] { "force_custom_plan", "force_generic_plan" })
+        {
+            await ExecuteAsync(connection, $"SET LOCAL plan_cache_mode={mode}");
+            var actual = await ReadQueryAsync(requested);
+            Assert.Equal(6, actual.Length);
+            Assert.Equal(new EvidenceResult(1,true,4,goodExpected), actual[0]);
+            Assert.Equal(new EvidenceResult(2,false,2,null), actual[1]);
+            Assert.Equal(new EvidenceResult(3,false,2,null), actual[2]);
+            Assert.Equal(new EvidenceResult(4,true,2,unaryExpected), actual[3]);
+            Assert.Equal(new EvidenceResult(5,null,null,null), actual[4]);
+            Assert.Equal(actual[0] with { Ordinal = 6 }, actual[5]);
+            Assert.Empty(await ReadQueryAsync([]));
+        }
+
+        // Production disallows NULL flags; do not silently fabricate a nullable
+        // storage contract to exercise the window's SQL three-valued logic.
+        await ExecuteAsync(connection, "SAVEPOINT null_replayable");
+        await using (var invalid = Command(connection,
+            "UPDATE laplace.attestations SET fold_replayable=NULL "
+            + "WHERE type_id=@type AND subject_id=@subject", good))
+        {
+            var error = await Assert.ThrowsAsync<PostgresException>(
+                async () => { await invalid.ExecuteNonQueryAsync(); });
+            Assert.Equal(PostgresErrorCodes.NotNullViolation, error.SqlState);
+        }
+        await ExecuteAsync(connection, "ROLLBACK TO SAVEPOINT null_replayable");
+        Assert.Equal(goodExpected, await CanonicalAsync(connection, good));
+        Assert.Equal(4L, await EvidenceCountAsync(connection, good));
+        await transaction.RollbackAsync();
+
+        async Task<EvidenceResult[]> ReadQueryAsync(Cell[] cells)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT * FROM ({query}) result ORDER BY ord";
+            command.CommandTimeout = 20;
+            command.Parameters.AddWithValue("type", NpgsqlDbType.Bytea, good.Type.ToBytes());
+            command.Parameters.AddWithValue("subjects", NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                cells.Select(cell => cell.Subject.ToBytes()).ToArray());
+            command.Parameters.AddWithValue("objects", NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+                cells.Select(cell => cell.Object?.ToBytes()).ToArray());
+            await command.PrepareAsync();
+            var results = new List<EvidenceResult>();
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                bool? replayable = reader.IsDBNull(1) ? null : reader.GetBoolean(1);
+                long? count = reader.IsDBNull(2) ? null : reader.GetInt64(2);
+                Standing? standing = null;
+                if (replayable == true)
+                {
+                    standing = new Standing(reader.GetInt64(3),reader.GetInt64(4),
+                        reader.GetInt64(5),reader.GetInt64(6),reader.GetDateTime(7).ToUniversalTime());
+                }
+                else
+                {
+                    for (int field=3;field<8;field++) Assert.True(reader.IsDBNull(field));
+                }
+                results.Add(new EvidenceResult(reader.GetInt64(0),replayable,count,standing));
+            }
+            return results.ToArray();
+        }
+    }
+
+    private sealed record EvidenceResult(long Ordinal, bool? Replayable, long? Rows, Standing? Value);
+
     private async Task<NpgsqlConnection> OpenAsync()
     {
         var connection=await pg.DataSource.OpenConnectionAsync();
@@ -269,7 +400,7 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
         command.CommandTimeout=20;
         command.Parameters.AddWithValue("subject",NpgsqlDbType.Bytea,cell.Subject.ToBytes());
         command.Parameters.AddWithValue("type",NpgsqlDbType.Bytea,cell.Type.ToBytes());
-        command.Parameters.AddWithValue("object",NpgsqlDbType.Bytea,cell.Object.ToBytes());
+        command.Parameters.AddWithValue("object",NpgsqlDbType.Bytea,(object?)cell.Object?.ToBytes() ?? DBNull.Value);
         command.Parameters.AddWithValue("source",NpgsqlDbType.Bytea,cell.Source.ToBytes());
         return command;
     }
@@ -350,7 +481,7 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
     {
         await using var command=Command(connection,"""
             SELECT rating,rd,volatility,witness_count,last_observed_at
-            FROM laplace.consensus WHERE type_id=@type AND subject_id=@subject AND object_id=@object
+            FROM laplace.consensus WHERE type_id=@type AND subject_id=@subject AND object_id IS NOT DISTINCT FROM @object
             """,cell);
         return await StandingAsync(command);
     }
@@ -364,7 +495,7 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
                 sum_score_fp1e9,consensus.glicko2_tau() ORDER BY last_observed_at,id) AS f,
                 max(last_observed_at) AS ts
               FROM laplace.attestations
-              WHERE type_id=@type AND subject_id=@subject AND object_id=@object
+              WHERE type_id=@type AND subject_id=@subject AND object_id IS NOT DISTINCT FROM @object
             ) canonical
             """,cell);
         return await StandingAsync(command);
@@ -407,7 +538,7 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
     private static async Task<long> EvidenceCountAsync(NpgsqlConnection connection,Cell cell)
     {
         await using var command=Command(connection,
-            "SELECT count(*) FROM laplace.attestations WHERE type_id=@type AND subject_id=@subject AND object_id=@object",cell);
+            "SELECT count(*) FROM laplace.attestations WHERE type_id=@type AND subject_id=@subject AND object_id IS NOT DISTINCT FROM @object",cell);
         return (long)(await command.ExecuteScalarAsync())!;
     }
 
@@ -450,8 +581,8 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
     {
         await using var connection=await OpenAsync();
         await using var command=Command(connection,"""
-            DELETE FROM laplace.attestations WHERE type_id=@type AND subject_id=@subject AND object_id=@object;
-            DELETE FROM laplace.consensus WHERE type_id=@type AND subject_id=@subject AND object_id=@object
+            DELETE FROM laplace.attestations WHERE type_id=@type AND subject_id=@subject AND object_id IS NOT DISTINCT FROM @object;
+            DELETE FROM laplace.consensus WHERE type_id=@type AND subject_id=@subject AND object_id IS NOT DISTINCT FROM @object
             """,cell);
         await command.ExecuteNonQueryAsync();
     }

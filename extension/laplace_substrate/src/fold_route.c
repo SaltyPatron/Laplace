@@ -1651,6 +1651,12 @@ static const char *EVIDENCE_LOCK_SQL =
  * Only fully replayable cells enter the existing consensus_fold aggregate.
  * A continuous transient score is never reconstructed from its categorical
  * receipt, including when the incoming delta itself is replayable. */
+/* Qualify the entire evidence cell before invoking the native aggregate.
+ * Joining materialized flags back to evidence can choose one full evidence
+ * rescan per requested cell when cardinality estimates are low. The window
+ * preserves every observation and excludes every row of a mixed/transient
+ * cell without that cross-cell join. Keep aggregate ordering and response
+ * flags/counts unchanged. */
 static const char *EVIDENCE_FOLD_SQL =
     "WITH requested AS MATERIALIZED ("
     " SELECT * FROM unnest($1::bytea[],$2::bytea[]) WITH ORDINALITY AS b(s,o,ord)), "
@@ -1674,7 +1680,9 @@ static const char *EVIDENCE_FOLD_SQL =
     " a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,GREATEST(a.observation_count,1),"
     " a.sum_score_fp1e9,consensus.glicko2_tau() ORDER BY a.last_observed_at,a.id) AS acc,"
     " max(a.last_observed_at) AS ts "
-    " FROM evidence a JOIN flags f ON f.ord=a.ord AND f.replayable "
+    " FROM (SELECT evidence.*,"
+    " bool_and(fold_replayable) OVER (PARTITION BY ord) AS cell_replayable"
+    " FROM evidence) a WHERE a.cell_replayable "
     " GROUP BY a.ord) "
     "SELECT b.ord,f.replayable,f.n,(g.acc).rating,(g.acc).rd,(g.acc).volatility,"
     " (g.acc).witness_count,g.ts "
