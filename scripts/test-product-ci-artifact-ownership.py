@@ -136,9 +136,13 @@ class ProductStageOwnershipContract(unittest.TestCase):
     def test_competitive_proof_extends_the_same_release_modules(self):
         proof = function("run_proof")
         self.assertLess(proof.index("run_release_candidate"),
-                        proof.index("model-synthesize-ci.sh"))
-        self.assertLess(proof.index("model-synthesize-ci.sh"),
+                        proof.index("run_proof_model"))
+        self.assertLess(proof.index("run_proof_model"),
                         proof.index("run_release_activation"))
+
+        model = function("run_proof_model")
+        self.assertLess(model.index("require_built_revision"),
+                        model.index("model-synthesize-ci.sh"))
 
     def test_mainline_is_only_build_and_development_tests(self):
         owner = function("run_mainline")
