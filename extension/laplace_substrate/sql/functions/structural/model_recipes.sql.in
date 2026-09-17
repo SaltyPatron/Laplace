@@ -21,10 +21,21 @@ BEGIN ATOMIC
           ON c.subject_id = r.id
          AND c.type_id = laplace.relation_type_id('ENCODES')
         GROUP BY r.id, r.first_observed_by
+    ), selected AS MATERIALIZED (
+        SELECT array_agg(id ORDER BY id) AS recipe_ids,
+               array_agg(content_id ORDER BY id) AS content_ids,
+               array_agg(first_observed_by ORDER BY id) AS first_observers
+        FROM encoded
+        WHERE content_id IS NOT NULL
+    ), rendered AS MATERIALIZED (
+        SELECT recipe_ids,
+               realize.render_text_batch(content_ids, 16) AS recipe_jsons,
+               first_observers
+        FROM selected
+        WHERE content_ids IS NOT NULL
     )
-    SELECT id,
-           realize.render_text_fast(content_id, 16),
-           first_observed_by
-    FROM encoded
-    WHERE content_id IS NOT NULL;
+    SELECT u.recipe_id, u.recipe_json, u.first_observed_by
+    FROM rendered r
+    CROSS JOIN LATERAL unnest(r.recipe_ids, r.recipe_jsons, r.first_observers)
+        AS u(recipe_id, recipe_json, first_observed_by);
 END;
