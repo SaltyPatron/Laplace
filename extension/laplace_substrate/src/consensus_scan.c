@@ -308,6 +308,7 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
     AttrNumber type = scan_attribute(relation, "type_id", BYTEAOID);
     AttrNumber rating = scan_attribute(relation, "rating", INT8OID);
     AttrNumber rd = scan_attribute(relation, "rd", INT8OID);
+    AttrNumber volatility = scan_attribute(relation, "volatility", INT8OID);
     AttrNumber witnesses = scan_attribute(relation, "witness_count", INT8OID);
     const ScanSet *probe = subjects->array != NULL ? subjects : objects;
     AttrNumber endpoint = subjects->array != NULL ? subject : object;
@@ -317,8 +318,8 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
     if (plane_local && index != NULL)
     {
         scan_plane_ranges(relation, index, subject, object, type, rating, rd,
-                          witnesses, subjects, objects, types, consume, cutoff,
-                          context, stats);
+                          volatility, witnesses, subjects, objects, types,
+                          consume, cutoff, context, stats);
         index_close(index, AccessShareLock);
         return;
     }
@@ -357,7 +358,7 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
         stats->index_scans++;
         while (index_getnext_slot(scan, ForwardScanDirection, slot))
         {
-            bool snull, onull, tnull, rnull, dnull, wnull;
+            bool snull, onull, tnull, rnull, dnull, vnull, wnull;
             Datum s = slot_getattr(slot, subject, &snull);
             Datum o = slot_getattr(slot, object, &onull);
             Datum t = slot_getattr(slot, type, &tnull);
@@ -382,8 +383,9 @@ scan_leaf(Relation relation, const ScanSet *subjects, const ScanSet *objects,
             if (!onull) memcpy(&row.object, VARDATA_ANY(DatumGetByteaPP(o)), 16);
             row.rating = DatumGetInt64(slot_getattr(slot, rating, &rnull));
             row.rd = DatumGetInt64(slot_getattr(slot, rd, &dnull));
+            row.volatility = DatumGetInt64(slot_getattr(slot, volatility, &vnull));
             row.witnesses = DatumGetInt64(slot_getattr(slot, witnesses, &wnull));
-            if (rnull || dnull || wnull)
+            if (rnull || dnull || vnull || wnull)
                 ereport(ERROR, (errmsg("consensus scan encountered incomplete standing")));
             if (ranked && cutoff(&row, context))
             {

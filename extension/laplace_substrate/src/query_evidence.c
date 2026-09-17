@@ -312,6 +312,7 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
         channel.outbound = !state->reverse;
         channel.rating = row->rating;
         channel.rd = row->rd;
+        channel.volatility = row->volatility;
         channel.witnesses = row->witnesses;
         query_channel_insert(state, channel.ordinal, &channel);
     }
@@ -713,6 +714,7 @@ query_exact_cell(const LaplaceConsensusRow *row, void *opaque)
         channel.outbound = !state->reverse;
         channel.rating = row->rating;
         channel.rd = row->rd;
+        channel.volatility = row->volatility;
         channel.witnesses = row->witnesses;
         key = channel_key(&channel);
         entry = (QueryChannelIndex *)

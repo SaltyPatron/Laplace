@@ -49,11 +49,11 @@ scan_plane_index(Relation relation, AttrNumber endpoint, AttrNumber type,
 static void
 scan_plane_ranges(Relation relation, Relation index,
                   AttrNumber subject, AttrNumber object, AttrNumber type,
-                  AttrNumber rating, AttrNumber rd, AttrNumber witnesses,
-                  const ScanSet *subjects, const ScanSet *objects,
-                  const ScanSet *types, LaplaceConsensusConsumer consume,
-                  LaplaceConsensusCutoff cutoff, void *context,
-                  LaplaceConsensusScanStats *stats)
+                  AttrNumber rating, AttrNumber rd, AttrNumber volatility,
+                  AttrNumber witnesses, const ScanSet *subjects,
+                  const ScanSet *objects, const ScanSet *types,
+                  LaplaceConsensusConsumer consume, LaplaceConsensusCutoff cutoff,
+                  void *context, LaplaceConsensusScanStats *stats)
 {
     const ScanSet *probe = subjects->array != NULL ? subjects : objects;
     TupleTableSlot *slot = table_slot_create(relation, NULL);
@@ -108,7 +108,7 @@ scan_plane_ranges(Relation relation, Relation index,
             ++stats->index_scans;
             while (index_getnext_slot(ranked, ForwardScanDirection, slot))
             {
-                bool snull, onull, tnull, rnull, dnull, wnull;
+                bool snull, onull, tnull, rnull, dnull, vnull, wnull;
                 Datum s = slot_getattr(slot, subject, &snull);
                 Datum o = slot_getattr(slot, object, &onull);
                 Datum t = slot_getattr(slot, type, &tnull);
@@ -133,8 +133,9 @@ scan_plane_ranges(Relation relation, Relation index,
                 row.object_is_null = false;
                 row.rating = DatumGetInt64(slot_getattr(slot, rating, &rnull));
                 row.rd = DatumGetInt64(slot_getattr(slot, rd, &dnull));
+                row.volatility = DatumGetInt64(slot_getattr(slot, volatility, &vnull));
                 row.witnesses = DatumGetInt64(slot_getattr(slot, witnesses, &wnull));
-                if (rnull || dnull || wnull)
+                if (rnull || dnull || vnull || wnull)
                     ereport(ERROR, (errmsg("consensus plane scan encountered incomplete standing")));
                 /* The cutoff is valid only for this exact endpoint/type.
                  * Ties continue; the consumer owns deterministic tie selection. */

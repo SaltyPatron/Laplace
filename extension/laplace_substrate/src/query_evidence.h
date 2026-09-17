@@ -24,9 +24,11 @@ typedef struct LaplaceQueryChannel
     hash128_t relation;         /* typed relation; never a generic adjacency         */
     bool outbound;              /* anchor is subject when true, object when false     */
 
-    /* Closed-epoch pooled standing for this exact relation cell. */
+    /* Closed-epoch pooled standing for this exact relation cell. Keep every
+     * Glicko coordinate typed; volatility is state, not a hidden ranking term. */
     int64 rating;
     int64 rd;
+    int64 volatility;
     int64 witnesses;
 
     /* Raw witnessed topology retained separately from pooled standing. */
