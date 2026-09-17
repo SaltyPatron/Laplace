@@ -68,22 +68,21 @@ public sealed class ExtensionManifestSeparationTests
     }
 
     [Fact]
-    public void ProductionIngest_KeepsSecondaryIndexesOnline()
+    public void CanonicalSeedWorkflow_KeepsSecondaryIndexesOnline()
     {
         var writer = Read(
             "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlWorkingSetApply.cs");
         var recovery = Read(
             "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIndexCycle.cs");
         var program = Read("app", "Laplace.Cli", "Program.cs");
-        var ingestWorkflow = Read(".github", "workflows", "_ingest.yml");
-        var foundationWorkflow = Read(".github", "workflows", "seed.yml");
+        var seedWorkflow = Read(".github", "workflows", "seed.yml");
 
         Assert.DoesNotContain("DropSecondariesAsync", recovery);
         Assert.DoesNotContain("JournalAndDropAsync", recovery);
         Assert.DoesNotContain("cycle.BeginAsync", writer);
         Assert.DoesNotContain("DropIndexesCommand", program);
-        Assert.DoesNotContain("LAPLACE_INDEX_CYCLE", ingestWorkflow);
-        Assert.DoesNotContain("drop-indexes", foundationWorkflow);
+        Assert.DoesNotContain("LAPLACE_INDEX_CYCLE", seedWorkflow);
+        Assert.DoesNotContain("drop-indexes", seedWorkflow);
     }
 
     [Fact]
