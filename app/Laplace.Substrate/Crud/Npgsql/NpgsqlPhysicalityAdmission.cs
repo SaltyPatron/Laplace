@@ -351,6 +351,7 @@ public sealed partial class NpgsqlSubstrateWriter
         bool journalHit, PostgresCommitReceipt commit, CopyTransactionCounts copy)>
         ApplyStagesCoreAsync(
         IReadOnlyList<IntentStage> stages, PhysicalityAdmissionBatch? physicalityAdmission,
+        IReadOnlyList<EntityInterpretationRow> managedInterpretations,
         Hash128? workingSetToken, Hash128? legacyWorkingSetToken, Hash128? legacySingletonToken,
         Hash128? workingSetSource, IReadOnlyList<Hash128> workingSetSources,
         Func<NpgsqlConnection, NpgsqlTransaction, WorkingSetAcceptedEvidence, CancellationToken, Task>? transactionParticipant,
@@ -397,6 +398,14 @@ public sealed partial class NpgsqlSubstrateWriter
             }
             admissionDiagnostic?.Complete();
         }
+
+        // Interpretations are part of the same control transaction as the replay
+        // receipt. Native generated stages are already present in `stages` here,
+        // so this one set-sized publication covers managed, prebuilt and generated
+        // producers before canonical entity COPY chooses one id row.
+        preparationRoundTrips += await PersistEntityInterpretationsAsync(
+            connection, transaction, stages, managedInterpretations, ct).ConfigureAwait(false);
+
         var result = await ApplyPreparedStagesCoreAsync(
             connection, transaction, epochRoute, physicalityAdmission,
             stages, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
@@ -452,8 +461,8 @@ public sealed partial class NpgsqlSubstrateWriter
         command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double, input.ObservationPriors.ToArray());
         // SQL now owns independent parameter copies in the PostgreSQL backend;
         // the extra client-side raw native stages can be released before
-        // receiving the generated stages.  The backend is a distinct allocation
-        // owner and must receive the operation's full declared grant.  Subtracting
+        // receiving the generated stages. The backend is a distinct allocation
+        // owner and must receive the operation's full declared grant. Subtracting
         // the client transport here caused large, valid Unicode/UCA batches to
         // arrive with only the unused tail of the client grant, even though the
         // native materializer accounts its parameter copies, decoded stages and

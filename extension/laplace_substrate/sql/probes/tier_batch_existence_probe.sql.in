@@ -1,25 +1,21 @@
--- One round of the tier-by-tier, trunk-to-leaf batch existence probe.
+-- One round of the trunk-to-leaf content-addressed existence probe.
 --
--- Takes exactly the candidate ids the C# orchestrator (TierTreeDescent.cs)
--- needs checked for the current tier/round -- already filtered to exclude
--- descendants of nodes proven present in an earlier (higher-tier) round,
--- per the content-addressing guarantee that a present node's whole subtree
--- is present too. Returns a bitmap with a bit set iff that id was
--- positively confirmed present (perfcache codepoint match, or a real
--- committed entities row) -- never a default-present assumption. See
--- laplace_tier_batch_existence_probe() / batch_presence_core() in
--- descent_probe.c.
+-- The C# orchestrator still descends by structural tier so it can stop walking
+-- children of a proven content node. That scheduling fact does not make tier an
+-- entity key: canonical storage is id-only/HASH(id), and a present content id
+-- proves the content regardless of which interpretation/floor led the caller to
+-- it. Bits are set only by a positive perfcache/codepoint or committed-row hit.
 CREATE OR REPLACE FUNCTION laplace.tier_batch_existence_probe(ids bytea[])
     RETURNS bytea
     AS 'MODULE_PATHNAME', 'pg_laplace_tier_batch_existence_probe'
     LANGUAGE C STABLE;
 
--- KEYED overload (additive — no version skew break): the descent is
--- tier-by-tier BY CONSTRUCTION, so the caller always knows the tier of
--- every candidate in a round. Pruning LIST(tier) turns each probe from
--- one index descent per leaf into one per id. Perfcache codepoint fast
--- path stays ON (identical semantics to the 1-arg form).
+-- Compatibility overload for callers whose round state already carries tiers.
+-- Tier participates in traversal scheduling only; it is intentionally ignored
+-- by canonical presence.
 CREATE OR REPLACE FUNCTION laplace.tier_batch_existence_probe(ids bytea[], tiers smallint[])
     RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_tier_batch_existence_probe_keyed'
-    LANGUAGE C STABLE;
+    LANGUAGE sql STABLE PARALLEL RESTRICTED
+BEGIN ATOMIC
+    SELECT laplace.tier_batch_existence_probe(ids);
+END;

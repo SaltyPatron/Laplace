@@ -1,1 +1,11 @@
-CREATE INDEX IF NOT EXISTS entities_first_observed_btree ON entities USING btree (first_observed_by) WHERE first_observed_by IS NOT NULL;
+-- first_observed_by on entities is a deterministic compatibility summary; exact
+-- interpretation provenance lives in entity_interpretations. Keep the legacy
+-- summary index until all readers migrate, while providing the authoritative
+-- source/tier route in parallel.
+CREATE INDEX IF NOT EXISTS entities_first_observed_btree
+    ON entities USING btree (first_observed_by)
+    WHERE first_observed_by IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS entity_interpretations_source_tier_btree
+    ON entity_interpretations USING btree (first_observed_by, tier, entity_id, type_id)
+    WHERE first_observed_by IS NOT NULL;

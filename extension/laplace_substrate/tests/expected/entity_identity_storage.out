@@ -1,0 +1,103 @@
+BEGIN;
+BEGIN
+SELECT p.partstrat = 'h' AS entities_hash_partitioned
+FROM pg_partitioned_table p
+WHERE p.partrelid = 'laplace.entities'::regclass;
+ entities_hash_partitioned 
+---------------------------
+ t
+(1 row)
+
+SELECT array_agg(a.attname ORDER BY u.ord) = ARRAY['id']::name[] AS entities_pk_is_id_only
+FROM pg_constraint c
+CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
+JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum
+WHERE c.conrelid = 'laplace.entities'::regclass AND c.contype = 'p';
+ entities_pk_is_id_only 
+------------------------
+ t
+(1 row)
+
+SELECT to_regclass('laplace.entity_interpretations') IS NOT NULL AS interpretations_present;
+ interpretations_present 
+-------------------------
+ t
+(1 row)
+
+DO $$
+DECLARE
+    a bytea := public.laplace_hash128_blake3('test/entity-identity/a');
+    b bytea := public.laplace_hash128_blake3('test/entity-identity/b');
+    ta bytea := public.laplace_hash128_blake3('test/entity-identity/type-a');
+    tb bytea := public.laplace_hash128_blake3('test/entity-identity/type-b');
+    s1 bytea := public.laplace_hash128_blake3('test/entity-identity/source-1');
+    s2 bytea := public.laplace_hash128_blake3('test/entity-identity/source-2');
+BEGIN
+    -- Same logical observations in opposite arrival order. Physical scheduling
+    -- must not change canonical identity or the compatibility summary.
+    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    VALUES (a,3,tb,s2), (a,1,ta,s1);
+
+    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    VALUES (b,1,ta,s1), (b,3,tb,s2);
+END $$;
+DO
+WITH ids AS (
+    SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
+           public.laplace_hash128_blake3('test/entity-identity/b') AS b
+)
+SELECT count(*) = 2 AS one_row_per_content_id
+FROM laplace.entities e, ids
+WHERE e.id IN (ids.a, ids.b);
+ one_row_per_content_id 
+------------------------
+ t
+(1 row)
+
+WITH ids AS (
+    SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
+           public.laplace_hash128_blake3('test/entity-identity/b') AS b
+), rows AS (
+    SELECT e.* FROM laplace.entities e, ids WHERE e.id IN (ids.a, ids.b)
+)
+SELECT count(DISTINCT (tier,type_id,first_observed_by)) = 1
+       AND min(tier) = 1 AS arrival_order_invariant_summary
+FROM rows;
+ arrival_order_invariant_summary 
+---------------------------------
+ t
+(1 row)
+
+WITH ids AS (
+    SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
+           public.laplace_hash128_blake3('test/entity-identity/b') AS b
+)
+SELECT count(*) = 4
+       AND count(*) FILTER (WHERE tier = 1) = 2
+       AND count(*) FILTER (WHERE tier = 3) = 2 AS all_interpretations_preserved
+FROM laplace.entity_interpretations i, ids
+WHERE i.entity_id IN (ids.a, ids.b);
+ all_interpretations_preserved 
+-------------------------------
+ t
+(1 row)
+
+WITH ids AS (
+    SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
+           public.laplace_hash128_blake3('test/entity-identity/b') AS b
+), a_claims AS (
+    SELECT tier,type_id FROM laplace.entity_interpretations i, ids WHERE i.entity_id = ids.a
+), b_claims AS (
+    SELECT tier,type_id FROM laplace.entity_interpretations i, ids WHERE i.entity_id = ids.b
+)
+SELECT NOT EXISTS ((SELECT * FROM a_claims EXCEPT SELECT * FROM b_claims)
+                   UNION ALL
+                   (SELECT * FROM b_claims EXCEPT SELECT * FROM a_claims))
+       AS interpretation_set_is_order_invariant;
+ interpretation_set_is_order_invariant 
+---------------------------------------
+ t
+(1 row)
+
+ROLLBACK;
+ROLLBACK

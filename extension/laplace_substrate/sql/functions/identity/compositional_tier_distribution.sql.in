@@ -1,15 +1,13 @@
--- BEGIN ATOMIC: GH #764.
+-- BEGIN ATOMIC: GH #764/#1008.  This is a distribution of witnessed structural
+-- interpretations, not a count over the one-row canonical identity relation.
 CREATE OR REPLACE FUNCTION laplace.compositional_tier_distribution()
 RETURNS TABLE(tier smallint, n bigint)
 LANGUAGE sql
 STABLE
 BEGIN ATOMIC
-    -- `= ANY(compositional_type_ids())` (not the is_compositional_type() wrapper): the array
-    -- evaluates ONCE and entities_type_btree serves the membership probe, instead of a per-row
-    -- function call that recomputes 5 BLAKE3 hashes for every entity row (100M+).
-    SELECT e.tier, count(*)::bigint
-    FROM laplace.entities e
-    WHERE e.type_id = ANY(laplace.compositional_type_ids())
-    GROUP BY e.tier
-    ORDER BY e.tier;
+    SELECT i.tier, count(*)::bigint
+    FROM laplace.entity_interpretations i
+    WHERE i.type_id = ANY(laplace.compositional_type_ids())
+    GROUP BY i.tier
+    ORDER BY i.tier;
 END;

@@ -477,10 +477,6 @@ public sealed partial class NpgsqlSubstrateWriter
         var firstEntIdx = DistinctEntityRowIndices(ents, tier0Gate, out var tier0Present);
         int distinctStagedEntities = firstEntIdx.Count + (tier0Present?.Count ?? 0);
         long entDedupeMs = dedupeSw.ElapsedMilliseconds;
-        // Materialized only when invert leaves a bitmap remainder.
-        List<Hash128> probeEntityIds = new();
-        List<short> probeEntityTiers = new();
-
         var physIdSet = new HashSet<Hash128>(phys.Ids.Count);
         var probePhysIds = new List<Hash128>(phys.Ids.Count);
         for (int i = 0; i < phys.Ids.Count; i++)
@@ -722,51 +718,26 @@ public sealed partial class NpgsqlSubstrateWriter
             // Empty-relation probe skip (under the apply advisory lock only).
             // If the whole phys|att heap has zero rows, every staged id for
             // that keyspace is absent — the bitmap probe would return an
-            // all-zero mask after paying full chunk round-trips. Entity tier
-            // emptiness is resolved by the bounded smaller-side verifier below;
-            // a separate EXISTS roster caused PostgreSQL to aggregate every
-            // entity partition once per apply on large targets.
+            // all-zero mask after paying full chunk round-trips. Canonical entity
+            // presence is id-only/HASH(id), so it goes directly through the
+            // content-id bitmap rather than a tier census or inversion.
             //
             // These probes do not run on the control transaction: pooled connections
             // release their AccessShare locks as soon as each probe completes while
             // preserving the same visibility (every snapshot starts after the apply
             // advisory lock was acquired).
             long physEmptySkip = 0, attEmptySkip = 0;
-            long entInvertResolved = 0;
-            var presentFromInvert = new HashSet<Hash128>();
-            List<Hash128> probeEntIdsUse = probeEntityIds;
-            List<short> probeEntTiersUse = probeEntityTiers;
-
-            // Complete presence sets: cache skip already removed every present
-            // id; the remainder is novel by exact membership — no invert/bitmap.
-            if (_entityPresenceComplete)
+            // Canonical entity storage is HASH(id). Tier is an interpretation
+            // projection and cannot participate in row presence or partition
+            // routing. Build the exact id set that still needs verification;
+            // the former LIST(tier) smaller-side inversion would otherwise turn
+            // a stored id observed at another tier into a false absence.
+            long entInvertResolved = 0; // retained telemetry field; no tier inversion remains
+            var probeEntIdsUse = new List<Hash128>(entVerifyIdx.Count);
+            if (!_entityPresenceComplete)
             {
-                probeEntIdsUse = new List<Hash128>();
-                probeEntTiersUse = new List<short>();
-            }
-            else if (entVerifyIdx.Count > 0)
-            {
-                // Smaller-build-side verify (under the same lock). Presence is still
-                // proven before COPY. Per LIST(tier) leaf: count committed rows; if
-                // that set is strictly smaller than the staged probe for the tier,
-                // load present ids and test locally (classic join build-side choice).
-                // If the leaf is larger, keep the bitmap probe. No fixed numeric dial —
-                // only which side is smaller.
-                if (entVerifyIdx.Count > 0)
-                {
-                    var inverted = await InvertEntityTiersBySmallerSideAsync(
-                        _ds, ents, entVerifyIdx, presentFromInvert, ct);
-                    rtProbe += inverted.RoundTrips;
-                    entInvertResolved = inverted.Resolved;
-                    probeEntIdsUse = new List<Hash128>(inverted.RemainingIdx.Count);
-                    probeEntTiersUse = new List<short>(inverted.RemainingIdx.Count);
-                    for (int k = 0; k < inverted.RemainingIdx.Count; k++)
-                    {
-                        int i = inverted.RemainingIdx[k];
-                        probeEntIdsUse.Add(ents.Ids[i]);
-                        probeEntTiersUse.Add(ents.Tiers[i]);
-                    }
-                }
+                for (int k = 0; k < entVerifyIdx.Count; k++)
+                    probeEntIdsUse.Add(ents.Ids[entVerifyIdx[k]]);
             }
 
             if (_physPresenceComplete)
@@ -785,8 +756,8 @@ public sealed partial class NpgsqlSubstrateWriter
             }
 
             // I/O locality — the load-bearing fix for large-DB probes. The native existence
-            // bitmaps do keyed lookups into the PARTITIONED tables (entities LIST(tier),
-            // physicalities HASH(id), attestations LIST(type_id)->HASH(subject)). Probing
+            // bitmaps read partitioned storage (entities HASH(id), physicalities HASH(id),
+            // attestations LIST(type_id)->HASH(subject)). Probing
             // in staged (content-hash-random) order scatters each 131k chunk across every
             // partition leaf and heap page — fine while the table fits cache, catastrophic once
             // it doesn't (MEASURED on Wiktionary: a single verify grew to 37-53 min of cache-cold
@@ -797,13 +768,12 @@ public sealed partial class NpgsqlSubstrateWriter
             // alignment is preserved by construction (guarded downstream anyway).
             if (probeEntIdsUse.Count > 1)
             {
-                var perm = BuildProbePermutation(probeEntIdsUse.Count, (a, b) =>
-                {
-                    int c = probeEntTiersUse[a].CompareTo(probeEntTiersUse[b]);
-                    return c != 0 ? c : probeEntIdsUse[a].CompareToBytewise(probeEntIdsUse[b]);
-                });
+                // HASH(id) owns entity placement. Sort the content hashes so
+                // each hash bucket's btree walk is forward; there is no tier key
+                // to keep aligned with this permutation anymore.
+                var perm = BuildProbePermutation(probeEntIdsUse.Count,
+                    (a, b) => probeEntIdsUse[a].CompareToBytewise(probeEntIdsUse[b]));
                 probeEntIdsUse = ApplyProbePermutation(probeEntIdsUse, perm);
-                probeEntTiersUse = ApplyProbePermutation(probeEntTiersUse, perm);
             }
             if (probePhysIdsUse.Count > 1)
             {
@@ -876,8 +846,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 probeAttSubjectsUse = ApplyProbePermutation(attSubjects, perm);
             }
 
-            var entProbeTask = ProbePresentTieredParallelAsync(
-                "laplace.entities_stored_bitmap", probeEntIdsUse, probeEntTiersUse,
+            var entProbeTask = ProbePresentCoreAsync(
+                "SELECT laplace.entities_stored_bitmap($1)", probeEntIdsUse,
+                static (_, _, _) => { },
                 r => Interlocked.Add(ref rtProbe, r), ct);
             // Id-only phys probe: hilbert-keyed routing hits the wrong HASH(id)
             // partition under the current schema (absent-for-stored is fatal).
@@ -893,8 +864,6 @@ public sealed partial class NpgsqlSubstrateWriter
             var presentEntities = await entProbeTask.ConfigureAwait(false);
             var presentPhys = await physProbeTask.ConfigureAwait(false);
             var presentAtts = await attProbeTask.ConfigureAwait(false);
-            if (presentFromInvert.Count > 0)
-                foreach (var id in presentFromInvert) presentEntities.Add(id);
             // Fold the known-persisted ids (excluded from the probe above) back into the
             // present set — the write lane below skips a row iff its id is present, and
             // these are present by our own committed writes. Tier-0 gated ids
@@ -919,7 +888,7 @@ public sealed partial class NpgsqlSubstrateWriter
             // persisted, so cache-miss ⇒ novel stops being provable).
             _log.LogInformation(
                 "WS_APPLY verify: {Entities:N0}e+{Phys:N0}p+{Atts:N0}a ids probed in {Ms:N0}ms "
-                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {PEmpty:N0}p/{AEmpty:N0}a empty-relation, {EInv:N0}e smaller-side invert, {AStruct:N0}a novel-by-construction; "
+                + "(skipped {ECache:N0}e/{PCache:N0}p cached, {T0:N0}e tier0-gate, {PEmpty:N0}p/{AEmpty:N0}a empty-relation, {EInv:N0}e retired-tier-invert, {AStruct:N0}a novel-by-construction; "
                 + "present: {PresentE:N0}e/{PresentP:N0}p/{PresentA:N0}a; "
                 + "epoch foreign-delta {EpochForeignDelta}, presence-cache-overflow {PresenceCacheOverflow})",
                 probeEntIdsUse.Count, probePhysIdsUse.Count, probeAttIdsUse.Count, phaseSw.ElapsedMilliseconds,
@@ -931,13 +900,11 @@ public sealed partial class NpgsqlSubstrateWriter
 
             using var filteringDiagnostic = MeasureApplyPhase("copy-survivor-selection");
 
-            // Entities: first occurrence of each id, minus stored rows.
-            // Kept rows carry their id so parallel COPY groups can own
-            // DISJOINT btree key ranges — content-addressed ids are
-            // uniformly random, and un-partitioned parallel inserts
-            // measured as LWLock:BufferContent pile-ups on shared index
-            // pages. Range-partitioned sorted groups fill leaves like a
-            // parallel bulk index build instead.
+            // Entities: one deterministic compatibility representative per
+            // canonical id, minus stored rows. Interpretations were published
+            // separately above. Kept rows carry content ids so parallel COPY
+            // groups stay uniform over HASH(id), while sorted ids walk each
+            // bucket's PK leaves forward.
             List<KeptRow> keptEnts;
             byte[][]? prebuiltEntPayloads = null;
             int[]? prebuiltEntRowsByLane = null;
@@ -1360,30 +1327,46 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
-    /// Return the first row for each staged entity id. Once the tier-0
-    /// completion marker is present, tier-0 ids are separated into the exact
-    /// known-present set instead of entering a database probe.
+    /// Return one deterministic canonical row for each staged content id.
+    /// Tier/type multiplicity is persisted separately as entity interpretations;
+    /// the base entity COPY therefore chooses a compatibility representative by
+    /// (tier,type_id) rather than by arrival/batch order. If any interpretation
+    /// is tier 0 after the Unicode completion marker, the content id is already
+    /// known present and the whole canonical id can skip the database probe.
     /// </summary>
     internal static List<int> DistinctEntityRowIndices(
         CopyTupleParser.EntityRows ents, bool tier0Gate, out List<Hash128>? tier0Present)
     {
         var ids = CollectionsMarshal.AsSpan(ents.Ids);
         var tiers = CollectionsMarshal.AsSpan(ents.Tiers);
-        var first = new List<int>(ids.Length);
-        var seen = new HashSet<Hash128>(ids.Length);
-        tier0Present = tier0Gate ? new List<Hash128>() : null;
+        var types = CollectionsMarshal.AsSpan(ents.TypeIds);
+        var best = new Dictionary<Hash128, int>(ids.Length);
+        HashSet<Hash128>? tier0Ids = tier0Gate ? new HashSet<Hash128>() : null;
 
         for (int i = 0; i < ids.Length; i++)
         {
-            if (!seen.Add(ids[i])) continue;
-            if (tier0Gate && tiers[i] == 0)
+            Hash128 id = ids[i];
+            if (tier0Gate && tiers[i] == 0) tier0Ids!.Add(id);
+            if (!best.TryGetValue(id, out int prior)
+                || tiers[i] < tiers[prior]
+                || (tiers[i] == tiers[prior]
+                    && types[i].CompareToBytewise(types[prior]) < 0))
+                best[id] = i;
+        }
+
+        var orderedIds = best.Keys.OrderBy(id => id, Hash128BytewiseOrder).ToArray();
+        var selected = new List<int>(orderedIds.Length);
+        tier0Present = tier0Gate ? new List<Hash128>() : null;
+        foreach (var id in orderedIds)
+        {
+            if (tier0Gate && tier0Ids!.Contains(id))
             {
-                tier0Present!.Add(ids[i]);
+                tier0Present!.Add(id);
                 continue;
             }
-            first.Add(i);
+            selected.Add(best[id]);
         }
-        return first;
+        return selected;
     }
 
     private static async Task<bool> RelationHasRowsAsync(
@@ -1402,7 +1385,8 @@ public sealed partial class NpgsqlSubstrateWriter
         List<int> RemainingIdx, long Resolved, int RoundTrips);
 
     /// <summary>
-    /// Under the apply lock: for each LIST(tier) leaf, if committed row count is
+    /// Historical LIST(tier) inversion retained for measured-reference archaeology;
+    /// the HASH(id) production path above no longer calls it. Formerly, if committed row count was
     /// strictly less than staged probe count for that tier, load the present id
     /// set and resolve membership locally; otherwise leave those ids on the
     /// bitmap probe path. Build the smaller side — not a fixed size dial.
