@@ -3,11 +3,6 @@ name: Laplace — API observability
 # Evidence-only workflow. It inventories the live API and probes safe read routes;
 # it never invokes mutating OpenAPI operations and is not a product lifecycle gate.
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/api-observability.yml"
-      - "scripts/api-diagnostics.py"
   workflow_dispatch:
     inputs:
       base_url:
