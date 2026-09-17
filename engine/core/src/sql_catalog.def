@@ -80,7 +80,7 @@ SQL_QUERY("consensus.repair_write", "bytea[],bytea[],bytea[],int8[],int8[],int8[
         "ON CONFLICT(id,type_id,subject_id) DO UPDATE SET rating=EXCLUDED.rating,rd=EXCLUDED.rd,"
         "volatility=EXCLUDED.volatility,witness_count=EXCLUDED.witness_count,last_observed_at=EXCLUDED.last_observed_at "
         "WHERE ROW(c.rating,c.rd,c.volatility,c.witness_count,c.last_observed_at) IS DISTINCT FROM "
-        "ROW(EXCLUDED.rating,EXCLUDED.rd,EXCLUDED.volatility,c.witness_count,c.last_observed_at)" )
+        "ROW(EXCLUDED.rating,EXCLUDED.rd,EXCLUDED.volatility,EXCLUDED.witness_count,EXCLUDED.last_observed_at)")
 
 SQL_QUERY("chess.roster_types", "", "SELECT laplace.entity_type_id('Chess_Player'),laplace.relation_type_id('OUTCOME'),laplace.entity_type_id('Chess_Result'),consensus.glicko2_neutral_mu(),consensus.glicko2_initial_rd()")
 SQL_QUERY("chess.search_exact", "text[],bytea,bytea,bytea",
@@ -160,7 +160,7 @@ SQL_QUERY("leaders.named", "int4[],int4",
     "FROM ops.band_leaders($1,$2) AS l "
     "JOIN converse.relation_band_catalog() AS b ON b.band=l.band "
     "ORDER BY l.band,l.eff_mu DESC,l.subject_id,l.object_id")
-SQL_QUERY("consensus.band_edges", "int4[],int4",
+SQL_QUERY("consensus.band_edges", "bytea[],int8,int8",
     "SELECT subject_id,type_id,object_id,rating,rd,witness_count,(rating - 2*rd) AS eff_mu "
     "FROM laplace.consensus WHERE type_id=ANY($1) AND object_id IS NOT NULL "
     "AND NOT consensus.refuted(rating,rd) AND (rating - 2*rd)>=$2 "
@@ -294,7 +294,62 @@ SQL_QUERY("ingest.selected_chess_scope", "bytea[],bytea[],bytea[],bytea[]",
 /* Shared setwise facet publication. Input includes every actual interpretation;
  * canonical identity rows must already exist in this transaction. */
 SQL_QUERY("ingest.entity_interpretations", "bytea[],int2[],bytea[],bytea[],bool[]",
-    "SELECT laplace.entity_interpretations_publish($1,$2,$3,$4,$5)")
+    "WITH input AS MATERIALIZED ( "
+    "SELECT DISTINCT ON (u.entity_id, u.tier, u.type_id) "
+    "u.entity_id, u.tier, u.type_id, "
+    "CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END AS first_observed_by "
+    "FROM unnest($1::bytea[], $2::smallint[], $3::bytea[], $4::bytea[], $5::boolean[]) "
+    "AS u(entity_id, tier, type_id, source_id, source_is_null) "
+    "ORDER BY u.entity_id, u.tier, u.type_id, "
+    "CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END NULLS LAST "
+    "), persisted AS ( "
+    "INSERT INTO laplace.entity_interpretations AS ei "
+    "(entity_id, tier, type_id, first_observed_by) "
+    "SELECT entity_id, tier, type_id, first_observed_by "
+    "FROM input "
+    "ON CONFLICT (entity_id, tier, type_id) DO UPDATE "
+    "SET first_observed_by = CASE "
+    "WHEN ei.first_observed_by IS NULL THEN EXCLUDED.first_observed_by "
+    "WHEN EXCLUDED.first_observed_by IS NULL THEN ei.first_observed_by "
+    "WHEN ei.first_observed_by <= EXCLUDED.first_observed_by THEN ei.first_observed_by "
+    "ELSE EXCLUDED.first_observed_by "
+    "END "
+    "WHERE EXCLUDED.first_observed_by IS NOT NULL "
+    "AND (ei.first_observed_by IS NULL OR EXCLUDED.first_observed_by < ei.first_observed_by) "
+    "RETURNING entity_id "
+    "), summary AS MATERIALIZED ( "
+    "SELECT i.entity_id, "
+    "min(i.tier)::smallint AS tier, "
+    "(array_agg(i.type_id ORDER BY i.type_id))[1] AS type_id, "
+    "(array_agg(i.first_observed_by ORDER BY i.first_observed_by) "
+    "FILTER (WHERE i.first_observed_by IS NOT NULL))[1] AS first_observed_by "
+    "FROM input i "
+    "GROUP BY i.entity_id "
+    "), updated AS ( "
+    "UPDATE laplace.entities e "
+    "SET tier = LEAST(e.tier, s.tier), "
+    "type_id = LEAST(e.type_id, s.type_id), "
+    "first_observed_by = CASE "
+    "WHEN e.first_observed_by IS NULL THEN s.first_observed_by "
+    "WHEN s.first_observed_by IS NULL THEN e.first_observed_by "
+    "WHEN e.first_observed_by <= s.first_observed_by THEN e.first_observed_by "
+    "ELSE s.first_observed_by "
+    "END "
+    "FROM summary s "
+    "WHERE e.id = s.entity_id "
+    "AND (e.tier, e.type_id, e.first_observed_by) IS DISTINCT FROM "
+    "(LEAST(e.tier, s.tier), LEAST(e.type_id, s.type_id), "
+    "CASE "
+    "WHEN e.first_observed_by IS NULL THEN s.first_observed_by "
+    "WHEN s.first_observed_by IS NULL THEN e.first_observed_by "
+    "WHEN e.first_observed_by <= s.first_observed_by THEN e.first_observed_by "
+    "ELSE s.first_observed_by "
+    "END) "
+    "RETURNING e.id "
+    ") "
+    "SELECT EXISTS ( "
+    "SELECT 1 FROM input i "
+    "WHERE NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id = i.entity_id)) ")
 SQL_QUERY("ingest.generated_stage_sink.lock", "",
     "SELECT pg_advisory_xact_lock(hashtextextended('laplace_apply_batch',0))")
 SQL_QUERY("ingest.generated_stage_sink.epoch", "",
