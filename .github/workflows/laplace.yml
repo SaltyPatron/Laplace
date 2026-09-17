@@ -45,7 +45,7 @@ jobs:
     timeout-minutes: 420
     concurrency:
       group: laplace-mainline-ci
-      cancel-in-progress: true
+      cancel-in-progress: false
     env:
       LICHESS_API: ${{ secrets.LICHESS_API }}
       LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
