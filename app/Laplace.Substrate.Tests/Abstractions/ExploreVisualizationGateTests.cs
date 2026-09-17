@@ -35,8 +35,15 @@ public class ExploreVisualizationGateTests
         var palette = Read("web", "src", "explore", "visualizationPalette.ts");
         var theme = Read("web", "src", "ui", "theme.css");
 
-        Assert.Contains("visualizationPalette()", graph);
-        Assert.Contains("visualizationPalette()", glome);
+        Assert.Contains("useVisualizationPalette()", graph);
+        Assert.Contains("useVisualizationPalette()", glome);
+        Assert.Contains("ensureVisualizationContrast", graph);
+        Assert.Contains("ensureVisualizationContrast", glome);
+        Assert.Contains("nodeThreeObjectExtend={false}", graph);
+        Assert.Contains("new Mesh(nodeSphereGeometry, nodeMaterial(color))", graph);
+        Assert.Contains("new MeshBasicMaterial({ color, toneMapped: false })", graph);
+        Assert.Contains("<meshBasicMaterial vertexColors toneMapped={false} color={palette.primary} />", glome);
+        Assert.DoesNotContain("useMemo(() => visualizationPalette(), [])", graph);
         Assert.Contains("--viz-signal: #69d9d1", theme);
         Assert.Contains("--viz-steel: #8fc4e2", theme);
         Assert.Contains("--viz-error: #ff8f9b", theme);
@@ -44,6 +51,10 @@ public class ExploreVisualizationGateTests
         Assert.Contains("--viz-muted: #b9cad4", theme);
         Assert.Contains("--viz-bg: #0a2638", theme);
         Assert.Contains("token('--viz-signal'", palette);
+        Assert.Contains("visualizationContrastRatio", palette);
+        Assert.Contains("minimum = 3", palette);
+        Assert.Contains("MutationObserver", palette);
+        Assert.Contains("data-appearance", palette);
 
         foreach (var retired in new[] { "#4f8cff", "#3ecf8e", "#e8b339", "#9b7bff", "#f07178", "#0b1220" })
         {

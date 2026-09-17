@@ -172,9 +172,10 @@ internal sealed partial class SubstrateClient
                 {
                     var facts = await ReadSalientFactsAsync(conn, value.Id, 3, ct);
                     var display = await NpgsqlDisplayLabels.ReadOneAsync(conn, value.Id, ct);
+                    var resolvedHex = Convert.ToHexStringLower(value.Id);
                     return new ExploreResolveResponse(
-                        IdHex: Convert.ToHexStringLower(value.Id),
-                        Label: display?.Label ?? "Unrealized entity",
+                        IdHex: resolvedHex,
+                        Label: PreferredDisplayLabel(display?.Label, resolvedHex),
                         RefKind: value.RefKind,
                         Exists: true,
                         PreviewFacts: facts);
@@ -207,8 +208,10 @@ internal sealed partial class SubstrateClient
             if (string.IsNullOrWhiteSpace(unresolvedLabel) || LooksLikeEntityHex(unresolvedLabel))
             {
                 await using var conn = await _dataSource.OpenConnectionAsync(ct);
-                unresolvedLabel = (await NpgsqlDisplayLabels.ReadOneAsync(conn, unresolved.Id, ct))?.Label
-                    ?? "Unrealized entity";
+                var unresolvedHex = Convert.ToHexStringLower(unresolved.Id);
+                unresolvedLabel = PreferredDisplayLabel(
+                    (await NpgsqlDisplayLabels.ReadOneAsync(conn, unresolved.Id, ct))?.Label,
+                    unresolvedHex);
             }
 
             return new ExploreResolveResponse(
@@ -607,7 +610,7 @@ internal sealed partial class SubstrateClient
                     if (nodes.TryGetValue(hex, out var node))
                         nodes[hex] = node with
                         {
-                            Label = TrimGraphLabel(entry.Label),
+                            Label = TrimGraphLabel(entry.Label, hex),
                             Tier = node.Tier ?? entry.Tier,
                         };
                 }
@@ -616,7 +619,7 @@ internal sealed partial class SubstrateClient
                 {
                     var e = edges[i];
                     if (labels.TryGetValue(e.Type, out var tl))
-                        edges[i] = e with { Type = TrimGraphLabel(tl.Label) };
+                        edges[i] = e with { Type = TrimGraphLabel(tl.Label, e.Type) };
                 }
             }
 
@@ -661,25 +664,47 @@ internal sealed partial class SubstrateClient
         return result;
     }
 
+    private static bool IsGenericUnrealizedLabel(string? label) =>
+        string.Equals(label?.Trim(), "Unrealized entity", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(label?.Trim(), "Unresolved entity", StringComparison.OrdinalIgnoreCase);
+
+    private static string IdentityDisplayLabel(string? idHex, string? type = null)
+    {
+        var prefix = string.IsNullOrWhiteSpace(type) ? "Entity" : type.Trim();
+        if (string.IsNullOrWhiteSpace(idHex)) return prefix;
+        var normalized = idHex.Trim().ToLowerInvariant();
+        var shortId = normalized[..Math.Min(12, normalized.Length)];
+        return $"{prefix} · {shortId}";
+    }
+
+    private static string PreferredDisplayLabel(string? label, string? idHex, string? type = null)
+    {
+        if (!string.IsNullOrWhiteSpace(label) && !IsGenericUnrealizedLabel(label))
+            return label.Trim();
+        return IdentityDisplayLabel(idHex, type);
+    }
+
     private static string DisplayLabel(
         IReadOnlyDictionary<string, (string Label, short? Tier)> labels,
         string? idHex,
         string? fallback)
     {
         if (idHex is not null && labels.TryGetValue(idHex, out var found))
-            return found.Label;
-        if (!string.IsNullOrWhiteSpace(fallback) && !LooksLikeEntityHex(fallback))
+            return PreferredDisplayLabel(found.Label, idHex);
+        if (!string.IsNullOrWhiteSpace(fallback) &&
+            !LooksLikeEntityHex(fallback) &&
+            !IsGenericUnrealizedLabel(fallback))
             return fallback.Trim();
-        return "Unrealized entity";
+        return IdentityDisplayLabel(idHex);
     }
 
-    private static string TrimGraphLabel(string label)
+    private static string TrimGraphLabel(string label, string? idHex = null)
     {
         // Display labels are Unicode surfaces, not byte strings. Collapse UI-only
         // whitespace and truncate on grapheme boundaries so an emoji/combining sequence is
         // never split merely because the graph sprite has a compact text budget.
         label = string.Join(' ', label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        if (label.Length == 0) return "Unrealized entity";
+        if (label.Length == 0) return IdentityDisplayLabel(idHex);
 
         var starts = StringInfo.ParseCombiningCharacters(label);
         if (starts.Length <= 48) return label;
@@ -705,12 +730,13 @@ internal sealed partial class SubstrateClient
         NpgsqlConnection conn, byte[] id, CancellationToken ct)
     {
         var display = await NpgsqlDisplayLabels.ReadOneAsync(conn, id, ct);
-        if (display is null) return (null!, null, null, false);
-
         var facet = await NpgsqlDisplayLabels.FacetAsync(conn, id, ct);
+        var idHex = Convert.ToHexStringLower(id);
+        if (display is null && facet is null) return (IdentityDisplayLabel(idHex), null, null, false);
+
         return facet is { } f
-            ? (display.Value.Label, f.Tier, f.Type, f.Exists)
-            : (display.Value.Label, display.Value.Tier, null, false);
+            ? (PreferredDisplayLabel(display?.Label, idHex, f.Type), f.Tier, f.Type, f.Exists)
+            : (PreferredDisplayLabel(display?.Label, idHex), display?.Tier, null, false);
     }
 
     private static async Task<long> ReadEvidenceCountAsync(NpgsqlConnection conn, byte[] id, CancellationToken ct)

@@ -3,10 +3,10 @@ import { Field, Input, Muted, SegmentedControl } from '@ui';
 import { forceCollide, forceManyBody, forceRadial } from 'd3-force-3d';
 import ForceGraph2D from 'react-force-graph-2d';
 import ForceGraph3D from 'react-force-graph-3d';
-import { CanvasTexture, LinearFilter, MOUSE, Object3D, Sprite, SpriteMaterial, type Camera, type Vector3 } from 'three';
+import { CanvasTexture, LinearFilter, Mesh, MeshBasicMaterial, MOUSE, Object3D, SphereGeometry, Sprite, SpriteMaterial, type Camera, type Vector3 } from 'three';
 import type { ExploreConsensusRow } from '../types';
 import type { WalkPathNode } from '../store';
-import { rgba, visualizationPalette, type VisualizationPalette } from '../visualizationPalette';
+import { ensureVisualizationContrast, rgba, useVisualizationPalette, type VisualizationPalette } from '../visualizationPalette';
 import styles from './ConsensusGraph.module.css';
 import { useGraphFlyControls } from './useGraphFlyControls';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
@@ -49,9 +49,9 @@ const LINK_BASE = 52;
 const CHARGE = -420;
 
 function hopColor(hop: number, walk: boolean | undefined, palette: VisualizationPalette): string {
-  if (walk) return palette.signal;
   const colors = [palette.signal, palette.steel, palette.primary, palette.muted, palette.error];
-  return colors[Math.min(Math.max(hop, 0), colors.length - 1)];
+  const candidate = walk ? palette.signal : colors[Math.min(Math.max(hop, 0), colors.length - 1)];
+  return ensureVisualizationContrast(candidate, palette.background, palette.primary);
 }
 
 function clamp(n: number, lo: number, hi: number) {
@@ -127,6 +127,16 @@ export function graphForDimension(base: GraphData, dim: Dim, centerId: string): 
  */
 const LABEL_FONT_PX = 44;
 const labelCache = new Map<string, Sprite>();
+const nodeSphereGeometry = new SphereGeometry(NODE_REL_SIZE, 12, 12);
+const nodeMaterialCache = new Map<string, MeshBasicMaterial>();
+
+function nodeMaterial(color: string): MeshBasicMaterial {
+  const cached = nodeMaterialCache.get(color);
+  if (cached) return cached;
+  const material = new MeshBasicMaterial({ color, toneMapped: false });
+  nodeMaterialCache.set(color, material);
+  return material;
+}
 
 function labelSprite(text: string, color: string, background: string): Sprite | null {
   const key = `${text}\0${color}\0${background}`;
@@ -238,7 +248,7 @@ export function ConsensusGraph({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const fittedKey = useRef<string>('');
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const palette = useMemo(() => visualizationPalette(), []);
+  const palette = useVisualizationPalette();
 
   useGraphFlyControls(shellRef, ref3d, dim === '3d' && size.width > 0);
   const webGlReady = useDeferredWebGlMount(dim === '3d' && size.width > 0 && size.height > 0);
@@ -483,10 +493,6 @@ export function ConsensusGraph({
             showNavInfo
             controlType="orbit"
             enableNavigationControls
-            nodeRelSize={NODE_REL_SIZE}
-            nodeVal={1}
-            nodeOpacity={0.95}
-            nodeResolution={10}
             linkDirectionalParticles={0}
             linkOpacity={0.45}
             rendererConfig={{
@@ -502,21 +508,23 @@ export function ConsensusGraph({
             }}
             nodeLabel={(n: WebNode) => `${n.label} · hop ${n.hop}`}
             linkLabel={(l: WebEdge) => `${l.type} μ=${l.mu.toFixed(1)} · ${l.witnesses} wit`}
-            nodeColor={(n: WebNode) => hopColor(n.hop, n.walk || n.id === centerId, palette)}
-            nodeThreeObjectExtend
+            nodeThreeObjectExtend={false}
             nodeThreeObject={(n: WebNode) => {
+              const root = new Object3D();
+              const color = hopColor(n.hop, n.walk || n.id === centerId, palette);
+              root.add(new Mesh(nodeSphereGeometry, nodeMaterial(color)));
+
               const label = n.label.length > 22 ? `${n.label.slice(0, 21)}…` : n.label;
               const sprite = labelSprite(
                 label,
                 n.id === centerId ? palette.primary : palette.muted,
                 palette.background,
               );
-              // `nodeThreeObjectExtend` still needs an Object3D when a label
-              // cannot be rasterised (no 2-D context); an empty group adds
-              // nothing and leaves the default sphere alone.
-              if (!sprite) return new Object3D();
-              sprite.position.set(0, NODE_REL_SIZE * 3.2, 0);
-              return sprite;
+              if (sprite) {
+                sprite.position.set(0, NODE_REL_SIZE * 3.2, 0);
+                root.add(sprite);
+              }
+              return root;
             }}
             onNodeClick={(n: WebNode) => handleNodeClick(n)}
             onNodeDragEnd={(n: WebNode) => {

@@ -1,5 +1,6 @@
 -- Display identity and display text are different contracts. A graph node keeps its
--- exact content id, but the label must be Unicode/name/description — never that id
--- rendered back as arbitrary hex. High-tier text preview is containment-owned (#804).
+-- exact content id. Friendly Unicode/name/description wins, but the final fallback must
+-- retain a short canonical id instead of replacing a known entity with generic status text.
+-- High-tier text preview is containment-owned (#804).
 \set ECHO none
-NOTICE:  display labels: id separate, Unicode exact, bounded containment preview, no hash fallback
+NOTICE:  display labels: Unicode exact, bounded containment preview, identity-bearing fallback

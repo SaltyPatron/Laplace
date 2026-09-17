@@ -10,7 +10,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class ExploreDisplayLabelGateTests
 {
     [Fact]
-    public void DisplayLabels_AreInstalledSetWiseBoundedAndNeverUseTheHashAsTheLabel()
+    public void DisplayLabels_AreInstalledSetWiseBoundedAndRetainIdentityAtTheFinalFallback()
     {
         var root = TypeIdLawTests.FindRepoRootPublic();
         var sqlPath = Path.Combine(root, "extension", "laplace_substrate", "sql", "functions",
@@ -34,6 +34,9 @@ public sealed class ExploreDisplayLabelGateTests
         Assert.DoesNotContain("constituents_closure", native, StringComparison.Ordinal);
         Assert.Contains("SqlCatalog.Get(\"display.labels\")", app, StringComparison.Ordinal);
         Assert.DoesNotContain("HAS_DEFINITION", app, StringComparison.Ordinal);
+        Assert.Contains("short_identity(", native, StringComparison.Ordinal);
+        Assert.Contains("Entity · %s", native, StringComparison.Ordinal);
+        Assert.DoesNotContain("item&&item->label?item->label:\"Unrealized entity\"", native, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -48,7 +51,11 @@ public sealed class ExploreDisplayLabelGateTests
         Assert.Contains("NpgsqlDisplayLabels.ReadOneAsync", source, StringComparison.Ordinal);
         Assert.Contains("NpgsqlDisplayLabels.FacetAsync", source, StringComparison.Ordinal);
         Assert.Contains("StringInfo.ParseCombiningCharacters", source, StringComparison.Ordinal);
-        Assert.Contains("Label = TrimGraphLabel(entry.Label)", source, StringComparison.Ordinal);
+        Assert.Contains("Label = TrimGraphLabel(entry.Label, hex)", source, StringComparison.Ordinal);
+        Assert.Contains("PreferredDisplayLabel", source, StringComparison.Ordinal);
+        Assert.Contains("IdentityDisplayLabel", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("return \"Unrealized entity\";", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("?? \"Unrealized entity\"", source, StringComparison.Ordinal);
         Assert.DoesNotContain("var lab = row.Label ?? hex", source, StringComparison.Ordinal);
         Assert.DoesNotContain("r.Label ?? r.IdHex", source, StringComparison.Ordinal);
         Assert.DoesNotContain("NpgsqlSubstrateReads.LabelOrHexAsync", source, StringComparison.Ordinal);
