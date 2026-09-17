@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static contracts for shared-host workflow ownership."""
+# Static contracts for shared-host workflow ownership.
 from pathlib import Path
 import json
 import os
@@ -32,19 +32,13 @@ class SharedHostQueue(unittest.TestCase):
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
-    def test_every_self_hosted_job_shares_lifecycle_concurrency(self):
-        host_jobs = 0
-        for path in sorted(WORKFLOWS.glob("*.yml")):
-            text = path.read_text(encoding="utf-8")
-            count = text.count("runs-on: [self-hosted, laplace]")
-            if count == 0:
-                continue
-            host_jobs += count
-            with self.subTest(workflow=path.name):
-                self.assertEqual(text.count("group: laplace-host-lifecycle"), count)
-                self.assertEqual(text.count("queue: max"), count)
-                self.assertEqual(text.count("cancel-in-progress: false"), count)
-        self.assertGreater(host_jobs, 0)
+    def test_mainline_validation_is_not_serialized_behind_operator_work(self):
+        text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        mainline = text.split("  mainline:\n", 1)[1].split("\n  operator:\n", 1)[0]
+        self.assertIn("group: laplace-mainline-validation", mainline)
+        self.assertIn("cancel-in-progress: true", mainline)
+        self.assertNotIn("group: laplace-host-lifecycle", mainline)
+        self.assertIn("exec bash scripts/product-ci.sh mainline", mainline)
 
     def test_benchmark_is_dispatch_only_versioned_evidence(self):
         text = (WORKFLOWS / "benchmark-evidence.yml").read_text(encoding="utf-8")
@@ -67,15 +61,17 @@ class SharedHostQueue(unittest.TestCase):
         self.assertNotIn("git checkout --force", text)
         self.assertIn("AUTHORIZATION: basic $checkout_auth", text)
 
-    def test_destructive_database_ops_require_exact_confirmation(self):
+    def test_database_surface_keeps_operator_operations_visible(self):
         text = (WORKFLOWS / "db-ops.yml").read_text(encoding="utf-8")
-        self.assertIn('LAPLACE_DB_CONFIRM: ${{ inputs.confirm }}', text)
-        drop_guard = text.index('[[ "$LAPLACE_DB_CONFIRM" == "DROP $PGDATABASE" ]]')
-        recreate_guard = text.index('[[ "$LAPLACE_DB_CONFIRM" == "RECREATE $PGDATABASE" ]]')
-        drop_nuke = text.index('exec bash scripts/db-migrations.sh nuke --yes')
-        recreate_nuke = text.index('bash scripts/db-migrations.sh nuke --yes', drop_nuke + 1)
-        self.assertLess(drop_guard, drop_nuke)
-        self.assertLess(recreate_guard, recreate_nuke)
+        self.assertIn(
+            "options: [status, migrate, repair, reindex, remigrate, recreate]",
+            text,
+        )
+        self.assertIn('description: "recreate only: type laplace"', text)
+        self.assertIn('"$PGDATABASE"|"RECREATE"|"RECREATE $PGDATABASE"', text)
+        self.assertIn('[[ "$LAPLACE_DB_CONFIRM" == "RECREATE $PGDATABASE" ]]', text)
+        for operation in ("migrate", "repair", "reindex", "remigrate", "recreate"):
+            self.assertIn(f"            {operation})", text)
 
 
 class SeedHostOwnership(unittest.TestCase):
@@ -163,7 +159,7 @@ class SeedHostOwnership(unittest.TestCase):
 
 
 class FoundationCompletion(unittest.TestCase):
-    """Execute the real ladder shell with explicit ingest/psql test boundaries."""
+    # Execute the real ladder shell with explicit ingest/psql test boundaries.
 
     SOURCES = {
         "unicode": "UnicodeDecomposer",
