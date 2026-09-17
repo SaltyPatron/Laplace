@@ -13,10 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def body(job: str, workflow: str = "laplace.yml") -> str:
+    if workflow == "laplace.yml" and job in ("mainline", "operator"):
+        workflow = "product-stage.yml"
+        job = "stage"
     text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
     section = text.split("  " + job + ":\n", 1)[1]
-    if workflow == "laplace.yml" and job == "mainline":
-        section = section.split("\n  operator:\n", 1)[0]
     raw = section.split("        run: |\n", 1)[1]
     return "\n".join(line[10:] for line in raw.splitlines()
                      if line.startswith("          ")) + "\n"
@@ -91,8 +92,11 @@ class WorkspaceFixture(unittest.TestCase):
         ).stdout
 
     def execute(self, job: str) -> subprocess.CompletedProcess[str]:
+        environment = dict(self.env)
+        if job == "mainline":
+            environment["LAPLACE_STAGE"] = "mainline"
         return subprocess.run(
-            ["bash", "-c", body(job)], cwd=self.workspace, env=self.env,
+            ["bash", "-c", body(job)], cwd=self.workspace, env=environment,
             text=True, capture_output=True, timeout=15,
         )
 
@@ -101,9 +105,10 @@ class WorkspaceReservation(WorkspaceFixture):
     def test_mainline_waits_for_real_host_lock_and_preserves_build_cache(self):
         with (self.work / "host-resource.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            environment = dict(self.env, LAPLACE_STAGE="mainline")
             process = subprocess.Popen(
                 ["bash", "-c", 'printf "started\\n";\n' + body("mainline")],
-                cwd=self.workspace, env=self.env, text=True,
+                cwd=self.workspace, env=environment, text=True,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
             try:
