@@ -120,13 +120,22 @@ jobs:
       EVICT_CONFIRM: ${{ inputs.evict_confirm }}
       GGUF_OUT: /build/laplace/work/model-outputs/laplace-model-substrate.gguf
     steps:
-      - name: Checkout exact revision
+      - name: Select source and run substrate mutation under one host reservation
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
+          EVICT_BEFORE_INGEST: ${{ inputs.evict_before_ingest && '1' || '0' }}
+          CHESS_DERIVED: ${{ inputs.chess_derived && '1' || '0' }}
+          FORCE_INPUT: ${{ inputs.force && '1' || '0' }}
+          SYNTHESIZE_MODEL: ${{ inputs.synthesize_model && '1' || '0' }}
         run: |
           set -euo pipefail
           umask 0002
+          workspace_lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          mkdir -p "$workspace_lock_root"
+          exec 9>"$workspace_lock_root/host-resource.lock"
+          flock 9
           cd "$GITHUB_WORKSPACE"
+
           if [[ ! -e .git ]]; then
             [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
               echo "::error::nonempty workspace has no repository; preserving its files" >&2
@@ -144,36 +153,17 @@ jobs:
             git fetch --no-tags --depth=2 origin "$TARGET_SHA"
           unset checkout_auth CHECKOUT_TOKEN
           git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
-          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
-          git diff --quiet
-          git diff --cached --quiet
-
-      - uses: ./.github/actions/setup-laplace-env
-        with:
-          use_cmake: false
-          require_built_revision: true
-
-      - name: Run substrate mutation under host reservation
-        env:
-          EVICT_BEFORE_INGEST: ${{ inputs.evict_before_ingest && '1' || '0' }}
-          CHESS_DERIVED: ${{ inputs.chess_derived && '1' || '0' }}
-          FORCE_INPUT: ${{ inputs.force && '1' || '0' }}
-          SYNTHESIZE_MODEL: ${{ inputs.synthesize_model && '1' || '0' }}
-        run: |
-          set -euo pipefail
-          workspace_lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
-          mkdir -p "$workspace_lock_root"
-          exec 9>"$workspace_lock_root/host-resource.lock"
-          flock 9
-          cd "$GITHUB_WORKSPACE"
-
           current_sha="$(git rev-parse HEAD)"
           [[ "$current_sha" == "$TARGET_SHA" ]] || {
-            echo "::error::seed checkout changed before host reservation (expected $TARGET_SHA, found $current_sha)" >&2
+            echo "::error::seed checkout mismatch (expected $TARGET_SHA, found $current_sha)" >&2
             exit 1
           }
           git diff --quiet
           git diff --cached --quiet
+
+          export LAPLACE_SETUP_USE_CMAKE=false
+          export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=true
+          source scripts/ci-environment.sh
           built_sha="$(cat build/.laplace-source-revision 2>/dev/null || true)"
           [[ "$built_sha" == "$TARGET_SHA" ]] || {
             echo "::error::seed runtime does not belong to reserved checkout (expected $TARGET_SHA, found ${built_sha:-missing})" >&2
