@@ -34,12 +34,23 @@ permissions:
   contents: read
 
 jobs:
-  mainline:
+  mainline-candidate:
     if: github.event_name == 'push'
     uses: ./.github/workflows/product-stage.yml
     with:
-      stage: mainline
+      stage: release-candidate
       target_sha: ${{ github.sha }}
+      skip_if_superseded: true
+    secrets: inherit
+
+  mainline-activation:
+    if: github.event_name == 'push'
+    needs: mainline-candidate
+    uses: ./.github/workflows/product-stage.yml
+    with:
+      stage: release-activation
+      target_sha: ${{ github.sha }}
+      skip_if_superseded: true
     secrets: inherit
 
   operator:

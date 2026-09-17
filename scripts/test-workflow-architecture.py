@@ -35,11 +35,12 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertFalse((WORKFLOWS / "code-player-ci.yml").exists())
         mainline = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("uses: ./.github/workflows/product-stage.yml", mainline)
-        self.assertIn("stage: mainline", mainline)
+        self.assertIn("stage: release-candidate", mainline)
+        self.assertIn("stage: release-activation", mainline)
 
     def test_mainline_preserves_every_run_and_skips_only_superseded_work(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        mainline = text.split("  mainline:\n", 1)[1].split("\n  operator:\n", 1)[0]
+        mainline = text.split("  mainline-candidate:\n", 1)[1].split("\n  operator:\n", 1)[0]
         self.assertNotIn("concurrency:", mainline)
 
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
@@ -55,9 +56,25 @@ class WorkflowArchitecture(unittest.TestCase):
             [lock, workspace, preserve, resolve, skip, fetch],
             sorted([lock, workspace, preserve, resolve, skip, fetch]),
         )
-        self.assertIn("no build/test work executed", reusable)
+        self.assertIn("no product stage executed", reusable)
         self.assertIn("exit 0", reusable)
 
+    def test_main_push_qualifies_installs_publishes_and_live_verifies(self):
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("mainline-candidate:", lifecycle)
+        self.assertIn("stage: release-candidate", lifecycle)
+        self.assertIn("mainline-activation:", lifecycle)
+        self.assertIn("needs: mainline-candidate", lifecycle)
+        self.assertIn("stage: release-activation", lifecycle)
+        self.assertEqual(2, lifecycle.count("skip_if_superseded: true"))
+
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        candidate = product.split("run_release_candidate() {", 1)[1].split("\n}", 1)[0]
+        activation = product.split("run_release_activation() {", 1)[1].split("\n}", 1)[0]
+        for token in ("run_build", "run_dev_tests", "run_install", "run_database_maintenance --prepare", "run_db_tests"):
+            self.assertIn(token, candidate)
+        for token in ("run_publish", "reconcile_installed_product", "run_live_tests"):
+            self.assertIn(token, activation)
     def test_observability_is_explicit_evidence_not_push_queue_load(self):
         for name in ("ui-observability.yml", "api-observability.yml"):
             text = (WORKFLOWS / name).read_text(encoding="utf-8")
