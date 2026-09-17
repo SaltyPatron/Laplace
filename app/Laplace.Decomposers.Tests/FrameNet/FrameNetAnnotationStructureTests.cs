@@ -1,3 +1,4 @@
+using System.Text;
 using System.Xml.Linq;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Tests;
@@ -79,7 +80,10 @@ public sealed class FrameNetAnnotationStructureTests
         var change = Compose(annotation);
         var physicality = AnnotationPhysicality(change);
         Hash128[] ids = Trajectory.Constituents(physicality.TrajectoryXyzm!);
+        Assert.False(annotation.HasUnresolvedSpans);
+        Assert.True(annotation.HasResolvedTarget);
         Assert.Equal(FrameNetDecomposer.AnnotationSchemaId, ids[0]);
+        Assert.DoesNotContain(change.Entities, row => row.Id == FrameNetDecomposer.UnresolvedAnnotationSchemaId);
         Assert.Equal(ContentEmitter.RootId(Sentence)!.Value, ids[1]);
         Hash128 frameId = CategoryAnchor.Id("Giving")!.Value;
         Assert.Equal(frameId, ids[2]);
@@ -110,6 +114,7 @@ public sealed class FrameNetAnnotationStructureTests
         }
         Assert.Equal(FrameNetDecomposer.AnnotationLayersEndId, ids[cursor++]);
         Assert.Equal(ids.Length, cursor);
+        Assert.Equal(Hash128.Merkle(EntityTier.Document, ids), physicality.EntityId);
         var parse = Assert.Single(change.Attestations,
             a => a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_PARSE"));
         var evokes = Assert.Single(change.Attestations,
@@ -183,7 +188,13 @@ public sealed class FrameNetAnnotationStructureTests
                 "<label name=\"Theme\" start=\"13\" end=\"12\"/>");
 
         var annotation = Assert.Single(Assert.Single(ParseLu(layers).Sentences).Annotations);
-        Assert.Equal("gave", annotation.TargetText);
+        Assert.Null(annotation.TargetText);
+        Assert.True(annotation.HasUnresolvedSpans);
+        Assert.False(annotation.HasResolvedTarget);
+        // The unchanged valid segment remains individually readable; it is not
+        // silently selected as the complete target in place of the stale segment.
+        var validTarget = annotation.Layers[0].Labels.Single(label => label.Start == 5);
+        Assert.Equal("gave", FrameNetDecomposer.ReadResolvedSpan(annotation.Sentence, validTarget));
         Assert.Contains(annotation.Layers.SelectMany(layer => layer.Labels),
             label => label.Name == "Target" && label.Start == 99 && label.End == 102);
         Assert.Contains(annotation.Layers.SelectMany(layer => layer.Labels),
@@ -192,5 +203,41 @@ public sealed class FrameNetAnnotationStructureTests
         var partial = FrameNetDecomposer.ReadAnnotationLabel("Theme", "3", null, null);
         Assert.Equal(3, partial.Start);
         Assert.Null(partial.End);
+    }
+
+    [Fact]
+    public void InvalidRoleCoordinatesRemainEvidenceButCannotBeReadAsAResolvedSpan()
+    {
+        var annotation = Assert.Single(Assert.Single(ParseLu(Layers.Replace("end=\"12\"", "end=\"99\"")).Sentences).Annotations);
+        Assert.Equal("gave", annotation.TargetText);
+        Assert.True(annotation.HasResolvedTarget);
+        Assert.True(annotation.HasUnresolvedSpans);
+        var label = annotation.Layers[1].Labels.Single(label => label.Name == "Theme");
+        Assert.Equal<int?>(99, label.End);
+        Assert.Throws<FormatException>(() => FrameNetDecomposer.ReadResolvedSpan(annotation.Sentence, label));
+        var incomplete = FrameNetDecomposer.ReadAnnotationLabel("Theme", "3", null, null);
+        Assert.Equal<int?>(3, incomplete.Start);
+        Assert.Null(incomplete.End);
+        Assert.Equal(FrameNetDecomposer.SpanResolution.Incomplete,
+            FrameNetDecomposer.ClassifySpan(incomplete, annotation.Sentence.EnumerateRunes().Count()));
+        Assert.Throws<FormatException>(() => FrameNetDecomposer.ReadResolvedSpan(annotation.Sentence, incomplete));
+        Assert.Throws<FormatException>(() => FrameNetDecomposer.ReadAnnotationLabel("Theme", "-1", "3", null));
+        Assert.Throws<FormatException>(() => FrameNetDecomposer.ReadAnnotationLabel("Theme", "broken", "3", null));
+
+        var change = Compose(annotation);
+        try
+        {
+            var body = AnnotationPhysicality(change);
+            var ids = Trajectory.Constituents(body.TrajectoryXyzm!);
+            Assert.Equal(FrameNetDecomposer.UnresolvedAnnotationSchemaId, ids[0]);
+            Assert.Contains(FrameNetDecomposer.OffsetId(99), ids);
+            Assert.Contains(FrameNetDecomposer.SpanResolutionId(FrameNetDecomposer.SpanResolution.OutOfRange), ids);
+            Assert.Single(change.Attestations,
+                a => a.TypeId == RelationTypeRegistry.RelationTypeId("EVOKES_FRAME"));
+        }
+        finally
+        {
+            foreach (var stage in change.IntentStages.Distinct()) stage.Dispose();
+        }
     }
 }

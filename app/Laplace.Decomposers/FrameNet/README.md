@@ -42,3 +42,43 @@ The canonical structure excludes file name, source sentence reference and annota
 The source witnesses `sentence HAS_PARSE annotation` and `annotation EVOKES_FRAME frame` with the same FrameNet source and occurrence context. Equal annotations from different occurrences converge on structure while retaining distinct evidence contexts. Changing a role binding, rank, null instantiation or source span changes the annotation structure.
 
 Version 1 target-only structures remain historical identities. Version 2 explicitly carries role structure and frame identity. Native consumers must dispatch by schema ID and preserve unknown schema status; they must not reinterpret either version as a plain text trajectory.
+
+## Unresolved source spans (version 3)
+
+FrameNet 1.7 also contains coordinates that do not resolve against its stored
+sentence. The retained source observation on 2026-09-17 includes BNC quote labels
+with an end before their start, PENN labels at or beyond the sentence end, and
+`lu10365.xml` AUTO_EDITED targets outside an ASCII sentence. In sentence
+`1254500`, annotation `1955991`, the source has target `19..22` for the
+16-character sentence `It rang a bell .`, alongside three valid target segments.
+These values are retained exactly. They are not clipped, reindexed, or treated
+as resolved intervals.
+
+A label retains its source name, nullable start/end, instantiation type, layer
+and rank. `ReadResolvedSpan` still requires both bounds, ordered and within the
+unchanged sentence, before extracting text. Missing bounds, reversed bounds,
+and bounds outside that sentence cannot be read through that API.
+
+An annotation containing an unresolved label uses
+`framenet/span-annotation/schema/v3`. It keeps the version 2 header and layer
+markers and appends a seventh ID to each label record: its explicit resolution,
+from `framenet/span-resolution/{state}/v1`. States are `resolved`,
+`no-span`, `incomplete`, `reversed`, and `out-of-range`. The `no-span`
+state preserves an absent overt span, including a legitimate FE null
+instantiation. A Target label with no span cannot resolve a target.
+
+If any Target segment is unresolved, `TargetText` is null and `TargetSpans`
+contains no resolved target. All original Target labels remain in the layer
+record, including otherwise valid segments. The target slot contains the
+existing `none` marker; no partial target text or target-derived
+`EVOKES_FRAME` testimony is created. Raw malformed BNC/PENN annotation sets
+without a Target are also retained as version 3 structures. The frame slot is
+the source frame context (in an LU file, the enclosing LU frame); its presence
+does not itself emit an `EVOKES_FRAME` witness.
+
+The existing `HAS_PARSE` source witness, occurrence identity, and
+`ParseStructure` physicality preserve the unresolved annotation. Fully valid
+annotations keep the exact version 2 trajectory, entity identity, content
+emission, and witnesses. Valid targetless annotation handling is unchanged.
+No native tuple ABI, PostgreSQL schema, offset identity, or source-prior rule
+changes for this representation.

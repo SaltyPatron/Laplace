@@ -129,17 +129,23 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     internal static void ComposeFulltextAnno(FulltextAnno ann, SubstrateChangeBuilder b)
     {
+        bool unresolved = ann.HasUnresolvedSpans;
+        bool resolvedTarget = ann.HasResolvedTarget;
+        int sourceLength = ann.Sentence.EnumerateRunes().Count();
         var sentId = ContentEmitter.Emit(b, ann.Sentence, Source);
-        var targetId = ContentEmitter.Emit(b, ann.TargetText, Source);
+        Hash128? targetId = resolvedTarget
+            ? ContentEmitter.Emit(b, ann.TargetText!, Source) : null;
         var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, TC.AcademicCurated);
-        if (sentId is null || targetId is null || frameId is null) return;
+        if (sentId is null || frameId is null || (resolvedTarget && targetId is null)) return;
+        var resolutionMarkers = new HashSet<Hash128>();
 
         // Typed source annotation, not a text continuation: labels retain their
         // layer, source rank, offsets, null instantiation and frame-scoped role.
         // Equal labels on different spans or under different frames stay distinct.
         var constituents = new List<Hash128>
         {
-            AnnotationSchemaId, sentId.Value, frameId.Value, targetId.Value,
+            unresolved ? UnresolvedAnnotationSchemaId : AnnotationSchemaId,
+            sentId.Value, frameId.Value, targetId ?? AnnotationNoneId,
             ContentOrNone(ann.Status),
         };
         foreach (var layer in ann.Layers)
@@ -160,6 +166,12 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                         b, RoleIdentityKind.FrameNet, frameId.Value, label.Name,
                         FeTypeId, Source) ?? AnnotationNoneId;
                 constituents.Add(roleId);
+                if (unresolved)
+                {
+                    Hash128 resolution = SpanResolutionId(ClassifySpan(label, sourceLength));
+                    constituents.Add(resolution);
+                    resolutionMarkers.Add(resolution);
+                }
             }
             constituents.Add(AnnotationLayerEndId);
         }
@@ -167,6 +179,12 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
         foreach (Hash128 marker in AnnotationMarkers)
             b.AddEntity(marker, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
+        if (unresolved)
+        {
+            b.AddEntity(UnresolvedAnnotationSchemaId, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
+            foreach (Hash128 marker in resolutionMarkers)
+                b.AddEntity(marker, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
+        }
         Hash128[] flat = constituents.ToArray();
         Hash128 annotationId = Hash128.Merkle(EntityTier.Document, flat);
         b.AddEntity(annotationId, EntityTier.Document, EntityTypeRegistry.FrameNetAnnotation, Source);
@@ -190,9 +208,12 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             sentId.Value, FrameNetSource.HasParseTypeId, annotationId,
             Source, occurrenceId, TC.AcademicCurated));
-        b.AddAttestation(NativeAttestation.Categorical(
-            annotationId, "EVOKES_FRAME", frameId.Value,
-            Source, TC.AcademicCurated, contextId: occurrenceId));
+        // A source annotation remains evidence even when its coordinates do not
+        // resolve. Do not turn a partial or invented target into a frame witness.
+        if (targetId is not null)
+            b.AddAttestation(NativeAttestation.Categorical(
+                annotationId, "EVOKES_FRAME", frameId.Value,
+                Source, TC.AcademicCurated, contextId: occurrenceId));
 
         Hash128 ContentOrNone(string? value) =>
             value is null ? AnnotationNoneId
@@ -212,6 +233,21 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     internal static readonly Hash128 AnnotationSchemaId =
         Hash128.OfCanonical("framenet/span-annotation/schema/v2");
+    internal static readonly Hash128 UnresolvedAnnotationSchemaId =
+        Hash128.OfCanonical("framenet/span-annotation/schema/v3");
+
+    internal enum SpanResolution { Resolved, NoSpan, Incomplete, Reversed, OutOfRange }
+
+    internal static Hash128 SpanResolutionId(SpanResolution resolution) =>
+        Hash128.OfCanonical("framenet/span-resolution/" + (resolution switch
+        {
+            SpanResolution.Resolved => "resolved",
+            SpanResolution.NoSpan => "no-span",
+            SpanResolution.Incomplete => "incomplete",
+            SpanResolution.Reversed => "reversed",
+            SpanResolution.OutOfRange => "out-of-range",
+            _ => throw new ArgumentOutOfRangeException(nameof(resolution)),
+        }) + "/v1");
     internal static readonly Hash128 AnnotationNoneId =
         Hash128.OfCanonical("framenet/span-annotation/none/v2");
     internal static readonly Hash128 AnnotationLayerId =
@@ -551,36 +587,69 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         return new AnnotationLabel(name ?? "", first, last, instantiationType);
     }
 
+    internal static SpanResolution ClassifySpan(AnnotationLabel label, int sourceLength)
+    {
+        if (label.Start is null && label.End is null) return SpanResolution.NoSpan;
+        if (label.Start is not { } first || label.End is not { } last) return SpanResolution.Incomplete;
+        if (first < 0 || last < 0) return SpanResolution.OutOfRange;
+        if (last < first) return SpanResolution.Reversed;
+        return last >= sourceLength ? SpanResolution.OutOfRange : SpanResolution.Resolved;
+    }
+
+    private static List<int> SourceBoundaries(string sentence)
+    {
+        // Keep the original XML text; source positions count Unicode scalars,
+        // whereas .NET substring positions count UTF-16 code units.
+        var boundaries = new List<int>(sentence.Length + 1) { 0 };
+        foreach (Rune rune in sentence.EnumerateRunes())
+            boundaries.Add(boundaries[^1] + rune.Utf16SequenceLength);
+        return boundaries;
+    }
+
+    internal static string ReadResolvedSpan(string sentence, AnnotationLabel label) =>
+        ReadResolvedSpan(sentence, SourceBoundaries(sentence), label);
+
+    private static string ReadResolvedSpan(string sentence, IReadOnlyList<int> boundaries, AnnotationLabel label)
+    {
+        SpanResolution resolution = ClassifySpan(label, boundaries.Count - 1);
+        if (resolution != SpanResolution.Resolved)
+            throw new FormatException($"FrameNet label span is not resolved: {resolution} "
+                + $"(start={label.Start}, end={label.End}, source length={boundaries.Count - 1})");
+        return sentence[boundaries[label.Start!.Value]..boundaries[label.End!.Value + 1]];
+    }
+
+    private static IEnumerable<AnnotationLabel> TargetLabels(IReadOnlyList<AnnotationLayer> layers) =>
+        layers.Where(layer => layer.Name == "Target").SelectMany(layer => layer.Labels)
+            .Where(label => label.Name == "Target");
+
+    private static bool ContainsUnresolvedSpans(IReadOnlyList<AnnotationLayer> layers, int sourceLength) =>
+        layers.SelectMany(layer => layer.Labels).Any(label =>
+            ClassifySpan(label, sourceLength) is not (SpanResolution.Resolved or SpanResolution.NoSpan))
+        || TargetLabels(layers).Any(label => ClassifySpan(label, sourceLength) != SpanResolution.Resolved);
+
     internal static FulltextAnno? CreateAnnotation(
         string sentence, string? frameName, IReadOnlyList<AnnotationLayer> layers,
         string fileLabel, string sentenceReference, string annotationReference, string? status)
     {
         if (string.IsNullOrEmpty(frameName) || sentence.Length == 0) return null;
-        // The source offsets index Unicode characters, as in the FrameNet corpus
-        // reader's Python text[start:end+1] contract. .NET indexes UTF-16 code
-        // units, so map the unchanged sentence once before reading any span.
-        // https://www.nltk.org/_modules/nltk/corpus/reader/framenet.html
-        var boundaries = new List<int>(sentence.Length + 1) { 0 };
-        foreach (Rune rune in sentence.EnumerateRunes())
-            boundaries.Add(boundaries[^1] + rune.Utf16SequenceLength);
-        // FrameNet 1.7 retains superseded and parser-produced labels beside the
-        // corrected annotation. Some of those source labels are partial, reversed,
-        // or outside the sentence (for example a stale Target followed by the valid
-        // replacement in the same layer). Keep every declared label in the exact
-        // annotation trajectory, but only realize valid Target spans as text.
-        TargetSpan[] spans = layers.Where(layer => layer.Name == "Target")
-            .SelectMany(layer => layer.Labels)
-            .Where(label => label.Name == "Target"
-                && label.Start is { } first
-                && label.End is { } last
-                && first <= last
-                && last < boundaries.Count - 1)
-            .Select(label => new TargetSpan(label.Start!.Value, label.End!.Value))
-            .OrderBy(span => span.Start).ThenBy(span => span.End).ToArray();
-        if (spans.Length == 0) return null;
-        string[] targetParts = spans.Select(span =>
-            sentence[boundaries[span.Start]..boundaries[span.End + 1]].Trim()).ToArray();
-        return new FulltextAnno(sentence, string.Join(' ', targetParts), frameName,
+        var boundaries = SourceBoundaries(sentence);
+        int sourceLength = boundaries.Count - 1;
+        AnnotationLabel[] targets = TargetLabels(layers)
+            .OrderBy(label => label.Start).ThenBy(label => label.End).ToArray();
+        bool resolvedTarget = targets.Length > 0 &&
+            targets.All(label => ClassifySpan(label, sourceLength) == SpanResolution.Resolved);
+        bool unresolved = ContainsUnresolvedSpans(layers, sourceLength);
+        if (targets.Length == 0 && !unresolved) return null;
+
+        // An invalid segment prevents resolution of the complete target. Every
+        // raw segment remains in Layers; never silently choose its valid subset.
+        TargetSpan[] spans = resolvedTarget
+            ? targets.Select(label => new TargetSpan(label.Start!.Value, label.End!.Value)).ToArray()
+            : [];
+        string? targetText = resolvedTarget
+            ? string.Join(' ', targets.Select(label => ReadResolvedSpan(sentence, boundaries, label).Trim()).ToArray())
+            : null;
+        return new FulltextAnno(sentence, targetText, frameName,
             spans, fileLabel, sentenceReference, annotationReference, status, layers);
     }
 
@@ -684,7 +753,7 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
     public sealed record FulltextAnno(
         string Sentence,
-        string TargetText,
+        string? TargetText,
         string FrameName,
         IReadOnlyList<TargetSpan> TargetSpans,
         string FileLabel,
@@ -696,7 +765,22 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         // Compatibility accessors for the original single-span shape. For a
         // discontinuous target these name its first textual segment; TargetSpans is
         // authoritative and preserves every segment.
-        public int TargetStart => TargetSpans[0].Start;
-        public int TargetEnd => TargetSpans[0].End;
+        public bool HasUnresolvedSpans =>
+            ContainsUnresolvedSpans(Layers, Sentence.EnumerateRunes().Count());
+
+        public bool HasResolvedTarget
+        {
+            get
+            {
+                if (TargetText is null || TargetSpans.Count == 0) return false;
+                int sourceLength = Sentence.EnumerateRunes().Count();
+                return TargetLabels(Layers).All(label => ClassifySpan(label, sourceLength) == SpanResolution.Resolved);
+            }
+        }
+
+        public int TargetStart => HasResolvedTarget ? TargetSpans[0].Start
+            : throw new InvalidOperationException("FrameNet annotation has no resolved target span");
+        public int TargetEnd => HasResolvedTarget ? TargetSpans[0].End
+            : throw new InvalidOperationException("FrameNet annotation has no resolved target span");
     }
 }
