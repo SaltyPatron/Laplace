@@ -32,6 +32,8 @@ class UserEngineAcceptanceTests(unittest.TestCase):
         self.addCleanup(self.scratch.cleanup)
         self.root = Path(self.scratch.name)
         self.environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        for key in ("LAPLACE_CHESS_PERFCACHE_BIN", "LAPLACE_CHESS_TRANSITION_BIN"):
+            self.environment.pop(key, None)
 
     def engine(self, name, *, prepared=True, provider=PROVIDERS, best="e2e4", depth=2):
         path = self.root / name
@@ -108,6 +110,31 @@ class UserEngineAcceptanceTests(unittest.TestCase):
             entry["options"] = [option]
             with self.subTest(option=option), self.assertRaises(ValueError):
                 self.check(entry, substrate=False)
+
+
+    def test_real_child_maps_exact_selected_floor_pair_and_rejects_replaced_generation(self):
+        position, transition = self.root / "position.bin", self.root / "transition.bin"
+        position.write_bytes(b"p" * 4096)
+        transition.write_bytes(b"t" * 4096)
+        code = ("import mmap,sys\n"
+                "files=[open(path,'rb') for path in sys.argv[1:]]\n"
+                "maps=[mmap.mmap(file.fileno(),0,access=mmap.ACCESS_READ) for file in files]\n"
+                "print('mapped',flush=True)\n"
+                "sys.stdin.read(1)\n")
+        environment = dict(self.environment, LAPLACE_CHESS_PERFCACHE_BIN=str(position),
+                           LAPLACE_CHESS_TRANSITION_BIN=str(transition))
+        with OWNER.Process([sys.executable, "-c", code, str(position), str(transition)],
+                           environment, self.root, self.root / "mapped.log",
+                           time.monotonic() + 5) as running:
+            running.until(lambda line: line == "mapped")
+            result = OWNER.mapped_floor_pair(running.process, environment)
+            self.assertEqual(running.process.pid, result["process"]["pid"])
+            self.assertEqual({"position", "transition"}, set(result["process"]["mappings"]))
+            replacement = self.root / "new-position.bin"
+            replacement.write_bytes(b"n" * 4096)
+            os.replace(replacement, position)
+            with self.assertRaisesRegex(ValueError, "exact selected artifact"):
+                OWNER.mapped_floor_pair(running.process, environment)
 
     def test_public_default_route_refuses_ambient_redirection_and_credentials(self):
         expected = OWNER.default_database_route({})
