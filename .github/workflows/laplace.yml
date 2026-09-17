@@ -3,6 +3,10 @@ name: Laplace — operator lifecycle
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - ".github/**"
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
     inputs:
       stage:
