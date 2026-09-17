@@ -8,21 +8,11 @@ managed tests loading /opt/laplace/lib/liblaplace_core.so instead of build/engin
 without recomputing the configured extension version.
 
 The extension version is a content hash of its SQL inputs plus the configured native
-execution-module identity (extension/laplace_substrate/CMakeLists.txt):
-
-    inputs  = manifest.install modules + manifest.upgrade modules
-              + laplace_substrate.control.in + laplace_substrate.sql.in
-              + laplace_substrate_upgrade.sql.in + sqldefines.h.in
-              + manifest.install + manifest.upgrade
-    dedupe, sort by path
-    version = SHA256( concat( SHA256(file) for file in inputs )
-                      + "module_pathname=<v>;execution=<configured execution module>" )[:16]
-
-The execution module is itself content/configuration-derived by CMake, so this checker must
-consume the exact configured build manifest rather than pretending the extension version is
-source-only. Recomputing the SQL side from source and combining it with that build identity,
-then comparing against the installed laplace_substrate--<version>.sql, answers the parity
-question mechanically.
+execution-module identity (extension/laplace_substrate/CMakeLists.txt). Ordinary shipped
+SQL inputs are hashed directly. The two manifest-generated attestation-law seed fragments
+are hashed from their canonical generator + manifest inputs, exactly as CMake does, so a
+post-codegen working tree cannot disagree with the version that was just configured and
+installed.
 
 Exit 0 current, 1 stale, 2 cannot determine. Stale is a real answer, not an error: it means
 a regress result must not be read as evidence about the tree.
@@ -70,6 +60,14 @@ def configured_execution_module(explicit=None, manifest=DEFAULT_EXECUTION_MANIFE
     return name
 
 
+def _sha256_file(path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        print(f"missing hashed input: {path} ({exc})", file=sys.stderr)
+        return None
+
+
 def source_version(module_pathname, execution_module):
     inputs = manifest_files(SQL / "manifest.install") + manifest_files(SQL / "manifest.upgrade")
     inputs += [EXT / "laplace_substrate.control.in",
@@ -87,14 +85,38 @@ def source_version(module_pathname, execution_module):
             ordered.append(p)
     ordered.sort(key=str)
 
+    generated_relation_seed = SQL / "generated" / "seed_relation_types.sql.in"
+    generated_pos_seed = SQL / "generated" / "seed_pos.sql.in"
+    generated = {generated_relation_seed, generated_pos_seed}
+
+    codegen_hash = relation_manifest_hash = pos_manifest_hash = None
+    if any(p in generated for p in ordered):
+        codegen_hash = _sha256_file(ROOT / "scripts" / "codegen-attestation-law.py")
+        relation_manifest_hash = _sha256_file(ROOT / "engine" / "manifest" / "relation_types.toml")
+        pos_manifest_hash = _sha256_file(ROOT / "engine" / "manifest" / "pos_tags.toml")
+        if None in (codegen_hash, relation_manifest_hash, pos_manifest_hash):
+            return None
+
     acc = ""
     for p in ordered:
-        if not p.exists():
-            print(f"missing hashed input: {p}", file=sys.stderr)
-            return None
-        # CMake file(SHA256) and string(SHA256) both emit LOWERCASE hex, and the outer
-        # hash is taken over that text, so the case has to match exactly.
-        acc += hashlib.sha256(p.read_bytes()).hexdigest()
+        if p == generated_relation_seed:
+            canonical = (
+                "generated=seed_relation_types;"
+                f"generator={codegen_hash};manifest={relation_manifest_hash}"
+            )
+            acc += hashlib.sha256(canonical.encode()).hexdigest()
+        elif p == generated_pos_seed:
+            canonical = (
+                "generated=seed_pos;"
+                f"generator={codegen_hash};manifest={pos_manifest_hash}"
+            )
+            acc += hashlib.sha256(canonical.encode()).hexdigest()
+        else:
+            digest = _sha256_file(p)
+            if digest is None:
+                return None
+            acc += digest
+
     acc += f"module_pathname={module_pathname};execution={execution_module}"
     return hashlib.sha256(acc.encode()).hexdigest()[:16]
 
