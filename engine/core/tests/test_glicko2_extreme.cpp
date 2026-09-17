@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <vector>
 #include <limits>
 
 #include "laplace/core/glicko2.h"
@@ -208,4 +210,180 @@ TEST(LaplaceCoreGlicko2Extreme, SaturatedDatabasePriorCannotBePublishedAgain) {
             1, SCALE, LAPLACE_GLICKO2_DEFAULT_TAU, 1000));
         ExpectSameState(state, before);
     }
+}
+
+
+TEST(LaplaceCoreGlicko2Extreme, WideIllinoisIntermediateKeepsARepresentableUpset) {
+    glicko2_state_t state;
+    glicko2_init(&state, 1500000000000LL, 100000000000LL, 60000000LL);
+    ASSERT_EQ(0, glicko2_fold_uniform_period(
+        &state, 5500000000000LL, 100000000000LL, 1, SCALE,
+        LAPLACE_GLICKO2_DEFAULT_TAU, 1000));
+    // Independent arbitrary-integer Q1e9 equations, preserving each rounding
+    // step. delta^2 and the Illinois denominator exceed the public int64 range.
+    EXPECT_EQ(state.rating, 1555463991368LL);
+    EXPECT_EQ(state.rd, 100541955192LL);
+    EXPECT_EQ(state.volatility, 60012266LL);
+    EXPECT_EQ(state.observation_count, 1);
+}
+
+TEST(LaplaceCoreGlicko2Extreme, WideDeltaDoesNotRejectARepresentableSmallTauPeriod) {
+    glicko2_state_t state;
+    glicko2_init(&state, 1500000000000LL, 100000000000LL, 60000000LL);
+    ASSERT_EQ(0, glicko2_fold_uniform_period(
+        &state, 5500000000000LL, 100000000000LL, 458, 458000000000LL,
+        1000000LL, 1000));
+    // delta itself exceeds int64 here, while all published fields fit. A guard
+    // which rejects a saturated delta before doing wide math would be wrong.
+    EXPECT_EQ(state.rating, 26902490117592LL);
+    EXPECT_EQ(state.rd, 100541919754LL);
+    EXPECT_EQ(state.volatility, 60010295LL);
+    EXPECT_EQ(state.observation_count, 458);
+}
+
+TEST(LaplaceCoreGlicko2Extreme, AlternatingPeriodsCannotPublishSaturatedIntermediateState) {
+    glicko2_state_t state;
+    glicko2_init(&state, 1500000000000LL, 350000000000LL, 60000000LL);
+    ASSERT_EQ(0, glicko2_fold_uniform_period(
+        &state, 1756000000000LL, 62000000000LL, 458, 458000000000LL,
+        LAPLACE_GLICKO2_DEFAULT_TAU, 1000));
+    EXPECT_EQ(state.rating, 2425413480906LL);
+    EXPECT_EQ(state.rd, 21023642064LL);
+    EXPECT_EQ(state.volatility, 60019914LL);
+    ASSERT_EQ(0, glicko2_fold_uniform_period(
+        &state, 1756000000000LL, 62000000000LL, 458, 0,
+        LAPLACE_GLICKO2_DEFAULT_TAU, 2000));
+    EXPECT_EQ(state.rating, -5487708174176LL);
+    EXPECT_EQ(state.rd, 55934962386LL);
+    EXPECT_EQ(state.volatility, 5336093260LL);
+    EXPECT_EQ(state.observation_count, 916);
+    const auto before = state;
+
+    // The wide Q1e9 reference gives sigma=23800720923308326912 (>INT64_MAX).
+    // The former saturated nonlinear solve instead accepted a spurious finite
+    // rating near 2.86 million. Neither output clipping nor prior reset is valid.
+    EXPECT_NE(0, glicko2_fold_uniform_period(
+        &state, 1756000000000LL, 62000000000LL, 458, 458000000000LL,
+        LAPLACE_GLICKO2_DEFAULT_TAU, 3000));
+    ExpectSameState(state, before);
+
+    std::vector<glicko2_observation_t> observations(
+        458, {1756000000000LL, 62000000000LL, SCALE});
+    glicko2_update_period(&state, observations.data(), observations.size(),
+                          LAPLACE_GLICKO2_DEFAULT_TAU, 3000);
+    ExpectSameState(state, before);
+}
+
+TEST(LaplaceCoreGlicko2Extreme, ActualRejectedStoredPriorRemainsUnchanged) {
+    glicko2_state_t state;
+    glicko2_init(&state, -1947199190011015233LL, 350000000000LL, 482453157376LL);
+    state.observation_count = 2474;
+    state.last_observed_at_unix_ns = 2000;
+    const auto before = state;
+    EXPECT_NE(0, glicko2_fold_uniform_period(
+        &state, 1756000000000LL, 62000000000LL, 458, 259000000000LL,
+        LAPLACE_GLICKO2_DEFAULT_TAU, 3000));
+    ExpectSameState(state, before);
+}
+
+TEST(LaplaceCoreGlicko2Extreme, CanonicalRetainedEvidenceKeepsExactSixtyGroupInputs) {
+    // Authenticated retained testimony of the rejected cell: 60 distinct A
+    // groups, 2474 observations, total score1115e9. Transport chunks are not
+    // additional Glicko periods. Keep every group's original rounding boundary.
+    struct Evidence { int64_t games, score; };
+    const Evidence evidence[] = {
+        {89, INT64_C(89000000000)},
+        {20, INT64_C(0)},
+        {49, INT64_C(49000000000)},
+        {57, INT64_C(57000000000)},
+        {36, INT64_C(0)},
+        {70, INT64_C(35000000000)},
+        {18, INT64_C(0)},
+        {59, INT64_C(59000000000)},
+        {59, INT64_C(59000000000)},
+        {6, INT64_C(0)},
+        {45, INT64_C(22500000000)},
+        {41, INT64_C(41000000000)},
+        {34, INT64_C(0)},
+        {51, INT64_C(0)},
+        {61, INT64_C(61000000000)},
+        {54, INT64_C(0)},
+        {20, INT64_C(20000000000)},
+        {16, INT64_C(0)},
+        {29, INT64_C(0)},
+        {15, INT64_C(15000000000)},
+        {34, INT64_C(34000000000)},
+        {10, INT64_C(10000000000)},
+        {42, INT64_C(0)},
+        {47, INT64_C(0)},
+        {59, INT64_C(0)},
+        {73, INT64_C(0)},
+        {44, INT64_C(0)},
+        {2, INT64_C(0)},
+        {53, INT64_C(53000000000)},
+        {67, INT64_C(67000000000)},
+        {18, INT64_C(18000000000)},
+        {10, INT64_C(5000000000)},
+        {48, INT64_C(0)},
+        {39, INT64_C(39000000000)},
+        {13, INT64_C(6500000000)},
+        {41, INT64_C(0)},
+        {12, INT64_C(12000000000)},
+        {69, INT64_C(0)},
+        {44, INT64_C(0)},
+        {6, INT64_C(6000000000)},
+        {57, INT64_C(57000000000)},
+        {57, INT64_C(0)},
+        {77, INT64_C(77000000000)},
+        {77, INT64_C(38500000000)},
+        {55, INT64_C(0)},
+        {35, INT64_C(35000000000)},
+        {42, INT64_C(0)},
+        {19, INT64_C(19000000000)},
+        {28, INT64_C(0)},
+        {28, INT64_C(14000000000)},
+        {46, INT64_C(23000000000)},
+        {76, INT64_C(0)},
+        {40, INT64_C(20000000000)},
+        {58, INT64_C(58000000000)},
+        {28, INT64_C(0)},
+        {32, INT64_C(0)},
+        {40, INT64_C(0)},
+        {31, INT64_C(15500000000)},
+        {10, INT64_C(0)},
+        {78, INT64_C(0)}
+    };
+    std::vector<int64_t> ratings, rds, games, scores;
+    std::vector<glicko2_observation_t> observations;
+    for (const auto& e : evidence) {
+        ratings.push_back(1756000000000LL);
+        rds.push_back(62000000000LL);
+        games.push_back(e.games);
+        scores.push_back(e.score);
+        const int64_t q = e.score / e.games;
+        for (int64_t i = 0; i < e.games; ++i)
+            observations.push_back({ratings.back(), rds.back(),
+                i + 1 == e.games ? e.score - q * (e.games - 1) : q});
+    }
+    ASSERT_EQ(games.size(), 60u);
+    ASSERT_EQ(observations.size(), 2474u);
+    glicko2_state_t actual, materialized, reversed;
+    glicko2_init(&actual, 1500000000000LL, 350000000000LL, 60000000LL);
+    materialized = reversed = actual;
+    ASSERT_EQ(0, glicko2_fold_grouped_period(
+        &actual, ratings.data(), rds.data(), games.data(), scores.data(), games.size(),
+        LAPLACE_GLICKO2_DEFAULT_TAU, 1000));
+    EXPECT_EQ(actual.rating, 1798219672794LL);
+    EXPECT_EQ(actual.rd, 9058987541LL);
+    EXPECT_EQ(actual.volatility, 59999089LL);
+    EXPECT_EQ(actual.observation_count, 2474);
+    glicko2_update_period(&materialized, observations.data(), observations.size(),
+                          LAPLACE_GLICKO2_DEFAULT_TAU, 1000);
+    ExpectSameState(materialized, actual);
+    std::reverse(games.begin(), games.end());
+    std::reverse(scores.begin(), scores.end());
+    ASSERT_EQ(0, glicko2_fold_grouped_period(
+        &reversed, ratings.data(), rds.data(), games.data(), scores.data(), games.size(),
+        LAPLACE_GLICKO2_DEFAULT_TAU, 1000));
+    ExpectSameState(reversed, actual);
 }
