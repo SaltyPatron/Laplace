@@ -60,8 +60,8 @@ LaplaceContinuation *laplace_trajectory_continuations_scoped(
  * trajectories already retained in the request scope. RLE multiplicity and
  * logical ordinals are decoded natively; no SQL relation synthesis and no
  * trajectory-as-geometry shortcut. Results are deduplicated by source/target
- * pair while preserving which structural families responded and how often, so
- * pre-ORIENT coupling can retain exact prompt-occurrence provenance. */
+ * identity pair while preserving which structural families responded and how
+ * often. Occurrence-level prompt provenance remains the caller's responsibility. */
 LaplaceStructuralCandidate *laplace_trajectory_structural_candidates(
     LaplaceTrajectoryScope *scope, ArrayType *sources, uint32 relation_mask, int *count);
 
