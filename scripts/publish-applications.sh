@@ -5,6 +5,34 @@ cd "$ROOT"
 
 managed() { bash "$ROOT/deploy/linux/managed-publish.sh" "$@"; }
 
+application_revision_expected() {
+  local expected built
+  expected="$(git -C "$ROOT" rev-parse HEAD)"
+  built="$(cat "$ROOT/build/.laplace-source-revision" 2>/dev/null || true)"
+  [[ "$built" == "$expected" ]] || {
+    echo "::error::application publication build does not belong to this checkout (expected $expected, found ${built:-missing})" >&2
+    return 1
+  }
+  printf '%s\n' "$expected"
+}
+
+application_revision_install() {
+  local expected app_dir receipt temporary
+  expected="$(application_revision_expected)" || return $?
+  app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  receipt="$app_dir/.laplace-source-revision"
+  temporary="$app_dir/.laplace-source-revision.tmp.$$"
+  install -m 0644 "$ROOT/build/.laplace-source-revision" "$temporary"
+  mv -f "$temporary" "$receipt"
+  bash "$ROOT/scripts/check-deployed-revision.sh" "$expected"
+}
+
+application_revision_verify() {
+  local expected
+  expected="$(application_revision_expected)" || return $?
+  bash "$ROOT/scripts/check-deployed-revision.sh" "$expected"
+}
+
 recover() {
   local keep_api_stopped="${1:-0}"
   if [[ -f "$ROOT/build/.api-publish-backup" ]]; then
@@ -60,6 +88,7 @@ main() {
       trap 'exit 143' TERM HUP
       trap 'exit 130' INT
       bash "$ROOT/scripts/pipeline.sh" publish
+      application_revision_install
       managed reconcile
       managed activate
       sudo -n systemctl restart laplace-api
@@ -70,6 +99,7 @@ main() {
       for _ in $(seq 1 60); do
         if live_body="$(curl -fsS http://127.0.0.1:5187/health 2>/dev/null)" && \
            grep -q '"status":"ok"' <<<"$live_body"; then
+          application_revision_verify
           managed commit
           trap - EXIT INT TERM HUP
           echo "application publish committed"
@@ -204,8 +234,10 @@ application_api_main() (
   attempted=1
   (set -o noclobber; printf '%s\n' "$backup" > "$ROOT/build/.api-publish-backup")
   application_api_publish "$backup/next.json"
+  application_revision_install
   application_api_control start
   application_api_verify "$backup/next.json" "$backup/verified.json"
+  application_revision_verify
   application_guard --compare "$backup/runtime-before.json"
   cp "$backup/next.json" "$ROOT/build/.api-publish-payload.json"
   cp "$backup/verified.json" "$ROOT/build/.api-publish-verified.json"
