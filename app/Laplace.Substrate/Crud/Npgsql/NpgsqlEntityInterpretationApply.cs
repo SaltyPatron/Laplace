@@ -63,7 +63,8 @@ public sealed partial class NpgsqlSubstrateWriter
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandTimeout = 0;
-            command.CommandText = SqlCatalog.Get("ingest.entity_interpretations").Text;
+            command.CommandText =
+                "SELECT laplace.entity_interpretations_publish($1,$2,$3,$4,$5)";
             command.Parameters.Add(new NpgsqlParameter
             { Value = ids, NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea });
             command.Parameters.Add(new NpgsqlParameter
