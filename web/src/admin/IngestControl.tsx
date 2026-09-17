@@ -1,8 +1,16 @@
 import { useState } from 'react';
-import { Button, ErrorText, Muted, Panel } from '@ui';
+import { Button, ErrorText, Muted, Panel, ReadStatus, useReadResource } from '@ui';
 import { useAppStore } from '../store';
-import { startIngest, stopIngest, type IngestStartReceipt } from './ingestControlApi';
+import {
+  listIngestProcesses,
+  startIngest,
+  stopIngest,
+  type IngestProcessReceipt,
+  type IngestStartReceipt,
+} from './ingestControlApi';
 import styles from './Admin.module.css';
+
+const PROCESS_REFRESH_MS = 5000;
 
 export function IngestControl({ onStarted }: { onStarted?: () => void }) {
   const { tenant } = useAppStore();
@@ -10,10 +18,15 @@ export function IngestControl({ onStarted }: { onStarted?: () => void }) {
   const [path, setPath] = useState('');
   const [argumentsText, setArgumentsText] = useState('');
   const [starting, setStarting] = useState(false);
-  const [stopping, setStopping] = useState(false);
+  const [stoppingPid, setStoppingPid] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<IngestStartReceipt | null>(null);
   const [processNote, setProcessNote] = useState<string | null>(null);
+  const processesRead = useReadResource({
+    key: JSON.stringify(['ingest-processes', tenant]),
+    refreshMs: PROCESS_REFRESH_MS,
+    read: (signal) => listIngestProcesses({ tenant, signal }),
+  });
 
   async function start() {
     const sourceName = source.trim();
@@ -33,6 +46,7 @@ export function IngestControl({ onStarted }: { onStarted?: () => void }) {
         ...(args.length ? { arguments: args } : {}),
       }, { tenant });
       setReceipt(result);
+      await processesRead.refresh();
       onStarted?.();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
@@ -41,18 +55,20 @@ export function IngestControl({ onStarted }: { onStarted?: () => void }) {
     }
   }
 
-  async function stop() {
-    if (!receipt || stopping) return;
-    setStopping(true);
+  async function stop(process: IngestProcessReceipt) {
+    if (stoppingPid != null) return;
+    setStoppingPid(process.pid);
     setError(null);
+    setProcessNote(null);
     try {
-      const result = await stopIngest(receipt.pid, { tenant });
+      const result = await stopIngest(process.pid, { tenant });
       setProcessNote(result.note);
+      await processesRead.refresh();
       onStarted?.();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
-      setStopping(false);
+      setStoppingPid(null);
     }
   }
 
@@ -85,18 +101,32 @@ export function IngestControl({ onStarted }: { onStarted?: () => void }) {
       <Muted>Launch returns immediately; progress is journaled independently.</Muted>
     </div>
     {error && <ErrorText role="alert">{error}</ErrorText>}
-    {receipt && <section className={styles.processReceipt} aria-label="Started ingest process">
-      <div>
-        <strong>{receipt.source}</strong>
-        <span className={styles.progressPct}>PID {receipt.pid}</span>
-      </div>
-      <code className={styles.processCommand} title={[receipt.cli, ...receipt.arguments].join(' ')}>
-        {[receipt.cli, ...receipt.arguments].join(' ')}
-      </code>
-      <Button variant="ghost" loading={stopping} disabled={stopping || processNote != null} onClick={() => void stop()}>
-        Stop process
-      </Button>
-      <span className={styles.progressPct}>{processNote ?? 'The stop control terminates this API-started CLI process tree; it does not rewrite the run receipt.'}</span>
-    </section>}
+    {receipt && <p className={styles.processEvent} role="status">
+      Started <strong>{receipt.source}</strong> as PID <code>{receipt.pid}</code>.
+    </p>}
+    {processNote && <p className={styles.processEvent} role="status">{processNote}</p>}
+
+    <div className={styles.processHeader}>
+      <strong>Processes started by this host</strong>
+      <Button variant="ghost" onClick={() => void processesRead.refresh()}>Refresh processes</Button>
+    </div>
+    <ReadStatus label="Ingest processes" resource={processesRead} />
+    {processesRead.data && (processesRead.data.data.length === 0
+      ? <Muted>No live API-started ingest processes on this server instance.</Muted>
+      : <div className={styles.processList}>
+        {processesRead.data.data.map((process) => <section key={process.pid} className={styles.processReceipt} aria-label={`${process.source} process ${process.pid}`}>
+          <div>
+            <strong>{process.source}</strong>
+            <span className={styles.progressPct}>PID {process.pid} · started {new Date(process.started_at).toLocaleString()}</span>
+          </div>
+          <code className={styles.processCommand} title={[process.cli, ...process.arguments].join(' ')}>
+            {[process.cli, ...process.arguments].join(' ')}
+          </code>
+          <Button variant="ghost" loading={stoppingPid === process.pid} disabled={stoppingPid != null} onClick={() => void stop(process)}>
+            Stop process
+          </Button>
+          <span className={styles.progressPct}>Stops this owned CLI process tree. The canonical run journal remains the execution record.</span>
+        </section>)}
+      </div>)}
   </Panel>;
 }
