@@ -545,10 +545,32 @@ query_observation(int ordinal, int16 role,
 
     {
         QueryEvidenceKey provenance;
+        QueryEvidenceWitness *witness;
+        bool found;
         MemSet(&provenance, 0, sizeof(provenance));
         provenance.channel_index = index->heap_index;
         provenance.id = query_provenance_witness(row);
         (void) hash_search(state->provenance, &provenance, HASH_ENTER, NULL);
+
+        witness = (QueryEvidenceWitness *)
+            hash_search(state->witnesses, &provenance, HASH_ENTER, &found);
+        if (!found)
+        {
+            witness->source = row->source;
+            witness->context = row->context;
+            witness->source_null = row->source_null;
+            witness->context_null = row->context_null;
+            witness->outcome = row->outcome;
+            witness->occurrences = row->occurrences;
+        }
+        else if (witness->source_null != row->source_null ||
+                 witness->context_null != row->context_null ||
+                 witness->outcome != row->outcome ||
+                 witness->occurrences != row->occurrences ||
+                 (!row->source_null && !hash128_eq(&witness->source, &row->source)) ||
+                 (!row->context_null && !hash128_eq(&witness->context, &row->context)))
+            ereport(ERROR,
+                    (errmsg("query evidence: one witness digest mapped to conflicting recorded state")));
     }
 
     if (!row->source_null)
