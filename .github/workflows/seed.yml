@@ -105,6 +105,7 @@ jobs:
       group: laplace-host-lifecycle
       cancel-in-progress: false
     env:
+      TARGET_SHA: ${{ github.sha }}
       LAPLACE_DATA_ROOT: /vault/Data
       LAPLACE_DB: "Host=/var/run/postgresql;Username=laplace_admin;Database=${{ inputs.database }}"
       LAPLACE_DBNAME: ${{ inputs.database }}
@@ -120,7 +121,6 @@ jobs:
     steps:
       - name: Checkout exact revision
         env:
-          TARGET_SHA: ${{ github.sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -152,22 +152,51 @@ jobs:
           use_cmake: false
           require_built_revision: true
 
-      - name: Evict selected source
-        if: inputs.mode == 'source' && inputs.evict_before_ingest
+      - name: Run substrate mutation under host reservation
+        env:
+          EVICT_BEFORE_INGEST: ${{ inputs.evict_before_ingest && '1' || '0' }}
+          CHESS_DERIVED: ${{ inputs.chess_derived && '1' || '0' }}
+          FORCE_INPUT: ${{ inputs.force && '1' || '0' }}
+          SYNTHESIZE_MODEL: ${{ inputs.synthesize_model && '1' || '0' }}
         run: |
           set -euo pipefail
-          [[ -z "$PATH_INPUT" && -z "$LANGS_INPUT" ]] || { echo "::error::source eviction requires a complete source ingest"; exit 1; }
-          src_name=$(python3 -c 'import json,os; x=json.load(open("scripts/decomposer-gates.json"))["sources"].get(os.environ["SOURCE_KEY"]); print(x["decomposer"] if x else "")')
-          [[ -n "$src_name" ]] || { echo "::error::no source mapping for $SOURCE_KEY"; exit 1; }
-          [[ "$EVICT_CONFIRM" == "$src_name" ]] || { echo "::error::type '$src_name' in evict_confirm"; exit 1; }
-          scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict "$src_name"
-          echo "LAPLACE_INGEST_FORCE=1" >> "$GITHUB_ENV"
+          workspace_lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          mkdir -p "$workspace_lock_root"
+          exec 9>"$workspace_lock_root/host-resource.lock"
+          flock 9
+          cd "$GITHUB_WORKSPACE"
 
-      - name: Run ingestion operation
-        run: |
-          set -euo pipefail
+          current_sha="$(git rev-parse HEAD)"
+          [[ "$current_sha" == "$TARGET_SHA" ]] || {
+            echo "::error::seed checkout changed before host reservation (expected $TARGET_SHA, found $current_sha)" >&2
+            exit 1
+          }
+          git diff --quiet
+          git diff --cached --quiet
+          built_sha="$(cat build/.laplace-source-revision 2>/dev/null || true)"
+          [[ "$built_sha" == "$TARGET_SHA" ]] || {
+            echo "::error::seed runtime does not belong to reserved checkout (expected $TARGET_SHA, found ${built_sha:-missing})" >&2
+            exit 1
+          }
+
           mkdir -p "$INGEST_LOGDIR"
-          if [[ -n "$LANGS_INPUT" ]]; then export LAPLACE_INGEST_LANGS="$LANGS_INPUT"; else unset LAPLACE_INGEST_LANGS || true; fi
+          if [[ -n "$LANGS_INPUT" ]]; then
+            export LAPLACE_INGEST_LANGS="$LANGS_INPUT"
+          else
+            unset LAPLACE_INGEST_LANGS || true
+          fi
+
+          if [[ "$MODE" == source && "$EVICT_BEFORE_INGEST" == 1 ]]; then
+            [[ -z "$PATH_INPUT" && -z "$LANGS_INPUT" ]] || {
+              echo "::error::source eviction requires a complete source ingest" >&2
+              exit 1
+            }
+            src_name=$(python3 -c 'import json,os; x=json.load(open("scripts/decomposer-gates.json"))["sources"].get(os.environ["SOURCE_KEY"]); print(x["decomposer"] if x else "")')
+            [[ -n "$src_name" ]] || { echo "::error::no source mapping for $SOURCE_KEY" >&2; exit 1; }
+            [[ "$EVICT_CONFIRM" == "$src_name" ]] || { echo "::error::type '$src_name' in evict_confirm" >&2; exit 1; }
+            scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict "$src_name"
+            export LAPLACE_INGEST_FORCE=1
+          fi
 
           case "$MODE" in
             source)
@@ -177,21 +206,21 @@ jobs:
               else
                 scripts/ingest-source.sh "$SOURCE_KEY"
               fi
-              if [[ "$SOURCE_KEY" == chess && "${{ inputs.chess_derived }}" == true ]]; then
+              if [[ "$SOURCE_KEY" == chess && "$CHESS_DERIVED" == 1 ]]; then
                 scripts/ingest-source.sh chess-move-outcomes
                 scripts/ingest-source.sh chess-transitions
               fi
               ;;
             foundation-ladder)
               args=()
-              [[ "${{ inputs.force }}" != true ]] || args+=(--force)
+              [[ "$FORCE_INPUT" != 1 ]] || args+=(--force)
               exec bash scripts/ensure-foundation.sh "${args[@]}"
               ;;
             model)
               model_dir="$PATH_INPUT"
               [[ -n "$model_dir" ]] || model_dir="${LAPLACE_TINYLLAMA_DIR:-}"
               [[ -n "$model_dir" && -d "$model_dir" ]] || { echo "::error::model snapshot directory is missing"; exit 1; }
-              if [[ "${{ inputs.synthesize_model }}" == true ]]; then
+              if [[ "$SYNTHESIZE_MODEL" == 1 ]]; then
                 mkdir -p "$(dirname "$GGUF_OUT")"
                 LAPLACE_GGUF_OUT="$GGUF_OUT" scripts/model-synthesize-ci.sh "$model_dir"
               else
