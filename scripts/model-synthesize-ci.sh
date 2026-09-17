@@ -69,6 +69,32 @@ log "migrations up + ingest unicode (idempotent; consensus folds, layer-0 marker
 (cd "$ROOT/app" && "${CLI[@]}" ingest unicode) \
   || die "ingest unicode failed"
 
+if [[ "${LAPLACE_MODEL_PROOF_CODE_CORPORA:-1}" == 1 ]]; then
+  log "admit code estate: TinyCodes + Stack v2 through the grammar/AST ingest spine"
+  bash "$ROOT/scripts/ingest-source.sh" tiny-codes \
+    || die "TinyCodes ingest failed"
+  bash "$ROOT/scripts/ingest-source.sh" stack \
+    || die "Stack v2 ingest failed"
+
+  for source_name in TinyCodesDecomposer StackDecomposer; do
+    evidence="$(psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc \
+      "SELECT ops.evidence_count(NULL, laplace.source_id('$source_name'))")"
+    [ "${evidence:-0}" -gt 0 ] || die "$source_name has no retained evidence after ingest"
+    log "  $source_name: $evidence evidence row(s)"
+  done
+
+  ast_rows="$(psql -h /var/run/postgresql -d laplace -U laplace_admin -tAc "
+    SELECT count(*)
+    FROM laplace.attestations a
+    WHERE a.source_id IN (laplace.source_id('TinyCodesDecomposer'), laplace.source_id('StackDecomposer'))
+      AND a.type_id IN (
+        laplace.relation_type_id('DEFINES'),
+        laplace.relation_type_id('CALLS'),
+        laplace.relation_type_id('REFERENCES'))")"
+  [ "${ast_rows:-0}" -gt 0 ] || die "code corpora admitted content but no Tree-sitter structural testimony (DEFINES/CALLS/REFERENCES)"
+  log "  Tree-sitter structural testimony: $ast_rows row(s)"
+fi
+
 log "deposit safetensors (pass 1)"
 (cd "$ROOT/app" && "${CLI[@]}" ingest safetensors "$MODEL_DIR") \
   || die "safetensor deposition pass 1 failed"
@@ -147,4 +173,4 @@ python3 "$ROOT/scripts/verify-model-behavioral.py" \
 grep -q '"ok": true' "$REPORT_OUT" \
   || die "behavioral report does not record ok=true: $REPORT_OUT"
 
-log "PASS — substrate pipeline: model ingest → SQL model evidence → deterministic export → llama.cpp generation → semantic behavior gate"
+log "PASS — code corpus AST evidence + model ingest + SQL model evidence + deterministic export + llama.cpp generation + semantic behavior gate"
