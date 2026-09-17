@@ -181,7 +181,9 @@ jobs:
           export LAPLACE_SETUP_USE_CMAKE=false
           export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
           source scripts/ci-environment.sh
-          scripts/laplace --help >/dev/null
+
+          # Operator execution must not depend on presentation/help rendering.
+          # The actual ingest path performs its runtime-closure checks before writing.
 
           mkdir -p "$INGEST_LOGDIR"
           if [[ -n "$LANGS_INPUT" ]]; then

@@ -198,7 +198,7 @@ internal sealed class StatsCommand : ForwardCommand<TailSettings>
     }
 }
 
-[Description("Close a cut-off ingest journal row: close-run <run_id> [cancelled|failed].")]
+[Description("Close a cut-off ingest journal row: close-run <run_id> (cancelled|failed).")]
 internal sealed class CloseRunCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
@@ -259,7 +259,7 @@ internal sealed class ModelBenchCommand : ForwardCommand<TailSettings>
 
 // ---- evict ----------------------------------------------------------------------------------
 
-[Description("Lawfully retract a source's testimony (#508): delete its evidence per relation partition, refold every touched consensus cell from the surviving rows (zero-survivor cells deleted, never zeroed), queue+drain highway-mask repair, and delete the lane's derivation markers so a --rederive re-runs it at the new version without double-counting. Args: <sourceName> [--relations A,B] [--marker-types X,Y] [--rederive].")]
+[Description("Lawfully retract a source's testimony (#508): delete its evidence per relation partition, refold every touched consensus cell from the surviving rows (zero-survivor cells deleted, never zeroed), queue+drain highway-mask repair, and delete the lane's derivation markers so a --rederive re-runs it at the new version without double-counting. Args: <sourceName>. Optional: --relations A,B; --marker-types X,Y; --rederive.")]
 internal sealed class EvictCommand : ForwardCommand<TailSettings>
 {
     protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct)
