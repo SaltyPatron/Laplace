@@ -8,12 +8,18 @@
   .columns { border: 1px solid var(--color-border-default); border-radius: var(--radius-sm, 4px); padding: .3rem .5rem; }
   .columns summary { cursor: pointer; }
   .columns label { display: flex; gap: .4rem; align-items: center; padding: .25rem; }
-  .scroll { max-width: 100%; max-height: 60vh; overflow: auto; border: 1px solid var(--color-border-default); border-radius: var(--radius-sm, 4px); }
-  .table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--text-sm, .875rem); }
-  .table caption { text-align: left; padding: .5rem; color: var(--color-text-muted); }
-  .table th, .table td { text-align: left; vertical-align: top; padding: .5rem .65rem; border-bottom: 1px solid var(--color-border-default); min-width: 4rem; max-width: 40ch; overflow-wrap: anywhere; }
-  .table thead th { position: sticky; top: 0; background: var(--color-bg-panel); z-index: 1; }
-  .table th:first-child, .table td:first-child { min-width: auto; }
+
+  /* Result sets must scroll horizontally instead of crushing operational data into
+     unreadable columns. This is intentionally a generic workspace invariant: callers
+     may return dozens of fields and the table must never reflow them into a pseudo-list. */
+  .scroll { max-width: 100%; max-height: 60vh; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--color-border-default); border-radius: var(--radius-sm, 4px); }
+  .table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--text-sm, .875rem); }
+  .table caption { text-align: left; padding: .5rem; color: var(--color-text-muted); position: sticky; left: 0; max-width: min(70vw, 70rem); }
+  .table th, .table td { text-align: left; vertical-align: top; padding: .5rem .65rem; border-bottom: 1px solid var(--color-border-default); min-width: 7rem; max-width: 32ch; overflow-wrap: anywhere; }
+  .table thead th { position: sticky; top: 0; background: var(--color-bg-panel); z-index: 2; white-space: normal; }
+  .table th:first-child, .table td:first-child,
+  .table th:nth-child(2), .table td:nth-child(2) { min-width: auto; width: 1%; white-space: nowrap; }
+  .table tbody tr:hover { background: color-mix(in srgb, var(--color-accent) 5%, transparent); }
   .table small { display: block; font-weight: normal; color: var(--color-text-muted); }
   .table tr[data-selected] { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
   .cellValue, .fullValue { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -25,5 +31,8 @@
   .values dd { margin: 0; min-width: 0; }
   .values pre { margin: 0; max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   .error { color: var(--color-error); }
-  @media (max-width: 600px) { .values > div { grid-template-columns: minmax(0, 1fr); gap: .25rem; } }
+  @media (max-width: 600px) {
+    .values > div { grid-template-columns: minmax(0, 1fr); gap: .25rem; }
+    .table th, .table td { min-width: 6rem; max-width: 24ch; }
+  }
 }
