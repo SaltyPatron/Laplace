@@ -89,6 +89,13 @@ public sealed class JsonAstDocument : IDisposable
 
     public JsonAstCursor Root => new(this, _rootIndex);
 
+    /// <summary>
+    /// True when the registered grammar parsed the complete source without error or
+    /// recovery nodes. Consumers that authenticate a whole JSON document can require
+    /// this without falling back to a second JSON parser.
+    /// </summary>
+    public bool SyntaxComplete => _ast.Diagnostics.SyntaxComplete;
+
     internal GrammarAst Ast => _ast;
 
     internal ReadOnlySpan<int> ChildrenOf(int node) =>
