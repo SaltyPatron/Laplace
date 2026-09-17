@@ -129,6 +129,19 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.marker.read_text(), "existing qualified build\n")
         self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])
 
+    def test_superseded_mainline_is_auditable_noop(self):
+        environment = dict(self.env, LAPLACE_STAGE="mainline", TARGET_SHA=self.old)
+        result = subprocess.run(
+            ["bash", "-c", body("mainline")],
+            cwd=self.workspace, env=environment,
+            text=True, capture_output=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("superseded by", result.stdout)
+        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
+        self.assertEqual(self.marker.read_text(), "existing qualified build\n")
+        self.assertFalse(self.events.exists())
+
     def test_operator_uses_requested_stage_without_extra_work(self):
         result = self.execute("operator")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
