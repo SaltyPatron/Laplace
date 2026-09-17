@@ -27,6 +27,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         cls.suite = load_module("benchmark_suite", "scripts/benchmark_suite.py")
         cls.scale = load_module("bench_compose_scale", "scripts/bench-compose-scale.py")
         cls.stream = load_module("bench_compose_stream_scale", "scripts/bench-compose-stream-scale.py")
+        cls.dag = load_module("bench_compose_dag_scale", "scripts/bench-compose-dag-scale.py")
         cls.scale_plan = load_module("benchmark_scale_plan", "scripts/benchmark_scale_plan.py")
         cls.forward = load_module("bench_forward_program", "scripts/bench-forward-program.py")
         cls.registry = json.loads((ROOT / "scripts/benchmark-profiles.json").read_text(encoding="utf-8"))
@@ -35,7 +36,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.suite.validate_registry(self.registry)
         profiles = {item["id"] for item in self.registry["profiles"]}
         self.assertEqual(
-            {"core-single", "core-scale", "core-scale-streams", "moby-roundtrip", "query-forward", "chess-environment", "postgres-geometry", "recorded-chess"},
+            {"core-single", "core-scale", "core-scale-streams", "core-dag-scale", "moby-roundtrip", "query-forward", "chess-environment", "postgres-geometry", "recorded-chess"},
             profiles,
         )
         for suite in self.registry["suites"]:
@@ -44,14 +45,16 @@ class BenchmarkSuiteTests(unittest.TestCase):
     def test_throughput_uses_stream_scaling_while_all_preserves_makespan(self):
         suites = {item["id"]: item for item in self.registry["suites"]}
         self.assertEqual(["core-single", "core-scale-streams"], suites["throughput"]["profiles"])
-        self.assertEqual(["core-scale-streams"], suites["scale"]["profiles"])
+        self.assertEqual(["core-dag-scale", "core-scale-streams"], suites["scale"]["profiles"])
+        self.assertEqual(["core-dag-scale"], suites["dag"]["profiles"])
         self.assertNotIn("core-scale", suites["throughput"]["profiles"])
+        self.assertIn("core-dag-scale", suites["all"]["profiles"])
         self.assertIn("core-scale-streams", suites["all"]["profiles"])
         self.assertIn("core-scale", suites["all"]["profiles"])
         self.assertEqual(["query-forward"], suites["query"]["profiles"])
         self.assertNotIn("query-forward", suites["all"]["profiles"])
         self.assertEqual(["chess-environment"], suites["chess"]["profiles"])
-        self.assertEqual({"quick", "throughput", "core", "scale", "moby", "query", "chess", "geometry", "recorded", "all"}, set(suites))
+        self.assertEqual({"quick", "throughput", "core", "scale", "dag", "moby", "query", "chess", "geometry", "recorded", "all"}, set(suites))
 
     def test_chess_suite_does_not_require_unrelated_native_artifacts(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -199,6 +202,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertNotIn("python3 scripts/bench-compose.py", workflow)
         self.assertNotIn("python3 scripts/bench-compose-scale.py", workflow)
         self.assertNotIn("python3 scripts/bench-compose-stream-scale.py", workflow)
+        self.assertNotIn("python3 scripts/bench-compose-dag-scale.py", workflow)
         self.assertNotIn("python3 scripts/bench-forward-program.py", workflow)
 
         self.assertEqual(["workflow_dispatch"], contract["triggers"])
@@ -235,6 +239,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
         self.assertIn('env["LAPLACE_PERFCACHE_BIN"] = str(t0)', text)
         self.assertIn('env["LD_LIBRARY_PATH"]', text)
         self.assertIn("bench-compose-stream-scale.py", text)
+        self.assertIn("bench-compose-dag-scale.py", text)
         self.assertIn("bench-forward-program.py", text)
 
     def test_core_single_is_one_worker_floor_not_core_count_extrapolation(self):
@@ -373,6 +378,20 @@ WORK_SHAPE tier_tree_nodes=8 nodes_per_codepoint=1.000000000000 nodes_per_tok4=4
         self.assertIn("nodes_per_worker", text)
         self.assertNotIn("464800", text)
         self.assertNotIn("3.4M", text)
+
+    def test_dag_scale_holds_one_object_fixed_and_gates_on_complete_tree_parity(self):
+        text = (ROOT / "scripts/bench-compose-dag-scale.py").read_text(encoding="utf-8")
+        self.assertIn("single-semantic-dag-frontier", text)
+        self.assertIn("content_witness_tree_build_workers", text)
+        self.assertIn('"work_held_fixed": True', text)
+        self.assertIn("tree_fingerprint_sha256", text)
+        self.assertIn("coord_binary64", text)
+        self.assertIn("hilbert128", text)
+        self.assertIn("semantic drift", text)
+        self.assertIn("os.sched_setaffinity", text)
+        self.assertNotIn("multiprocessing", text)
+        self.assertNotIn("partition_docs", text)
+        self.assertNotIn("scale._worker", text)
 
     def test_first_scaling_receipt_is_documented_as_makespan_not_serialization(self):
         text = (ROOT / "docs/benchmarks/SCALING_MODES.md").read_text(encoding="utf-8")
