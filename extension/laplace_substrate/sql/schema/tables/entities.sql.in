@@ -100,22 +100,42 @@ DECLARE
     summary_type bytea;
     summary_source bytea;
 BEGIN
-    -- The outer trigger redirects one logical write through a canonical-id UPSERT.
-    -- The recursive invocation is the actual row insert and returns immediately.
-    -- On a competing writer, the primary-key conflict blocks only on this content
-    -- id and then takes that row's lock; unrelated entity ids remain concurrent.
-    -- This replaces the former process-wide advisory transaction lock.
+    -- The outer trigger owns one canonical content id at a time. Existing ids use
+    -- a row lock without rewriting the row. Missing ids are inserted recursively;
+    -- a competing insert waits on the primary-key conflict, then the follow-up
+    -- SELECT locks the committed winner. Unrelated entity ids remain concurrent.
+    -- This replaces the former process-wide advisory transaction lock without
+    -- turning idempotent observations into no-op UPDATE tuple churn.
     IF pg_trigger_depth() > 1 THEN
         RETURN NEW;
     END IF;
 
-    INSERT INTO @extschema@.entities AS e(
-        id, tier, type_id, first_observed_by, created_at, highway_mask)
-    VALUES (
-        NEW.id, NEW.tier, NEW.type_id, NEW.first_observed_by, NEW.created_at, NEW.highway_mask)
-    ON CONFLICT (id) DO UPDATE
-       SET id = e.id
-    RETURNING e.* INTO prior;
+    SELECT e.*
+      INTO prior
+      FROM @extschema@.entities e
+     WHERE e.id = NEW.id
+     FOR UPDATE;
+
+    IF NOT FOUND THEN
+        INSERT INTO @extschema@.entities(
+            id, tier, type_id, first_observed_by, created_at, highway_mask)
+        VALUES (
+            NEW.id, NEW.tier, NEW.type_id, NEW.first_observed_by, NEW.created_at, NEW.highway_mask)
+        ON CONFLICT (id) DO NOTHING;
+
+        -- If another transaction won the absent-row race, ON CONFLICT waits for
+        -- that outcome. Re-read with a row lock so its committed interpretation is
+        -- visible before this transaction computes the deterministic summary.
+        SELECT e.*
+          INTO prior
+          FROM @extschema@.entities e
+         WHERE e.id = NEW.id
+         FOR UPDATE;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'canonical entity % disappeared during admission', encode(NEW.id, 'hex');
+        END IF;
+    END IF;
 
     INSERT INTO @extschema@.entity_interpretations AS ei(
         entity_id, tier, type_id, first_observed_by)
@@ -148,7 +168,7 @@ BEGIN
            IS DISTINCT FROM
            (summary_tier, summary_type, summary_source);
 
-    -- The nested UPSERT already owns the canonical row for this statement.
+    -- Admission and compatibility projection are complete for the outer row.
     RETURN NULL;
 END;
 $$;
