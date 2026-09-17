@@ -17,6 +17,21 @@ provision_deps() {
   bash scripts/ci-deps.sh
 }
 
+run_ci_contract_checks() {
+  bash -n \
+    scripts/product-ci.sh \
+    scripts/pipeline.sh \
+    scripts/ci-deps.sh \
+    scripts/test-parallel.sh \
+    scripts/model-synthesize-ci.sh \
+    scripts/maintain-installed-database.sh \
+    scripts/ingest-source.sh
+  python3 scripts/validate-pipeline.py
+  python3 scripts/test-ci-workspace.py
+  python3 scripts/test-product-ci-artifact-ownership.py
+  python3 scripts/test-seed-workflow-ownership.py
+}
+
 require_built_revision() {
   local expected actual
   expected="$(git rev-parse HEAD)"
@@ -160,7 +175,7 @@ case "$stage" in
     provision_deps
     ;;
   check)
-    bash -n scripts/product-ci.sh scripts/pipeline.sh scripts/ci-deps.sh scripts/test-parallel.sh scripts/model-synthesize-ci.sh
+    run_ci_contract_checks
     ;;
   reconcile)
     reconcile_installed_product
