@@ -65,6 +65,10 @@ interrupted or rejected. Named writer windows total 2,984.420805 seconds,
 leaving 266.759158 seconds of unclassified writer time. Nested times must not
 be added to the enclosing writer or admission totals.
 
+This participant contains both consensus upsert/folding and highway-mask work;
+this receipt does not separate them. Existing counters can distinguish those
+costs in a subsequent measurement.
+
 | Nested cost per complete game | First 140 | Next 2,000 |
 | --- | ---: | ---: |
 | Consensus acceptance | 0.091999 s | 1.257783 s |
