@@ -1,6 +1,27 @@
 @layer components {
-  .shell { height: 100%; min-height: 0; width: 100%; display: flex; flex-direction: column; }
-  .main { flex: 1; min-height: 0; min-width: 0; width: 100%; display: flex; flex-direction: column; }
+  .shell {
+    position: relative;
+    isolation: isolate;
+    height: 100%;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Product workspaces are always above ambient decoration. The familiar is allowed
+     in exposed page gutters, never over inputs, buttons, tables, boards, or transcripts. */
+  .main {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
   .main > * { flex: 1; min-height: 0; min-width: 0; }
   .title { color: #f7fbfd !important; text-decoration: none; font-weight: inherit; }
   .title:hover { color: #ffffff !important; }
