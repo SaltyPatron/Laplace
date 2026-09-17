@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+FORMAT = 3
 MODULES = {
     "engine/core/liblaplace_core.so": "lib/liblaplace_core.so",
     "engine/dynamics/liblaplace_dynamics.so": "lib/liblaplace_dynamics.so",
@@ -44,7 +45,10 @@ SELECT json_build_object(
        CASE WHEN loaded.geom IS NOT NULL AND loaded.substrate IS NOT NULL
             THEN pg_read_file('/proc/self/maps') END, chr(10)) AS line
      WHERE line ~ '/(liblaplace_(core|dynamics|synthesis)[.]so([.][0-9]+)*|laplace_(geom|substrate)[.]so|laplace_execution_[0-9a-f]{16}[.]so)( [(]deleted[)])?$'),
- 'database',current_database(), 'server_version',current_setting('server_version_num'),
+ 'database',current_database(),
+ 'database_oid',(SELECT oid::bigint FROM pg_catalog.pg_database WHERE datname=current_database()),
+ 'system_identifier',(SELECT system_identifier::text FROM pg_catalog.pg_control_system()),
+ 'server_version',current_setting('server_version_num'),
  'postmaster_started',pg_postmaster_start_time(),
  'extensions',(SELECT json_object_agg(extname,extversion) FROM pg_extension
      WHERE extname IN ('laplace_geom','laplace_substrate')),
@@ -247,9 +251,28 @@ def mapped_native_identities(prefix, database, hashes, *, required=None):
     # generations, retaining all runtime/library compatibility distinctions.
     return {key: observed[key] for key in sorted(observed)}
 
+
+def database_incarnation(database):
+    """Require exact observed cluster/database identities for current proof.
+
+    A database name and postmaster start do not identify a database across
+    DROP/CREATE. Preserve the SQL bigint cluster identifier as decimal text, without
+    a floating-point conversion, and the database OID as an exact JSON integer.
+    """
+    oid = database.get("database_oid")
+    system = database.get("system_identifier")
+    if type(oid) is not int or not 0 < oid <= 0xffffffff:
+        raise ValueError("database incarnation requires an exact database OID")
+    if (not isinstance(system, str) or re.fullmatch(r"-?[1-9][0-9]{0,18}", system) is None
+            or not -0x8000000000000000 <= int(system) <= 0x7fffffffffffffff):
+        raise ValueError("database incarnation requires an exact cluster system identifier")
+    return system, oid
+
+
 def snapshot(root, prefix, database, *, purpose="publication"):
     if purpose not in ("publication", "recording"):
         raise ValueError("unknown runtime guard purpose")
+    database_incarnation(database)
     identity = build_identity(root, prefix)
     build = Path(identity["directory"])
     if not 180000 <= int(database["server_version"]) < 190000:
@@ -297,7 +320,7 @@ def snapshot(root, prefix, database, *, purpose="publication"):
         hashes["chess_floor_pair_receipt"] = digest(installed_pair)
     if build_identity(root, prefix) != identity:
         raise ValueError("configured native build changed during runtime observation")
-    state = {"format": 2, "build": identity, "artifacts": hashes,
+    state = {"format": FORMAT, "build": identity, "artifacts": hashes,
              "database": copy.deepcopy(database)}
     state["database"]["native_mappings"] = mapped
     if purpose == "recording":
@@ -311,12 +334,17 @@ def compatible(before, after, *, purpose="publication"):
     A journal row may describe either a live or an interrupted ingest. Its count
     does not change the native artifacts, SQL contract or application compatibility.
     Publication and recording preserve that count in their original receipts.
+    Historical formats remain historical and cannot be upgraded by comparison;
+    current proof requires the observed cluster/database incarnation on both sides.
     """
     if purpose not in ("publication", "recording"):
         raise ValueError("unknown runtime guard purpose")
     before = copy.deepcopy(before)
     after = copy.deepcopy(after)
     for state in (before, after):
+        if type(state.get("format")) is not int or state["format"] != FORMAT:
+            return False
+        database_incarnation(state["database"])
         if purpose == "recording" and state.get("purpose") != "recording":
             raise ValueError("recording comparison requires recording snapshots")
         if purpose == "publication" and state.get("purpose") is not None:

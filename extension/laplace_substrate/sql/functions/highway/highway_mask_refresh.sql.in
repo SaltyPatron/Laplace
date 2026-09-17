@@ -4,6 +4,9 @@
 -- Every requested identity remains in the workset, including those with no
 -- remaining relations. Their desired NULL mask clears stale bits. Registry
 -- outages retain exact dirty identities without changing existing masks.
+-- Call in READ COMMITTED maintenance transactions. Native refresh locks the
+-- captured entity rows before its fresh incident snapshot; transaction-snapshot
+-- isolation must retry in READ COMMITTED rather than clear an unseen new bit.
 DROP FUNCTION IF EXISTS laplace.highway_mask_refresh(bytea[]);
 CREATE OR REPLACE FUNCTION consensus.highway_mask_refresh(p_ids bytea[])
     RETURNS bigint

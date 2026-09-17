@@ -670,6 +670,17 @@ static int emit_ast_node_physicalities(
     const compose_state_t* st, size_t g_first, int json_mod) {
     size_t n = st->n;
     int root_seen = 0;
+    /* JSON probing already emits its multi-codepoint grapheme floor. Match
+     * the full walk's initial identity set when the record itself collapses
+     * to one of those graphemes. Non-JSON floor rows do not seed that set. */
+    if (json_mod && n > 0) {
+        for (size_t i = 0; i < r->phys_count; ++i) {
+            if (hash128_equals(&r->physicalities[i].entity_id, &st->comp_id[0])) {
+                root_seen = 1;
+                break;
+            }
+        }
+    }
     for (size_t idx = n; idx-- > 0;) {
         if (!st->comp_valid[idx]) continue;
         hash128_t id = st->comp_id[idx];
@@ -762,8 +773,9 @@ int laplace_grammar_compose_materialize_phys(laplace_compose_result_t* r,
                                              const uint8_t* utf8, size_t len,
                                              laplace_ast_t* ast, const char* modality_id) {
     if (!r || !utf8 || !ast || !modality_id) return -1;
-    if (r->phys_count > 0) return 0;
+    if (r->source_mode || r->physicalities_complete) return 0;
 
+    const size_t initial_phys_count = r->phys_count;
     compose_state_t st{};
     tier_tree_t* tree = NULL;
     laplace_grapheme_floor_t floor;
@@ -799,6 +811,15 @@ done_st:
 done:
     laplace_grapheme_floor_free(&floor);
     tier_tree_free(tree);
+    if (rc == 0) {
+        r->physicalities_complete = 1;
+    } else {
+        /* A retry starts from the original probe forms, never a partially
+         * appended floor/AST body list from the failed materialization. */
+        for (size_t i = initial_phys_count; i < r->phys_count; ++i)
+            free(r->physicalities[i].trajectory_xyzm);
+        r->phys_count = initial_phys_count;
+    }
     return rc;
 }
 
@@ -1192,6 +1213,7 @@ static int grammar_compose_impl(const uint8_t* utf8, size_t len, laplace_ast_t* 
     free(st.comp_valid);
     laplace_grapheme_floor_free(&floor);
     tier_tree_free(tree);
+    r->physicalities_complete = materialize_phys ? 1 : 0;
     *out = r;
     return 0;
 

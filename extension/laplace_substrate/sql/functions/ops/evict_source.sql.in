@@ -15,12 +15,13 @@
 --       the touched entity ids.
 --   (b) REFOLD every touched cell in place from its SURVIVING evidence through the
 --       consensus_fold AGGREGATE — the SQL surface of the same native scalar the
---       ingest fold runs (glicko2_fold_uniform_period), seeded from the neutral
---       prior, one uniform period per surviving row using the persisted fold inputs
---       (opponent_rd_fp1e9 / observation_count / sum_score_fp1e9), in the canonical
---       order (last_observed_at, id). Bit-parity with the incremental history is not
---       the contract (batch boundaries are not recoverable); the canonical fold of
---       the surviving evidence is.
+--       ingest fold runs (glicko2_fold_grouped_period), seeded from the neutral
+--       prior. All surviving rows contribute to one rating period using persisted
+--       opponent ratings/RDs, observation counts, and score sums before one state
+--       transition. Ordering by (last_observed_at, id) is deterministic traversal;
+--       timestamps do not reconstruct original rating-period boundaries. Bit-parity
+--       with incremental history is not the contract (batch boundaries are not
+--       recoverable); the grouped fold of surviving evidence is.
 --   (c) Cells with ZERO surviving evidence are DELETED, never zeroed — unattested is
 --       not attested-false (the #688/#689 law); a consensus row with no witnesses is
 --       a claim nobody makes.
@@ -227,9 +228,9 @@ BEGIN
             evidence_total := evidence_total + n_del;
 
             -- (b) refold each touched cell in place from surviving evidence:
-            --     one uniform period per surviving row, canonical order
-            --     (last_observed_at, id), neutral-prior seed — the consensus_fold
-            --     aggregate is the SQL surface of the ingest fold's native scalar.
+            --     one grouped period for all surviving rows, neutral-prior seed.
+            --     The stable (last_observed_at, id) traversal does not create a
+            --     separate state transition for each row.
             EXECUTE format($q$
                 INSERT INTO laplace.consensus AS c
                     (id, subject_id, type_id, object_id,

@@ -63,16 +63,21 @@ public sealed class GrammarComposeContainmentTests
     }
 
     [Theory]
-    [InlineData("1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}")]
-    [InlineData("7\tIsA\t/c/en/a moment in time\t/c/en/moment\t{}")]
-    public void PresentEntities_StillMaterializeEveryPhysicalityAndWitness(string row)
+    [InlineData("tsv", "1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}")]
+    [InlineData("tsv", "7\tIsA\t/c/en/a moment in time\t/c/en/moment\t{}")]
+    [InlineData("json", "{\"name\":\"q\\u0301\"}")]
+    [InlineData("json", "{\"name\":\"q\\u0301\",\"same\":\"q\\u0301\"}")]
+    [InlineData("json", "{\"name\":\"q\u0301\",\"same\":\"q\u0301\"}")]
+    [InlineData("json", "{\"name\":\"\\ud83d\\udc69\\u200d\\ud83d\\udcbb\"}")]
+    [InlineData("json", "\"q\\u0301\"")]
+    public void PresentEntities_StillMaterializeEveryPhysicalityAndWitness(string modality, string row)
     {
         byte[] utf8 = Encoding.UTF8.GetBytes(row);
-        using var ast = GrammarDecomposer.Parse(utf8, "tsv");
-        using var composer = new GrammarRowComposer(utf8, ast, Src, "tsv");
+        using var ast = GrammarDecomposer.Parse(utf8, modality);
+        using var composer = new GrammarRowComposer(utf8, ast, Src, modality);
 
         Hash128[] ids = composer.EntityIds();
-        Assert.True(ids.Length > 0, "expected the tsv row to compose at least one entity");
+        Assert.True(ids.Length > 0, "expected the grammar row to compose at least one entity");
 
         var (baseEnts, basePhys, basePrec, _) = composer.Materialize(1.0);
         Assert.True(baseEnts.Length > 0);
@@ -82,7 +87,7 @@ public sealed class GrammarComposeContainmentTests
 
         // A new composer has only probed identities when its all-present bitmap
         // arrives; it must still materialize the native source bodies.
-        using var known = new GrammarRowComposer(utf8, ast, Src, "tsv");
+        using var known = new GrammarRowComposer(utf8, ast, Src, modality);
         Assert.Equal(ids, known.EntityIds());
         var (ents, phys, prec, _) = known.Materialize(1.0, present);
 

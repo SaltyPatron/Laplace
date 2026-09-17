@@ -14,8 +14,9 @@
 -- surviving attestations. evict_source already proves it — its step (b) refolds
 -- every touched cell in place after deleting testimony. This is the complete
 -- rebuild form of that arm with NOTHING deleted: enumerate the cells the source's
--- testimony touches, refold each from ALL evidence, one uniform period, canonical
--- order (last_observed_at, id), neutral-prior seed, and UPSERT the derived row.
+-- testimony touches, refold each from ALL evidence in one grouped rating period,
+-- with a neutral-prior seed, and UPSERT the derived row. The stable traversal
+-- (last_observed_at, id) does not invent a separate period for each observation.
 -- The INSERT half matters: an interrupted first fold can leave durable evidence
 -- with no consensus row at all, and UPDATE-only repair cannot reconstruct it.
 -- Idempotent by construction — a second run recomputes identical values. Touches

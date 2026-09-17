@@ -155,6 +155,7 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
         const char* modality;
         const char* source;
         bool repeated_grapheme;
+        bool partial_json_floor = false;
     };
     const Case cases[] = {
         {"tsv", "1\tRelatedTo\t/c/en/dog\t/c/en/animal\t{}", false},
@@ -163,6 +164,12 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
         {"tsv", "a\ta\ta\na\ta\ta\n", false},
         {"tsv", "q\xCC\x81\tq\xCC\x81\n", true},
         {"json", R"({"name":"dog","same":"dog"})", false},
+        {"json", R"({"name":"q\u0301"})", false, true},
+        {"json", R"({"name":"q\u0301","same":"q\u0301"})", true, true},
+        {"json", "{\"name\":\"q\xCC\x81\",\"same\":\"q\xCC\x81\"}", true, true},
+        {"json", R"({"name":"\ud83d\udc69\u200d\ud83d\udcbb"})", false, true},
+        {"json", R"("q\u0301")", false},
+
     };
     for (const auto& fixture : cases) {
         SCOPED_TRACE(::testing::Message() << fixture.modality << ": " << fixture.source);
@@ -194,6 +201,13 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
         const hash128_t probed_root = laplace_compose_root_id(probe);
         ASSERT_TRUE(hash128_equals(&root, &probed_root));
 
+        if (fixture.partial_json_floor) {
+            ASSERT_GT(laplace_compose_physicality_count(probe), 0u)
+                << "fixture must retain real grapheme forms during probing";
+            ASSERT_LT(laplace_compose_physicality_count(probe),
+                      laplace_compose_physicality_count(full))
+                << "floor forms alone cannot prove the AST body is complete";
+        }
         ASSERT_EQ(laplace_grammar_compose_materialize_phys(
             probe, bytes, length, ast, fixture.modality), 0);
         ASSERT_EQ(laplace_compose_entity_count(probe), entity_count);
@@ -232,6 +246,11 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
             probe, bytes, length, ast, fixture.modality), 0);
         EXPECT_EQ(laplace_compose_physicality_count(probe), count)
             << "materializing the same owned result twice must not append observations";
+        ASSERT_EQ(laplace_grammar_compose_materialize_phys(
+            full, bytes, length, ast, fixture.modality), 0);
+        EXPECT_EQ(laplace_compose_physicality_count(full), count)
+            << "a fully composed result must already be complete";
+
     }
 }
 

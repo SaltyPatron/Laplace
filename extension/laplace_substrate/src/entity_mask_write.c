@@ -112,7 +112,54 @@ static void retain_dirty_ids(Datum *ids, int count)
         elog(ERROR,"entity mask write: dirty queue persistence failed");
 }
 
-static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count, bool replace)
+static MaskRelation *mask_relation(HTAB *relations, Oid oid)
+{
+    bool found;
+    MaskRelation *entry=hash_search(relations,&oid,HASH_ENTER,&found);
+    if(!found)
+    {
+        entry->relation=table_open(entry->oid,RowExclusiveLock);
+        check_storage(entry->relation);
+        entry->id=get_attnum(entry->oid,"id");entry->tier=get_attnum(entry->oid,"tier");
+        entry->mask=get_attnum(entry->oid,"highway_mask");
+        if(entry->id<=0 || entry->tier<=0 || entry->mask<=0)
+            elog(ERROR,"entity mask write: incomplete entity storage");
+        entry->estate=CreateExecutorState();
+        entry->estate->es_snapshot=GetActiveSnapshot();
+        entry->estate->es_output_cid=GetCurrentCommandId(true);
+        InitResultRelInfo(&entry->result,entry->relation,0,NULL,0);
+        ExecOpenIndices(&entry->result,false);
+        entry->old_slot=table_slot_create(entry->relation,NULL);
+        entry->new_slot=MakeSingleTupleTableSlot(RelationGetDescr(entry->relation),&TTSOpsVirtual);
+    }
+    return entry;
+}
+
+/* Lock the captured physical row, following a committed replacement at READ
+ * COMMITTED. The exact identity/tier check still precedes every storage write. */
+static TM_Result mask_target_lock(MaskRelation *entry, MaskTarget *target,
+                                 const LaplaceEntityMaskDelta *delta, bool replace)
+{
+    TM_FailureData failure;
+    bool isnull;
+    TM_Result locked=table_tuple_lock(entry->relation,&target->tid,GetActiveSnapshot(),
+        entry->old_slot,GetCurrentCommandId(false),LockTupleNoKeyExclusive,
+        replace ? LockWaitBlock : LockWaitSkip,
+        IsolationUsesXactSnapshot()?0:TUPLE_LOCK_FLAG_FIND_LAST_VERSION,&failure);
+    if(!replace && locked==TM_WouldBlock) return locked;
+    if(locked==TM_Deleted && !IsolationUsesXactSnapshot()) return locked;
+    if(locked==TM_Updated || locked==TM_Deleted)
+        ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),errmsg("entity mask target changed concurrently")));
+    if(locked!=TM_Ok) elog(ERROR,"entity mask write: unexpected tuple lock result %d",locked);
+    bytea *current=DatumGetByteaPP(slot_getattr(entry->old_slot,entry->id,&isnull));
+    if(isnull || VARSIZE_ANY_EXHDR(current)!=16 || memcmp(VARDATA_ANY(current),delta->id,16)!=0 ||
+       DatumGetInt16(slot_getattr(entry->old_slot,entry->tier,&isnull))!=target->tier)
+        return TM_Deleted;
+    return TM_Ok;
+}
+
+static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count, bool replace,
+                               LaplaceEntityMaskRefresh recompute, void *context)
 {
     if (!count) return 0;
     if (XactReadOnly)
@@ -153,9 +200,8 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
         if(isnull || VARSIZE_ANY_EXHDR(id)!=16) elog(ERROR,"entity mask write: invalid stored identity");
         const LaplaceEntityMaskDelta *delta=bsearch(VARDATA_ANY(id),deltas,count,sizeof(*deltas),compare_id);
         if(!delta) elog(ERROR,"entity mask write: unexpected identity");
-        Datum mask=SPI_getbinval(tuple,desc,3,&isnull);
-        laplace_mask256_t merged;
-        if(!mask_missing(mask,isnull,&delta->mask,&merged,replace)) continue;
+        /* Even an apparent OR no-op must lock or retain dirty work: a
+         * concurrent authoritative refresh may be about to clear that bit. */
         MaskTarget *target=&targets[n++];
         target->delta=(int)(delta-deltas);
         target->tier=DatumGetInt16(SPI_getbinval(tuple,desc,2,&isnull));
@@ -169,33 +215,30 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
     HASHCTL ctl={0}; ctl.keysize=sizeof(Oid);ctl.entrysize=sizeof(MaskRelation);
     HTAB *relations=hash_create("entity mask write relations",32,&ctl,HASH_ELEM|HASH_BLOBS);
     int64 updated=0;
+    if(recompute)
+    {
+        /* Freeze exactly the existing physical target set before opening the
+         * incident snapshot. Later-created entities/tiers are not replacement
+         * targets; their ordinary deposits remain intact. */
+        for(uint64 i=0;i<n;++i)
+        {
+            CHECK_FOR_INTERRUPTS();
+            MaskTarget *target=&targets[i];
+            MaskRelation *entry=mask_relation(relations,target->relation);
+            if(mask_target_lock(entry,target,&deltas[target->delta],true)!=TM_Ok)
+                target->relation=InvalidOid;
+            ExecClearTuple(entry->old_slot);
+        }
+        recompute(context);
+    }
     for(uint64 i=0;i<n;++i)
     {
         CHECK_FOR_INTERRUPTS();
-        MaskTarget *target=&targets[i]; bool found,isnull;
+        MaskTarget *target=&targets[i]; bool isnull;
+        if(!OidIsValid(target->relation)) continue;
         const LaplaceEntityMaskDelta *delta=&deltas[target->delta];
-        MaskRelation *entry=hash_search(relations,&target->relation,HASH_ENTER,&found);
-        if(!found)
-        {
-            entry->relation=table_open(entry->oid,RowExclusiveLock);
-            check_storage(entry->relation);
-            entry->id=get_attnum(entry->oid,"id");entry->tier=get_attnum(entry->oid,"tier");
-            entry->mask=get_attnum(entry->oid,"highway_mask");
-            if(entry->id<=0 || entry->tier<=0 || entry->mask<=0)
-                elog(ERROR,"entity mask write: incomplete entity storage");
-            entry->estate=CreateExecutorState();
-            entry->estate->es_snapshot=GetActiveSnapshot();
-            entry->estate->es_output_cid=GetCurrentCommandId(true);
-            InitResultRelInfo(&entry->result,entry->relation,0,NULL,0);
-            ExecOpenIndices(&entry->result,false);
-            entry->old_slot=table_slot_create(entry->relation,NULL);
-            entry->new_slot=MakeSingleTupleTableSlot(RelationGetDescr(entry->relation),&TTSOpsVirtual);
-        }
-        TM_FailureData failure;
-        TM_Result locked=table_tuple_lock(entry->relation,&target->tid,GetActiveSnapshot(),
-            entry->old_slot,GetCurrentCommandId(false),LockTupleNoKeyExclusive,
-            replace ? LockWaitBlock : LockWaitSkip,
-            IsolationUsesXactSnapshot()?0:TUPLE_LOCK_FLAG_FIND_LAST_VERSION,&failure);
+        MaskRelation *entry=mask_relation(relations,target->relation);
+        TM_Result locked=mask_target_lock(entry,target,delta,replace);
         if(!replace && locked==TM_WouldBlock)
         {
             hash128_t id;
@@ -204,14 +247,7 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
             ExecClearTuple(entry->old_slot);
             continue;
         }
-        if(locked==TM_Deleted && !IsolationUsesXactSnapshot()) continue;
-        if(locked==TM_Updated || locked==TM_Deleted)
-            ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),errmsg("entity mask target changed concurrently")));
-        if(locked!=TM_Ok) elog(ERROR,"entity mask write: unexpected tuple lock result %d",locked);
-        bytea *current=DatumGetByteaPP(slot_getattr(entry->old_slot,entry->id,&isnull));
-        if(isnull || VARSIZE_ANY_EXHDR(current)!=16 || memcmp(VARDATA_ANY(current),delta->id,16)!=0 ||
-           DatumGetInt16(slot_getattr(entry->old_slot,entry->tier,&isnull))!=target->tier)
-        { ExecClearTuple(entry->old_slot); continue; }
+        if(locked!=TM_Ok) { ExecClearTuple(entry->old_slot); continue; }
         Datum old_mask=slot_getattr(entry->old_slot,entry->mask,&isnull);
         laplace_mask256_t merged;
         if(mask_missing(old_mask,isnull,&delta->mask,&merged,replace))
@@ -253,10 +289,19 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
  * and authoritative. Empty replacement means NULL, not an absent request. */
 int64 laplace_entity_masks_apply(const LaplaceEntityMaskDelta *deltas, int count)
 {
-    return entity_masks_write(deltas,count,false);
+    return entity_masks_write(deltas,count,false,NULL,NULL);
 }
 
 int64 laplace_entity_masks_replace(const LaplaceEntityMaskDelta *masks, int count)
 {
-    return entity_masks_write(masks,count,true);
+    return entity_masks_write(masks,count,true,NULL,NULL);
+}
+
+/* Recompute only after all captured entity tuples are locked. The callback
+ * owns its fresh incident snapshot and restores it before returning. */
+int64 laplace_entity_masks_refresh(const LaplaceEntityMaskDelta *masks, int count,
+                                  LaplaceEntityMaskRefresh recompute, void *context)
+{
+    if(!recompute) elog(ERROR,"entity mask refresh requires a recomputation callback");
+    return entity_masks_write(masks,count,true,recompute,context);
 }

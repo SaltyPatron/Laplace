@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import contextlib
 import ctypes
 import datetime as dt
 import hashlib
@@ -931,6 +932,23 @@ def recommendations(report):
     return result
 
 
+
+@contextlib.contextmanager
+def interruption_scope():
+    """Let existing owned-process finally blocks finish on cancellation."""
+    previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+    def interrupted(signum, frame):
+        for selected in previous:
+            signal.signal(selected, signal.SIG_IGN)
+        raise KeyboardInterrupt("chess calibration interrupted")
+    for sig in previous:
+        signal.signal(sig, interrupted)
+    try:
+        yield
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -1139,8 +1157,9 @@ def main():
             report["evidence_invalid"] = True
             raise ValueError("machine affinity or cgroup CPU/memory limits changed during the benchmark")
         report["status"] = "complete" if not report["failures"] else "incomplete"
-    except (OSError, ValueError, TimeoutError, subprocess.SubprocessError) as error:
-        report["status"] = "budget_exhausted" if isinstance(error, TimeoutError) else "failed"
+    except (OSError, ValueError, TimeoutError, subprocess.SubprocessError, KeyboardInterrupt) as error:
+        report["status"] = ("interrupted" if isinstance(error, KeyboardInterrupt) else
+                            "budget_exhausted" if isinstance(error, TimeoutError) else "failed")
         report["failures"].append(str(error))
     finally:
         report["elapsed_wall_seconds"] = time.monotonic() - started
@@ -1153,4 +1172,5 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    with interruption_scope():
+        raise SystemExit(main())

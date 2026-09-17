@@ -27,6 +27,7 @@ class RuntimeGuardTests(unittest.TestCase):
         self.database = {"server_version": "180000", "running_ingests": 0,
                          "extension_functions": "fixture-functions", "database": "fixture",
                          "postmaster_started": "fixture-start", "migrations": ["001.sql"],
+                         "database_oid": 16384, "system_identifier": "9223372036854775807",
                          "extensions": {"laplace_geom": "fixture", "laplace_substrate": "fixture"},
                          "roms": {}}
         self.write(self.root / "build/CMakeCache.txt",
@@ -91,11 +92,91 @@ class RuntimeGuardTests(unittest.TestCase):
         )
         state = self.snapshot()
         self.assertEqual(12, len(state["artifacts"]))
-        self.assertEqual(2, state["format"])
+        self.assertEqual(3, state["format"])
         self.assertEqual(guard.build_identity(self.root, self.prefix), state["build"])
         self.assertNotIn("native_fingerprint", state)
         self.assertFalse((self.root / "build/.stamps").exists())
 
+
+    def test_same_name_and_postmaster_cannot_hide_database_recreation(self):
+        for purpose in ("publication", "recording"):
+            with self.subTest(purpose=purpose):
+                self.database["database_oid"] = 16384
+                before = self.snapshot(purpose=purpose)
+                self.database["database_oid"] = 32768
+                after = self.snapshot(purpose=purpose)
+                self.assertEqual(before["database"]["database"], after["database"]["database"])
+                self.assertEqual(before["database"]["postmaster_started"], after["database"]["postmaster_started"])
+                self.assertFalse(guard.compatible(before, after, purpose=purpose))
+
+    def test_different_cluster_cannot_reuse_database_oid_as_current_proof(self):
+        for purpose in ("publication", "recording"):
+            with self.subTest(purpose=purpose):
+                self.database["system_identifier"] = "9223372036854775807"
+                before = self.snapshot(purpose=purpose)
+                self.database["system_identifier"] = "9223372036854775806"
+                after = self.snapshot(purpose=purpose)
+                self.assertEqual(before["database"]["database_oid"], after["database"]["database_oid"])
+                self.assertFalse(guard.compatible(before, after, purpose=purpose))
+
+    def test_stable_incarnation_round_trips_exactly_and_accepts_journal_progress(self):
+        for purpose in ("publication", "recording"):
+            with self.subTest(purpose=purpose):
+                self.database["database_oid"] = 4294967295
+                before = self.snapshot(purpose=purpose)
+                self.database["running_ingests"] += 1
+                after = json.loads(json.dumps(self.snapshot(purpose=purpose)))
+                self.assertEqual(4294967295, after["database"]["database_oid"])
+                self.assertIs(type(after["database"]["database_oid"]), int)
+                self.assertEqual("9223372036854775807", after["database"]["system_identifier"])
+                self.assertTrue(guard.compatible(before, after, purpose=purpose))
+                negative = json.loads(json.dumps(before))
+                negative["database"]["system_identifier"] = "-9223372036854775808"
+                self.assertEqual(("-9223372036854775808", 4294967295),
+                                 guard.database_incarnation(negative["database"]))
+                self.assertTrue(guard.compatible(negative, json.loads(json.dumps(negative)), purpose=purpose))
+
+    def test_current_proof_requires_exact_incarnation_fields(self):
+        baseline = self.snapshot(purpose="recording")
+        for field, invalid_values in (
+                ("database_oid", (None, True, 0, -1, 4294967296, 16384.0, "16384")),
+                ("system_identifier", (None, True, 9223372036854775807, 1.0,
+                                       "", "0", "-0", "01", "1.0", "1e3", "-9223372036854775809",
+                                       "9223372036854775808"))):
+            original = self.database[field]
+            for invalid in invalid_values:
+                with self.subTest(field=field, value=invalid):
+                    self.database[field] = invalid
+                    with self.assertRaisesRegex(ValueError, "database incarnation"):
+                        self.snapshot(purpose="recording")
+                    changed = json.loads(json.dumps(baseline))
+                    changed["database"][field] = invalid
+                    with self.assertRaisesRegex(ValueError, "database incarnation"):
+                        guard.compatible(baseline, changed, purpose="recording")
+            del self.database[field]
+            with self.assertRaisesRegex(ValueError, "database incarnation"):
+                self.snapshot(purpose="recording")
+            missing = json.loads(json.dumps(baseline))
+            del missing["database"][field]
+            for before, after in ((baseline, missing), (missing, baseline)):
+                with self.assertRaisesRegex(ValueError, "database incarnation"):
+                    guard.compatible(before, after, purpose="recording")
+            self.database[field] = original
+
+    def test_historical_formats_are_not_implicitly_promoted_to_current_proof(self):
+        current = self.snapshot(purpose="recording")
+        for version in (None, 2, 3.0, True, "3"):
+            historical = json.loads(json.dumps(current))
+            if version is None:
+                del historical["format"]
+            else:
+                historical["format"] = version
+            historical["database"].pop("database_oid")
+            historical["database"].pop("system_identifier")
+            for before, after in ((current, historical), (historical, current), (historical, historical)):
+                self.assertFalse(guard.compatible(before, after, purpose="recording"))
+        self.assertEqual(3, current["format"])
+        self.assertIn("database_oid", current["database"])
 
     def test_backend_mappings_bind_installed_generation_without_pid_or_aslr_identity(self):
         before = self.snapshot()
@@ -436,6 +517,8 @@ class RuntimeGuardTests(unittest.TestCase):
         self.assertIn("-w", argv)
         self.assertIn("laplace_admin", argv)
         self.assertIn("BEGIN READ ONLY", argv[-1])
+        self.assertIn("oid::bigint FROM pg_catalog.pg_database WHERE datname=current_database()", argv[-1])
+        self.assertIn("system_identifier::text FROM pg_catalog.pg_control_system()", argv[-1])
         self.assertIn("ON_ERROR_STOP=1", argv)
         self.assertEqual({"PGOPTIONS": "-c default_transaction_read_only=on -c statement_timeout=10000"},
                          run.call_args.kwargs["env"])

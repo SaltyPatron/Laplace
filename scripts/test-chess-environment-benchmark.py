@@ -576,6 +576,79 @@ ActiveEnterTimestampMonotonic=2000000
                 os.kill(result["pid"], 0)
 
 
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "owned process groups require Linux")
+    def test_term_reaps_owned_tournament_process_and_latches_repeated_signals(self):
+        self.check_signal_cleanup("process")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "owned process groups require Linux")
+    def test_term_reaps_owned_uci_process_and_restores_signal_handlers(self):
+        self.check_signal_cleanup("uci")
+
+    def check_signal_cleanup(self, route):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            child_script = directory / "engine"
+            child_script.write_text("#!" + sys.executable + "\n" +
+                "import json,os,pathlib,time\n" +
+                "p=pathlib.Path(" + repr(str(directory / "child.json")) + ")\n" +
+                "ticks=pathlib.Path('/proc/self/stat').read_text().rsplit(')',1)[1].split()[19]\n" +
+                "q=p.with_suffix('.tmp');q.write_text(json.dumps({'pid':os.getpid(),'startTicks':ticks}));q.replace(p)\n" +
+                "time.sleep(30)\n")
+            child_script.chmod(0o755)
+            worker_script = directory / "worker.py"
+            worker_script.write_text(
+                "import importlib.util,json,os,pathlib,signal,sys\n"
+                "sys.path.insert(0," + repr(str(ROOT / "scripts")) + ")\n"
+                "spec=importlib.util.spec_from_file_location('benchmark_owner'," + repr(str(Path(bench.__file__))) + ")\n"
+                "owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)\n"
+                "directory=pathlib.Path(" + repr(str(directory)) + ")\n"
+                "before={sig:signal.getsignal(sig) for sig in (signal.SIGTERM,signal.SIGINT)}\n"
+                "budget={'cpu_affinity':sorted(os.sched_getaffinity(0))[:1],'memory_budget_bytes':512*owner.MIB}\n"
+                "with owner.interruption_scope():\n"
+                " try:\n"
+                "  if " + repr(route) + "=='process':\n"
+                "   owner.run_process([str(directory/'engine')],directory/'process.log',budget,20)\n"
+                "  else:\n"
+                "   owner.uci_bootstrap(directory/'engine',directory/'uci.log',budget,20)\n"
+                " except KeyboardInterrupt:\n"
+                "  child=json.loads((directory/'child.json').read_text())\n"
+                "  assert not pathlib.Path('/proc',str(child['pid'])).exists(),'owned child was not reaped'\n"
+                "  os.kill(os.getpid(),signal.SIGTERM)\n"
+                "  os.kill(os.getpid(),signal.SIGINT)\n"
+                " else:raise AssertionError('TERM did not interrupt the owner')\n"
+                "assert all(signal.getsignal(sig)==handler for sig,handler in before.items())\n"
+                "(directory/'result.json').write_text(json.dumps({'reaped':True,'latched':True,'restored':True}))\n")
+            worker = bench.subprocess.Popen([sys.executable, str(worker_script)],
+                                           stdout=bench.subprocess.PIPE, stderr=bench.subprocess.PIPE, text=True)
+            child_identity = None
+            try:
+                deadline = time.monotonic() + 10
+                while not (directory / "child.json").is_file() and worker.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue((directory / "child.json").is_file(), "owned child did not start")
+                child_identity = json.loads((directory / "child.json").read_text())
+                worker.send_signal(bench.signal.SIGTERM)
+                stdout, stderr = worker.communicate(timeout=10)
+                self.assertEqual(worker.returncode, 0, (stdout, stderr))
+                self.assertEqual(json.loads((directory / "result.json").read_text()),
+                                 {"reaped": True, "latched": True, "restored": True})
+            finally:
+                if worker.poll() is None:
+                    worker.kill()
+                    worker.communicate(timeout=10)
+                if child_identity is not None:
+                    proc = Path("/proc") / str(child_identity["pid"])
+                    try:
+                        observed = (proc / "stat").read_text().rsplit(")", 1)[1].split()[19]
+                        if observed == child_identity["startTicks"]:
+                            os.killpg(child_identity["pid"], bench.signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    except FileNotFoundError:
+                        pass
+
+
 class ChessPgnProvider(unittest.TestCase):
     """Real pinned rules execution, with independent archive/import refusals."""
 

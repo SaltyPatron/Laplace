@@ -325,7 +325,7 @@ def recording_compatible(guard, before, after):
     """Retain all runtime identities; only observed journal occupancy may differ."""
     for state in (before, after):
         if (not isinstance(state, dict) or type(state.get("format")) is not int
-                or state["format"] != 2):
+                or state["format"] != 3):
             raise ValueError("pilot installed runtime has an unsupported format")
     if not guard.compatible(before, after, purpose="recording"):
         raise ValueError("installed native/database selection differs from the recording baseline")

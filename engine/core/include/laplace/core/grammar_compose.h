@@ -72,6 +72,10 @@ typedef struct {
     tier_tree_t**                    source_trees;
     size_t                           source_tree_count;
     uint8_t                          source_mode;
+    /* Record composition can retain JSON grapheme forms during probing.
+     * Their presence alone does not mean AST forms have been materialized.
+     * This byte uses existing padding before source_root_coord. */
+    uint8_t                          physicalities_complete;
     /* The full-source root can lawfully collapse to a lexical content node.
      * Keep its placement here because such a root has no wrapper physicality. */
     double                           source_root_coord[4];

@@ -608,9 +608,9 @@ class NativeQualificationTests(unittest.TestCase):
             driver.verify_qualification_receipts(receipt)
 
     def baseline(self):
-        return {"format": 2, "purpose": "recording", "build": copy.deepcopy(self.state["buildIdentity"]),
+        return {"format": 3, "purpose": "recording", "build": copy.deepcopy(self.state["buildIdentity"]),
                 "database": {"server_version": "180006", "running_ingests": 2,
-                             "system_identifier": "fixture-database", "extensions": {"real-owner": "1"}},
+                             "system_identifier": "1234567890123456789", "database_oid": 1001, "extensions": {"real-owner": "1"}},
                 "artifacts": {"lib/liblaplace_core.so": {"sha256": "b" * 64}}}
 
     def runtime_guard(self, observed):
@@ -631,7 +631,7 @@ class NativeQualificationTests(unittest.TestCase):
             driver.installed_state(guard, self.prefix, self.prefix / "pgsql-18", baseline, receipt)
         guard.snapshot.assert_not_called()
         observed["database"]["server_version"] = "180006"
-        observed["database"]["system_identifier"] = "different-database"
+        observed["database"]["system_identifier"] = "1234567890123456790"
         with self.assertRaisesRegex(ValueError, "recording baseline"):
             driver.installed_state(guard, self.prefix, self.prefix / "pgsql-18", baseline, receipt)
 
@@ -657,7 +657,7 @@ class NativeQualificationTests(unittest.TestCase):
         baseline = self.baseline()
         guard = self.runtime_guard(baseline)
         driver.recording_compatible(guard, baseline, copy.deepcopy(baseline))
-        for value in (1, True, "2", 3, None):
+        for value in (1, 2, True, "3", 4, None):
             with self.subTest(format=value):
                 changed = copy.deepcopy(baseline)
                 if value is None:
@@ -674,13 +674,18 @@ class NativeQualificationTests(unittest.TestCase):
         guard = self.runtime_guard(baseline)
         variants = []
         for section, key, value in (
-                ("database", "system_identifier", "other"),
+                ("database", "system_identifier", "1234567890123456790"),
+                ("database", "database_oid", 1002),
                 ("database", "extensions", {"real-owner": "2"}),
                 ("artifacts", "lib/liblaplace_core.so", {"sha256": "c" * 64}),
                 ("build", "installProgramSha256", "c" * 64)):
             changed = copy.deepcopy(baseline)
             changed[section][key] = value
             changed["database"]["running_ingests"] = 0
+            variants.append(changed)
+        for field in ("database_oid", "system_identifier"):
+            changed = copy.deepcopy(baseline)
+            del changed["database"][field]
             variants.append(changed)
         variants += [{**baseline, "build": {}},
                      {**baseline, "purpose": "publication"},

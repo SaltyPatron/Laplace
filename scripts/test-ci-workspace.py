@@ -11,8 +11,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
-def body(job):
-    text = (ROOT / ".github/workflows/laplace.yml").read_text()
+def body(job, workflow="laplace.yml"):
+    text = (ROOT / ".github/workflows" / workflow).read_text()
     section = text.split("  " + job + ":\n", 1)[1]
     if job == "mainline":
         section = section.split("\n  operator:\n", 1)[0]
@@ -20,7 +20,7 @@ def body(job):
     return "\n".join(line[10:] for line in raw.splitlines()
                      if line.startswith("          ")) + "\n"
 
-class WorkspaceReservation(unittest.TestCase):
+class WorkspaceFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="laplace-ci-workspace-")
         self.addCleanup(self.temp.cleanup)
@@ -45,6 +45,7 @@ class WorkspaceReservation(unittest.TestCase):
             'printf "environment\\n" >> "$TEST_EVENTS"\n')
         (self.seed / "scripts/product-ci.sh").write_text(
             '#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "$TEST_EVENTS"\n')
+        self.prepare_seed()
         self.git(self.seed, "add", ".")
         self.git(self.seed, "commit", "-m", "initial fixture")
         self.git(self.seed, "remote", "add", "origin", str(self.origin))
@@ -64,6 +65,9 @@ class WorkspaceReservation(unittest.TestCase):
                         TARGET_SHA=self.target, CHECKOUT_TOKEN="fixture-only",
                         TEST_EVENTS=str(self.events), LAPLACE_STAGE="check", GITHUB_REPOSITORY="fixture/repository")
 
+    def prepare_seed(self):
+        pass
+
     def git(self, cwd, *arguments):
         return subprocess.run(["git", *arguments], cwd=cwd, env=self.env,
                               check=True, text=True, capture_output=True, timeout=15).stdout
@@ -72,6 +76,7 @@ class WorkspaceReservation(unittest.TestCase):
         return subprocess.run(["bash", "-c", body(job)], cwd=self.workspace, env=self.env,
                               text=True, capture_output=True, timeout=15)
 
+class WorkspaceReservation(WorkspaceFixture):
     def test_checkout_waits_for_reservation_and_preserves_build(self):
         with (self.work / "host-resource.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
@@ -143,6 +148,174 @@ class WorkspaceReservation(unittest.TestCase):
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
         self.assertFalse(self.events.exists())
 
+
+
+class DatabaseWorkspaceReservation(WorkspaceFixture):
+    def prepare_seed(self):
+        # Real Git and flock are exercised. Only the database commands are
+        # fixtures: this suite must not connect to or mutate a developer DB.
+        ownership = (
+            'exec 8>"$LAPLACE_WORK_ROOT/host-resource.lock"\n'
+            'if flock -n 8; then echo "reservation was not inherited" >&2; exit 97; fi\n'
+            'exec 8>&-\n'
+            '[[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]] || exit 98\n')
+        (self.seed / "scripts/ci-environment.sh").write_text(
+            ownership
+            + '[[ "$LAPLACE_SETUP_USE_CMAKE" == false ]] || exit 95\n'
+            + '[[ "$LAPLACE_SETUP_REQUIRE_BUILT_REVISION" == true ]] || exit 96\n'
+            + '[[ ! -v CHECKOUT_TOKEN && ! -v checkout_auth ]] || exit 94\n'
+            + 'printf "environment\\n" >> "$TEST_EVENTS"\n')
+        for name, label in (
+                ("db-migrations.sh", "migration"), ("pipeline.sh", "pipeline"),
+                ("check-database-health.sh", "health"),
+                ("maintain-installed-database.sh", "maintenance"),
+                ("ingest-source.sh", "ingest"), ("ensure-foundation.sh", "foundation")):
+            (self.seed / "scripts" / name).write_text(
+                '#!/usr/bin/env bash\nset -euo pipefail\n' + ownership
+                + 'event="' + label + ':$*"\n'
+                + 'printf "%s\\n" "$event" >> "$TEST_EVENTS"\n'
+                + '[[ "$event" != "$TEST_FAIL_EVENT" ]] || exit 23\n')
+
+    def setUp(self):
+        super().setUp()
+        self.env.update(LAPLACE_DB_OPERATION="status", LAPLACE_DB_SEED_SOURCE="",
+                        LAPLACE_DB_SEED_LIMIT="", PGDATABASE="fixture_database",
+                        TEST_FAIL_EVENT="")
+
+    def execute_database(self, operation="status", seed=""):
+        environment = dict(self.env, LAPLACE_DB_OPERATION=operation,
+                           LAPLACE_DB_SEED_SOURCE=seed)
+        return subprocess.run(["bash", "-c", body("db", "db-ops.yml")],
+                              cwd=self.workspace, env=environment,
+                              text=True, capture_output=True, timeout=15)
+
+    def test_database_selection_and_setup_wait_for_the_shared_reservation(self):
+        fetch_head = self.workspace / ".git/FETCH_HEAD"
+        prior_fetch = fetch_head.read_bytes() if fetch_head.exists() else None
+        with (self.work / "host-resource.lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            process = subprocess.Popen(
+                ["bash", "-c", 'printf "started\\n";\n' + body("db", "db-ops.yml")],
+                cwd=self.workspace, env=self.env, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                self.assertEqual(process.stdout.readline(), "started\n")
+                time.sleep(0.25)
+                self.assertIsNone(process.poll())
+                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
+                self.assertEqual(fetch_head.read_bytes() if fetch_head.exists() else None, prior_fetch)
+                self.assertFalse(self.events.exists())
+                self.assertEqual(self.marker.read_text(), "existing qualified build\n")
+                fcntl.flock(lock, fcntl.LOCK_UN)
+                stdout, stderr = process.communicate(timeout=15)
+                self.assertEqual(process.returncode, 0, stdout + stderr)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate(timeout=5)
+        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
+        self.assertEqual(self.marker.read_text(), "existing qualified build\n")
+        self.assertEqual(self.events.read_text().splitlines(), ["environment", "migration:status"])
+        self.assertNotIn("extraheader", self.git(self.workspace, "config", "--local", "--list"))
+
+    def test_database_operations_keep_the_existing_dispatch_and_arguments(self):
+        pipeline = "pipeline:sync-extension tune-pg tune-laplace perfcache-guc api-env"
+        cases = (
+            ("status", "", ["migration:status"]),
+            ("create", "", ["migration:up", pipeline, "health:fixture_database"]),
+            ("drop", "", ["migration:nuke --yes"]),
+            ("recreate", "", ["migration:nuke --yes", "migration:up", pipeline,
+                              "health:fixture_database"]),
+            ("update", "", ["maintenance:"]),
+            ("update", "selected source", ["maintenance:", "ingest:selected source"]),
+            ("seed", "", ["foundation:"]),
+            ("seed", "selected source", ["ingest:selected source"]),
+            ("verify", "", ["health:fixture_database"]),
+        )
+        for operation, seed, expected in cases:
+            with self.subTest(operation=operation, seed=seed):
+                self.events.unlink(missing_ok=True)
+                result = self.execute_database(operation, seed)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.events.read_text().splitlines(), ["environment", *expected])
+                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
+
+    def test_database_selects_requested_commit_even_after_origin_advances(self):
+        (self.seed / "source.txt").write_text("later revision\n")
+        self.git(self.seed, "add", ".")
+        self.git(self.seed, "commit", "-m", "later fixture")
+        self.git(self.seed, "push", "origin", "HEAD:refs/heads/main")
+        later = self.git(self.seed, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(later, self.target)
+        result = self.execute_database()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
+        self.assertEqual((self.workspace / "source.txt").read_text(), "selected\n")
+
+    def test_database_empty_runner_uses_the_authenticated_origin_path(self):
+        shutil.rmtree(self.workspace)
+        self.workspace.mkdir()
+        self.git(None, "config", "--file", str(self.global_config),
+                 "url." + str(self.origin) + ".insteadOf", "https://github.com/fixture/repository.git")
+        result = self.execute_database()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
+        self.assertEqual(self.events.read_text().splitlines(), ["environment", "migration:status"])
+        self.assertEqual(self.git(self.workspace, "config", "--local", "--get", "remote.origin.url").strip(),
+                         "https://github.com/fixture/repository.git")
+
+    def test_database_preserves_nonrepository_files_without_starting_setup(self):
+        shutil.rmtree(self.workspace)
+        self.workspace.mkdir()
+        path = self.workspace / "existing-work.txt"
+        path.write_text("existing work\n")
+        result = self.execute_database()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(path.read_text(), "existing work\n")
+        self.assertFalse((self.workspace / ".git").exists())
+        self.assertFalse(self.events.exists())
+
+    def test_database_preserves_unstaged_and_staged_tracked_work(self):
+        path = self.workspace / "source.txt"
+        path.write_text("uncommitted work\n")
+        for staged in (False, True):
+            with self.subTest(staged=staged):
+                if staged:
+                    self.git(self.workspace, "add", "source.txt")
+                result = self.execute_database()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(path.read_text(), "uncommitted work\n")
+                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
+                if staged:
+                    self.assertEqual(self.git(self.workspace, "show", ":source.txt"),
+                                     "uncommitted work\n")
+                self.assertFalse(self.events.exists())
+
+    def test_database_preserves_untracked_and_ignored_checkout_collisions(self):
+        path = self.workspace / "new-source.txt"
+        path.write_text("untracked work\n")
+        for ignored in (False, True):
+            with self.subTest(ignored=ignored):
+                if ignored:
+                    with (self.workspace / ".git/info/exclude").open("a") as stream:
+                        stream.write("\nnew-source.txt\n")
+                result = self.execute_database()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(path.read_text(), "untracked work\n")
+                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
+                self.assertFalse(self.events.exists())
+
+    def test_database_operation_failure_prevents_later_phases(self):
+        self.env["TEST_FAIL_EVENT"] = "migration:up"
+        result = self.execute_database("recreate")
+        self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
+        self.assertEqual(self.events.read_text().splitlines(),
+                         ["environment", "migration:nuke --yes", "migration:up"])
+
+    def test_unknown_database_operation_never_starts_database_work(self):
+        result = self.execute_database("unknown")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(self.events.read_text().splitlines(), ["environment"])
 
 class IntegratedLifecycle(unittest.TestCase):
     def execute(self, test_status):

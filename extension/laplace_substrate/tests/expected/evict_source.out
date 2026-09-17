@@ -102,7 +102,7 @@ BEGIN
         -- cell V (subj, rel_p, NULL): ANALYSIS ONLY, NULL object — culled
         (public.laplace_hash128_blake3('test/evict/a5'), subj, rel_p, NULL, src_a, NULL,
          2, t2, 3, 3 * win, phi_a),
-        -- cell VI (subj, rel_p, o5): interleaved periods — refold order pin:
+        -- cell VI (subj, rel_p, o5): interleaved observations — grouped refold pin:
         -- surviving witness rows t1 and t3 straddle the deleted analysis row t2
         (public.laplace_hash128_blake3('test/evict/w4'), subj, rel_p, o5, src_w, NULL,
          2, t1, 1, win, phi_w),
@@ -195,7 +195,6 @@ DECLARE
     row_c    laplace.consensus%ROWTYPE;
     snap     _ev_snap_v1%ROWTYPE;
     expect   laplace.laplace_glicko2_result;
-    step     laplace.laplace_glicko2_result;
     leafname text;
 BEGIN
     -- every evidence row of the evicted source is gone; the witness layer is intact
@@ -276,22 +275,20 @@ BEGIN
         RAISE EXCEPTION 'FAIL: refolded hot cell in %, expected an is_a hash leaf', leafname;
     END IF;
 
-    -- (VI): canonical order pin — survivors refold by (last_observed_at, id),
-    -- t1 then t3, regardless of the deleted t2 period between them
-    step := laplace.laplace_glicko2_accumulate_period(
-        consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility(),
-        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi_w]::bigint[],
-        ARRAY[1]::bigint[], ARRAY[win]::bigint[], consensus.glicko2_tau());
+    -- (VI): one canonical aggregate is one rating period. Both surviving rows
+    -- contribute before the state transition; observation timestamps retain
+    -- provenance and do not invent unrecoverable original batch boundaries.
     expect := laplace.laplace_glicko2_accumulate_period(
-        step.rating, step.rd, step.volatility,
-        ARRAY[consensus.glicko2_neutral_mu()]::bigint[], ARRAY[phi_w]::bigint[],
-        ARRAY[2]::bigint[], ARRAY[s_conf]::bigint[], consensus.glicko2_tau());
+        consensus.glicko2_neutral_mu(), consensus.glicko2_initial_rd(), consensus.glicko2_initial_volatility(),
+        ARRAY[consensus.glicko2_neutral_mu(), consensus.glicko2_neutral_mu()]::bigint[],
+        ARRAY[phi_w, phi_w]::bigint[],
+        ARRAY[1, 2]::bigint[], ARRAY[win, s_conf]::bigint[], consensus.glicko2_tau());
     SELECT * INTO row_c FROM laplace.consensus
     WHERE subject_id = subj AND type_id = rel_p AND object_id = o5;
     IF NOT FOUND THEN RAISE EXCEPTION 'FAIL: interleaved cell culled'; END IF;
     IF row_c.rating <> expect.rating OR row_c.rd <> expect.rd
        OR row_c.volatility <> expect.volatility THEN
-        RAISE EXCEPTION 'FAIL: interleaved refold broke the canonical (ts, id) order';
+        RAISE EXCEPTION 'FAIL: interleaved refold diverges from one grouped survivor period';
     END IF;
     IF row_c.witness_count <> 3 OR row_c.last_observed_at <> t3 THEN
         RAISE EXCEPTION 'FAIL: interleaved witness_count/ts (%, %)',

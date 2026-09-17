@@ -45,25 +45,41 @@ jobs:
       LAPLACE_DB_SEED_SOURCE: ${{ inputs.seed_source }}
       LAPLACE_DB_SEED_LIMIT: ${{ inputs.seed_limit }}
     steps:
-      - name: Checkout exact requested revision
+      - name: Select source and run the requested database operation under one host reservation
         env:
           TARGET_SHA: ${{ github.sha }}
-        run: |
-          git fetch --no-tags --prune --depth=2 origin "$TARGET_SHA"
-          git checkout --force "$TARGET_SHA"
-
-      - uses: ./.github/actions/setup-laplace-env
-        with:
-          use_cmake: "false"
-          require_built_revision: "true"
-
-      - name: Run database operation
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           umask 0002
-          mkdir -p /build/laplace/work
-          exec 9>/build/laplace/work/host-resource.lock
+          workspace_lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          mkdir -p "$workspace_lock_root"
+          exec 9>"$workspace_lock_root/host-resource.lock"
           flock 9
+          cd "$GITHUB_WORKSPACE"
+          if [[ ! -e .git ]]; then
+            [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+              echo "::error::nonempty workspace has no repository; preserving its files" >&2
+              exit 1
+            }
+            git init --initial-branch=main
+            git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+            git fetch --no-tags --depth=2 origin "$TARGET_SHA"
+          unset checkout_auth CHECKOUT_TOKEN
+          git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+          git diff --quiet
+          git diff --cached --quiet
+          export LAPLACE_SETUP_USE_CMAKE=false
+          export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=true
+          source scripts/ci-environment.sh
 
           case "$LAPLACE_DB_OPERATION" in
             status)
