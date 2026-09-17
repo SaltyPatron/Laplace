@@ -165,6 +165,7 @@ program_channel_compare(const void *left, const void *right)
     do { if (a->field != b->field) return a->field < b->field ? -1 : 1; } while (0)
     PROGRAM_CHANNEL_CMP(rating);
     PROGRAM_CHANNEL_CMP(rd);
+    PROGRAM_CHANNEL_CMP(volatility);
     PROGRAM_CHANNEL_CMP(witnesses);
     PROGRAM_CHANNEL_CMP(confirm_occurrences);
     PROGRAM_CHANNEL_CMP(draw_occurrences);
@@ -256,6 +257,7 @@ program_fingerprint_channels(StringInfo bytes,
         program_fingerprint_u32(bytes, channel->outbound ? 1u : 0u);
         program_fingerprint_u64(bytes, (uint64) channel->rating);
         program_fingerprint_u64(bytes, (uint64) channel->rd);
+        program_fingerprint_u64(bytes, (uint64) channel->volatility);
         program_fingerprint_u64(bytes, (uint64) channel->witnesses);
         program_fingerprint_u64(bytes, (uint64) channel->confirm_occurrences);
         program_fingerprint_u64(bytes, (uint64) channel->draw_occurrences);
@@ -275,7 +277,10 @@ program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values,
                     int initial_channel_count)
 {
     StringInfoData bytes;
-    hash128_t domain = cognition_domain("laplace:cognition-program:v5");
+    /* v6 adds the retained Glicko volatility coordinate to the semantic
+     * response-state identity. A standing change must change the program
+     * receipt even when rating/RD and selected output happen to remain equal. */
+    hash128_t domain = cognition_domain("laplace:cognition-program:v6");
     int member = -1;
     initStringInfo(&bytes);
     appendBinaryStringInfo(&bytes, (const char *) &domain, sizeof(domain));

@@ -1,0 +1,3 @@
+-- Glicko standing coordinates remain typed COUPLE state before ORIENT.
+\set ECHO none
+NOTICE:  standing volatility: preserved in pre-ORIENT typed response state

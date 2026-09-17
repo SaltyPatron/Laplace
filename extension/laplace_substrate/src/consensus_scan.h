@@ -12,6 +12,7 @@ typedef struct LaplaceConsensusRow
     hash128_t object;
     int64 rating;
     int64 rd;
+    int64 volatility;
     int64 witnesses;
     bool object_is_null;
 } LaplaceConsensusRow;
