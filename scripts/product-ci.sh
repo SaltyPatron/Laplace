@@ -155,10 +155,12 @@ reconcile_installed_product() {
 }
 
 # Product lifecycle owns build/install/database verification/publication/live checks.
-# Mainline proves the competitive model path before application activation so a
-# failed required capability cannot be published as a successful product revision.
+# Mainline proves the repository contracts and competitive model path before any
+# installed-product mutation so a broken control plane or required capability
+# cannot be published as a successful product revision.
 run_deploy() {
   check_deps
+  run_ci_contract_checks
   run_build
   run_dev_tests
   run_install
