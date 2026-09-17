@@ -3,10 +3,9 @@ using Laplace.Api.Contracts;
 namespace Laplace.Endpoints.OpenAICompat;
 
 /// <summary>
-/// The one authority for served model ids. /v1/models advertises exactly this list
-/// and the endpoints route on exact ids — substring routing on the model field was
-/// an English-dispatch hack (spec 34); an unknown model is a 400, never a silent
-/// fallback lane.
+/// The one authority for generally advertised model ids. A specialized model may own
+/// an exact endpoint before catalog promotion; catalog promotion is gated by live proof,
+/// never by a label alone.
 /// </summary>
 internal static class ModelCatalog
 {
@@ -20,7 +19,6 @@ internal static class ModelCatalog
     [
         new ModelInfo(Converse, "model", 0, "laplace"),
         new ModelInfo(Completions, "model", 0, "laplace"),
-        new ModelInfo(Code, "model", 0, "laplace"),
         new ModelInfo(EmbedForm, "model", 0, "laplace"),
         new ModelInfo(EmbedMeaning, "model", 0, "laplace"),
     ];
