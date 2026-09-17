@@ -33,7 +33,8 @@ jobs:
           printf 'EVIDENCE_ROOT=%s\n' "$evidence_root" >> "$GITHUB_ENV"
           cp .github/workflows/canonical-identity-qualification.yml "$evidence_root/workflow.yml"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = "$BASE"
+          git merge-base --is-ancestor "$BASE" HEAD
+          test "$(git diff --name-only "$BASE" HEAD)" = .github/workflows/canonical-identity-qualification.yml
           test -z "$(git status --porcelain --untracked-files=all)"
           git config user.name "Laplace qualification"
           git config user.email "qualification@users.noreply.github.com"
@@ -68,7 +69,7 @@ jobs:
           PY
             exit "$merge_status"
           fi
-          git rm -- .github/workflows/identity-storage-proof.yml .github/workflows/identity-working-set-patch.yml scripts/patch-identity-working-set.py
+          git rm -f -- .github/workflows/identity-storage-proof.yml .github/workflows/identity-working-set-patch.yml scripts/patch-identity-working-set.py
           git diff --check --cached
           git diff --cached --binary > "$evidence_root/reconciled.patch"
           git commit -m "Reconcile canonical identity source for isolated qualification"
