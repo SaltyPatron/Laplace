@@ -23,13 +23,19 @@ int hash_composer_run(
     hash_composer_atom_resolver_fn resolver,
     void*                          resolver_user_data);
 
-
-
-
-
-
-
-
+/* Dependency-frontier composition for one semantic DAG. worker_count is a
+ * caller-owned physical resource grant and never participates in identity.
+ * Every parent starts only after its complete child frontier has joined.
+ *
+ * The resolver supplied here must be safe for concurrent calls. The scalar
+ * hash_composer_run entry remains the compatibility/oracle path for arbitrary
+ * resolvers and is also the exact fallback when native parallel execution is
+ * unavailable. */
+int hash_composer_run_workers(
+    tier_tree_t*                   tree,
+    hash_composer_atom_resolver_fn resolver,
+    void*                          resolver_user_data,
+    size_t                         worker_count);
 
 void hash_composer_compose_node(
     uint8_t          tier,
