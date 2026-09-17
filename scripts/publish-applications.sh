@@ -46,15 +46,31 @@ main() {
       managed activate
       sudo -n systemctl restart laplace-api
       for _ in $(seq 1 60); do
-        if curl -fsS http://127.0.0.1:5187/health/ready | grep -q '"ready":true'; then
+        # /health/ready is also the product-data receipt. HTTP 503 can therefore
+        # mean "application deployed correctly but substrate is empty/thin".
+        # Preserve the body and separate deployment health from product readiness.
+        detail="$(curl -sS http://127.0.0.1:5187/health/ready 2>/dev/null || true)"
+        if grep -Eq '"ready"[[:space:]]*:[[:space:]]*true' <<<"$detail"; then
           managed commit
           trap - EXIT INT TERM HUP
           echo "application publish committed"
           return 0
         fi
+        if grep -Eq '"substrate_reachable"[[:space:]]*:[[:space:]]*true' <<<"$detail" \
+           && grep -Eq '"perfcache_ready"[[:space:]]*:[[:space:]]*true' <<<"$detail"; then
+          entities="$(sed -nE 's/.*"entities"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' <<<"$detail")"
+          consensus="$(sed -nE 's/.*"consensus_relations"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' <<<"$detail")"
+          if [[ -n "$entities" && -n "$consensus" && ( "$entities" == 0 || "$consensus" == 0 ) ]]; then
+            managed commit
+            trap - EXIT INT TERM HUP
+            echo "application publish committed; runtime healthy, substrate not product-ready"
+            return 0
+          fi
+        fi
         sleep 1
       done
-      echo "::error::laplace-api did not become ready after publish" >&2
+      echo "::error::laplace-api did not establish deployment health after publish" >&2
+      [[ -z "${detail:-}" ]] || printf '%s\n' "$detail" >&2
       return 1
       ;;
     *)
