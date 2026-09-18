@@ -85,7 +85,7 @@ jobs:
     name: Qualify affected product inputs
     needs: plan
     concurrency:
-      group: laplace-main-qualification-dispatch
+      group: ${{ needs.plan.outputs.delivery_actions != '' && 'laplace-main-product-qualification-dispatch' || 'laplace-main-test-qualification-dispatch' }}
       cancel-in-progress: true
     uses: ./.github/workflows/product-stage.yml
     with:
