@@ -540,6 +540,90 @@ export function StorageProofView() {
             </div>
           </section>
 
+          <section className={styles.section}>
+            <div className={styles.sectionHead}>
+              <div>
+                <h3>Storage law</h3>
+                <p>
+                  A fixed finite geometric domain carries an unbounded family of finite recursive
+                  compositions. Identity, placement, locality, and reversible sequence storage are
+                  separate mechanisms and are shown separately below.
+                </p>
+              </div>
+            </div>
+            <div className={styles.lawGrid}>
+              <article className={styles.lawCard}>
+                <span className={styles.lawStep}>01 · finite floor ROM</span>
+                <strong>Tier 0 is a fixed address basis</strong>
+                <p>
+                  The v4 perfcache stores every Unicode codepoint&apos;s content ID, DUCET/UCA
+                  order, 4-D S³ coordinate, 128-bit Hilbert key, and segmentation properties.
+                  DUCET order feeds the open Super-Fibonacci map; early ranks are interleaved
+                  across the full shell instead of filling one latitude band.
+                </p>
+                <code>codepoint → {'{'} id, uca_order, x, y, z, m, hilbert, flags {'}'}</code>
+              </article>
+
+              <article className={styles.lawCard}>
+                <span className={styles.lawStep}>02 · recursive identity</span>
+                <strong>Ordered children determine content identity</strong>
+                <p>
+                  A single-child wrapper collapses to the child identity. A multi-child node is
+                  the Merkle-domain BLAKE3 content address of the ordered child-ID sequence.
+                  Tier, source, ordinal, worker, and container are not identity salt.
+                </p>
+                <code>n = 1 → id(child)</code>
+                <code>n &gt; 1 → BLAKE3(domain ∥ child₁.id ∥ … ∥ childₙ.id)[0..127]</code>
+              </article>
+
+              <article className={styles.lawCard}>
+                <span className={styles.lawStep}>03 · bounded placement</span>
+                <strong>Every composition stays inside one finite 4-D ball</strong>
+                <p>
+                  HashComposer places a parent at the Euclidean centroid of its immediate child
+                  coordinates. The closed unit 4-ball is convex, so finite recursive composition
+                  cannot escape it. Hilbert encodes that resulting 4-D point for locality.
+                </p>
+                <code>coord(parent) = (Σ childᵢ.coord) / n</code>
+                <code>hilbert(parent) = Hilbert4D(coord(parent))</code>
+              </article>
+
+              <article className={styles.lawCard}>
+                <span className={styles.lawStep}>04 · exact sequence manifest</span>
+                <strong>Order and identity are not thrown away by the centroid</strong>
+                <p>
+                  The physicality trajectory stores each child identity plus logical position,
+                  run length, tier/atom metadata, and flags in four 53-bit float payload slots.
+                  This carrier is exactly reversible identity cargo; it is not a path of positions.
+                </p>
+                <code>vertex = pack(child.id, ordinal, run_length, flags) → 4 × 53 bits</code>
+              </article>
+
+              <article className={styles.lawCard}>
+                <span className={styles.lawStep}>05 · realized geometry</span>
+                <strong>Spatial shape is reconstructed from live child coordinates</strong>
+                <p>
+                  When geometry is required, Laplace resolves the stored child IDs through their
+                  physicalities and orders those real coordinates by ordinal. Fréchet/Hausdorff
+                  operate on this realized curve, never on the mantissa carrier.
+                </p>
+                <code>manifest child IDs → live PointZM → ordered realized curve</code>
+              </article>
+
+              <article className={styles.lawCard}>
+                <span className={styles.lawStep}>06 · recursive addressability</span>
+                <strong>Complexity grows by composition, not by enlarging the coordinate domain</strong>
+                <p>
+                  Every finite node has a finite content address, one bounded 4-D placement, and a
+                  finite exact child manifest. Those nodes become children of higher nodes without
+                  allocating a larger geometric space. The limiting resource is computation and
+                  materialization, not exhaustion of the 4-D coordinate domain.
+                </p>
+                <code>finite basis → finite nodes → finite parents → …</code>
+              </article>
+            </div>
+          </section>
+
           <section className={styles.proofGrid}>
             <article className={styles.treePanel}>
               <div className={styles.panelHead}>
