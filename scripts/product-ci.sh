@@ -293,7 +293,8 @@ check_t0_perfcache_runtime() {
   local host="${PGHOST:-/var/run/postgresql}"
   local user="${PGUSER:-laplace_admin}"
   local database="${PGDATABASE:-laplace}"
-  local word_id
+  local word_id db_receipt perfcache_path file_receipt
+
   word_id="$(psql -h "$host" -U "$user" -d "$database" -v ON_ERROR_STOP=1 -X -tAc \
     "SELECT encode(laplace.word_id('the'),'hex');")" || {
     echo "::error::installed PostgreSQL runtime cannot execute the T0 perfcache-backed word_id operation" >&2
@@ -303,6 +304,41 @@ check_t0_perfcache_runtime() {
     echo "::error::installed T0 perfcache probe returned an invalid identity: $word_id" >&2
     return 1
   fi
+
+  # The T0 ROM is prewarmed by the postmaster. Replacing the file or recycling
+  # backends is not enough: a live postmaster can keep serving the old mmap.
+  # Compare the checksum receipt of the loaded native table with the trailer of
+  # the exact file named by the runtime GUC. SQL is only exposing the native
+  # receipt; it does not reconstruct any Tier-0 geometry.
+  perfcache_path="$(psql -h "$host" -U "$user" -d "$database" -v ON_ERROR_STOP=1 -X -tAc \
+    "SHOW laplace_substrate.perfcache_path;")" || {
+    echo "::error::could not resolve installed T0 perfcache path" >&2
+    return 1
+  }
+  db_receipt="$(psql -h "$host" -U "$user" -d "$database" -v ON_ERROR_STOP=1 -X -tAc \
+    "SELECT encode(laplace.perfcache_receipt(),'hex');")" || {
+    echo "::error::installed PostgreSQL runtime cannot expose its T0 perfcache receipt" >&2
+    return 1
+  }
+  file_receipt="$(python3 - "$perfcache_path" <<'PY'
+import pathlib
+import sys
+path = pathlib.Path(sys.argv[1])
+data = path.read_bytes()
+if len(data) < 16:
+    raise SystemExit("T0 perfcache is shorter than its 16-byte receipt")
+print(data[-16:].hex())
+PY
+)" || {
+    echo "::error::could not read deployed T0 perfcache receipt from $perfcache_path" >&2
+    return 1
+  }
+
+  if [[ "${db_receipt,,}" != "${file_receipt,,}" ]]; then
+    echo "::error::T0 ROM mismatch: PostgreSQL mmap=$db_receipt deployed-file=$file_receipt. Restart the PostgreSQL postmaster; backend recycle alone cannot replace a shared-preload mmap." >&2
+    return 1
+  fi
+  echo "::notice::T0 ROM receipt aligned: $db_receipt"
 }
 
 verify_installed_product() {
