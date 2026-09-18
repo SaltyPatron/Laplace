@@ -49,7 +49,7 @@ try {
   if ((renderedRom ?? '').toLowerCase() !== proof.perfcache_receipt_hex.toLowerCase()) {
     throw new Error(`rendered proof ROM ${renderedRom} != API ROM ${proof.perfcache_receipt_hex}`);
   }
-  await page.getByRole('link', { name: 'Proof', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
+  await page.getByRole('link', { name: 'Storage Proof', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
   await page.getByRole('heading', { name: 'Selected storage address' }).waitFor({ state: 'visible', timeout: 20_000 });
   await page.getByText('same exact T0 ROM').waitFor({ state: 'visible', timeout: 20_000 });
 
