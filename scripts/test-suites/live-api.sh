@@ -3,8 +3,9 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 run_live_api() {
-  local base capabilities readiness inventory completion code_completion code_chat
+  local base ui_base capabilities readiness inventory completion code_completion code_chat
   base="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
+  ui_base="${LAPLACE_PUBLIC_UI_BASE:-http://127.0.0.1:8080}"
   capabilities=$(curl -fsS "$base/v1/capabilities")
   grep -q '"chat_completions"' <<<"$capabilities"
   grep -q '"op"' <<<"$capabilities"
@@ -26,14 +27,15 @@ run_live_api() {
   (
     cd "$ROOT/web"
     npx playwright install chromium
-    LAPLACE_UI_URL="$base" \
+    LAPLACE_API_BASE="$base" \
+      LAPLACE_UI_URL="$ui_base" \
       LAPLACE_STORAGE_PROOF_EVIDENCE_DIR="$ROOT/build/eval-proof" \
       node scripts/verify-storage-proof-live.mjs
   ) || {
     echo "::error::rendered live Storage Proof verification failed" >&2
     return 1
   }
-  proof_html=$(curl -fsS "$base/proof")
+  proof_html=$(curl -fsS "$ui_base/proof?q=aa")
   if ! grep -q '<div id="root"' <<<"$proof_html"; then
     echo "::error::deployed application does not serve the Storage Proof SPA route at /proof" >&2
     return 1
