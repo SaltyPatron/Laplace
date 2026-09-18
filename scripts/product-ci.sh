@@ -53,15 +53,66 @@ require_deployed_revision() {
   bash scripts/check-deployed-revision.sh "$(git rev-parse HEAD)"
 }
 
+reuse_qualified_native_build() {
+  [[ -f build/engine/core/liblaplace_core.so ]] && return 0
+
+  local source_sha source_root work_root
+  source_sha="$(python3 scripts/ci-qualification-cache.py source --suite native-dev 2>/dev/null || true)"
+  [[ "$source_sha" =~ ^[0-9a-fA-F]{40}$ ]] || return 1
+
+  work_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+  source_root="$work_root/product-worktrees/$source_sha"
+  [[ -f "$source_root/build/engine/core/liblaplace_core.so" ]] || return 1
+  find -L "$source_root/build/engine" -name 'laplace_t0_perfcache*.bin' -print -quit | grep -q . || return 1
+
+  mkdir -p build
+  [[ ! -e build/engine && ! -L build/engine ]] || return 1
+  ln -s "$source_root/build/engine" build/engine
+  echo "::notice::reusing qualified native build from $source_sha"
+  return 0
+}
+
 run_build() {
-  local args=()
+  local args=() selected="${LAPLACE_BUILD_COMPONENTS:-all}"
+  local need_native=0 need_managed=0
+
   [[ "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || args+=(--force-rebuild)
   if [[ "${LAPLACE_FORCE_CODEGEN:-}" == 1 || \
         ! -f extension/laplace_substrate/sql/generated/seed_relation_types.sql.in || \
         ! -f extension/laplace_substrate/sql/generated/seed_pos.sql.in ]]; then
     args+=(--force-codegen)
   fi
-  bash scripts/pipeline.sh "${args[@]}" build
+
+  if [[ "$selected" == all || ",$selected," == *",native,"* ]]; then
+    need_native=1
+  fi
+  if [[ "$selected" == all || ",$selected," == *",managed,"* ]]; then
+    need_managed=1
+  fi
+
+  # Managed applications execute the native core from the candidate build tree.
+  # When native inputs are unchanged, reference the immutable build belonging to
+  # the matching native qualification receipt instead of rebuilding it.
+  if (( need_native == 0 && need_managed == 1 )); then
+    if ! reuse_qualified_native_build; then
+      echo "::notice::no reusable qualified native build found; native build required"
+      need_native=1
+    fi
+  fi
+
+  local phases=()
+  if (( need_native == 1 )); then
+    [[ ! -L build/engine ]] || rm -f build/engine
+    phases+=(build-native)
+  fi
+  (( need_managed == 0 )) || phases+=(build-app)
+
+  if (( ${#phases[@]} == 0 )); then
+    echo "::notice::candidate requires no native/managed compilation"
+  else
+    bash scripts/pipeline.sh "${args[@]}" "${phases[@]}"
+  fi
+
   mkdir -p build
   git rev-parse HEAD > build/.laplace-source-revision
 }
