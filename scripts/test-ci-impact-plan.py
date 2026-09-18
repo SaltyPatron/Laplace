@@ -29,7 +29,7 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
-        self.assertEqual(value["publish_scope"], "api")
+        self.assertEqual(value["publish_scope"], "full")
         self.assertEqual(value["live_suites"], ["live-floor", "live-api"])
         self.assertFalse(value["full_qualification"])
 
