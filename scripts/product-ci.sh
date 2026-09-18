@@ -137,37 +137,86 @@ run_database_maintenance() {
   bash scripts/maintain-installed-database.sh "$@"
 }
 
+csv_selected() {
+  local selected="${1:-all}" wanted="$2"
+  [[ "$selected" == all ]] || [[ ",$selected," == *",$wanted,"* ]]
+}
+
 run_db_tests() {
   require_built_revision
-  bash scripts/test-parallel.sh --profile db --suite db-health
-  rm -rf build/extension/*/tests/regress_output
-  local native_rc=0
-  bash scripts/test-parallel.sh --profile db --suite native-db || native_rc=$?
-  if (( native_rc != 0 )); then
-    while IFS= read -r diff; do
-      echo "===== REGRESSION DIFF: $diff =====" >&2
-      cat "$diff" >&2 || true
-    done < <(find -L build -path '*/tests/regress_output/regression.diffs' -type f -print | sort)
-    return "$native_rc"
+  local selected="${LAPLACE_DB_SUITES:-all}"
+
+  if csv_selected "$selected" db-health; then
+    bash scripts/test-parallel.sh --profile db --suite db-health
+  else
+    echo "::notice::database planner kept db-health valid; suite not scheduled"
   fi
-  bash scripts/test-parallel.sh --profile db --suite managed-db
-}
 
+  if csv_selected "$selected" native-db; then
+    rm -rf build/extension/*/tests/regress_output
+    local native_rc=0
+    bash scripts/test-parallel.sh --profile db --suite native-db || native_rc=$?
+    if (( native_rc != 0 )); then
+      while IFS= read -r diff; do
+        echo "===== REGRESSION DIFF: $diff =====" >&2
+        cat "$diff" >&2 || true
+      done < <(find -L build -path '*/tests/regress_output/regression.diffs' -type f -print | sort)
+      return "$native_rc"
+    fi
+  else
+    echo "::notice::database planner kept native-db valid; suite not scheduled"
+  fi
+
+  if csv_selected "$selected" managed-db; then
+    bash scripts/test-parallel.sh --profile db --suite managed-db
+  else
+    echo "::notice::database planner kept managed-db valid; suite not scheduled"
+  fi
+}
 run_publish() {
-  bash scripts/publish-applications.sh recover
+  local scope="${LAPLACE_PUBLISH_SCOPE:-full}"
   require_built_revision
-  bash scripts/publish-applications.sh deploy
+  case "$scope" in
+    api)
+      bash scripts/publish-applications.sh api-recover
+      bash scripts/publish-applications.sh api-deploy
+      ;;
+    full|all)
+      bash scripts/publish-applications.sh recover
+      bash scripts/publish-applications.sh deploy
+      ;;
+    *)
+      echo "::error::unknown publication scope: $scope" >&2
+      return 2
+      ;;
+  esac
 }
-
 run_live_tests() {
   require_deployed_revision
+  local selected="${LAPLACE_LIVE_SUITES:-all}"
   export LAPLACE_API_BASE="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
-  bash scripts/test-parallel.sh --profile live --suite live-floor
-  bash scripts/test-parallel.sh --profile live --suite live-api
-  bash scripts/test-parallel.sh --profile live --suite managed-live
-  bash scripts/test-parallel.sh --profile live --suite generation-eval
-}
 
+  if csv_selected "$selected" live-floor; then
+    bash scripts/test-parallel.sh --profile live --suite live-floor
+  else
+    echo "::notice::live planner kept live-floor valid; suite not scheduled"
+  fi
+  if csv_selected "$selected" live-api; then
+    bash scripts/test-parallel.sh --profile live --suite live-api
+  else
+    echo "::notice::live planner kept live-api valid; suite not scheduled"
+  fi
+  if csv_selected "$selected" managed-live; then
+    bash scripts/test-parallel.sh --profile live --suite managed-live
+  else
+    echo "::notice::live planner kept managed-live valid; suite not scheduled"
+  fi
+  if csv_selected "$selected" generation-eval; then
+    bash scripts/test-parallel.sh --profile live --suite generation-eval
+  else
+    echo "::notice::live planner kept generation-eval valid; suite not scheduled"
+  fi
+}
 check_application_live() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local body
@@ -197,20 +246,22 @@ check_t0_perfcache_runtime() {
   fi
 }
 
-reconcile_installed_product() {
+verify_installed_product() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
-  # Installed reconciliation may mutate canonical database state, so first prove
-  # that the application selected on this host is the checkout being reconciled.
   require_deployed_revision
-  # Installed product reconciliation is deliberately seed-independent. Corpus
-  # admission remains a separate seed workflow and cannot be required to deploy code.
-  bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
   check_application_live
   check_t0_perfcache_runtime
   python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
 }
 
+reconcile_installed_product() {
+  # Reconciliation is a deliberate database mutation and is only selected when
+  # the impact plan invalidates installed substrate/database state.
+  require_deployed_revision
+  bash scripts/reconcile-highway-masks.sh "${PGDATABASE:-laplace}"
+  verify_installed_product
+}
 run_release_qualification() {
   check_deps
 
@@ -304,9 +355,8 @@ run_release_delivery() {
   require_built_revision
 
   # Qualification is allowed to be superseded and cancelled. Delivery is not.
-  # Recheck freshness after this stage owns the build+host locks; once a current
-  # revision crosses the mutation boundary, finish publication and activation
-  # coherently even if a newer main revision appears while this transaction runs.
+  # Recheck freshness at the mutation boundary; once current, finish the selected
+  # delivery plan coherently even if a newer main revision appears.
   local current_rc=0
   release_candidate_current_before_mutation || current_rc=$?
   if (( current_rc == 3 )); then
@@ -315,13 +365,43 @@ run_release_delivery() {
   (( current_rc == 0 )) || return "$current_rc"
   export LAPLACE_SKIP_IF_SUPERSEDED=0
 
-  run_install
-  run_database_maintenance --prepare
-  run_db_tests
-  run_publish
-  run_release_activation
-}
+  local actions="${LAPLACE_DELIVERY_ACTIONS:-all}"
+  echo "::notice::delivery actions=$actions publish_scope=${LAPLACE_PUBLISH_SCOPE:-full} db_suites=${LAPLACE_DB_SUITES:-all} live_suites=${LAPLACE_LIVE_SUITES:-all}"
 
+  if csv_selected "$actions" install; then
+    run_install
+  else
+    echo "::notice::native installation remains valid; install skipped"
+  fi
+
+  if csv_selected "$actions" database; then
+    run_database_maintenance --prepare
+    run_db_tests
+  else
+    echo "::notice::database preparation/regression remains valid; database mutation skipped"
+  fi
+
+  # Every delivered source revision owns an exact application revision receipt.
+  # The planner may choose API-only publication, but publication itself is never
+  # omitted for a real product delivery.
+  csv_selected "$actions" publish || {
+    echo "::error::release-delivery plan omitted mandatory publication" >&2
+    return 2
+  }
+  run_publish
+
+  if csv_selected "$actions" reconcile; then
+    reconcile_installed_product
+  else
+    verify_installed_product
+  fi
+
+  csv_selected "$actions" live || {
+    echo "::error::release-delivery plan omitted mandatory live verification" >&2
+    return 2
+  }
+  run_live_tests
+}
 run_proof_model() {
   require_built_revision
   LAPLACE_MODEL_PROOF_CODE_CORPORA=1 bash scripts/model-synthesize-ci.sh
