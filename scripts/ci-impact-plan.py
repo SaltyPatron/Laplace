@@ -7,6 +7,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from ci_product_scope import ignored as product_ignored
+
 DEV_SUITES = ("native-dev", "managed-dev", "uci-dev", "browser-dev")
 DB_SUITES = ("db-health", "native-db", "managed-db")
 LIVE_SUITES = ("live-floor", "live-api", "managed-live", "generation-eval")
@@ -65,11 +67,11 @@ def classify_paths(paths: list[str]) -> dict:
         invalidate(LIVE_SUITES, path)
 
     for path in paths:
-        if path.startswith("docs/") or path.endswith(".md") or path.startswith(".github/"):
+        if product_ignored(path):
             ignored.append(path)
             continue
 
-        if path in ROOT_FILES_FULL or path.startswith("scripts/"):
+        if path in ROOT_FILES_FULL:
             full(path)
             continue
 
