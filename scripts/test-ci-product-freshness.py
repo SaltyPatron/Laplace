@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from ci_product_scope import GITHUB_PATH_IGNORES, ignored
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "ci-product-freshness.py"
 SPEC = importlib.util.spec_from_file_location("ci_product_freshness", SCRIPT)
@@ -24,6 +26,16 @@ class ProductFreshnessTests(unittest.TestCase):
             "README.md",
             "scripts/api-diagnostics.py",
             "web/scripts/capture-ui-diagnostics.mjs",
+            "scripts/ci-impact-plan.py",
+            "scripts/ci-qualification-cache.py",
+            "scripts/ci-product-freshness.py",
+            "scripts/ci_product_scope.py",
+            "scripts/test-ci-workspace.py",
+            "scripts/test-workflow-architecture.py",
+            "scripts/test-seed-workflow-ownership.py",
+            "scripts/test-product-ci-artifact-ownership.py",
+            "scripts/test-benchmark-suite.py",
+            "scripts/validate-pipeline.py",
         ):
             with self.subTest(path=path):
                 self.assertTrue(MODULE.ignored(path))
@@ -35,6 +47,16 @@ class ProductFreshnessTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertFalse(MODULE.ignored(path))
+
+    def test_main_delivery_trigger_matches_shared_product_ignore_law(self):
+        workflow = (ROOT / ".github" / "workflows" / "laplace.yml").read_text(encoding="utf-8")
+        for pattern in GITHUB_PATH_IGNORES:
+            with self.subTest(pattern=pattern):
+                self.assertIn(f'- "{pattern}"', workflow)
+
+    def test_shared_scope_function_is_the_freshness_function(self):
+        for path in ("scripts/test-ci-workspace.py", "scripts/product-ci.sh"):
+            self.assertEqual(MODULE.ignored(path), ignored(path))
 
     def test_only_nonproduct_changes_are_product_equivalent(self):
         value = MODULE.product_delta(
