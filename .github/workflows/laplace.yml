@@ -83,6 +83,9 @@ jobs:
   mainline-qualification:
     name: Qualify affected product inputs
     needs: plan
+    concurrency:
+      group: laplace-main-qualification-dispatch
+      cancel-in-progress: true
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-qualification
@@ -98,6 +101,9 @@ jobs:
     name: Install, validate, publish, and activate exact candidate
     needs: [plan, mainline-qualification]
     if: needs.plan.outputs.delivery_actions != ''
+    concurrency:
+      group: laplace-main-delivery-dispatch
+      cancel-in-progress: false
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-delivery
