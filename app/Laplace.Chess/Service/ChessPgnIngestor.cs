@@ -273,6 +273,14 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 throw new InvalidDataException(
                     $"provider game commit acknowledged but recording witness {witnessId} is absent on exact readback");
 
+        if (await PersistedTrajectoryMismatchAsync(games, ct).ConfigureAwait(false) is { } mismatch)
+            throw new InvalidDataException(mismatch);
+    }
+
+    private async Task<string?> PersistedTrajectoryMismatchAsync(
+        IReadOnlyList<ChessGameRecord> games, CancellationToken ct)
+    {
+        if (games.Count == 0) return null;
         var expectedLines = games
             .GroupBy(static game => game.LineId)
             .ToDictionary(static group => group.Key, static group => group.First().MoveIds);
@@ -288,14 +296,13 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 .OrderBy(static row => row.Ordinal)
                 .ToArray();
             if (actual.Length != expectedMoves.Length)
-                throw new InvalidDataException(
-                    $"provider game line {lineId} persisted {actual.Length} moves; expected {expectedMoves.Length}");
+                return $"provider game line {lineId} persisted {actual.Length} moves; expected {expectedMoves.Length}";
 
             for (int i = 0; i < expectedMoves.Length; i++)
                 if (Hash128.FromBytes(actual[i].EntityId) != expectedMoves[i])
-                    throw new InvalidDataException(
-                        $"provider game line {lineId} move {i + 1} failed exact typed-trajectory readback");
+                    return $"provider game line {lineId} move {i + 1} failed exact typed-trajectory readback";
         }
+        return null;
     }
 
     public async Task<ProfileResult> IngestPlayerProfilesAsync(
@@ -529,9 +536,20 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                         ownedChanges.Add(repairAnalyzed);
                         var present = await ReadPresentAttestationIdsAsync(
                             repairBuilt.Attestations.Concat(repairAnalyzed.Attestations).ToArray(), ct);
+                        string? recordedTrajectoryMismatch = await PersistedTrajectoryMismatchAsync(
+                            chunk.Where(game => repairPlayings.Contains(game.PlayingId)).ToArray(), ct);
                         foreach (var candidate in new[] { repairBuilt, repairAnalyzed })
                         {
-                            if (MissingWitnesses(candidate, present) is not { } repairChange) continue;
+                            // A PLAYING witness proves that the occurrence was accepted, not that
+                            // its Content carrier survived an interrupted/older write. The old path
+                            // only admitted repair work when testimony was missing, so a game could
+                            // permanently retain headers/result while its move trajectory stayed
+                            // absent. Force the recording owner back through ordinary admission when
+                            // exact current readback disagrees with the source line.
+                            bool structuralRepair = ReferenceEquals(candidate, repairBuilt)
+                                && recordedTrajectoryMismatch is not null;
+                            if (MissingWitnesses(candidate, present, structuralRepair) is not { } repairChange)
+                                continue;
                             changes.Add(repairChange);
                             // Calculated testimony may be shared by several playings. Report
                             // the repaired window size without inventing per-game attribution.
@@ -638,12 +656,13 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     }
 
     internal static SubstrateChange? MissingWitnesses(
-        SubstrateChange change, IReadOnlySet<Hash128> present)
+        SubstrateChange change, IReadOnlySet<Hash128> present, bool structuralRepair = false)
     {
         var missing = change.Attestations.Where(row => !present.Contains(row.Id)).ToImmutableArray();
-        if (missing.Length == 0) return null;
+        if (missing.Length == 0 && !structuralRepair) return null;
         // Preserve every canonical carrier/stage and its owning source. Only accepted
-        // testimony is suppressed; derived lanes are as recoverable as recorded headers.
+        // testimony is suppressed. structuralRepair deliberately permits a physicality-only
+        // replay when exact source-line readback proves the accepted game carrier is incomplete.
         return change with { Attestations = missing, CountsAsUnit = false };
     }
 
