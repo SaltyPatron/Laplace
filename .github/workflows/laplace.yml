@@ -18,6 +18,8 @@ on:
       - "scripts/pipeline.sh"
       - "scripts/ci_managed_projects.py"
       - "scripts/test-parallel.sh"
+      - "scripts/publish-applications.sh"
+      - "deploy/linux/deploy.sh"
       - "scripts/test-suites/**"
       - "scripts/test-*.py"
       - "scripts/test-*.sh"
