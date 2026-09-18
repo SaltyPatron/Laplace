@@ -955,6 +955,16 @@ public sealed class DecomposerArchitectureGateTests
             Assert.Contains("ucd.all.flat", text, StringComparison.Ordinal);
             Assert.DoesNotContain("ucd.nounihan.flat", text, StringComparison.Ordinal);
         }
+
+        var cmake = File.ReadAllText(Path.Combine(repoRoot, "engine", "CMakeLists.txt"));
+        var coreCmake = File.ReadAllText(Path.Combine(repoRoot, "engine", "core", "CMakeLists.txt"));
+        var codepoint = File.ReadAllText(Path.Combine(
+            repoRoot, "engine", "core", "src", "codepoint_table.c"));
+        Assert.Contains("LAPLACE_UCD_RELEASE_README", cmake, StringComparison.Ordinal);
+        Assert.Contains("LAPLACE_EXPECTED_UCD_VERSION=\\\"${LAPLACE_UNICODE_VERSION}\\\"",
+            coreCmake, StringComparison.Ordinal);
+        Assert.DoesNotContain("#define LAPLACE_EXPECTED_UCD_VERSION \\\"17.0.0\\\"",
+            codepoint, StringComparison.Ordinal);
     }
 
     [Fact]
