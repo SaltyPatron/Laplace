@@ -827,7 +827,7 @@ bool next_row(const uint8_t* data, size_t bytes, size_t& at, std::vector<Field>&
 TEST_F(PhysicalityDescriptorAdmission, DuplicateSourceUnitObservationsPreserveEveryOccurrenceAndExactTime) {
     const auto a = composition({atom('a'), atom('b')});
     const std::array<int64_t, 3> times{3, 9, 5};
-    auto original = stage({a, a, a}, {times.begin(), times.end()});
+    auto original = stage({a, a, a}, std::vector<int64_t>(times.begin(), times.end()));
     auto captured = capture(original.get());
     auto sources = witnesses(3);
     sources[2].source_unit_id.lo += 1;
