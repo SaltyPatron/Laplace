@@ -403,7 +403,8 @@
   }
 
   .romMatch,
-  .romMismatch {
+  .romMismatch,
+  .romUnverified {
     white-space: nowrap;
     align-self: center;
   }
@@ -412,8 +413,27 @@
     color: var(--color-signal);
   }
 
-  .romMismatch {
+  .romMismatch,
+  .romUnverified {
     color: var(--color-error);
+  }
+
+  .romError {
+    margin: var(--space-2) var(--space-4) 0;
+    padding: 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--color-error) 55%, var(--color-border-default));
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--color-error) 7%, var(--color-bg-elevated));
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    color: var(--color-error);
+  }
+
+  .romError code {
+    color: var(--color-text-primary);
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 
   .dbWitness > div {
