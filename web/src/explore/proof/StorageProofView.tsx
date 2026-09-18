@@ -317,8 +317,8 @@ function DistributionLab({
       </div>
 
       <div className={styles.metrics}>
-        <div><span>Canonical x²+y² prefix</span><strong>{(canonicalFraction * 100).toFixed(2)}%</strong></div>
-        <div><span>Interleaved sampled x²+y² span</span><strong>{(openSpan * 100).toFixed(2)}%</strong></div>
+        <div><span>Legacy latitude occupied</span><strong>{(canonicalFraction * 100).toFixed(2)}%</strong></div>
+        <div><span>Canonical sampled radial span</span><strong>{(openSpan * 100).toFixed(2)}%</strong></div>
         <div><span>Rendered sample</span><strong>{canonical.length.toLocaleString()} points</strong></div>
       </div>
 
