@@ -144,23 +144,50 @@ class ProductStageOwnershipContract(unittest.TestCase):
         positions = [activation.index(token) for token in delivery]
         self.assertEqual(positions, sorted(positions))
 
-    def test_qualified_main_delivery_owns_mutation_and_activation_without_requalification(self):
+    def test_qualified_main_delivery_executes_only_selected_mutations(self):
         delivery = function("run_release_delivery")
-        order = [
-            "check_deps",
-            "require_built_revision",
-            "release_candidate_current_before_mutation",
-            "export LAPLACE_SKIP_IF_SUPERSEDED=0",
-            "run_install",
-            "run_database_maintenance --prepare",
-            "run_db_tests",
-            "run_publish",
-            "run_release_activation",
-        ]
-        positions = [delivery.index(token) for token in order]
-        self.assertEqual(positions, sorted(positions))
+        self.assertIn("check_deps", delivery)
+        self.assertIn("require_built_revision", delivery)
+        self.assertIn("release_candidate_current_before_mutation", delivery)
+        self.assertIn("export LAPLACE_SKIP_IF_SUPERSEDED=0", delivery)
+        self.assertIn("LAPLACE_DELIVERY_ACTIONS", delivery)
+        self.assertIn('csv_selected "$actions" install', delivery)
+        self.assertIn('csv_selected "$actions" database', delivery)
+        self.assertIn('csv_selected "$actions" reconcile', delivery)
+        self.assertIn('csv_selected "$actions" publish', delivery)
+        self.assertIn('csv_selected "$actions" live', delivery)
+        self.assertIn("run_install", delivery)
+        self.assertIn("run_database_maintenance --prepare", delivery)
+        self.assertIn("run_db_tests", delivery)
+        self.assertIn("run_publish", delivery)
+        self.assertIn("verify_installed_product", delivery)
+        self.assertIn("reconcile_installed_product", delivery)
+        self.assertIn("run_live_tests", delivery)
         self.assertNotIn("run_release_qualification", delivery)
         self.assertNotIn("run_build", delivery)
+        self.assertNotIn("run_release_activation", delivery)
+
+    def test_build_plan_reuses_matching_qualified_native_artifact(self):
+        build = function("run_build")
+        reuse = function("reuse_qualified_native_build")
+        self.assertIn("LAPLACE_BUILD_COMPONENTS", build)
+        self.assertIn("build-native", build)
+        self.assertIn("build-app", build)
+        self.assertIn("reuse_qualified_native_build", build)
+        self.assertIn("ci-qualification-cache.py source --suite native-dev", reuse)
+        self.assertIn("product-worktrees", reuse)
+        self.assertIn('ln -s "$source_root/build/engine" build/engine', reuse)
+
+    def test_database_and_live_matrices_are_impact_selectable(self):
+        database = function("run_db_tests")
+        live = function("run_live_tests")
+        self.assertIn("LAPLACE_DB_SUITES", database)
+        self.assertIn('csv_selected "$selected" db-health', database)
+        self.assertIn('csv_selected "$selected" native-db', database)
+        self.assertIn('csv_selected "$selected" managed-db', database)
+        self.assertIn("LAPLACE_LIVE_SUITES", live)
+        for suite in ("live-floor", "live-api", "managed-live", "generation-eval"):
+            self.assertIn(f'csv_selected "$selected" {suite}', live)
 
     def test_competitive_proof_extends_the_same_release_modules(self):
         proof = function("run_proof")
