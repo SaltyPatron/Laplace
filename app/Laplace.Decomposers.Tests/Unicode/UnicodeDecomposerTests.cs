@@ -3,6 +3,7 @@ using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.Tests;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
+using Laplace.SubstrateCRUD.Npgsql;
 using Xunit;
 
 namespace Laplace.Decomposers.Unicode.Tests;
