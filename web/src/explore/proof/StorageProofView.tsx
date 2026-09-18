@@ -12,6 +12,7 @@ import type {
 import { GlomeCanvas, type GlomeNode } from '../glome/GlomeCanvas';
 import styles from './StorageProofView.module.css';
 
+const STORAGE_PROOF_SURFACE_VERSION = 'v4' as const;
 const TWO_POW_53_MINUS_1 = (1n << 53n) - 1n;
 const MANTISSA_MASK = (1n << 52n) - 1n;
 const TWO_PI = 6.2831853071795864769252867665590057683943387987502;
@@ -497,10 +498,10 @@ export function StorageProofView() {
   }
 
   return (
-    <div className={styles.root} data-storage-proof-surface="v4">
+    <div className={styles.root} data-storage-proof-surface={STORAGE_PROOF_SURFACE_VERSION}>
       <header className={styles.hero}>
         <div>
-          <span className={styles.eyebrow}>Executable storage proof · T0 ROM v4</span>
+          <span className={styles.eyebrow}>Executable storage proof · T0 ROM {STORAGE_PROOF_SURFACE_VERSION}</span>
           <h2>Finite coordinate address · exact reversible trajectory</h2>
           <p>
             One prompt, one native decomposition: identity, O(Tier) trunk/leaf structure,
