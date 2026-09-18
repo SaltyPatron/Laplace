@@ -16,7 +16,6 @@
 #include "laplace/core/version.h"
 #include "laplace/core/hash128.h"
 #include "laplace/core/math4d.h"
-#include "laplace/core/super_fibonacci.h"
 #include "laplace/core/hilbert4d.h"
 #include "laplace/core/mantissa.h"
 #include "laplace/core/trajectory.h"
@@ -458,36 +457,6 @@ pg_laplace_radius_origin(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(r);
 }
 
-
-PG_FUNCTION_INFO_V1(pg_laplace_super_fibonacci_open_index);
-
-Datum
-pg_laplace_super_fibonacci_open_index(PG_FUNCTION_ARGS)
-{
-    GSERIALIZED *g;
-    LWGEOM *l = lwgeom_from_datum(PG_GETARG_DATUM(0), &g);
-    const int64 max_count_arg = PG_GETARG_INT64(1);
-
-    if (max_count_arg <= 0 || (uint64_t) max_count_arg > (1ULL << 53))
-    {
-        lwgeom_free(l);
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("laplace_super_fibonacci_open_index: max_count must be in [1, 2^53]")));
-    }
-
-    POINT4D p;
-    require_point4d(l, "laplace_super_fibonacci_open_index", &p);
-    const double point[4] = {p.x, p.y, p.z, p.m};
-    uint64_t index = 0;
-    const int rc = super_fibonacci_open_index(
-        point, (uint64_t) max_count_arg, &index);
-    lwgeom_free(l);
-
-    if (rc != 0)
-        PG_RETURN_NULL();
-    PG_RETURN_INT64((int64) index);
-}
 
 PG_FUNCTION_INFO_V1(pg_laplace_frechet_4d);
 
