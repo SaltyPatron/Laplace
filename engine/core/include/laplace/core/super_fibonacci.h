@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,6 +29,15 @@ void super_fibonacci_point(size_t n, size_t i, double out[4]);
  * the radial parameter, which recovers i. Exact while i < 2^53.
  */
 void super_fibonacci_point_open(size_t i, double out[4]);
+
+/*
+ * Inverse for an open placement within a declared finite window. max_count
+ * determines the significant radical-inverse width; for the Unicode floor this
+ * is 21 bits, which makes recovery robust to the libm residue in x^2+y^2 while
+ * retaining exact rank identity. Returns 0 on success.
+ */
+int super_fibonacci_open_index(const double point[4], uint64_t max_count,
+                               uint64_t* out_index);
 
 #ifdef __cplusplus
 }
