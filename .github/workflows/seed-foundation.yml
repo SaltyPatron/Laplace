@@ -1,16 +1,19 @@
-name: Seed — foundation
+name: Data — foundation ingest
+run-name: "Foundation ingest — ${{ inputs.source }} → ${{ inputs.database }}"
 
 on:
   workflow_dispatch:
     inputs:
       source:
-        description: "foundation source, or ladder for the ordered foundation campaign"
+        description: "What to ingest; ladder runs the ordered foundation campaign"
         type: choice
         required: true
-        options: [unicode, iso639, operational, cili, wordnet, verbnet, propbank, framenet, mapnet, wordframenet, semlink, ladder]
-      path:
-        description: "single-source optional path"
+        default: ladder
+        options: [ladder, unicode, iso639, operational, cili, wordnet, verbnet, propbank, framenet, mapnet, wordframenet, semlink]
+      advanced_path_override:
+        description: "ADVANCED: local file/directory override for a single source; normally leave blank"
         type: string
+        required: false
         default: ""
       database:
         description: "target database"
@@ -18,7 +21,7 @@ on:
         options: [laplace]
         default: laplace
       force:
-        description: "ladder only: re-ingest every rung"
+        description: "Ladder only: re-ingest every rung instead of completing only missing work"
         type: boolean
         default: false
 
@@ -32,7 +35,7 @@ jobs:
     with:
       mode: source
       source: ${{ inputs.source }}
-      path: ${{ inputs.path }}
+      path: ${{ inputs.advanced_path_override }}
       database: ${{ inputs.database }}
 
   ladder:

@@ -1,19 +1,27 @@
-name: Seed — models
+name: Data — models ingest
+run-name: "Models ingest — ${{ inputs.model }} → ${{ inputs.database }}"
 
 on:
   workflow_dispatch:
     inputs:
-      model_dir:
-        description: "HF snapshot directory; blank uses $LAPLACE_TINYLLAMA_DIR"
+      model:
+        description: "Installed model snapshot; proof-default prefers Qwen2.5-Coder and falls back to TinyLlama"
+        type: choice
+        required: true
+        default: proof-default
+        options: [proof-default, qwen25-coder, tinyllama, phi2, custom-path]
+      advanced_path_override:
+        description: "ADVANCED: local Hugging Face snapshot directory; required only for custom-path"
         type: string
+        required: false
         default: ""
       database:
-        description: "target database"
+        description: "Target database"
         type: choice
         options: [laplace]
         default: laplace
       synthesize_model:
-        description: "ingest, synthesize GGUF, and run behavioral verification"
+        description: "Ingest/verify the model and synthesize the substrate GGUF"
         type: boolean
         default: true
 
@@ -25,6 +33,8 @@ jobs:
     uses: ./.github/workflows/seed.yml
     with:
       mode: model
-      path: ${{ inputs.model_dir }}
+      source: model
+      model_preset: ${{ inputs.model }}
+      path: ${{ inputs.advanced_path_override }}
       database: ${{ inputs.database }}
       synthesize_model: ${{ inputs.synthesize_model }}
