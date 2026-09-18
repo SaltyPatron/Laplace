@@ -186,34 +186,53 @@ reconcile_installed_product() {
 run_release_qualification() {
   check_deps
   run_build
-  run_dev_tests
+
+  local current_rc=0
+  release_selected_revision_current || current_rc=$?
+  if (( current_rc == 3 )); then return 0; fi
+  (( current_rc == 0 )) || return "$current_rc"
+
+  require_built_revision
+  current_rc=0
+  run_dev_test_matrix 1 || current_rc=$?
+  if (( current_rc == 3 )); then return 0; fi
+  return "$current_rc"
 }
 
 run_mainline() {
   run_release_qualification
 }
 
-release_candidate_current_before_mutation() {
+release_selected_revision_current() {
   [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]] || return 0
 
   local selected latest
   selected="$(git rev-parse HEAD)"
   latest="$(git ls-remote --heads origin refs/heads/main | awk '{print $1}')"
   if [[ -z "$latest" ]]; then
-    echo "::error::release candidate could not resolve current main before mutation" >&2
+    echo "::error::could not resolve current main while qualifying selected revision" >&2
     return 2
   fi
-  if [[ "$latest" == "$selected" ]]; then
-    return 0
-  fi
+  if [[ "$latest" == "$selected" ]]; then return 0; fi
+  echo "::notice::selected revision $selected is superseded by current main $latest"
+  return 3
+}
 
-  echo "::notice::release candidate $selected became superseded by $latest after build/dev qualification; install/database mutation skipped"
+release_candidate_current_before_mutation() {
+  local current_rc=0
+  release_selected_revision_current || current_rc=$?
+  if (( current_rc != 3 )); then return "$current_rc"; fi
+
+  local selected latest
+  selected="$(git rev-parse HEAD)"
+  latest="$(git ls-remote --heads origin refs/heads/main | awk '{print $1}')"
+  echo "::notice::release candidate $selected became superseded by $latest before install/database mutation; mutation skipped"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       echo "## Superseded release candidate"
       echo
-      printf '%s\n' "- Selected: \`$selected\`"
-      printf '%s\n' "- Current main: \`$latest\`"
+      echo "- Selected: $selected"
+      echo "- Current main: $latest"
       echo "- Qualification completed; install/database mutation was not started."
     } >> "$GITHUB_STEP_SUMMARY"
   fi
