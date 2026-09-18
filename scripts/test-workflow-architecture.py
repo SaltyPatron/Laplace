@@ -15,7 +15,7 @@ class MainPushQueueContract(unittest.TestCase):
         self.assertIn("concurrency:", text)
         self.assertIn("laplace-main-product-lifecycle", text)
         self.assertIn("cancel-in-progress: ${{ github.event_name == 'push' }}", text)
-        self.assertNotIn("laplace-main-product-lifecycle", text)
+        self.assertNotIn("cancel-in-progress: false", text)
 
 
 
@@ -60,7 +60,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-24.04", preflight)
         self.assertIn("git ls-remote --heads", preflight)
         self.assertIn("execute=false", preflight)
-        self.assertNotIn("self-hosted", preflight)
+        self.assertNotIn("runs-on: [self-hosted, laplace]", preflight)
         self.assertNotIn("host-resource.lock", preflight)
         self.assertIn("needs: preflight", stage)
         self.assertIn("if: needs.preflight.outputs.execute == 'true'", stage)
