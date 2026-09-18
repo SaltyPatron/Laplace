@@ -7,7 +7,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from ci_product_scope import ignored as product_ignored
+from ci_product_scope import ignored as product_ignored, managed_test_path
 from ci_managed_projects import (
     load_projects as load_managed_projects,
     plan_changed as plan_managed_projects,
@@ -44,6 +44,13 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     managed_test_force_all = False
     managed_db_force_all = False
     managed_live_force_all = False
+    delivery_paths = [
+        path for path in paths
+        if not product_ignored(path) and not managed_test_path(path)
+    ]
+    pure_uci = bool(delivery_paths) and all(
+        path.startswith("app/Laplace.Chess.Uci/") for path in delivery_paths
+    )
 
     components: set[str] = set()
     build_components: set[str] = set()
@@ -123,26 +130,32 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 continue
 
             product_change = True
+            isolated_uci = pure_uci and path.startswith("app/Laplace.Chess.Uci/")
             api_scoped = (
                 path.startswith("app/Laplace.Api.Contracts")
                 or path.startswith("app/Laplace.Endpoints.OpenAICompat")
             )
-            if not api_scoped:
+            if isolated_uci:
+                publish_scope = "uci"
+            elif not api_scoped:
                 publish_scope = "full"
-                # The current broad publisher still materializes API + UCI + MCP +
-                # Lichess together. Keep its compile closure whole until those
-                # transaction owners are split; test selection remains project-level.
+                # Shared managed libraries can feed API + UCI + MCP + Lichess.
+                # Keep the broad publication closure only when dependency impact
+                # actually crosses those runtime owners.
                 managed_build_force_all = True
             components.add("managed")
             build_components.add("managed")
-            dev_suites.add("managed-dev")
-            live_suites.update(LIVE_SUITES)
-            delivery_actions.update(("publish", "live"))
-            invalidate(("managed-dev",), path)
-            invalidate(LIVE_SUITES, path)
+            if not isolated_uci:
+                dev_suites.add("managed-dev")
+                live_suites.update(LIVE_SUITES)
+                delivery_actions.update(("publish", "live"))
+                invalidate(("managed-dev",), path)
+                invalidate(LIVE_SUITES, path)
+            else:
+                delivery_actions.add("publish")
 
             if path.startswith("app/Laplace.Chess") or path.startswith("app/Laplace.Chess.Uci"):
-                publish_scope = "full"
+                publish_scope = "uci" if isolated_uci else "full"
                 components.add("uci")
                 dev_suites.add("uci-dev")
                 invalidate(("uci-dev",), path)
@@ -234,8 +247,10 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     # universal live floor. This is deliberately much smaller than full live
     # qualification and does not imply native/DB mutation.
     if product_change:
-        delivery_actions.update(("publish", "live"))
-        live_suites.update(BASE_LIVE_SUITES)
+        delivery_actions.add("publish")
+        if not pure_uci:
+            delivery_actions.add("live")
+            live_suites.update(BASE_LIVE_SUITES)
 
     return {
         "components": sorted(components),
@@ -250,7 +265,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         "delivery_actions": [
             action for action in DELIVERY_ACTIONS if action in delivery_actions
         ],
-        "publish_scope": "full" if publish_scope == "full" else "api",
+        "publish_scope": publish_scope if publish_scope in ("api", "uci", "full") else "full",
         "full_qualification": force_full or bool(unknown),
         "unknown_paths": sorted(set(unknown)),
         "ignored_paths": sorted(ignored),
