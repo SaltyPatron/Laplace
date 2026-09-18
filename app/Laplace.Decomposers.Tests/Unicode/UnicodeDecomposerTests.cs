@@ -157,6 +157,8 @@ public sealed class UnicodeDecomposerTests
 
             if (!change.IntentStages.IsDefaultOrEmpty)
             {
+                // Staged COPY rows are the persisted intent surface; direct managed
+                // row arrays may be empty after native stage materialization.
                 var entityRows = CopyTupleParser.ParseEntities(
                     change.IntentStages
                         .Select(stage => stage.TupleBuffer(IntentStageTable.Entities))
