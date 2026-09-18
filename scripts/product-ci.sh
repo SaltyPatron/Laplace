@@ -285,7 +285,7 @@ orders = {
     "LAPLACE_BUILD_COMPONENTS": ("build_components", ("native", "managed", "web")),
     "LAPLACE_DEV_SUITES": ("dev_suites", ("native-dev", "managed-dev", "uci-dev", "browser-dev")),
     "LAPLACE_DB_SUITES": ("db_suites", ("db-health", "native-db", "managed-db")),
-    "LAPLACE_LIVE_SUITES": ("live_suites", ("live-floor", "live-api", "managed-live", "generation-eval")),
+    "LAPLACE_LIVE_SUITES": ("live_suites", ("live-floor", "live-api", "managed-live", "generation-eval", "chess-provider-live")),
     "LAPLACE_DELIVERY_ACTIONS": ("delivery_actions", ("install", "database", "reconcile", "publish", "live")),
 }
 
@@ -415,6 +415,11 @@ run_live_tests() {
     bash scripts/test-parallel.sh --profile live --suite generation-eval
   else
     echo "::notice::live planner kept generation-eval valid; suite not scheduled"
+  fi
+  if csv_selected "$selected" chess-provider-live; then
+    bash scripts/test-parallel.sh --profile live --suite chess-provider-live
+  else
+    echo "::notice::live planner kept chess-provider-live valid; suite not scheduled"
   fi
 }
 check_application_live() {
