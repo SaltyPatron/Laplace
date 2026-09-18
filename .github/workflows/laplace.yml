@@ -56,6 +56,7 @@ jobs:
       build_components: ${{ steps.plan.outputs.build_components }}
       managed_build_projects: ${{ steps.plan.outputs.managed_build_projects }}
       managed_test_projects: ${{ steps.plan.outputs.managed_test_projects }}
+      managed_test_filter: ${{ steps.plan.outputs.managed_test_filter }}
       managed_db_test_projects: ${{ steps.plan.outputs.managed_db_test_projects }}
       managed_live_test_projects: ${{ steps.plan.outputs.managed_live_test_projects }}
       full_qualification: ${{ steps.plan.outputs.full_qualification }}
@@ -95,6 +96,7 @@ jobs:
       build_components: ${{ needs.plan.outputs.build_components }}
       managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}
       managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}
+      managed_test_filter: ${{ needs.plan.outputs.managed_test_filter }}
       delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
       publish_scope: ${{ needs.plan.outputs.publish_scope }}
       skip_if_superseded: true
