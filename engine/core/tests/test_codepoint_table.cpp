@@ -6,6 +6,7 @@
 
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/perfcache_format.h"
+#include "laplace/core/super_fibonacci.h"
 
 TEST(LaplaceCoreCodepointTable, Loaded) {
     EXPECT_TRUE(codepoint_table_is_loaded());
@@ -30,6 +31,19 @@ TEST(LaplaceCoreCodepointTable, CoordOnUnitGlome) {
     double r2 = 0.0;
     for (int k = 0; k < 4; ++k) r2 += e->coord[k] * e->coord[k];
     EXPECT_NEAR(r2, 1.0, 1e-9);
+}
+
+
+TEST(LaplaceCoreCodepointTable, PerfcacheCarriesCanonicalOpenPlacement) {
+    for (uint32_t cp : {0u, 0x20u, 0x41u, 0x61u, 0x0301u, 0x4E2Du, 0x1F600u, 0x10FFFFu}) {
+        const codepoint_entry_t* e = codepoint_table_lookup(cp);
+        ASSERT_NE(e, nullptr) << "cp=" << cp;
+        double expected[4];
+        super_fibonacci_point_open(e->uca_order, expected);
+        EXPECT_EQ(0, std::memcmp(e->coord, expected, sizeof(expected)))
+            << "perfcache is not the v4 open-placement floor at cp=" << cp
+            << " uca_order=" << e->uca_order;
+    }
 }
 
 TEST(LaplaceCoreCodepointTable, PropertyAccessorsKnownValues) {
