@@ -114,9 +114,9 @@ def classify_paths(paths: list[str]) -> dict:
                 or path.startswith("app/Laplace.Migrations")
             ):
                 components.add("database")
-                db_suites.update(DB_SUITES)
+                db_suites.update(("db-health", "managed-db"))
                 delivery_actions.update(("database", "reconcile"))
-                invalidate(DB_SUITES, path)
+                invalidate(("db-health", "managed-db"), path)
 
             if (
                 path.startswith("app/Laplace.Endpoints.Mcp")
@@ -146,10 +146,10 @@ def classify_paths(paths: list[str]) -> dict:
             matched = product_change = True
             components.add("database")
             build_components.add("managed")
-            db_suites.update(DB_SUITES)
+            db_suites.update(("db-health", "managed-db"))
             live_suites.update(LIVE_SUITES)
             delivery_actions.update(("database", "reconcile", "publish", "live"))
-            invalidate(DB_SUITES, path)
+            invalidate(("db-health", "managed-db"), path)
             invalidate(LIVE_SUITES, path)
 
         if path.startswith("deploy/"):
