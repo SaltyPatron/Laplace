@@ -23,6 +23,11 @@ on:
         type: boolean
         required: false
         default: false
+      dev_suites:
+        description: "comma-separated development suites selected by the impact planner; all runs the complete matrix"
+        type: string
+        required: false
+        default: all
       skip_if_superseded:
         description: "skip this selected revision if main advanced before host ownership"
         type: boolean
@@ -86,6 +91,9 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.execute == 'true'
     name: Product — ${{ inputs.stage }}
+    concurrency:
+      group: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' && 'laplace-main-qualification' || inputs.skip_if_superseded && inputs.stage == 'release-delivery' && 'laplace-main-delivery' || format('laplace-product-stage-{0}-{1}', inputs.stage, github.run_id) }}
+      cancel-in-progress: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     env:
@@ -94,6 +102,8 @@ jobs:
       LAPLACE_FULL_CLEAN: ${{ inputs.full_clean && '1' || '' }}
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
+      LAPLACE_DEV_SUITES: ${{ inputs.dev_suites }}
+      LAPLACE_USE_QUALIFICATION_CACHE: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' && '1' || '0' }}
       LAPLACE_SKIP_IF_SUPERSEDED: ${{ inputs.skip_if_superseded && '1' || '0' }}
       LICHESS_API: ${{ secrets.LICHESS_API }}
       LAPLACE_MCP_TOKEN: ${{ secrets.LAPLACE_MCP_TOKEN }}
