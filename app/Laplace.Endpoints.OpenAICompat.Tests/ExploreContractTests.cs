@@ -113,7 +113,7 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
 
         var body = await response.Content.ReadFromJsonAsync<StorageProofResponse>();
         Assert.NotNull(body);
-        Assert.Equal(UnicodeSeed.CodepointCount, body!.AtomWindow);
+        Assert.Equal(0x110000, body!.AtomWindow);
         Assert.NotEmpty(body.Nodes);
 
         var root = Assert.Single(body.Nodes.Where(n => n.Ordinal == body.NaturalUnitOrdinal));
