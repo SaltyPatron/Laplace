@@ -42,6 +42,24 @@ internal static class UnicodePhysicalArtifactParser
         string Property,
         string Value);
 
+    internal readonly record struct DelimitedCodepointPropertyRow(
+        uint Codepoint,
+        string Property,
+        string Value,
+        bool ValueIsUnicodeSequence,
+        bool CountsSourceRow);
+
+    internal readonly record struct SequenceMetadataRow(
+        string Sequence,
+        string Property,
+        string Value,
+        bool CountsSourceRow);
+
+    internal readonly record struct NamedSequenceRow(
+        string Sequence,
+        string Name,
+        bool CountsSourceRow);
+
     internal static async IAsyncEnumerable<UnicodeDataRow> UnicodeDataAsync(
         string path,
         [EnumeratorCancellation] CancellationToken ct)
@@ -171,6 +189,111 @@ internal static class UnicodePhysicalArtifactParser
         }
     }
 
+    internal static async IAsyncEnumerable<DelimitedCodepointPropertyRow> DelimitedCodepointPropertiesAsync(
+        string path,
+        IReadOnlyList<string> propertyNames,
+        IReadOnlySet<int>? unicodeSequenceFieldIndexes,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 2) continue;
+
+            string subject = fields[0].Trim();
+            if (subject.StartsWith("U+", StringComparison.OrdinalIgnoreCase))
+                subject = subject[2..];
+            if (!TryRange(subject, out uint start, out uint end)) continue;
+
+            bool sourceRow = true;
+            for (uint cp = start; cp <= end; ++cp)
+            {
+                int available = Math.Min(propertyNames.Count, fields.Length - 1);
+                for (int i = 0; i < available; ++i)
+                {
+                    string value = fields[i + 1].Trim();
+                    if (value.Length == 0) continue;
+
+                    bool isSequence = unicodeSequenceFieldIndexes?.Contains(i) == true;
+                    if (isSequence && TryHexSequenceText(value, out string sequence))
+                        value = sequence;
+                    else if (isSequence)
+                        continue;
+
+                    yield return new DelimitedCodepointPropertyRow(
+                        cp, propertyNames[i], value, isSequence, sourceRow);
+                    sourceRow = false;
+                }
+                if (cp == 0x10FFFFu) break;
+            }
+        }
+    }
+
+    internal static async IAsyncEnumerable<NamedSequenceRow> NamedSequencesAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 2) continue;
+            string name = fields[0].Trim();
+            if (name.Length == 0 || !TryHexSequenceText(fields[1].Trim(), out string sequence))
+                continue;
+            yield return new NamedSequenceRow(sequence, name, true);
+        }
+    }
+
+    internal static async IAsyncEnumerable<SequenceMetadataRow> SequenceMetadataAsync(
+        string path,
+        IReadOnlyList<string> propertyNames,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 2) continue;
+
+            string subject = fields[0].Trim();
+            var sequences = new List<string>();
+            if (subject.Contains("..", StringComparison.Ordinal)
+                && TryRange(subject, out uint start, out uint end))
+            {
+                for (uint cp = start; cp <= end; ++cp)
+                {
+                    if (cp is < 0xD800u or > 0xDFFFu)
+                        sequences.Add(char.ConvertFromUtf32((int)cp));
+                    if (cp == 0x10FFFFu) break;
+                }
+            }
+            else if (TryHexSequenceText(subject, out string one))
+            {
+                sequences.Add(one);
+            }
+            if (sequences.Count == 0) continue;
+
+            bool sourceRow = true;
+            foreach (string sequence in sequences)
+            {
+                int available = Math.Min(propertyNames.Count, fields.Length - 1);
+                for (int i = 0; i < available; ++i)
+                {
+                    string value = fields[i + 1].Trim();
+                    if (value.Length == 0) continue;
+                    yield return new SequenceMetadataRow(
+                        sequence, propertyNames[i], value, sourceRow);
+                    sourceRow = false;
+                }
+            }
+        }
+    }
+
     internal static async IAsyncEnumerable<MirrorRow> MirrorsAsync(
         string path,
         [EnumeratorCancellation] CancellationToken ct)
@@ -262,6 +385,27 @@ internal static class UnicodePhysicalArtifactParser
                 if (cp == 0x10FFFFu) break;
             }
         }
+    }
+
+    private static bool TryHexSequenceText(string value, out string sequence)
+    {
+        var sb = new StringBuilder();
+        foreach (string raw in value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string token = raw.Trim();
+            if (token.StartsWith("U+", StringComparison.OrdinalIgnoreCase))
+                token = token[2..];
+            if (!uint.TryParse(token, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint cp)
+                || cp > 0x10FFFFu
+                || cp is >= 0xD800u and <= 0xDFFFu)
+            {
+                sequence = string.Empty;
+                return false;
+            }
+            sb.Append(char.ConvertFromUtf32((int)cp));
+        }
+        sequence = sb.ToString();
+        return sequence.Length > 0;
     }
 
     private static uint ParseHexOrZero(string value) =>
