@@ -55,7 +55,10 @@ public static class ChessGameFetcher
         ValidateLimit(max);
         var archUrl = $"https://api.chess.com/pub/player/{Uri.EscapeDataString(user)}/games/archives";
         log?.Invoke($"chess.com archives: {archUrl}");
-        var archJson = await GetStringWithRetryAsync(archUrl, ct);
+        // Route the archive-index request through the same visible provider retry
+        // channel as monthly PGNs. A throttle on the very first request must not look
+        // like a hung import while later requests report their backoff.
+        var archJson = await GetStringWithRetryAsync(archUrl, ct, log: log);
         using var doc = JsonDocument.Parse(archJson);
         var archives = ChronologicalArchiveUrls(
             doc.RootElement.GetProperty("archives").EnumerateArray()
