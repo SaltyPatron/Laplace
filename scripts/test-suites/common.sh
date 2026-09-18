@@ -80,12 +80,23 @@ run_managed_dotnet_tests() {
   solution="$(managed_test_solution "$selected" "$label")" || return $?
   [[ "$solution" == "$ROOT/app/Laplace.slnx" ]] || generated="$solution"
 
+  local test_log_dir test_log
+  test_log_dir="${LAPLACE_WORK_ROOT:-/build/laplace/work}/managed-test-logs"
+  mkdir -p "$test_log_dir"
+  test_log="$(mktemp "$test_log_dir/${label}.XXXXXX.log")"
+
   echo "::notice::$label projects=$selected deadline=$deadline filter=$filter"
   timeout --signal=TERM --kill-after=30s "$deadline" \
     dotnet test "$solution" -c Release --no-build --nologo --verbosity minimal \
-      "$@" --filter "$filter" || rc=$?
+      "$@" --filter "$filter" 2>&1 | tee "$test_log" || rc=$?
+
+  if (( rc == 0 )) && grep -Fq "No test matches" "$test_log"; then
+    echo "::error::$label filter matched zero tests: $filter" >&2
+    rc=4
+  fi
 
   [[ -z "$generated" ]] || rm -f "$generated"
+  rm -f "$test_log"
   if (( rc == 124 || rc == 137 )); then
     echo "::error::$label exceeded managed test deadline $deadline" >&2
   fi

@@ -43,7 +43,7 @@ class ManagedProjectImpactTests(unittest.TestCase):
             ["app/Laplace.Decomposers.Tests/Unicode/UnicodeDecomposerTests.cs"],
         )
         self.assertIn(
-            "FullyQualifiedName=Laplace.Decomposers.Unicode.Tests.UnicodeDecomposerTests",
+            "FullyQualifiedName~Laplace.Decomposers.Unicode.Tests.UnicodeDecomposerTests",
             value,
         )
 

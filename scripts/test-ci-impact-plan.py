@@ -253,7 +253,7 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["managed_test_projects"], [target])
         self.assertEqual(
             value["managed_test_filter"],
-            "FullyQualifiedName=Laplace.Decomposers.Abstractions.Tests.DecomposerArchitectureGateTests",
+            "FullyQualifiedName~Laplace.Decomposers.Abstractions.Tests.DecomposerArchitectureGateTests",
         )
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["live_suites"], [])

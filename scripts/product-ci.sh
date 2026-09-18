@@ -198,7 +198,7 @@ run_dev_test_matrix() {
         echo "- Managed test projects: ${LAPLACE_MANAGED_TEST_PROJECTS}"
       fi
       if [[ -n "${LAPLACE_MANAGED_TEST_FILTER:-}" ]]; then
-        echo "- Managed test filter: `${LAPLACE_MANAGED_TEST_FILTER}`"
+        printf '%s%s%s\n' '- Managed test filter: `' "$LAPLACE_MANAGED_TEST_FILTER" '`'
       fi
       echo
       echo "| Suite | Decision | Evidence |"

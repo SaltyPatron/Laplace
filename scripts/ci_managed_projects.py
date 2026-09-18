@@ -88,7 +88,7 @@ def test_filter_for_paths(root: Path, paths: list[str]) -> str:
         if namespace is None or not classes:
             return ""
         filters.update(
-            f"FullyQualifiedName={namespace.group(1)}.{name}"
+            f"FullyQualifiedName~{namespace.group(1)}.{name}"
             for name in classes
         )
     return "|".join(sorted(filters))
