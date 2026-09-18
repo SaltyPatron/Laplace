@@ -216,22 +216,23 @@ public sealed class UnicodeDecomposerTests
     }
 
     [Fact]
-    public async Task Binary_property_parser_expands_ranges_without_inventing_negative_evidence()
+    public async Task Binary_property_parser_retains_source_ranges_without_managed_point_expansion()
     {
         string file = Path.Combine(Path.GetTempPath(), "laplace-proplist-" + Guid.NewGuid().ToString("N") + ".txt");
         try
         {
             await File.WriteAllTextAsync(file, "0041..0042 ; Alphabetic # fixture\n0043 ; White_Space\n");
-            var rows = new List<UnicodePhysicalArtifactParser.BinaryPropertyPoint>();
-            await foreach (var row in UnicodePhysicalArtifactParser.BinaryPropertiesAsync(file, CancellationToken.None))
+            var rows = new List<UnicodePhysicalArtifactParser.BinaryPropertyRange>();
+            await foreach (var row in UnicodePhysicalArtifactParser.BinaryPropertyRangesAsync(file, CancellationToken.None))
                 rows.Add(row);
 
-            Assert.Equal(3, rows.Count);
-            Assert.Equal((uint)0x41, rows[0].Codepoint);
+            Assert.Equal(2, rows.Count);
+            Assert.Equal((uint)0x41, rows[0].Start);
+            Assert.Equal((uint)0x42, rows[0].End);
             Assert.Equal("Alphabetic", rows[0].Property);
-            Assert.True(rows[0].CountsSourceRow);
-            Assert.False(rows[1].CountsSourceRow);
-            Assert.Equal("White_Space", rows[2].Property);
+            Assert.Equal((uint)0x43, rows[1].Start);
+            Assert.Equal((uint)0x43, rows[1].End);
+            Assert.Equal("White_Space", rows[1].Property);
         }
         finally
         {

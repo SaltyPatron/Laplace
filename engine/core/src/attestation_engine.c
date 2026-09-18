@@ -1,4 +1,44 @@
-#include "laplace/core/attestation_engine.h"
+#i
+int laplace_attestation_codepoint_range_add(
+    intent_stage_t* stage,
+    uint32_t first_codepoint,
+    uint32_t last_codepoint,
+    const hash128_t* type_id,
+    const hash128_t* object_id,
+    const hash128_t* source_id,
+    const hash128_t* context_id,
+    uint8_t context_is_null,
+    double source_trust,
+    int64_t observation_count) {
+    if (!stage || !type_id || !object_id || !source_id
+        || first_codepoint > last_codepoint || last_codepoint > 0x10FFFFu
+        || observation_count <= 0) return -1;
+
+    enum { CHUNK = 256 };
+    laplace_attestation_staged_t staged[CHUNK];
+    uint32_t cp = first_codepoint;
+    while (cp <= last_codepoint) {
+        size_t n = 0;
+        while (n < CHUNK && cp <= last_codepoint) {
+            uint8_t u8[4];
+            size_t len = laplace_utf8_encode(cp, u8);
+            hash128_t subject;
+            hash128_blake3(u8, len, &subject);
+            int rc = laplace_attestation_resolved_build(
+                &subject, type_id, object_id, 0, source_id,
+                context_is_null ? NULL : context_id, context_is_null,
+                source_trust, 1, observation_count, 0, &staged[n]);
+            if (rc != 0) return rc;
+            ++n;
+            if (cp == 0x10FFFFu) { ++cp; break; }
+            ++cp;
+        }
+        if (laplace_attestation_staged_batch_add(stage, staged, n, NULL) != 0)
+            return -2;
+    }
+    return 0;
+}
+nclude "laplace/core/attestation_engine.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -11,7 +51,7 @@
 #endif
 
 #include "laplace/core/glicko2.h"
-#include "laplace/core/score.h"
+#include "laplace/core/score.h"\n#include "laplace/core/utf8.h"
 
 static const double kPhiTrusted = 30.0;
 static const double kPhiCrank   = 350.0;

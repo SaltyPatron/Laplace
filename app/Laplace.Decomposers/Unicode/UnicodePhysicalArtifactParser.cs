@@ -20,10 +20,10 @@ internal static class UnicodePhysicalArtifactParser
         uint LowercaseMapping,
         uint TitlecaseMapping);
 
-    internal readonly record struct RangePoint(
-        uint Codepoint,
-        string Value,
-        bool CountsSourceRow);
+    internal readonly record struct RangeRecord(
+        uint Start,
+        uint End,
+        string Value);
 
     internal readonly record struct MirrorRow(uint Codepoint, uint Mirror);
     internal readonly record struct AliasRow(uint Codepoint, string Alias);
@@ -33,10 +33,10 @@ internal static class UnicodePhysicalArtifactParser
         string Form,
         bool Maybe,
         bool CountsSourceRow);
-    internal readonly record struct BinaryPropertyPoint(
-        uint Codepoint,
-        string Property,
-        bool CountsSourceRow);
+    internal readonly record struct BinaryPropertyRange(
+        uint Start,
+        uint End,
+        string Property);
     internal readonly record struct UnihanPropertyRow(
         uint Codepoint,
         string Property,
@@ -165,7 +165,7 @@ internal static class UnicodePhysicalArtifactParser
         }
     }
 
-    internal static async IAsyncEnumerable<RangePoint> RangePointsAsync(
+    internal static async IAsyncEnumerable<RangeRecord> RangeRecordsAsync(
         string path,
         [EnumeratorCancellation] CancellationToken ct)
     {
@@ -178,19 +178,11 @@ internal static class UnicodePhysicalArtifactParser
             string range = line[..semi].Trim();
             string value = line[(semi + 1)..].Trim();
             if (value.Length == 0 || !TryRange(range, out uint start, out uint end)) continue;
-            bool first = true;
-            for (uint cp = start; cp <= end; ++cp)
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return new RangePoint(cp, value, first);
-                first = false;
-                if (cp == 0x10FFFFu) break;
-            }
+            yield return new RangeRecord(start, end, value);
         }
     }
 
-
-    internal static async IAsyncEnumerable<BinaryPropertyPoint> BinaryPropertiesAsync(
+    internal static async IAsyncEnumerable<BinaryPropertyRange> BinaryPropertyRangesAsync(
         string path,
         [EnumeratorCancellation] CancellationToken ct)
     {
@@ -204,15 +196,7 @@ internal static class UnicodePhysicalArtifactParser
             if (property.Length == 0
                 || !TryRange(fields[0].Trim(), out uint start, out uint end))
                 continue;
-
-            bool first = true;
-            for (uint cp = start; cp <= end; ++cp)
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return new BinaryPropertyPoint(cp, property, first);
-                first = false;
-                if (cp == 0x10FFFFu) break;
-            }
+            yield return new BinaryPropertyRange(start, end, property);
         }
     }
 

@@ -269,6 +269,21 @@ int laplace_attestation_staged_batch_add(
     size_t                              n,
     const uint8_t*                      masks /* n*32 bytes or NULL */);
 
+/* One source-format range -> one native staging call. Subject identities are the
+ * canonical UTF-8 codepoint ids; expansion never crosses the managed/native boundary
+ * per codepoint. The relation id is already governed/resolved by the caller. */
+int laplace_attestation_codepoint_range_add(
+    intent_stage_t* stage,
+    uint32_t first_codepoint,
+    uint32_t last_codepoint,
+    const hash128_t* type_id,
+    const hash128_t* object_id,
+    const hash128_t* source_id,
+    const hash128_t* context_id,
+    uint8_t context_is_null,
+    double source_trust,
+    int64_t observation_count);
+
 int laplace_attestation_witness_batch_add(
     intent_stage_t*                        stage,
     const laplace_attestation_witness_edge_t* edges,

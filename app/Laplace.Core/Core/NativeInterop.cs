@@ -897,6 +897,13 @@ public static unsafe partial class NativeInterop
     internal static unsafe partial int AttestationStagedBatchAdd(
         IntPtr stage, AttestationStagedNative* rows, nuint n, byte* masks);
 
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_codepoint_range_add")]
+    internal static unsafe partial int AttestationCodepointRangeAdd(
+        IntPtr stage, uint firstCodepoint, uint lastCodepoint,
+        Hash128* typeId, Hash128* objectId, Hash128* sourceId,
+        Hash128* contextId, byte contextIsNull,
+        double sourceTrust, long observationCount);
+
     [LibraryImport(Library, EntryPoint = "laplace_attestation_aggregated_batch_build")]
     internal static partial int AttestationAggregatedBatchBuild(
         AttestationAggregatedCellNative* cells,

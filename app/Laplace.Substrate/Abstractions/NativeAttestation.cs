@@ -288,6 +288,33 @@ public static class NativeAttestation
 
     public static AttestationRow Row(in AttestationStagedNative staged) => ToRow(staged);
 
+    public static unsafe void AddCodepointRange(
+        IntentStage stage,
+        uint firstCodepoint,
+        uint lastCodepoint,
+        Hash128 typeId,
+        Hash128 objectId,
+        Hash128 sourceId,
+        Hash128? contextId,
+        double sourceTrust,
+        long observationCount = 1)
+    {
+        ArgumentNullException.ThrowIfNull(stage);
+        Hash128 type = typeId, obj = objectId, source = sourceId;
+        Hash128 context = contextId ?? default;
+        int rc = NativeInterop.AttestationCodepointRangeAdd(
+            stage.DangerousNativeHandle,
+            firstCodepoint, lastCodepoint,
+            &type, &obj, &source,
+            contextId is null ? null : &context,
+            (byte)(contextId is null ? 1 : 0),
+            sourceTrust, observationCount);
+        GC.KeepAlive(stage);
+        if (rc != 0)
+            throw new InvalidOperationException(
+                $"native codepoint-range attestation staging failed (rc={rc}, range=U+{firstCodepoint:X4}..U+{lastCodepoint:X4})");
+    }
+
 
     public static void ScoreBatchFp(ReadOnlySpan<float> values, double arenaScale, Span<long> outFp)
     {

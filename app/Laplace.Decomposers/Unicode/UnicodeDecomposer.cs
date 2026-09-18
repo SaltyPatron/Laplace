@@ -1396,7 +1396,7 @@ public sealed class UnicodeDecomposer
     }
 
     private sealed class RangePropertyPhase
-        : UnicodeComposePhase<UnicodePhysicalArtifactParser.RangePoint>
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.RangeRecord>
     {
         private readonly UnicodeDecomposer _owner;
         private readonly string _path;
@@ -1425,32 +1425,32 @@ public sealed class UnicodeDecomposer
 
         protected override string PhaseLabel => _label;
 
-        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangePoint row) =>
-            row.CountsSourceRow ? 1 : 0;
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangeRecord row) => 1;
 
         protected override void Compose(
-            UnicodePhysicalArtifactParser.RangePoint row,
+            UnicodePhysicalArtifactParser.RangeRecord row,
             SubstrateChangeBuilder builder)
         {
             if (_allowed is not null && !_allowed.Contains(row.Value)) return;
             Hash128 valueId = _owner.ClassifierEntity(
                 builder, _canonicalPrefix, row.Value);
-            builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), _relation, valueId, Source, null,
-                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+            NativeAttestation.AddCodepointRange(
+                builder.ContentStage, row.Start, row.End,
+                _relation, valueId, Source, contextId: null,
+                sourceTrust: TC.StandardsDerived);
         }
 
-        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangePoint>
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangeRecord>
             ExtractRecordsAsync(
                 string ecosystemPath,
                 DecomposerOptions options,
                 CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.RangePointsAsync(_path, ct);
+            UnicodePhysicalArtifactParser.RangeRecordsAsync(_path, ct);
     }
 
 
     private sealed class BinaryPropertyPhase
-        : UnicodeComposePhase<UnicodePhysicalArtifactParser.BinaryPropertyPoint>
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.BinaryPropertyRange>
     {
         private readonly UnicodeDecomposer _owner;
         private readonly string _path;
@@ -1460,31 +1460,30 @@ public sealed class UnicodeDecomposer
 
         protected override string PhaseLabel => $"binary-properties/{Path.GetFileNameWithoutExtension(_path)}";
 
-        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.BinaryPropertyPoint row) =>
-            row.CountsSourceRow ? 1 : 0;
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.BinaryPropertyRange row) => 1;
 
         protected override void Compose(
-            UnicodePhysicalArtifactParser.BinaryPropertyPoint row,
+            UnicodePhysicalArtifactParser.BinaryPropertyRange row,
             SubstrateChangeBuilder builder)
         {
             Hash128 propertyId = _owner.ClassifierEntity(
                 builder, "unicode/property", row.Property);
-            builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
-                propertyId, Source, null,
-                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+            NativeAttestation.AddCodepointRange(
+                builder.ContentStage, row.Start, row.End,
+                UcdProperties.RelTypeHasProperty, propertyId, Source,
+                contextId: null, sourceTrust: TC.StandardsDerived);
         }
 
-        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.BinaryPropertyPoint>
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.BinaryPropertyRange>
             ExtractRecordsAsync(
                 string ecosystemPath,
                 DecomposerOptions options,
                 CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.BinaryPropertiesAsync(_path, ct);
+            UnicodePhysicalArtifactParser.BinaryPropertyRangesAsync(_path, ct);
     }
 
     private sealed class ContextualRangePropertyPhase
-        : UnicodeComposePhase<UnicodePhysicalArtifactParser.RangePoint>
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.RangeRecord>
     {
         private readonly UnicodeDecomposer _owner;
         private readonly string _path;
@@ -1499,32 +1498,31 @@ public sealed class UnicodeDecomposer
 
         protected override string PhaseLabel => $"property/{_property}";
 
-        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangePoint row) =>
-            row.CountsSourceRow ? 1 : 0;
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangeRecord row) => 1;
 
         protected override void Compose(
-            UnicodePhysicalArtifactParser.RangePoint row,
+            UnicodePhysicalArtifactParser.RangeRecord row,
             SubstrateChangeBuilder builder)
         {
             Hash128 keyId = _owner.ClassifierEntity(builder, "unicode/property_key", _property);
             Hash128 valueId = _owner.ClassifierEntity(
                 builder, $"unicode/property_value/{_property}", row.Value);
-            builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
-                valueId, Source, keyId,
-                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+            NativeAttestation.AddCodepointRange(
+                builder.ContentStage, row.Start, row.End,
+                UcdProperties.RelTypeHasProperty, valueId, Source,
+                contextId: keyId, sourceTrust: TC.StandardsDerived);
         }
 
-        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangePoint>
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangeRecord>
             ExtractRecordsAsync(
                 string ecosystemPath,
                 DecomposerOptions options,
                 CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.RangePointsAsync(_path, ct);
+            UnicodePhysicalArtifactParser.RangeRecordsAsync(_path, ct);
     }
 
     private sealed class ScriptExtensionsPhase
-        : UnicodeComposePhase<UnicodePhysicalArtifactParser.RangePoint>
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.RangeRecord>
     {
         private readonly UnicodeDecomposer _owner;
         private readonly string _path;
@@ -1534,30 +1532,29 @@ public sealed class UnicodeDecomposer
 
         protected override string PhaseLabel => "script-extensions";
 
-        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangePoint row) =>
-            row.CountsSourceRow ? 1 : 0;
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangeRecord row) => 1;
 
         protected override void Compose(
-            UnicodePhysicalArtifactParser.RangePoint row,
+            UnicodePhysicalArtifactParser.RangeRecord row,
             SubstrateChangeBuilder builder)
         {
             foreach (string script in row.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
                 Hash128 scriptId = _owner.ClassifierEntity(
                     builder, "unicode/script", script);
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    CodepointId(row.Codepoint), UcdProperties.RelTypeUsesScriptExtension,
-                    scriptId, Source, null,
-                    RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+                NativeAttestation.AddCodepointRange(
+                    builder.ContentStage, row.Start, row.End,
+                    UcdProperties.RelTypeUsesScriptExtension, scriptId, Source,
+                    contextId: null, sourceTrust: TC.StandardsDerived);
             }
         }
 
-        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangePoint>
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangeRecord>
             ExtractRecordsAsync(
                 string ecosystemPath,
                 DecomposerOptions options,
                 CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.RangePointsAsync(_path, ct);
+            UnicodePhysicalArtifactParser.RangeRecordsAsync(_path, ct);
     }
 
     private sealed class UnihanPropertyPhase
