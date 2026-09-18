@@ -177,14 +177,14 @@ def report_summary(report: dict) -> str:
         lines += ["### Preserved because they contain artifacts", ""]
         for item in report["preserved_artifacts"][:30]:
             lines.append(
-                f"- \`{item['path']}\` — {item['run_count']} run(s), "
+                f"- `{item['path']}` — {item['run_count']} run(s), "
                 f"artifact run(s): {', '.join(map(str, item['artifact_run_ids'][:8]))}"
             )
         lines.append("")
     if report["remaining_eligible"]:
         lines += ["### Still eligible for a later cleanup batch", ""]
         for item in report["remaining_eligible"][:30]:
-            lines.append(f"- \`{item['path']}\` — {item['run_count']} run(s)")
+            lines.append(f"- `{item['path']}` — {item['run_count']} run(s)")
         lines.append("")
     return "\n".join(lines)
 

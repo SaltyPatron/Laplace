@@ -47,6 +47,13 @@ jobs:
         shell: bash
         run: python3 .github/scripts/test-actions-history-cleanup.py
 
+      - name: Reject Python warnings in Actions maintenance scripts
+        shell: bash
+        run: |
+          python3 -W error::SyntaxWarning -m py_compile \
+            .github/scripts/cleanup-actions-history.py \
+            .github/scripts/archive-actions-evidence.py
+
       - name: Validate historical Actions evidence archive policy
         shell: bash
         run: python3 .github/scripts/test-actions-evidence-archive.py
