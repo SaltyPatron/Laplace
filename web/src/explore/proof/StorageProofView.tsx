@@ -740,7 +740,11 @@ export function StorageProofView() {
                       </code>
                     </div>
                     <strong className={
-                      proof.perfcache_aligned === false ? styles.romMismatch : styles.romMatch
+                      proof.perfcache_aligned == null
+                        ? styles.romUnverified
+                        : proof.perfcache_aligned
+                          ? styles.romMatch
+                          : styles.romMismatch
                     }>
                       {proof.perfcache_aligned == null
                         ? 'UNVERIFIED — database ROM receipt unavailable'
