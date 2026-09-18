@@ -46,7 +46,13 @@ BEGIN
         (sentence_id,3,sentence_type),
         (ca,0,codepoint_type),(cb,0,codepoint_type),
         (lang_a,2,language_type),(lang_b,2,language_type),
-        (relation_id,2,relation_type),(wa,2,grammar_type);
+        (relation_id,2,relation_type);
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[wa]::bytea[],
+        ARRAY[2]::smallint[],
+        ARRAY[grammar_type]::bytea[],
+        ARRAY[NULL::bytea]::bytea[],
+        ARRAY[true]::boolean[]);
     INSERT INTO laplace.canonical_names(id,name)
     VALUES(grammar_type,'substrate/type/grammar/reader-fixture/node/v1');
 
@@ -130,18 +136,37 @@ BEGIN
     -- The canonical content rows do not multiply. Lower unrelated observations
     -- hide the old scalar summary, and repeated matching types at other tiers
     -- must not multiply attestation weight or physical trajectory occurrences.
-    INSERT INTO laplace.entities(id,tier,type_id)
-    SELECT id,0,low_type FROM laplace.entities
-    WHERE id IN (wa,sentence_id,ca,cb,lang_b,relation_id);
-    INSERT INTO laplace.entities(id,tier,type_id) VALUES
-        (wb,0,decode('01'||repeat('00',15),'hex')),
-        (wc,0,decode('02'||repeat('00',15),'hex')),
-        (wa,5,word_type),(wb,5,word_type),(wb,6,word_type),
-        (sentence_id,5,sentence_type),(sentence_id,3,low_type),
-        (sentence_id,4,realize.canonical_id('Document')),
-        (ca,5,codepoint_type),(ca,6,realize.canonical_id('Grapheme')),
-        (lang_a,3,language_type),(lang_a,4,language_type),(lang_a,5,language_type),
-        (relation_id,5,relation_type),(relation_id,6,relation_type);
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[wa,sentence_id,ca,cb,lang_b,relation_id]::bytea[],
+        ARRAY[0,0,0,0,0,0]::smallint[],
+        ARRAY[low_type,low_type,low_type,low_type,low_type,low_type]::bytea[],
+        ARRAY[NULL::bytea,NULL::bytea,NULL::bytea,NULL::bytea,NULL::bytea,NULL::bytea]::bytea[],
+        ARRAY[true,true,true,true,true,true]::boolean[]);
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[
+            wb,wc,wa,wb,wb,sentence_id,sentence_id,sentence_id,
+            ca,ca,lang_a,lang_a,lang_a,relation_id,relation_id
+        ]::bytea[],
+        ARRAY[0,0,5,5,6,5,3,4,5,6,3,4,5,5,6]::smallint[],
+        ARRAY[
+            decode('01'||repeat('00',15),'hex'),
+            decode('02'||repeat('00',15),'hex'),
+            word_type,word_type,word_type,
+            sentence_type,low_type,realize.canonical_id('Document'),
+            codepoint_type,realize.canonical_id('Grapheme'),
+            language_type,language_type,language_type,
+            relation_type,relation_type
+        ]::bytea[],
+        ARRAY[
+            NULL::bytea,NULL::bytea,NULL::bytea,NULL::bytea,NULL::bytea,
+            NULL::bytea,NULL::bytea,NULL::bytea,NULL::bytea,NULL::bytea,
+            NULL::bytea,NULL::bytea,NULL::bytea,NULL::bytea,NULL::bytea
+        ]::bytea[],
+        ARRAY[
+            true,true,true,true,true,
+            true,true,true,true,true,
+            true,true,true,true,true
+        ]::boolean[]);
     IF (SELECT tier FROM laplace.entities WHERE id=sentence_id) <> 0
        OR (SELECT type_id FROM laplace.entities WHERE id=relation_id) <> low_type
        OR (SELECT count(*) FROM laplace.entities) <> original_entities
@@ -186,8 +211,12 @@ BEGIN
     END IF;
     -- Diagnostics must see hidden invalid facets once per canonical object/type.
     prohibited_before := laplace.fake_tier_band_count();
-    INSERT INTO laplace.entities(id,tier,type_id) VALUES
-        (wa,247,missing_type),(wa,248,missing_type);
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[wa,wa]::bytea[],
+        ARRAY[247,248]::smallint[],
+        ARRAY[missing_type,missing_type]::bytea[],
+        ARRAY[NULL::bytea,NULL::bytea]::bytea[],
+        ARRAY[true,true]::boolean[]);
     IF laplace.fake_tier_band_count() <> prohibited_before + 1
        OR (SELECT count(*) FROM laplace.identity_law_violations()
            WHERE id=missing_type AND reason='dangling_entity_type') <> 1
