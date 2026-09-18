@@ -243,6 +243,11 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
                 disposition = IngestArtifactDisposition.ExcludedWithReason;
                 notes = "release/cache/provenance control artifact; retained but not admitted as language testimony";
             }
+            else if (IsAlternateLanguageEstateArtifact(relative))
+            {
+                disposition = IngestArtifactDisposition.ExcludedWithReason;
+                notes = "alternate/reference packaging outside the canonical ISO foundation inputs; retained for provenance but not double-admitted";
+            }
             else
             {
                 disposition = IngestArtifactDisposition.Unsupported;
@@ -294,6 +299,14 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
 
         return false;
     }
+
+    private static bool IsAlternateLanguageEstateArtifact(string relative) =>
+        relative.StartsWith("cldr/", StringComparison.OrdinalIgnoreCase)
+        || relative.StartsWith("loc/", StringComparison.OrdinalIgnoreCase)
+        || relative.StartsWith("sil/change_request", StringComparison.OrdinalIgnoreCase)
+        || relative.StartsWith("sil/change_requests/", StringComparison.OrdinalIgnoreCase)
+        || relative.Equals("iso639-5.atom10.xml", StringComparison.OrdinalIgnoreCase)
+        || relative.Equals("iso639-5.rss20.xml", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsIsoControlArtifact(string relative)
     {
@@ -495,18 +508,16 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         {
             bool hdr = false;
             string path = Path.Combine(ecosystemPath, "iso-639-3_Retirements.tab");
-            await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+            await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(
+                               path, "tsv", GrammarRecordFraming.Line, ct))
             {
                 if (!hdr) { hdr = true; continue; }
-                if (lineMem.Length == 0) continue;
-                string line = Encoding.UTF8.GetString(lineMem.Span);
-                var c = line.Split('\t');
-                if (c.Length < 4) continue;
-                string retired = c[0].Trim();
+                if (fields.Length < 4) continue;
+                string retired = fields[0].Trim();
                 if (retired.Length != 3) continue;
-                string reason = c[2].Trim();
-                string changeTo = c[3].Trim();
-                string remedy = c.Length > 4 ? c[4].Trim() : "";
+                string reason = fields[2].Trim();
+                string changeTo = fields[3].Trim();
+                string remedy = fields.Length > 4 ? fields[4].Trim() : "";
 
                 var (reasonOut, successors, keep) =
                     IsoRetirementRemedy.Classify(reason, changeTo, remedy);
@@ -587,10 +598,8 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         {
             var languageAliases = LanguageGraph.LoadIso6393Aliases(ecosystemPath);
             string path = Path.Combine(ecosystemPath, "ISO-639-2_utf-8.txt");
-            await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+            await foreach (var (fields, _) in GrammarRowReader.ReadDelimitedFieldsAsync(path, '|', ct))
             {
-                if (lineMem.IsEmpty) continue;
-                string[] fields = Encoding.UTF8.GetString(lineMem.Span).Split('|');
                 if (fields.Length < 5) continue;
                 string b = fields[0].Trim().ToLowerInvariant();
                 string t = fields[1].Trim().ToLowerInvariant();
@@ -626,14 +635,12 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         {
             bool hdr = false;
             string path = Path.Combine(ecosystemPath, "iso-639-3_Name_Index.tab");
-            await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+            await foreach (var (fields, _) in GrammarRowReader.ReadFieldsAsync(
+                               path, "tsv", GrammarRecordFraming.Line, ct))
             {
                 if (!hdr) { hdr = true; continue; }
-                if (lineMem.Length == 0) continue;
-                string line = Encoding.UTF8.GetString(lineMem.Span);
-                var c = line.Split('\t');
-                if (c.Length < 2) continue;
-                string id = c[0].Trim(), printName = c[1].Trim();
+                if (fields.Length < 2) continue;
+                string id = fields[0].Trim(), printName = fields[1].Trim();
                 if (id.Length != 3 || printName.Length == 0) continue;
                 yield return (id, printName);
             }
@@ -645,14 +652,10 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         [EnumeratorCancellation] CancellationToken ct)
     {
         bool headerSkipped = false;
-        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        await foreach (var (parts, _) in GrammarRowReader.ReadFieldsAsync(
+                           path, "tsv", GrammarRecordFraming.Line, ct))
         {
             if (!headerSkipped) { headerSkipped = true; continue; }
-            if (lineMem.Length == 0) continue;
-            string line = Encoding.UTF8.GetString(lineMem.Span);
-            if (string.IsNullOrWhiteSpace(line)) continue;
-
-            var parts = line.Split('\t');
             if (parts.Length < 7) continue;
 
             string id = parts[0].Trim();
