@@ -23,6 +23,7 @@ class ImpactPlanTests(unittest.TestCase):
     def test_web_only_change_qualifies_and_publishes_without_native_or_database_mutation(self):
         value = plan("web/src/App.tsx")
         self.assertEqual(value["components"], ["web"])
+        self.assertEqual(value["build_components"], ["managed", "web"])
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
@@ -33,6 +34,7 @@ class ImpactPlanTests(unittest.TestCase):
     def test_native_change_invalidates_native_managed_db_and_full_live(self):
         value = plan("engine/core/src/example.cpp")
         self.assertEqual(value["components"], ["database", "managed", "native", "uci"])
+        self.assertEqual(value["build_components"], ["managed", "native"])
         self.assertEqual(
             value["dev_suites"], ["native-dev", "managed-dev", "uci-dev"]
         )
@@ -65,7 +67,7 @@ class ImpactPlanTests(unittest.TestCase):
         value = plan("app/Laplace.Substrate/Crud/Npgsql/Foo.cs")
         self.assertIn("managed-dev", value["dev_suites"])
         self.assertEqual(
-            value["db_suites"], ["db-health", "native-db", "managed-db"]
+            value["db_suites"], ["db-health", "managed-db"]
         )
         self.assertEqual(
             value["delivery_actions"], ["database", "reconcile", "publish", "live"]
@@ -83,8 +85,9 @@ class ImpactPlanTests(unittest.TestCase):
         value = plan("db/migrations/example.sql")
         self.assertEqual(value["dev_suites"], [])
         self.assertEqual(
-            value["db_suites"], ["db-health", "native-db", "managed-db"]
+            value["db_suites"], ["db-health", "managed-db"]
         )
+        self.assertEqual(value["build_components"], ["managed"])
         self.assertEqual(
             value["delivery_actions"], ["database", "reconcile", "publish", "live"]
         )
@@ -96,6 +99,7 @@ class ImpactPlanTests(unittest.TestCase):
             value["dev_suites"],
             ["native-dev", "managed-dev", "uci-dev", "browser-dev"],
         )
+        self.assertEqual(value["build_components"], ["native", "managed", "web"])
         self.assertEqual(
             value["db_suites"], ["db-health", "native-db", "managed-db"]
         )
@@ -118,6 +122,7 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["live_suites"], [])
         self.assertEqual(value["delivery_actions"], [])
         self.assertEqual(value["components"], [])
+        self.assertEqual(value["build_components"], [])
         self.assertFalse(value["full_qualification"])
 
 
