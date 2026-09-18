@@ -42,7 +42,7 @@ application_web_restore_revision() {
   local state="$1" app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
   local receipt="$app_dir/.laplace-source-revision" temporary
   if [[ -f "$state/previous-revision" && ! -L "$state/previous-revision" ]]; then
-    temporary="$app_dir/.laplace-source-revision.restore.$"
+    temporary="$app_dir/.laplace-source-revision.restore.${BASHPID}"
     install -m 0644 "$state/previous-revision" "$temporary"
     mv -f "$temporary" "$receipt"
   elif [[ -f "$state/previous-revision-absent" ]]; then
@@ -122,7 +122,8 @@ application_web_main() (
       exit 1
     }
   done
-  [[ ! -e /var/lib/laplace-managed/transaction.json ]] || {
+  local managed_transaction="${LAPLACE_MANAGED_TRANSACTION_PATH:-/var/lib/laplace-managed/transaction.json}"
+  [[ ! -e "$managed_transaction" ]] || {
     echo "::error::managed service transaction unresolved; no web changes made" >&2
     exit 1
   }
