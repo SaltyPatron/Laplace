@@ -58,66 +58,29 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         DecomposerOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        string iso639 = Path.Combine(context.EcosystemPath, "iso-639-3.tab");
-        if (SelectedOrUnmanifested(context, iso639))
+        string root = context.EcosystemPath;
+        var foundation = new List<ArtifactPhaseWork>();
+        var dependents = new List<ArtifactPhaseWork>();
+
+        void Add(List<ArtifactPhaseWork> level, string relative, IDecomposer phase)
         {
-            await foreach (var change in RunPhaseAsync(
-                new Iso6393Phase(this), context, options, "iso-639-3.tab", iso639, ct))
-                yield return change;
+            string path = Path.Combine(root, relative);
+            if (SelectedOrUnmanifested(context, path))
+                level.Add(new ArtifactPhaseWork(phase, relative.Replace('\\', '/'), path));
         }
 
-        string macro = Path.Combine(context.EcosystemPath, "iso-639-3-macrolanguages.tab");
-        if (SelectedOrUnmanifested(context, macro))
-        {
-            await foreach (var change in RunPhaseAsync(
-                new MacrolanguagePhase(this), context, options,
-                "iso-639-3-macrolanguages.tab", macro, ct))
-                yield return change;
-        }
+        Add(foundation, "iso-639-3.tab", new Iso6393Phase(this));
+        Add(dependents, "iso-639-3-macrolanguages.tab", new MacrolanguagePhase(this));
+        Add(dependents, Path.Combine("cldr", "supplementalData.xml"), new ScriptPhase(this));
+        Add(dependents, "iso-639-3_Retirements.tab", new RetirementPhase(this));
+        Add(dependents, Path.Combine("iana", "language-subtag-registry.txt"), new VariantPhase(this));
+        Add(dependents, "iso-639-3_Name_Index.tab", new NameIndexPhase(this));
+        Add(dependents, "ISO-639-2_utf-8.txt", new Iso6392Phase(this));
 
-        string script = Path.Combine(context.EcosystemPath, "cldr", "supplementalData.xml");
-        if (SelectedOrUnmanifested(context, script))
-        {
-            await foreach (var change in RunPhaseAsync(
-                new ScriptPhase(this), context, options, "cldr/supplementalData.xml", script, ct))
-                yield return change;
-        }
-
-        string retPath = Path.Combine(context.EcosystemPath, "iso-639-3_Retirements.tab");
-        if (SelectedOrUnmanifested(context, retPath))
-        {
-            await foreach (var change in RunPhaseAsync(
-                new RetirementPhase(this), context, options,
-                "iso-639-3_Retirements.tab", retPath, ct))
-                yield return change;
-        }
-
-        string variant = Path.Combine(context.EcosystemPath, "iana", "language-subtag-registry.txt");
-        if (SelectedOrUnmanifested(context, variant))
-        {
-            await foreach (var change in RunPhaseAsync(
-                new VariantPhase(this), context, options,
-                "iana/language-subtag-registry.txt", variant, ct))
-                yield return change;
-        }
-
-        string names = Path.Combine(context.EcosystemPath, "iso-639-3_Name_Index.tab");
-        if (SelectedOrUnmanifested(context, names))
-        {
-            await foreach (var change in RunPhaseAsync(
-                new NameIndexPhase(this), context, options,
-                "iso-639-3_Name_Index.tab", names, ct))
-                yield return change;
-        }
-
-        string iso2 = Path.Combine(context.EcosystemPath, "ISO-639-2_utf-8.txt");
-        if (SelectedOrUnmanifested(context, iso2))
-        {
-            await foreach (var change in RunPhaseAsync(
-                new Iso6392Phase(this), context, options,
-                "ISO-639-2_utf-8.txt", iso2, ct))
-                yield return change;
-        }
+        await foreach (SubstrateChange change in RunArtifactDependencyLevelsAsync(
+                           [foundation, dependents], context, options,
+                           "iso639/dependency", ct).ConfigureAwait(false))
+            yield return change;
 
         IntentStage.ResetContentBank();
     }

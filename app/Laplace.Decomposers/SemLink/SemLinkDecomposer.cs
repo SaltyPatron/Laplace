@@ -36,72 +36,36 @@ public sealed class SemLinkDecomposer : DecomposerMultiPhase<SemLinkSource, Full
         SourceEntityIdConventions.EnsureCiliMapForIngest(context.Logger, SourceName);
 
         string instancesDir = ResolveInstancesDir(context.EcosystemPath);
-        long cap = options.MaxInputUnits;
-        long consumed = 0;
+        var peers = new List<ArtifactPhaseWork>();
 
         string? annotatedInstances = SemLinkInstanceIngest.ResolvePath(instancesDir);
         if (annotatedInstances is not null)
-        {
-            var phaseOpts = RemainingOptions(options, cap, consumed);
-            var phase = new SemLinkInstancePhase(annotatedInstances);
-            await foreach (var change in RunPhaseAsync(
-                phase, context, phaseOpts,
-                "semlink/annotated-instances", annotatedInstances, ct))
-            {
-                consumed += change.Metadata.InputUnitsConsumed;
-                yield return change;
-                if (cap > 0 && consumed >= cap) yield break;
-            }
-        }
+            peers.Add(new ArtifactPhaseWork(
+                new SemLinkInstancePhase(annotatedInstances),
+                "semlink/annotated-instances", annotatedInstances));
 
         foreach (var (path, kind, label) in JsonDocumentSpecs(instancesDir))
-        {
-            if (cap > 0 && consumed >= cap) yield break;
-            var phaseOpts = RemainingOptions(options, cap, consumed);
-            var phase = new SemLinkJsonDocumentPhase(path, kind, label);
-            await foreach (var change in RunPhaseAsync(
-                phase, context, phaseOpts, label, path, ct))
-            {
-                consumed += change.Metadata.InputUnitsConsumed;
-                yield return change;
-                if (cap > 0 && consumed >= cap) yield break;
-            }
-        }
-
-        if (cap > 0 && consumed >= cap) yield break;
+            peers.Add(new ArtifactPhaseWork(
+                new SemLinkJsonDocumentPhase(path, kind, label), label, path));
 
         foreach (string pmPath in PredicateMatrixIngest.ResolvePaths(context.EcosystemPath))
         {
-            if (cap > 0 && consumed >= cap) yield break;
-            var phaseOpts = RemainingOptions(options, cap, consumed);
-            var phase = new PredicateMatrixPhase(pmPath, options.Languages);
-            await foreach (var change in RunPhaseAsync(
-                phase, context, phaseOpts,
-                "semlink/predicate-matrix", pmPath, ct))
-            {
-                consumed += change.Metadata.InputUnitsConsumed;
-                yield return change;
-                if (cap > 0 && consumed >= cap) yield break;
-            }
+            peers.Add(new ArtifactPhaseWork(
+                new PredicateMatrixPhase(pmPath, options.Languages),
+                "semlink/predicate-matrix", pmPath));
             break;
         }
 
-        if (cap > 0 && consumed >= cap) yield break;
-
         string? roleMappingPath = SemLinkRoleMappingIngest.ResolvePath(context.EcosystemPath);
         if (roleMappingPath is not null)
-        {
-            var phaseOpts = RemainingOptions(options, cap, consumed);
-            var phase = new SemLinkRoleMappingPhase(roleMappingPath);
-            await foreach (var change in RunPhaseAsync(
-                phase, context, phaseOpts,
-                "semlink/vn-fn-role-mapping", roleMappingPath, ct))
-            {
-                consumed += change.Metadata.InputUnitsConsumed;
-                yield return change;
-                if (cap > 0 && consumed >= cap) yield break;
-            }
-        }
+            peers.Add(new ArtifactPhaseWork(
+                new SemLinkRoleMappingPhase(roleMappingPath),
+                "semlink/vn-fn-role-mapping", roleMappingPath));
+
+        await foreach (SubstrateChange change in RunArtifactDependencyLevelsAsync(
+                           [peers], context, options,
+                           "semlink/dependency", ct).ConfigureAwait(false))
+            yield return change;
     }
 
     private static DecomposerOptions RemainingOptions(DecomposerOptions options, long cap, long consumed) =>

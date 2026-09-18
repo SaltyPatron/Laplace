@@ -72,6 +72,52 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
             yield return change;
     }
 
+    protected readonly record struct ArtifactPhaseWork(
+        IDecomposer Phase,
+        string Label,
+        string Path);
+
+    /// <summary>
+    /// Execute a source's semantic dependency DAG as parallel peer levels separated by
+    /// real apply barriers. A level is not "the next loop in C#": the following level
+    /// cannot begin until every change from the prior level is committed by the shared
+    /// writer. Within one level, artifacts use the common bounded worker scheduler.
+    /// </summary>
+    protected async IAsyncEnumerable<SubstrateChange> RunArtifactDependencyLevelsAsync(
+        IReadOnlyList<IReadOnlyList<ArtifactPhaseWork>> levels,
+        IDecomposerContext context,
+        DecomposerOptions options,
+        string barrierPrefix,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(levels);
+        int emittedLevel = 0;
+        foreach (IReadOnlyList<ArtifactPhaseWork> level in levels)
+        {
+            ArtifactPhaseWork[] work = level
+                .Where(static item => !string.IsNullOrWhiteSpace(item.Path))
+                .ToArray();
+            if (work.Length == 0) continue;
+
+            if (emittedLevel > 0)
+                await foreach (SubstrateChange barrier in ApplyBarrierAsync(
+                                   $"{barrierPrefix}/level-{emittedLevel}", ct)
+                                   .ConfigureAwait(false))
+                    yield return barrier;
+
+            await foreach (SubstrateChange change in RunArtifactPhasesAsync(
+                               work,
+                               context,
+                               options,
+                               static item => item.Phase,
+                               static item => item.Label,
+                               static item => item.Path,
+                               ct).ConfigureAwait(false))
+                yield return change;
+            emittedLevel++;
+        }
+    }
+
     /// <summary>
     /// File-backed phase using the same content-root resume and completion semantics as
     /// <see cref="IngestBatchPipeline.RunMultiFileAsync{TRecord}"/>.

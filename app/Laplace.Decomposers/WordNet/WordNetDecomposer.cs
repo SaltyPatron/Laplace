@@ -67,56 +67,32 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
         string dictDir = Path.Combine(context.EcosystemPath, "WordNet-3.0", "dict");
         int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.WordNet, options);
+        var frames = new List<ArtifactPhaseWork>();
+        var data = new List<ArtifactPhaseWork>();
+        var lexical = new List<ArtifactPhaseWork>();
+        var sentenceIndex = new List<ArtifactPhaseWork>();
 
-        string framesPath = Path.Combine(dictDir, "frames.vrb");
-        if (File.Exists(framesPath))
+        void Add(List<ArtifactPhaseWork> level, string name, IDecomposer phase)
         {
-            await foreach (var c in RunPhaseAsync(
-                new FramePhase(batch), context, options, "frames.vrb", framesPath, ct))
-                yield return c;
+            string path = Path.Combine(dictDir, name);
+            if (File.Exists(path)) level.Add(new ArtifactPhaseWork(phase, name, path));
         }
 
-        foreach (string posFile in PosFiles)
-        {
-            string path = Path.Combine(dictDir, posFile);
-            if (!File.Exists(path)) continue;
-            await foreach (var c in RunPhaseAsync(
-                new DataPhase(posFile, batch), context, options, posFile, path, ct))
-                yield return c;
-        }
+        Add(frames, "frames.vrb", new FramePhase(batch));
+        foreach (string name in PosFiles)
+            Add(data, name, new DataPhase(name, batch));
 
-        string sensePath = Path.Combine(dictDir, "index.sense");
-        if (File.Exists(sensePath))
-        {
-            await foreach (var c in RunPhaseAsync(
-                new SensePhase(batch), context, options, "index.sense", sensePath, ct))
-                yield return c;
-        }
+        Add(lexical, "index.sense", new SensePhase(batch));
+        foreach (string name in ExcFiles)
+            Add(lexical, name, new ExcPhase(name, batch));
+        Add(lexical, "sents.vrb", new SentenceTextPhase(batch));
 
-        foreach (string excFile in ExcFiles)
-        {
-            string path = Path.Combine(dictDir, excFile);
-            if (!File.Exists(path)) continue;
-            await foreach (var c in RunPhaseAsync(
-                new ExcPhase(excFile, batch), context, options, excFile, path, ct))
-                yield return c;
-        }
+        Add(sentenceIndex, "sentidx.vrb", new SentenceIndexPhase(batch));
 
-        string sentsPath = Path.Combine(dictDir, "sents.vrb");
-        if (File.Exists(sentsPath))
-        {
-            await foreach (var c in RunPhaseAsync(
-                new SentenceTextPhase(batch), context, options, "sents.vrb", sentsPath, ct))
-                yield return c;
-        }
-
-        string sentIdxPath = Path.Combine(dictDir, "sentidx.vrb");
-        if (File.Exists(sentIdxPath))
-        {
-            await foreach (var c in RunPhaseAsync(
-                new SentenceIndexPhase(batch), context, options, "sentidx.vrb", sentIdxPath, ct))
-                yield return c;
-        }
+        await foreach (SubstrateChange change in RunArtifactDependencyLevelsAsync(
+                           [frames, data, lexical, sentenceIndex], context, options,
+                           "wordnet/dependency", ct).ConfigureAwait(false))
+            yield return change;
     }
 
     private abstract class WnComposePhase<T> : ComposeDecomposerPhase<T>

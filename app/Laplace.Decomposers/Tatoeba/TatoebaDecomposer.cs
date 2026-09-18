@@ -55,6 +55,13 @@ public sealed class TatoebaDecomposer : DecomposerMultiPhase<TatoebaSource, Full
                            "tatoeba/sentences", sentencesPath, ct))
             yield return c;
 
+        // The id map is complete once composition finishes, but the link phase also
+        // references sentence entities durably. Make that dependency a real persistence
+        // barrier rather than relying on producer order ahead of the apply consumer.
+        await foreach (SubstrateChange barrier in ApplyBarrierAsync(
+                           "tatoeba/sentences-persisted", ct).ConfigureAwait(false))
+            yield return barrier;
+
         // Phase 2 only ever runs after phase 1 has been fully composed, so the map is
         // complete by construction. If it is empty the corpus would silently lose every
         // translation — the failure class IngestRunner already refuses to call success.

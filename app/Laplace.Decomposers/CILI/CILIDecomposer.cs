@@ -29,38 +29,34 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         string root = context.EcosystemPath;
-
         string ttl = Path.Combine(root, "ili.ttl");
-        if (File.Exists(ttl))
-        {
-            await foreach (var change in RunPhaseAsync(
-                               new ConceptsPhase(), context, options, "cili/concepts", ttl, ct))
-                yield return change;
-        }
+        var concepts = new List<ArtifactPhaseWork>();
+        var dependentClaims = new List<ArtifactPhaseWork>();
 
-        // The release's own change log. SelectMapInputs globs ili-map-* only, so this was
-        // never read: 76 deprecated ILIs whose withdrawal the corpus states outright.
+        if (File.Exists(ttl))
+            concepts.Add(new ArtifactPhaseWork(
+                new ConceptsPhase(), "cili/concepts", ttl));
+
         foreach (string changes in Directory
                  .EnumerateFiles(root, "changes-in-*.csv", SearchOption.AllDirectories)
-                 .OrderBy(p => p, StringComparer.Ordinal))
-        {
-            await foreach (var change in RunPhaseAsync(
-                               new IliStatusPhase(changes, VersionLabel(changes)), context, options,
-                               $"cili/status/{Path.GetFileName(changes)}", changes, ct))
-                yield return change;
-        }
+                 .OrderBy(static path => path, StringComparer.Ordinal))
+            dependentClaims.Add(new ArtifactPhaseWork(
+                new IliStatusPhase(changes, VersionLabel(changes)),
+                $"cili/status/{Path.GetFileName(changes)}", changes));
 
         foreach (CiliMapInput map in SelectMapInputs(root, conceptsContainPwn30: File.Exists(ttl)))
         {
-            ct.ThrowIfCancellationRequested();
             IDecomposer phase = map.IsTab
                 ? new MapTabPhase(map.Path, map.Version)
                 : new MapTtlPhase(map.Path, map.Version);
-            await foreach (var change in RunPhaseAsync(
-                               phase, context, options,
-                               $"cili/map/{Path.GetFileName(map.Path)}", map.Path, ct))
-                yield return change;
+            dependentClaims.Add(new ArtifactPhaseWork(
+                phase, $"cili/map/{Path.GetFileName(map.Path)}", map.Path));
         }
+
+        await foreach (SubstrateChange change in RunArtifactDependencyLevelsAsync(
+                           [concepts, dependentClaims], context, options,
+                           "cili/dependency", ct).ConfigureAwait(false))
+            yield return change;
     }
 
     private static int ResolveBatch(DecomposerOptions options) =>
