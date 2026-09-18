@@ -359,14 +359,14 @@ public sealed class UnicodeDecomposer
         if (context.HasArtifactGraph)
         {
             var jobs = new List<ArtifactJob>(context.SelectedArtifacts.Count);
-            var kinds = new HashSet<ArtifactKind>();
+            var singletonKinds = new HashSet<ArtifactKind>();
             foreach (IngestArtifact artifact in context.SelectedArtifacts)
             {
                 string path = Path.GetFullPath(artifact.Path);
                 ArtifactKind kind = ClassifyArtifact(path, baseDir, xml, ducet);
-                if (!kinds.Add(kind))
+                if (IsSingletonArtifactRole(kind) && !singletonKinds.Add(kind))
                     throw new InvalidOperationException(
-                        $"Unicode selected more than one admitted artifact for role {kind}; "
+                        $"Unicode selected more than one admitted artifact for singleton role {kind}; "
                         + "equivalent/superseded packaging must not double-vote.");
                 jobs.Add(new ArtifactJob(kind, path, artifact.FileLabel));
             }
@@ -527,6 +527,10 @@ public sealed class UnicodeDecomposer
         path = Path.GetFullPath(path);
         if (File.Exists(path)) jobs.Add(new ArtifactJob(kind, path, label));
     }
+
+    private static bool IsSingletonArtifactRole(ArtifactKind kind) =>
+        kind is not ArtifactKind.BinaryProperties
+            and not ArtifactKind.UnihanProperties;
 
     private static void AddUnihanFiles(List<ArtifactJob> jobs, string baseDir)
     {
