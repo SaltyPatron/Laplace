@@ -21,6 +21,8 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.Contains("<color attach=\"background\"", canvas, StringComparison.Ordinal);
         Assert.Contains("<meshBasicMaterial vertexColors toneMapped={false} color={palette.primary} />", canvas, StringComparison.Ordinal);
         Assert.Contains("material.needsUpdate = true", canvas, StringComparison.Ordinal);
+        Assert.Contains("export function carrierDisplayPos", canvas, StringComparison.Ordinal);
+        Assert.Contains("Math.max(-1, Math.min(1, n.x)) * SHELL", canvas, StringComparison.Ordinal);
 
         Assert.DoesNotContain(
             "return [rotatedX * SHELL, y * SHELL, z * SHELL]",
@@ -53,7 +55,8 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.Contains("UNVERIFIED — database ROM receipt unavailable", proof, StringComparison.Ordinal);
         Assert.Contains("Database verification failed", proof, StringComparison.Ordinal);
         Assert.Contains("<h3>Finite address ledger</h3>", proof, StringComparison.Ordinal);
-        Assert.Contains("projection=\"packed\"", proof, StringComparison.Ordinal);
+        Assert.Contains("projection=\"carrier\"", proof, StringComparison.Ordinal);
+        Assert.Contains("Packed X/Y/Z sign+mantissa payloads are mapped independently into 3-D bit-space", proof, StringComparison.Ordinal);
         Assert.Contains("M is metadata (ordinal/run/flags), not a spatial axis", proof, StringComparison.Ordinal);
         Assert.DoesNotContain("'alignment unknown'", proof, StringComparison.Ordinal);
     }
