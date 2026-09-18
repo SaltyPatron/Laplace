@@ -269,6 +269,31 @@ public sealed class IngestRunner
                     long units = intent.Metadata.InputUnitsConsumed;
                     if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
                     options.Progress?.Report(MakeProgress(counters));
+                    if (intent.ApplyBarrier is { } syncBarrier)
+                    {
+                        try
+                        {
+                            if (sbatch.Count > 0)
+                            {
+                                LogAdmissionWindow(sbatch.Count);
+                                await ProcessOwnedBatchAsync(
+                                    sbatch, decomposer, options, rng,
+                                    counters, failures, log, workingSet, runCt);
+                                sbatch.Clear();
+                                sbatchRows = 0;
+                                wsBytes = 0;
+                                admissionWindow.Reset();
+                                sbatchSource = null;
+                            }
+                            syncBarrier.Complete();
+                        }
+                        catch (Exception ex)
+                        {
+                            syncBarrier.Fail(ex);
+                            throw;
+                        }
+                        continue;
+                    }
                     if (!workingSet && batchSize == 1 && commitRows == 0)
                     {
                         transfer.Complete();
@@ -432,6 +457,22 @@ public sealed class IngestRunner
                         Interlocked.Add(ref bufferedRows, -queued.Rows);
                         Interlocked.Add(ref bufferedBytes, -queued.SerializedBytes);
                         try { drained.Release(); } catch (SemaphoreFullException) { }
+
+                        if (intent.ApplyBarrier is { } applyBarrier)
+                        {
+                            try
+                            {
+                                foreach (ApplyBatchBucket pendingBucket in buckets.Values.ToArray())
+                                    await FlushBucketAsync(pendingBucket).ConfigureAwait(false);
+                                applyBarrier.Complete();
+                            }
+                            catch (Exception ex)
+                            {
+                                applyBarrier.Fail(ex);
+                                throw;
+                            }
+                            continue;
+                        }
 
                         if (!workingSet && batchSize == 1 && commitRows == 0)
                         {

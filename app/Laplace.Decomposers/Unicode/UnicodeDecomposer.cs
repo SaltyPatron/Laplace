@@ -84,6 +84,10 @@ public sealed class UnicodeDecomposer
                            xml[0], ducet[0], context, options, batch, ct).ConfigureAwait(false))
             yield return change;
 
+        await foreach (SubstrateChange barrier in ApplyBarrierAsync(
+                           "unicode/tier0-floor-persisted", ct).ConfigureAwait(false))
+            yield return barrier;
+
         if (SourceVocabularyBootstrap.BuildLicenseChange(Manifest) is { } licenseChange)
             yield return licenseChange;
 

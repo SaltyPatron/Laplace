@@ -698,6 +698,15 @@ public abstract class DecomposerMultiPhase : IDecomposer
         }
     }
 
+    protected async IAsyncEnumerable<SubstrateChange> ApplyBarrierAsync(
+        string label,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var barrier = new IngestApplyBarrier();
+        yield return IngestBatchPipeline.BuildApplyBarrier(SourceId, label, barrier);
+        await barrier.WaitAsync(ct).ConfigureAwait(false);
+    }
+
     protected async IAsyncEnumerable<SubstrateChange> RunPhaseAsync(
         IDecomposer phase,
         IDecomposerContext context,

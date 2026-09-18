@@ -527,6 +527,7 @@ public static class IngestBatchPipeline
     /// compose threw. Zero rows, CountsAsUnit=false — it exists purely so the runner counts
     /// the failure with its reason and the file is neither counted done nor marked complete.</summary>
     public const string FileFailedUnitPrefix = "file-failed/";
+    public const string ApplyBarrierUnitPrefix = "apply-barrier/";
 
     /// <summary>Attach the physical-file execution owner without changing content identity.</summary>
     internal static SubstrateChange BindFileLabel(SubstrateChange change, string fileLabel)
@@ -554,6 +555,21 @@ public static class IngestBatchPipeline
         BindFileLabel(new SubstrateChangeBuilder(
             sourceId, $"{CancelledBoundaryUnitPrefix}{fileLabel}", null,
             entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build(), fileLabel);
+
+    public static SubstrateChange BuildApplyBarrier(
+        Hash128 sourceId, string label, IngestApplyBarrier barrier)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        ArgumentNullException.ThrowIfNull(barrier);
+        return new SubstrateChangeBuilder(
+                sourceId, $"{ApplyBarrierUnitPrefix}{label}", null,
+                entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0)
+            .Build() with
+            {
+                CountsAsUnit = false,
+                ApplyBarrier = barrier,
+            };
+    }
 
     /// <summary>
     /// Per-file resume for multi-file sources (GH #898). A source-level completion

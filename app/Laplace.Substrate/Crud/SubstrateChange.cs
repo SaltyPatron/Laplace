@@ -15,6 +15,7 @@ public sealed record SubstrateChange(
 {
     public bool CountsAsUnit { get; init; } = true;
     public SubstrateApplyEnvelope? ApplyEnvelope { get; init; }
+    public IngestApplyBarrier? ApplyBarrier { get; init; }
     /// <summary>
     /// Every distinct structural interpretation observed while composing this
     /// change. Canonical <see cref="Entities"/> remains one row per content id;
