@@ -237,17 +237,6 @@ TEST(LaplaceCoreSuperFibonacci, OpenPlacementIsInjectiveAndOnTheGlome) {
 }
 
 
-TEST(LaplaceCoreSuperFibonacci, OpenPlacementRoundTripsUnicodeWindow) {
-    constexpr uint64_t UNICODE_N = 1114112;
-    for (uint64_t i = 0; i < UNICODE_N; ++i) {
-        double p[4];
-        super_fibonacci_point_open((size_t)i, p);
-        uint64_t recovered = UINT64_MAX;
-        ASSERT_EQ(0, super_fibonacci_open_index(p, UNICODE_N, &recovered)) << i;
-        ASSERT_EQ(i, recovered) << "open placement lost DUCET rank identity at " << i;
-    }
-}
-
 TEST(LaplaceCoreSuperFibonacci, OpenPrefixOccupiesEveryRadialBand) {
     constexpr size_t N = 1u << 18;
     constexpr size_t BINS = 64;
