@@ -517,38 +517,28 @@ TEST(OrderedCompositionStage, ExactReplayRetainsRawRowsAndReusesDescriptorAndSou
         &materialized_raw), PHYSICALITY_DESCRIPTOR_OK);
     std::unique_ptr<physicality_descriptor_materialization_t, decltype(&physicality_descriptor_materialization_free)>
         materialized(materialized_raw, physicality_descriptor_materialization_free);
+    size_t provenance_count = 0;
+    const auto* provenance =
+        physicality_descriptor_materialization_observations(materialized.get(), &provenance_count);
+    ASSERT_NE(provenance, nullptr);
+    ASSERT_EQ(provenance_count, 3u);
+    const std::array<int64_t, 3> expected_times{
+        first_request.observed_at_unix_us,
+        replays[0].observed_at_unix_us,
+        replays[1].observed_at_unix_us
+    };
+    for (size_t i = 0; i < provenance_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &descriptor));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &witness.source_id));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &witness.source_unit_id));
+        EXPECT_EQ(provenance[i].observed_at_unix_us, expected_times[i]);
+    }
     Stage generated(physicality_descriptor_materialization_take_stage(materialized.get()), intent_stage_free);
     ASSERT_NE(generated, nullptr);
-    ASSERT_EQ(intent_stage_attestation_count(generated.get()), 1u);
-    size_t bytes = 0;
-    const auto* row = row_at(generated.get(), INTENT_STAGE_TABLE_ATTESTATIONS, 0, &bytes);
-    ASSERT_NE(row, nullptr);
-    hash128_t relation{};
-    ASSERT_EQ(laplace_relation_resolve("HAS_PHYSICALITY", &relation), 0);
-    uint32_t width = 0;
-    const auto* relation_field = field(row, bytes, 2, &width);
-    ASSERT_NE(relation_field, nullptr);
-    ASSERT_EQ(width, sizeof(relation));
-    EXPECT_EQ(std::memcmp(relation_field, &relation, width), 0);
-    const auto* object = field(row, bytes, 3, &width);
-    ASSERT_NE(object, nullptr);
-    ASSERT_EQ(width, sizeof(descriptor));
-    EXPECT_EQ(std::memcmp(object, &descriptor, width), 0);
-    const auto* observations = field(row, bytes, 8, &width);
-    ASSERT_NE(observations, nullptr);
-    ASSERT_EQ(width, 8u);
-    uint64_t observation_count = 0;
-    for (size_t i = 0; i < width; ++i) observation_count = (observation_count << 8u) | observations[i];
-    EXPECT_EQ(observation_count, 1u);
-    const auto* time = field(row, bytes, 7, &width);
-    ASSERT_NE(time, nullptr);
-    ASSERT_EQ(width, 8u);
-    uint64_t bits = 0;
-    for (size_t i = 0; i < width; ++i) bits = (bits << 8u) | time[i];
-    int64_t observed_at;
-    std::memcpy(&observed_at, &bits, sizeof(observed_at));
-    EXPECT_EQ(observed_at + INTENT_STAGE_PG_EPOCH_UNIX_US, replays[0].observed_at_unix_us);
-}
+    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
+    size_t attestation_bytes = 0;
+    (void)intent_stage_tuple_ptr(generated.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &attestation_bytes);
+    EXPECT_EQ(attestation_bytes, 0u);
 
 TEST(OrderedCompositionStage, InvalidBatchDoesNotPartiallyStage) {
     laplace_ordered_component_t valid_children[] = {
@@ -813,9 +803,23 @@ TEST(OrderedCompositionStage, HigherTierSingletonRequiresItsActualChildBodyFromP
         &provider, 1, nullptr, 0, nullptr, 0, &witness, 1, &source,
         requests[1].observed_at_unix_us, kDescriptorBudget, &raw_materialized), PHYSICALITY_DESCRIPTOR_OK);
     materialized.reset(raw_materialized);
+    size_t provenance_count = 0;
+    const auto* provenance =
+        physicality_descriptor_materialization_observations(materialized.get(), &provenance_count);
+    ASSERT_NE(provenance, nullptr);
+    ASSERT_EQ(provenance_count, 1u);
+    size_t form_count = 0;
+    const auto* forms = physicality_descriptor_materialization_forms(materialized.get(), &form_count);
+    ASSERT_NE(forms, nullptr);
+    ASSERT_EQ(form_count, 1u);
+    EXPECT_TRUE(hash128_equals(&provenance[0].entity_id, &results[1].id));
+    EXPECT_TRUE(hash128_equals(&provenance[0].descriptor_id, &forms[0].descriptor_id));
+    EXPECT_TRUE(hash128_equals(&provenance[0].source_id, &witness.source_id));
+    EXPECT_TRUE(hash128_equals(&provenance[0].source_unit_id, &witness.source_unit_id));
+    EXPECT_EQ(provenance[0].observed_at_unix_us, requests[1].observed_at_unix_us);
     Stage generated(physicality_descriptor_materialization_take_stage(materialized.get()), intent_stage_free);
     ASSERT_NE(generated, nullptr);
-    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 1u);
+    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
 }
 
 }  // namespace
