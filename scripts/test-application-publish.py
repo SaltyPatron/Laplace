@@ -227,7 +227,7 @@ class ApplicationTransactionTests(unittest.TestCase):
                 self.assertEqual([], self.events())
 
     def test_pending_api_transaction_refuses_full_deploy_before_any_action(self):
-        for name in (".api-publish-backup", ".application-publish-owner", ".uci-publish-pending"):
+        for name in (".api-publish-backup", ".application-publish-owner", ".uci-publish-pending", ".web-publish-pending"):
             with self.subTest(name=name):
                 path = self.root / "build" / name
                 path.write_bytes(b"retained previous owner")
@@ -249,7 +249,7 @@ class ApplicationTransactionTests(unittest.TestCase):
                     "ensure_host() {\n",
                     'ensure_host() {\n  printf "host preflight reached\\n" >&2; return 97\n')
             (directory / name).write_text(content)
-        for name in (".api-publish-backup", ".application-publish-owner", ".uci-publish-pending"):
+        for name in (".api-publish-backup", ".application-publish-owner", ".uci-publish-pending", ".web-publish-pending"):
             with self.subTest(name=name):
                 path = self.root / "build" / name
                 path.write_bytes(b"retained API owner")
@@ -638,7 +638,8 @@ class ApiOnlyTransactionTests(unittest.TestCase):
         marker.write_text("fixture-api")
         api_receipt.write_text("retained API backup")
         for pending in (self.root / "build/.managed-publish-backup",
-                        self.root / "root-transaction.json", self.root / "build/.uci-publish-pending"):
+                        self.root / "root-transaction.json", self.root / "build/.uci-publish-pending",
+                        self.root / "build/.web-publish-pending"):
             with self.subTest(pending=pending.name):
                 pending.write_text("retained managed state")
                 for mode in ("recover", "api-recover"):
