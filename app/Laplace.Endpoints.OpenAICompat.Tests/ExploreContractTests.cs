@@ -102,4 +102,32 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
         Assert.NotNull(body);
         Assert.True(body!.Nodes.Count > 0);
     }
+
+
+    [Fact]
+    public async Task ExploreStorageProof_ExposesExactCarrierAndPlacement()
+    {
+        using var response = await _client.PostAsJsonAsync(
+            "/v1/explore/storage-proof", new DecomposeRequest("aa"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<StorageProofResponse>();
+        Assert.NotNull(body);
+        Assert.Equal(UnicodeSeed.CodepointCount, body!.AtomWindow);
+        Assert.NotEmpty(body.Nodes);
+
+        var root = Assert.Single(body.Nodes.Where(n => n.Ordinal == body.NaturalUnitOrdinal));
+        Assert.Equal(32, root.HilbertHex.Length);
+        Assert.InRange(root.Radius, 0.0, 1.000000000001);
+        Assert.NotEmpty(root.PackedVertices);
+        Assert.Equal(root.RealizedVertices.Count, root.PackedVertices.Sum(v => v.RunLength));
+
+        foreach (var atom in body.Nodes.Where(n => n.Tier == 0))
+        {
+            Assert.NotNull(atom.Atom);
+            Assert.NotNull(atom.DucetRank);
+            Assert.InRange(atom.DucetRank!.Value, 0u, (uint)body.AtomWindow - 1);
+            Assert.InRange(atom.Radius, 0.999999999999, 1.000000000001);
+        }
+    }
 }
