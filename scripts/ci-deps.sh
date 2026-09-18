@@ -51,7 +51,7 @@ peer=$("$PG_PREFIX/bin/psql" -X -w -h /var/run/postgresql -U laplace_admin -d po
   "SELECT current_user || ' on ' || current_database();")
 [[ "$peer" == "laplace_admin on postgres" ]] || { echo "::error::PostgreSQL peer auth failed: $peer" >&2; exit 1; }
 
-ucd="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.nounihan.flat.zip"
+ucd="${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest/ucdxml/ucd.all.flat.zip"
 [[ -f "$ucd" ]] || { echo "::error::UCD input missing: $ucd" >&2; exit 1; }
 
 echo "DEPENDENCIES_READY mode=$([[ "$CHECK_ONLY" == 1 ]] && echo consume || echo provision) postgres=$($PG_PREFIX/bin/pg_config --version)"
