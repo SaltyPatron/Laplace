@@ -11,6 +11,7 @@ import fnmatch
 PRODUCT_IGNORED_PREFIXES = (
     ".github/",
     "docs/",
+    "scripts/test-suites/",
 )
 
 PRODUCT_IGNORED_SUFFIXES = (
@@ -24,6 +25,8 @@ PRODUCT_IGNORED_EXACT = frozenset({
     "scripts/ci-qualification-cache.py",
     "scripts/ci-product-freshness.py",
     "scripts/ci_product_scope.py",
+    "scripts/ci_managed_graph.py",
+    "scripts/test-parallel.sh",
     "scripts/test-workflow-architecture.py",
     "scripts/test-seed-workflow-ownership.py",
     "scripts/test-product-ci-artifact-ownership.py",
@@ -32,7 +35,8 @@ PRODUCT_IGNORED_EXACT = frozenset({
 })
 
 PRODUCT_IGNORED_GLOBS = (
-    "scripts/test-ci-*.py",
+    "scripts/test-*.py",
+    "app/*.Tests/**",
 )
 
 # These are the equivalent GitHub Actions paths-ignore entries. A contract test
@@ -47,7 +51,11 @@ GITHUB_PATH_IGNORES = (
     "scripts/ci-qualification-cache.py",
     "scripts/ci-product-freshness.py",
     "scripts/ci_product_scope.py",
-    "scripts/test-ci-*.py",
+    "scripts/ci_managed_graph.py",
+    "scripts/test-parallel.sh",
+    "scripts/test-suites/**",
+    "scripts/test-*.py",
+    "app/*.Tests/**",
     "scripts/test-workflow-architecture.py",
     "scripts/test-seed-workflow-ownership.py",
     "scripts/test-product-ci-artifact-ownership.py",
