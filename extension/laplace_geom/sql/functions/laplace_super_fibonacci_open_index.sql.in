@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION @extschema@.laplace_super_fibonacci_open_index(
+        p geometry, p_max_count bigint)
+    RETURNS bigint
+    AS 'MODULE_PATHNAME', 'pg_laplace_super_fibonacci_open_index'
+    LANGUAGE C LAPLACE_IMMUTABLE_STRICT;
+
+COMMENT ON FUNCTION @extschema@.laplace_super_fibonacci_open_index(geometry, bigint) IS
+    'Recover the zero-based index of a prefix-stable open Super-Fibonacci point. '
+    'p_max_count fixes the significant radical-inverse width and rejects points outside that window.';
