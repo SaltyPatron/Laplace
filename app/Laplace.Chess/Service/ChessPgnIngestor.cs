@@ -218,6 +218,11 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     measurement?.Checkpoint("SourceReadParseAndValidation", "chunk-parsed", chunkGames: chunk.Count);
                     (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment, measurement);
                     novel += n; applied += a; repaired += r;
+                    if (requireCompleteSource && measurement is null)
+                    {
+                        await VerifyPersistedCompleteGamesAsync(chunk, ct);
+                        log?.Invoke($"verified persisted witness + typed move trajectory for {chunk.Count} provider games");
+                    }
                     chunk.Clear();
                     parseWindow = measurement?.NextReplayChunkGames ?? ChunkSize;
                 }
@@ -226,6 +231,11 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                 {
                     (int n, int a, int r) = await ApplyChunkAsync(chunk, ct, experiment, measurement);
                     novel += n; applied += a; repaired += r;
+                    if (requireCompleteSource && measurement is null)
+                    {
+                        await VerifyPersistedCompleteGamesAsync(chunk, ct);
+                        log?.Invoke($"verified persisted witness + typed move trajectory for {chunk.Count} provider games");
+                    }
                 }
 
                 log?.Invoke($"ingested {applied}/{parsed} new games from {sourceLabel}"
@@ -247,6 +257,44 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         finally
         {
             Gate.Release();
+        }
+    }
+
+    private async Task VerifyPersistedCompleteGamesAsync(
+        IReadOnlyList<ChessGameRecord> games, CancellationToken ct)
+    {
+        if (games.Count == 0) return;
+
+        var witnessIds = games.Select(ChessPgnDecomposer.RecordingWitnessId).Distinct().ToArray();
+        var present = await _reader.PresentAttestationIdsAsync(
+            ChessVocabulary.PlaysLineType, witnessIds, ct).ConfigureAwait(false);
+        foreach (var witnessId in witnessIds)
+            if (!present.Contains(witnessId))
+                throw new InvalidDataException(
+                    $"provider game commit acknowledged but recording witness {witnessId} is absent on exact readback");
+
+        var expectedLines = games
+            .GroupBy(static game => game.LineId)
+            .ToDictionary(static group => group.Key, static group => group.First().MoveIds);
+        var lineIds = expectedLines.Keys.Select(static id => id.ToBytes()).ToArray();
+        var rows = await NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
+            _ds, lineIds, [PhysicalityType.Content], ct).ConfigureAwait(false);
+
+        foreach (var (lineId, expectedMoves) in expectedLines)
+        {
+            var actual = rows
+                .Where(row => row.Type == PhysicalityType.Content
+                              && Hash128.FromBytes(row.ParentId) == lineId)
+                .OrderBy(static row => row.Ordinal)
+                .ToArray();
+            if (actual.Length != expectedMoves.Length)
+                throw new InvalidDataException(
+                    $"provider game line {lineId} persisted {actual.Length} moves; expected {expectedMoves.Length}");
+
+            for (int i = 0; i < expectedMoves.Length; i++)
+                if (Hash128.FromBytes(actual[i].EntityId) != expectedMoves[i])
+                    throw new InvalidDataException(
+                        $"provider game line {lineId} move {i + 1} failed exact typed-trajectory readback");
         }
     }
 
