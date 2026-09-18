@@ -43,6 +43,15 @@ def _starts(path: str, prefix: str) -> bool:
     return path == prefix.rstrip("/") or path.startswith(prefix)
 
 
+def native_test_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return (
+        normalized.startswith("engine/") and "/tests/" in normalized
+    ) or (
+        normalized.startswith("extension/") and "/tests/" in normalized
+    )
+
+
 def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     root = (root or Path(".")).resolve()
     managed_projects = load_managed_projects(root)
@@ -110,6 +119,13 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             continue
 
         matched = False
+
+        if native_test_path(path):
+            matched = True
+            build_components.add("native")
+            dev_suites.add("native-dev")
+            invalidate(("native-dev",), path)
+            continue
 
         if (
             path == "CMakeLists.txt"
