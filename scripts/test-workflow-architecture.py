@@ -75,13 +75,19 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("stage: release-qualification", lifecycle)
         self.assertIn("stage: release-delivery", lifecycle)
 
-    def test_superseded_push_is_rejected_before_self_hosted_scheduling_and_candidate_mutation(self):
+    def test_superseded_push_is_rejected_only_when_source_tree_changes(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         preflight = reusable.split("  preflight:\n", 1)[1].split("\n  stage:\n", 1)[0]
         stage = reusable.split("  stage:\n", 1)[1]
 
         self.assertIn("runs-on: ubuntu-24.04", preflight)
         self.assertIn("git ls-remote --heads", preflight)
+        self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$TARGET_SHA"', preflight)
+        self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"', preflight)
+        self.assertIn('target_tree="$(git -C "$probe_repo" rev-parse "$TARGET_SHA^{tree}")"', preflight)
+        self.assertIn('latest_tree="$(git -C "$probe_repo" rev-parse "$latest_main^{tree}")"', preflight)
+        self.assertIn('[[ "$latest_tree" != "$target_tree" ]]', preflight)
+        self.assertIn("tree-equivalent", preflight)
         self.assertIn("execute=false", preflight)
         self.assertNotIn("runs-on: [self-hosted, laplace]", preflight)
         self.assertNotIn("host-resource.lock", preflight)
@@ -89,12 +95,18 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("if: needs.preflight.outputs.execute == 'true'", stage)
         self.assertIn("runs-on: [self-hosted, laplace]", stage)
 
-        resolve = stage.index("git ls-remote --heads origin refs/heads/main")
         fetch = stage.index('git fetch --no-tags --depth=2 origin "$TARGET_SHA"')
+        resolve = stage.index("git ls-remote --heads origin refs/heads/main")
+        tree_probe = stage.index('git fetch --no-tags --depth=1 origin "$latest_main"')
         worktree = stage.index('git worktree add --detach "$candidate_workspace" "$TARGET_SHA"')
         candidate_lock = stage.index('product-$TARGET_SHA.lock')
-        self.assertLess(resolve, fetch)
-        self.assertLess(fetch, candidate_lock)
+        self.assertLess(fetch, resolve)
+        self.assertLess(resolve, tree_probe)
+        self.assertLess(tree_probe, candidate_lock)
+        self.assertIn('target_tree="$(git rev-parse "$TARGET_SHA^{tree}")"', stage)
+        self.assertIn('latest_tree="$(git rev-parse "$latest_main^{tree}")"', stage)
+        self.assertIn('[[ "$latest_tree" != "$target_tree" ]]', stage)
+        self.assertIn("tree-equivalent", stage)
         self.assertLess(candidate_lock, worktree)
         self.assertIn("product-worktrees", stage)
         self.assertIn("git-metadata.lock", stage)

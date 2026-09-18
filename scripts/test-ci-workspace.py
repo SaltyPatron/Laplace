@@ -188,6 +188,17 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.marker.read_text(), "existing qualified build\n")
         self.assertFalse(self.events.exists())
 
+    def test_tree_equivalent_main_advance_does_not_supersede_candidate(self):
+        self.git(self.seed, "commit", "--allow-empty", "-m", "tree-neutral successor")
+        self.git(self.seed, "push", "origin", "HEAD:refs/heads/main")
+
+        result = self.execute("mainline")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("tree-equivalent", result.stdout)
+        self.assertNotIn("no product stage executed", result.stdout)
+        self.assertEqual(self.git(self.candidate(), "rev-parse", "HEAD").strip(), self.target)
+        self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])
+
     def test_operator_uses_requested_stage_in_isolated_candidate(self):
         result = self.execute("operator")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

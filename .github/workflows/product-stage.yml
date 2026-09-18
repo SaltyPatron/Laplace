@@ -97,20 +97,51 @@ jobs:
             GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
             GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
             git ls-remote --heads "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/main | awk '{print $1}')"
-          unset checkout_auth CHECKOUT_TOKEN
           [[ -n "$latest_main" ]] || { echo "::error::could not resolve current main" >&2; exit 1; }
 
           if [[ "$latest_main" != "$TARGET_SHA" ]]; then
-            echo "execute=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::selected revision $TARGET_SHA is superseded by $latest_main; self-hosted product work was not scheduled"
-            {
-              echo "## Superseded product stage"
-              echo
-              echo "- Selected: $TARGET_SHA"
-              echo "- Current main: $latest_main"
-              echo "- Result: no self-hosted product work scheduled"
-            } >> "$GITHUB_STEP_SUMMARY"
+            probe_repo="$(mktemp -d)"
+            trap 'rm -rf "$probe_repo"' EXIT
+            git -C "$probe_repo" init -q
+            git -C "$probe_repo" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+            GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+              git -C "$probe_repo" fetch --no-tags --depth=1 origin "$TARGET_SHA"
+            GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+              git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"
+            target_tree="$(git -C "$probe_repo" rev-parse "$TARGET_SHA^{tree}")"
+            latest_tree="$(git -C "$probe_repo" rev-parse "$latest_main^{tree}")"
+
+            if [[ "$latest_tree" != "$target_tree" ]]; then
+              echo "execute=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::selected revision $TARGET_SHA is superseded by content-changing main $latest_main; self-hosted product work was not scheduled"
+              {
+                echo "## Superseded product stage"
+                echo
+                echo "- Selected: $TARGET_SHA"
+                echo "- Current main: $latest_main"
+                echo "- Selected tree: $target_tree"
+                echo "- Current tree: $latest_tree"
+                echo "- Result: no self-hosted product work scheduled"
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::notice::main advanced from $TARGET_SHA to tree-equivalent $latest_main; candidate remains valid"
+              {
+                echo "## Tree-equivalent successor"
+                echo
+                echo "- Selected: $TARGET_SHA"
+                echo "- Current main: $latest_main"
+                echo "- Shared tree: $target_tree"
+                echo "- Result: candidate remains valid"
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            rm -rf "$probe_repo"
+            trap - EXIT
           fi
+          unset checkout_auth CHECKOUT_TOKEN
 
   stage:
     needs: preflight
@@ -179,6 +210,11 @@ jobs:
           git diff --cached --quiet
 
           checkout_auth="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+            git fetch --no-tags --depth=2 origin "$TARGET_SHA"
+
           if [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]]; then
             latest_main="$(GIT_CONFIG_COUNT=1 \
               GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
@@ -186,16 +222,21 @@ jobs:
               git ls-remote --heads origin refs/heads/main | awk '{print $1}')"
             [[ -n "$latest_main" ]] || { echo "::error::could not resolve current main" >&2; exit 1; }
             if [[ "$latest_main" != "$TARGET_SHA" ]]; then
-              unset checkout_auth CHECKOUT_TOKEN
-              echo "::notice::selected revision $TARGET_SHA is superseded by $latest_main; no product stage executed"
-              exit 0
+              GIT_CONFIG_COUNT=1 \
+                GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+                GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
+                git fetch --no-tags --depth=1 origin "$latest_main"
+              target_tree="$(git rev-parse "$TARGET_SHA^{tree}")"
+              latest_tree="$(git rev-parse "$latest_main^{tree}")"
+              if [[ "$latest_tree" != "$target_tree" ]]; then
+                unset checkout_auth CHECKOUT_TOKEN
+                echo "::notice::selected revision $TARGET_SHA is superseded by content-changing main $latest_main; no product stage executed"
+                exit 0
+              fi
+              echo "::notice::main advanced from $TARGET_SHA to tree-equivalent $latest_main; continuing exact candidate"
             fi
           fi
 
-          GIT_CONFIG_COUNT=1 \
-            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
-            git fetch --no-tags --depth=2 origin "$TARGET_SHA"
           unset checkout_auth CHECKOUT_TOKEN
 
           # Candidate worktrees are generated build state, not source authority. Reclaim
