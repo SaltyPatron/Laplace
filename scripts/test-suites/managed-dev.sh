@@ -4,23 +4,35 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 run_managed_dev() {
+  local selected="${LAPLACE_MANAGED_TEST_PROJECTS:-all}" project
   set_dev_perfcache
   sync_managed_native
-  python3 scripts/test-managed-policy.py
-  python3 scripts/test-application-payload.py
-  python3 scripts/test-cutechess-calibration.py
-  python3 scripts/test-chess-x11-runtime.py
-  python3 scripts/test-chess-floor-artifacts.py
-  python3 scripts/test-recorded-chess-selection.py
-  python3 scripts/test-chess-environment-benchmark.py ChessEnvironmentTests
-  python3 scripts/test-ci-workspace.py
-  python3 scripts/test-product-ci-artifact-ownership.py
-  python3 scripts/test-seed-workflow-ownership.py
-  python3 scripts/test-managed-db-scheduling.py
-  python3 scripts/test-codegen-configure.py
-  python3 scripts/test-cmake-release.py
-  dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-    --filter 'Tier!=db&Tier!=live&Tier!=perf'
+
+  if [[ "$selected" == all ]]; then
+    dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
+      --filter 'Tier!=db&Tier!=live&Tier!=perf'
+    return
+  fi
+
+  [[ -n "$selected" ]] || {
+    echo "::notice::managed dependency graph selected no managed test projects"
+    return 0
+  }
+
+  IFS=',' read -r -a projects <<< "$selected"
+  for project in "${projects[@]}"; do
+    [[ "$project" == app/*.csproj || "$project" == app/*/*.csproj ]] || {
+      echo "::error::managed test project is outside app/: $project" >&2
+      return 2
+    }
+    [[ -f "$ROOT/$project" ]] || {
+      echo "::error::managed test project does not exist: $project" >&2
+      return 2
+    }
+    echo "--- managed test target: $project"
+    dotnet test "$ROOT/$project" -c Release --no-build --nologo --verbosity minimal \
+      --filter 'Tier!=db&Tier!=live&Tier!=perf'
+  done
 }
 
 run_managed_dev
