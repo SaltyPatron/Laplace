@@ -79,9 +79,29 @@ uci_revision_snapshot() {
 }
 
 uci_revision_install() {
-  local state="$1" receipt="$APP_DIR/.laplace-source-revision" temporary
+  local state="$1" receipt="$APP_DIR/.laplace-source-revision" temporary current=""
   [[ -f "$state/revision-managed" ]] || return 0
-  temporary="$APP_DIR/.laplace-source-revision.tmp.$"
+  [[ ! -L "$receipt" && ( ! -e "$receipt" || -f "$receipt" ) ]] || {
+    echo "::error::application revision receipt changed type during UCI transaction" >&2
+    return 1
+  }
+  [[ ! -f "$receipt" ]] || current="$(<"$receipt")"
+  if [[ -f "$state/previous-revision" ]]; then
+    [[ "$current" == "$(<"$state/previous-revision")" ]] || {
+      echo "::error::application revision changed outside the UCI transaction" >&2
+      return 1
+    }
+  elif [[ -f "$state/previous-revision-absent" ]]; then
+    [[ -z "$current" && ! -e "$receipt" ]] || {
+      echo "::error::application revision appeared outside the UCI transaction" >&2
+      return 1
+    }
+  else
+    echo "::error::UCI transaction lost its revision snapshot" >&2
+    return 1
+  fi
+
+  temporary="$APP_DIR/.laplace-source-revision.tmp.$"$
   install -m 0644 "$state/next-revision" "$temporary"
   mv -f "$temporary" "$receipt"
   [[ "$(<"$receipt")" == "$(<"$state/next-revision")" ]] || {
@@ -96,7 +116,11 @@ uci_revision_restore() {
   [[ -f "$state/revision-managed" ]] || return 0
 
   next="$(<"$state/next-revision")"
-  [[ ! -f "$receipt" || -L "$receipt" ]] || current="$(<"$receipt")"
+  [[ ! -L "$receipt" && ( ! -e "$receipt" || -f "$receipt" ) ]] || {
+    echo "::error::application revision receipt changed type during UCI recovery" >&2
+    return 1
+  }
+  [[ ! -f "$receipt" ]] || current="$(<"$receipt")"
 
   if [[ -f "$state/previous-revision" ]]; then
     previous="$(<"$state/previous-revision")"
@@ -104,7 +128,7 @@ uci_revision_restore() {
       echo "::error::application revision changed outside the UCI transaction" >&2
       return 1
     }
-    temporary="$APP_DIR/.laplace-source-revision.restore.$"
+    temporary="$APP_DIR/.laplace-source-revision.restore.$"$
     install -m 0644 "$state/previous-revision" "$temporary"
     mv -f "$temporary" "$receipt"
   elif [[ -f "$state/previous-revision-absent" ]]; then
