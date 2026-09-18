@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Decide whether a newer main revision invalidates an exact product candidate.
 
-The law matches Product — main delivery's trigger exclusions: documentation,
-workflow/policy files, and explicit diagnostics-only sources do not invalidate an
-already qualified product candidate. Any other repository change does.
+Candidate freshness is intentionally narrower than workflow triggering. Pure
+policy/diagnostic changes and managed test-project changes do not invalidate an
+already qualified product candidate; product-source changes do.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from ci_product_scope import ignored
+from ci_product_scope import candidate_equivalent, ignored
 
 
 def changed_files(root: Path, base: str, head: str) -> list[str]:
@@ -33,8 +33,8 @@ def changed_files(root: Path, base: str, head: str) -> list[str]:
 
 
 def product_delta(paths: list[str]) -> dict:
-    relevant = [path for path in paths if not ignored(path)]
-    ignored_paths = [path for path in paths if ignored(path)]
+    relevant = [path for path in paths if not candidate_equivalent(path)]
+    ignored_paths = [path for path in paths if candidate_equivalent(path)]
     return {
         "product_equivalent": not relevant,
         "product_paths": relevant,
