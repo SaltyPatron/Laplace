@@ -340,6 +340,37 @@ PY
     return 1
   fi
   echo "::notice::T0 ROM receipt aligned: $db_receipt"
+
+  local proof
+  proof="$(curl -fsS -X POST "${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}/v1/explore/storage-proof" \
+    -H 'Content-Type: application/json' \
+    --data '{"text":"A"}')" || {
+      echo "::error::deployed storage-proof endpoint is unavailable" >&2
+      return 1
+    }
+  PROOF_JSON="$proof" DB_RECEIPT="$db_receipt" python3 - <<'PY' || {
+import json
+import math
+import os
+
+proof = json.loads(os.environ["PROOF_JSON"])
+expected = os.environ["DB_RECEIPT"].lower()
+assert proof["perfcache_aligned"] is True, proof
+assert proof["perfcache_receipt_hex"].lower() == expected, proof
+assert proof["database_perfcache_receipt_hex"].lower() == expected, proof
+nodes = proof["nodes"]
+assert len(nodes) == 1, nodes
+leaf = nodes[0]
+assert leaf["tier"] == 0 and leaf["atom"] == 65, leaf
+assert leaf["ducet_rank"] is not None, leaf
+assert len(leaf["id_hex"]) == 32 and len(leaf["hilbert_hex"]) == 32, leaf
+assert math.isclose(float(leaf["radius"]), 1.0, rel_tol=0.0, abs_tol=1e-12), leaf
+PY
+    echo "::error::deployed storage-proof endpoint does not agree with the live T0 ROM" >&2
+    printf '%s\n' "$proof" >&2
+    return 1
+  }
+  echo "::notice::storage-proof endpoint verified against live T0 ROM"
 }
 
 verify_installed_product() {
