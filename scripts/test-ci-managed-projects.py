@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ci_managed_projects import plan_changed, write_solution
+from ci_managed_projects import plan_changed, test_filter_for_paths, write_solution
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -36,6 +36,28 @@ class ManagedProjectImpactTests(unittest.TestCase):
         self.assertEqual([target], value["changed_projects"])
         self.assertEqual([target], value["build_projects"])
         self.assertEqual([target], value["test_projects"])
+
+    def test_test_only_source_change_builds_exact_class_filter(self):
+        value = test_filter_for_paths(
+            ROOT,
+            ["app/Laplace.Decomposers.Tests/Unicode/UnicodeDecomposerTests.cs"],
+        )
+        self.assertIn(
+            "FullyQualifiedName=Laplace.Decomposers.Unicode.Tests.UnicodeDecomposerTests",
+            value,
+        )
+
+    def test_non_test_or_shared_input_falls_back_to_project_wide_filter(self):
+        self.assertEqual(
+            "",
+            test_filter_for_paths(ROOT, ["app/Laplace.Core/Core/Hash128.cs"]),
+        )
+        self.assertEqual(
+            "",
+            test_filter_for_paths(
+                ROOT, ["app/Laplace.Decomposers.Tests/Laplace.Decomposers.Tests.csproj"]
+            ),
+        )
 
     def test_shared_core_change_expands_through_reverse_project_references(self):
         value = plan_changed(ROOT, ["app/Laplace.Core/Core/Hash128.cs"])
