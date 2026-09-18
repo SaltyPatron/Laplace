@@ -78,6 +78,7 @@ class WorkspaceFixture(unittest.TestCase):
             TARGET_SHA=self.target,
             CHECKOUT_TOKEN="fixture-only",
             TEST_EVENTS=str(self.events),
+            GITHUB_STEP_SUMMARY=str(self.directory / "summary.md"),
             LAPLACE_STAGE="check",
             GITHUB_REPOSITORY="fixture/repository",
         )
@@ -103,8 +104,13 @@ class WorkspaceFixture(unittest.TestCase):
 
 
 class WorkspaceReservation(WorkspaceFixture):
-    def test_mainline_waits_only_for_build_lock_after_selecting_source(self):
-        with (self.work / "build-resource.lock").open("w") as lock:
+    def candidate(self, sha=None):
+        return self.work / "product-worktrees" / (sha or self.target)
+
+    def test_mainline_uses_exact_revision_worktree_and_waits_only_for_that_candidate(self):
+        lock_path = self.work / f"product-{self.target}.lock"
+        lock_path.touch()
+        with lock_path.open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             environment = dict(self.env, LAPLACE_STAGE="mainline", LAPLACE_SKIP_IF_SUPERSEDED="1")
             process = subprocess.Popen(
@@ -114,11 +120,14 @@ class WorkspaceReservation(WorkspaceFixture):
             )
             try:
                 self.assertEqual(process.stdout.readline(), "started\n")
+                candidate = self.candidate()
                 deadline = time.time() + 2
-                while time.time() < deadline and self.git(self.workspace, "rev-parse", "HEAD").strip() != self.target:
+                while time.time() < deadline and not (candidate / ".git").exists():
                     time.sleep(0.02)
                 self.assertIsNone(process.poll())
-                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
+                self.assertTrue((candidate / ".git").exists())
+                self.assertEqual(self.git(candidate, "rev-parse", "HEAD").strip(), self.target)
+                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
                 self.assertFalse(self.events.exists())
                 self.assertEqual(self.marker.read_text(), "existing qualified build\n")
                 fcntl.flock(lock, fcntl.LOCK_UN)
@@ -140,17 +149,20 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("superseded by", result.stdout)
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
+        self.assertFalse(self.candidate(self.old).exists())
         self.assertEqual(self.marker.read_text(), "existing qualified build\n")
         self.assertFalse(self.events.exists())
 
-    def test_operator_uses_requested_stage_without_extra_work(self):
+    def test_operator_uses_requested_stage_in_isolated_candidate(self):
         result = self.execute("operator")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
+        candidate = self.candidate()
+        self.assertEqual(self.git(candidate, "rev-parse", "HEAD").strip(), self.target)
+        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
         self.assertEqual(self.marker.read_text(), "existing qualified build\n")
         self.assertEqual(self.events.read_text().splitlines(), ["environment", "check"])
 
-    def test_nonrepository_workspace_is_not_destroyed(self):
+    def test_nonrepository_control_workspace_is_not_destroyed(self):
         shutil.rmtree(self.workspace)
         self.workspace.mkdir()
         path = self.workspace / "existing-work.txt"
@@ -161,7 +173,7 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertFalse((self.workspace / ".git").exists())
         self.assertFalse(self.events.exists())
 
-    def test_tracked_local_work_is_not_destroyed(self):
+    def test_tracked_local_control_work_is_not_destroyed(self):
         path = self.workspace / "source.txt"
         path.write_text("uncommitted work\n", encoding="utf-8")
         result = self.execute("mainline")
@@ -170,14 +182,15 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
         self.assertFalse(self.events.exists())
 
-    def test_untracked_checkout_collision_is_not_destroyed(self):
+    def test_untracked_control_work_is_preserved_and_cannot_collide_with_candidate_checkout(self):
         path = self.workspace / "new-source.txt"
         path.write_text("untracked work\n", encoding="utf-8")
         result = self.execute("operator")
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(path.read_text(), "untracked work\n")
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
-        self.assertFalse(self.events.exists())
+        self.assertEqual(self.git(self.candidate(), "rev-parse", "HEAD").strip(), self.target)
+        self.assertEqual(self.events.read_text().splitlines(), ["environment", "check"])
 
 
 class DatabaseWorkspaceReservation(WorkspaceFixture):
