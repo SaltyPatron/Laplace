@@ -95,6 +95,22 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["publish_scope"], "full")
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
 
+    def test_uci_executable_change_isolated_from_api_database_and_live_matrix(self):
+        value = plan("app/Laplace.Chess.Uci/Program.cs")
+        self.assertEqual(value["components"], ["managed", "uci"])
+        self.assertEqual(value["build_components"], ["managed"])
+        self.assertEqual(
+            value["managed_build_projects"],
+            ["app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj"],
+        )
+        self.assertEqual(value["managed_test_projects"], [])
+        self.assertEqual(value["dev_suites"], ["uci-dev"])
+        self.assertEqual(value["db_suites"], [])
+        self.assertEqual(value["live_suites"], [])
+        self.assertEqual(value["delivery_actions"], ["publish"])
+        self.assertEqual(value["publish_scope"], "uci")
+        self.assertFalse(value["full_qualification"])
+
     def test_chess_change_keeps_full_publication_and_uci_qualification(self):
         value = plan("app/Laplace.Chess/Service/Foo.cs")
         self.assertIn("managed-dev", value["dev_suites"])
