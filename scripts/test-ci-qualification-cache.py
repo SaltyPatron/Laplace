@@ -67,6 +67,11 @@ class QualificationCacheTests(unittest.TestCase):
         source = self.run_cache("source", "native-dev", check=True)
         self.assertEqual(source.stdout.strip(), "test-source")
 
+    def test_latest_source_tracks_most_recent_success_for_bounded_artifact_reuse(self):
+        self.run_cache("record", "native-dev", check=True)
+        latest = self.run_cache("latest-source", "native-dev", check=True)
+        self.assertEqual(latest.stdout.strip(), "test-source")
+
     def test_recorded_receipt_is_reused_until_relevant_input_changes(self):
         miss = self.run_cache("check", "managed-dev")
         self.assertEqual(miss.returncode, 1)
