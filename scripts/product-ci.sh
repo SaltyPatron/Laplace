@@ -116,9 +116,10 @@ run_build() {
     need_web=1
   fi
 
-  # The checked-in OpenAPI document is an explicit web build input. API
-  # contract changes select both managed and web in the impact plan; a pure web
-  # change therefore does not need an unrelated managed rebuild.
+  # The checked-in OpenAPI document is an explicit web build input. The
+  # impact planner owns publication closure: full SPA publication selects the
+  # four managed publish roots because deploy uses --no-build for those payloads,
+  # while keeping managed test suites unscheduled when managed source is unchanged.
 
   # Managed applications execute the native core from the candidate build tree.
   # When native inputs are unchanged, reference the immutable build belonging to
