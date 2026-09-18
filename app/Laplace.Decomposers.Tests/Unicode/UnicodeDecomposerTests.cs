@@ -112,9 +112,10 @@ public sealed class UnicodeDecomposerTests
         var writer = new CapturingWriter();
         await dec.InitializeAsync(Context(writer));
 
-        // Classifiers ride ClassifierPhase on the spine — Initialize is vocab + license only.
-        Assert.Equal(2, writer.Captured.Count);
-        var boot = writer.Captured[0];
+        // Layer-0 sources bootstrap vocabulary before physical ingestion, but
+        // license/version testimony is emitted only after the Tier-0 floor is
+        // durably persisted. Initialize must therefore perform exactly one write.
+        var boot = Assert.Single(writer.Captured);
 
         Assert.Contains(boot.Entities, e =>
             e.Id == UnicodeDecomposer.Source && e.TypeId == BootstrapIntentBuilder.SourceTypeId);
@@ -124,14 +125,9 @@ public sealed class UnicodeDecomposerTests
             a.SubjectId == UnicodeDecomposer.Source
             && a.TypeId == BootstrapIntentBuilder.HasTrustClassTypeId
             && a.ObjectId == UnicodeDecomposer.TrustClass);
-
-        var license = writer.Captured[1];
-        Assert.Contains(license.Attestations, a =>
-            a.SubjectId == UnicodeDecomposer.Source
-            && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_LICENSE"));
-        Assert.Contains(license.Attestations, a =>
-            a.SubjectId == UnicodeDecomposer.Source
-            && a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_VERSION"));
+        Assert.DoesNotContain(boot.Attestations, a =>
+            a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_LICENSE")
+            || a.TypeId == RelationTypeRegistry.RelationTypeId("HAS_VERSION"));
     }
 
     [Fact]
@@ -144,18 +140,43 @@ public sealed class UnicodeDecomposerTests
 
         bool sawCodepointEntity = false;
         bool sawMappingAttestation = false;
+        HashSet<Hash128> mappingTypes =
+        [
+            UcdProperties.RelTypeHasUppercaseMapping,
+            UcdProperties.RelTypeHasLowercaseMapping,
+            UcdProperties.RelTypeHasTitlecaseMapping,
+        ];
+
         await foreach (var change in dec.DecomposeAsync(ctx, opts))
         {
             if (change.Entities.Any(e => e.TypeId == UnicodeDecomposer.CodepointType))
                 sawCodepointEntity = true;
-            // Cap run stops after tier-0 — mapping attestations must not appear.
-            if (change.Attestations.Length > 0
-                && change.Entities.All(e => e.TypeId != UnicodeDecomposer.CodepointType))
+            if (change.Attestations.Any(a => mappingTypes.Contains(a.TypeId)))
                 sawMappingAttestation = true;
+
+            if (!change.IntentStages.IsDefaultOrEmpty)
+            {
+                var entityRows = CopyTupleParser.ParseEntities(
+                    change.IntentStages
+                        .Select(stage => stage.TupleBuffer(IntentStageTable.Entities))
+                        .ToList());
+                if (entityRows.TypeIds.Any(typeId => typeId == UnicodeDecomposer.CodepointType))
+                    sawCodepointEntity = true;
+
+                var decoded = new List<AttestationRow>();
+                CopyTupleParser.DecodeAttestations(
+                    change.IntentStages
+                        .Select(stage => stage.TupleBuffer(IntentStageTable.Attestations))
+                        .ToList(),
+                    decoded);
+                if (decoded.Any(a => mappingTypes.Contains(a.TypeId)))
+                    sawMappingAttestation = true;
+            }
         }
-        Assert.True(sawCodepointEntity);
+        Assert.True(sawCodepointEntity,
+            "MaxInputUnits prefix must still contain persisted Tier-0 codepoint rows");
         Assert.False(sawMappingAttestation,
-            "MaxInputUnits cap must stop after Tier0Phase; mapping phase must not run");
+            "MaxInputUnits cap must stop after Tier-0 floor persistence; mapping phases must not run");
     }
 
     [Fact]
