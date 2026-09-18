@@ -86,7 +86,8 @@ class ManagedDbSchedulingTests(unittest.TestCase):
                     "-p:BuildInParallel=false", "-p:BuildInParallel=true")
             script = (
                 "set -euo pipefail\n"
-                "set_installed_perfcache() { :; }\n" +
+                "set_installed_perfcache() { :; }\n"
+                "sync_managed_native() { :; }\n" +
                 function + "\nrun_managed_db\n"
             )
             env = os.environ.copy()
