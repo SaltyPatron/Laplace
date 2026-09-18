@@ -770,6 +770,68 @@ export function StorageProofView() {
           <section className={styles.section}>
             <div className={styles.sectionHead}>
               <div>
+                <h3>Finite address ledger</h3>
+                <p>
+                  Every emitted storage node in this proof, with its exact recursive parent,
+                  content address, 4-D coordinate and Hilbert locality key. Select any row to
+                  drive the detailed address, packed carrier and realized-curve views.
+                </p>
+              </div>
+            </div>
+            <div className={styles.ledgerWrap}>
+              <table className={styles.ledger}>
+                <thead>
+                  <tr>
+                    <th>ord</th>
+                    <th>tier</th>
+                    <th>surface</th>
+                    <th>parent</th>
+                    <th>content id</th>
+                    <th>X</th>
+                    <th>Y</th>
+                    <th>Z</th>
+                    <th>M</th>
+                    <th>r₄</th>
+                    <th>Hilbert128</th>
+                    <th>T0 / DUCET</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderedNodes.map((node) => (
+                    <tr
+                      key={`ledger-${node.ordinal}`}
+                      className={node.ordinal === selected?.ordinal ? styles.ledgerSelected : undefined}
+                      onClick={() => {
+                        setSelectedOrdinal(node.ordinal);
+                        setSelectedPacked(0);
+                      }}
+                    >
+                      <td>{node.ordinal}</td>
+                      <td>T{node.tier}</td>
+                      <td title={node.label}>{node.label || '∅'}</td>
+                      <td>{node.parent_ordinal ?? '—'}</td>
+                      <td><code title={node.id_hex}>{compactId(node.id_hex)}</code></td>
+                      <td><code>{prettyNumber(node.x, 7)}</code></td>
+                      <td><code>{prettyNumber(node.y, 7)}</code></td>
+                      <td><code>{prettyNumber(node.z, 7)}</code></td>
+                      <td><code>{prettyNumber(node.m, 7)}</code></td>
+                      <td><code>{prettyNumber(node.radius, 7)}</code></td>
+                      <td><code title={node.hilbert_hex}>{compactId(node.hilbert_hex)}</code></td>
+                      <td>
+                        {node.atom == null
+                          ? '—'
+                          : `U+${node.atom.toString(16).toUpperCase().padStart(4, '0')} · #${node.ducet_rank?.toLocaleString() ?? '?'}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className={styles.section}>
+            <div className={styles.sectionHead}>
+              <div>
                 <h3>Real 4-D placement</h3>
                 <p>
                   Every emitted node from this prompt, projected with X–M and Z–M rotations.
@@ -829,10 +891,10 @@ export function StorageProofView() {
                     <div className={styles.canvasTall}>
                       <GlomeCanvas
                         nodes={carrierNodes}
-                        projection="placement"
+                        projection="packed"
                         highlightOrdinal={selectedPackedRow?.logical_ordinal ?? null}
                         fill
-                        note="Visualization of the four 53-bit carrier slots after decoding sign+mantissa. This is not geometric placement."
+                        note="Packed X/Y/Z payload lanes form the 3-D carrier shell. M is metadata (ordinal/run/flags), not a spatial axis; its exact bits are decoded below."
                       />
                     </div>
                   </article>
