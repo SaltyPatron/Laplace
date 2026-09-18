@@ -169,6 +169,7 @@ function GlomeScene({
   const [hover, setHover] = useState<GlomeNode | null>(null);
   const instances = useRef<THREE.InstancedMesh>(null);
   const transform = useMemo(() => new THREE.Object3D(), []);
+  const invalidate = useThree((s) => s.invalidate);
 
   useEffect(() => {
     const mesh = instances.current;
@@ -204,7 +205,11 @@ function GlomeScene({
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const material of materials) material.needsUpdate = true;
     }
-  }, [nodes, projection, xmAngle, zmAngle, highlightIds, highlightOrdinal, palette, transform]);
+    // Demand-mode does not repaint after mutating InstancedMesh matrices/colors.
+    // Invalidate AFTER the mutations, otherwise every instance is visually left
+    // at its initial origin transform until the user happens to move the camera.
+    invalidate();
+  }, [nodes, projection, xmAngle, zmAngle, highlightIds, highlightOrdinal, palette, transform, invalidate]);
 
   return (
     <>
