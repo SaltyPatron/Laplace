@@ -1,3 +1,4 @@
+using Laplace.Engine.Core;
 using DynInterop = Laplace.Engine.Dynamics.NativeInterop;
 
 namespace Laplace.Decomposers.Model;
@@ -11,15 +12,18 @@ internal sealed class NativeBilinearContraction : IDisposable
 {
     private IntPtr _handle;
 
-    private NativeBilinearContraction(IntPtr handle, double arenaRms, nuint residentBytes)
+    private NativeBilinearContraction(
+        IntPtr handle, double arenaRms, nuint residentBytes, int entityCount)
     {
         _handle = handle;
         ArenaRms = arenaRms;
         ResidentBytes = checked((long)residentBytes);
+        EntityCount = entityCount;
     }
 
     public double ArenaRms { get; }
     public long ResidentBytes { get; }
+    public int EntityCount { get; }
 
     public static unsafe NativeBilinearContraction Direct(
         float[] leftRows, float[] rightRows, int vocabularyRows, int dimension,
@@ -42,7 +46,7 @@ internal sealed class NativeBilinearContraction : IDisposable
                 &handle, &arena, &resident);
         if (rc != 0 || handle == IntPtr.Zero)
             throw new InvalidOperationException($"native direct contraction creation failed: {rc}");
-        return new(handle, arena, resident);
+        return new(handle, arena, resident, entityCount);
     }
 
     public static unsafe NativeBilinearContraction Projected(
@@ -84,7 +88,7 @@ internal sealed class NativeBilinearContraction : IDisposable
                 &handle, &arena, &resident);
         if (rc != 0 || handle == IntPtr.Zero)
             throw new InvalidOperationException($"native projected contraction creation failed: {rc}");
-        return new(handle, arena, resident);
+        return new(handle, arena, resident, entityCount);
     }
 
     public static unsafe NativeBilinearContraction Ffn(
@@ -120,7 +124,29 @@ internal sealed class NativeBilinearContraction : IDisposable
                 &handle, &arena, &resident);
         if (rc != 0 || handle == IntPtr.Zero)
             throw new InvalidOperationException($"native nonlinear FFN contraction creation failed: {rc}");
-        return new(handle, arena, resident);
+        return new(handle, arena, resident, entityCount);
+    }
+
+    public unsafe (long[] Scores, int[] Order) Salience(IReadOnlyList<Hash128> entityIds)
+    {
+        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+        ArgumentNullException.ThrowIfNull(entityIds);
+        if (entityIds.Count != EntityCount)
+            throw new ArgumentException(
+                $"circuit contains {EntityCount} canonical entities but {entityIds.Count} identities were supplied",
+                nameof(entityIds));
+        Hash128[] ids = entityIds as Hash128[] ?? entityIds.ToArray();
+        var scores = new long[EntityCount];
+        var order = new int[EntityCount];
+        int rc;
+        fixed (Hash128* idPtr = ids)
+        fixed (long* scorePtr = scores)
+        fixed (int* orderPtr = order)
+            rc = DynInterop.BilinearContractionEntitySalience(
+                _handle, idPtr, (nuint)EntityCount, scorePtr, orderPtr);
+        if (rc != 0)
+            throw new InvalidOperationException($"native circuit salience reduction failed: {rc}");
+        return (scores, order);
     }
 
     public unsafe (long[] Scores, short[] Outcomes) Score(int[] rows, int[] cols)

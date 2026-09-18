@@ -93,6 +93,18 @@ int bilinear_contraction_candidates_calibrate(
     const int* rows, const int* cols, size_t pair_count,
     int64_t* out_scores_fp1e9, int16_t* out_outcomes);
 
+/* Rank every canonical entity by how strongly this circuit touches it. This is
+ * a decomposition primitive, not a truth judgment or model forward pass. The
+ * opaque contraction already contains canonicalized per-entity left/right
+ * factors; this operation reduces those transient factors to one normalized
+ * salience score per entity and returns a deterministic score-descending order.
+ * entity_ids are used only for stable bytewise tie-breaking and are not copied
+ * into the native context. */
+int bilinear_contraction_entity_salience(
+    const bilinear_contraction_context_t* context,
+    const hash128_t* entity_ids, size_t entity_count,
+    int64_t* out_scores_fp1e9, int32_t* out_order);
+
 /* Per-token nonlinear FFN probe, reduced to canonical identities only AFTER
  * activation. Retains [mean(FFN(E_alias)), mean(E_alias)] factors of width d;
  * candidate calibration and arena reduction use the shared context operations. */

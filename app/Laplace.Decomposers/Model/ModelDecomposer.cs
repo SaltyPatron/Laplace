@@ -176,8 +176,10 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
 
 
 
-        // Model ingest admits checkpoint, tokenizer, and recipe provenance. It
-        // does not emit model evidence before native calibrated contraction.
+        // Model ingest is one source-decomposition pass. Checkpoint/tokenizer/
+        // recipe structure is admitted normally; numeric tensor payloads are only
+        // transient operands used to derive source-scoped circuit physicalities
+        // and typed evidence. No prompt execution or raw-weight persistence occurs.
         bool recorderRun = ModelTokenEdgeETL.ResolvePlanesMode() == "structure";
 
         if (recorderRun)
@@ -213,9 +215,9 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             if (checkpointChange is not null)
                 yield return checkpointChange;
 
-            // Numerical checkpoint values are consumed only by the governed
-            // native token-pair contraction. No per-tensor factor, rank, or
-            // floating-point representation is persisted as model structure.
+            // Numerical checkpoint values remain transient. The circuit phase
+            // below retains ranked canonical token paths and governed evidence,
+            // never the original tensor payload or a second model runtime.
         }
 
         if (manifest.Coverage == Coverage.Unsupported)
@@ -365,9 +367,10 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
             }
         }
 
-        // The admitted source consists of tokenizer content plus the ordered
-        // safetensors header. Native OP0-OP3 structure is retained; OP4-OP9
-        // token-pair evidence is intentionally deferred until calibrated.
+        // The admitted source consists of tokenizer/content structure plus the
+        // ordered safetensors header and derived circuit forms. Raw tensor values
+        // are not durable ingest units; the circuit decomposer consumes them
+        // transiently under the source snapshot.
         long headerTensors = 0;
         foreach (string path in Directory.GetFiles(_modelDir, "*.safetensors"))
         {

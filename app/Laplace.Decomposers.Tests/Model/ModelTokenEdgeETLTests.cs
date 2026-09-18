@@ -68,6 +68,49 @@ public sealed class ModelTokenEdgeETLTests
         Assert.NotEqual(receipt, nextReceipt);
     }
 
+
+    [Fact]
+    public async Task CircuitPhysicalityIsRecordedWithoutAnyPreexistingGraphClaim()
+    {
+        string dir = WriteEmbeddingFixture([1, 0, 0, 3, 2, 0]);
+        try
+        {
+            ModelManifest manifest = FixtureManifest();
+            IReadOnlyList<LlamaTokenizerParser.TokenRecord> tokens = FixtureTokens();
+            var etl = new ModelTokenEdgeETL(
+                dir, manifest, tokens,
+                SourceEntityIdConventions.ModelContentSourceId(dir)!.Value);
+
+            using CollectedChanges changes = await Collect(
+                etl.EmitAsync(1, reader: null, DecomposerOptions.Default));
+
+            SubstrateChange circuit = Assert.Single(
+                changes.Where(change => change.Physicalities.Length == 1));
+            PhysicalityRow physicality = Assert.Single(circuit.Physicalities);
+            Assert.Equal(PhysicalityType.Projection, physicality.Type);
+            Assert.Equal(
+                ModelCoordinates.CircuitId("embedding", -1, -1),
+                physicality.EntityId);
+            Assert.Equal(3, physicality.NConstituents);
+            Assert.Equal(1, physicality.SourceDim);
+            Assert.NotNull(physicality.TrajectoryXyzm);
+            TestimonyWalk.Vertex[] vertices =
+                TestimonyWalk.Unpack(physicality.TrajectoryXyzm!);
+            Assert.Equal(3, vertices.Length);
+            Assert.Equal(tokens[1].EntityId, vertices[0].ObjectId);
+            Assert.Equal(tokens[2].EntityId, vertices[1].ObjectId);
+            Assert.Equal(tokens[0].EntityId, vertices[2].ObjectId);
+            Assert.True(vertices[0].ScoreFp1e9 > vertices[1].ScoreFp1e9);
+            Assert.True(vertices[1].ScoreFp1e9 > vertices[2].ScoreFp1e9);
+            Assert.Empty(circuit.Attestations);
+            Assert.Empty(circuit.EphemeralFoldInputs);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact]
     public void CircuitVotes_AggregateThroughNativeGlickoWithContinuousResult()
     {
@@ -110,7 +153,11 @@ public sealed class ModelTokenEdgeETLTests
             using CollectedChanges changes = await Collect(etl.EmitAsync(
                 1, reader, DecomposerOptions.Default));
 
-            SubstrateChange change = Assert.Single(changes);
+            Assert.Contains(changes,
+                item => item.Physicalities.Any(
+                    p => p.Type == PhysicalityType.Projection));
+            SubstrateChange change = Assert.Single(
+                changes.Where(item => item.Attestations.Length == 2));
             Assert.Empty(change.Entities);
             Assert.Empty(change.Physicalities);
             Assert.Equal(2, change.Attestations.Length);
@@ -161,7 +208,8 @@ public sealed class ModelTokenEdgeETLTests
             using CollectedChanges changes = await Collect(etl.EmitAsync(
                 1, new CandidateReader(ModelDecomposer.SimilarToTypeId, [relation]),
                 DecomposerOptions.Default));
-            SubstrateChange change = Assert.Single(changes);
+            SubstrateChange change = Assert.Single(
+                changes.Where(item => item.Attestations.Length == 1));
 
             Assert.Equal(AttestationOutcome.Draw, Assert.Single(change.Attestations).Outcome);
             Assert.Equal(500_000_000, Assert.Single(change.EphemeralFoldInputs).ScoreFp1e9);
@@ -402,7 +450,11 @@ public sealed class ModelTokenEdgeETLTests
             1, reader, DecomposerOptions.Default));
         sw.Stop();
 
-        SubstrateChange change = Assert.Single(changes);
+        Assert.Contains(changes,
+            item => item.Physicalities.Any(
+                p => p.Type == PhysicalityType.Projection));
+        SubstrateChange change = Assert.Single(
+            changes.Where(item => item.Attestations.Length == 1));
         Assert.Single(change.Attestations);
         Assert.Single(change.EphemeralFoldInputs);
         Assert.Empty(change.Entities);
@@ -449,11 +501,16 @@ public sealed class ModelTokenEdgeETLTests
         Assert.Equal(12, receipts.Count(r => r.TypeId == ModelDecomposer.AttendsTypeId));
         Assert.Equal(12, receipts.Count(r => r.TypeId == ModelDecomposer.OvRelatesTypeId));
         Assert.Equal(1, receipts.Count(r => r.TypeId == ModelDecomposer.CompletesToTypeId));
-        Assert.All(changes, c =>
+        Assert.Contains(changes,
+            item => item.Physicalities.Any(
+                p => p.Type == PhysicalityType.Projection));
+        Assert.All(changes.Where(c => c.Attestations.Length > 0), c =>
         {
             Assert.Empty(c.Entities);
             Assert.Empty(c.Physicalities);
-            Assert.Equal(c.Attestations.Length, c.EphemeralFoldInputs.Length);
+            Assert.Equal(
+                c.Attestations.Length,
+                c.EphemeralFoldInputs.Length);
         });
         Assert.InRange(etl.PeakNativeResidentBytes, 1, 256L * 1024 * 1024);
         _output.WriteLine(

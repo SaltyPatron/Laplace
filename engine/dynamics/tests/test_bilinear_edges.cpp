@@ -260,6 +260,44 @@ TEST(BilinearEdges, CanonicalAliasSetsAverageEveryTokenAndIgnoreEnumerationOrder
     bilinear_contraction_free(b);
 }
 
+
+TEST(BilinearEdges, CircuitSalienceRanksCanonicalEntitiesWithoutMaterializingPairs) {
+    const float embeddings[] = {
+        1, 0,
+        0, 3,
+        2, 0,
+    };
+    const int token_rows[] = {0, 1, 2};
+    const int entities[] = {0, 1, 2};
+    const hash128_t ids[] = {
+        {3, 0},
+        {1, 0},
+        {2, 0},
+    };
+    bilinear_contraction_context_t* context = nullptr;
+    double arena = 0.0;
+    size_t resident = 0;
+    ASSERT_EQ(0, bilinear_direct_contraction_create(
+        embeddings, embeddings, 3, 2,
+        token_rows, entities, 3, 3,
+        &context, &arena, &resident));
+    ASSERT_NE(nullptr, context);
+
+    int64_t scores[3]{};
+    int32_t order[3]{};
+    ASSERT_EQ(0, bilinear_contraction_entity_salience(
+        context, ids, 3, scores, order));
+    EXPECT_EQ(1, order[0]);
+    EXPECT_EQ(2, order[1]);
+    EXPECT_EQ(0, order[2]);
+    EXPECT_GT(scores[1], scores[2]);
+    EXPECT_GT(scores[2], scores[0]);
+    EXPECT_GE(scores[0], 500000000LL);
+    EXPECT_LE(scores[1], 1000000000LL);
+
+    bilinear_contraction_free(context);
+}
+
 TEST(BilinearEdges, WideProjectionContractsBeforeVocabularyAndMatchesExplicitFactors) {
     const float embeddings[] = {
         1, 0,

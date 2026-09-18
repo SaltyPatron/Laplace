@@ -4,10 +4,10 @@ using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Model;
 
-// A checkpoint header is physical source provenance. Tensor payload ranges may be
-// read by a numerical analyzer, but they do not become content entities, model
-// knowledge, or calibrated testimony. The retained source structure is the ordered
-// safetensors header: tensor path, dtype, dimensions, and declaration order.
+// A checkpoint header is physical source provenance. Tensor payload values are
+// transient operands for model decomposition; they are never persisted as raw
+// weights or used as canonical world identity. Durable model state is the ordered
+// safetensors structure plus separately derived circuit physicalities/evidence.
 //
 // Native ordered composition owns the resulting Merkle identity, dynamic tier floor,
 // and physical trajectory. Model/layer/head addresses remain source context; token

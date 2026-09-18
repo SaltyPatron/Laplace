@@ -1,36 +1,6 @@
--- The model operator set, sourced from EVIDENCE rather than from stored floats.
---
--- WHY THIS FILE EXISTS. Every function in model_factor.sql.in reads the factor
--- trajectories: generation.model_pair_score and generation.model_row_topk take
--- p_q_slice/p_k_slice and scan a PostGIS varlena (~450 ms/call), and
--- generation.model_forward raises no_data_found telling the operator to run
--- LAPLACE_MODEL_PLANES=factors. That is the pass docs/plan/MODEL_INGESTION_DESIGN.md
--- Phase 7 deletes -- "No floats retained. No trajectories. Payload contribution:
--- 0 bytes." When it lands, that entire query surface stops answering, and nothing
--- replaced it.
---
--- These are the replacements. Same questions, different source:
---
---   question                        model_factor.sql.in        here
---   ------------------------------  -------------------------  --------------------
---   coupling of A,B in one circuit   scan two float slices      one attestations row
---   top-k partners in one circuit    native varlena top-k       index scan
---   what does the substrate believe  (not expressible)          consensus.eff_mu
---   next-token ranking               unembed through a slice    index scan
---
--- WHERE THE COORDINATE LIVES. laplace.consensus carries no context_id and no
--- source_id -- it is the FOLD, with the circuit coordinate folded out. So a
--- per-circuit read cannot come from consensus at any price; it must go through
--- laplace.attestations, which carries both. That split is the design rather than
--- a limitation: attestations are per-witness testimony (this model, this head),
--- consensus is what survived adjudication across all of them.
---
--- THE PROPERTY THE FLOAT SURFACE CANNOT HAVE. eff_mu = rating - 2*rd is a
--- conservative lower bound and is freely <= 0. An unattested pair returns NO ROW,
--- not an epsilon. A dense float tile has no way to express that: softmax is
--- nonzero for every input, so the "this pair couples with nothing" answer does
--- not exist in the representation. Here it is the absence of a row, which is also
--- why these are index probes instead of scans.
+-- Model circuit evidence is ordinary Laplace evidence around canonical entities.
+-- Circuit coordinates are content-addressed ordered paths. Source checkpoints
+-- contribute physicality forms and typed attestations; they are not runtimes.
 
 -- generation.circuit_coord -- resolve (plane, layer, head) to its context id.
 --
@@ -97,45 +67,40 @@ CREATE OR REPLACE FUNCTION generation.circuit_coord(
 RETURNS bytea
 LANGUAGE sql STABLE
 BEGIN ATOMIC
-    WITH anchor AS (
-        SELECT realize.canonical_id('substrate/entity/model/plane/' || p_plane || '/v1') AS id
-    ),
-    resolved AS (
-        SELECT CASE WHEN p_layer IS NULL THEN a.id ELSE lh.ctx END AS id
-        FROM anchor a
-        LEFT JOIN LATERAL (
-            SELECT p1.context_id AS ctx
-            FROM laplace.attestations p1
-            WHERE p1.type_id = laplace.relation_type_id(p_structure_relation)
-              AND p1.subject_id = a.id
-              AND p1.object_id = laplace.word_id(p_layer::text)
-              AND (p_head IS NULL OR EXISTS (
-                    SELECT 1 FROM laplace.attestations p2
-                    WHERE p2.type_id = p1.type_id
-                      AND p2.context_id = p1.context_id
-                      AND p2.subject_id = laplace.word_id(p_layer::text)
-                      AND p2.object_id = laplace.word_id(p_head::text)))
-              AND (p_head IS NOT NULL OR NOT EXISTS (
-                    SELECT 1 FROM laplace.attestations p3
-                    WHERE p3.type_id = p1.type_id
-                      AND p3.context_id = p1.context_id
-                      AND p3.subject_id = laplace.word_id(p_layer::text)))
-            ORDER BY p1.context_id
-            LIMIT 1
-        ) lh ON p_layer IS NOT NULL
-        WHERE p_layer IS NULL OR lh.ctx IS NOT NULL
+    WITH path AS (
+        SELECT ARRAY[
+                   laplace.word_id('model-circuit'),
+                   laplace.word_id(lower(btrim(p_plane)))
+               ]::bytea[]
+             || CASE WHEN p_layer IS NULL THEN ARRAY[]::bytea[]
+                     ELSE ARRAY[
+                         laplace.word_id('layer'),
+                         laplace.word_id(p_layer::text)
+                     ]::bytea[] END
+             || CASE WHEN p_head IS NULL THEN ARRAY[]::bytea[]
+                     ELSE ARRAY[
+                         laplace.word_id('head'),
+                         laplace.word_id(p_head::text)
+                     ]::bytea[] END AS ids
     )
-    SELECT resolved.id FROM resolved;
+    SELECT CASE
+             WHEN p_head IS NOT NULL AND p_layer IS NULL
+               THEN NULL::bytea
+             ELSE public.laplace_hash128_merkle(
+                 0::smallint, path.ids)
+           END
+    FROM path;
 END;
 
-COMMENT ON FUNCTION generation.circuit_coord(text, integer, integer, text) IS
-    'Context id for one circuit (plane, layer, head), resolved from plane anchors '
-    'and PRECEDES. Survives the factor-payload deletion; scopes every per-circuit read.';
+COMMENT ON FUNCTION generation.circuit_coord(
+    text, integer, integer, text) IS
+'Canonical model-circuit content identity for ordered path model-circuit/plane[/layer/N][/head/N]. '
+'Compatibility p_structure_relation is no longer an identity input: path structure lives in the Content trajectory.';
 
 
 -- generation.circuit_coupling -- one entry of one circuit's matrix.
 --
--- The QK/OV analogue of generation.model_pair_score, without the slices. Returns
+-- One source-scoped QK/OV evidence cell. Returns
 -- the mean magnitude this witness deposited for the pair in this circuit:
 -- sum_score_fp1e9 / observation_count, on the 1e9 fixed-point scale the fold
 -- uses. NULL means the pair was never attested here -- which is an answer, not a
@@ -180,7 +145,7 @@ COMMENT ON FUNCTION generation.circuit_coupling(bytea, bytea, text, integer, int
 
 -- generation.circuit_row -- one row of one circuit's matrix, top-k.
 --
--- The analogue of generation.model_row_topk. Bounded by the attested partners of
+-- Bounded by the attested partners of
 -- this subject in this circuit, not by V.
 -- Keep current OIDs and their parsed SQL dependencies; retire only an older shape.
 DO $upgrade_shape$
@@ -328,3 +293,63 @@ END;
 COMMENT ON FUNCTION generation.adjudicated_row(bytea, integer, text) IS
     'Top-k by adjudicated evidence -- the exact, abstaining counterpart of the '
     'softmax output layer''s maximum-inner-product search over the vocabulary.';
+
+
+CREATE OR REPLACE FUNCTION generation.model_circuit_testimony(
+    p_source bytea,
+    p_plane text,
+    p_layer integer DEFAULT NULL,
+    p_head integer DEFAULT NULL)
+RETURNS TABLE(
+    circuit_id bytea,
+    descriptor_id bytea,
+    token bytea,
+    score_fp1e9 bigint,
+    logical_ordinal integer)
+LANGUAGE sql STABLE
+BEGIN ATOMIC
+    WITH circuit AS MATERIALIZED (
+        SELECT generation.circuit_coord(
+            p_plane, p_layer, p_head) AS id
+    ),
+    forms AS MATERIALIZED (
+        SELECT DISTINCT a.object_id AS descriptor_id
+        FROM circuit c
+        JOIN laplace.attestations a
+          ON a.subject_id = c.id
+         AND a.type_id =
+             laplace.relation_type_id('HAS_PHYSICALITY')
+        WHERE a.source_id = p_source
+          AND a.object_id IS NOT NULL
+          AND a.outcome = 2
+    ),
+    bodies AS MATERIALIZED (
+        SELECT c.id AS circuit_id,
+               f.descriptor_id,
+               (d.physicality_types)[1] AS physicality_type,
+               (d.trajectory_bits)[1] AS trajectory_bits
+        FROM circuit c
+        JOIN forms f ON true
+        CROSS JOIN LATERAL
+          structural.physicality_descriptor_read(
+            ARRAY[f.descriptor_id],
+            536870912::bigint,
+            16,
+            10000000::bigint) d
+        WHERE cardinality(d.descriptor_ids) = 1
+    )
+    SELECT b.circuit_id, b.descriptor_id,
+           t.token, t.score_fp1e9,
+           t.logical_ordinal
+    FROM bodies b
+    CROSS JOIN LATERAL
+      generation.model_testimony_decode(
+        b.trajectory_bits) t
+    WHERE b.physicality_type = 3
+      AND b.trajectory_bits IS NOT NULL
+    ORDER BY b.descriptor_id, t.logical_ordinal;
+END;
+
+COMMENT ON FUNCTION generation.model_circuit_testimony(
+    bytea, text, integer, integer) IS
+'Source-scoped SQL readback for one decomposed model circuit. Returns the exact ranked canonical-entity trajectory; it does not execute or reconstruct the source checkpoint.';

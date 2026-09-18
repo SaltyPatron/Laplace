@@ -300,6 +300,63 @@ int bilinear_candidates_calibrate(
         out_scores_fp1e9, out_outcomes);
 }
 
+
+extern "C"
+int bilinear_contraction_entity_salience(
+    const bilinear_contraction_context_t* context,
+    const hash128_t* entity_ids, std::size_t entity_count,
+    int64_t* out_scores_fp1e9, int32_t* out_order)
+{
+    if (!context || !entity_ids || !out_scores_fp1e9 || !out_order
+        || entity_count == 0 || entity_count != context->entity_count
+        || context->rank == 0)
+        return -1;
+
+    const std::vector<double>& left = context->left;
+    const std::vector<double>& right =
+        context->shared_factors ? context->left : context->right;
+    if (left.size() != entity_count * context->rank
+        || right.size() != entity_count * context->rank)
+        return -1;
+
+    std::vector<double> magnitudes(entity_count, 0.0);
+    long double squared_sum = 0.0L;
+    for (std::size_t entity = 0; entity < entity_count; ++entity) {
+        const double* l = left.data() + entity * context->rank;
+        const double* r = right.data() + entity * context->rank;
+        long double magnitude_squared = 0.0L;
+        for (std::size_t k = 0; k < context->rank; ++k) {
+            if (!std::isfinite(l[k]) || !std::isfinite(r[k])) return -2;
+            magnitude_squared += (long double)l[k] * l[k];
+            if (!context->shared_factors)
+                magnitude_squared += (long double)r[k] * r[k];
+        }
+        double magnitude = std::sqrt((double)magnitude_squared);
+        if (!std::isfinite(magnitude)) return -2;
+        magnitudes[entity] = magnitude;
+        squared_sum += magnitude_squared;
+    }
+
+    const double salience_arena =
+        std::sqrt((double)(squared_sum / (long double)entity_count));
+    if (!std::isfinite(salience_arena)) return -2;
+    for (std::size_t entity = 0; entity < entity_count; ++entity) {
+        out_scores_fp1e9[entity] = salience_arena == 0.0
+            ? 500000000LL
+            : laplace_score_fp(magnitudes[entity], salience_arena);
+        out_order[entity] = (int32_t)entity;
+    }
+
+    std::sort(out_order, out_order + entity_count,
+        [&](int32_t a, int32_t b) {
+            const int64_t as = out_scores_fp1e9[(std::size_t)a];
+            const int64_t bs = out_scores_fp1e9[(std::size_t)b];
+            if (as != bs) return as > bs;
+            return std::memcmp(entity_ids + a, entity_ids + b, sizeof(hash128_t)) < 0;
+        });
+    return 0;
+}
+
 extern "C"
 int bilinear_direct_contraction_create(
     const float* left_rows, const float* right_rows,

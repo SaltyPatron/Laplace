@@ -82,6 +82,11 @@ public static partial class NativeInterop
         IntPtr context, int* rows, int* cols, nuint pairCount,
         long* outScoresFp1e9, short* outOutcomes);
 
+    [LibraryImport(Library, EntryPoint = "bilinear_contraction_entity_salience")]
+    public static unsafe partial int BilinearContractionEntitySalience(
+        IntPtr context, Laplace.Engine.Core.Hash128* entityIds, nuint entityCount,
+        long* outScoresFp1e9, int* outOrder);
+
     [LibraryImport(Library, EntryPoint = "ffn_contraction_create")]
     public static unsafe partial int FfnContractionCreate(
         float* embeddingRows, nuint vocabularyRows, nuint dimension,
