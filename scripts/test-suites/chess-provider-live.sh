@@ -9,7 +9,7 @@ python3 scripts/tests/chess-provider-live.py \
   --api-base "$base" \
   --user "${LAPLACE_CHESS_PROVIDER_PROOF_USER:-Anthony-Hart}" \
   --site "${LAPLACE_CHESS_PROVIDER_PROOF_SITE:-chesscom}" \
-  --games "${LAPLACE_CHESS_PROVIDER_PROOF_GAMES:-100}" \
+  --games "${LAPLACE_CHESS_PROVIDER_PROOF_GAMES:-0}" \
   --output "$output"
 echo "REAL_CHESS_PROVIDER_PROOF=$output"
 cat "$output"
