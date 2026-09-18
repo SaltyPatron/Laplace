@@ -74,7 +74,7 @@ reuse_qualified_native_build() {
 
 run_build() {
   local args=() selected="${LAPLACE_BUILD_COMPONENTS:-all}"
-  local need_native=0 need_managed=0
+  local need_native=0 need_managed=0 need_web=0
 
   [[ "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || args+=(--force-rebuild)
   if [[ "${LAPLACE_FORCE_CODEGEN:-}" == 1 || \
@@ -89,6 +89,13 @@ run_build() {
   if [[ "$selected" == all || ",$selected," == *",managed,"* ]]; then
     need_managed=1
   fi
+  if [[ "$selected" == all || ",$selected," == *",web,"* ]]; then
+    need_web=1
+  fi
+
+  # Web generation consumes the managed OpenAPI contract, so a web artifact
+  # always materializes the managed contract first in this exact candidate.
+  (( need_web == 0 )) || need_managed=1
 
   # Managed applications execute the native core from the candidate build tree.
   # When native inputs are unchanged, reference the immutable build belonging to
@@ -106,6 +113,7 @@ run_build() {
     phases+=(build-native)
   fi
   (( need_managed == 0 )) || phases+=(build-app)
+  (( need_web == 0 )) || phases+=(build-web)
 
   if (( ${#phases[@]} == 0 )); then
     echo "::notice::candidate requires no native/managed compilation"
