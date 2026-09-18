@@ -115,6 +115,10 @@ public sealed class ExploreContractTests : IClassFixture<ExploreFactory>
         Assert.NotNull(body);
         Assert.Equal(0x110000, body!.AtomWindow);
         Assert.NotEmpty(body.Nodes);
+        Assert.Contains(body.Nodes, n => n.IdHex == body.RootIdHex);
+        Assert.Null(body.DatabasePerfcacheReceiptHex);
+        Assert.NotNull(body.DatabasePerfcacheError);
+        Assert.Null(body.PerfcacheAligned);
 
         var root = Assert.Single(body.Nodes.Where(n => n.Ordinal == body.NaturalUnitOrdinal));
         Assert.Equal(32, root.HilbertHex.Length);
