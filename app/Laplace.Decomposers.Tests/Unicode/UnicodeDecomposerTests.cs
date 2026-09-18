@@ -209,6 +209,52 @@ public sealed class UnicodeDecomposerTests
     }
 
     [Fact]
+    public async Task Binary_property_parser_expands_ranges_without_inventing_negative_evidence()
+    {
+        string file = Path.Combine(Path.GetTempPath(), "laplace-proplist-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            await File.WriteAllTextAsync(file, "0041..0042 ; Alphabetic # fixture\n0043 ; White_Space\n");
+            var rows = new List<UnicodePhysicalArtifactParser.BinaryPropertyPoint>();
+            await foreach (var row in UnicodePhysicalArtifactParser.BinaryPropertiesAsync(file, CancellationToken.None))
+                rows.Add(row);
+
+            Assert.Equal(3, rows.Count);
+            Assert.Equal((uint)0x41, rows[0].Codepoint);
+            Assert.Equal("Alphabetic", rows[0].Property);
+            Assert.True(rows[0].CountsSourceRow);
+            Assert.False(rows[1].CountsSourceRow);
+            Assert.Equal("White_Space", rows[2].Property);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public async Task Unihan_parser_preserves_property_name_and_exact_value()
+    {
+        string file = Path.Combine(Path.GetTempPath(), "laplace-unihan-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            await File.WriteAllTextAsync(file, "U+4E00\tkDefinition\tone; a, an; alone\n");
+            var rows = new List<UnicodePhysicalArtifactParser.UnihanPropertyRow>();
+            await foreach (var row in UnicodePhysicalArtifactParser.UnihanPropertiesAsync(file, CancellationToken.None))
+                rows.Add(row);
+
+            var row = Assert.Single(rows);
+            Assert.Equal((uint)0x4E00, row.Codepoint);
+            Assert.Equal("kDefinition", row.Property);
+            Assert.Equal("one; a, an; alone", row.Value);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
     public async Task Artifact_graph_admits_declared_extended_UCD_property_files()
     {
         string root = Path.Combine(Path.GetTempPath(), "laplace-unicode-extended-" + Guid.NewGuid().ToString("N"));
