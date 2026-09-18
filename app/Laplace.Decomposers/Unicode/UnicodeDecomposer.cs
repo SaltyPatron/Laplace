@@ -250,7 +250,8 @@ public sealed class UnicodeDecomposer
     private static bool IsUnicodeControlArtifact(string relative)
     {
         string name = Path.GetFileName(relative);
-        return name.Equals("ReadMe.txt", StringComparison.OrdinalIgnoreCase)
+        return relative.StartsWith("charts/", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("ReadMe.txt", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("README", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase)
             || name.Contains("copyright", StringComparison.OrdinalIgnoreCase)
@@ -457,6 +458,23 @@ public sealed class UnicodeDecomposer
             ArtifactKind.PropertyValueAliases => new PropertyValueAliasPhase(this, job.Path, batch),
             ArtifactKind.IndexTerms => new IndexTermPhase(this, job.Path, batch),
             ArtifactKind.USourceData => new USourceDataPhase(this, job.Path, batch),
+            ArtifactKind.EmojiSequences => new SequenceMetadataPhase(
+                this, job.Path, batch,
+                ["Emoji_Sequence_Type", "Emoji_Sequence_Description"]),
+            ArtifactKind.Idna2008 => new ContextualRangePropertyPhase(
+                this, job.Path, batch, "IDNA2008_Category"),
+            ArtifactKind.IdnaMapping => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch,
+                ["IDNA_Status", "IDNA_Mapping", "IDNA2008_Status"],
+                new HashSet<int> { 1 }),
+            ArtifactKind.IntentionalConfusables => new SequencePairPhase(
+                this, job.Path, batch, "Intentional_Confusable"),
+            ArtifactKind.UcaDecompositions => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch,
+                ["UCA_Decomposition_Tag", "UCA_Decomposition"],
+                new HashSet<int> { 1 }),
+            ArtifactKind.UcaCommonTemplate => new CttPhase(this, job.Path, batch),
+            ArtifactKind.NamesList => new NamesListPhase(this, job.Path, batch),
             _ => throw new InvalidOperationException($"Unsupported Unicode artifact kind {job.Kind}."),
         };
 
@@ -606,6 +624,22 @@ public sealed class UnicodeDecomposer
             Path.Combine(baseDir, "ucd", "Index.txt"), "ucd/Index.txt");
         AddIfPresent(legacy, ArtifactKind.USourceData,
             Path.Combine(baseDir, "ucd", "USourceData.txt"), "ucd/USourceData.txt");
+        AddIfPresent(legacy, ArtifactKind.EmojiSequences,
+            Path.Combine(baseDir, "emoji", "emoji-sequences.txt"), "emoji/emoji-sequences.txt");
+        AddIfPresent(legacy, ArtifactKind.EmojiSequences,
+            Path.Combine(baseDir, "emoji", "emoji-zwj-sequences.txt"), "emoji/emoji-zwj-sequences.txt");
+        AddIfPresent(legacy, ArtifactKind.Idna2008,
+            Path.Combine(baseDir, "idna", "Idna2008.txt"), "idna/Idna2008.txt");
+        AddIfPresent(legacy, ArtifactKind.IdnaMapping,
+            Path.Combine(baseDir, "idna", "IdnaMappingTable.txt"), "idna/IdnaMappingTable.txt");
+        AddIfPresent(legacy, ArtifactKind.IntentionalConfusables,
+            Path.Combine(baseDir, "security", "intentional.txt"), "security/intentional.txt");
+        AddIfPresent(legacy, ArtifactKind.UcaDecompositions,
+            Path.Combine(baseDir, "uca", "decomps.txt"), "uca/decomps.txt");
+        AddIfPresent(legacy, ArtifactKind.UcaCommonTemplate,
+            Path.Combine(baseDir, "uca", "ctt.txt"), "uca/ctt.txt");
+        AddIfPresent(legacy, ArtifactKind.NamesList,
+            Path.Combine(baseDir, "ucd", "NamesList.txt"), "ucd/NamesList.txt");
         AddUnihanFiles(legacy, baseDir);
         legacy.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return legacy;
@@ -699,6 +733,14 @@ public sealed class UnicodeDecomposer
             "ucd/PropertyValueAliases.txt" => ArtifactKind.PropertyValueAliases,
             "ucd/Index.txt" => ArtifactKind.IndexTerms,
             "ucd/USourceData.txt" => ArtifactKind.USourceData,
+            "emoji/emoji-sequences.txt" or "emoji/emoji-zwj-sequences.txt"
+                => ArtifactKind.EmojiSequences,
+            "idna/Idna2008.txt" => ArtifactKind.Idna2008,
+            "idna/IdnaMappingTable.txt" => ArtifactKind.IdnaMapping,
+            "security/intentional.txt" => ArtifactKind.IntentionalConfusables,
+            "uca/decomps.txt" => ArtifactKind.UcaDecompositions,
+            "uca/ctt.txt" => ArtifactKind.UcaCommonTemplate,
+            "ucd/NamesList.txt" => ArtifactKind.NamesList,
             _ when (relative.StartsWith("ucd/Unihan/", StringComparison.Ordinal)
                     || relative.StartsWith("ucd/Unihan_", StringComparison.Ordinal))
                 && relative.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
@@ -722,7 +764,8 @@ public sealed class UnicodeDecomposer
         kind is not ArtifactKind.BinaryProperties
             and not ArtifactKind.UnihanProperties
             and not ArtifactKind.NamedSequences
-            and not ArtifactKind.TabbedCodepointProperties;
+            and not ArtifactKind.TabbedCodepointProperties
+            and not ArtifactKind.EmojiSequences;
 
     private static void AddUnihanFiles(List<ArtifactJob> jobs, string baseDir)
     {
@@ -814,6 +857,13 @@ public sealed class UnicodeDecomposer
         PropertyValueAliases = 51,
         IndexTerms = 52,
         USourceData = 53,
+        EmojiSequences = 54,
+        Idna2008 = 55,
+        IdnaMapping = 56,
+        IntentionalConfusables = 57,
+        UcaDecompositions = 58,
+        UcaCommonTemplate = 59,
+        NamesList = 60,
         Unknown = int.MaxValue,
     }
 
@@ -1705,6 +1755,129 @@ public sealed class UnicodeDecomposer
             ExtractRecordsAsync(
                 string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
             UnicodePhysicalArtifactParser.USourceDataAsync(_path, ct);
+    }
+
+    private sealed class SequencePairPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.SequencePairRow>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+        private readonly string _contextName;
+
+        public SequencePairPhase(
+            UnicodeDecomposer owner,
+            string path,
+            int batch,
+            string contextName)
+            : base(batch, commitEpoch: 1)
+            => (_owner, _path, _contextName) = (owner, path, contextName);
+
+        protected override string PhaseLabel =>
+            $"sequence-pairs/{Path.GetFileNameWithoutExtension(_path)}";
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.SequencePairRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128? left = ContentEmitter.Emit(builder, row.Left, Source);
+            Hash128? right = ContentEmitter.Emit(builder, row.Right, Source);
+            if (left is null || right is null) return;
+            Hash128 context = _owner.ClassifierEntity(
+                builder, "unicode/property_key", _contextName);
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                left.Value, UcdProperties.RelTypeConfusableWith,
+                right.Value, Source, context,
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.SequencePairRow>
+            ExtractRecordsAsync(
+                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.SequencePairsAsync(_path, ct);
+    }
+
+    private sealed class CttPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.CttRow>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+
+        public CttPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
+
+        protected override string PhaseLabel => "uca/ctt";
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.CttRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Emit("UCA_CTT_Primary", row.Primary);
+            Emit("UCA_CTT_Secondary", row.Secondary);
+            Emit("UCA_CTT_Tertiary", row.Tertiary);
+            Emit("UCA_CTT_Quaternary", row.Quaternary);
+
+            void Emit(string property, string value)
+            {
+                if (value.Length == 0) return;
+                Hash128? valueId = ContentEmitter.Emit(builder, value, Source);
+                if (valueId is null) return;
+                Hash128 key = _owner.ClassifierEntity(
+                    builder, "unicode/property_key", property);
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                    valueId.Value, Source, key,
+                    RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+            }
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.CttRow>
+            ExtractRecordsAsync(
+                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.CttAsync(_path, ct);
+    }
+
+    private sealed class NamesListPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.NamesListRow>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+
+        public NamesListPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
+
+        protected override string PhaseLabel => "ucd/names-list";
+
+        protected override long UnitsPerRecord(
+            UnicodePhysicalArtifactParser.NamesListRow row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.NamesListRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128? value = ContentEmitter.Emit(builder, row.Value, Source);
+            if (value is null) return;
+            if (row.Kind == "Name")
+            {
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    CodepointId(row.Codepoint), UcdProperties.RelTypeHasName,
+                    value.Value, Source, null,
+                    RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+                return;
+            }
+
+            Hash128 key = _owner.ClassifierEntity(
+                builder, "unicode/names_list_property", row.Kind);
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                value.Value, Source, key,
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.NamesListRow>
+            ExtractRecordsAsync(
+                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.NamesListAsync(_path, ct);
     }
 
     private sealed class MirrorPhase
