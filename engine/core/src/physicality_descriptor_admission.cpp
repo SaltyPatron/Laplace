@@ -185,11 +185,9 @@ physicality_descriptor_status_t materialize(
         phase(PHYSICALITY_MATERIALIZATION_COMPLETE);
         return PHYSICALITY_DESCRIPTOR_OK;
     }
-    for (size_t i = 0; i < source_count; ++i) {
-        checkpoint();
-        require(std::isfinite(sources[i].source_trust) && sources[i].source_trust >= 0.0 &&
-            sources[i].source_trust <= 1.0, PHYSICALITY_DESCRIPTOR_INVALID);
-    }
+    // source_trust is retained in the ABI for transport compatibility only.
+    // Physical-form provenance is structural {entity, descriptor, source, unit, time}
+    // and must not validate, rank, deduplicate, or otherwise depend on trust/standing.
     /* Fixed native basis verification scratch is admitted before entering the
      * allocation-free owner, and released before ordinary frontier work. */
     constexpr size_t byte_basis_scratch = sizeof(laplace_byte_atoms_t) + LAPLACE_BYTE_ATOM_COUNT * 64u;
