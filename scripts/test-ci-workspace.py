@@ -284,23 +284,14 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
         super().setUp()
         self.env.update(
             LAPLACE_DB_OPERATION="status",
-            LAPLACE_DB_CONFIRM_RECREATE="0",
-            LAPLACE_DB_CONFIRM_DATA_LOSS="0",
             PGDATABASE="fixture_database",
             PGHOST="/test/no-database",
             PGUSER="fixture_user",
             TEST_FAIL_EVENT="",
         )
 
-    def execute_database(self, operation="status", confirmations=None):
-        if confirmations is None:
-            confirmations = (operation == "recreate", operation == "recreate")
-        environment = dict(
-            self.env,
-            LAPLACE_DB_OPERATION=operation,
-            LAPLACE_DB_CONFIRM_RECREATE="1" if confirmations[0] else "0",
-            LAPLACE_DB_CONFIRM_DATA_LOSS="1" if confirmations[1] else "0",
-        )
+    def execute_database(self, operation="status"):
+        environment = dict(self.env, LAPLACE_DB_OPERATION=operation)
         return subprocess.run(
             ["bash", "-c", body("db", "db-ops.yml")],
             cwd=self.workspace, env=environment,
@@ -351,17 +342,20 @@ class DatabaseWorkspaceReservation(WorkspaceFixture):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(self.events.read_text().splitlines(), ["environment", *expected])
 
-    def test_recreate_requires_both_explicit_confirmations(self):
-        for confirmations in ((False, False), (True, False), (False, True)):
-            with self.subTest(confirmations=confirmations):
-                self.events.unlink(missing_ok=True)
-                result = self.execute_database("recreate", confirmations=confirmations)
-                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertEqual(self.events.read_text().splitlines(), ["environment"])
+    def test_recreate_dispatch_is_the_explicit_destructive_operation(self):
         self.events.unlink(missing_ok=True)
-        result = self.execute_database("recreate", confirmations=(True, True))
+        result = self.execute_database("recreate")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("migration:nuke --yes", self.events.read_text().splitlines())
+        self.assertEqual(
+            self.events.read_text().splitlines(),
+            [
+                "environment",
+                "migration:nuke --yes",
+                "migration:up",
+                "pipeline:sync-extension tune-pg tune-laplace perfcache-guc api-env",
+                "health:fixture_database",
+            ],
+        )
 
     def test_database_failure_stops_later_work(self):
         self.env["TEST_FAIL_EVENT"] = "migration:up"
