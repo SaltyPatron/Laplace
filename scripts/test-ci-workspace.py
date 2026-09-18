@@ -48,6 +48,10 @@ class WorkspaceFixture(unittest.TestCase):
         self.git(None, "init", "--bare", str(self.origin))
         self.git(None, "init", str(self.seed))
         (self.seed / "scripts").mkdir()
+        shutil.copyfile(
+            ROOT / "scripts" / "ci-product-freshness.py",
+            self.seed / "scripts" / "ci-product-freshness.py",
+        )
         (self.seed / ".gitignore").write_text("build/\n", encoding="utf-8")
         (self.seed / "source.txt").write_text("old\n", encoding="utf-8")
         (self.seed / "scripts/ci-environment.sh").write_text(
@@ -188,13 +192,17 @@ class WorkspaceReservation(WorkspaceFixture):
         self.assertEqual(self.marker.read_text(), "existing qualified build\n")
         self.assertFalse(self.events.exists())
 
-    def test_tree_equivalent_main_advance_does_not_supersede_candidate(self):
-        self.git(self.seed, "commit", "--allow-empty", "-m", "tree-neutral successor")
+    def test_product_ignored_main_advance_does_not_supersede_candidate(self):
+        policy = self.seed / ".github" / "workflows"
+        policy.mkdir(parents=True)
+        (policy / "policy.yml").write_text("name: Policy only\n", encoding="utf-8")
+        self.git(self.seed, "add", ".github/workflows/policy.yml")
+        self.git(self.seed, "commit", "-m", "policy-only successor")
         self.git(self.seed, "push", "origin", "HEAD:refs/heads/main")
 
         result = self.execute("mainline")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("tree-equivalent", result.stdout)
+        self.assertIn("product-equivalent", result.stdout)
         self.assertNotIn("no product stage executed", result.stdout)
         self.assertEqual(self.git(self.candidate(), "rev-parse", "HEAD").strip(), self.target)
         self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])

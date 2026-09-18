@@ -112,22 +112,11 @@ jobs:
               GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
               GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
               git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"
-            target_tree="$(git -C "$probe_repo" rev-parse "$TARGET_SHA^{tree}")"
-            latest_tree="$(git -C "$probe_repo" rev-parse "$latest_main^{tree}")"
-
-            product_delta=()
-            while IFS= read -r changed_path; do
-              [[ -n "$changed_path" ]] || continue
-              case "$changed_path" in
-                docs/*|.github/*|*.md|scripts/api-diagnostics.py|web/scripts/capture-ui-diagnostics.mjs)
-                  ;;
-                *)
-                  product_delta+=("$changed_path")
-                  ;;
-              esac
-            done < <(git -C "$probe_repo" diff --name-only "$TARGET_SHA" "$latest_main")
-
-            if [[ "$latest_tree" != "$target_tree" && ${#product_delta[@]} -gt 0 ]]; then
+            freshness_tool="$probe_repo/ci-product-freshness.py"
+            git -C "$probe_repo" show "$TARGET_SHA:scripts/ci-product-freshness.py" > "$freshness_tool"
+            freshness_rc=0
+            python3 "$freshness_tool" --root "$probe_repo" --base "$TARGET_SHA" --head "$latest_main" || freshness_rc=$?
+            if (( freshness_rc == 3 )); then
               echo "execute=false" >> "$GITHUB_OUTPUT"
               echo "::notice::selected revision $TARGET_SHA is superseded by product-changing main $latest_main; self-hosted product work was not scheduled"
               {
@@ -135,21 +124,20 @@ jobs:
                 echo
                 echo "- Selected: $TARGET_SHA"
                 echo "- Current main: $latest_main"
-                echo "- Product-changing paths:"
-                printf '  - `%s`\n' "${product_delta[@]}"
-                echo "- Result: no self-hosted product work scheduled"
+                echo "- Result: product-relevant content changed; no self-hosted product work scheduled"
               } >> "$GITHUB_STEP_SUMMARY"
-            elif [[ "$latest_tree" != "$target_tree" ]]; then
-              echo "::notice::main advanced from $TARGET_SHA only through product-ignored paths; candidate remains valid"
+            elif (( freshness_rc == 0 )); then
+              echo "::notice::main advanced from $TARGET_SHA to product-equivalent $latest_main; candidate remains valid"
               {
                 echo "## Product-equivalent successor"
                 echo
                 echo "- Selected: $TARGET_SHA"
                 echo "- Current main: $latest_main"
-                echo "- Result: later changes are product-ignored; candidate remains valid"
+                echo "- Result: only product-ignored content changed; candidate remains valid"
               } >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "::notice::main advanced from $TARGET_SHA to tree-equivalent $latest_main; candidate remains valid"
+              echo "::error::could not determine product freshness for $TARGET_SHA against $latest_main" >&2
+              exit "$freshness_rc"
             fi
             rm -rf "$probe_repo"
             trap - EXIT
@@ -239,29 +227,22 @@ jobs:
                 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
                 GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
                 git fetch --no-tags --depth=1 origin "$latest_main"
-              target_tree="$(git rev-parse "$TARGET_SHA^{tree}")"
-              latest_tree="$(git rev-parse "$latest_main^{tree}")"
-              product_delta=()
-              while IFS= read -r changed_path; do
-                [[ -n "$changed_path" ]] || continue
-                case "$changed_path" in
-                  docs/*|.github/*|*.md|scripts/api-diagnostics.py|web/scripts/capture-ui-diagnostics.mjs)
-                    ;;
-                  *)
-                    product_delta+=("$changed_path")
-                    ;;
-                esac
-              done < <(git diff --name-only "$TARGET_SHA" "$latest_main")
-              if [[ "$latest_tree" != "$target_tree" && ${#product_delta[@]} -gt 0 ]]; then
+              freshness_tool="$(mktemp "$work_root/product-freshness.XXXXXX.py")"
+              git show "$TARGET_SHA:scripts/ci-product-freshness.py" > "$freshness_tool"
+              freshness_rc=0
+              python3 "$freshness_tool" --root "$control_workspace" --base "$TARGET_SHA" --head "$latest_main" || freshness_rc=$?
+              rm -f "$freshness_tool"
+              if (( freshness_rc == 3 )); then
                 unset checkout_auth CHECKOUT_TOKEN
                 echo "::notice::selected revision $TARGET_SHA is superseded by product-changing main $latest_main; no product stage executed"
                 exit 0
               fi
-              if [[ "$latest_tree" != "$target_tree" ]]; then
-                echo "::notice::main advanced from $TARGET_SHA only through product-ignored paths; continuing exact candidate"
-              else
-                echo "::notice::main advanced from $TARGET_SHA to tree-equivalent $latest_main; continuing exact candidate"
+              if (( freshness_rc != 0 )); then
+                unset checkout_auth CHECKOUT_TOKEN
+                echo "::error::could not determine product freshness for $TARGET_SHA against $latest_main" >&2
+                exit "$freshness_rc"
               fi
+              echo "::notice::main advanced from $TARGET_SHA to product-equivalent $latest_main; continuing exact candidate"
             fi
           fi
 
