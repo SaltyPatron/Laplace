@@ -202,6 +202,9 @@ internal sealed class ExploreDecomposeService
             RootIdHex: Convert.ToHexStringLower(root.Id.ToBytes()),
             NaturalUnitOrdinal: naturalUnit,
             AtomWindow: UnicodeSeed.CodepointCount,
+            PerfcacheReceiptHex: CodepointPerfcache.ReceiptHex,
+            DatabasePerfcacheReceiptHex: null,
+            PerfcacheAligned: null,
             Nodes: rows);
     }
 
