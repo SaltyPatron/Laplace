@@ -316,6 +316,46 @@ A transformer's dense `QK^T` synthesizes relevance from learned latent state eac
 
 That is not “nearest neighbor instead of AI.” It is a different implementation of addressing, relevance, evidence aggregation, memory and continuation.
 
+### Persistent memory, processing layers and context
+
+In a conventional autoregressive transformer, the KV cache is a per-attention-layer
+cache of key/value tensors for previously processed token positions. Laplace uses that
+only as a functional comparison. Its durable memory is not a literal KV tensor cache
+and is not a transient query-owned DAG.
+
+The durable memory is the shared substrate: canonical content/entity identities and
+their recursive composition DAG, exact occurrences and trajectories, typed
+attestations/witnesses, consensus standing and uncertainty, physicalities and
+coordinates, indexed locality such as Hilbert keys, source/context/time provenance,
+session trajectory, and admitted calculated state/receipts. A forward operation may
+hold a bounded frontier/residual/working projection in memory, but that working set
+references shared identities and typed routes. It cannot become a second semantic
+authority and it cannot silently replace durable state with private session state.
+
+Laplace therefore has no architectural fixed **token context window**. Every concrete
+operation is finite and resource-bounded by its declared execution envelope — hops,
+fanout/frontier width, provider/operator scope, candidate work, memory, I/O,
+concurrency, trajectory expansion and realization/output. Those limits bound the work
+performed by one operation; they do not make otherwise addressable substrate state
+disappear because it is older than N tokens.
+
+“Layer” is likewise a functional analogy, not a hard-coded schema or one mandatory
+serial list. A Laplace processing layer/round is a routed execution and fold over the
+typed planes/operators enabled for that operation. Attestation, witnessing,
+physicality, coordinates, Hilbert locality, containment/trajectory, centroid or
+Fréchet geometry, standing/uncertainty, source/context, domain calculators and future
+lawful operators may participate as independent typed channels. The operation ISA and
+registries are extensible; a new operator must declare its inputs, outputs,
+provenance/determinism rules, execution grain and receipt semantics rather than being
+smuggled into a generic score.
+
+Target-model export is a projection/compilation from this architecture-neutral
+substrate, not the semantic authority. A recipe/template may query the same typed
+planes and materialize the tensor roles and package required by a target architecture
+or format. Supporting a new architecture still requires an explicit mapping/template,
+writer and validation contract; architecture-neutral source data does not imply that
+every external model format is automatically supported without that work.
+
 ---
 
 ## 9. Sparse forward execution: hops and fanout
