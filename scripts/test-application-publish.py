@@ -64,6 +64,14 @@ def prepare_revision_fixture(root):
     return revision
 
 
+class WebRevisionReceiptContract(unittest.TestCase):
+    def test_deploy_stamps_new_web_bytes_but_preserves_installed_web_receipt(self):
+        source = (ROOT / "deploy/linux/deploy.sh").read_text(encoding="utf-8")
+        self.assertGreaterEqual(source.count('.laplace-web-source-revision'), 2)
+        self.assertIn('git -C "$REPO_ROOT" rev-parse HEAD > "$STAGE/wwwroot/.laplace-web-source-revision"', source)
+        self.assertIn('cp -r "$APP_DIR/wwwroot/." "$STAGE/wwwroot/"', source)
+
+
 class ApplicationTransactionTests(unittest.TestCase):
     """Exercise current direct deployment; no removed session/stamp owner."""
     def setUp(self):
