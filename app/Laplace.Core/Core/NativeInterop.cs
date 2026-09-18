@@ -136,10 +136,6 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "hilbert128_compare")]
     internal static partial int Hilbert128Compare(Hilbert128* a, Hilbert128* b);
 
-    [LibraryImport(Library, EntryPoint = "laplace_unicode_seed_compute", StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial int UnicodeSeedCompute(string ucdxmlPath, string ducetPath,
-                                                   CodepointRecord* outRecords, nuint outCapacity);
-
     [LibraryImport(Library, EntryPoint = "codepoint_table_load_perfcache", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int CodepointTableLoadPerfcache(string path);
 
