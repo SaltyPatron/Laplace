@@ -225,6 +225,10 @@ public sealed class ElectorArchitectureGateTests
             "Operational interpretation must consume the coupled substrate response after query creation.");
         Assert.Matches(@"walk_continuations\(\s*walk_call,\s*input,\s*hops,\s*trace,\s*NULL,\s*invocation_context,\s*discourse\s*\)", native);
         Assert.Contains("laplace_prompt_intent_bind_discourse(&coupled_intent, discourse)", native);
+        Assert.Contains("context_array, frontier_array, discourse, walk_context", native);
+        Assert.Contains("roles[used++] = LAPLACE_QUERY_OPERAND_DISCOURSE;", native);
+        Assert.Contains("p_prior_frontier is the historical public parameter name", sql);
+        Assert.DoesNotContain("prompt_frontier_add(&frontier, &id);\n    }\n\n    if (!PG_ARGISNULL(8))", native);
         Assert.Contains("return forward_prompt(fcinfo, false);", native);
         Assert.Contains("return forward_prompt(fcinfo, true);", native);
         Assert.Contains("laplace_trajectory_scope_bind_input(trajectory_scope, input)", native);
