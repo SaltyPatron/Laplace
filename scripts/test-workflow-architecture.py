@@ -13,7 +13,7 @@ class MainPushQueueContract(unittest.TestCase):
     def test_main_push_cancels_obsolete_qualification_instead_of_queueing_delivery(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("concurrency:", text)
-        self.assertIn("laplace-main-qualification", text)
+        self.assertIn("laplace-main-product-lifecycle", text)
         self.assertIn("cancel-in-progress: ${{ github.event_name == 'push' }}", text)
         self.assertNotIn("laplace-main-product-lifecycle", text)
 

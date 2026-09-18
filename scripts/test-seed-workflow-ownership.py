@@ -42,7 +42,7 @@ class WorkflowOwnership(unittest.TestCase):
         self.assertNotIn("stage: release-candidate", mainline)
         self.assertNotIn("stage: release-activation", mainline)
         self.assertEqual(1, mainline.count("skip_if_superseded: true"))
-        self.assertIn("laplace-main-qualification", text)
+        self.assertIn("laplace-main-product-lifecycle", text)
         self.assertIn("cancel-in-progress: ${{ github.event_name == 'push' }}", text)
 
     def test_expensive_competitive_proof_is_dispatch_only(self):
