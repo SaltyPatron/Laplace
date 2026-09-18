@@ -149,6 +149,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "codepoint_table_is_loaded")]
     internal static partial int CodepointTableIsLoaded();
 
+    [LibraryImport(Library, EntryPoint = "codepoint_table_copy_receipt")]
+    internal static partial int CodepointTableCopyReceipt(Hash128* outReceipt);
+
     // GH #822 — chess position floor (native only; peer of codepoint_table_load_perfcache).
     [LibraryImport(Library, EntryPoint = "chess_position_table_load", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int ChessPositionTableLoad(string path);
