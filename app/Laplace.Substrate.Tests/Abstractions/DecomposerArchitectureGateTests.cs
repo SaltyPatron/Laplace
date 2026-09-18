@@ -917,6 +917,47 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     [Fact]
+    public void UnicodeArtifacts_UseSharedBoundedFileWorkers()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var unicode = File.ReadAllText(Path.Combine(
+            repoRoot, "app", "Laplace.Decomposers", "Unicode", "UnicodeDecomposer.cs"));
+        var artifactBase = File.ReadAllText(Path.Combine(
+            repoRoot, "app", "Laplace.Substrate", "Abstractions",
+            "ArtifactDecomposerMultiPhase.cs"));
+
+        Assert.Contains("RunArtifactPhasesAsync(", unicode, StringComparison.Ordinal);
+        Assert.DoesNotContain("foreach (ArtifactJob job in jobs)", unicode, StringComparison.Ordinal);
+        Assert.Contains("ParallelIngestWork.RunAsync(", artifactBase, StringComparison.Ordinal);
+        Assert.Contains("IngestTopology.Current.FileWorkers", artifactBase, StringComparison.Ordinal);
+        Assert.Contains("options.MaxInputUnits > 0", artifactBase, StringComparison.Ordinal);
+        Assert.Contains("? 1", artifactBase, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnicodeAuthority_UsesCompleteFlatXml()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        string[] activePaths =
+        [
+            Path.Combine("engine", "CMakeLists.txt"),
+            Path.Combine("engine", "core", "CMakeLists.txt"),
+            Path.Combine("scripts", "pipeline.sh"),
+            Path.Combine("scripts", "ci-deps.sh"),
+            Path.Combine("scripts", "win", "build-engine.cmd"),
+            Path.Combine("scripts", "win", "build-engine-asan.cmd"),
+            Path.Combine("app", "Laplace.Decomposers", "Unicode", "UnicodeDecomposer.cs"),
+        ];
+
+        foreach (string relative in activePaths)
+        {
+            string text = File.ReadAllText(Path.Combine(repoRoot, relative));
+            Assert.Contains("ucd.all.flat", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("ucd.nounihan.flat", text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void HandlerHotPaths_DoNotResolveFromContainer()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
