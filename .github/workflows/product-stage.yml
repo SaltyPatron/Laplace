@@ -43,6 +43,11 @@ on:
         type: string
         required: false
         default: all
+      managed_test_filter:
+        description: "optional VSTest filter for exact test-only class qualification"
+        type: string
+        required: false
+        default: ""
       managed_db_test_projects:
         description: "comma-separated DB-tier managed test csproj paths"
         type: string
@@ -189,6 +194,7 @@ jobs:
       LAPLACE_BUILD_COMPONENTS: ${{ inputs.build_components }}
       LAPLACE_MANAGED_BUILD_PROJECTS: ${{ inputs.managed_build_projects }}
       LAPLACE_MANAGED_TEST_PROJECTS: ${{ inputs.managed_test_projects }}
+      LAPLACE_MANAGED_TEST_FILTER: ${{ inputs.managed_test_filter }}
       LAPLACE_MANAGED_DB_TEST_PROJECTS: ${{ inputs.managed_db_test_projects }}
       LAPLACE_MANAGED_LIVE_TEST_PROJECTS: ${{ inputs.managed_live_test_projects }}
       LAPLACE_DB_SUITES: ${{ inputs.db_suites }}
