@@ -335,3 +335,81 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
     }
     return 0;
 }
+
+struct laplace_unicode_seed_snapshot {
+    std::vector<laplace_perfcache_record_t> records;
+};
+
+extern "C" int laplace_unicode_seed_snapshot_open(
+    const char* ucdxml_path,
+    const char* ducet_path,
+    laplace_unicode_seed_snapshot_t** out_snapshot) {
+    if (!ucdxml_path || !ducet_path || !out_snapshot) return -1;
+    *out_snapshot = nullptr;
+
+    auto* snapshot = new (std::nothrow) laplace_unicode_seed_snapshot_t();
+    if (!snapshot) return -4;
+    try {
+        snapshot->records.resize(CP_COUNT);
+    } catch (...) {
+        delete snapshot;
+        return -4;
+    }
+
+    int rc = laplace_unicode_seed_compute(
+        ucdxml_path, ducet_path, snapshot->records.data(), snapshot->records.size());
+    if (rc != 0) {
+        delete snapshot;
+        return rc;
+    }
+    *out_snapshot = snapshot;
+    return 0;
+}
+
+extern "C" void laplace_unicode_seed_snapshot_free(
+    laplace_unicode_seed_snapshot_t* snapshot) {
+    delete snapshot;
+}
+
+extern "C" size_t laplace_unicode_seed_snapshot_count(
+    const laplace_unicode_seed_snapshot_t* snapshot) {
+    return snapshot ? snapshot->records.size() : 0u;
+}
+
+extern "C" int laplace_unicode_seed_snapshot_stage(
+    const laplace_unicode_seed_snapshot_t* snapshot,
+    size_t first,
+    size_t count,
+    intent_stage_t* stage,
+    const hash128_t* source_id) {
+    if (!snapshot || !stage || !source_id) return -1;
+    if (first > snapshot->records.size()
+        || count > snapshot->records.size() - first) return -1;
+
+    const hash128_t codepoint_type = laplace_content_tier_type_id(0);
+    for (size_t i = 0; i < count; ++i) {
+        const laplace_perfcache_record_t& record = snapshot->records[first + i];
+        if (intent_stage_add_entity(
+                stage, &record.hash, 0, &codepoint_type, source_id) != 0)
+            return -2;
+
+        hash128_t physicality_id;
+        laplace_physicality_id_compute(record.hash, 1, &physicality_id);
+        if (intent_stage_add_physicality(
+                stage, &physicality_id, &record.hash, 1,
+                record.coord, &record.hilbert,
+                nullptr, 0, 0,
+                1, 0.0, 1, 0, 0) != 0)
+            return -2;
+    }
+    return 0;
+}
+
+extern "C" int laplace_unicode_seed_snapshot_copy_record(
+    const laplace_unicode_seed_snapshot_t* snapshot,
+    size_t index,
+    laplace_perfcache_record_t* out_record) {
+    if (!snapshot || !out_record || index >= snapshot->records.size()) return -1;
+    *out_record = snapshot->records[index];
+    return 0;
+}

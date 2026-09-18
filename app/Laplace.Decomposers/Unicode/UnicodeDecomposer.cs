@@ -9,11 +9,11 @@ namespace Laplace.Decomposers.Unicode;
 
 /// <summary>
 /// Unicode/UCD ingestion at physical-artifact grain. No source is preloaded during
-/// Initialize: every selected file is claimed exactly once by the shared multi-phase
-/// artifact executor and streamed through parse → compose → shared apply. The generated
-/// T0 perfcache is the sole runtime geometry/Hilbert authority; DUCET is the build-time
-/// ordering input for that ROM. UCD XML is independently parsed/validated; property tables
-/// own only the claims they physically state.
+/// Initialize. The Tier-0 floor is generated from the selected complete UCD XML + DUCET
+/// inputs by one native source snapshot and persisted through the ordinary working-set/COPY
+/// writer. Unicode admission never reads the installed T0 perfcache; that ROM is downstream
+/// derived acceleration state. After the floor barrier, independent property artifacts run
+/// through the shared bounded artifact executor.
 /// </summary>
 public sealed class UnicodeDecomposer
     : DecomposerMultiPhase<UnicodeSource, FullScope>, IIngestInventoryProvider, IIngestArtifactGraphProvider
@@ -69,9 +69,26 @@ public sealed class UnicodeDecomposer
     {
         int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Unicode, options);
         IReadOnlyList<ArtifactJob> jobs = ResolveArtifactJobs(context);
+        ArtifactJob[] xml = jobs.Where(static job => job.Kind == ArtifactKind.UcdXml).ToArray();
+        ArtifactJob[] ducet = jobs.Where(static job => job.Kind == ArtifactKind.Ducet).ToArray();
+        if (xml.Length != 1 || ducet.Length != 1)
+            throw new InvalidOperationException(
+                $"Unicode floor requires exactly one admitted complete UCD XML and one DUCET artifact; "
+                + $"selected xml={xml.Length}, ducet={ducet.Length}.");
 
+        // Real dependency barrier: the database floor must exist before any property/name/
+        // sequence witness can point at codepoint identities. The two physical authority
+        // artifacts are parsed once together by the native source snapshot; the installed
+        // runtime perfcache is not read anywhere on this path.
+        await foreach (SubstrateChange change in RunFloorAsync(
+                           xml[0], ducet[0], context, options, batch, ct).ConfigureAwait(false))
+            yield return change;
+
+        ArtifactJob[] independent = jobs
+            .Where(static job => job.Kind is not ArtifactKind.UcdXml and not ArtifactKind.Ducet)
+            .ToArray();
         await foreach (SubstrateChange change in RunArtifactPhasesAsync(
-                           jobs,
+                           independent,
                            context,
                            options,
                            job => BuildArtifactPhase(job, batch),
@@ -79,6 +96,88 @@ public sealed class UnicodeDecomposer
                            static job => job.Path,
                            ct).ConfigureAwait(false))
             yield return change;
+    }
+
+    private async IAsyncEnumerable<SubstrateChange> RunFloorAsync(
+        ArtifactJob xml,
+        ArtifactJob ducet,
+        IDecomposerContext context,
+        DecomposerOptions options,
+        int batch,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        string xmlLabel = ClaimArtifact(context, xml.Path, xml.Label);
+        string ducetLabel = ClaimArtifact(context, ducet.Path, ducet.Label);
+        Hash128? xmlRoot = IngestBatchPipeline.TryResolveFileIdentity(xml.Path);
+        Hash128? ducetRoot = IngestBatchPipeline.TryResolveFileIdentity(ducet.Path);
+        var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
+
+        bool xmlDone = xmlRoot is { } xr
+            && !options.ReObservePresent
+            && await context.Reader.HasFileCompletedAsync(
+                xr, Source, LayerOrder, ct).ConfigureAwait(false);
+        bool ducetDone = ducetRoot is { } dr
+            && !options.ReObservePresent
+            && await context.Reader.HasFileCompletedAsync(
+                dr, Source, LayerOrder, ct).ConfigureAwait(false);
+        if (xmlDone && ducetDone)
+        {
+            observability.OnFileComposed(SourceName, xmlLabel, resumeFingerprint: xmlRoot);
+            observability.OnFileComposed(SourceName, ducetLabel, resumeFingerprint: ducetRoot);
+            yield return IngestBatchPipeline.BuildSkippedBoundary(Source, xmlLabel);
+            yield return IngestBatchPipeline.BuildSkippedBoundary(Source, ducetLabel);
+            yield break;
+        }
+
+        observability.OnFileStarted(SourceName, xmlLabel, IngestBatchPipeline.TryFileBytes(xml.Path));
+        observability.OnFileStarted(SourceName, ducetLabel, IngestBatchPipeline.TryFileBytes(ducet.Path));
+
+        long records = 0, entities = 0, physicalities = 0, attestations = 0;
+        var phase = new UnicodeFloorPhase(xml.Path, ducet.Path, batch);
+        await foreach (SubstrateChange change in base.RunPhaseAsync(
+                           phase, context, options, ct).ConfigureAwait(false))
+        {
+            records += change.Metadata.InputUnitsConsumed;
+            entities += change.Entities.Length;
+            physicalities += change.Physicalities.Length;
+            attestations += change.Attestations.Length;
+            if (!change.IntentStages.IsDefaultOrEmpty)
+                foreach (IntentStage stage in change.IntentStages)
+                {
+                    if (stage.IsInvalid) continue;
+                    entities += stage.EntityCount;
+                    physicalities += stage.PhysicalityCount;
+                    attestations += stage.AttestationCount;
+                }
+            yield return change;
+        }
+
+        observability.OnFileComposed(
+            SourceName, xmlLabel, null, records, entities, physicalities, attestations,
+            resumeFingerprint: xmlRoot);
+        observability.OnFileComposed(
+            SourceName, ducetLabel, null, 0, 0, 0, 0,
+            resumeFingerprint: ducetRoot);
+
+        if (options.MaxInputUnits > 0)
+        {
+            yield return IngestBatchPipeline.BuildCancelledBoundary(Source, xmlLabel);
+            yield return IngestBatchPipeline.BuildCancelledBoundary(Source, ducetLabel);
+            yield break;
+        }
+
+        var names = new HashSet<string>(CanonicalNamesForReadback, StringComparer.Ordinal)
+        {
+            $"substrate/source/{SourceName}/v1",
+        };
+        yield return xmlRoot is { } completedXml
+            ? IngestBatchPipeline.BuildFileCompletion(
+                Source, xmlLabel, completedXml, LayerOrder, names)
+            : IngestBatchPipeline.BuildPeriodBoundary(Source, xmlLabel);
+        yield return ducetRoot is { } completedDucet
+            ? IngestBatchPipeline.BuildFileCompletion(
+                Source, ducetLabel, completedDucet, LayerOrder, names)
+            : IngestBatchPipeline.BuildPeriodBoundary(Source, ducetLabel);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
@@ -93,7 +192,8 @@ public sealed class UnicodeDecomposer
         // one claimed open. DUCET has an exact semantic denominator by contract; the
         // remaining source-row denominator is raised truthfully from observed parser units
         // as those files execute.
-        long declared = jobs.Any(static job => job.Kind == ArtifactKind.Ducet)
+        long declared = jobs.Any(static job => job.Kind == ArtifactKind.UcdXml)
+            && jobs.Any(static job => job.Kind == ArtifactKind.Ducet)
             ? UnicodeSeed.CodepointCount
             : 0L;
         if (options.MaxInputUnits > 0) declared = Math.Min(declared, options.MaxInputUnits);
@@ -101,7 +201,7 @@ public sealed class UnicodeDecomposer
         var files = jobs.Select(job => new IngestFileSpec(
             job.Label,
             job.Path,
-            job.Kind == ArtifactKind.Ducet ? UnicodeSeed.CodepointCount : 0L)).ToArray();
+            job.Kind == ArtifactKind.UcdXml ? UnicodeSeed.CodepointCount : 0L)).ToArray();
         return Task.FromResult<IngestInventory?>(
             new IngestInventory("source-rows", declared, files, TracksFileCompletion: true));
     }
@@ -352,8 +452,8 @@ public sealed class UnicodeDecomposer
     private IDecomposer BuildArtifactPhase(ArtifactJob job, int batch) =>
         job.Kind switch
         {
-            ArtifactKind.Ducet => new DucetTier0Phase(job.Path, batch),
-            ArtifactKind.UcdXml => new UcdXmlValidationPhase(job.Path, batch),
+            ArtifactKind.Ducet or ArtifactKind.UcdXml => throw new InvalidOperationException(
+                "Unicode floor authority artifacts execute together before independent property phases."),
             ArtifactKind.UnicodeData => new UnicodeDataPhase(this, job.Path, batch),
             ArtifactKind.Scripts => new RangePropertyPhase(
                 this, job.Path, "scripts", UcdProperties.RelTypeHasScript,
@@ -928,71 +1028,65 @@ public sealed class UnicodeDecomposer
                 options);
     }
 
-    private sealed class DucetTier0Phase : UnicodeComposePhase<int>
+    private readonly record struct UnicodeSeedRange(int First, int Count);
+
+    private sealed class UnicodeFloorPhase : UnicodeComposePhase<UnicodeSeedRange>
     {
-        private readonly string _path;
+        private readonly string _ucdxmlPath;
+        private readonly string _ducetPath;
+        private readonly int _rangeSize;
+        private UnicodeSeedSnapshot? _snapshot;
 
-        public DucetTier0Phase(string path, int batch)
-            : base(batch, attestationCapacity: 0) => _path = path;
-
-        protected override string PhaseLabel => "uca/allkeys";
-
-        protected override void Compose(int cp, SubstrateChangeBuilder builder)
+        public UnicodeFloorPhase(string ucdxmlPath, string ducetPath, int rangeSize)
+            : base(Math.Max(1, rangeSize), attestationCapacity: 0)
         {
-            ReadOnlySpan<CodepointRecord> records = CodepointPerfcache.Records;
-            ref readonly CodepointRecord record = ref records[cp];
-            Hash128 entityId = record.Hash;
-            builder.AddEntity(entityId, tier: 0, CodepointType, firstObservedBy: Source);
-            Hash128 physicalityId = PhysicalityId.Compute(entityId, PhysicalityType.Content);
-            builder.AddPhysicality(new PhysicalityRow(
-                Id: physicalityId,
-                EntityId: entityId,
-                SourceId: Source,
-                Type: PhysicalityType.Content,
-                CoordX: record.CoordX,
-                CoordY: record.CoordY,
-                CoordZ: record.CoordZ,
-                CoordM: record.CoordM,
-                HilbertIndex: record.Hilbert,
-                TrajectoryXyzm: null,
-                NConstituents: 0,
-                AlignmentResidual: null,
-                SourceDim: null,
-                ObservedAtUnixUs: 0));
-
-            if (cp == 0) EmitByteCatalog(builder);
-            if (cp >= ByteAtoms.First && cp <= byte.MaxValue)
-                EmitByte(builder, (byte)cp);
+            _ucdxmlPath = ucdxmlPath;
+            _ducetPath = ducetPath;
+            _rangeSize = Math.Max(1, rangeSize);
         }
 
-        protected override async IAsyncEnumerable<int> ExtractRecordsAsync(
+        protected override string PhaseLabel => "unicode-floor";
+
+        protected override long UnitsPerRecord(UnicodeSeedRange range) => range.Count;
+
+        protected override void Compose(UnicodeSeedRange range, SubstrateChangeBuilder builder)
+        {
+            UnicodeSeedSnapshot snapshot = _snapshot
+                ?? throw new InvalidOperationException("Unicode source snapshot was not initialized.");
+            snapshot.StageRange(builder.ContentStage, range.First, range.Count, Source);
+
+            int end = checked(range.First + range.Count);
+            if (range.First == 0) EmitByteCatalog(builder);
+            int byteFirst = Math.Max(range.First, ByteAtoms.First);
+            int byteEnd = Math.Min(end, byte.MaxValue + 1);
+            for (int cp = byteFirst; cp < byteEnd; ++cp)
+                EmitByte(builder, checked((byte)cp));
+        }
+
+        protected override async IAsyncEnumerable<UnicodeSeedRange> ExtractRecordsAsync(
             string ecosystemPath,
             DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct)
         {
-            // The generated mmap is the single Tier-0 geometry authority.
-            // allkeys.txt remains the declared physical source input, but ingest must
-            // never independently recompute coordinates/Hilbert and create a second
-            // placement law beside the installed perfcache.
-            if (!File.Exists(_path))
-                throw new FileNotFoundException("DUCET source is required for Unicode floor provenance.", _path);
-            await using (FileStream source = File.OpenRead(_path))
-            {
-                if (!source.CanRead)
-                    throw new IOException($"DUCET source is not readable: {_path}");
-            }
-
-            CodepointPerfcache.LoadDefault();
-            if (CodepointPerfcache.Count != UnicodeSeed.CodepointCount)
-                throw new InvalidOperationException(
-                    $"Tier-0 perfcache has {CodepointPerfcache.Count} records; expected {UnicodeSeed.CodepointCount}.");
-
-            await Task.CompletedTask;
-            for (int cp = 0; cp < CodepointPerfcache.Count; ++cp)
+            _snapshot ??= UnicodeSeed.OpenSnapshot(_ucdxmlPath, _ducetPath);
+            int remaining = options.MaxInputUnits > 0
+                ? checked((int)Math.Min(options.MaxInputUnits, _snapshot.Count))
+                : _snapshot.Count;
+            for (int first = 0; first < remaining;)
             {
                 ct.ThrowIfCancellationRequested();
-                yield return cp;
+                int count = Math.Min(_rangeSize, remaining - first);
+                yield return new UnicodeSeedRange(first, count);
+                first += count;
+                await Task.Yield();
             }
+        }
+
+        public override ValueTask DisposeAsync()
+        {
+            _snapshot?.Dispose();
+            _snapshot = null;
+            return ValueTask.CompletedTask;
         }
 
         private static void EmitByteCatalog(SubstrateChangeBuilder builder)
@@ -1049,28 +1143,6 @@ public sealed class UnicodeDecomposer
                 builder.AddAttestation(NativeAttestation.Categorical(
                     byteId, "DECODES_TO", CodepointId(cp1252Target), Source,
                     TC.StandardsDerived, contextId: cp1252));
-        }
-    }
-
-    private sealed class UcdXmlValidationPhase : UnicodeComposePhase<int>
-    {
-        private readonly string _path;
-
-        public UcdXmlValidationPhase(string path, int batch)
-            : base(batch, attestationCapacity: 0) => _path = path;
-
-        protected override string PhaseLabel => "ucdxml";
-        protected override void Compose(int record, SubstrateChangeBuilder builder) { }
-
-        protected override async IAsyncEnumerable<int> ExtractRecordsAsync(
-            string ecosystemPath,
-            DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            ct.ThrowIfCancellationRequested();
-            UnicodeSeed.ValidateUcdXml(_path);
-            await Task.CompletedTask;
-            yield return 0;
         }
     }
 
