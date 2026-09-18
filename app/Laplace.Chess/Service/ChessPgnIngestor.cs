@@ -58,7 +58,9 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     private readonly NpgsqlSubstrateReader _reader;
     private readonly bool _ownsResources;
 
-    public readonly record struct Result(int Parsed, int Novel, int Applied);
+    public readonly record struct Result(
+        int Parsed, int Novel, int Applied,
+        int Repaired = 0, int Verified = 0, long VerifiedPlies = 0);
     public readonly record struct ProfileResult(int Profiles, int Players, int Links);
 
     private ChessPgnIngestor(
@@ -188,7 +190,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             {
                 using var sourcePhase = measurement?.MeasurePhase(
                     ChessRecordingMeasurement.WorkPhase.SourceReadParseAndValidation);
-                int parsed = 0, novel = 0, applied = 0, repaired = 0;
+                int parsed = 0, novel = 0, applied = 0, repaired = 0, verified = 0;
+                long verifiedPlies = 0;
                 int parseWindow = measurement?.NextReplayChunkGames ?? ChunkSize;
                 var chunk = new List<ChessGameRecord>(Math.Max(1, parseWindow));
 
@@ -221,6 +224,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     if (requireCompleteSource && measurement is null)
                     {
                         await VerifyPersistedCompleteGamesAsync(chunk, ct);
+                        verified += chunk.Count;
+                        verifiedPlies += chunk.Sum(static game => (long)game.MoveIds.Length);
                         log?.Invoke($"verified persisted witness + typed move trajectory for {chunk.Count} provider games");
                     }
                     chunk.Clear();
@@ -234,6 +239,8 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     if (requireCompleteSource && measurement is null)
                     {
                         await VerifyPersistedCompleteGamesAsync(chunk, ct);
+                        verified += chunk.Count;
+                        verifiedPlies += chunk.Sum(static game => (long)game.MoveIds.Length);
                         log?.Invoke($"verified persisted witness + typed move trajectory for {chunk.Count} provider games");
                     }
                 }
@@ -242,8 +249,11 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                             + (parsed > novel ? $" ({parsed - novel} already present)" : "")
                             + (repaired > 0
                                 ? $"; repaired current testimony across {repaired} already-recorded games"
+                                : "")
+                            + (verified > 0
+                                ? $"; exact persisted readback verified {verified} games / {verifiedPlies} plies"
                                 : ""));
-                var result = new Result(parsed, novel, applied);
+                var result = new Result(parsed, novel, applied, repaired, verified, verifiedPlies);
                 measurement?.ObserveResult(result);
                 return result;
             }
