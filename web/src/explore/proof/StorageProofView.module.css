@@ -168,6 +168,52 @@
     white-space: nowrap;
   }
 
+  .lawGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .lawCard {
+    min-width: 0;
+    padding: var(--space-4);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-elevated);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .lawCard strong {
+    font-size: 0.96rem;
+    line-height: 1.3;
+  }
+
+  .lawCard p {
+    margin: 0;
+    color: var(--color-text-muted);
+    line-height: 1.48;
+    font-size: var(--text-sm);
+  }
+
+  .lawCard code {
+    display: block;
+    overflow-wrap: anywhere;
+    padding: 0.38rem 0.48rem;
+    border-left: 2px solid color-mix(in srgb, var(--color-signal) 55%, var(--color-border-default));
+    background: color-mix(in srgb, var(--color-signal) 5%, var(--color-bg-panel));
+    font-size: 0.76rem;
+  }
+
+  .lawStep {
+    color: var(--color-signal);
+    font-size: 0.72rem;
+    font-weight: 750;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
   .proofGrid {
     display: grid;
     grid-template-columns: minmax(22rem, 0.95fr) minmax(26rem, 1.25fr);
@@ -558,6 +604,10 @@
     grid-template-columns: 1fr;
   }
 
+  .lawGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .summaryStrip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -576,6 +626,10 @@
   .carrierSummary,
   .metrics,
   .addressGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .lawGrid {
     grid-template-columns: 1fr;
   }
 
