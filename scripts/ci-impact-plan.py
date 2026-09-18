@@ -222,6 +222,8 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             full(path)
 
     managed_impact = plan_managed_projects(root, managed_changed_paths)
+    if pure_uci and managed_impact["test_projects"]:
+        dev_suites.add("managed-dev")
 
     def managed_selection(
         selected: bool,
