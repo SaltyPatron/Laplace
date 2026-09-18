@@ -10,11 +10,12 @@
 
 /*
  * Keep the runtime load boundary pinned to the same Unicode release that owns
- * the shipped T0 artifact. The generator already writes this exact release into
- * laplace_perfcache_header_t::ucd_version; accepting a different header would
- * silently change segmentation and therefore content identity.
+ * the shipped T0 artifact. CMake supplies LAPLACE_EXPECTED_UCD_VERSION from the
+ * single LAPLACE_UNICODE_VERSION authority used by the generator/install path.
  */
-#define LAPLACE_EXPECTED_UCD_VERSION "17.0.0"
+#ifndef LAPLACE_EXPECTED_UCD_VERSION
+#error "LAPLACE_EXPECTED_UCD_VERSION must come from the configured Unicode release"
+#endif
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
