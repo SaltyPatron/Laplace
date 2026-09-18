@@ -9,21 +9,9 @@ namespace Laplace.Endpoints.OpenAICompat;
 internal sealed partial class SubstrateClient
 {
 
-    public async Task<string?> PerfcacheReceiptHexAsync(CancellationToken ct)
-    {
-        try
-        {
-            await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            await using var cmd = new NpgsqlCommand(
-                "SELECT encode(laplace.perfcache_receipt(), 'hex')", conn);
-            var scalar = await cmd.ExecuteScalarAsync(ct);
-            return scalar is null or DBNull ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
-        }
-        catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
-        {
-            throw new SubstrateUnavailableException("T0 perfcache receipt query failed.", ex);
-        }
-    }
+    public Task<string?> PerfcacheReceiptHexAsync(CancellationToken ct) =>
+        NpgsqlSubstrateReads.PerfcacheReceiptHexAsync(
+            _dataSource, ct, TranslateReadError);
 
     private static readonly WitnessCatalog WitnessCatalog = WitnessCatalog.Load();
 
