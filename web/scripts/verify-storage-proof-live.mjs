@@ -39,6 +39,7 @@ page.on('pageerror', (error) => consoleErrors.push(error.message));
 const screenshot = resolve(outDir, 'storage-proof-live.png');
 try {
   await page.goto(`${uiBase}/proof?q=aa`, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+  await page.getByRole('link', { name: 'Proof', exact: true }).waitFor({ state: 'visible', timeout: 20_000 });
   await page.getByRole('heading', { name: 'Selected storage address' }).waitFor({ state: 'visible', timeout: 20_000 });
   await page.getByText('same exact T0 ROM').waitFor({ state: 'visible', timeout: 20_000 });
 
