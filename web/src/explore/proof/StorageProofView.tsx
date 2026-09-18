@@ -84,6 +84,7 @@ function nodeToGlomeNode(node: StorageProofNodeRow, selected: boolean): GlomeNod
     z: node.z,
     m: node.m,
     radius: node.radius,
+    ordinal: node.ordinal,
     kind: selected ? 'primary' : node.tier === 0 ? 'constituent' : 'walk',
   };
 }
@@ -782,7 +783,13 @@ export function StorageProofView() {
                 projection="placement"
                 highlightIds={selected ? [selected.id_hex] : []}
                 fill
-                note="Actual HashComposer coordinates. Tier-0 atoms are on S³; composed entities are bounded centroids inside the 4-D ball."
+                onSelectOrdinal={(ordinal) => {
+                  if (ordinal != null && byOrdinal.has(ordinal)) {
+                    setSelectedOrdinal(ordinal);
+                    setSelectedPacked(0);
+                  }
+                }}
+                note="Actual HashComposer coordinates. Click a point to inspect its exact address. Tier-0 atoms are on S³; composed entities are bounded centroids inside the 4-D ball."
               />
             </div>
           </section>
