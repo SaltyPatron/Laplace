@@ -169,6 +169,25 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertNotIn("run_build", delivery)
         self.assertNotIn("run_release_activation", delivery)
 
+    def test_spa_has_independent_revision_receipt_and_carry_forward(self):
+        web = function("carry_forward_installed_web_impact")
+        self.assertIn("wwwroot/.laplace-web-source-revision", web)
+        self.assertIn("ci-impact-plan.py", web)
+        self.assertIn("force_web_carry_forward_impact", web)
+
+        verify = function("verify_installed_web_receipt")
+        self.assertIn("wwwroot/.laplace-web-source-revision", verify)
+        self.assertIn("ci-impact-plan.py", verify)
+        self.assertIn("installed SPA revision", verify)
+
+        delivery = function("run_release_delivery")
+        self.assertIn("LAPLACE_REQUIRE_QUALIFIED_WEB", delivery)
+        self.assertIn("LAPLACE_REUSE_INSTALLED_WEB", delivery)
+
+        live = function("run_live_tests")
+        self.assertIn("LAPLACE_PUBLIC_UI_BASE", live)
+        self.assertIn("http://127.0.0.1:8080", live)
+
     def test_automatic_delivery_carries_impact_from_the_installed_revision(self):
         carry = function("carry_forward_undelivered_impact")
         self.assertIn(".laplace-source-revision", carry)
