@@ -1,7 +1,8 @@
 #pragma once
 
 #include <stddef.h>
-#include "laplace/core/perfcache_format.h"\n#include "laplace/core/intent_stage.h"
+#include "laplace/core/perfcache_format.h"
+#include "laplace/core/content_witness_batch.h"
 
 #ifdef __cplusplus
 extern "C" {
