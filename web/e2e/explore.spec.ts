@@ -262,7 +262,7 @@ test('Storage Proof selects the emitted root and renders its exact packed compos
   await page.goto('/proof?q=aa');
 
   await expect(page.getByRole('heading', { name: 'Selected storage address' })).toBeVisible();
-  await expect(page.getByTitle(rootId)).toBeVisible();
+  await expect(page.getByTitle(rootId).first()).toBeVisible();
   await expect(page.getByText('Select a node from the composition walk.')).toHaveCount(0);
   await expect(page.getByText('212-bit carrier projection')).toBeVisible();
   await expect(page.getByText('Realized constituent curve')).toBeVisible();
