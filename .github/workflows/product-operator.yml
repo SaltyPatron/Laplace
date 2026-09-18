@@ -1,25 +1,25 @@
-name: Product — manual operation
-run-name: "Product operation — ${{ inputs.operation }} @ ${{ github.sha }}"
+name: Product — maintenance
+run-name: "Product maintenance — ${{ inputs.operation }} @ ${{ github.sha }}"
 
 on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "Explicit maintenance operation; normal main delivery is automatic"
+        description: "Explicit installed-product operation; normal main delivery is automatic"
         type: choice
         required: true
         default: reconcile
-        options: [reconcile, build, test-dev, test-db, test-live, deploy, install, applications, provision, check]
+        options: [reconcile, deploy]
       full_clean:
-        description: "Build/deploy only: wipe build outputs before rebuilding"
+        description: "Deploy only: discard candidate build outputs before rebuilding"
         type: boolean
         default: false
       force_codegen:
-        description: "Build/deploy only: regenerate attestation-law source"
+        description: "Deploy only: regenerate attestation-law source before building"
         type: boolean
         default: false
       serial_tests:
-        description: "Test operations only: force serial native tests"
+        description: "Deploy only: force serial native tests"
         type: boolean
         default: false
 
