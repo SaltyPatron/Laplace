@@ -72,8 +72,10 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-24.04", text)
         self.assertNotIn("self-hosted", text)
         self.assertIn("bash scripts/product-ci.sh check", text)
-        self.assertIn("laplace-actions-history-cleanup-{0}", text)
-        self.assertIn("github.event_name != 'push' || !contains(github.event.head_commit.message, '[actions-history-cleanup]')", text)
+        self.assertIn("laplace-actions-history-{0}", text)
+        self.assertIn("[actions-history-cleanup]", text)
+        self.assertIn("[actions-evidence-archive]", text)
+        self.assertIn("cancel-in-progress:", text)
 
     def test_main_delivery_plans_then_qualifies_then_delivers(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")

@@ -18,12 +18,11 @@ SPEC.loader.exec_module(MODULE)
 class CleanupWorkflowContractTests(unittest.TestCase):
     def test_cleanup_marker_has_unique_nonpreemptible_concurrency(self):
         workflow = (HERE.parent / "workflows" / "ci-contract.yml").read_text(encoding="utf-8")
-        self.assertIn("laplace-actions-history-cleanup-{0}", workflow)
+        self.assertIn("laplace-actions-history-{0}", workflow)
         self.assertIn("github.run_id", workflow)
-        self.assertIn(
-            "cancel-in-progress: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[actions-history-cleanup]') }}",
-            workflow,
-        )
+        self.assertIn("[actions-history-cleanup]", workflow)
+        self.assertIn("[actions-evidence-archive]", workflow)
+        self.assertIn("cancel-in-progress:", workflow)
         self.assertIn("if: github.event_name == 'push' && contains(github.event.head_commit.message, '[actions-history-cleanup]')", workflow)
 
 

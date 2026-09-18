@@ -24,8 +24,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[actions-history-cleanup]') && format('laplace-actions-history-cleanup-{0}', github.run_id) || format('laplace-ci-contract-{0}', github.event.pull_request.number || github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[actions-history-cleanup]') }}
+  group: ${{ github.event_name == 'push' && (contains(github.event.head_commit.message, '[actions-history-cleanup]') || contains(github.event.head_commit.message, '[actions-evidence-archive]')) && format('laplace-actions-history-{0}', github.run_id) || format('laplace-ci-contract-{0}', github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'push' || (!contains(github.event.head_commit.message, '[actions-history-cleanup]') && !contains(github.event.head_commit.message, '[actions-evidence-archive]')) }}
 
 jobs:
   contract:
@@ -46,6 +46,10 @@ jobs:
       - name: Validate evidence-safe Actions history cleanup policy
         shell: bash
         run: python3 .github/scripts/test-actions-history-cleanup.py
+
+      - name: Validate historical Actions evidence archive policy
+        shell: bash
+        run: python3 .github/scripts/test-actions-evidence-archive.py
 
   cleanup-history:
     name: Remove artifact-free stale workflow identities
@@ -82,4 +86,44 @@ jobs:
           name: actions-history-cleanup-${{ github.run_id }}
           path: ${{ runner.temp }}/actions-history-cleanup.json
           if-no-files-found: error
+          retention-days: 90
+
+  archive-history:
+    name: Archive evidence-bearing stale workflow identities
+    needs: contract
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[actions-evidence-archive]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Check out archive policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Archive retained evidence before deleting stale workflow runs
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          command -v gh >/dev/null
+          command -v curl >/dev/null
+          python3 .github/scripts/archive-actions-evidence.py \
+            --release-tag actions-evidence-archive-2026-09-18 \
+            --report "$RUNNER_TEMP/actions-evidence-archive-report.json" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload archive transaction audit
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: actions-evidence-archive-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/actions-evidence-archive-report.json
+            ${{ runner.temp }}/actions-evidence-archive-index.json
+          if-no-files-found: warn
           retention-days: 90
