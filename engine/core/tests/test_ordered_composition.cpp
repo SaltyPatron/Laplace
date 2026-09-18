@@ -539,6 +539,7 @@ TEST(OrderedCompositionStage, ExactReplayRetainsRawRowsAndReusesDescriptorAndSou
     size_t attestation_bytes = 0;
     (void)intent_stage_tuple_ptr(generated.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &attestation_bytes);
     EXPECT_EQ(attestation_bytes, 0u);
+}
 
 TEST(OrderedCompositionStage, InvalidBatchDoesNotPartiallyStage) {
     laplace_ordered_component_t valid_children[] = {
