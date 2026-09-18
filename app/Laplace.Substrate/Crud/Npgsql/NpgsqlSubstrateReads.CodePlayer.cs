@@ -8,8 +8,11 @@ public static partial class NpgsqlSubstrateReads
 {
     // The code adapter does not own a reduced cognition path. The canonical native
     // forward program owns RESOLVE -> ... -> WITNESS over the shared substrate.
-    // prior_frontier contains only witnessed state from earlier failed candidates;
-    // model checkpoints, code corpora, or any other source family are optional
+    // The SQL ABI still calls the final array prior_frontier, but the native
+    // forward program assigns it the DISCOURSE operand role. These are ordered
+    // witnessed feedback roots from earlier attempts, not semantic-seed
+    // candidates and not a private replacement knowledge graph.
+    // Model checkpoints, code corpora, or any other source family are optional
     // testimony discovered by COUPLE/ROUTE, never prerequisites selected here.
     internal const string ForwardCodeSql = """
         SELECT g.step, g.entity, g.stride_used
