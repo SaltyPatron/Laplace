@@ -31,18 +31,11 @@ class MainPushQueueContract(unittest.TestCase):
         self.assertIn("group: laplace-main-delivery-dispatch", delivery)
         self.assertIn("cancel-in-progress: false", delivery)
 
-        # The called workflow keeps an independent inner guard. Distinct group
-        # names avoid self-deadlock while caller cancellation tears down the
-        # superseded reusable-workflow invocation before it owns the runner.
-        self.assertIn("laplace-main-product-qualification", reusable)
-        self.assertIn("laplace-main-test-qualification-{0}-{1}", reusable)
-        self.assertIn("inputs.dev_suites", reusable)
-        self.assertIn("inputs.managed_test_projects", reusable)
+        # Qualification cancellation has one owner: the scoped caller above.
+        # The reusable stage must not cross-cancel a different suite/project plan.
+        self.assertNotIn("laplace-main-qualification", reusable)
         self.assertIn("laplace-main-delivery", reusable)
-        self.assertIn(
-            "cancel-in-progress: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' }}",
-            reusable,
-        )
+        self.assertIn("cancel-in-progress: false", reusable)
 
 
 class WorkflowArchitecture(unittest.TestCase):
