@@ -100,7 +100,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("stage: release-qualification", lifecycle)
         self.assertIn("stage: release-delivery", lifecycle)
 
-    def test_superseded_push_is_rejected_only_when_source_tree_changes(self):
+    def test_superseded_push_is_rejected_only_when_product_relevant_content_changes(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         preflight = reusable.split("  preflight:\n", 1)[1].split("\n  stage:\n", 1)[0]
         stage = reusable.split("  stage:\n", 1)[1]
@@ -109,10 +109,10 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("git ls-remote --heads", preflight)
         self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$TARGET_SHA"', preflight)
         self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"', preflight)
-        self.assertIn('target_tree="$(git -C "$probe_repo" rev-parse "$TARGET_SHA^{tree}")"', preflight)
-        self.assertIn('latest_tree="$(git -C "$probe_repo" rev-parse "$latest_main^{tree}")"', preflight)
-        self.assertIn('[[ "$latest_tree" != "$target_tree" ]]', preflight)
-        self.assertIn("tree-equivalent", preflight)
+        self.assertIn('git -C "$probe_repo" show "$TARGET_SHA:scripts/ci-product-freshness.py"', preflight)
+        self.assertIn('python3 "$freshness_tool" --root "$probe_repo" --base "$TARGET_SHA" --head "$latest_main"', preflight)
+        self.assertIn("product-equivalent", preflight)
+        self.assertIn("product-relevant content changed", preflight)
         self.assertIn("execute=false", preflight)
         self.assertNotIn("runs-on: [self-hosted, laplace]", preflight)
         self.assertNotIn("host-resource.lock", preflight)
@@ -128,10 +128,10 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertLess(fetch, resolve)
         self.assertLess(resolve, tree_probe)
         self.assertLess(tree_probe, candidate_lock)
-        self.assertIn('target_tree="$(git rev-parse "$TARGET_SHA^{tree}")"', stage)
-        self.assertIn('latest_tree="$(git rev-parse "$latest_main^{tree}")"', stage)
-        self.assertIn('[[ "$latest_tree" != "$target_tree" ]]', stage)
-        self.assertIn("tree-equivalent", stage)
+        self.assertIn('git show "$TARGET_SHA:scripts/ci-product-freshness.py"', stage)
+        self.assertIn('python3 "$freshness_tool" --root "$control_workspace" --base "$TARGET_SHA" --head "$latest_main"', stage)
+        self.assertIn("product-equivalent", stage)
+        self.assertIn("product-changing main", stage)
         self.assertLess(candidate_lock, worktree)
         self.assertIn("product-worktrees", stage)
         self.assertIn("git-metadata.lock", stage)
