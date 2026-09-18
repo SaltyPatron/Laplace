@@ -101,7 +101,7 @@ uci_revision_install() {
     return 1
   fi
 
-  temporary="$APP_DIR/.laplace-source-revision.tmp.$"$
+  temporary="$APP_DIR/.laplace-source-revision.tmp.$"
   install -m 0644 "$state/next-revision" "$temporary"
   mv -f "$temporary" "$receipt"
   [[ "$(<"$receipt")" == "$(<"$state/next-revision")" ]] || {
@@ -128,7 +128,7 @@ uci_revision_restore() {
       echo "::error::application revision changed outside the UCI transaction" >&2
       return 1
     }
-    temporary="$APP_DIR/.laplace-source-revision.restore.$"$
+    temporary="$APP_DIR/.laplace-source-revision.restore.$"
     install -m 0644 "$state/previous-revision" "$temporary"
     mv -f "$temporary" "$receipt"
   elif [[ -f "$state/previous-revision-absent" ]]; then
