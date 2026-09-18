@@ -16,7 +16,9 @@ from ci_managed_projects import (
 
 DEV_SUITES = ("native-dev", "managed-dev", "uci-dev", "browser-dev")
 DB_SUITES = ("db-health", "native-db", "managed-db")
-LIVE_SUITES = ("live-floor", "live-api", "managed-live", "generation-eval")
+STANDARD_LIVE_SUITES = ("live-floor", "live-api", "managed-live", "generation-eval")
+CHESS_PROVIDER_LIVE_SUITE = "chess-provider-live"
+LIVE_SUITES = (*STANDARD_LIVE_SUITES, CHESS_PROVIDER_LIVE_SUITE)
 DELIVERY_ACTIONS = ("install", "database", "reconcile", "publish", "live")
 BASE_LIVE_SUITES = ("live-floor", "live-api")
 ALL_DEV_COMPONENTS = ("native", "managed", "uci", "web")
@@ -92,11 +94,11 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         build_components.update(("native", "managed", "web"))
         dev_suites.update(DEV_SUITES)
         db_suites.update(DB_SUITES)
-        live_suites.update(LIVE_SUITES)
+        live_suites.update(STANDARD_LIVE_SUITES)
         delivery_actions.update(DELIVERY_ACTIONS)
         invalidate(DEV_SUITES, path)
         invalidate(DB_SUITES, path)
-        invalidate(LIVE_SUITES, path)
+        invalidate(STANDARD_LIVE_SUITES, path)
 
     for path in paths:
         if product_ignored(path):
@@ -125,11 +127,11 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             build_components.update(("native", "managed"))
             dev_suites.update(("native-dev", "managed-dev", "uci-dev"))
             db_suites.update(DB_SUITES)
-            live_suites.update(LIVE_SUITES)
+            live_suites.update(STANDARD_LIVE_SUITES)
             delivery_actions.update(DELIVERY_ACTIONS)
             invalidate(("native-dev", "managed-dev", "uci-dev"), path)
             invalidate(DB_SUITES, path)
-            invalidate(LIVE_SUITES, path)
+            invalidate(STANDARD_LIVE_SUITES, path)
 
         if path.startswith("app/"):
             matched = True
@@ -159,10 +161,13 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             build_components.add("managed")
             if not isolated_uci:
                 dev_suites.add("managed-dev")
-                live_suites.update(LIVE_SUITES)
+                live_suites.update(STANDARD_LIVE_SUITES)
                 delivery_actions.update(("publish", "live"))
                 invalidate(("managed-dev",), path)
-                invalidate(LIVE_SUITES, path)
+                invalidate(STANDARD_LIVE_SUITES, path)
+                if path.startswith("app/Laplace.Chess/"):
+                    live_suites.add(CHESS_PROVIDER_LIVE_SUITE)
+                    invalidate((CHESS_PROVIDER_LIVE_SUITE,), path)
             else:
                 delivery_actions.add("publish")
 
@@ -218,10 +223,10 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             components.add("database")
             build_components.add("managed")
             db_suites.update(("db-health", "managed-db"))
-            live_suites.update(LIVE_SUITES)
+            live_suites.update(STANDARD_LIVE_SUITES)
             delivery_actions.update(("database", "reconcile", "publish", "live"))
             invalidate(("db-health", "managed-db"), path)
-            invalidate(LIVE_SUITES, path)
+            invalidate(STANDARD_LIVE_SUITES, path)
 
         if path.startswith("deploy/"):
             matched = product_change = True
@@ -230,9 +235,9 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             publish_scope = "full"
             components.add("deployment")
             build_components.add("managed")
-            live_suites.update(LIVE_SUITES)
+            live_suites.update(STANDARD_LIVE_SUITES)
             delivery_actions.update(("publish", "live"))
-            invalidate(LIVE_SUITES, path)
+            invalidate(STANDARD_LIVE_SUITES, path)
 
         if not matched:
             unknown.append(path)
@@ -337,13 +342,13 @@ def force_full_plan(plan: dict) -> None:
     plan["managed_live_test_projects"] = ["all"]
     plan["dev_suites"] = list(DEV_SUITES)
     plan["db_suites"] = list(DB_SUITES)
-    plan["live_suites"] = list(LIVE_SUITES)
+    plan["live_suites"] = list(STANDARD_LIVE_SUITES)
     plan["delivery_actions"] = list(DELIVERY_ACTIONS)
     plan["publish_scope"] = "full"
     plan["unknown_paths"] = ["<unable-to-resolve-base>"]
     plan["reasons"] = {
         suite: ["<unable-to-resolve-base>"]
-        for suite in (*DEV_SUITES, *DB_SUITES, *LIVE_SUITES)
+        for suite in (*DEV_SUITES, *DB_SUITES, *STANDARD_LIVE_SUITES)
     }
 
 
