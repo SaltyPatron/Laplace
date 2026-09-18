@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from ci_product_scope import ignored as product_ignored
+from ci_managed_graph import plan as plan_managed_graph
 
 DEV_SUITES = ("native-dev", "managed-dev", "uci-dev", "browser-dev")
 DB_SUITES = ("db-health", "native-db", "managed-db")
@@ -242,6 +243,8 @@ def write_github_outputs(path: Path, plan: dict) -> None:
             "delivery_actions",
             "components",
             "build_components",
+            "managed_test_projects",
+            "managed_build_projects",
         ):
             stream.write(f"{name}={','.join(plan[name])}\n")
         stream.write(f"publish_scope={plan['publish_scope']}\n")
@@ -260,7 +263,9 @@ def write_summary(path: Path, plan: dict) -> None:
         stream.write(f"- Changed files: {len(plan['changed_files'])}\n")
         stream.write(f"- Affected components: {joined('components')}\n")
         stream.write(f"- Candidate build components: {joined('build_components')}\n")
+        stream.write(f"- Managed build projects: {joined('managed_build_projects')}\n")
         stream.write(f"- Development suites: {joined('dev_suites')}\n")
+        stream.write(f"- Managed test projects: {joined('managed_test_projects')}\n")
         stream.write(f"- Database suites: {joined('db_suites')}\n")
         stream.write(f"- Delivery actions: {joined('delivery_actions')}\n")
         stream.write(f"- Publication scope: {plan['publish_scope']}\n")
@@ -307,6 +312,63 @@ def main() -> int:
     plan = classify_paths(changed)
     if forced_full:
         force_full_plan(plan)
+
+    managed = plan_managed_graph(root, changed)
+    managed_dev_selected = "managed-dev" in plan["dev_suites"]
+    app_product_change = any(
+        path.startswith("app/") and not product_ignored(path)
+        for path in changed
+    )
+    native_or_global_managed_change = any(
+        path in ROOT_FILES_FULL
+        or path == "CMakeLists.txt"
+        or path.startswith("cmake/")
+        or path.startswith("engine/")
+        or path.startswith("extension/")
+        for path in changed
+        if not product_ignored(path)
+    )
+
+    if managed_dev_selected:
+        if native_or_global_managed_change or forced_full:
+            all_managed = plan_managed_graph(root, ["Directory.Packages.props"])
+            plan["managed_test_projects"] = ["all"]
+            managed = all_managed
+        elif app_product_change:
+            plan["managed_test_projects"] = managed["test_projects"]
+            if not plan["managed_test_projects"]:
+                plan["dev_suites"] = [
+                    suite for suite in plan["dev_suites"] if suite != "managed-dev"
+                ]
+        else:
+            plan["managed_test_projects"] = ["all"]
+    else:
+        plan["managed_test_projects"] = []
+
+    if "managed" in plan["build_components"]:
+        if (
+            native_or_global_managed_change
+            or forced_full
+            or plan["db_suites"]
+        ):
+            plan["managed_build_projects"] = ["all"]
+        else:
+            build_projects = set(managed["build_projects"])
+            if plan["publish_scope"] == "full":
+                build_projects.update({
+                    "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
+                    "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj",
+                    "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj",
+                    "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
+                })
+            elif "publish" in plan["delivery_actions"]:
+                build_projects.add(
+                    "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj"
+                )
+            plan["managed_build_projects"] = sorted(build_projects) or ["all"]
+    else:
+        plan["managed_build_projects"] = []
+
     plan["base"] = args.base
     plan["head"] = args.head
     plan["changed_files"] = changed
