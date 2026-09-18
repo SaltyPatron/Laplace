@@ -247,12 +247,19 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
             byte[] unrelatedType = Assert.IsType<byte[]>(await lowerType.ExecuteScalarAsync());
 
             await using var observe = new NpgsqlCommand("""
-                INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-                SELECT id, tier, @type, NULL FROM laplace.entities WHERE id = @file
+                WITH current AS (
+                    SELECT tier FROM laplace.entities WHERE id = @file
+                )
+                SELECT laplace.entity_interpretations_publish(
+                    ARRAY[@file]::bytea[],
+                    ARRAY[(SELECT tier FROM current)]::smallint[],
+                    ARRAY[@type]::bytea[],
+                    ARRAY['\\x'::bytea]::bytea[],
+                    ARRAY[true]::boolean[])
                 """, conn);
             observe.Parameters.Add("type", NpgsqlDbType.Bytea).Value = unrelatedType;
             observe.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
-            await observe.ExecuteNonQueryAsync();
+            Assert.False(Assert.IsType<bool>(await observe.ExecuteScalarAsync()));
 
             await using var verify = new NpgsqlCommand("""
                 SELECT e.type_id, e.first_observed_by, EXISTS (

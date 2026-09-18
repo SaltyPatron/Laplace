@@ -452,9 +452,9 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
         long? originalCount = await ordinary.CountAsync(ct);
         var before = await ordinary.HydrateAsync(playingIds, 64L * 1024 * 1024, ct);
 
-        // Choose a real already-declared named type, not a made-up hash. Admit the
-        // alternate through the ordinary entity trigger so its smaller byte order
-        // actually replaces the compatibility summary while preserving both facets.
+        // Choose a real already-declared named type, not a made-up hash. Publish the
+        // alternate through the canonical facet owner so its smaller byte order
+        // replaces the compatibility summary while preserving both facets.
         byte[] lowerType;
         await using (var choose = pg.DataSource.CreateCommand("""
             SELECT DISTINCT i.type_id
@@ -468,16 +468,24 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
             lowerType = Assert.IsType<byte[]>(await choose.ExecuteScalarAsync(ct));
         }
         await using (var admit = pg.DataSource.CreateCommand("""
-            INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
-            SELECT e.id,e.tier,$2,$3
-            FROM laplace.entities e WHERE e.id=ANY($1)
-            ON CONFLICT(id) DO NOTHING
+            WITH facets AS (
+                SELECT array_agg(e.id ORDER BY u.ord) AS ids,
+                       array_agg(e.tier ORDER BY u.ord) AS tiers,
+                       array_agg($2::bytea ORDER BY u.ord) AS types,
+                       array_agg($3::bytea ORDER BY u.ord) AS sources,
+                       array_agg(false ORDER BY u.ord) AS source_is_null
+                FROM unnest($1::bytea[]) WITH ORDINALITY AS u(id,ord)
+                JOIN laplace.entities e ON e.id=u.id
+            )
+            SELECT laplace.entity_interpretations_publish(
+                ids,tiers,types,sources,source_is_null)
+            FROM facets
             """))
         {
             admit.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
             admit.Parameters.AddWithValue(lowerType);
             admit.Parameters.AddWithValue(source.ToBytes());
-            await admit.ExecuteNonQueryAsync(ct);
+            Assert.False(Assert.IsType<bool>(await admit.ExecuteScalarAsync(ct)));
         }
         await using (var verify = pg.DataSource.CreateCommand("""
             SELECT count(*) FROM laplace.entities e
