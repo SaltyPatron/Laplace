@@ -32,13 +32,18 @@ DECLARE
     s1 bytea := public.laplace_hash128_blake3('test/entity-identity/source-1');
     s2 bytea := public.laplace_hash128_blake3('test/entity-identity/source-2');
 BEGIN
-    -- Same logical observations in opposite arrival order. Physical scheduling
-    -- must not change canonical identity or the compatibility summary.
+    -- Same logical facet set with opposite first-observation order. Canonical
+    -- identity is inserted once; later facets use the one publication owner.
+    -- Physical scheduling must not change the compatibility summary.
     INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
-    VALUES (a,3,tb,s2), (a,1,ta,s1);
+    VALUES (a,3,tb,s2), (b,1,ta,s1);
 
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
-    VALUES (b,1,ta,s1), (b,3,tb,s2);
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[a,b]::bytea[],
+        ARRAY[1,3]::smallint[],
+        ARRAY[ta,tb]::bytea[],
+        ARRAY[s1,s2]::bytea[],
+        ARRAY[false,false]::boolean[]);
 END $$;
 WITH ids AS (
     SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
