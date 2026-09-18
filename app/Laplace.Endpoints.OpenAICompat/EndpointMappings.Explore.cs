@@ -220,19 +220,22 @@ internal static class ExploreEndpoints
             {
                 StorageProofResponse proof = decompose.StorageProof(payload.Text);
                 string? databaseReceipt = null;
+                string? databaseReceiptError = null;
                 try
                 {
                     databaseReceipt = await substrate.PerfcacheReceiptHexAsync(ct);
+                    if (string.IsNullOrWhiteSpace(databaseReceipt))
+                        databaseReceiptError = "PostgreSQL returned no T0 perfcache receipt.";
                 }
-                catch (SubstrateUnavailableException)
+                catch (SubstrateUnavailableException ex)
                 {
-                    // The mathematical/storage proof remains valid without PostgreSQL.
-                    // Alignment is unknown rather than false when the DB is unavailable.
+                    databaseReceiptError = ex.Message;
                 }
 
                 return Results.Json(proof with
                 {
                     DatabasePerfcacheReceiptHex = databaseReceipt,
+                    DatabasePerfcacheError = databaseReceiptError,
                     PerfcacheAligned = databaseReceipt is null
                         ? null
                         : string.Equals(
