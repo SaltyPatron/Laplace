@@ -165,7 +165,7 @@ public class ConsensusAccumulatingWriterTests
     [Fact]
     public void BulkRun_SourceContract_KeepsFoldOffTheApplyCriticalPath()
     {
-        var repo = TypeIdLawTests.FindRepoRootPublic();
+        var repo = Laplace.Decomposers.Abstractions.Tests.TypeIdLawTests.FindRepoRootPublic();
         var source = File.ReadAllText(Path.Combine(
             repo, "app", "Laplace.Substrate", "Crud", "Npgsql", "ConsensusAccumulatingWriter.cs"));
         Assert.Contains("if (_bulkRun) await EnqueueFoldAsync(delta, CancellationToken.None);", source);
