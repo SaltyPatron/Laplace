@@ -177,14 +177,8 @@ internal sealed class ExploreDecomposeService
             }
 
             uint? ducetRank = null;
-            if (node.Tier == 0)
-            {
-                var recovered = (x * x + y * y) * UnicodeSeed.CodepointCount - 0.5;
-                ducetRank = checked((uint)Math.Clamp(
-                    (long)Math.Round(recovered, MidpointRounding.AwayFromZero),
-                    0L,
-                    UnicodeSeed.CodepointCount - 1L));
-            }
+            if (node.Tier == 0 && node.Atom < (uint)CodepointPerfcache.Records.Length)
+                ducetRank = CodepointPerfcache.Records[(int)node.Atom].UcaOrder;
 
             rows.Add(new StorageProofNodeRow(
                 Ordinal: index,
