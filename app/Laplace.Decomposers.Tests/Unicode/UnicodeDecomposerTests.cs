@@ -243,10 +243,10 @@ public sealed class UnicodeDecomposerTests
             await foreach (var row in UnicodePhysicalArtifactParser.UnihanPropertiesAsync(file, CancellationToken.None))
                 rows.Add(row);
 
-            var row = Assert.Single(rows);
-            Assert.Equal((uint)0x4E00, row.Codepoint);
-            Assert.Equal("kDefinition", row.Property);
-            Assert.Equal("one; a, an; alone", row.Value);
+            var parsed = Assert.Single(rows);
+            Assert.Equal((uint)0x4E00, parsed.Codepoint);
+            Assert.Equal("kDefinition", parsed.Property);
+            Assert.Equal("one; a, an; alone", parsed.Value);
         }
         finally
         {
