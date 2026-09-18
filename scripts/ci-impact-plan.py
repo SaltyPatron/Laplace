@@ -203,12 +203,13 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         if path.startswith("web/"):
             matched = product_change = True
             # The SPA is part of the full application publication transaction.
-            # api-deploy does not own the web bundle; a web-only candidate must
-            # therefore select full publication or it can qualify successfully
-            # while leaving the installed UI on an older revision.
+            # api-deploy does not own the web bundle. Full publication uses
+            # --no-build for API/UCI/MCP/Lichess, so materialize exactly those
+            # managed roots as payload prerequisites without adding managed tests.
             publish_scope = "full"
             components.add("web")
-            build_components.add("web")
+            build_components.update(("managed", "web"))
+            managed_build_required.update(FULL_PUBLISH_PROJECTS)
             dev_suites.add("browser-dev")
             live_suites.update(BASE_LIVE_SUITES)
             delivery_actions.update(("publish", "live"))
