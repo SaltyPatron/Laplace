@@ -234,6 +234,31 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("product-worktrees", reuse)
         self.assertIn('ln -s "$source_root/build/engine" build/engine', reuse)
 
+    def test_dev_qualification_summary_exposes_reuse_and_execution_decisions(self):
+        matrix = function("run_dev_test_matrix")
+        for token in (
+            "## Qualification execution",
+            "GITHUB_STEP_SUMMARY",
+            '"unaffected"',
+            '"reused"',
+            '"executed — passed"',
+            '"executed — failed"',
+            "ci-qualification-cache.py check",
+            "ci-qualification-cache.py record",
+        ):
+            self.assertIn(token, matrix)
+
+        contract = function("run_ci_contract_checks")
+        self.assertIn("python3 -m py_compile", contract)
+        for planner in (
+            "scripts/ci-impact-plan.py",
+            "scripts/ci-qualification-cache.py",
+            "scripts/ci-product-freshness.py",
+            "scripts/ci_product_scope.py",
+            "scripts/ci_managed_projects.py",
+        ):
+            self.assertIn(planner, contract)
+
     def test_database_and_live_matrices_are_impact_selectable(self):
         database = function("run_db_tests")
         live = function("run_live_tests")
