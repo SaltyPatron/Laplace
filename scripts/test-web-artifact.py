@@ -60,16 +60,16 @@ class WebArtifactTests(unittest.TestCase):
         self.assertEqual(0, verified.returncode, verified.stderr)
 
     def test_dist_mutation_invalidates_qualified_artifact(self):
-        self.assertEqual(0, self.run("seal").returncode)
+        self.assertEqual(0, self.run_artifact("seal").returncode)
         (self.repo / "web/dist/assets/app.js").write_text("console.log('changed');\n", encoding="utf-8")
-        verified = self.run("verify")
+        verified = self.run_artifact("verify")
         self.assertNotEqual(0, verified.returncode)
         self.assertIn("dist_sha256", verified.stderr)
 
     def test_openapi_mutation_invalidates_qualified_artifact(self):
-        self.assertEqual(0, self.run("seal").returncode)
+        self.assertEqual(0, self.run_artifact("seal").returncode)
         (self.repo / "web/openapi/openapi.json").write_text('{"openapi":"3.1.0"}\n', encoding="utf-8")
-        verified = self.run("verify")
+        verified = self.run_artifact("verify")
         self.assertNotEqual(0, verified.returncode)
         self.assertIn("openapi_sha256", verified.stderr)
 
