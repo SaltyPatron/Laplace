@@ -339,7 +339,6 @@ int main(void)
     CHECK(intent_stage_from_tuple_bytes(entities,entity_bytes,NULL,0,NULL,0,1024*1024,&parts[0])==0);
     CHECK(intent_stage_import_entity_interpretations(parts[0],interpretations,interpretation_bytes)==0);
     CHECK(intent_stage_from_tuple_bytes(NULL,0,physicalities,physicality_bytes,NULL,0,1024*1024,&parts[1])==0);
-    const intent_stage_t *generated_stages[1]={parts[0]};
     const intent_stage_t *generated_pair[2]={parts[0],parts[1]};
 
     reset_spi();LaplaceGeneratedStageSinkReceipt receipt;
