@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ci_product_scope import GITHUB_PATH_IGNORES, ignored
+from ci_product_scope import GITHUB_PATH_IGNORES, candidate_equivalent, ignored
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "ci-product-freshness.py"
@@ -65,6 +65,15 @@ class ProductFreshnessTests(unittest.TestCase):
     def test_shared_scope_function_is_the_freshness_function(self):
         for path in ("scripts/test-ci-workspace.py", "scripts/product-ci.sh"):
             self.assertEqual(MODULE.ignored(path), ignored(path))
+            self.assertEqual(MODULE.candidate_equivalent(path), candidate_equivalent(path))
+
+    def test_managed_test_change_qualifies_without_invalidating_candidate(self):
+        path = "app/Laplace.Substrate.Tests/Abstractions/ExampleTests.cs"
+        self.assertFalse(ignored(path))
+        self.assertTrue(candidate_equivalent(path))
+        value = MODULE.product_delta([path])
+        self.assertTrue(value["product_equivalent"])
+        self.assertEqual(value["product_paths"], [])
 
     def test_only_nonproduct_changes_are_product_equivalent(self):
         value = MODULE.product_delta(
