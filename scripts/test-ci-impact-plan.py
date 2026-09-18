@@ -52,17 +52,6 @@ class ImpactPlanTests(unittest.TestCase):
             value["live_suites"],
             ["live-floor", "live-api", "managed-live", "generation-eval"],
         )
-        self.assertEqual(
-            value["managed_test_projects"],
-            ["app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj"],
-        )
-        self.assertEqual(
-            value["managed_build_projects"],
-            [
-                "app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj",
-                "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
-            ],
-        )
         self.assertEqual(value["managed_test_projects"], ["all"])
         self.assertEqual(value["managed_build_projects"], ["all"])
         self.assertFalse(value["full_qualification"])
@@ -76,6 +65,17 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(
             value["live_suites"],
             ["live-floor", "live-api", "managed-live", "generation-eval"],
+        )
+        self.assertEqual(
+            value["managed_test_projects"],
+            ["app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj"],
+        )
+        self.assertEqual(
+            value["managed_build_projects"],
+            [
+                "app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj",
+                "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
+            ],
         )
 
     def test_substrate_managed_change_adds_database_prepare_and_regression_without_native_install(self):
