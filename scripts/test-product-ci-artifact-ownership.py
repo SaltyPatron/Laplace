@@ -175,6 +175,17 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("ci-impact-plan.py", web)
         self.assertIn("force_web_carry_forward_impact", web)
 
+        forced = function("force_web_carry_forward_impact")
+        self.assertIn("LAPLACE_BUILD_COMPONENTS managed", forced)
+        for project in (
+            "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
+            "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj",
+            "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj",
+            "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
+        ):
+            self.assertIn(project, forced)
+        self.assertIn("LAPLACE_PUBLISH_SCOPE=full", forced)
+
         verify = function("verify_installed_web_receipt")
         self.assertIn("wwwroot/.laplace-web-source-revision", verify)
         self.assertIn("ci-impact-plan.py", verify)
