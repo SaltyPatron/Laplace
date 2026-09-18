@@ -1,0 +1,16 @@
+name: One-shot foundation recovery
+
+on:
+  push:
+    branches: [ops/foundation-recovery-20260917]
+
+permissions:
+  contents: read
+
+jobs:
+  foundation:
+    uses: ./.github/workflows/seed.yml
+    with:
+      mode: foundation-ladder
+      database: laplace
+      force: false
