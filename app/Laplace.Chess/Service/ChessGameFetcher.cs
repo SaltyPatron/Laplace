@@ -102,9 +102,6 @@ public static class ChessGameFetcher
         return kept;
     }
 
-    internal static IReadOnlyList<string> ChronologicalArchiveUrls        return kept;
-    }
-
     internal static IReadOnlyList<string> ChronologicalArchiveUrls(IEnumerable<string> archives)
         => archives.Where(static a => !string.IsNullOrWhiteSpace(a))
             .OrderBy(static a => a, StringComparer.Ordinal)
@@ -236,7 +233,7 @@ public static class ChessGameFetcher
         return PgnGames.StreamGames(outPath).Count();
     }
 
-    public static async Task<ChessPlayerProfile> FetchLichessProfileAsync    public static async Task<ChessPlayerProfile> FetchLichessProfileAsync(string user, CancellationToken ct)
+    public static async Task<ChessPlayerProfile> FetchLichessProfileAsync(string user, CancellationToken ct)
     {
         string json = await GetStringWithRetryAsync(
             $"https://lichess.org/api/user/{Uri.EscapeDataString(user)}", ct);
@@ -719,7 +716,7 @@ public static class ChessGameFetcher
     private static TimeSpan LimitProviderDelay(TimeSpan delay)
         => delay > TimeSpan.FromMinutes(2) ? TimeSpan.FromMinutes(2) : delay;
 
-    private static async Task<string> SendStringWithRetryAsync    private static async Task<string> SendStringWithRetryAsync(HttpRequestMessage request, CancellationToken ct)
+    private static async Task<string> SendStringWithRetryAsync(HttpRequestMessage request, CancellationToken ct)
     {
         for (int attempt = 0; ; attempt++)
         {
