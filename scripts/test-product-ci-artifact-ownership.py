@@ -185,6 +185,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
         ):
             self.assertIn(project, forced)
         self.assertIn("LAPLACE_PUBLISH_SCOPE=full", forced)
+        self.assertNotIn("LAPLACE_DEV_SUITES", forced)
 
         verify = function("verify_installed_web_receipt")
         self.assertIn("wwwroot/.laplace-web-source-revision", verify)
@@ -208,6 +209,12 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("LAPLACE_DEV_SUITES", carry)
         self.assertIn("LAPLACE_DELIVERY_ACTIONS", carry)
         self.assertIn("force_full_carry_forward_impact", carry)
+
+        fallback = function("force_full_carry_forward_impact")
+        self.assertIn("LAPLACE_BUILD_COMPONENTS=all", fallback)
+        self.assertIn("LAPLACE_DELIVERY_ACTIONS=all", fallback)
+        self.assertNotIn("LAPLACE_DEV_SUITES", fallback)
+        self.assertNotIn("LAPLACE_MANAGED_TEST_PROJECTS", fallback)
 
         qualification = function("run_release_qualification")
         delivery = function("run_release_delivery")
