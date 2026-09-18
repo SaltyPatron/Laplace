@@ -103,8 +103,8 @@ class WorkspaceFixture(unittest.TestCase):
 
 
 class WorkspaceReservation(WorkspaceFixture):
-    def test_mainline_waits_for_real_host_lock_and_preserves_build_cache(self):
-        with (self.work / "host-resource.lock").open("w") as lock:
+    def test_mainline_waits_only_for_build_lock_after_selecting_source(self):
+        with (self.work / "build-resource.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             environment = dict(self.env, LAPLACE_STAGE="mainline", LAPLACE_SKIP_IF_SUPERSEDED="1")
             process = subprocess.Popen(
@@ -114,9 +114,11 @@ class WorkspaceReservation(WorkspaceFixture):
             )
             try:
                 self.assertEqual(process.stdout.readline(), "started\n")
-                time.sleep(0.25)
+                deadline = time.time() + 2
+                while time.time() < deadline and self.git(self.workspace, "rev-parse", "HEAD").strip() != self.target:
+                    time.sleep(0.02)
                 self.assertIsNone(process.poll())
-                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
+                self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
                 self.assertFalse(self.events.exists())
                 self.assertEqual(self.marker.read_text(), "existing qualified build\n")
                 fcntl.flock(lock, fcntl.LOCK_UN)
@@ -126,8 +128,6 @@ class WorkspaceReservation(WorkspaceFixture):
                 if process.poll() is None:
                     process.kill()
                     process.communicate(timeout=5)
-        self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.target)
-        self.assertEqual(self.marker.read_text(), "existing qualified build\n")
         self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])
 
     def test_superseded_mainline_is_auditable_noop(self):

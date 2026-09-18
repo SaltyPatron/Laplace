@@ -33,12 +33,12 @@ on:
 permissions:
   contents: read
 
-# Keep the currently executing main delivery intact, but collapse queued push
-# revisions to the newest one before they ever consume the self-hosted runner.
-# Explicit operator/dispatch runs get a unique group and are never coalesced.
+# Main pushes are disposable qualification, not deployment. A newer revision
+# cancels obsolete read-only CI immediately. Explicit operator/deploy/proof runs
+# keep unique groups and are never preempted.
 concurrency:
-  group: ${{ github.event_name == 'push' && 'laplace-main-product-lifecycle' || format('laplace-product-dispatch-{0}', github.run_id) }}
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'push' && 'laplace-main-qualification' || format('laplace-product-dispatch-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   mainline-qualification:
@@ -46,26 +46,6 @@ jobs:
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-qualification
-      target_sha: ${{ github.sha }}
-      skip_if_superseded: true
-    secrets: inherit
-
-  mainline-candidate:
-    if: github.event_name == 'push'
-    needs: mainline-qualification
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-candidate
-      target_sha: ${{ github.sha }}
-      skip_if_superseded: true
-    secrets: inherit
-
-  mainline-activation:
-    if: github.event_name == 'push'
-    needs: mainline-candidate
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-activation
       target_sha: ${{ github.sha }}
       skip_if_superseded: true
     secrets: inherit

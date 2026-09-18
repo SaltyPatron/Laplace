@@ -131,7 +131,6 @@ run_publish() {
 }
 
 run_live_tests() {
-  require_built_revision
   require_deployed_revision
   export LAPLACE_API_BASE="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
   bash scripts/test-parallel.sh --profile live --suite live-floor
@@ -255,10 +254,10 @@ run_release_candidate() {
   run_install
   run_database_maintenance --prepare
   run_db_tests
+  run_publish
 }
 
 run_release_activation() {
-  run_publish
   reconcile_installed_product
   run_live_tests
 }

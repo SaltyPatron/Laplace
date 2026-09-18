@@ -30,14 +30,13 @@ def publish_function(name: str) -> str:
 
 class ProductStageOwnershipContract(unittest.TestCase):
     def test_build_consumers_require_the_selected_revision(self):
-        for name in ("run_dev_tests", "run_install", "run_db_tests", "run_live_tests"):
+        for name in ("run_dev_tests", "run_install", "run_db_tests", "run_publish"):
             with self.subTest(function=name):
                 self.assertIn("require_built_revision", function(name))
 
     def test_live_and_reconcile_prove_the_installed_application_revision(self):
         live = function("run_live_tests")
-        self.assertLess(live.index("require_built_revision"),
-                        live.index("require_deployed_revision"))
+        self.assertNotIn("require_built_revision", live)
         self.assertLess(live.index("require_deployed_revision"),
                         live.index("test-parallel.sh"))
         reconcile = function("reconcile_installed_product")
@@ -121,7 +120,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("check_deps", qualification)
         self.assertIn("run_build", qualification)
         self.assertIn("run_dev_test_matrix 1", qualification)
-        for forbidden in ("run_install", "run_database_maintenance", "run_db_tests"):
+        for forbidden in ("run_install", "run_database_maintenance", "run_db_tests", "run_publish"):
             self.assertNotIn(forbidden, qualification)
 
         candidate = function("run_release_candidate")
@@ -132,6 +131,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
             "run_install",
             "run_database_maintenance --prepare",
             "run_db_tests",
+            "run_publish",
         ]
         positions = [candidate.index(token) for token in mutation]
         self.assertEqual(positions, sorted(positions))
@@ -139,7 +139,8 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertNotIn("run_dev_tests", candidate)
 
         activation = function("run_release_activation")
-        delivery = ["run_publish", "reconcile_installed_product", "run_live_tests"]
+        self.assertNotIn("run_publish", activation)
+        delivery = ["reconcile_installed_product", "run_live_tests"]
         positions = [activation.index(token) for token in delivery]
         self.assertEqual(positions, sorted(positions))
 
