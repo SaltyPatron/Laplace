@@ -45,7 +45,7 @@ BEGIN
      *
      * Materialize the observed facet set once. Existing facets only change when
      * a lower non-null compatibility source arrives; missing facets are inserted
-     * without ON CONFLICT. If two concurrent publishers race for the same exact
+     * without conflict-upsert arbitration. If two concurrent publishers race for the same exact
      * absent facet, the unique key rejects one transaction and the existing
      * whole-apply concurrency retry re-probes it.
      *
