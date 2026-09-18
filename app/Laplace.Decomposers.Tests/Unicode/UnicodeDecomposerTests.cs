@@ -179,4 +179,75 @@ public sealed class UnicodeDecomposerTests
         Assert.Equal(TotalCodepoints, await dec.EstimateUnitCountAsync(Context(new NullWriter())));
     }
 
+    [Fact]
+    public async Task Artifact_graph_enumerates_unknown_files_instead_of_silently_omitting_them()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "laplace-unicode-estate-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "ucd"));
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, "ucd", "UnicodeData.txt"), "0041;LATIN CAPITAL LETTER A;Lu;0;L;;;;;N;;;;0061;\n");
+            await File.WriteAllTextAsync(Path.Combine(root, "ucd", "FutureProperty.txt"), "0041 ; Future_Value\n");
+
+            var dec = NewDecomposer();
+            IngestArtifactGraph graph = Assert.IsType<IngestArtifactGraph>(
+                await dec.DescribeArtifactsAsync(root, DecomposerOptions.Default));
+
+            IngestArtifact unicodeData = Assert.Single(
+                graph.Artifacts, a => a.RelativePath == "ucd/UnicodeData.txt");
+            Assert.Equal(IngestArtifactDisposition.Admitted, unicodeData.Disposition);
+
+            IngestArtifact unknown = Assert.Single(
+                graph.Artifacts, a => a.RelativePath == "ucd/FutureProperty.txt");
+            Assert.Equal(IngestArtifactDisposition.Unsupported, unknown.Disposition);
+            Assert.Contains("must not be reported as complete coverage", unknown.Notes);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Artifact_graph_admits_declared_extended_UCD_property_files()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "laplace-unicode-extended-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "ucd", "auxiliary"));
+        Directory.CreateDirectory(Path.Combine(root, "ucd", "extracted"));
+        Directory.CreateDirectory(Path.Combine(root, "ucd", "Unihan"));
+        try
+        {
+            string[] files =
+            [
+                "ucd/PropList.txt",
+                "ucd/DerivedCoreProperties.txt",
+                "ucd/ScriptExtensions.txt",
+                "ucd/auxiliary/GraphemeBreakProperty.txt",
+                "ucd/extracted/DerivedGeneralCategory.txt",
+                "ucd/Unihan/Unihan_Readings.txt",
+            ];
+            foreach (string relative in files)
+            {
+                string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await File.WriteAllTextAsync(path, "# synthetic fixture\n");
+            }
+
+            var dec = NewDecomposer();
+            IngestArtifactGraph graph = Assert.IsType<IngestArtifactGraph>(
+                await dec.DescribeArtifactsAsync(root, DecomposerOptions.Default));
+
+            foreach (string relative in files)
+            {
+                IngestArtifact artifact = Assert.Single(
+                    graph.Artifacts, a => a.RelativePath == relative);
+                Assert.Equal(IngestArtifactDisposition.Admitted, artifact.Disposition);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
 }
