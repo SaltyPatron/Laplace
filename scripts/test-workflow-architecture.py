@@ -279,10 +279,15 @@ class WorkflowArchitecture(unittest.TestCase):
         checks = product.split("run_ci_contract_checks() {", 1)[1].split("\n}", 1)[0]
         self.assertIn("test-application-publish.py", checks)
 
-    def test_web_only_plan_does_not_force_managed_rebuild(self):
+    def test_build_executor_obeys_planned_managed_and_web_components(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
         run_build = product.split("run_build() {", 1)[1].split("\n}\n\nrun_dev_test_matrix", 1)[0]
+        self.assertIn("need_managed", run_build)
         self.assertIn("need_web", run_build)
+        self.assertIn('phases+=(build-app)', run_build)
+        self.assertIn('phases+=(build-web)', run_build)
+        # Publication closure belongs to ci-impact-plan.py; the executor must not
+        # independently infer managed work from need_web and drift from the plan.
         self.assertNotIn("need_web == 0 )) || need_managed=1", run_build)
     def test_planned_web_component_is_built_before_delivery(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
