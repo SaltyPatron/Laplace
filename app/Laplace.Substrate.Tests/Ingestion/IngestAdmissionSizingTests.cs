@@ -220,7 +220,9 @@ public sealed class IngestAdmissionSizingTests
         Assert.Equal(Tuples(expected), Tuples(rawStage));
         Assert.Equal(3, rawStage.PhysicalityCount);
         Assert.Equal(3, captured.ObservationSources.Count);
-        Assert.Equal(4 * 40L, captured.ObservationPayloadBytes);
+        // entity/source/unit/time plus the retained SQL compatibility double:
+        // 16 + 16 + 16 + 8 + 8 = 64 bytes per captured observation.
+        Assert.Equal(4 * 64L, captured.ObservationPayloadBytes);
         Assert.Equal(4, captured.ObservationSources.Capacity);
         Assert.Same(row, change.PhysicalityObservations[0]);
         Assert.Same(row, change.PhysicalityObservations[1]);
@@ -236,7 +238,7 @@ public sealed class IngestAdmissionSizingTests
         Assert.Equal(modeled, exactBuilder.ModeledSourcePayloadBytes);
         Assert.True(modeled >= captured.OwnedRawBytes + captured.ObservationPayloadBytes);
         Assert.True(exactBuilder.CaptureReservationBytes >=
-            captured.ObservationPayloadBytes - (long)actualSource.Forms * 40L);
+            captured.ObservationPayloadBytes - (long)actualSource.Forms * 64L);
         AssertNativeCaptureFits(rawStage, exactBuilder.Source);
         Assert.True(modeled < IngestAdmissionSizing.Measure(change, serialized).ModeledSourcePayloadBytes);
 
