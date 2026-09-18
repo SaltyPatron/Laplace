@@ -20,36 +20,103 @@ def plan(*paths: str) -> dict:
 
 
 class ImpactPlanTests(unittest.TestCase):
-    def test_web_only_change_does_not_invalidate_native_or_managed_dev(self):
+    def test_web_only_change_qualifies_and_publishes_without_native_or_database_mutation(self):
         value = plan("web/src/App.tsx")
         self.assertEqual(value["components"], ["web"])
         self.assertEqual(value["dev_suites"], ["browser-dev"])
+        self.assertEqual(value["db_suites"], [])
+        self.assertEqual(value["delivery_actions"], ["publish", "live"])
+        self.assertEqual(value["publish_scope"], "api")
+        self.assertEqual(value["live_suites"], ["live-floor", "live-api"])
         self.assertFalse(value["full_qualification"])
 
-    def test_native_change_invalidates_native_managed_and_uci_but_not_browser(self):
+    def test_native_change_invalidates_native_managed_db_and_full_live(self):
         value = plan("engine/core/src/example.cpp")
-        self.assertEqual(value["components"], ["managed", "native", "uci"])
-        self.assertEqual(value["dev_suites"], ["native-dev", "managed-dev", "uci-dev"])
+        self.assertEqual(value["components"], ["database", "managed", "native", "uci"])
+        self.assertEqual(
+            value["dev_suites"], ["native-dev", "managed-dev", "uci-dev"]
+        )
+        self.assertEqual(
+            value["db_suites"], ["db-health", "native-db", "managed-db"]
+        )
+        self.assertEqual(
+            value["delivery_actions"],
+            ["install", "database", "reconcile", "publish", "live"],
+        )
+        self.assertEqual(value["publish_scope"], "full")
+        self.assertEqual(
+            value["live_suites"],
+            ["live-floor", "live-api", "managed-live", "generation-eval"],
+        )
         self.assertFalse(value["full_qualification"])
 
-    def test_chess_change_adds_uci_to_managed(self):
+    def test_managed_api_change_avoids_native_install_but_runs_product_live_checks(self):
+        value = plan("app/Laplace.Endpoints.OpenAICompat/Foo.cs")
+        self.assertEqual(value["dev_suites"], ["managed-dev", "browser-dev"])
+        self.assertEqual(value["db_suites"], [])
+        self.assertEqual(value["delivery_actions"], ["publish", "live"])
+        self.assertEqual(value["publish_scope"], "api")
+        self.assertEqual(
+            value["live_suites"],
+            ["live-floor", "live-api", "managed-live", "generation-eval"],
+        )
+
+    def test_substrate_managed_change_adds_database_prepare_and_regression_without_native_install(self):
+        value = plan("app/Laplace.Substrate/Crud/Npgsql/Foo.cs")
+        self.assertIn("managed-dev", value["dev_suites"])
+        self.assertEqual(
+            value["db_suites"], ["db-health", "native-db", "managed-db"]
+        )
+        self.assertEqual(
+            value["delivery_actions"], ["database", "reconcile", "publish", "live"]
+        )
+        self.assertNotIn("install", value["delivery_actions"])
+
+    def test_chess_change_keeps_full_publication_and_uci_qualification(self):
         value = plan("app/Laplace.Chess/Service/Foo.cs")
         self.assertIn("managed-dev", value["dev_suites"])
         self.assertIn("uci-dev", value["dev_suites"])
+        self.assertEqual(value["publish_scope"], "full")
         self.assertNotIn("native-dev", value["dev_suites"])
 
-    def test_unknown_production_path_fails_safe_to_full_qualification(self):
+    def test_database_sql_change_skips_native_install_but_runs_db_and_full_live(self):
+        value = plan("db/migrations/example.sql")
+        self.assertEqual(value["dev_suites"], [])
+        self.assertEqual(
+            value["db_suites"], ["db-health", "native-db", "managed-db"]
+        )
+        self.assertEqual(
+            value["delivery_actions"], ["database", "reconcile", "publish", "live"]
+        )
+        self.assertEqual(value["publish_scope"], "api")
+
+    def test_unknown_production_path_fails_safe_to_everything(self):
         value = plan("mystery/runtime.dat")
         self.assertEqual(
             value["dev_suites"],
             ["native-dev", "managed-dev", "uci-dev", "browser-dev"],
         )
+        self.assertEqual(
+            value["db_suites"], ["db-health", "native-db", "managed-db"]
+        )
+        self.assertEqual(
+            value["delivery_actions"],
+            ["install", "database", "reconcile", "publish", "live"],
+        )
+        self.assertEqual(
+            value["live_suites"],
+            ["live-floor", "live-api", "managed-live", "generation-eval"],
+        )
+        self.assertEqual(value["publish_scope"], "full")
         self.assertTrue(value["full_qualification"])
         self.assertEqual(value["unknown_paths"], ["mystery/runtime.dat"])
 
     def test_docs_and_workflow_paths_do_not_create_product_work(self):
         value = plan("docs/README.md", ".github/workflows/foo.yml")
         self.assertEqual(value["dev_suites"], [])
+        self.assertEqual(value["db_suites"], [])
+        self.assertEqual(value["live_suites"], [])
+        self.assertEqual(value["delivery_actions"], [])
         self.assertEqual(value["components"], [])
         self.assertFalse(value["full_qualification"])
 
