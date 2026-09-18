@@ -18,6 +18,7 @@ on:
       - "scripts/pipeline.sh"
       - "scripts/ci_managed_projects.py"
       - "scripts/test-parallel.sh"
+      - "scripts/test-suites/**"
       - "scripts/test-*.py"
       - "scripts/test-*.sh"
       - "scripts/tests/**"
