@@ -457,7 +457,6 @@ pg_laplace_radius_origin(PG_FUNCTION_ARGS)
     PG_RETURN_FLOAT8(r);
 }
 
-
 PG_FUNCTION_INFO_V1(pg_laplace_frechet_4d);
 
 Datum
