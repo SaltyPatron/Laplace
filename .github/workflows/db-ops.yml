@@ -1,4 +1,4 @@
-name: DB — lifecycle ops
+name: Database — maintenance
 
 on:
   workflow_dispatch:
