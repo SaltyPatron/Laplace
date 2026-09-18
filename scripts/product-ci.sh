@@ -64,14 +64,39 @@ run_build() {
   git rev-parse HEAD > build/.laplace-source-revision
 }
 
+run_dev_test_matrix() {
+  local check_superseded="${1:-0}"
+  local rc=0 current_rc profile suite spec
+  local specs=(
+    "dev-native:native-dev"
+    "dev-managed:managed-dev"
+    "dev-managed:uci-dev"
+    "dev-managed:browser-dev"
+  )
+
+  for spec in "${specs[@]}"; do
+    if [[ "$check_superseded" == 1 ]]; then
+      current_rc=0
+      release_selected_revision_current || current_rc=$?
+      if (( current_rc == 3 )); then return 3; fi
+      (( current_rc == 0 )) || return "$current_rc"
+    fi
+    IFS=: read -r profile suite <<< "$spec"
+    bash scripts/test-parallel.sh --profile "$profile" --suite "$suite" || rc=$?
+  done
+
+  if [[ "$check_superseded" == 1 ]]; then
+    current_rc=0
+    release_selected_revision_current || current_rc=$?
+    if (( current_rc == 3 )); then return 3; fi
+    (( current_rc == 0 )) || return "$current_rc"
+  fi
+  return "$rc"
+}
+
 run_dev_tests() {
   require_built_revision
-  local rc=0
-  bash scripts/test-parallel.sh --profile dev-native --suite native-dev || rc=$?
-  bash scripts/test-parallel.sh --profile dev-managed --suite managed-dev || rc=$?
-  bash scripts/test-parallel.sh --profile dev-managed --suite uci-dev || rc=$?
-  bash scripts/test-parallel.sh --profile dev-managed --suite browser-dev || rc=$?
-  return "$rc"
+  run_dev_test_matrix 0
 }
 
 run_install() {
