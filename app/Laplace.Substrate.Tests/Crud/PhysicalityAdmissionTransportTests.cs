@@ -271,16 +271,21 @@ public class PhysicalityAdmissionTransportTests
             [rows[0].ObservedAtUnixUs, rows[0].ObservedAtUnixUs, rows[0].ObservedAtUnixUs,
              rows[1].ObservedAtUnixUs, secondRow.ObservedAtUnixUs],
             capture.ObservationTimesUnixUs.ToArray());
+        Assert.Equal(
+            [rows[0].Id, rows[0].Id, rows[0].Id, rows[1].Id, secondRow.Id],
+            capture.ObservationPhysicalityIds.ToArray());
+        Assert.Equal(
+            [rows[0].EntityId, rows[0].EntityId, rows[0].EntityId,
+             rows[1].EntityId, secondRow.EntityId],
+            capture.ObservationEntities.ToArray());
         // Physical provenance has no trust/standing lane. The source-prior values
         // remain on the originating changes and are deliberately absent here.
         Assert.Equal(.75, first.RequireSourcePrior(H(50)));
         Assert.Equal(.25, second.RequireSourcePrior(H(51)));
-        Assert.Equal(2, capture.RawStages.Count);
-        using var expectedFirst = ScalarCapture([rows[0], rows[0], rows[0], rows[1]]);
-        Assert.Equal(Tuples(expectedFirst, IntentStageTable.Physicalities),
-            Tuples(capture.RawStages[0], IntentStageTable.Physicalities));
-        Assert.Equal(1, capture.RawStages[1].PhysicalityCount);
-        Assert.InRange(capture.OwnedRawBytes + capture.ObservationPayloadBytes, 1, capture.MaximumBytes);
+        Assert.Empty(capture.RawStages);
+        Assert.Equal(0, capture.OwnedRawBytes);
+        Assert.Equal(5 * 72L, capture.ObservationPayloadBytes);
+        Assert.InRange(capture.ObservationPayloadBytes, 1, capture.MaximumBytes);
     }
 
     [Fact]

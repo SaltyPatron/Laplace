@@ -68,8 +68,8 @@ public sealed class ChessGraphObservationRecoveryTests(LocalPgFixture pg)
         {
             int index = Enumerable.Range(0, repair.PhysicalityObservations.Length)
                 .Single(i => repair.PhysicalityObservations[i].EntityId == entity);
-            await PhysicalityWriterTestSupport.AssertDescriptorReadbackAsync(pg.DataSource,
-                admission.Forms[index].DescriptorId, repair.PhysicalityObservations[index]);
+            await PhysicalityWriterTestSupport.AssertPhysicalityReadbackAsync(pg.DataSource,
+                admission.Forms[index].PhysicalityId, repair.PhysicalityObservations[index]);
         }
 
         string accepted = await SnapshotAsync(source);
@@ -93,15 +93,17 @@ public sealed class ChessGraphObservationRecoveryTests(LocalPgFixture pg)
     {
         await using var command = pg.DataSource.CreateCommand("""
             SELECT COALESCE(jsonb_agg(
-                to_jsonb(a) || jsonb_build_object('standing',to_jsonb(c)) ORDER BY a.id),
+                jsonb_build_object(
+                    'entity',encode(entity_id,'hex'),
+                    'physicality',encode(physicality_id,'hex'),
+                    'unit',encode(source_unit_id,'hex'),
+                    'observed_at_unix_us',observed_at_unix_us)
+                ORDER BY entity_id,physicality_id,source_unit_id),
                 '[]'::jsonb)::text
-            FROM laplace.attestations a
-            JOIN laplace.consensus c ON c.type_id=a.type_id AND c.subject_id=a.subject_id
-                AND c.object_id IS NOT DISTINCT FROM a.object_id
-            WHERE a.source_id=$1 AND a.type_id=$2
+            FROM laplace.physicality_observations
+            WHERE source_id=$1
             """);
         command.Parameters.AddWithValue(source.ToBytes());
-        command.Parameters.AddWithValue(RelationTypeRegistry.Resolve("HAS_PHYSICALITY").Id.ToBytes());
         return (string)(await command.ExecuteScalarAsync())!;
     }
 }

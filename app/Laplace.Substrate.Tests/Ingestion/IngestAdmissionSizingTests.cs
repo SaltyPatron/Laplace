@@ -202,7 +202,7 @@ public sealed class IngestAdmissionSizingTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void GrowingBuilderBoundMatchesActualReferenceUnionWithoutDroppingSameIdObservations(bool differentBody)
+    public void GrowingBuilderBoundMatchesDirectProvenanceUnionWithoutDroppingSameIdObservations(bool differentBody)
     {
         using var builder = new SubstrateChangeBuilder(Source, "builder-reference-union");
         var row = Row(1);
@@ -211,51 +211,47 @@ public sealed class IngestAdmissionSizingTests
         long serialized = builder.StagedBytesEstimate;
         long modeled = SubstrateChangeBuilder.ModeledSourceAdmissionPayloadBytes(builder);
         var change = builder.Build().WithSourcePrior(Source, .75);
+
         using var captured = NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.Capture(
             [change], Array.Empty<IntentStage>(), CancellationToken.None)!;
         Assert.NotNull(captured);
-        var rawStage = Assert.Single(captured.RawStages);
-        using var expected = Scalar([row, row, copied]);
-        using var selectedStage = Scalar(change.Physicalities);
-        Assert.Equal(Tuples(expected), Tuples(rawStage));
-        Assert.Equal(3, rawStage.PhysicalityCount);
+        Assert.Empty(captured.RawStages);
+        Assert.Equal(0, captured.OwnedRawBytes);
+        Assert.Equal(
+            new[] { row.Id, row.Id, copied.Id },
+            captured.ObservationPhysicalityIds.ToArray());
+        Assert.Equal(
+            new[] { row.EntityId, row.EntityId, copied.EntityId },
+            captured.ObservationEntities.ToArray());
         Assert.Equal(3, captured.ObservationSources.Count);
-        // entity/source/unit/time plus the retained SQL compatibility double:
-        // 16 + 16 + 16 + 8 + 8 = 64 bytes per captured observation.
-        Assert.Equal(4 * 64L, captured.ObservationPayloadBytes);
+        // Capture reserves the possible selected-row supplement before reference
+        // overlap is known. Direct provenance is physicality/entity/source/unit/time.
+        Assert.Equal(4 * 72L, captured.ObservationPayloadBytes);
         Assert.Equal(4, captured.ObservationSources.Capacity);
+        Assert.True(modeled >= serialized);
+        Assert.True(modeled >= captured.ObservationPayloadBytes);
         Assert.Same(row, change.PhysicalityObservations[0]);
         Assert.Same(row, change.PhysicalityObservations[1]);
         Assert.Same(copied, change.PhysicalityObservations[2]);
         Assert.NotSame(row, copied);
 
-        var actualSource = PhysicalityDescriptorSizing.FromStages(captured.RawStages);
-        var actualSelected = PhysicalityDescriptorSizing.FromStages([selectedStage]);
-        var exactBuilder = IngestAdmissionSizing.MeasureGrowingBuilder(
-            serialized, Array.Empty<IntentStage>(), actualSelected, actualSource, 0, 0);
-        Assert.Equal(actualSource, exactBuilder.Source);
-        Assert.Equal(actualSelected, exactBuilder.Admitted);
-        Assert.Equal(modeled, exactBuilder.ModeledSourcePayloadBytes);
-        Assert.True(modeled >= captured.OwnedRawBytes + captured.ObservationPayloadBytes);
-        Assert.True(exactBuilder.CaptureReservationBytes >=
-            captured.ObservationPayloadBytes - (long)actualSource.Forms * 64L);
-        AssertNativeCaptureFits(rawStage, exactBuilder.Source);
-        Assert.True(modeled < IngestAdmissionSizing.Measure(change, serialized).ModeledSourcePayloadBytes);
-
-        // An arbitrary change may have another selected object with the same ID.
-        // Capture must supplement it by reference; the general union stays conservative.
+        // An arbitrary change may select another object with the same canonical
+        // physicality id. The sidecar cannot hide it; provenance retains both
+        // occurrences without constructing another physicality body.
         var extra = row with { CoordM = .9 };
         var supplemented = change with { Physicalities = [extra] };
         using var externalCapture = NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.Capture(
             [supplemented], Array.Empty<IntentStage>(), CancellationToken.None)!;
         Assert.NotNull(externalCapture);
-        using var externalExpected = Scalar([row, row, copied, extra]);
-        var externalStage = Assert.Single(externalCapture.RawStages);
-        Assert.Equal(Tuples(externalExpected), Tuples(externalStage));
-        Assert.Equal(4, externalStage.PhysicalityCount);
+        Assert.Empty(externalCapture.RawStages);
+        Assert.Equal(0, externalCapture.OwnedRawBytes);
+        Assert.Equal(4, externalCapture.ObservationPhysicalityIds.Count);
+        Assert.Equal(4 * 72L, externalCapture.ObservationPayloadBytes);
+        Assert.All(externalCapture.ObservationPhysicalityIds,
+            id => Assert.Equal(row.Id, id));
         var externalSizing = IngestAdmissionSizing.Measure(supplemented, serialized);
-        Assert.Equal(PhysicalityDescriptorSizing.FromStages(externalCapture.RawStages), externalSizing.Source);
-        Assert.Equal(0, externalSizing.CaptureReservationBytes);
+        Assert.True(externalSizing.ModeledSourcePayloadBytes >=
+            externalCapture.ObservationPayloadBytes);
         Assert.True(externalSizing.ModeledSourcePayloadBytes > modeled);
     }
 

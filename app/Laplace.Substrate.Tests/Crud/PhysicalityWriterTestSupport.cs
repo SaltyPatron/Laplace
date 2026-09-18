@@ -6,8 +6,9 @@ using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
-/// <summary>Assertions distinguish source rows from the native descriptor graphs
-/// that the same normal apply now admits. No formula predicts generated row counts.</summary>
+/// <summary>Assertions for canonical physicality rows and structural provenance.
+/// Descriptor helpers remain only for explicit legacy/readback compatibility tests;
+/// ordinary apply must not manufacture descriptor graphs.</summary>
 internal static class PhysicalityWriterTestSupport
 {
     internal static async Task AssertDescriptorShapesAsync(NpgsqlDataSource dataSource,
@@ -46,6 +47,57 @@ internal static class PhysicalityWriterTestSupport
         command.Parameters.AddWithValue(NpgsqlDbType.Integer, 512);
         command.Parameters.AddWithValue(NpgsqlDbType.Bigint, budget / MemoryTopology.Hash128Bytes);
         return command;
+    }
+
+    internal static async Task AssertPhysicalityReadbackAsync(
+        NpgsqlDataSource dataSource, Hash128 physicalityId, PhysicalityRow expected)
+    {
+        await using var command = dataSource.CreateCommand("""
+            SELECT entity_id,type,
+                   public.ST_X(coord),public.ST_Y(coord),
+                   public.ST_Z(coord),public.ST_M(coord),
+                   hilbert_index,
+                   CASE WHEN trajectory IS NULL THEN NULL
+                        ELSE generation.trajectory_bits(
+                            public.ST_AsBinary(trajectory,'NDR')) END,
+                   n_constituents,alignment_residual,source_dim
+            FROM laplace.physicalities
+            WHERE id=$1
+            """);
+        command.Parameters.AddWithValue(physicalityId.ToBytes());
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(expected.EntityId.ToBytes(), reader.GetFieldValue<byte[]>(0));
+        Assert.Equal((short)expected.Type, reader.GetInt16(1));
+        Assert.Equal(BitConverter.DoubleToInt64Bits(expected.CoordX),
+            BitConverter.DoubleToInt64Bits(reader.GetDouble(2)));
+        Assert.Equal(BitConverter.DoubleToInt64Bits(expected.CoordY),
+            BitConverter.DoubleToInt64Bits(reader.GetDouble(3)));
+        Assert.Equal(BitConverter.DoubleToInt64Bits(expected.CoordZ),
+            BitConverter.DoubleToInt64Bits(reader.GetDouble(4)));
+        Assert.Equal(BitConverter.DoubleToInt64Bits(expected.CoordM),
+            BitConverter.DoubleToInt64Bits(reader.GetDouble(5)));
+        Assert.Equal(expected.HilbertIndex.ToByteArray(),
+            reader.GetFieldValue<byte[]>(6));
+        Assert.Equal(expected.TrajectoryXyzm is null ? null : Bits(expected.TrajectoryXyzm),
+            reader.IsDBNull(7) ? null : reader.GetFieldValue<byte[]>(7));
+        Assert.Equal(expected.NConstituents, reader.GetInt32(8));
+        if (expected.AlignmentResidual is { } residual)
+        {
+            Assert.False(reader.IsDBNull(9));
+            Assert.Equal(BitConverter.DoubleToInt64Bits(residual),
+                BitConverter.DoubleToInt64Bits(reader.GetDouble(9)));
+        }
+        else
+            Assert.True(reader.IsDBNull(9));
+        if (expected.SourceDim is { } sourceDim)
+        {
+            Assert.False(reader.IsDBNull(10));
+            Assert.Equal(sourceDim, reader.GetInt32(10));
+        }
+        else
+            Assert.True(reader.IsDBNull(10));
+        Assert.False(await reader.ReadAsync());
     }
 
     internal static async Task AssertDescriptorReadbackAsync(NpgsqlDataSource dataSource,
