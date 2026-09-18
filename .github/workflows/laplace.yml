@@ -95,6 +95,8 @@ jobs:
       build_components: ${{ needs.plan.outputs.build_components }}
       managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}
       managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}
+      delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
+      publish_scope: ${{ needs.plan.outputs.publish_scope }}
       skip_if_superseded: true
     secrets: inherit
 
