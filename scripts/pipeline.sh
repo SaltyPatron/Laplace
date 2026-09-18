@@ -263,7 +263,28 @@ phase_codegen() {
 
 phase_build_app() {
   echo "===== PHASE — BUILD APP ====="
-  ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
+  local selected="${LAPLACE_MANAGED_BUILD_PROJECTS:-all}" project
+  if [[ "$selected" == all ]]; then
+    ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
+    return
+  fi
+  [[ -n "$selected" ]] || {
+    echo "::error::managed build selected without any managed project targets" >&2
+    return 2
+  }
+  IFS=',' read -r -a projects <<< "$selected"
+  for project in "${projects[@]}"; do
+    [[ "$project" == app/*.csproj || "$project" == app/*/*.csproj ]] || {
+      echo "::error::managed build project is outside app/: $project" >&2
+      return 2
+    }
+    [[ -f "$ROOT/$project" ]] || {
+      echo "::error::managed build project does not exist: $project" >&2
+      return 2
+    }
+    echo "--- managed build target: $project"
+    dotnet build "$ROOT/$project" -c Release
+  done
 }
 
 phase_build_web() {
