@@ -453,14 +453,37 @@ TEST_F(PhysicalityDescriptorRetention, SourceUnitReplayIsUnchangedWhenViewIsUnav
         expect_missing(absent, i, {child.value.entity_id});
         EXPECT_TRUE(equal(form(absent, i).descriptor_id, form(available, i).descriptor_id));
     }
+    size_t absent_count = 0, available_count = 0;
+    const auto* absent_observations =
+        physicality_descriptor_materialization_observations(absent.get(), &absent_count);
+    const auto* available_observations =
+        physicality_descriptor_materialization_observations(available.get(), &available_count);
+    ASSERT_NE(absent_observations, nullptr);
+    ASSERT_NE(available_observations, nullptr);
+    ASSERT_EQ(absent_count, sources.size());
+    ASSERT_EQ(available_count, absent_count);
+    const std::array<int64_t, 3> expected_times{3, 9, 5};
+    for (size_t i = 0; i < absent_count; ++i) {
+        EXPECT_TRUE(equal(absent_observations[i].entity_id, available_observations[i].entity_id));
+        EXPECT_TRUE(equal(absent_observations[i].descriptor_id, available_observations[i].descriptor_id));
+        EXPECT_TRUE(equal(absent_observations[i].source_id, sources[i].source_id));
+        EXPECT_TRUE(equal(absent_observations[i].source_unit_id, sources[i].source_unit_id));
+        EXPECT_TRUE(equal(absent_observations[i].source_id, available_observations[i].source_id));
+        EXPECT_TRUE(equal(absent_observations[i].source_unit_id, available_observations[i].source_unit_id));
+        EXPECT_EQ(absent_observations[i].observed_at_unix_us, expected_times[i]);
+        EXPECT_EQ(available_observations[i].observed_at_unix_us, expected_times[i]);
+    }
     Stage absent_stage(physicality_descriptor_materialization_take_stage(absent.get()), intent_stage_free);
     Stage available_stage(physicality_descriptor_materialization_take_stage(available.get()), intent_stage_free);
-    ASSERT_EQ(intent_stage_attestation_count(absent_stage.get()), 2u);
-    ASSERT_EQ(intent_stage_attestation_count(available_stage.get()), 2u);
+    ASSERT_NE(absent_stage, nullptr);
+    ASSERT_NE(available_stage, nullptr);
+    EXPECT_EQ(intent_stage_attestation_count(absent_stage.get()), 0u);
+    EXPECT_EQ(intent_stage_attestation_count(available_stage.get()), 0u);
     size_t absent_bytes = 0, available_bytes = 0;
-    const auto* a = intent_stage_tuple_ptr(absent_stage.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &absent_bytes);
-    const auto* b = intent_stage_tuple_ptr(available_stage.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &available_bytes);
-    ASSERT_EQ(absent_bytes, available_bytes);
-    EXPECT_EQ(std::memcmp(a, b, absent_bytes), 0);
+    (void)intent_stage_tuple_ptr(absent_stage.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &absent_bytes);
+    (void)intent_stage_tuple_ptr(available_stage.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &available_bytes);
+    EXPECT_EQ(absent_bytes, 0u);
+    EXPECT_EQ(available_bytes, 0u);
+
 }
 } // namespace
