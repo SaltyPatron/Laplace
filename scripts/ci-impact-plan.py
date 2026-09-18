@@ -391,7 +391,8 @@ def write_github_outputs(path: Path, plan: dict) -> None:
         ):
             stream.write(f"{name}={','.join(plan[name])}\n")
         stream.write(f"managed_test_filter={plan.get('managed_test_filter', '')}\n")
-        stream.write(f"publish_scope={plan['publish_scope']}\n")        stream.write(
+        stream.write(f"publish_scope={plan['publish_scope']}\n")
+        stream.write(
             f"full_qualification={'true' if plan['full_qualification'] else 'false'}\n"
         )
         stream.write(f"changed_count={len(plan['changed_files'])}\n")
