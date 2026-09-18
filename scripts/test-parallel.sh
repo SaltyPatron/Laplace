@@ -197,6 +197,17 @@ run_live_api() {
     printf '%s\n' "$storage_proof" >&2
     return 1
   fi
+  mkdir -p "$ROOT/build/eval-proof"
+  (
+    cd "$ROOT/web"
+    npx playwright install chromium
+    LAPLACE_UI_URL="$base" \
+      LAPLACE_STORAGE_PROOF_EVIDENCE_DIR="$ROOT/build/eval-proof" \
+      node scripts/verify-storage-proof-live.mjs
+  ) || {
+    echo "::error::rendered live Storage Proof verification failed" >&2
+    return 1
+  }
   proof_html=$(curl -fsS "$base/proof")
   if ! grep -q '<div id="root"' <<<"$proof_html"; then
     echo "::error::deployed application does not serve the Storage Proof SPA route at /proof" >&2
