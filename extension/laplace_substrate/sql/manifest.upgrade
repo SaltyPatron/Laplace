@@ -70,6 +70,7 @@ functions/mu/effective_mu.sql.in
 functions/mu/eff_mu.sql.in
 functions/mu/eff_mu_display.sql.in
 functions/mu/refuted.sql.in
+indexes/consensus_type_rank_btree.sql.in
 views/v_consensus_resolved.sql.in
 views/v_consensus_edges.sql.in
 views/v_consensus_unrefuted.sql.in

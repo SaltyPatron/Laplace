@@ -8,20 +8,24 @@
 #
 #   statement-profile.sh reset          # zero the counters, immediately before a run
 #   statement-profile.sh top [N]        # rank by total time (plan + execute)
+#   statement-profile.sh calls [N]      # rank by call frequency
+#   statement-profile.sh snapshot       # JSON evidence without resetting counters
 #   statement-profile.sh plans [N]      # rank by PLANNING time -- the re-planning tax
 #   statement-profile.sh io [N]         # rank by blocks read -- the lookup/index tax
 #
-# `reset` matters: the view accumulates since the last reset, so profiling a specific
-# run means zeroing first. Without that the numbers blend every query the cluster has
-# served since restart and rank the wrong things.
+# Counters are shared evidence: preserve them during live investigations. Capture
+# snapshots before/after a workload and compare matching (dbid, userid, queryid,
+# toplevel) entries; reset timestamps and eviction counts bound that comparison.
+# Nested times overlap their callers and must never be summed as disjoint work.
 
 set -euo pipefail
 
-PSQL=(psql -U "${PGUSER:-laplace_admin}" -d "${PGDATABASE:-laplace}" -qAX
+PSQL=(psql -U "${PGUSER:-laplace_admin}" -d "${PGDATABASE:-laplace}" -qAX -v ON_ERROR_STOP=1
       -c "SET search_path = laplace, public;")
-[[ -n "${PGHOST:-}" ]] && PSQL=(psql -h "$PGHOST" -U "${PGUSER:-laplace_admin}" -d "${PGDATABASE:-laplace}" -qAX
+[[ -n "${PGHOST:-}" ]] && PSQL=(psql -h "$PGHOST" -U "${PGUSER:-laplace_admin}" -d "${PGDATABASE:-laplace}" -qAX -v ON_ERROR_STOP=1
       -c "SET search_path = laplace, public;")
 N="${2:-20}"
+[[ "$N" =~ ^[1-9][0-9]*$ ]] || { echo "N must be a positive integer" >&2; exit 2; }
 
 have() {
     "${PSQL[@]}" -tAc "SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements'" 2>/dev/null | grep -q 1
@@ -39,6 +43,28 @@ reset)
     echo "statement counters reset — start the run now"
     ;;
 
+snapshot)
+    "${PSQL[@]}" -t -c "
+      SELECT json_build_object(
+        'captured_at', clock_timestamp(), 'database', current_database(),
+        'server_version', version(),
+        'info', (SELECT row_to_json(i) FROM pg_stat_statements_info i),
+        'statements', (SELECT json_agg(s) FROM pg_stat_statements s
+          WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())));"
+    ;;
+
+calls)
+    "${PSQL[@]}" -c "
+      SELECT queryid, toplevel, calls,
+             round(total_exec_time::numeric, 1) AS exec_ms,
+             round(mean_exec_time::numeric, 3) AS mean_exec_ms,
+             round(max_exec_time::numeric, 3) AS max_exec_ms,
+             rows, left(regexp_replace(query, '\s+', ' ', 'g'), 160) AS statement
+      FROM pg_stat_statements
+      WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+      ORDER BY calls DESC, total_exec_time DESC LIMIT $N;"
+    ;;
+
 top)
     # total_plan_time is only populated when pg_stat_statements.track_planning = on.
     # Reported separately rather than folded in: a statement dominated by PLANNING is a
@@ -48,11 +74,12 @@ top)
       SELECT round((total_plan_time + total_exec_time)::numeric) AS total_ms,
              round(total_plan_time::numeric)                     AS plan_ms,
              round(total_exec_time::numeric)                     AS exec_ms,
-             calls,
+             queryid, toplevel, calls,
              round(mean_exec_time::numeric, 3)                   AS mean_exec_ms,
              rows,
              left(regexp_replace(query, '\s+', ' ', 'g'), 90)    AS statement
       FROM pg_stat_statements
+      WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
       ORDER BY (total_plan_time + total_exec_time) DESC
       LIMIT $N;"
     ;;
@@ -64,10 +91,11 @@ plans)
              CASE WHEN total_exec_time > 0
                   THEN round((100*total_plan_time/(total_plan_time+total_exec_time))::numeric,1)
              END                                             AS pct_planning,
-             calls,
+             queryid, toplevel, calls,
              left(regexp_replace(query, '\s+', ' ', 'g'), 90) AS statement
       FROM pg_stat_statements
       WHERE total_plan_time > 0
+        AND dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
       ORDER BY total_plan_time DESC
       LIMIT $N;"
     ;;
@@ -77,16 +105,17 @@ io)
     # partitioned table shows up here long before it shows up in wall-clock, because the
     # pages are usually cached on a warm box and the cost only appears under real volume.
     "${PSQL[@]}" -c "
-      SELECT shared_blks_read, shared_blks_hit, calls,
+      SELECT queryid, toplevel, shared_blks_read, shared_blks_hit, calls,
              round(total_exec_time::numeric) AS exec_ms,
              left(regexp_replace(query, '\s+', ' ', 'g'), 90) AS statement
       FROM pg_stat_statements
+      WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
       ORDER BY shared_blks_read DESC
       LIMIT $N;"
     ;;
 
 *)
-    echo "usage: $0 reset|top|plans|io [N]" >&2
+    echo "usage: $0 snapshot|reset|top|calls|plans|io [N]" >&2
     exit 2
     ;;
 esac

@@ -28,12 +28,9 @@ BEGIN
 
     -- Missing canonical identity is a caller/protocol error. Keep this one
     -- complete set check before mutation; identity is never synthesized here.
-    IF EXISTS (
-        SELECT 1
-        FROM (SELECT DISTINCT entity_id FROM unnest(p_entity_ids) AS u(entity_id)) i
-        LEFT JOIN @extschema@.entities e ON e.id = i.entity_id
-        WHERE e.id IS NULL
-    ) THEN
+    -- Reuse the native HASH(id) routed batch probe. Resolvability from the
+    -- codepoint perfcache is deliberately insufficient: these must be stored rows.
+    IF bit_count(@extschema@.entities_stored_bitmap(p_entity_ids)) <> n THEN
         RETURN true;
     END IF;
 
@@ -62,29 +59,18 @@ BEGIN
              AS u(entity_id, tier, type_id, source_id, source_is_null)
         ORDER BY u.entity_id, u.tier, u.type_id,
                  CASE WHEN u.source_is_null THEN NULL::bytea ELSE u.source_id END NULLS LAST
-    ), updated_facets AS (
-        UPDATE @extschema@.entity_interpretations ei
-           SET first_observed_by = i.first_observed_by
-          FROM input i
-         WHERE ei.entity_id = i.entity_id
-           AND ei.tier = i.tier
-           AND ei.type_id = i.type_id
-           AND i.first_observed_by IS NOT NULL
-           AND (ei.first_observed_by IS NULL
-                OR i.first_observed_by < ei.first_observed_by)
+    ), published_facets AS (
+        -- One indexed match supplies both branches. Separate UPDATE and anti-join
+        -- INSERT statements probe the same complete facet set twice on every replay.
+        MERGE INTO @extschema@.entity_interpretations ei
+        USING input i
+        ON ei.entity_id = i.entity_id AND ei.tier = i.tier AND ei.type_id = i.type_id
+        WHEN MATCHED AND i.first_observed_by IS NOT NULL
+          AND (ei.first_observed_by IS NULL OR i.first_observed_by < ei.first_observed_by)
+          THEN UPDATE SET first_observed_by = i.first_observed_by
+        WHEN NOT MATCHED THEN INSERT (entity_id, tier, type_id, first_observed_by)
+          VALUES (i.entity_id, i.tier, i.type_id, i.first_observed_by)
         RETURNING ei.entity_id
-    ), inserted_facets AS (
-        INSERT INTO @extschema@.entity_interpretations(
-            entity_id, tier, type_id, first_observed_by)
-        SELECT i.entity_id, i.tier, i.type_id, i.first_observed_by
-        FROM input i
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM @extschema@.entity_interpretations ei
-            WHERE ei.entity_id = i.entity_id
-              AND ei.tier = i.tier
-              AND ei.type_id = i.type_id)
-        RETURNING entity_id
     ), incoming_summary AS MATERIALIZED (
         SELECT i.entity_id,
                min(i.tier)::smallint AS tier,

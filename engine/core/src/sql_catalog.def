@@ -160,11 +160,19 @@ SQL_QUERY("leaders.named", "int4[],int4",
     "FROM ops.band_leaders($1,$2) AS l "
     "JOIN converse.relation_band_catalog() AS b ON b.band=l.band "
     "ORDER BY l.band,l.eff_mu DESC,l.subject_id,l.object_id")
+/* Each relation contributes at most the requested page. A global top-N item
+ * must be in its own relation's top-N, including the complete tie order. One
+ * typed set handoff bounds the final merge to relation_count * page_size and
+ * avoids scanning every equal-score row or absent type in DEFAULT storage. */
 SQL_QUERY("consensus.band_edges", "bytea[],int8,int8",
-    "SELECT subject_id,type_id,object_id,rating,rd,witness_count,(rating - 2*rd) AS eff_mu "
-    "FROM laplace.consensus WHERE type_id=ANY($1) AND object_id IS NOT NULL "
-    "AND NOT consensus.refuted(rating,rd) AND (rating - 2*rd)>=$2 "
-    "ORDER BY (rating - 2*rd) DESC,subject_id,type_id,object_id LIMIT $3")
+    "SELECT r.* FROM unnest($1::bytea[]) AS t(type_id) "
+    "CROSS JOIN LATERAL ("
+    "SELECT c.subject_id,c.type_id,c.object_id,c.rating,c.rd,c.witness_count,"
+    "(c.rating - 2*c.rd) AS eff_mu FROM laplace.consensus c "
+    "WHERE c.type_id=t.type_id AND c.object_id IS NOT NULL "
+    "AND NOT consensus.refuted(c.rating,c.rd) AND (c.rating - 2*c.rd)>=$2 "
+    "ORDER BY (c.rating - 2*c.rd) DESC,c.subject_id,c.object_id LIMIT $3) r "
+    "ORDER BY r.eff_mu DESC,r.subject_id,r.type_id,r.object_id LIMIT $3")
 
 SQL_QUERY("leaders.arena", "int4,int8",
     "SELECT subject_id,type_id,object_id,rating,rd,witness_count FROM consensus.band_edges($1,NULL,$2)")

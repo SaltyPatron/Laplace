@@ -932,6 +932,8 @@ pg_laplace_relation_highway_band(PG_FUNCTION_ARGS)
  * ONE indexed SPI query does the fetch. consensus_type_btree carries the
  * type_id = ANY($1) filter; the eff_mu expression index carries the ordering.
  */
+static SPIPlanPtr band_edges_plan = NULL;
+
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_band_edges);
 
 Datum
@@ -991,7 +993,15 @@ pg_laplace_consensus_band_edges(PG_FUNCTION_ARGS)
     args[0] = PointerGetDatum(type_arr);
     args[1] = Int64GetDatum(min_eff_mu);
     args[2] = Int64GetDatum(limit_rows);
-    rc = SPI_execute_with_args(laplace_sql_query_text("consensus.band_edges"), 3, argtypes, args, NULL, true, 0);
+    if (band_edges_plan == NULL)
+    {
+        SPIPlanPtr plan = SPI_prepare_cursor(laplace_sql_query_text("consensus.band_edges"),
+            3, argtypes, CURSOR_OPT_GENERIC_PLAN);
+        if (plan == NULL || SPI_keepplan(plan) != 0)
+            elog(ERROR, "consensus_band_edges: cannot retain typed page plan");
+        band_edges_plan = plan;
+    }
+    rc = SPI_execute_plan(band_edges_plan, args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
         elog(ERROR, "consensus_band_edges: query failed: %s",
              SPI_result_code_string(rc));

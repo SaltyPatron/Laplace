@@ -1,0 +1,8 @@
+-- Typed leaderboard pages need the complete deterministic order. A score-only
+-- index reads the entire tied score group, and scans DEFAULT storage for absent
+-- types. This prefix allows one indexed page per requested relation, including
+-- runtime pruning of its physical partition. Keep the native refutation test in
+-- the partial predicate so excluded rows never consume the page workset.
+CREATE INDEX IF NOT EXISTS consensus_type_rank_btree
+    ON consensus (type_id, ((rating - 2*rd)) DESC, subject_id, object_id)
+    WHERE object_id IS NOT NULL AND NOT consensus.refuted(rating, rd);

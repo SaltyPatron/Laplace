@@ -44,10 +44,19 @@ BEGIN ATOMIC
     WHERE t.relnamespace IN ('laplace'::regnamespace, 'realize'::regnamespace,
                              'consensus'::regnamespace, 'generation'::regnamespace)
       AND NOT i.indisvalid
-    ORDER BY t.relname, c.relname;
+    UNION ALL
+    -- A dropped index has no pg_index row. Retained recovery declarations are
+    -- therefore part of health, even when every surviving index is valid.
+    SELECT j.index_name, j.table_name, false, t.relkind = 'p', 0::bigint,
+           'laplace'::text
+    FROM laplace.index_cycle_journal j
+    LEFT JOIN pg_catalog.pg_class t
+      ON t.oid = to_regclass(format('laplace.%I', j.table_name))
+    WHERE to_regclass(format('laplace.%I', j.index_name)) IS NULL
+    ORDER BY 2, 1;
 END;
 
 COMMENT ON FUNCTION ops.index_health() IS
-    'Every non-valid index in the substrate schemas (empty set = healthy). '
+    'Every non-valid index and journaled missing index in the substrate schemas. '
     'leaf_count 0 on a partitioned parent = the 2026-08-13 shell class: '
     'present in the catalog, unusable for reads, invisible to row counts.';

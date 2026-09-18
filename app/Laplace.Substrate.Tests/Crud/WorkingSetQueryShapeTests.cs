@@ -43,8 +43,9 @@ public sealed class WorkingSetQueryShapeTests
         Assert.DoesNotContain(
             "FROM @extschema@.entity_interpretations i\n        JOIN",
             publisher, StringComparison.Ordinal);
-        Assert.Contains("updated_facets AS", publisher, StringComparison.Ordinal);
-        Assert.Contains("inserted_facets AS", publisher, StringComparison.Ordinal);
+        Assert.Contains("entities_stored_bitmap(p_entity_ids)", publisher, StringComparison.Ordinal);
+        Assert.Contains("MERGE INTO @extschema@.entity_interpretations", publisher, StringComparison.Ordinal);
+        Assert.Contains("WHEN NOT MATCHED THEN INSERT", publisher, StringComparison.Ordinal);
         Assert.Contains("incoming_summary AS MATERIALIZED", publisher, StringComparison.Ordinal);
         Assert.Contains("sqlState is \"23505\" or", retry, StringComparison.Ordinal);
     }
