@@ -338,9 +338,11 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         var result = walk.Result.Value;
         if (strict && PgnGames.TagStr(gameText, "Result") != result.ResultToken)
             throw new InvalidDataException("complete recorded PGN header and movetext result disagree");
-        if (requireCompleteSource && PgnGames.TagStr(gameText, "Termination").ToLowerInvariant()
+        string termination = PgnGames.TagStr(gameText, "Termination");
+        if (requireCompleteSource && termination.ToLowerInvariant()
             is "unterminated" or "abandoned")
             throw new InvalidDataException("corpus source declares an unfinished game");
+        bool requireSourceTerminal = requireCompleteSource && SourceDeclaresBoardTerminal(termination);
 
         string declaredPlies = PgnGames.TagStr(gameText, "PlyCount");
         if (strict && declaredPlies.Length > 0 && (!int.TryParse(declaredPlies,
@@ -358,7 +360,8 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
             throw new InvalidDataException("normal recorded PGN has a FEN without SetUp=1");
         var replay = TryReplayLineDetailed(moves, startFen,
             expectedNormalOutcome: requireNormalCompletion ? result : null,
-            expectedSourceOutcome: requireCompleteSource ? result : null);
+            expectedSourceOutcome: requireCompleteSource ? result : null,
+            requireSourceTerminal: requireSourceTerminal);
         if (replay is null)
         {
             if (strict)
@@ -395,6 +398,10 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         };
     }
 
+    private static bool SourceDeclaresBoardTerminal(string termination)
+        => termination.Contains("checkmate", StringComparison.OrdinalIgnoreCase)
+           || termination.Contains("stalemate", StringComparison.OrdinalIgnoreCase);
+
     private static string DropReason(string gameText, string? startFen)
     {
         if (startFen is null) return ChessDropLedger.UnreadableSan;
@@ -417,7 +424,7 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
     internal static ChessLineReplay? TryReplayLineDetailed(
         IReadOnlyList<string> sans, string? startFen, GameOutcome? expectedNormalOutcome = null,
-        GameOutcome? expectedSourceOutcome = null)
+        GameOutcome? expectedSourceOutcome = null, bool requireSourceTerminal = false)
     {
         var m = new ChessModality();
         if (ChessAnalyze.InitialState(startFen, m) is not { } start) return null;
@@ -469,12 +476,23 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         }
         if (history is not null && m.Terminal(new ChessState(board, history)) != expectedNormalOutcome)
             throw new InvalidDataException("normal recorded game's serialized terminal outcome differs from its result");
-        // Human source games may end by resignation or agreement while legal moves
-        // remain. A forced mate/stalemate still cannot contradict the declared result.
-        // Do not turn claimable repetition/fifty-move positions into automatic endings.
-        if (expectedSourceOutcome is { } sourceOutcome && MoveGen.Legal(board).Count == 0
-            && m.Terminal(new ChessState(board, ImmutableList.Create(ids[^1]))) != sourceOutcome)
-            throw new InvalidDataException("complete source game's forced terminal outcome differs from its result");
+        // Human source games may end by resignation, timeout or agreement while legal
+        // moves remain. But if the provider explicitly says checkmate/stalemate, the stored
+        // source line itself must end at a board-terminal position with the declared result.
+        // This rejects header-only "checkmates" that would otherwise create a PLAYING witness
+        // with no move carrier and later surface as a game that cannot be replayed.
+        if (expectedSourceOutcome is { } sourceOutcome)
+        {
+            var legal = MoveGen.Legal(board);
+            var forced = legal.Count == 0
+                ? m.Terminal(new ChessState(board, ImmutableList.Create(ids[^1])))
+                : null;
+            if (requireSourceTerminal && (legal.Count != 0 || forced != sourceOutcome))
+                throw new InvalidDataException(
+                    "complete source game declares a board-terminal finish not present in its move trajectory");
+            if (!requireSourceTerminal && legal.Count == 0 && forced != sourceOutcome)
+                throw new InvalidDataException("complete source game's forced terminal outcome differs from its result");
+        }
         return new ChessLineReplay(ids, moves, movingPieces, moveIds, start.Initial.Board.WhiteToMove);
     }
 
