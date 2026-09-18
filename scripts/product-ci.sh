@@ -38,6 +38,12 @@ run_ci_contract_checks() {
     scripts/check-deployed-revision.sh \
     scripts/publish-applications.sh \
     deploy/linux/deploy.sh
+  python3 -m py_compile \
+    scripts/ci-impact-plan.py \
+    scripts/ci-qualification-cache.py \
+    scripts/ci-product-freshness.py \
+    scripts/ci_product_scope.py \
+    scripts/ci_managed_projects.py
   python3 scripts/validate-pipeline.py
   python3 scripts/test-ci-workspace.py
   python3 scripts/test-product-ci-artifact-ownership.py
@@ -158,7 +164,7 @@ run_build() {
 
 run_dev_test_matrix() {
   local check_superseded="${1:-0}"
-  local current_rc profile suite spec
+  local current_rc profile suite spec cache_message record_message
   local selected="${LAPLACE_DEV_SUITES:-all}"
   local use_cache="${LAPLACE_USE_QUALIFICATION_CACHE:-0}"
   local specs=(
@@ -175,6 +181,31 @@ run_dev_test_matrix() {
     [[ ",$selected," == *",$wanted,"* ]]
   }
 
+  qualification_row() {
+    local row_suite="$1" decision="$2" evidence="$3"
+    [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
+    evidence="${evidence//|/\\|}"
+    printf '| `%s` | %s | %s |\n' "$row_suite" "$decision" "$evidence" >> "$GITHUB_STEP_SUMMARY"
+  }
+
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      echo "## Qualification execution"
+      echo
+      echo "- Selected development suites: ${selected:-none}"
+      echo "- Receipt reuse: $([[ "$use_cache" == 1 ]] && echo enabled || echo disabled)"
+      if [[ -n "${LAPLACE_MANAGED_TEST_PROJECTS:-}" ]]; then
+        echo "- Managed test projects: ${LAPLACE_MANAGED_TEST_PROJECTS}"
+      fi
+      if [[ -n "${LAPLACE_MANAGED_TEST_FILTER:-}" ]]; then
+        echo "- Managed test filter: `${LAPLACE_MANAGED_TEST_FILTER}`"
+      fi
+      echo
+      echo "| Suite | Decision | Evidence |"
+      echo "| --- | --- | --- |"
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
+
   for spec in "${specs[@]}"; do
     if [[ "$check_superseded" == 1 ]]; then
       current_rc=0
@@ -186,21 +217,30 @@ run_dev_test_matrix() {
     IFS=: read -r profile suite <<< "$spec"
     if ! suite_selected "$suite"; then
       echo "::notice::qualification planner kept $suite valid; suite not scheduled"
+      qualification_row "$suite" "unaffected" "impact planner did not invalidate this suite"
       continue
     fi
 
-    if [[ "$use_cache" == 1 ]] && python3 scripts/ci-qualification-cache.py check --suite "$suite"; then
+    cache_message=""
+    if [[ "$use_cache" == 1 ]] && cache_message="$(python3 scripts/ci-qualification-cache.py check --suite "$suite")"; then
       echo "::notice::reusing passed qualification receipt for $suite"
+      qualification_row "$suite" "reused" "$cache_message"
       continue
     fi
 
     current_rc=0
     bash scripts/test-parallel.sh --profile "$profile" --suite "$suite" || current_rc=$?
-    (( current_rc == 0 )) || return "$current_rc"
+    if (( current_rc != 0 )); then
+      qualification_row "$suite" "executed — failed" "test suite exited $current_rc"
+      return "$current_rc"
+    fi
 
     if [[ "$use_cache" == 1 ]]; then
-      python3 scripts/ci-qualification-cache.py record \
-        --suite "$suite" --source-sha "$(git rev-parse HEAD)"
+      record_message="$(python3 scripts/ci-qualification-cache.py record \
+        --suite "$suite" --source-sha "$(git rev-parse HEAD)")"
+      qualification_row "$suite" "executed — passed" "$record_message"
+    else
+      qualification_row "$suite" "executed — passed" "receipt cache disabled for this operation"
     fi
   done
 
