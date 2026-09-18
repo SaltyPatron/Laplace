@@ -712,10 +712,17 @@ public abstract class DecomposerMultiPhase : IDecomposer
             phaseOptions = options with { MaxInputUnits = remaining };
         }
 
-        await foreach (var change in phase.DecomposeAsync(context, phaseOptions, ct))
-            // Each phase owns its source/prior declarations. A multi-source
-            // container cannot replace them with its own identity or trust class.
-            yield return change;
+        try
+        {
+            await foreach (var change in phase.DecomposeAsync(context, phaseOptions, ct))
+                // Each phase owns its source/prior declarations. A multi-source
+                // container cannot replace them with its own identity or trust class.
+                yield return change;
+        }
+        finally
+        {
+            await phase.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -801,7 +808,8 @@ public abstract class DecomposerMultiPhase<TSource, TScope> : ArtifactDecomposer
     {
         await OnBeforeRegisterAsync(context, ct);
         await SourceVocabularyBootstrap.RegisterManifestAsync(
-            context, Manifest, VocabularyReadback, ct: ct);
+            context, Manifest, VocabularyReadback,
+            depositLicense: LayerOrder != 0, ct: ct);
         await OnInitializedAsync(context, ct);
     }
 

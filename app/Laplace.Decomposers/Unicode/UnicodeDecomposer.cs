@@ -84,6 +84,9 @@ public sealed class UnicodeDecomposer
                            xml[0], ducet[0], context, options, batch, ct).ConfigureAwait(false))
             yield return change;
 
+        if (SourceVocabularyBootstrap.BuildLicenseChange(Manifest) is { } licenseChange)
+            yield return licenseChange;
+
         ArtifactJob[] independent = jobs
             .Where(static job => job.Kind is not ArtifactKind.UcdXml and not ArtifactKind.Ducet)
             .ToArray();

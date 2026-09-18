@@ -116,6 +116,7 @@ public static class SourceVocabularyBootstrap
         IDecomposerContext context,
         ISourceManifest manifest,
         ConcurrentDictionary<string, byte>? readbackNames = null,
+        bool depositLicense = true,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(manifest);
@@ -128,7 +129,8 @@ public static class SourceVocabularyBootstrap
             relationNodeNames: CreditRelations.Concat(manifest.Relations),
             readbackNames: readbackNames,
             ct: ct);
-        await DepositLicenseAsync(context, manifest, ct);
+        if (depositLicense)
+            await DepositLicenseAsync(context, manifest, ct);
         return boot;
     }
 
@@ -141,10 +143,7 @@ public static class SourceVocabularyBootstrap
     /// Deposit license metadata as witnessed scalar edges on the source entity.
     /// Skips when license is <see cref="SourceLicense.Unknown"/> with no fields set.
     /// </summary>
-    public static async Task DepositLicenseAsync(
-        IDecomposerContext context,
-        ISourceManifest manifest,
-        CancellationToken ct = default)
+    public static SubstrateChange? BuildLicenseChange(ISourceManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         var license = manifest.License;
@@ -154,7 +153,7 @@ public static class SourceVocabularyBootstrap
             && string.IsNullOrEmpty(license.Copyright)
             && string.IsNullOrEmpty(license.Citation)
             && string.IsNullOrEmpty(license.Version))
-            return;
+            return null;
 
         var b = new SubstrateChangeBuilder(
             manifest.SourceId, $"bootstrap/license/{manifest.SourceName}", null,
@@ -178,7 +177,16 @@ public static class SourceVocabularyBootstrap
         Attest("HAS_CITATION", license.Citation);
         Attest("HAS_VERSION", license.Version);
 
-        if (!any) return;
-        await context.Writer.ApplyAsync(b.Build(), ct);
+        if (any) return b.Build();
+        b.Dispose();
+        return null;
     }
-}
+
+    public static async Task DepositLicenseAsync(
+        IDecomposerContext context,
+        ISourceManifest manifest,
+        CancellationToken ct = default)
+    {
+        if (BuildLicenseChange(manifest) is { } change)
+            await context.Writer.ApplyAsync(change, ct);
+    }}
