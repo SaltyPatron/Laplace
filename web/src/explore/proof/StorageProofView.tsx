@@ -507,7 +507,7 @@ export function StorageProofView() {
       <header className={styles.hero}>
         <div>
           <span className={styles.eyebrow}>Executable storage proof · T0 ROM {STORAGE_PROOF_SURFACE_VERSION}</span>
-          <h2>Finite coordinate address · exact reversible trajectory</h2>
+          <h2>Storage Proof · finite coordinate address · exact reversible trajectory</h2>
           <p>
             One prompt, one native decomposition: identity, O(Tier) trunk/leaf structure,
             4-D placement, 128-bit Hilbert locality, and the exact 212-bit packed carrier
