@@ -44,6 +44,7 @@ PRODUCT_IGNORED_GLOBS = (
     "scripts/test-*.sh",
     "scripts/tests/**",
     "web/scripts/test-*.mjs",
+    "web/scripts/verify-*.mjs",
     "web/e2e/**",
 )
 
@@ -69,6 +70,7 @@ GITHUB_PATH_IGNORES = (
     "scripts/test-*.sh",
     "scripts/tests/**",
     "web/scripts/test-*.mjs",
+    "web/scripts/verify-*.mjs",
     "web/e2e/**",
     "scripts/test-workflow-architecture.py",
     "scripts/test-seed-workflow-ownership.py",
