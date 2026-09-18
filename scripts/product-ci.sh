@@ -226,20 +226,19 @@ run_db_tests() {
 }
 run_publish() {
   local scope="${LAPLACE_PUBLISH_SCOPE:-full}"
-  require_built_revision
   case "$scope" in
-    api)
-      bash scripts/publish-applications.sh api-recover
-      bash scripts/publish-applications.sh api-deploy
-      ;;
-    full|all)
-      bash scripts/publish-applications.sh recover
-      bash scripts/publish-applications.sh deploy
-      ;;
+    api) bash scripts/publish-applications.sh api-recover ;;
+    full|all) bash scripts/publish-applications.sh recover ;;
     *)
       echo "::error::unknown publication scope: $scope" >&2
       return 2
       ;;
+  esac
+
+  require_built_revision
+  case "$scope" in
+    api) bash scripts/publish-applications.sh api-deploy ;;
+    full|all) bash scripts/publish-applications.sh deploy ;;
   esac
 }
 run_live_tests() {
