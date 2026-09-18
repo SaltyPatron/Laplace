@@ -33,6 +33,14 @@ internal static class UnicodePhysicalArtifactParser
         string Form,
         bool Maybe,
         bool CountsSourceRow);
+    internal readonly record struct BinaryPropertyPoint(
+        uint Codepoint,
+        string Property,
+        bool CountsSourceRow);
+    internal readonly record struct UnihanPropertyRow(
+        uint Codepoint,
+        string Property,
+        string Value);
 
     internal static async IAsyncEnumerable<UnicodeDataRow> UnicodeDataAsync(
         string path,
@@ -107,6 +115,59 @@ internal static class UnicodePhysicalArtifactParser
                 first = false;
                 if (cp == 0x10FFFFu) break;
             }
+        }
+    }
+
+
+    internal static async IAsyncEnumerable<BinaryPropertyPoint> BinaryPropertiesAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 2) continue;
+            string property = fields[1].Trim();
+            if (property.Length == 0
+                || !TryRange(fields[0].Trim(), out uint start, out uint end))
+                continue;
+
+            bool first = true;
+            for (uint cp = start; cp <= end; ++cp)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return new BinaryPropertyPoint(cp, property, first);
+                first = false;
+                if (cp == 0x10FFFFu) break;
+            }
+        }
+    }
+
+    internal static async IAsyncEnumerable<UnihanPropertyRow> UnihanPropertiesAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            if (lineMem.IsEmpty) continue;
+            string line = Encoding.UTF8.GetString(lineMem.Span);
+            if (line.Length == 0 || line[0] == '#') continue;
+            string[] fields = line.Split('\t', 3);
+            if (fields.Length != 3) continue;
+
+            string cpText = fields[0].Trim();
+            if (cpText.StartsWith("U+", StringComparison.OrdinalIgnoreCase))
+                cpText = cpText[2..];
+            if (!uint.TryParse(cpText, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint cp)
+                || cp > 0x10FFFFu)
+                continue;
+
+            string property = fields[1].Trim();
+            string value = fields[2].Trim();
+            if (property.Length == 0 || value.Length == 0) continue;
+            yield return new UnihanPropertyRow(cp, property, value);
         }
     }
 
