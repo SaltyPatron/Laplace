@@ -136,6 +136,9 @@ export interface StorageProofResponse {
   root_id_hex: string;
   natural_unit_ordinal: number;
   atom_window: number;
+  perfcache_receipt_hex: string;
+  database_perfcache_receipt_hex?: string | null;
+  perfcache_aligned?: boolean | null;
   nodes: StorageProofNodeRow[];
 }
 export interface ExploreAnchorNeighborRow {
