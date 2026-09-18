@@ -198,6 +198,40 @@ jobs:
             git fetch --no-tags --depth=2 origin "$TARGET_SHA"
           unset checkout_auth CHECKOUT_TOKEN
 
+          # Reserve this exact candidate BEFORE creating or mutating its worktree.
+          # Holding the metadata lock at the same time closes the old create->unlock->lock
+          # race where a newer run could reclaim a candidate before its owner locked it.
+          exec 8>"$work_root/product-$TARGET_SHA.lock"
+          flock 8
+
+          # Candidate worktrees are generated build state, not source authority. Reclaim every
+          # inactive superseded candidate before a new build so cancelled pushes cannot fill
+          # /build indefinitely. An active candidate keeps its per-revision lock and is never
+          # touched. Dirty tracked state is preserved for diagnosis instead of force-deleted.
+          for stale_workspace in "$worktree_root"/*; do
+            [[ -d "$stale_workspace" ]] || continue
+            [[ "$stale_workspace" != "$candidate_workspace" ]] || continue
+            stale_sha="${stale_workspace##*/}"
+            [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+
+            exec {stale_fd}>"$work_root/product-$stale_sha.lock"
+            if flock -n "$stale_fd"; then
+              if [[ -e "$stale_workspace/.git" ]]; then
+                if [[ -z "$(git -C "$stale_workspace" status --porcelain --untracked-files=no)" ]]; then
+                  git worktree remove --force "$stale_workspace"
+                else
+                  echo "::warning::preserving dirty inactive candidate worktree: $stale_workspace" >&2
+                fi
+              else
+                # A SHA-named partial directory can be left by a killed worktree add/build.
+                # Its inactive revision lock proves no stage owns it.
+                rm -rf "$stale_workspace"
+              fi
+              flock -u "$stale_fd"
+            fi
+            exec {stale_fd}>&-
+          done
+
           git worktree prune
           if [[ -e "$candidate_workspace/.git" ]]; then
             [[ "$(git -C "$candidate_workspace" rev-parse HEAD)" == "$TARGET_SHA" ]] || {
@@ -223,8 +257,6 @@ jobs:
           # Serialize only jobs touching the SAME candidate build tree. Different
           # revisions have independent source/build trees. Stateful operations also
           # reserve the installed host/database, while read-only qualification does not.
-          exec 8>"$work_root/product-$TARGET_SHA.lock"
-          flock 8
           case "$LAPLACE_STAGE" in
             release-qualification|mainline|build|test-dev|check)
               ;;

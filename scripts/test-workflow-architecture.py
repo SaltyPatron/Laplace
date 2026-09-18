@@ -94,11 +94,14 @@ class WorkflowArchitecture(unittest.TestCase):
         worktree = stage.index('git worktree add --detach "$candidate_workspace" "$TARGET_SHA"')
         candidate_lock = stage.index('product-$TARGET_SHA.lock')
         self.assertLess(resolve, fetch)
-        self.assertLess(fetch, worktree)
-        self.assertLess(worktree, candidate_lock)
+        self.assertLess(fetch, candidate_lock)
+        self.assertLess(candidate_lock, worktree)
         self.assertIn("product-worktrees", stage)
         self.assertIn("git-metadata.lock", stage)
         self.assertIn("host-resource.lock", stage)
+        self.assertIn('flock -n "$stale_fd"', stage)
+        self.assertIn('git worktree remove --force "$stale_workspace"', stage)
+        self.assertIn('status --porcelain --untracked-files=no', stage)
         self.assertNotIn("build-resource.lock", stage)
 
     def test_main_qualification_reuses_exact_valid_suite_receipts(self):

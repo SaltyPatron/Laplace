@@ -121,32 +121,47 @@ class WorkspaceReservation(WorkspaceFixture):
             try:
                 self.assertEqual(process.stdout.readline(), "started\n")
                 candidate = self.candidate()
-                deadline = time.time() + 2
-                candidate_head = None
-                while time.time() < deadline:
-                    if candidate.exists():
-                        probe = subprocess.run(
-                            ["git", "rev-parse", "HEAD"],
-                            cwd=candidate, env=self.env,
-                            text=True, capture_output=True, check=False,
-                        )
-                        if probe.returncode == 0:
-                            candidate_head = probe.stdout.strip()
-                            break
-                    time.sleep(0.02)
+                time.sleep(0.25)
                 self.assertIsNone(process.poll())
-                self.assertEqual(candidate_head, self.target)
+                self.assertFalse(candidate.exists(),
+                                 "candidate must not be mutated before its revision lock is owned")
                 self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
                 self.assertFalse(self.events.exists())
                 self.assertEqual(self.marker.read_text(), "existing qualified build\n")
                 fcntl.flock(lock, fcntl.LOCK_UN)
                 stdout, stderr = process.communicate(timeout=15)
                 self.assertEqual(process.returncode, 0, stdout + stderr)
+                self.assertEqual(self.git(candidate, "rev-parse", "HEAD").strip(), self.target)
             finally:
                 if process.poll() is None:
                     process.kill()
                     process.communicate(timeout=5)
         self.assertEqual(self.events.read_text().splitlines(), ["environment", "mainline"])
+
+    def test_inactive_superseded_candidate_is_reclaimed_before_checkout(self):
+        stale = self.candidate(self.old)
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
+        (stale / "build-junk.bin").write_bytes(b"x" * 4096)
+
+        result = self.execute("operator")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(stale.exists())
+        self.assertEqual(self.git(self.candidate(), "rev-parse", "HEAD").strip(), self.target)
+
+    def test_active_superseded_candidate_is_never_reclaimed(self):
+        stale = self.candidate(self.old)
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
+        stale_lock = self.work / f"product-{self.old}.lock"
+        stale_lock.touch()
+
+        with stale_lock.open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = self.execute("operator")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(stale.exists())
+            self.assertEqual(self.git(stale, "rev-parse", "HEAD").strip(), self.old)
 
     def test_superseded_mainline_is_auditable_noop(self):
         environment = dict(self.env, LAPLACE_STAGE="mainline", LAPLACE_SKIP_IF_SUPERSEDED="1", TARGET_SHA=self.old)
