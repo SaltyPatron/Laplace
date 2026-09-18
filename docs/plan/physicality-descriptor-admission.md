@@ -171,16 +171,13 @@ storage projection now uses the explicit retention recipe. Existing E and exact
 D identities do not change. Prior type-1 descriptor storage remains readable;
 it is not relabeled as a type-9 projection.
 
-The registered `HAS_PHYSICALITY` relation associates E with D using the actual
-source and source-unit context. A raw source-unit receipt is not assumed to be
-an existing E: the native owner emits a canonical context entity containing
-typed source-id and receipt identifiers, each represented by sixteen exact
-octets through the ordinary numeric vocabulary. Native batch dedup retains one association per
-such tuple and the latest supplied timestamp; repeated internal candidates do
-not multiply observation count. The shared writer's existing attestation-id
-presence exclusion owns durable replay behavior. Ordinary `fold_replayable`
-transport remains enabled; its alternate mode belongs to the atomic consensus
-participant path and is not a generic dedup switch.
+Physical-form provenance is structural state, not testimony. Admission retains one
+exact `(E,D,source,source-unit)` observation in `laplace.physicality_observations`,
+advancing only its observation time on exact replay. The source-unit receipt remains
+opaque provenance; no context entity is manufactured merely to carry it. Descriptor
+identity remains immutable and source-independent. Physicality provenance does not
+enter Glicko consensus, relation standing, highway masks or salient semantic facts.
+
 
 `physicality_descriptor_generated_source_create` builds the ordinary content
 entity for `substrate/source/PhysicalityDescriptorAdmission/v1` through the

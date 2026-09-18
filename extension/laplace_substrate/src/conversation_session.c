@@ -31,6 +31,7 @@ static SPIPlanPtr session_manifest_metadata_plan = NULL;
 static SPIPlanPtr session_lock_plan = NULL;
 static SPIPlanPtr session_coords_plan = NULL;
 static SPIPlanPtr session_write_plan = NULL;
+static SPIPlanPtr session_observation_plan = NULL;
 
 /* A stable session handle owns a mutable projection of its ordered turns.
  * Each turn retains its canonical Content physicality through governed apply.
@@ -155,7 +156,6 @@ pg_laplace_session_turn_ids(PG_FUNCTION_ARGS)
 /* Projection bodies are observations made by the native session operator.
  * The ordinary fixed source has the repository's explicit AppDerived prior;
  * a tenant, prompt or response identity does not imply this derivation prior. */
-#define SESSION_PROJECTION_PRIOR 0.40
 /* Seven outer set executions plus at most seven initial plan preparations. */
 #define SESSION_OPERATION_RESERVATION 14
 
@@ -580,7 +580,7 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
     for (size_t i = 0; i < observation_count; ++i) {
         observations[i].source_id = admission->source;
         observations[i].source_unit_id = admission->unit;
-        observations[i].source_trust = SESSION_PROJECTION_PRIOR;
+        observations[i].source_trust = 0.0; /* compatibility only; provenance is not testimony */
     }
     laplace_physicality_pg_admission_result *materialized = laplace_physicality_pg_materialize(
         (const intent_stage_t *const *)admission->raw, observation_count,
@@ -604,6 +604,36 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
         (uint32) (maximum_operations - SESSION_OPERATION_RESERVATION - materialized->database_operations)};
     LaplaceGeneratedStageSinkReceipt sink_receipt;
     laplace_generated_stage_sink(generated, 4, &sink_limits, &sink_receipt);
+    if (materialized->observation_count != observation_count)
+        elog(ERROR, "session_append_turns: structural provenance count changed during materialization");
+    {
+        Datum *entities = palloc(sizeof(Datum) * observation_count);
+        Datum *descriptors = palloc(sizeof(Datum) * observation_count);
+        Datum *sources = palloc(sizeof(Datum) * observation_count);
+        Datum *units = palloc(sizeof(Datum) * observation_count);
+        Datum *times = palloc(sizeof(Datum) * observation_count);
+        for (size_t i = 0; i < observation_count; ++i) {
+            const physicality_descriptor_form_observation_t *o = &materialized->observations[i];
+            entities[i] = hash128_to_datum(&o->entity_id);
+            descriptors[i] = hash128_to_datum(&o->descriptor_id);
+            sources[i] = hash128_to_datum(&o->source_id);
+            units[i] = hash128_to_datum(&o->source_unit_id);
+            times[i] = Int64GetDatum(o->observed_at_unix_us);
+        }
+        Oid types[5] = {BYTEAARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID,INT8ARRAYOID};
+        Datum args[5] = {
+            PointerGetDatum(construct_array(entities, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
+            PointerGetDatum(construct_array(descriptors, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
+            PointerGetDatum(construct_array(sources, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
+            PointerGetDatum(construct_array(units, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
+            PointerGetDatum(construct_array(times, observation_count, INT8OID,8,true,TYPALIGN_DOUBLE))
+        };
+        SPIPlanPtr plan = session_plan(&session_observation_plan,
+            laplace_sql_query_text("ingest.physicality_observations"), 5, types);
+        if (SPI_execute_plan(plan, args, NULL, false, 1) != SPI_OK_SELECT || SPI_processed != 1)
+            elog(ERROR, "session_append_turns: retaining structural physicality provenance failed");
+        SPI_freetuptable(SPI_tuptable);
+    }
     /* Register display names against the actual ordinary source IDs. The
      * legacy canonical-name helper hashes whole label bytes and therefore is
      * not an identity constructor for these content-tree entities. */

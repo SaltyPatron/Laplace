@@ -313,15 +313,10 @@ BEGIN ATOMIC
             p_plane, p_layer, p_head) AS id
     ),
     forms AS MATERIALIZED (
-        SELECT DISTINCT a.object_id AS descriptor_id
+        SELECT DISTINCT o.descriptor_id
         FROM circuit c
-        JOIN laplace.attestations a
-          ON a.subject_id = c.id
-         AND a.type_id =
-             laplace.relation_type_id('HAS_PHYSICALITY')
-        WHERE a.source_id = p_source
-          AND a.object_id IS NOT NULL
-          AND a.outcome = 2
+        JOIN laplace.physicality_observations o ON o.entity_id = c.id
+        WHERE o.source_id = p_source
     ),
     bodies AS MATERIALIZED (
         SELECT c.id AS circuit_id,

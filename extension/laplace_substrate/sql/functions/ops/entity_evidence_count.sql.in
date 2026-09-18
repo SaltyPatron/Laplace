@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION ops.entity_evidence_count(p_subject bytea)
+RETURNS bigint LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT count(*) FROM laplace.attestations a WHERE a.subject_id=p_subject;
+END;
+
+COMMENT ON FUNCTION ops.entity_evidence_count(bytea) IS
+'Exact subject-side attestation row count. Physical-form provenance is structural, not testimony.';

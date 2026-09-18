@@ -12,7 +12,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include "laplace/core/attestation_engine.h"
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/hash_composer.h"
@@ -144,10 +143,12 @@ struct physicality_descriptor_materialization {
     std::pmr::vector<hash128_t> pending;
     std::pmr::vector<hash128_t> missing;
     std::pmr::vector<physicality_descriptor_admitted_form_t> forms;
+    std::pmr::vector<physicality_descriptor_form_observation_t> observations;
     intent_stage_t* stage = nullptr;
     size_t stage_bytes = 0;
     explicit physicality_descriptor_materialization(size_t ceiling)
-        : memory(ceiling - sizeof(*this)), pending(&memory), missing(&memory), forms(&memory) {}
+        : memory(ceiling - sizeof(*this)), pending(&memory), missing(&memory), forms(&memory),
+          observations(&memory) {}
     ~physicality_descriptor_materialization() { intent_stage_free(stage); }
 };
 
@@ -201,7 +202,6 @@ physicality_descriptor_status_t materialize(
     // once forms and observations are complete. Their historical peak remains.
     std::pmr::vector<OutputNode> output(&memory);
     std::pmr::vector<hash128_t> output_children(&memory);
-    std::pmr::vector<laplace_attestation_staged_t> attestations(&memory);
     size_t before_retirement = 0;
     {
     phase(PHYSICALITY_MATERIALIZATION_CURRENT_CAPTURE);
@@ -589,48 +589,17 @@ physicality_descriptor_status_t materialize(
         result.forms[i] = {descriptors[i], view.id, view.state, view.missing_first, view.missing_count};
     }
 
-    phase(PHYSICALITY_MATERIALIZATION_OBSERVATIONS);
-    hash128_t relation;
-    require(laplace_relation_resolve("HAS_PHYSICALITY", &relation) == 0);
-    IdMap<size_t> observation_index(&memory);
-    hash128_t context_id{};
+    phase(PHYSICALITY_MATERIALIZATION_PROVENANCE);
+    result.observations.resize(original_count);
     for (size_t i = 0; i < original_count; ++i) {
         checkpoint();
-        /* A source-unit receipt is a typed identifier, not automatically an E.
-         * Its ordinary context binds the registered source id and exact unit
-         * receipt bytes while the attestation retains the real source owner. */
-        // The context recipe depends only on these exact identifiers. Reuse
-        // the immediately preceding result while that pair is unchanged;
-        // alternating source/unit rows still take the ordinary compose path.
-        // Trust, timestamp and descriptor remain per-observation inputs below.
-        if (i == 0u ||
-            !hash128_equals(&sources[i].source_id, &sources[i - 1u].source_id) ||
-            !hash128_equals(&sources[i].source_unit_id, &sources[i - 1u].source_unit_id)) {
-            const auto source_identifier = identifier(vocabulary.source_schema.id, sources[i].source_id);
-            const auto unit_identifier = identifier(vocabulary.unit_schema.id, sources[i].source_unit_id);
-            const std::array<hash128_t,3> context_fields{vocabulary.context_schema.id,
-                source_identifier.id, unit_identifier.id};
-            context_id = compose(context_fields.data(), context_fields.size(), nullptr, SIZE_MAX).id;
-        }
-        laplace_attestation_staged_t observation{};
-        require(laplace_attestation_resolved_build(&inputs[i].entity_id, &relation,
-            &descriptors[i], 0, &sources[i].source_id, &context_id, 0,
-            sources[i].source_trust, 1, 1, observations[i].observed_at_unix_us, &observation) == 0);
-        observation.last_observed_at_unix_us = observations[i].observed_at_unix_us;
-        /* The ordinary writer's source-unit journal owns replay exclusion.
-         * fold_replayable stays on its ordinary transport law: the alternate
-         * mode requires an atomic consensus transaction participant. */
-        const auto old = observation_index.find(observation.id);
-        if (old != observation_index.end()) {
-            auto& retained = attestations[old->second];
-            require(retained.opponent_rd_fp1e9 == observation.opponent_rd_fp1e9 &&
-                retained.opponent_rating_fp1e9 == observation.opponent_rating_fp1e9);
-            retained.last_observed_at_unix_us = std::max(retained.last_observed_at_unix_us,
-                observation.last_observed_at_unix_us);
-        } else {
-            observation_index.emplace(observation.id, attestations.size());
-            attestations.push_back(observation);
-        }
+        result.observations[i] = {
+            inputs[i].entity_id,
+            descriptors[i],
+            sources[i].source_id,
+            sources[i].source_unit_id,
+            observations[i].observed_at_unix_us
+        };
     }
 
     before_retirement = memory.used();
@@ -673,14 +642,9 @@ physicality_descriptor_status_t materialize(
                 static_cast<uint32_t>(stored_vertices), static_cast<int32_t>(node.child_count),
                 1, 0.0, 1, 0, generated_at) == 0);
     }
-    // Preserve the scalar append order and complete output. Subspans only
-    // bound cancellation latency inside the existing serialization owner.
-    for (size_t first = 0; first < attestations.size();) {
-        checkpoint();
-        const size_t count = std::min<size_t>(256u, attestations.size() - first);
-        stage_require(laplace_attestation_staged_batch_add(stage.get(), attestations.data() + first, count, nullptr) == 0);
-        first += count;
-    }
+    /* Physical-form provenance is returned through the structural observation
+     * stream. Generated descriptor stages deliberately contain no attestations:
+     * geometry must not manufacture semantic testimony or consensus standing. */
     result.stage_bytes = intent_stage_memory_bytes(stage.get());
     const size_t stage_peak = intent_stage_memory_peak_bytes(stage.get());
     memory.claim(stage_peak);
@@ -812,6 +776,13 @@ extern "C" const physicality_descriptor_admitted_form_t* physicality_descriptor_
     const physicality_descriptor_materialization_t* value, size_t* count) {
     if (count != nullptr) *count = value == nullptr ? 0u : value->forms.size();
     return value == nullptr ? nullptr : value->forms.data();
+}
+
+extern "C" const physicality_descriptor_form_observation_t* physicality_descriptor_materialization_observations(
+    const physicality_descriptor_materialization_t* value, size_t* count) {
+    if (count == nullptr) return nullptr;
+    *count = value == nullptr ? 0u : value->observations.size();
+    return value == nullptr || value->observations.empty() ? nullptr : value->observations.data();
 }
 
 extern "C" const hash128_t* physicality_descriptor_materialization_missing(

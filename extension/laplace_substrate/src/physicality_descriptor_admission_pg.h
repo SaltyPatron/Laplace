@@ -6,13 +6,15 @@
 #include "laplace/core/physicality_descriptor_admission.h"
 
 /* Three generated stages, borrowed until release: source declaration,
- * vocabulary, then descriptors/views/structural observations. They are never
- * automatically reflected again as new source observations. */
+ * vocabulary, then descriptor/view structures. Physical-form provenance is a
+ * separate typed result and never becomes generated semantic testimony. */
 typedef struct laplace_physicality_pg_admission_result {
     MemoryContext owner;
     intent_stage_t *stages[3];
     const physicality_descriptor_admitted_form_t *forms;
     size_t form_count;
+    const physicality_descriptor_form_observation_t *observations;
+    size_t observation_count;
     const hash128_t *view_missing_ids;
     size_t view_missing_count;
     hash128_t floor_receipt;
@@ -23,7 +25,7 @@ typedef struct laplace_physicality_pg_admission_result {
     int provider_rounds, database_operations;
 } laplace_physicality_pg_admission_result;
 
-/* The caller supplies actual bodies and explicit source/unit/prior metadata.
+/* The caller supplies actual bodies and explicit source/unit provenance metadata.
  * Input stages are borrowed; validated copies and every generated native
  * allocation live in the returned owner's child memory context. Provider reads
  * use the caller's active snapshot, which must be acquired after any write-lock

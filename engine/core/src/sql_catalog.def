@@ -279,6 +279,22 @@ SQL_QUERY("write.commit_settings", "",
     "current_setting('full_page_writes')::boolean")
 SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch')")
 
+SQL_QUERY("ingest.physicality_observations", "bytea[],bytea[],bytea[],bytea[],int8[]",
+    "WITH input AS ("
+    " SELECT e,d,s,u,t FROM unnest($1,$2,$3,$4,$5) AS x(e,d,s,u,t)"
+    "), dedup AS ("
+    " SELECT e,d,s,u,max(t) AS t FROM input"
+    " WHERE e IS NOT NULL AND d IS NOT NULL AND s IS NOT NULL AND u IS NOT NULL AND t IS NOT NULL"
+    " GROUP BY e,d,s,u"
+    "), written AS ("
+    " INSERT INTO laplace.physicality_observations AS current"
+    " (entity_id,descriptor_id,source_id,source_unit_id,observed_at_unix_us)"
+    " SELECT e,d,s,u,t FROM dedup"
+    " ON CONFLICT(entity_id,descriptor_id,source_id,source_unit_id) DO UPDATE"
+    " SET observed_at_unix_us=GREATEST(current.observed_at_unix_us,EXCLUDED.observed_at_unix_us)"
+    " WHERE current.observed_at_unix_us<EXCLUDED.observed_at_unix_us"
+    " RETURNING 1"
+    ") SELECT count(*)::bigint FROM written")
 SQL_QUERY("ingest.physicality_descriptor_provider_metadata", "bytea[]",
     "SELECT p.id,p.entity_id,p.type,p.coord,p.hilbert_index,p.trajectory,"
     "p.n_constituents,p.alignment_residual,p.source_dim,p.observed_at "

@@ -830,12 +830,12 @@ public static partial class NpgsqlSubstrateReads
                 param.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
             }, ct: ct, label: "entity_primary_forms_batch", onError: onError);
 
-    /// <summary><c>ops.evidence_count(NULL, NULL, id)</c> — attestation rows for a subject.</summary>
+    /// <summary><c>ops.entity_evidence_count(id)</c> — attestation rows whose subject is id.</summary>
     public static Task<long?> EvidenceCountAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ExecuteScalarAsync<long?>(conn,
-            "SELECT ops.evidence_count(NULL, NULL, @id)",
+            "SELECT ops.entity_evidence_count(@id)",
             p => p.Add("id", NpgsqlDbType.Bytea).Value = id,
             ct: ct, label: "evidence_count", onError: onError);
 

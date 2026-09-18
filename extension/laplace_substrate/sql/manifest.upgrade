@@ -1,6 +1,7 @@
 schema/purpose_schemas.sql.in
 schema/purpose_relocate.sql.in
 schema/laplace_substrate_version.sql.in
+schema/tables/physicality_observations.sql.in
 schema/tables/attestation_witness_columns.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
@@ -20,6 +21,7 @@ indexes/physicalities_hilbert_btree.sql.in
 indexes/physicalities_radius_btree.sql.in
 indexes/physicalities_residual_btree.sql.in
 indexes/physicalities_observed_brin.sql.in
+indexes/physicality_observations_source_entity_btree.sql.in
 indexes/physicalities_traj_probe.sql.in
 indexes/physicalities_traj_first_id_btree.sql.in
 indexes/physicalities_constituents_gin.sql.in
@@ -147,6 +149,7 @@ functions/identity/entity_type_id.sql.in
 functions/relation/relation_family_members.sql.in
 functions/identity/source_id.sql.in
 functions/ops/evidence_count.sql.in
+functions/ops/entity_evidence_count.sql.in
 functions/ops/consensus_count.sql.in
 functions/ops/content_count.sql.in
 functions/ops/multi_source_entity_count.sql.in

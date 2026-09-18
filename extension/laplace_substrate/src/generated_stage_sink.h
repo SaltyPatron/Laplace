@@ -39,8 +39,8 @@ typedef struct LaplaceGeneratedStageSinkReceipt {
 void laplace_generated_stage_sink_lock(void);
 
 /* Persist native-generated source/vocabulary/descriptor Content stages, an
- * optional session source declaration, and
- * replayable HAS_PHYSICALITY evidence. This is not an arbitrary ingest API.
+ * optional session source declaration. Physical-form provenance is persisted
+ * through its structural owner; generated semantic attestations are rejected.
  * The stages remain borrowed. Duplicate exact witnesses are replay, never
  * additive evidence. Only INSERT RETURNING's accepted attestations are folded.
  * Existing native consensus and mask owners execute within this transaction.

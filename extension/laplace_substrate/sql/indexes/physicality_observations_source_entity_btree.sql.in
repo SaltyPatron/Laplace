@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS physicality_observations_source_entity_btree
+ON physicality_observations (source_id,entity_id,descriptor_id);

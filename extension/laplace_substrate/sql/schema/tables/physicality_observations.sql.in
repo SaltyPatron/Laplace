@@ -1,0 +1,9 @@
+-- Exact physical-form provenance. This is not testimony and is never folded into consensus.
+CREATE TABLE IF NOT EXISTS physicality_observations (
+    entity_id bytea NOT NULL CHECK (octet_length(entity_id)=16),
+    descriptor_id bytea NOT NULL CHECK (octet_length(descriptor_id)=16),
+    source_id bytea NOT NULL CHECK (octet_length(source_id)=16),
+    source_unit_id bytea NOT NULL CHECK (octet_length(source_unit_id)=16),
+    observed_at_unix_us bigint NOT NULL,
+    PRIMARY KEY (entity_id,descriptor_id,source_id,source_unit_id)
+);

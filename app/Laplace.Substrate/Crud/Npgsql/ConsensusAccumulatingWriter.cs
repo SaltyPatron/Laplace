@@ -396,7 +396,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                             }
                             var acceptedDelta = BuildDelta(
                                 acceptance.OriginalReplay ? [] : changes,
-                                acceptance.AttestationIds, acceptance.GeneratedAttestations);
+                                acceptance.AttestationIds);
                             if (acceptedDelta is { Count: > 0 })
                                 atomicStats = await UpsertDeltaInTransactionAsync(
                                     acceptedDelta, connection, transaction, token).ConfigureAwait(false);
@@ -460,8 +460,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     }
 
     private Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta>? BuildDelta(
-        IReadOnlyList<SubstrateChange> changes, IReadOnlySet<Hash128>? admittedAttestations = null,
-        IReadOnlyList<AttestationRow>? generatedAttestations = null)
+        IReadOnlyList<SubstrateChange> changes, IReadOnlySet<Hash128>? admittedAttestations = null)
     {
         // Flatten to the attestation arrays that actually carry testimony. The
         // merge below is over a contiguous index space across those arrays, so
@@ -499,17 +498,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             if (accepted.IsEmpty) continue;
             (blocks ??= new()).Add(accepted);
             total += accepted.Length;
-        }
-        if (generatedAttestations is { Count: > 0 })
-        {
-            var accepted = generatedAttestations
-                .Where(a => admittedAttestations is null || admittedAttestations.Contains(a.Id))
-                .ToImmutableArray();
-            if (!accepted.IsEmpty)
-            {
-                (blocks ??= new()).Add(accepted);
-                total += accepted.Length;
-            }
         }
         if (blocks is null || total == 0)
         {

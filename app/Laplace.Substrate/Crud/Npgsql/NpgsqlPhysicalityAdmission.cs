@@ -9,8 +9,14 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 internal sealed record WorkingSetAcceptedEvidence(
     IReadOnlySet<Hash128> AttestationIds,
-    IReadOnlyList<AttestationRow> GeneratedAttestations,
     bool OriginalReplay);
+
+internal readonly record struct PhysicalityObservationRow(
+    Hash128 EntityId,
+    Hash128 DescriptorId,
+    Hash128 SourceId,
+    Hash128 SourceUnitId,
+    long ObservedAtUnixUs);
 
 public sealed partial class NpgsqlSubstrateWriter
 {
@@ -20,10 +26,11 @@ public sealed partial class NpgsqlSubstrateWriter
         internal readonly List<IntentStage> RawStages = [];
         internal readonly List<IntentStage> OwnedRawStages = [];
         internal readonly List<IntentStage> GeneratedStages = [];
+        internal readonly List<Hash128> ObservationEntities = [];
         internal readonly List<Hash128> ObservationSources = [];
         internal readonly List<Hash128> ObservationUnits = [];
-        internal readonly List<double> ObservationPriors = [];
-        internal readonly List<AttestationRow> GeneratedAttestations = [];
+        internal readonly List<long> ObservationTimesUnixUs = [];
+        internal readonly List<PhysicalityObservationRow> StructuralObservations = [];
         internal readonly long MaximumBytes = IngestSizing.ResolveWorkingSetBudgetBytes();
         internal long OwnedRawBytes;
         internal long ObservationPayloadBytes;
@@ -78,12 +85,14 @@ public sealed partial class NpgsqlSubstrateWriter
                 // Exact payload widths, excluding managed object/allocator bookkeeping.
                 // Reserve all source metadata and the largest reused transport before
                 // any owned raw native stage is allocated.
-                result.ObservationPayloadBytes = checked(count * 40L);
+                // entity/source/unit/time plus the retained SQL compatibility double.
+                result.ObservationPayloadBytes = checked(count * 64L);
                 if (count > Array.MaxLength || result.ObservationPayloadBytes + largestScratch > result.MaximumBytes)
                     throw new InvalidOperationException("physicality source capture exceeds its aggregate allocation grant");
+                result.ObservationEntities.Capacity = checked((int)count);
                 result.ObservationSources.Capacity = checked((int)count);
                 result.ObservationUnits.Capacity = checked((int)count);
-                result.ObservationPriors.Capacity = checked((int)count);
+                result.ObservationTimesUnixUs.Capacity = checked((int)count);
                 foreach (var change in changes)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -92,17 +101,26 @@ public sealed partial class NpgsqlSubstrateWriter
                         {
                             if (stage.IsInvalid || stage.PhysicalityCount == 0) continue;
                             result.RawStages.Add(stage);
+                            var physicalityBlob = stage.TupleBuffer(IntentStageTable.Physicalities);
+                            var physicalityRows = CopyTupleParser.ParsePhysicalities([physicalityBlob]);
+                            if (physicalityRows.EntityIds.Count != stage.PhysicalityCount
+                                || physicalityRows.TimestampsPgUs.Count != stage.PhysicalityCount)
+                                throw new InvalidOperationException("native physicality source rows lost positional alignment");
                             int covered = 0;
                             foreach (var range in stage.PhysicalitySourceRanges)
                             {
                                 if (range.FirstRow != covered || range.RowCount <= 0
                                     || range.RowCount > stage.PhysicalityCount - covered)
                                     throw new InvalidOperationException("native physicality source ranges are incomplete or overlap");
-                                double prior = change.RequireSourcePrior(range.SourceId);
                                 for (int i = 0; i < range.RowCount; ++i)
                                 {
                                     ct.ThrowIfCancellationRequested();
-                                    result.AddObservation(range.SourceId, change.Metadata.IntentId, prior);
+                                    int row = checked(covered + i);
+                                    result.AddObservation(
+                                        physicalityRows.EntityIds[row],
+                                        range.SourceId,
+                                        change.Metadata.IntentId,
+                                        checked(physicalityRows.TimestampsPgUs[row] + IntentStage.PgEpochUnixUs));
                                 }
                                 covered = checked(covered + range.RowCount);
                             }
@@ -125,8 +143,8 @@ public sealed partial class NpgsqlSubstrateWriter
                     foreach (var physicality in observations)
                     {
                         ct.ThrowIfCancellationRequested();
-                        result.AddObservation(physicality.SourceId, change.Metadata.IntentId,
-                            change.RequireSourcePrior(physicality.SourceId));
+                        result.AddObservation(physicality.EntityId, physicality.SourceId,
+                            change.Metadata.IntentId, physicality.ObservedAtUnixUs);
                     }
                 }
                 ct.ThrowIfCancellationRequested();
@@ -148,11 +166,39 @@ public sealed partial class NpgsqlSubstrateWriter
             }
         }
 
-        private void AddObservation(Hash128 source, Hash128 unit, double prior)
+        private void AddObservation(Hash128 entity, Hash128 source, Hash128 unit, long observedAtUnixUs)
         {
+            ObservationEntities.Add(entity);
             ObservationSources.Add(source);
             ObservationUnits.Add(unit);
-            ObservationPriors.Add(prior);
+            ObservationTimesUnixUs.Add(observedAtUnixUs);
+        }
+
+        internal Hash128 StructuralObservationDigest()
+        {
+            if (StructuralObservations.Count == 0) return default;
+            var rows = StructuralObservations.ToArray();
+            Array.Sort(rows, static (left, right) =>
+            {
+                int c = left.EntityId.CompareToBytewise(right.EntityId);
+                if (c != 0) return c;
+                c = left.DescriptorId.CompareToBytewise(right.DescriptorId);
+                if (c != 0) return c;
+                c = left.SourceId.CompareToBytewise(right.SourceId);
+                return c != 0 ? c : left.SourceUnitId.CompareToBytewise(right.SourceUnitId);
+            });
+            ReadOnlySpan<byte> domain = "LaplacePhysicalityObservation/v1\0"u8;
+            var bytes = new byte[checked(domain.Length + rows.Length * 64)];
+            domain.CopyTo(bytes);
+            int offset = domain.Length;
+            foreach (var row in rows)
+            {
+                row.EntityId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
+                row.DescriptorId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
+                row.SourceId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
+                row.SourceUnitId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
+            }
+            return Hash128.Blake3(bytes);
         }
 
         private static long CaptureScratchBytes(SubstrateChange change, CancellationToken ct)
@@ -391,7 +437,8 @@ public sealed partial class NpgsqlSubstrateWriter
             // the older source-only receipt exists. A changed form is not hidden
             // behind that receipt, and a backfill cannot replay original callbacks.
             var baseToken = legacyWorkingSetToken ?? IntentStage.SemanticDigestBatch(physicalityAdmission.OriginalStages);
-            workingSetToken = ReplayTokenV2(baseToken, stages);
+            workingSetToken = ReplayTokenV2(baseToken, stages,
+                physicalityAdmission.StructuralObservationDigest());
             if (physicalityAdmission.OriginalReplay)
             {
                 legacyWorkingSetToken = null;
@@ -474,6 +521,31 @@ public sealed partial class NpgsqlSubstrateWriter
         return result;
     }
 
+    private static async Task<int> PersistPhysicalityObservationsAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction,
+        PhysicalityAdmissionBatch admission, CancellationToken ct)
+    {
+        if (admission.StructuralObservations.Count == 0) return 0;
+        var rows = admission.StructuralObservations;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = SqlCatalog.Get("ingest.physicality_observations").Text;
+        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+            rows.Select(static r => r.EntityId.ToBytes()).ToArray());
+        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+            rows.Select(static r => r.DescriptorId.ToBytes()).ToArray());
+        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+            rows.Select(static r => r.SourceId.ToBytes()).ToArray());
+        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+            rows.Select(static r => r.SourceUnitId.ToBytes()).ToArray());
+        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint,
+            rows.Select(static r => r.ObservedAtUnixUs).ToArray());
+        long writes = (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+        if (admission.Receipt is { } receipt)
+            admission.Receipt = receipt with { PhysicalityObservationWrites = writes };
+        return 1;
+    }
+
     private async Task MaterializePhysicalitiesAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction,
         PhysicalityAdmissionBatch input, CancellationToken ct)
@@ -497,7 +569,10 @@ public sealed partial class NpgsqlSubstrateWriter
             input.ObservationSources.Select(id => id.ToBytes()).ToArray());
         command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
             input.ObservationUnits.Select(id => id.ToBytes()).ToArray());
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double, input.ObservationPriors.ToArray());
+        // Kept only for the installed SQL ABI during this greenfield cutover.
+        // Physical provenance has no trust/standing channel.
+        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double,
+            new double[input.ObservationSources.Count]);
         // SQL now owns independent parameter copies in the PostgreSQL backend;
         // the extra client-side raw native stages can be released before
         // receiving the generated stages. The backend is a distinct allocation
@@ -549,6 +624,16 @@ public sealed partial class NpgsqlSubstrateWriter
             || views.LongLength != forms || floor.Length != 16 || generatedSource.Length != 16
             || descriptors.Any(id => id is not { Length: 16 }))
             throw new InvalidOperationException("physicality materializer receipt and native source forms do not align");
+        if (attestations.Any(static bytes => bytes.Length != 0))
+            throw new InvalidOperationException(
+                "physicality materializer emitted semantic testimony; provenance must remain structural");
+        input.StructuralObservations.Capacity = checked((int)forms);
+        for (int i = 0; i < descriptors.Length; ++i)
+            input.StructuralObservations.Add(new PhysicalityObservationRow(
+                input.ObservationEntities[i], Hash128.FromBytes(descriptors[i]),
+                input.ObservationSources[i], input.ObservationUnits[i],
+                input.ObservationTimesUnixUs[i]));
+
         input.Receipt = new PhysicalityAdmissionReceipt(
             Hash128.FromBytes(floor), Hash128.FromBytes(generatedSource), reader.GetString(6), forms,
             reader.GetInt64(8), reader.GetInt64(9), reader.GetInt32(10), reader.GetInt32(11),
@@ -603,24 +688,15 @@ public sealed partial class NpgsqlSubstrateWriter
         }
         if (await reader.ReadAsync(ct).ConfigureAwait(false))
             throw new InvalidOperationException("physicality materializer returned multiple receipts");
+        if (input.GeneratedAttestationCount != 0)
+            throw new InvalidOperationException(
+                "generated physicality stages contain attestations; geometry cannot manufacture testimony");
         input.Receipt = input.Receipt with
         {
             GeneratedEntityRows = input.GeneratedEntityCount,
             GeneratedPhysicalityRows = input.GeneratedPhysicalityCount,
-            GeneratedAttestationRows = input.GeneratedAttestationCount,
+            PhysicalityObservationRows = input.StructuralObservations.Count,
         };
-        // A fully populated native attestation tuple has 14 length prefixes,
-        // six IDs, outcome, five int64 fields, replay flag and mask. Its 229-byte
-        // width also bounds the decoded row's field/reference payload; managed
-        // object headers remain allocator bookkeeping, not measured process RSS.
-        const int decodedRowPayload = 2 + 14 * 4 + 6 * 16 + 2 + 5 * 8 + 1 + 32;
-        int generatedAttestations = input.GeneratedAttestationCount;
-        if (checked(returnedBytes + generatedBytes + generatedAttestations * (long)decodedRowPayload) > receiverGrant)
-            throw new InvalidOperationException("physicality evidence decoding exceeds its aggregate allocation grant");
-        input.GeneratedAttestations.Capacity = generatedAttestations;
-        CopyTupleParser.DecodeAttestations(
-            CollectBlobs(input.GeneratedStages, IntentStageTable.Attestations, 14, "attestations"),
-            input.GeneratedAttestations);
         _log.LogInformation("PHYSICALITY_ADMISSION forms={Forms} available_views={AvailableViews} missing_views={MissingViews} missing_reference_entries={MissingReferences} provider_rounds={Rounds} database_operations={Operations} peak_bytes={PeakBytes} tuple_bytes={TupleBytes}",
             forms, input.Receipt.Forms.LongCount(form => form.ViewState == PhysicalityViewState.Available),
             input.Receipt.Forms.LongCount(form => form.ViewState == PhysicalityViewState.MissingReference),

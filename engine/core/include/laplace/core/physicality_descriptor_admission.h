@@ -99,12 +99,21 @@ typedef struct {
 
 typedef struct {
     hash128_t source_id;
-    /* Exact receipt identifier, not assumed to be an existing entity. Native
-     * materialization creates a typed ordinary source+unit context entity. */
+    /* Exact source-unit receipt. It remains provenance metadata and is never
+     * promoted to a semantic entity/context merely to describe a physical form. */
     hash128_t source_unit_id;
-    /* Actual registered source prior supplied by the source owner. */
+    /* Transport compatibility only. Physical-form provenance is not testimony,
+     * so trust does not participate in descriptor identity, storage or standing. */
     double source_trust;
 } physicality_descriptor_source_observation_t;
+
+typedef struct {
+    hash128_t entity_id;
+    hash128_t descriptor_id;
+    hash128_t source_id;
+    hash128_t source_unit_id;
+    int64_t observed_at_unix_us;
+} physicality_descriptor_form_observation_t;
 
 /* current_content_stages are actual Content bodies from one pinned reader
  * transaction. Explicitly missing ids distinguish a checked absence from an
@@ -157,7 +166,9 @@ enum {
     PHYSICALITY_MATERIALIZATION_PROVIDER_INDEX = 4,
     PHYSICALITY_MATERIALIZATION_GEOMETRY = 5,
     PHYSICALITY_MATERIALIZATION_VIEWS = 6,
-    PHYSICALITY_MATERIALIZATION_OBSERVATIONS = 7,
+    PHYSICALITY_MATERIALIZATION_PROVENANCE = 7,
+    /* Source compatibility name; phase 7 now carries structural provenance, not attestations. */
+    PHYSICALITY_MATERIALIZATION_OBSERVATIONS = PHYSICALITY_MATERIALIZATION_PROVENANCE,
     PHYSICALITY_MATERIALIZATION_SERIALIZATION = 8,
     PHYSICALITY_MATERIALIZATION_COMPLETE = 9
 };
@@ -203,6 +214,8 @@ void physicality_descriptor_materialization_free(
 const hash128_t* physicality_descriptor_materialization_pending(
     const physicality_descriptor_materialization_t* materialization, size_t* count);
 const physicality_descriptor_admitted_form_t* physicality_descriptor_materialization_forms(
+    const physicality_descriptor_materialization_t* materialization, size_t* count);
+const physicality_descriptor_form_observation_t* physicality_descriptor_materialization_observations(
     const physicality_descriptor_materialization_t* materialization, size_t* count);
 /* Each unavailable form addresses a sorted unique range in this array. Exact
  * duplicate forms may share that range; unrelated roots have separate ranges. */

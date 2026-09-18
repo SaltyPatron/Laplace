@@ -43,7 +43,10 @@ public sealed record PhysicalityAdmissionReceipt(
     public int DatabaseOperationGrant { get; init; }
     public int GeneratedEntityRows { get; init; }
     public int GeneratedPhysicalityRows { get; init; }
-    public int GeneratedAttestationRows { get; init; }
+    /// <summary>Exact source-form provenance rows retained outside semantic testimony.</summary>
+    public int PhysicalityObservationRows { get; init; }
+    /// <summary>Rows inserted or timestamp-advanced by this apply.</summary>
+    public long PhysicalityObservationWrites { get; init; }
     /// <summary>Source-order immutable descriptors and their explicitly selected view disposition.</summary>
     public ImmutableArray<PhysicalityFormReceipt> Forms { get; init; } = [];
     /// <summary>Exact missing entity IDs, addressed by each form's first/count slice.

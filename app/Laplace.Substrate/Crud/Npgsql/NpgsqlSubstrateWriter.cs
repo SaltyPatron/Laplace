@@ -456,13 +456,24 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
     };
 
     private static Hash128 ReplayTokenV2(
-        Hash128 legacyToken, IReadOnlyList<IntentStage> sourceStages)
+        Hash128 legacyToken, IReadOnlyList<IntentStage> sourceStages,
+        Hash128? structuralObservationDigest = null)
     {
         Hash128 semanticDigest = IntentStage.SemanticDigestBatch(sourceStages);
-        Span<byte> payload = stackalloc byte[23 + 16 + 16];
-        "LaplaceReplayIntent/v2\0"u8.CopyTo(payload);
+        if (structuralObservationDigest is not { } provenance || provenance == default)
+        {
+            Span<byte> v2 = stackalloc byte[23 + 16 + 16];
+            "LaplaceReplayIntent/v2\0"u8.CopyTo(v2);
+            legacyToken.WriteBytes(v2.Slice(23, 16));
+            semanticDigest.WriteBytes(v2.Slice(39, 16));
+            return Hash128.Blake3(v2);
+        }
+
+        Span<byte> payload = stackalloc byte[23 + 16 + 16 + 16];
+        "LaplaceReplayIntent/v3\0"u8.CopyTo(payload);
         legacyToken.WriteBytes(payload.Slice(23, 16));
         semanticDigest.WriteBytes(payload.Slice(39, 16));
+        provenance.WriteBytes(payload.Slice(55, 16));
         return Hash128.Blake3(payload);
     }
 

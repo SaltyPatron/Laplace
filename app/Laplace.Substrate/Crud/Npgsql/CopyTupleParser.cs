@@ -42,6 +42,8 @@ internal static class CopyTupleParser
         /// <summary>128-bit Hilbert curve index of the row's coord (wire packing
         /// is 16 octets; value is the index, not a hash).</summary>
         public readonly List<Hilbert128> HilbertKeys = new();
+        /// <summary>observed_at as stored on the wire (µs since PG epoch 2000-01-01).</summary>
+        public readonly List<long> TimestampsPgUs = new();
         public readonly List<StagedRowRef> Rows = new();
     }
 
@@ -169,6 +171,7 @@ internal static class CopyTupleParser
                 long rowStart = off;
                 Hash128 id = default, entityId = default;
                 Hilbert128 hilbert = default;
+                long observedAtPgUs = 0;
                 // This is the million-row document hot path. WalkRow's capturing
                 // callback allocated one closure/delegate for every physicality;
                 // the parser only needs three fixed fields, so extract them in
@@ -197,11 +200,14 @@ internal static class CopyTupleParser
                         entityId = ReadHash(p, off, valLen, "physicalities.entity_id");
                     else if (field == 4)
                         hilbert = ReadHilbert(p, off, valLen, "physicalities.hilbert_index");
+                    else if (field == 9)
+                        observedAtPgUs = ReadInt64(p, off, valLen, "physicalities.observed_at");
                     off += valLen;
                 }
                 result.Ids.Add(id);
                 result.EntityIds.Add(entityId);
                 result.HilbertKeys.Add(hilbert);
+                result.TimestampsPgUs.Add(observedAtPgUs);
                 result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
             }
         }

@@ -903,6 +903,8 @@ void laplace_generated_stage_sink(const intent_stage_t *const *stages,
                 s->receipt.tuple_bytes=sink_add(s->receipt.tuple_bytes,bytes);
             }
         }
+        if (s->receipt.input_rows[2] != 0)
+            sink_invalid("generated descriptor stages must not contain semantic attestations; physicality provenance is structural");
         if (total>limits->maximum_rows)
             ereport(ERROR,(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                            errmsg("generated stage sink: row grant exhausted")));

@@ -52,6 +52,7 @@ BEGIN ATOMIC
           -- family exclusions above and is exactly equivalent to NOT IN here: type_id is
           -- NOT NULL on both laplace.consensus and laplace.attestations (catalog-verified).
           c.type_id <> ALL (consensus.relation_set_ids('NON_SALIENT_STRUCTURAL'))
+          AND c.type_id <> laplace.relation_type_id('HAS_PHYSICALITY')
           -- UNDECLARED VOCABULARY, kept inline deliberately: CO_OCCURS_WITH and
           -- OCCURS_IN_CONTEXT are in neither the manifest's canonicals nor its
           -- aliases, though both exist as live RelationType entities. Codegen
@@ -101,7 +102,7 @@ BEGIN ATOMIC
                         consensus.relation_canonical(o.type_id),
                         'Unrealized relation') AS type,
                COALESCE(NULLIF(labels.l[o.ord], ''),
-                        'Unrealized entity') AS fact,
+                        'Entity · ' || left(encode(o.object_id,'hex'),12)) AS fact,
                consensus.eff_mu_display(o.rating, o.rd) AS eff_mu, o.witness_count AS witnesses,
                o.sort_mu
         FROM ordered o, labels

@@ -1151,6 +1151,9 @@ public sealed partial class NpgsqlSubstrateWriter
             // finished, before testimony acceptance and the replay commit.
             rtCopy += await PersistEntityInterpretationsAsync(
                 conn, tx, interpretations, ct).ConfigureAwait(false);
+            if (physicalityAdmission is not null)
+                rtCopy += await PersistPhysicalityObservationsAsync(
+                    conn, tx, physicalityAdmission, ct).ConfigureAwait(false);
 
             // Consensus acceptance is supplied only by the accumulating writer
             // for a freshly claimed V2 working set. It shares this transaction
@@ -1162,7 +1165,6 @@ public sealed partial class NpgsqlSubstrateWriter
                 await transactionParticipant(conn, tx,
                     new WorkingSetAcceptedEvidence(
                         novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(),
-                        physicalityAdmission?.GeneratedAttestations ?? [],
                         physicalityAdmission?.OriginalReplay ?? originalReceiptPresent), ct);
                 participantDiagnostic?.Complete();
             }

@@ -85,7 +85,8 @@ internal static class PhysicalityWriterTestSupport
         Assert.Equal(sourceForms, receipt.SourceForms);
         Assert.Equal(entities + receipt.GeneratedEntityRows, result.EntitiesAttempted);
         Assert.Equal(physicalities + receipt.GeneratedPhysicalityRows, result.PhysicalitiesAttempted);
-        Assert.Equal(attestations + receipt.GeneratedAttestationRows, result.AttestationsAttempted);
+        Assert.Equal(attestations, result.AttestationsAttempted);
+        Assert.Equal(sourceForms, receipt.PhysicalityObservationRows);
         return receipt;
     }
 

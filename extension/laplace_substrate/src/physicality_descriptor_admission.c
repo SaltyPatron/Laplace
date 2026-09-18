@@ -320,7 +320,7 @@ static physicality_descriptor_source_observation_t *admission_sources(
     for (size_t i = 0; i < count; ++i) {
         sources[i].source_id = admission_id(arrays[0].values[i]);
         sources[i].source_unit_id = admission_id(arrays[1].values[i]);
-        sources[i].source_trust = DatumGetFloat8(arrays[2].values[i]);
+        sources[i].source_trust = 0.0; /* compatibility only; provenance has no trust */
         if (!isfinite(sources[i].source_trust) || sources[i].source_trust < 0 || sources[i].source_trust > 1)
             admission_invalid("source trust must be an explicit finite registered prior in [0,1]");
     }
@@ -819,9 +819,6 @@ static void admission_materialize(admission_state *s,
         actual_count = admission_add(actual_count, intent_stage_physicality_count(s->source.items[i]));
     if (actual_count != source_count || (source_count != 0 && sources == NULL))
         admission_invalid("source metadata must align with every raw physicality observation");
-    for (size_t i = 0; i < source_count; ++i)
-        if (!isfinite(sources[i].source_trust) || sources[i].source_trust < 0 || sources[i].source_trust > 1)
-            admission_invalid("source trust must be an explicit finite registered prior in [0,1]");
     if (!laplace_perfcache_ready())
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                        errmsg("physicality descriptor admission requires the configured Unicode perfcache")));
@@ -882,6 +879,10 @@ static void admission_materialize(admission_state *s,
     MemoryContextSwitchTo(s->context);
     result->forms = physicality_descriptor_materialization_forms(s->materialization, &form_count);
     if (form_count != source_count) admission_invalid("native output form count differs from original observation count");
+    result->observations = physicality_descriptor_materialization_observations(
+        s->materialization, &result->observation_count);
+    if (result->observation_count != source_count)
+        admission_invalid("native structural provenance count differs from original observation count");
     s->output[1] = physicality_descriptor_vocabulary_take_stage(s->vocabulary);
     s->output[2] = physicality_descriptor_materialization_take_stage(s->materialization);
     for (size_t i = 0; i < 3; ++i) result->stages[i] = s->output[i];
