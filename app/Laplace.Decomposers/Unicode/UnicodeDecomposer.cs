@@ -70,15 +70,15 @@ public sealed class UnicodeDecomposer
         int batch = IngestPipelineDefaults.ResolveBatch(IngestSourceProfile.Unicode, options);
         IReadOnlyList<ArtifactJob> jobs = ResolveArtifactJobs(context);
 
-        foreach (ArtifactJob job in jobs)
-        {
-            IDecomposer phase = BuildArtifactPhase(job, batch);
-            await foreach (SubstrateChange change in RunPhaseAsync(
-                phase, context, options, job.Label, job.Path, ct))
-            {
-                yield return change;
-            }
-        }
+        await foreach (SubstrateChange change in RunArtifactPhasesAsync(
+                           jobs,
+                           context,
+                           options,
+                           job => BuildArtifactPhase(job, batch),
+                           static job => job.Label,
+                           static job => job.Path,
+                           ct).ConfigureAwait(false))
+            yield return change;
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
