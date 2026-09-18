@@ -270,26 +270,20 @@ TEST(LaplaceContentObservations, ExistingRootRetainsSourcesAndFormsWithoutDuplic
         INTENT_STAGE_PG_EPOCH_UNIX_US, budget, &raw_materialized));
     std::unique_ptr<physicality_descriptor_materialization_t, decltype(&physicality_descriptor_materialization_free)>
         materialized(raw_materialized, physicality_descriptor_materialization_free);
+    size_t provenance_count = 0;
+    const auto* provenance =
+        physicality_descriptor_materialization_observations(materialized.get(), &provenance_count);
+    ASSERT_NE(provenance, nullptr);
+    ASSERT_EQ(provenance_count, sources.size());
+    for (size_t i = 0; i < provenance_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&provenance[i].entity_id, &original));
+        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &descriptors[i]));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &sources[i].source_id));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &sources[i].source_unit_id));
+    }
     Stage generated(physicality_descriptor_materialization_take_stage(materialized.get()), intent_stage_free);
     ASSERT_NE(nullptr, generated);
-    ASSERT_EQ(3u, intent_stage_attestation_count(generated.get()));
-    const uint8_t* attestation_bytes = intent_stage_tuple_ptr(generated.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &size);
-    offset = 0;
-    size_t source_a_count = 0, source_b_count = 0;
-    while (offset < size) {
-        ASSERT_TRUE(next_row(attestation_bytes, size, offset, fields));
-        ASSERT_EQ(14u, fields.size());
-        ASSERT_EQ(16, fields[4].length);
-        if (std::memcmp(fields[4].bytes, &source_a, 16) == 0) ++source_a_count;
-        else if (std::memcmp(fields[4].bytes, &source_b, 16) == 0) ++source_b_count;
-        else ADD_FAILURE() << "Generated observation substituted its source";
-        ASSERT_EQ(8, fields[8].length);
-        uint64_t observation_count = 0;
-        for (size_t i = 0; i < 8; ++i) observation_count = (observation_count << 8u) | fields[8].bytes[i];
-        EXPECT_EQ(1u, observation_count);
-    }
-    EXPECT_EQ(1u, source_a_count);
-    EXPECT_EQ(2u, source_b_count);
+    EXPECT_EQ(0u, intent_stage_attestation_count(generated.get()));
 }
 
 TEST(LaplaceContentObservations, PresentRootDoesNotSuppressMissingDescendantsOrOccurrenceForms) {
@@ -400,7 +394,7 @@ TEST(LaplaceContentObservations, ExplicitAtomicRootsCopyFloorDespiteExistingWitn
     }
 }
 
-TEST(LaplaceContentObservations, AtomicRootReplaySharesDescriptorWithOneWitnessPerSourceUnit) {
+TEST(LaplaceContentObservations, AtomicRootReplaySharesDescriptorAndPreservesEveryStructuralObservation) {
     constexpr size_t budget = 64u * 1024u * 1024u;
     const hash128_t source_a{101, 102}, source_b{201, 202}, unit_one{301, 302}, unit_two{401, 402};
     const physicality_descriptor_source_observation_t a{source_a, unit_one, 0.8};
@@ -460,37 +454,20 @@ TEST(LaplaceContentObservations, AtomicRootReplaySharesDescriptorWithOneWitnessP
         INTENT_STAGE_PG_EPOCH_UNIX_US, budget, &raw_materialized), PHYSICALITY_DESCRIPTOR_OK);
     std::unique_ptr<physicality_descriptor_materialization_t, decltype(&physicality_descriptor_materialization_free)>
         materialized(raw_materialized, physicality_descriptor_materialization_free);
+    size_t provenance_count = 0;
+    const auto* provenance =
+        physicality_descriptor_materialization_observations(materialized.get(), &provenance_count);
+    ASSERT_NE(provenance, nullptr);
+    ASSERT_EQ(provenance_count, sources.size());
+    for (size_t i = 0; i < provenance_count; ++i) {
+        EXPECT_TRUE(hash128_equals(&provenance[i].entity_id, &floor->hash));
+        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &descriptors[i]));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &sources[i].source_id));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &sources[i].source_unit_id));
+    }
     Stage generated(physicality_descriptor_materialization_take_stage(materialized.get()), intent_stage_free);
     ASSERT_NE(generated, nullptr);
-    ASSERT_EQ(intent_stage_attestation_count(generated.get()), 3u);
-    size_t size = 0, offset = 0, a_count = 0, b_count = 0;
-    const auto* rows = intent_stage_tuple_ptr(generated.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &size);
-    hash128_t has_physicality{};
-    ASSERT_EQ(laplace_relation_resolve("HAS_PHYSICALITY", &has_physicality), 0);
-    std::vector<hash128_t> contexts;
-    std::vector<Field> fields;
-    while (offset < size) {
-        ASSERT_TRUE(next_row(rows, size, offset, fields));
-        ASSERT_EQ(fields.size(), 14u);
-        for (size_t column : {1u, 2u, 3u, 4u, 5u}) ASSERT_EQ(fields[column].length, 16);
-        EXPECT_EQ(std::memcmp(fields[1].bytes, &floor->hash, 16), 0);
-        EXPECT_EQ(std::memcmp(fields[2].bytes, &has_physicality, 16), 0);
-        EXPECT_EQ(std::memcmp(fields[3].bytes, &descriptors[0], 16), 0);
-        if (std::memcmp(fields[4].bytes, &source_a, 16) == 0) ++a_count;
-        else if (std::memcmp(fields[4].bytes, &source_b, 16) == 0) ++b_count;
-        else ADD_FAILURE() << "Atomic observation changed source";
-        hash128_t context{};
-        std::memcpy(&context, fields[5].bytes, sizeof(context));
-        for (const auto& previous : contexts) EXPECT_FALSE(hash128_equals(&previous, &context));
-        contexts.push_back(context);
-        ASSERT_EQ(fields[8].length, 8);
-        uint64_t observations = 0;
-        for (size_t i = 0; i < 8; ++i) observations = (observations << 8u) | fields[8].bytes[i];
-        EXPECT_EQ(observations, 1u);
-    }
-    EXPECT_EQ(a_count, 2u);
-    EXPECT_EQ(b_count, 1u);
-    EXPECT_EQ(contexts.size(), 3u);
+    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
 }
 
 TEST(LaplaceContentObservations, FloorAtomRejectsInvalidIdentityAndMissingFloorWithoutAppending) {
