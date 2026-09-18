@@ -49,46 +49,6 @@ void super_fibonacci_point_open(size_t i, double out[4]) {
 }
 
 
-static uint64_t laplace_reverse_low_bits(uint64_t value, unsigned bits) {
-    uint64_t out = 0;
-    for (unsigned i = 0; i < bits; ++i) {
-        out = (out << 1) | (value & 1ULL);
-        value >>= 1;
-    }
-    return out;
-}
-
-int super_fibonacci_open_index(const double point[4], uint64_t max_count,
-                               uint64_t* out_index) {
-    if (point == NULL || out_index == NULL || max_count == 0
-        || max_count > (1ULL << 53))
-        return -1;
-
-    unsigned bits = 0;
-    uint64_t ceiling = max_count - 1;
-    while (ceiling != 0) {
-        ++bits;
-        ceiling >>= 1;
-    }
-    if (bits == 0) bits = 1;
-
-    const double t = point[0] * point[0] + point[1] * point[1];
-    if (!isfinite(t) || t < -1e-12 || t > 1.0 + 1e-12)
-        return -2;
-
-    const double scaled = ldexp(t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t), (int)bits);
-    uint64_t reversed = (uint64_t) llround(scaled);
-    const uint64_t domain = 1ULL << bits;
-    if (reversed >= domain)
-        reversed = domain - 1;
-
-    const uint64_t index = laplace_reverse_low_bits(reversed, bits);
-    if (index >= max_count)
-        return -3;
-
-    *out_index = index;
-    return 0;
-}
 
 void super_fibonacci(size_t n, double* out) {
     if (n == 0 || out == NULL) return;
