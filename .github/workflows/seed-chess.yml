@@ -1,27 +1,30 @@
-name: Seed — chess
+name: Data — chess ingest
+run-name: "Chess ingest — ${{ inputs.source }} / ${{ inputs.corpus }} → ${{ inputs.database }}"
 
 on:
   workflow_dispatch:
     inputs:
       source:
-        description: "chess source"
+        description: "Chess data or derived operation"
         type: choice
         required: true
+        default: chess
         options: [chess, openings, chess-books, chess-analyze, chess-eval, chess-move-outcomes, chess-transitions, chess-syzygy, chess-trajectory, chess-opening-match]
       corpus:
-        description: "corpus for file-backed sources"
+        description: "Named corpus for file-backed sources; derived operations ignore this"
         type: choice
         required: true
         default: lumbras-elite
-        options: [lumbras-elite, chesscom-all, magnus, hikaru, firouzja, nihalsarin, caruana, gukesh, pragg, anish-giri, owner-games, twic, lumbras-otb, lumbras-online, openings-book, syzygy-tablebase, books, path-override]
+        options: [lumbras-elite, chesscom-all, magnus, hikaru, firouzja, nihalsarin, caruana, gukesh, pragg, anish-giri, owner-games, twic, lumbras-otb, lumbras-online, openings-book, syzygy-tablebase, books, custom-path]
       slice:
-        description: "era slice for Lumbras corpora"
+        description: "Lumbras OTB/online era slice; leave all for every other corpus"
         type: choice
         default: all
         options: [all, otb-1900-1949, otb-1950-1969, otb-1970-1989, otb-1990-1999, otb-2000-2004, otb-2005-2009, otb-2010-2014, otb-2015-2019, otb-2020-2024, otb-2025, otb-2026-partial, online-1995-2009, online-2010-2014, online-2015-2019, online-2020, online-2021, online-2022, online-2023, online-2024, online-2025]
-      path:
-        description: "explicit path; overrides corpus"
+      advanced_path_override:
+        description: "ADVANCED: local file/directory override; normally use the corpus dropdown"
         type: string
+        required: false
         default: ""
       database:
         description: "target database"
@@ -29,17 +32,17 @@ on:
         options: [laplace]
         default: laplace
       derive_after_games:
-        description: "after source=chess, derive move outcomes and transitions"
+        description: "After source=chess, also derive move outcomes and transitions"
         type: boolean
         default: true
-      evict_before_ingest:
-        description: "retract this source before re-deriving it"
+      replace_existing_source:
+        description: "DESTRUCTIVE: retract the complete selected source before re-ingesting it"
         type: boolean
         default: false
-      evict_confirm:
-        description: "exact decomposer source name required for eviction"
-        type: string
-        default: ""
+      confirm_replace_existing:
+        description: "Second confirmation required when replace_existing_source is enabled"
+        type: boolean
+        default: false
       run_idempotency:
         description: "re-ingest the selected source and prove evidence does not double-count"
         type: boolean
@@ -57,7 +60,7 @@ on:
         type: string
         required: false
         default: all
-      path:
+      advanced_path_override:
         type: string
         required: false
         default: ""
@@ -69,14 +72,14 @@ on:
         type: boolean
         required: false
         default: true
-      evict_before_ingest:
+      replace_existing_source:
         type: boolean
         required: false
         default: false
-      evict_confirm:
-        type: string
+      confirm_replace_existing:
+        type: boolean
         required: false
-        default: ""
+        default: false
       run_idempotency:
         type: boolean
         required: false
@@ -97,7 +100,7 @@ jobs:
           SOURCE_INPUT: ${{ inputs.source }}
           CORPUS_INPUT: ${{ inputs.corpus }}
           SLICE_INPUT: ${{ inputs.slice }}
-          PATH_INPUT: ${{ inputs.path }}
+          PATH_INPUT: ${{ inputs.advanced_path_override }}
         run: |
           set -euo pipefail
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
@@ -180,7 +183,7 @@ jobs:
                 [[ "$slice" == "$venue"-* ]] || { echo "::error::slice $slice does not belong to $corpus"; exit 1; }
                 p=$(slice_file "$slice") || { echo "::error::unknown slice $slice"; exit 1; }
               fi ;;
-            path-override) echo "::error::path-override requires path"; exit 1 ;;
+            custom-path) echo "::error::custom-path requires the advanced path override"; exit 2 ;;
             *) echo "::error::unknown corpus $corpus"; exit 1 ;;
           esac
           [[ -e "$p" ]] || { echo "::error::$p does not exist"; exit 1; }
@@ -195,7 +198,7 @@ jobs:
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       chess_derived: ${{ inputs.source == 'chess' && inputs.derive_after_games }}
-      evict_before_ingest: ${{ inputs.evict_before_ingest }}
-      evict_confirm: ${{ inputs.evict_confirm }}
+      evict_before_ingest: ${{ inputs.replace_existing_source }}
+      confirm_evict: ${{ inputs.confirm_replace_existing }}
       run_gate: true
       run_idempotency: ${{ inputs.run_idempotency }}
