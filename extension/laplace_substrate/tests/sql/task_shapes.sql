@@ -320,9 +320,12 @@ BEGIN
 
     -- An unrelated smaller summary and a second same-type facet must neither
     -- erase this exact current form's Word membership nor duplicate candidates.
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) VALUES
-        (v_original,0,decode(repeat('00',16),'hex'),v_source),
-        (v_original,3,v_word,v_source);
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[v_original,v_original]::bytea[],
+        ARRAY[0,3]::smallint[],
+        ARRAY[decode(repeat('00',16),'hex'),v_word]::bytea[],
+        ARRAY[v_source,v_source]::bytea[],
+        ARRAY[false,false]::boolean[]);
     IF (SELECT type_id FROM laplace.entities WHERE id=v_original)<>decode(repeat('00',16),'hex')
        OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=v_original AND type_id=v_word)<>2 THEN
         RAISE EXCEPTION 'FAIL: current-form fixture did not establish plural memberships and changed summary';
@@ -477,8 +480,12 @@ BEGIN
     -- is absent from the interpretation set.
     DELETE FROM laplace.entity_interpretations WHERE entity_id=v_input AND type_id=v_concept;
     PERFORM pg_temp.shape_reject('semantic input without its declared type membership',v_prompt);
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
-    VALUES(v_input,2,v_concept,v_source) ON CONFLICT (id) DO NOTHING;
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[v_input]::bytea[],
+        ARRAY[2]::smallint[],
+        ARRAY[v_concept]::bytea[],
+        ARRAY[v_source]::bytea[],
+        ARRAY[false]::boolean[]);
     RAISE NOTICE 'task shapes: complete source and context testimony plus declared semantic input types are required';
 
     PERFORM pg_temp.shape_surface('«ζαλκ ñébulo»',v_source);
@@ -621,9 +628,12 @@ BEGIN
             RAISE EXCEPTION 'FAIL: language-specific surface structure changed the shared semantic input/result: %',r;
         END IF;
         IF i=1 THEN
-            INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) VALUES
-                (v_input,0,decode(repeat('00',16),'hex'),v_source),
-                (v_input,3,v_concept,v_source);
+            PERFORM laplace.entity_interpretations_publish(
+                ARRAY[v_input,v_input]::bytea[],
+                ARRAY[0,3]::smallint[],
+                ARRAY[decode(repeat('00',16),'hex'),v_concept]::bytea[],
+                ARRAY[v_source,v_source]::bytea[],
+                ARRAY[false,false]::boolean[]);
             IF (SELECT type_id FROM laplace.entities WHERE id=v_input)<>decode(repeat('00',16),'hex')
                OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=v_input AND type_id=v_concept)<>2 THEN
                 RAISE EXCEPTION 'FAIL: semantic fixture did not establish plural memberships and changed summary';
