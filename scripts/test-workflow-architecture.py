@@ -171,6 +171,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "scripts/ci-product-freshness.py",
             "scripts/ci_product_scope.py",
             "scripts/test-parallel.sh",
+            "scripts/test-suites/**",
             "scripts/product-ci.sh",
             "scripts/pipeline.sh",
             "scripts/ci_managed_projects.py",
@@ -202,24 +203,40 @@ class WorkflowArchitecture(unittest.TestCase):
 
     def test_managed_project_impact_drives_build_and_test_selection(self):
         pipeline = (ROOT / "scripts" / "pipeline.sh").read_text(encoding="utf-8")
-        tests = (ROOT / "scripts" / "test-parallel.sh").read_text(encoding="utf-8")
+        dispatcher = (ROOT / "scripts" / "test-parallel.sh").read_text(encoding="utf-8")
+        common = (ROOT / "scripts" / "test-suites" / "common.sh").read_text(encoding="utf-8")
+        managed = (ROOT / "scripts" / "test-suites" / "managed-dev.sh").read_text(encoding="utf-8")
+        managed_db = (ROOT / "scripts" / "test-suites" / "managed-db.sh").read_text(encoding="utf-8")
+        managed_live = (ROOT / "scripts" / "test-suites" / "managed-live.sh").read_text(encoding="utf-8")
         product = (ROOT / "scripts" / "product-ci.sh").read_text(encoding="utf-8")
 
         self.assertIn("LAPLACE_MANAGED_BUILD_PROJECTS", pipeline)
         self.assertIn("ci_managed_projects.py", pipeline)
-        self.assertIn("LAPLACE_MANAGED_TEST_PROJECTS", tests)
-        self.assertIn("LAPLACE_MANAGED_DB_TEST_PROJECTS", tests)
-        self.assertIn("LAPLACE_MANAGED_LIVE_TEST_PROJECTS", tests)
-        self.assertIn("run_managed_dotnet_tests", tests)
-        self.assertIn("LAPLACE_MANAGED_TEST_TIMEOUT", tests)
+        self.assertIn('driver="$ROOT/scripts/test-suites/$1.sh"', dispatcher)
+        self.assertNotIn("run_managed_dev() {", dispatcher)
+        self.assertNotIn("run_live_api() {", dispatcher)
+        self.assertIn("run_managed_dotnet_tests", common)
+        self.assertIn("LAPLACE_MANAGED_TEST_TIMEOUT", common)
+        self.assertIn("LAPLACE_MANAGED_TEST_PROJECTS", managed)
+        self.assertIn("LAPLACE_MANAGED_DB_TEST_PROJECTS", managed_db)
+        self.assertIn("LAPLACE_MANAGED_LIVE_TEST_PROJECTS", managed_live)
 
-        managed = tests.split("run_managed_dev() {", 1)[1].split("\n}", 1)[0]
+        for suite in (
+            "native-dev", "managed-dev", "uci-dev", "browser-dev",
+            "db-health", "native-db", "managed-db",
+            "live-floor", "live-api", "managed-live", "generation-eval",
+        ):
+            with self.subTest(suite=suite):
+                self.assertTrue((ROOT / "scripts" / "test-suites" / f"{suite}.sh").is_file())
+
         self.assertNotIn("test-managed-policy.py", managed)
         self.assertNotIn("test-application-payload.py", managed)
         checks = product.split("run_ci_contract_checks() {", 1)[1].split("\n}", 1)[0]
         self.assertIn("test-managed-policy.py", checks)
         self.assertIn("test-application-payload.py", checks)
         self.assertIn("test-ci-managed-projects.py", checks)
+        self.assertIn("scripts/test-suites/*.sh", checks)
+
 
     def test_web_only_plan_does_not_force_managed_rebuild(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
@@ -280,6 +297,8 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("ci-qualification-cache.py record", matrix)
         self.assertIn("qualification planner kept", matrix)
         self.assertNotIn("|| rc=$?", matrix)
+        self.assertNotIn("suite_use_cache", matrix)
+        self.assertNotIn("project-subset pass is not a whole", matrix)
 
     def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
