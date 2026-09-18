@@ -140,10 +140,17 @@ class CMakeProvisionTests(unittest.TestCase):
         self.root = self.base / "install/tools/cmake"
         selected = self.select(self.archive(command_fixture=True))
         checkout, _ = self.executable_fixture_source()
-        source = (ROOT / "scripts/test-parallel.sh").read_text()
+        suite_driver = {
+            "run_native_dev": ROOT / "scripts/test-suites/native-dev.sh",
+            "run_native_db": ROOT / "scripts/test-suites/native-db.sh",
+        }[suite]
+        sources = {
+            "run_ctest": (ROOT / "scripts/test-suites/common.sh").read_text(),
+            suite: suite_driver.read_text(),
+        }
         functions = []
         for name in ("run_ctest", suite):
-            match = re.search(r"(?ms)^" + name + r"\(\) \{\n.*?^\}", source)
+            match = re.search(r"(?ms)^" + name + r"\(\) \{\n.*?^\}", sources[name])
             self.assertIsNotNone(match, name)
             functions.append(match.group(0))
         hostile = self.base / "host-tools"; hostile.mkdir()
