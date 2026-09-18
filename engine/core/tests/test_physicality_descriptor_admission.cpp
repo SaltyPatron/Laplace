@@ -548,6 +548,8 @@ TEST_F(PhysicalityDescriptorAdmission, MixedWriterStagesSelectFirstContentPlacem
     ASSERT_EQ(provenance.size(), 6u);
     const auto expected_sources = witnesses(6);
     for (size_t i = 0; i < provenance.size(); ++i) {
+        // form() returns by value; keep the descriptor owner alive while the
+        // pointer-based ABI comparison reads its hash.
         const auto expected_form = form(fallback, i);
         EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &expected_form.descriptor_id));
         EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &expected_sources[i].source_id));
