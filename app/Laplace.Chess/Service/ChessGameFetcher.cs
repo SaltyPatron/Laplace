@@ -76,7 +76,7 @@ public static class ChessGameFetcher
             {
                 ct.ThrowIfCancellationRequested();
                 string pgn = await GetStringWithRetryAsync(
-                    $"{archiveUrl}/pgn", ct, retryNotFound: true, log);
+                    $"{archiveUrl}/pgn", ct, retryNotFound: true, log: log);
                 if (string.IsNullOrWhiteSpace(pgn)) continue;
 
                 var ready = new List<string>();
@@ -707,6 +707,11 @@ public static class ChessGameFetcher
             var wait = date - DateTimeOffset.UtcNow;
             if (wait > TimeSpan.Zero) return LimitProviderDelay(wait);
         }
+        // Lichess explicitly requires a full minute after HTTP 429, and Chess.com
+        // warns that parallel/rate-limited access can produce the same status.
+        // Retry-After wins when present; otherwise use the conservative provider floor.
+        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            return TimeSpan.FromMinutes(1);
         return ProviderBackoff(attempt);
     }
 
