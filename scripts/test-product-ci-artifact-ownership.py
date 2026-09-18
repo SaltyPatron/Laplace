@@ -169,6 +169,27 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertNotIn("run_build", delivery)
         self.assertNotIn("run_release_activation", delivery)
 
+    def test_automatic_delivery_carries_impact_from_the_installed_revision(self):
+        carry = function("carry_forward_undelivered_impact")
+        self.assertIn(".laplace-source-revision", carry)
+        self.assertIn("ci-impact-plan.py", carry)
+        self.assertIn("--base \"$deployed\" --head \"$target\"", carry)
+        self.assertIn("LAPLACE_BUILD_COMPONENTS", carry)
+        self.assertIn("LAPLACE_DEV_SUITES", carry)
+        self.assertIn("LAPLACE_DELIVERY_ACTIONS", carry)
+        self.assertIn("force_full_carry_forward_impact", carry)
+
+        qualification = function("run_release_qualification")
+        delivery = function("run_release_delivery")
+        self.assertLess(
+            qualification.index("carry_forward_undelivered_impact"),
+            qualification.index("run_build"),
+        )
+        self.assertLess(
+            delivery.index("carry_forward_undelivered_impact"),
+            delivery.index("require_built_revision"),
+        )
+
     def test_build_plan_reuses_matching_qualified_native_artifact(self):
         build = function("run_build")
         reuse = function("reuse_qualified_native_build")
