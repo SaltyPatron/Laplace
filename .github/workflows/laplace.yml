@@ -26,6 +26,10 @@ jobs:
     timeout-minutes: 5
     outputs:
       dev_suites: ${{ steps.plan.outputs.dev_suites }}
+      db_suites: ${{ steps.plan.outputs.db_suites }}
+      live_suites: ${{ steps.plan.outputs.live_suites }}
+      delivery_actions: ${{ steps.plan.outputs.delivery_actions }}
+      publish_scope: ${{ steps.plan.outputs.publish_scope }}
       components: ${{ steps.plan.outputs.components }}
       full_qualification: ${{ steps.plan.outputs.full_qualification }}
       changed_count: ${{ steps.plan.outputs.changed_count }}
@@ -68,5 +72,9 @@ jobs:
     with:
       stage: release-delivery
       target_sha: ${{ github.sha }}
+      delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
+      db_suites: ${{ needs.plan.outputs.db_suites }}
+      live_suites: ${{ needs.plan.outputs.live_suites }}
+      publish_scope: ${{ needs.plan.outputs.publish_scope }}
       skip_if_superseded: true
     secrets: inherit
