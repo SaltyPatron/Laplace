@@ -352,6 +352,7 @@ public sealed record StorageProofResponse(
     [property: JsonPropertyName("atom_window")] int AtomWindow,
     [property: JsonPropertyName("perfcache_receipt_hex")] string PerfcacheReceiptHex,
     [property: JsonPropertyName("database_perfcache_receipt_hex")] string? DatabasePerfcacheReceiptHex,
+    [property: JsonPropertyName("database_perfcache_error")] string? DatabasePerfcacheError,
     [property: JsonPropertyName("perfcache_aligned")] bool? PerfcacheAligned,
     [property: JsonPropertyName("nodes")] IReadOnlyList<StorageProofNodeRow> Nodes);
 
