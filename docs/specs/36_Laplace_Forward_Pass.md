@@ -160,6 +160,57 @@ state_t
 -> ...
 ```
 
+## Persistent execution state, KV correspondence and context
+
+The conventional KV-cache comparison is functional, not literal. In an
+autoregressive transformer each attention layer can retain key/value tensors for
+previous token positions so later decode steps reuse them. Laplace does not turn the
+forward pass into a second tensor-cache ontology.
+
+The shared persistent state available to a pass includes, as applicable:
+
+```text
+canonical entity/content identity + recursive composition DAG
+occurrences / containers / trajectories / exact order and gaps
+attestations / witnesses / contradiction / provenance
+consensus standing + uncertainty
+physicalities / coordinates / Hilbert locality / geometric state
+source / context / world / time scope
+session trajectory / discourse bindings / open obligations
+admitted deterministic calculations and their receipts
+```
+
+The pass may materialize an in-memory frontier, residual state, candidate set or
+operator-local cache to execute efficiently. Such state is a bounded working
+projection over the shared substrate. It must retain canonical ids/routes needed to
+rejoin durable state, must not become an untracked private knowledge graph, and must
+not be treated as a second semantic authority.
+
+Laplace has no fixed transformer-style token context window. A request is still
+finite: its compute envelope bounds hops, fanout, candidate work, provider/operator
+scope, memory, I/O, concurrency and output. These are execution limits over the same
+addressable knowledge world, not a rule that state older than a fixed token count is
+discarded or inaccessible.
+
+## Processing layers and extensibility
+
+A Laplace “layer” means one routed processing/fold round over the enabled typed
+planes/operators; it does not mean one fixed neural block and it does not mean that
+every provider runs in a universal serial order.
+
+Typed channels may include exact composition/containment, occurrence/trajectory,
+attestation and witnessing, standing/uncertainty, physicality, coordinate/Hilbert
+locality, centroid/Fréchet or other geometry, source/context/time, model-circuit
+testimony, and deterministic domain/tool calculations. ROUTE selects the lawful
+operators and SCAN/COMPOSE/PROPOSE/STEER consume their typed results. New operator
+families may be added through the governed ISA/registry without redefining canonical
+identity or inventing a parallel cognition engine.
+
+Model export consumes these same typed planes through an explicit recipe/template and
+materializes the tensor/package contract of the target architecture. Export is a
+projection of substrate state; it is not a second source of truth, and support for a
+new target architecture requires an explicit mapping/writer plus validation.
+
 ## Compute envelope and preflight
 
 Hops, fanout/frontier width, provider/operator families, candidate work, trajectory expansion, calculation work, memory/I/O/concurrency and realization/output are explicit execution dimensions over the **same knowledge world**.
