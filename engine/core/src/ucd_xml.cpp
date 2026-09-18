@@ -379,13 +379,10 @@ extern "C" int laplace_unicode_seed_compute_ducet(
     for (uint32_t ordinal = 0; ordinal < ARTIFACT_CP_COUNT; ++ordinal)
         rank[order[ordinal]] = ordinal;
 
-    std::vector<double> points(4ull * ARTIFACT_CP_COUNT);
-    super_fibonacci(ARTIFACT_CP_COUNT, points.data());
     for (uint32_t cp = 0; cp < ARTIFACT_CP_COUNT; ++cp) {
         uint32_t ordinal = rank[cp];
-        double coord[4] = {
-            points[4ull * ordinal + 0], points[4ull * ordinal + 1],
-            points[4ull * ordinal + 2], points[4ull * ordinal + 3]};
+        double coord[4];
+        super_fibonacci_point_open(ordinal, coord);
         hilbert128_t hilbert;
         hilbert4d_encode(coord, &hilbert);
         uint8_t utf8[4];
