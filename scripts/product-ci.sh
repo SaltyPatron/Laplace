@@ -43,7 +43,9 @@ run_ci_contract_checks() {
     scripts/ci-qualification-cache.py \
     scripts/ci-product-freshness.py \
     scripts/ci_product_scope.py \
-    scripts/ci_managed_projects.py
+    scripts/ci_managed_projects.py \
+    scripts/web-artifact.py \
+    scripts/atomic-directory-exchange.py
   python3 scripts/validate-pipeline.py
   python3 scripts/test-ci-workspace.py
   python3 scripts/test-product-ci-artifact-ownership.py
@@ -66,6 +68,8 @@ run_ci_contract_checks() {
   python3 scripts/test-codegen-configure.py
   python3 scripts/test-cmake-release.py
   python3 scripts/test-web-artifact.py
+  python3 scripts/test-atomic-directory-exchange.py
+  python3 scripts/test-web-publication.py
 }
 
 require_built_revision() {
