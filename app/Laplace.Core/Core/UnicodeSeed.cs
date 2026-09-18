@@ -25,26 +25,6 @@ public static unsafe class UnicodeSeed
         return buf;
     }
 
-    /// <summary>
-    /// Compute the database tier-0 identity/UCA geometry from the one physical DUCET
-    /// artifact. Segmentation flags stay zero because they belong to UCD XML and are not
-    /// consumed by the database tier-0 physicality rows.
-    /// </summary>
-    public static CodepointRecord[] ComputeDucetGeometry(string ducetPath)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(ducetPath);
-        var records = new CodepointRecord[CodepointCount];
-        fixed (CodepointRecord* p = records)
-        {
-            int rc = NativeInterop.UnicodeSeedComputeDucet(
-                ducetPath, p, (nuint)records.Length);
-            if (rc != 0)
-                throw new InvalidOperationException(
-                    $"laplace_unicode_seed_compute_ducet(\"{ducetPath}\") returned {rc}");
-        }
-        return records;
-    }
-
     /// <summary>Read/decompress and parse one UCD XML artifact to completion.</summary>
     public static void ValidateUcdXml(string ucdxmlPath)
     {
