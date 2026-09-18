@@ -53,6 +53,30 @@ def native_test_path(path: str) -> bool:
     )
 
 
+def managed_test_tiers(root: Path, path: str) -> set[str]:
+    """Read explicit xUnit Tier traits from one changed managed test source."""
+    if not path.endswith(".cs"):
+        return set()
+    source = root / path
+    if not source.is_file():
+        return set()
+    text = source.read_text(encoding="utf-8")
+    tiers: set[str] = set()
+    marker = 'Trait("Tier", "'
+    start = 0
+    while True:
+        start = text.find(marker, start)
+        if start < 0:
+            break
+        value_start = start + len(marker)
+        value_end = text.find('"', value_start)
+        if value_end < 0:
+            break
+        tiers.add(text[value_start:value_end].strip().lower())
+        start = value_end + 1
+    return tiers
+
+
 def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     root = (root or Path(".")).resolve()
     managed_projects = load_managed_projects(root)
@@ -156,8 +180,19 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             managed_project = managed_project_for_path(managed_projects, path)
             if managed_project is not None and managed_projects[managed_project].is_test:
                 build_components.add("managed")
-                dev_suites.add("managed-dev")
-                invalidate(("managed-dev",), path)
+                tiers = managed_test_tiers(root, path)
+                # A DB/live-only test edit belongs to its actual execution tier.
+                # Sending it through managed-dev adds Tier!=db/live and can produce
+                # a false "zero tests matched" failure before the relevant suite runs.
+                if tiers == {"db"}:
+                    db_suites.add("managed-db")
+                    invalidate(("managed-db",), path)
+                elif tiers == {"live"}:
+                    live_suites.add("managed-live")
+                    invalidate(("managed-live",), path)
+                else:
+                    dev_suites.add("managed-dev")
+                    invalidate(("managed-dev",), path)
                 continue
 
             product_change = True
@@ -262,7 +297,14 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     managed_impact = plan_managed_projects(root, managed_changed_paths)
     managed_test_filter = ""
     if managed_changed_paths and all(managed_test_path(path) for path in managed_changed_paths):
-        managed_test_filter = managed_test_filter_for_paths(root, managed_changed_paths)
+        # Exact class filters are a managed-dev optimization only. An explicitly
+        # DB/live/perf-tier class would be intersected with Tier!=db/live/perf by
+        # managed-dev and match nothing, so leave that tier to its own suite.
+        explicit_tiers = set().union(
+            *(managed_test_tiers(root, path) for path in managed_changed_paths)
+        )
+        if not (explicit_tiers & {"db", "live", "perf"}):
+            managed_test_filter = managed_test_filter_for_paths(root, managed_changed_paths)
     if pure_uci and managed_impact["test_projects"]:
         dev_suites.add("managed-dev")
 
