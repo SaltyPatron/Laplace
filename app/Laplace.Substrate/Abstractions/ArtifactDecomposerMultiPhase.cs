@@ -24,6 +24,55 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
     bool IDecomposer.PerFileCompletion => true;
 
     /// <summary>
+    /// Execute independent heterogeneous artifact phases through the same shared bounded
+    /// ingest worker pool used by ordinary multi-file decomposers. Full runs schedule
+    /// larger artifacts first to avoid a one-file serial tail. Capped diagnostic runs
+    /// remain single-worker so MaxInputUnits still names an exact deterministic prefix.
+    /// </summary>
+    protected async IAsyncEnumerable<SubstrateChange> RunArtifactPhasesAsync<TArtifact>(
+        IReadOnlyList<TArtifact> artifacts,
+        IDecomposerContext context,
+        DecomposerOptions options,
+        Func<TArtifact, IDecomposer> phaseFactory,
+        Func<TArtifact, string> labelSelector,
+        Func<TArtifact, string> pathSelector,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(artifacts);
+        ArgumentNullException.ThrowIfNull(phaseFactory);
+        ArgumentNullException.ThrowIfNull(labelSelector);
+        ArgumentNullException.ThrowIfNull(pathSelector);
+        if (artifacts.Count == 0) yield break;
+
+        IReadOnlyList<TArtifact> scheduled = options.MaxInputUnits > 0
+            ? artifacts
+            : artifacts
+                .OrderByDescending(artifact =>
+                    MultiFileScheduler.EstimateBytes(pathSelector(artifact)))
+                .ThenBy(pathSelector, StringComparer.Ordinal)
+                .ToArray();
+
+        int workers = options.MaxInputUnits > 0
+            ? 1
+            : Math.Min(scheduled.Count, Math.Max(1, IngestTopology.Current.FileWorkers));
+
+        IAsyncEnumerable<SubstrateChange> Execute(
+            TArtifact artifact,
+            CancellationToken token) =>
+            RunPhaseAsync(
+                phaseFactory(artifact),
+                context,
+                options,
+                labelSelector(artifact),
+                pathSelector(artifact),
+                token);
+
+        await foreach (SubstrateChange change in ParallelIngestWork.RunAsync(
+                           scheduled, workers, Execute, ct).ConfigureAwait(false))
+            yield return change;
+    }
+
+    /// <summary>
     /// File-backed phase using the same content-root resume and completion semantics as
     /// <see cref="IngestBatchPipeline.RunMultiFileAsync{TRecord}"/>.
     /// </summary>
