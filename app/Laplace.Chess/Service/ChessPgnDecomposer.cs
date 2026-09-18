@@ -336,6 +336,13 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
 
         var moves = walk.Mainline.Select(p => p.San).ToList();
         var result = walk.Result.Value;
+        if (moves.Count == 0)
+        {
+            if (strict)
+                throw new InvalidDataException("recorded PGN requires at least one legal mainline move");
+            ChessDropLedger.Drop(ChessDropLedger.NoResultOrMoves, Headline(gameText));
+            return null;
+        }
         if (strict && PgnGames.TagStr(gameText, "Result") != result.ResultToken)
             throw new InvalidDataException("complete recorded PGN header and movetext result disagree");
         if (requireCompleteSource && PgnGames.TagStr(gameText, "Termination").ToLowerInvariant()

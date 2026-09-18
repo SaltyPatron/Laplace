@@ -11,10 +11,9 @@ import styles from './ChessDb.module.css';
  * careers, which is what closes the loop: roster → player → game → the other
  * player → his games, forever, with no dead ends.
  *
- * The movetext is not a stored blob. It is rebuilt from the game's content id
- * through its constituent chain — the same roundtrip that proves the substrate
- * kept the original bytes losslessly — so what is displayed is the PGN as
- * ingested, not a re-serialisation of a parse.
+ * Movetext is reconstructed from the typed move trajectory stored for the game's
+ * line. Source headers remain source testimony; generated SAN is deliberately not
+ * presented as a byte-for-byte copy of the provider's original PGN.
  */
 export function GamePage() {
   const { idHex } = useParams();
@@ -83,10 +82,10 @@ export function GamePage() {
         {plies ? <GameBoard data={plies} white={game.white} black={game.black} /> : null}
       </Panel>
 
-      <Panel title="Movetext as recorded">
+      <Panel title="Reconstructed movetext">
         <Muted style={{ marginBottom: '0.5rem' }}>
-          The source's own bytes, rebuilt from this game's content hash — not a
-          re-serialisation of the replay above. The board is driven from this.
+          Generated from the recorded typed move trajectory used by the replay above.
+          Source headers are shown separately and are not inferred from this rendering.
         </Muted>
         {game.movetext ? (
           <pre className={styles.movetext}>{game.movetext}</pre>

@@ -142,26 +142,32 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
     {
         if (!measurement.IsCorpus)
             throw new ArgumentException("corpus ingestion requires bound corpus provenance", nameof(measurement));
-        return IngestGamesCoreAsync(games, "bound original corpus selection", null, ct, null, measurement);
+        return IngestGamesCoreAsync(games, "bound original corpus selection", null, ct, null, measurement,
+            requireCompleteSource: true);
     }
 
     public async Task<Result> IngestFileAsync(
-        string pgnPath, Action<string>? log = null, CancellationToken ct = default, string? experimentReceiptJson = null)
-        => await IngestGamesAsync(PgnGames.StreamGames(pgnPath), Path.GetFileName(pgnPath), log, ct, experimentReceiptJson);
+        string pgnPath, Action<string>? log = null, CancellationToken ct = default,
+        string? experimentReceiptJson = null, bool requireCompleteSource = false)
+        => await IngestGamesAsync(PgnGames.StreamGames(pgnPath), Path.GetFileName(pgnPath), log, ct,
+            experimentReceiptJson, requireCompleteSource);
 
     public async Task<Result> IngestGamesAsync(
         IEnumerable<string> games, string sourceLabel, Action<string>? log = null,
-        CancellationToken ct = default, string? experimentReceiptJson = null)
-        => await IngestGamesCoreAsync(games, sourceLabel, log, ct, experimentReceiptJson, null);
+        CancellationToken ct = default, string? experimentReceiptJson = null,
+        bool requireCompleteSource = false)
+        => await IngestGamesCoreAsync(games, sourceLabel, log, ct, experimentReceiptJson, null,
+            requireCompleteSource);
 
     internal Task<Result> IngestRecordedFileAsync(string pgnPath, ChessRecordingMeasurement measurement,
         Action<string>? log, CancellationToken ct, string experimentReceiptJson)
         => IngestGamesCoreAsync(PgnGames.StreamGames(pgnPath), Path.GetFileName(pgnPath),
-            log, ct, experimentReceiptJson, measurement);
+            log, ct, experimentReceiptJson, measurement, requireCompleteSource: true);
 
     private async Task<Result> IngestGamesCoreAsync(
         IEnumerable<string> games, string sourceLabel, Action<string>? log,
-        CancellationToken ct, string? experimentReceiptJson, ChessRecordingMeasurement? measurement)
+        CancellationToken ct, string? experimentReceiptJson, ChessRecordingMeasurement? measurement,
+        bool requireCompleteSource)
     {
         var experiment = experimentReceiptJson is null ? null : ChessExperimentEvidence.Parse(experimentReceiptJson);
         measurement?.Checkpoint("gate", "waiting");
@@ -197,7 +203,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                         chunkGames: chunk.Count);
                     if (ChessPgnDecomposer.TryParseGame(gameText,
                         requireNormalCompletion: measurement?.RequiresNormalCompletion == true,
-                        requireCompleteSource: measurement?.IsCorpus == true) is not { } game)
+                        requireCompleteSource: requireCompleteSource || measurement?.IsCorpus == true) is not { } game)
                     {
                         if (measurement is not null) measurement.Work.ParseRejected++;
                         measurement?.Checkpoint("SourceReadParseAndValidation", "parse-progress", periodic: true);

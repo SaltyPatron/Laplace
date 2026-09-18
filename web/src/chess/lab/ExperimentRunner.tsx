@@ -74,7 +74,6 @@ const JOB_FIELDS: Record<string, FieldDef[]> = {
     { key: 'site', label: 'Source', type: 'select', options: ['chesscom', 'lichess'], optionLabels: { chesscom: 'Chess.com', lichess: 'Lichess' } },
     { key: 'all', label: 'Ingest all games', type: 'bool', help: 'Omit the provider cap and stream the complete available archive.' },
     { key: 'max', label: 'Game limit', type: 'number', min: 1, step: 100, help: 'Used only when “Ingest all games” is off.', placeholder: '1000' },
-    { key: 'concurrency', label: 'Parallel archive downloads', type: 'number', min: 0, help: '0 = use the host I/O worker budget. Applies to Chess.com monthly archives.', placeholder: '0' },
     { key: 'fideId', label: 'FIDE ID', type: 'text', help: 'Optional official FIDE profile to connect to this online identity.', placeholder: '1503014' },
     { key: 'ingest', label: 'Write to Laplace', type: 'bool', help: 'Record, analyze, deduplicate, and attribute the downloaded games immediately.' },
   ],

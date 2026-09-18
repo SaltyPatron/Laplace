@@ -468,7 +468,6 @@ public static class ChessLabRunners
         bool ingest = bool.TryParse(Config(slot.Job.Config, "ingest", "true"), out bool ingestValue) && ingestValue;
         bool persistPgn = ChessLabStorage.PersistPgn(slot.Job.Config, defaultValue: !ingest);
         int? max = ChessGameFetcher.ResolveArchiveLimit(all, Config(slot.Job.Config, "max", ""));
-        int concurrency = ResolveConcurrency(slot.Job.Config);
         string fideId = Config(slot.Job.Config, "fideId", "").Trim();
         if (user.Length == 0) throw new ArgumentException("A provider username is required.");
 
@@ -509,6 +508,8 @@ public static class ChessLabRunners
                 outPath = Path.Combine(spoolDir, fileName);
             }
 
+            int parsedWhileFetching = 0;
+            int novelWhileFetching = 0;
             int appliedWhileFetching = 0;
             int games = await ChessGameFetcher.FetchAsync(user, site, max, 0, outPath,
                 msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
@@ -517,26 +518,36 @@ public static class ChessLabRunners
                     {
                         var part = await ingestor!.IngestGamesAsync(
                             batch, "Chess.com monthly archive",
-                            msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), token);
+                            msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), token,
+                            requireCompleteSource: true);
+                        parsedWhileFetching += part.Parsed;
+                        novelWhileFetching += part.Novel;
                         appliedWhileFetching += part.Applied;
                         lab.UpdateSummary(slot, new ChessLabJobSummary(
                             appliedWhileFetching, 0, $"{appliedWhileFetching} new games recorded while downloading"));
                     }
                     : null,
-                concurrency);
+                concurrency: 1);
             lab.Publish(slot, new ChessLabMetricEvent("games_fetched", games));
 
             if (ingest)
             {
-                var gameResult = appliedWhileFetching > 0 || site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase)
-                    ? new ChessPgnIngestor.Result(games, appliedWhileFetching, appliedWhileFetching)
+                bool chessCom = site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase);
+                var gameResult = chessCom
+                    ? new ChessPgnIngestor.Result(
+                        parsedWhileFetching, novelWhileFetching, appliedWhileFetching)
                     : await ingestor!.IngestFileAsync(outPath,
-                        msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct);
+                        msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
+                        requireCompleteSource: true);
+                if (gameResult.Parsed != games)
+                    throw new InvalidDataException(
+                        $"provider returned {games} games but only {gameResult.Parsed} complete legal games validated");
+                lab.Publish(slot, new ChessLabMetricEvent("games_validated", gameResult.Parsed));
                 lab.Publish(slot, new ChessLabMetricEvent("games_ingested", gameResult.Applied));
                 lab.UpdateSummary(slot, new ChessLabJobSummary(
                     gameResult.Applied, games,
                     $"{profileResult.Profiles} profiles · {profileResult.Links} identity links · "
-                    + $"{games} fetched oldest-to-newest · {gameResult.Applied} new games"));
+                    + $"{games} fetched + fully validated oldest-to-newest · {gameResult.Applied} new games"));
             }
             else
             {

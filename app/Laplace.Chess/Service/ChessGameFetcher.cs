@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -8,6 +9,9 @@ namespace Laplace.Chess.Service;
 public static class ChessGameFetcher
 {
     private static readonly HttpClient Http = CreateClient();
+    private static readonly SemaphoreSlim ChessComRequests = new(1, 1);
+    private static readonly SemaphoreSlim LichessRequests = new(1, 1);
+    private const int ProviderMaxAttempts = 6;
 
     private static HttpClient CreateClient()
     {
@@ -56,36 +60,23 @@ public static class ChessGameFetcher
         var archives = ChronologicalArchiveUrls(
             doc.RootElement.GetProperty("archives").EnumerateArray()
                 .Select(e => e.GetString()!));
-        int workers = Math.Clamp(
-            concurrency ?? IngestTopology.Current.IoWorkersAvailable, 1, Math.Max(1, archives.Count));
-        log?.Invoke($"  {archives.Count} monthly archives ({workers} parallel downloads; oldest-first apply)"
+        // The public provider is the scarce resource here, not local I/O. Older code sized
+        // concurrent monthly requests from host CPU/I/O topology, which can turn a large
+        // account into dozens of simultaneous Chess.com requests. Keep the parameter only
+        // for API compatibility and intentionally serialize provider traffic.
+        _ = concurrency;
+        log?.Invoke($"  {archives.Count} monthly archives (serialized downloads; each archive is applied before the next request)"
             + (minTcSeconds > 0 ? $", min base TC {minTcSeconds}s" : ""));
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         int kept = 0;
         await using (var w = new StreamWriter(outPath, append: false, new UTF8Encoding(false)))
         {
-            // Downloads are independent physical artifacts, so keep one topology-sized window
-            // in flight. Consumption remains oldest-first: deterministic record chronology is
-            // preserved while network latency overlaps parsing, apply, and inline fold work.
-            var pending = new Queue<(string Url, Task<string> Download)>();
-            int nextArchive = 0;
-            while (nextArchive < archives.Count && pending.Count < workers)
-            {
-                string url = archives[nextArchive++];
-                pending.Enqueue((url, GetStringWithRetryAsync($"{url}/pgn", ct)));
-            }
-
-            while (pending.Count > 0)
+            foreach (string archiveUrl in archives)
             {
                 ct.ThrowIfCancellationRequested();
-                var (archiveUrl, download) = pending.Dequeue();
-                var pgn = await download;
-                if (nextArchive < archives.Count)
-                {
-                    string url = archives[nextArchive++];
-                    pending.Enqueue((url, GetStringWithRetryAsync($"{url}/pgn", ct)));
-                }
+                string pgn = await GetStringWithRetryAsync(
+                    $"{archiveUrl}/pgn", ct, retryNotFound: true, log);
                 if (string.IsNullOrWhiteSpace(pgn)) continue;
 
                 var ready = new List<string>();
@@ -97,7 +88,11 @@ public static class ChessGameFetcher
                     ready.Add(game);
                     if (++kept >= (max ?? int.MaxValue)) break;
                 }
+
                 await w.FlushAsync(ct);
+                // Do not prefetch the next month while the current one is still being
+                // validated and committed. A successful provider request therefore maps
+                // to one bounded apply window before another request can consume quota.
                 if (ready.Count > 0 && onBatchReady is not null)
                     await onBatchReady(ready, ct);
                 log?.Invoke($"  {archiveUrl[^7..]}: {ready.Count} processed · {kept} total");
@@ -105,6 +100,9 @@ public static class ChessGameFetcher
             }
         }
         return kept;
+    }
+
+    internal static IReadOnlyList<string> ChronologicalArchiveUrls        return kept;
     }
 
     internal static IReadOnlyList<string> ChronologicalArchiveUrls(IEnumerable<string> archives)
@@ -183,20 +181,62 @@ public static class ChessGameFetcher
         ValidateLimit(max);
         var url = LichessGamesUrl(user, max);
         log?.Invoke($"lichess: {url}");
-        using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.Accept.ParseAdd("application/x-chess-pgn");
-        using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        resp.EnsureSuccessStatusCode();
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
-        await using (var src = await resp.Content.ReadAsStreamAsync(ct))
-        await using (var dst = File.Create(outPath))
-            await src.CopyToAsync(dst, ct);
-        // `sort=dateAsc` makes the streamed provider order itself the chronology contract;
-        // do not materialize a potentially multi-gigabyte all-games export just to reorder it.
+
+        for (int attempt = 0; ; attempt++)
+        {
+            TimeSpan? retryDelay = null;
+            await LichessRequests.WaitAsync(ct);
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Accept.ParseAdd("application/x-chess-pgn");
+                using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                if (IsTransientProviderStatus(resp.StatusCode, retryNotFound: false)
+                    && attempt + 1 < ProviderMaxAttempts)
+                {
+                    retryDelay = ProviderRetryDelay(resp, attempt);
+                    log?.Invoke($"  lichess HTTP {(int)resp.StatusCode}; retrying in {retryDelay.Value.TotalSeconds:F1}s");
+                }
+                else
+                {
+                    resp.EnsureSuccessStatusCode();
+                    await using var src = await resp.Content.ReadAsStreamAsync(ct);
+                    await using var dst = File.Create(outPath);
+                    await src.CopyToAsync(dst, ct);
+                    break;
+                }
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode is null && attempt + 1 < ProviderMaxAttempts)
+            {
+                retryDelay = ProviderBackoff(attempt);
+                log?.Invoke($"  lichess transport failure; retrying in {retryDelay.Value.TotalSeconds:F1}s");
+            }
+            catch (IOException) when (attempt + 1 < ProviderMaxAttempts)
+            {
+                retryDelay = ProviderBackoff(attempt);
+                log?.Invoke($"  lichess stream failure; retrying in {retryDelay.Value.TotalSeconds:F1}s");
+            }
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested && attempt + 1 < ProviderMaxAttempts)
+            {
+                retryDelay = ProviderBackoff(attempt);
+                log?.Invoke($"  lichess request timeout; retrying in {retryDelay.Value.TotalSeconds:F1}s");
+            }
+            finally
+            {
+                LichessRequests.Release();
+            }
+
+            if (retryDelay is null)
+                throw new HttpRequestException($"lichess request failed without a retryable response: {url}");
+            await Task.Delay(retryDelay.Value, ct);
+        }
+
+        // sort=dateAsc makes the streamed provider order itself the chronology contract.
         return PgnGames.StreamGames(outPath).Count();
     }
 
-    public static async Task<ChessPlayerProfile> FetchLichessProfileAsync(string user, CancellationToken ct)
+    public static async Task<ChessPlayerProfile> FetchLichessProfileAsync    public static async Task<ChessPlayerProfile> FetchLichessProfileAsync(string user, CancellationToken ct)
     {
         string json = await GetStringWithRetryAsync(
             $"https://lichess.org/api/user/{Uri.EscapeDataString(user)}", ct);
@@ -600,22 +640,86 @@ public static class ChessGameFetcher
         if (max is <= 0) throw new ArgumentOutOfRangeException(nameof(max), "Game limit must be positive.");
     }
 
-    private static async Task<string> GetStringWithRetryAsync(string url, CancellationToken ct)
+    private static async Task<string> GetStringWithRetryAsync(
+        string url, CancellationToken ct, bool retryNotFound = false, Action<string>? log = null)
     {
+        SemaphoreSlim? gate = ProviderGate(url);
         for (int attempt = 0; ; attempt++)
         {
-            using var resp = await Http.GetAsync(url, ct);
-            if ((int)resp.StatusCode == 429 && attempt < 5)
+            TimeSpan? retryDelay = null;
+            if (gate is not null) await gate.WaitAsync(ct);
+            try
             {
-                await Task.Delay(TimeSpan.FromSeconds(1 << attempt), ct);
-                continue;
+                using var resp = await Http.GetAsync(url, ct);
+                if (IsTransientProviderStatus(resp.StatusCode, retryNotFound)
+                    && attempt + 1 < ProviderMaxAttempts)
+                {
+                    retryDelay = ProviderRetryDelay(resp, attempt);
+                    log?.Invoke($"  provider HTTP {(int)resp.StatusCode}; retrying in {retryDelay.Value.TotalSeconds:F1}s");
+                }
+                else
+                {
+                    resp.EnsureSuccessStatusCode();
+                    return await resp.Content.ReadAsStringAsync(ct);
+                }
             }
-            resp.EnsureSuccessStatusCode();
-            return await resp.Content.ReadAsStringAsync(ct);
+            catch (HttpRequestException ex) when (ex.StatusCode is null && attempt + 1 < ProviderMaxAttempts)
+            {
+                retryDelay = ProviderBackoff(attempt);
+                log?.Invoke($"  provider transport failure; retrying in {retryDelay.Value.TotalSeconds:F1}s");
+            }
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested && attempt + 1 < ProviderMaxAttempts)
+            {
+                retryDelay = ProviderBackoff(attempt);
+                log?.Invoke($"  provider request timeout; retrying in {retryDelay.Value.TotalSeconds:F1}s");
+            }
+            finally
+            {
+                gate?.Release();
+            }
+
+            if (retryDelay is null)
+                throw new HttpRequestException($"provider request failed without a retryable response: {url}");
+            await Task.Delay(retryDelay.Value, ct);
         }
     }
 
-    private static async Task<string> SendStringWithRetryAsync(HttpRequestMessage request, CancellationToken ct)
+    private static SemaphoreSlim? ProviderGate(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
+        if (uri.Host.Equals("api.chess.com", StringComparison.OrdinalIgnoreCase))
+            return ChessComRequests;
+        if (uri.Host.Equals("lichess.org", StringComparison.OrdinalIgnoreCase))
+            return LichessRequests;
+        return null;
+    }
+
+    private static bool IsTransientProviderStatus(HttpStatusCode status, bool retryNotFound)
+        => status == HttpStatusCode.TooManyRequests
+           || status == HttpStatusCode.RequestTimeout
+           || (int)status >= 500
+           || (retryNotFound && status == HttpStatusCode.NotFound);
+
+    private static TimeSpan ProviderRetryDelay(HttpResponseMessage response, int attempt)
+    {
+        var retry = response.Headers.RetryAfter;
+        if (retry?.Delta is { } delta && delta > TimeSpan.Zero)
+            return LimitProviderDelay(delta);
+        if (retry?.Date is { } date)
+        {
+            var wait = date - DateTimeOffset.UtcNow;
+            if (wait > TimeSpan.Zero) return LimitProviderDelay(wait);
+        }
+        return ProviderBackoff(attempt);
+    }
+
+    private static TimeSpan ProviderBackoff(int attempt)
+        => TimeSpan.FromMilliseconds(Math.Min(30_000, 500 * (1 << Math.Min(attempt, 5))));
+
+    private static TimeSpan LimitProviderDelay(TimeSpan delay)
+        => delay > TimeSpan.FromMinutes(2) ? TimeSpan.FromMinutes(2) : delay;
+
+    private static async Task<string> SendStringWithRetryAsync    private static async Task<string> SendStringWithRetryAsync(HttpRequestMessage request, CancellationToken ct)
     {
         for (int attempt = 0; ; attempt++)
         {
