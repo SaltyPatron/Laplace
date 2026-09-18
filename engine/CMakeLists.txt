@@ -110,14 +110,14 @@ if(NOT DEFINED LAPLACE_UCD_PATH)
 endif()
 set(LAPLACE_UCD_PATH "${LAPLACE_UCD_PATH}"
     CACHE PATH "Path to the UCD tree (contains ucd/, ucdxml/, uca/, etc.)")
-set(LAPLACE_UCDXML_ZIP "${LAPLACE_UCD_PATH}/ucdxml/ucd.nounihan.flat.zip"
-    CACHE FILEPATH "UCDXML zip (nounihan flat). 67 MB uncompressed; carries all properties the engine codegen needs.")
+set(LAPLACE_UCDXML_ZIP "${LAPLACE_UCD_PATH}/ucdxml/ucd.all.flat.zip"
+    CACHE FILEPATH "Complete UCDXML flat zip (CJK + non-CJK); canonical Unicode property authority for engine codegen.")
 if(NOT EXISTS "${LAPLACE_UCDXML_ZIP}")
     message(FATAL_ERROR
         "LAPLACE_UCDXML_ZIP not found:\n"
         "  ${LAPLACE_UCDXML_ZIP}\n"
         "Override -DLAPLACE_UCDXML_ZIP=... to the path of\n"
-        "ucd.nounihan.flat.zip (download from https://www.unicode.org/Public/${LAPLACE_UNICODE_VERSION}/ucdxml/).")
+        "ucd.all.flat.zip (download from https://www.unicode.org/Public/${LAPLACE_UNICODE_VERSION}/ucdxml/).")
 endif()
 set(LAPLACE_UCD_CONFORMANCE_DIR "${LAPLACE_UCD_PATH}/ucd"
     CACHE PATH "Directory holding the UAX#29/UAX#15 conformance test .txt files (auxiliary/Grapheme/Word/SentenceBreakTest.txt + NormalizationTest.txt)")
