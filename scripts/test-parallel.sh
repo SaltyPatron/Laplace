@@ -105,6 +105,7 @@ run_managed_dev() {
 
 run_uci_dev() {
   local runtime output
+  set_dev_perfcache
   sync_managed_native
   runtime=$(mktemp -d)
   trap 'rm -rf "$runtime"' RETURN
