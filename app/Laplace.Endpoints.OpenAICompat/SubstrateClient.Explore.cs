@@ -1,3 +1,4 @@
+using Npgsql;
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
 using Laplace.SubstrateCRUD.Npgsql;
