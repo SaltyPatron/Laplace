@@ -141,7 +141,7 @@ def classify_paths(paths: list[str]) -> dict:
         if path.startswith("web/"):
             matched = product_change = True
             components.add("web")
-            build_components.update(("managed", "web"))
+            build_components.add("web")
             dev_suites.add("browser-dev")
             live_suites.update(BASE_LIVE_SUITES)
             delivery_actions.update(("publish", "live"))
