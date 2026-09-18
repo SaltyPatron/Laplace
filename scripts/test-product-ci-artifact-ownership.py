@@ -51,11 +51,13 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertLess(recovery, proof)
         self.assertLess(proof, deployment)
 
-    def test_successful_build_records_checkout_after_build_completion(self):
+    def test_successful_build_records_checkout_after_planned_build_completion(self):
         owner = function("run_build")
-        build = owner.index('bash scripts/pipeline.sh "${args[@]}" build')
+        planned = owner.index('bash scripts/pipeline.sh "${args[@]}" "${phases[@]}"')
         marker = owner.index("git rev-parse HEAD > build/.laplace-source-revision")
-        self.assertLess(build, marker)
+        self.assertIn("phases+=(build-native)", owner)
+        self.assertIn("phases+=(build-app)", owner)
+        self.assertLess(planned, marker)
 
     def test_full_publication_commits_only_after_revision_receipt_verification(self):
         source = PUBLISH.read_text(encoding="utf-8")
