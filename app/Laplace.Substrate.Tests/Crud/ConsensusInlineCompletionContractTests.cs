@@ -7,16 +7,17 @@ namespace Laplace.SubstrateCRUD.Tests;
 public sealed class ConsensusInlineCompletionContractTests
 {
     [Fact]
-    public void WriterHasNoDeferredFoldQueueAuthority()
+    public void BulkWriterOwnsBoundedFileCompletionPipeline()
     {
         var type = typeof(ConsensusAccumulatingWriter);
         const BindingFlags hidden = BindingFlags.Instance | BindingFlags.NonPublic;
-
-        Assert.Null(type.GetField("_foldDepth", hidden));
-        Assert.Null(type.GetField("_foldChainLock", hidden));
-        Assert.Null(type.GetField("_outstanding", hidden));
-        Assert.Null(type.GetMethod("EnqueueFoldAsync", hidden));
-        Assert.Null(type.GetMethod("DrainFoldsAsync", hidden));
-        Assert.Null(type.GetMethod("ObserveFoldFailureAsync", hidden));
+        const BindingFlags publicInstance = BindingFlags.Instance | BindingFlags.Public;
+        Assert.NotNull(type.GetField("_foldDepth", hidden));
+        Assert.NotNull(type.GetField("_foldChainLock", hidden));
+        Assert.NotNull(type.GetField("_outstanding", hidden));
+        Assert.NotNull(type.GetField("_fileFolds", hidden));
+        Assert.NotNull(type.GetMethod("EnqueueFoldAsync", hidden));
+        Assert.NotNull(type.GetMethod("DrainFoldsAsync", publicInstance));
+        Assert.NotNull(type.GetMethod("CompleteFileAsync", publicInstance));
     }
 }

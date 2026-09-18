@@ -528,23 +528,32 @@ public static class IngestBatchPipeline
     /// the failure with its reason and the file is neither counted done nor marked complete.</summary>
     public const string FileFailedUnitPrefix = "file-failed/";
 
-    /// <summary>Ingest file-progress marker (see IngestRunner.TrackIntent). The fold is inline
-    /// per batch (ConsensusAccumulatingWriter → consensus_upsert) — this marker carries no fold
-    /// semantics; the writer skips it as an empty change.</summary>
+    /// <summary>Attach the physical-file execution owner without changing content identity.</summary>
+    internal static SubstrateChange BindFileLabel(SubstrateChange change, string fileLabel)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileLabel);
+        if (change.Metadata.FileLabel is { } existing
+            && !string.Equals(existing, fileLabel, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"ingest change already belongs to file '{existing}', cannot rebind to '{fileLabel}'");
+        return change with { Metadata = change.Metadata with { FileLabel = fileLabel } };
+    }
+
     public static SubstrateChange BuildPeriodBoundary(Hash128 sourceId, string fileLabel) =>
-        new SubstrateChangeBuilder(
+        BindFileLabel(new SubstrateChangeBuilder(
             sourceId, $"{PeriodBoundaryUnitPrefix}{fileLabel}", null,
-            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build(), fileLabel);
 
     public static SubstrateChange BuildSkippedBoundary(Hash128 sourceId, string fileLabel) =>
-        new SubstrateChangeBuilder(
+        BindFileLabel(new SubstrateChangeBuilder(
             sourceId, $"{SkippedBoundaryUnitPrefix}{fileLabel}", null,
-            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build(), fileLabel);
 
     public static SubstrateChange BuildCancelledBoundary(Hash128 sourceId, string fileLabel) =>
-        new SubstrateChangeBuilder(
+        BindFileLabel(new SubstrateChangeBuilder(
             sourceId, $"{CancelledBoundaryUnitPrefix}{fileLabel}", null,
-            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build();
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0).Build(), fileLabel);
 
     /// <summary>
     /// Per-file resume for multi-file sources (GH #898). A source-level completion
@@ -661,7 +670,7 @@ public static class IngestBatchPipeline
             entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1);
         Laplace.Ingestion.LayerCompletion.EmitFileMarker(
             builder, fileRoot, sourceId, layerOrder);
-        var change = builder.Build();
+        var change = BindFileLabel(builder.Build(), fileLabel);
         return canonicalNames is { Count: > 0 }
             ? change with
             {
@@ -674,11 +683,12 @@ public static class IngestBatchPipeline
     }
 
     public static SubstrateChange BuildFileFailure(Hash128 sourceId, string fileLabel, Exception ex) =>
-        new SubstrateChangeBuilder(
-            sourceId, $"{FileFailedUnitPrefix}{fileLabel}: [{ex.GetType().Name}] {ex.Message}", null,
-            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0)
-        .Build() with
-        { CountsAsUnit = false };
+        BindFileLabel(
+            new SubstrateChangeBuilder(
+                sourceId, $"{FileFailedUnitPrefix}{fileLabel}: [{ex.GetType().Name}] {ex.Message}", null,
+                entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 0)
+            .Build() with { CountsAsUnit = false },
+            fileLabel);
 
     internal sealed class AllAbsentSubstrateReader : ISubstrateReader
     {
@@ -985,7 +995,7 @@ public static class IngestBatchPipeline
                             unitsConsumed - unitsAtFileStart,
                             fileEntities, filePhysicalities, fileAttestations);
                     }
-                    yield return change;
+                    yield return BindFileLabel(change, label);
                     if (maxTotalUnits > 0 && unitsConsumed >= maxTotalUnits)
                     {
                         hitCap = true;
@@ -1270,7 +1280,8 @@ public static class IngestBatchPipeline
                             fileEntities += rowCounts.Entities;
                             filePhysicalities += rowCounts.Physicalities;
                             fileAttestations += rowCounts.Attestations;
-                            await IngestProducerGroup.WriteAsync(outCh.Writer, change, ct);
+                            await IngestProducerGroup.WriteAsync(
+                                outCh.Writer, BindFileLabel(change, source.FileLabel), ct);
                         }
                     }
                     catch (OperationCanceledException) { throw; }

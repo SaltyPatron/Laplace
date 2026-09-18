@@ -741,7 +741,7 @@ public abstract class DecomposerMultiPhase : IDecomposer
             entities += change.Entities.Length;
             physicalities += change.Physicalities.Length;
             attestations += change.Attestations.Length;
-            yield return change;
+            yield return IngestBatchPipeline.BindFileLabel(change, fileLabel);
         }
         observability.OnFileComposed(
             phase.SourceName, fileLabel, null,

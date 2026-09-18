@@ -85,7 +85,8 @@ public sealed record SubstrateChangeMetadata(
     Hash128? ParentIntentId,
     long InputUnitsConsumed = 0,
     int CommitEpoch = 0,
-    Hash128? FileId = null);
+    Hash128? FileId = null,
+    string? FileLabel = null);
 
 public sealed record EntityRow(
     Hash128 Id,

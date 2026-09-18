@@ -39,6 +39,10 @@ public interface ISubstrateWriter
     /// </remarks>
     Task DrainFoldsAsync() => Task.CompletedTask;
 
+    /// <summary>Close semantic work owned by one file before files_done advances.</summary>
+    Task CompleteFileAsync(string fileLabel, CancellationToken ct = default)
+        => Task.CompletedTask;
+
     Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default);
 
     async Task<ApplyResult> ApplyManyAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
@@ -82,8 +86,8 @@ public interface ISubstrateWriter
     /// <summary>
     /// Applies a group of changes as ONE working set — one transaction, one
     /// verification pass, one idempotency token derived from every member's
-    /// intent hash. The runner accumulates per-file/per-budget changes and
-    /// closes them here.
+    /// intent hash. File-backed runners keep one accumulator per file so a
+    /// working set never makes one file own another file's completion.
     /// </summary>
     Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => ApplyManyAsync(changes, ct);

@@ -89,7 +89,7 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
                     attestations += stage.AttestationCount;
                 }
             }
-            yield return change;
+            yield return IngestBatchPipeline.BindFileLabel(change, fileLabel);
         }
 
         observability.OnFileComposed(

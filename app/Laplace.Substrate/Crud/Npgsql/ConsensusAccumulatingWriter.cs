@@ -447,7 +447,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 // Evidence has committed and its replay journal will suppress this delta
                 // forever. From here the fold is an owed continuation, not cancellable
                 // speculative work; completion/drain owns surfacing any failure.
-                if (_bulkRun) await EnqueueFoldAsync(delta, CancellationToken.None);
+                if (_bulkRun) await EnqueueFoldAsync(delta, changes, CancellationToken.None);
                 else await UpsertDeltaAsync(delta, CancellationToken.None);
             }
 
@@ -1416,7 +1416,9 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     /// The machine-sized fold plan's outstanding deltas act as backpressure on RAM.
     /// </summary>
     private async Task EnqueueFoldAsync(
-        Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta, CancellationToken ct)
+        Dictionary<(Hash128 S, Hash128 T, Hash128? O), Delta> delta,
+        IReadOnlyList<SubstrateChange> changes,
+        CancellationToken ct)
     {
         await _foldDepth.WaitAsync(ct);
         Task dispatched;
@@ -1435,7 +1437,20 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         }
 
         var tracked = Release(dispatched);
-        lock (_foldChainLock) _outstanding.Add(tracked);
+        lock (_foldChainLock)
+        {
+            _outstanding.Add(tracked);
+            foreach (string owner in changes
+                         .Select(static change => change.Metadata.FileLabel)
+                         .Where(static label => !string.IsNullOrWhiteSpace(label))
+                         .Select(static label => label!)
+                         .Distinct(StringComparer.Ordinal))
+            {
+                if (!_fileFolds.TryGetValue(owner, out var owned))
+                    _fileFolds.Add(owner, owned = new List<Task>());
+                owned.Add(tracked);
+            }
+        }
 
         async Task Release(Task fold)
         {
@@ -1451,6 +1466,34 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     /// fold failure can never vanish silently.
     /// </summary>
     private readonly List<Task> _outstanding = new();
+    private readonly Dictionary<string, List<Task>> _fileFolds = new(StringComparer.Ordinal);
+
+    public async Task CompleteFileAsync(string fileLabel, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileLabel);
+        Task[] owned;
+        lock (_foldChainLock)
+        {
+            if (!_fileFolds.TryGetValue(fileLabel, out var tasks))
+                return;
+            tasks.RemoveAll(static task => task.IsCompletedSuccessfully);
+            if (tasks.Count == 0)
+            {
+                _fileFolds.Remove(fileLabel);
+                return;
+            }
+            owned = tasks.ToArray();
+        }
+        await Task.WhenAll(owned).WaitAsync(ct).ConfigureAwait(false);
+        lock (_foldChainLock)
+        {
+            if (!_fileFolds.TryGetValue(fileLabel, out var tasks))
+                return;
+            tasks.RemoveAll(static task => task.IsCompletedSuccessfully);
+            if (tasks.Count == 0)
+                _fileFolds.Remove(fileLabel);
+        }
+    }
 
     private Task[] SnapshotFolds()
     {
@@ -1473,8 +1516,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             if (t.IsFaulted || t.IsCanceled) await t;
     }
 
-    /// <summary>Awaits every queued fold. Ingest completion IS fold
-    /// completion: finalize/complete/dispose all pass through here.</summary>
+    /// <summary>Final safety drain for anonymous work and abnormal teardown.
+    /// Normal file-backed ingest closes folds through CompleteFileAsync.</summary>
     public async Task DrainFoldsAsync()
     {
         // Re-snapshot until quiet: awaiting a lane can let a queued delta dispatch

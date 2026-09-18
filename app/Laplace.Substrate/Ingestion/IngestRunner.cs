@@ -211,9 +211,6 @@ public sealed class IngestRunner
             IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
             Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
         var admissionWindow = new IngestAdmissionWindow(applyEnvelope);
-        long boundaryCommitFloor = applyEnvelope
-            / Math.Max(1, topo.ApplyPartitions);
-
         static bool IsPeriodBoundary(SubstrateChange c) =>
             c.Metadata.SourceContentUnitName.StartsWith(
                 IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal);
@@ -310,7 +307,7 @@ public sealed class IngestRunner
                     sbatchRows += RowsOf(intent);
                     wsBytes += sib;
                     if (ShouldFlushWithCap(sbatch.Count, sbatchRows)
-                        || (IsPeriodBoundary(intent) && wsBytes >= boundaryCommitFloor))
+                        || IsPeriodBoundary(intent))
                     {
                         LogAdmissionWindow(sbatch.Count);
                         await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
@@ -444,7 +441,7 @@ public sealed class IngestRunner
                         batchRows += RowsOf(intent);
                         wsBytes += ib;
                         if (ShouldFlushWithCap(batch.Count, batchRows)
-                            || (IsPeriodBoundary(intent) && wsBytes >= boundaryCommitFloor))
+                            || IsPeriodBoundary(intent))
                         {
                             await FlushBatchAsync(batch);
                             batchRows = 0;
@@ -871,6 +868,14 @@ public sealed class IngestRunner
                 long batchRows = (long)apply.EntitiesAttempted + apply.PhysicalitiesAttempted + apply.AttestationsAttempted;
                 double secs = Math.Max(1e-3, apply.WallClock.TotalSeconds);
                 foreach (var intent in batch)
+                {
+                    string unit = intent.Metadata.SourceContentUnitName;
+                    if ((IsPeriodBoundary(intent)
+                         || unit.StartsWith(IngestBatchPipeline.FileFailedUnitPrefix, StringComparison.Ordinal))
+                        && intent.Metadata.FileLabel is { Length: > 0 } fileLabel)
+                        await _writer.CompleteFileAsync(fileLabel, ct).ConfigureAwait(false);
+                }
+                foreach (var intent in batch)
                     TrackIntent(counters, intent, failures);
 
                 log.LogInformation(
@@ -1273,6 +1278,9 @@ public sealed class IngestRunner
             Account(result, changes);
             return result;
         }
+
+        public Task CompleteFileAsync(string fileLabel, CancellationToken ct = default)
+            => inner.CompleteFileAsync(fileLabel, ct);
 
         private void Account(ApplyResult result, IReadOnlyList<SubstrateChange> changes)
         {
