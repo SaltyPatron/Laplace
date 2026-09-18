@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +61,37 @@ def project_for_path(projects: dict[str, Project], path: str) -> str | None:
         if normalized == project.path or normalized.startswith(directory):
             return project.path
     return None
+
+
+def test_filter_for_paths(root: Path, paths: list[str]) -> str:
+    """Return an exact VSTest class filter only for unambiguous test-class edits."""
+    root = root.resolve()
+    projects = load_projects(root)
+    filters: set[str] = set()
+    for raw in paths:
+        path = raw.replace("\\", "/")
+        project = project_for_path(projects, path)
+        if project is None or not projects[project].is_test or not path.endswith(".cs"):
+            return ""
+        source = root / path
+        if not source.is_file():
+            return ""
+        text = source.read_text(encoding="utf-8")
+        namespace = re.search(
+            r"(?m)^\s*namespace\s+([A-Za-z_][A-Za-z0-9_.]*)\s*[;{]",
+            text,
+        )
+        classes = re.findall(
+            r"(?m)^\s*(?:public|internal)\s+(?:(?:sealed|partial|abstract)\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)",
+            text,
+        )
+        if namespace is None or not classes:
+            return ""
+        filters.update(
+            f"FullyQualifiedName={namespace.group(1)}.{name}"
+            for name in classes
+        )
+    return "|".join(sorted(filters))
 
 
 def plan_changed(root: Path, paths: list[str]) -> dict[str, object]:
