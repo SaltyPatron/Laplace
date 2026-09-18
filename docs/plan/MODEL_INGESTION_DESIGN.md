@@ -25,6 +25,29 @@ model claims/completions                 source-attributed observations/testimon
 
 The checkpoint is therefore not an opaque runtime authority, but neither is it “nothing but testimony.” Its tokenizer/config/header/component structure is decomposable content. Weight values may be consumed transiently to derive circuit physicalities and evidence without being retained as raw weights or making bit-perfect checkpoint reconstruction an ingest goal.
 
+### Durable model representation is physicality/trajectory, not tensor payload
+
+The durable circuit representation is Laplace-native. A circuit/layer/head/expert or
+other admitted source structure is a canonical entity/composition with a typed
+physical realization. Ordered salient/coupled canonical entities are retained in that
+physicality trajectory; placement supplies coordinate/locality state such as centroid
+and Hilbert index; source-scoped claims produced by the numeric reduction are retained
+as typed evidence.
+
+The current model circuit writer follows this law directly:
+`ModelTokenEdgeETL.BuildCircuitObservation` writes one
+`PhysicalityType.Projection` with `TrajectoryXyzm`, `CoordX/Y/Z/M`,
+`HilbertIndex`, and `NConstituents`, while the ingest receipt reports
+`raw_weight_bytes_retained=0`.
+
+This is not generic binary-blob storage. SafeTensors/GGUF/checkpoint files are source
+packaging used by the decomposer. Tensor bytes and raw weight arrays may be decoded
+inside the bounded ingest calculation, but they do not become the durable model
+ontology, a payload column, or a reconstruction archive. If a future implementation
+needs an opaque source artifact for provenance, that artifact identity/occurrence is
+separate from the Laplace-native circuit representation and must not be queried as the
+semantic model state.
+
 Laplace must preserve enough decomposed structure to answer what source structure was observed, where a component occurs, and which canonical entities/paths that component couples to under the declared decomposition recipe. A separately requested model-execution measurement may also be witnessed, but executing prompts through the source model is not model ingestion.
 
 ---
