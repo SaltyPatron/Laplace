@@ -24,6 +24,9 @@ internal readonly record struct ConverseOptions(
 internal interface ISubstrateClient
 {
 
+    Task<string?> PerfcacheReceiptHexAsync(CancellationToken ct) =>
+        Task.FromResult<string?>(null);
+
     Task<IReadOnlyList<QueryShape>> QueryShapesAsync(CancellationToken ct);
 
     Task<IReadOnlyList<RelationBand>> RelationBandsAsync(CancellationToken ct);
