@@ -393,7 +393,12 @@ export function StorageProofView() {
       .then((result) => {
         if (cancelled) return;
         setProof(result);
-        setSelectedOrdinal(result.natural_unit_ordinal);
+        const emittedRoot = result.nodes.find((node) => node.id_hex === result.root_id_hex)
+          ?? result.nodes.find((node) => node.ordinal === result.natural_unit_ordinal)
+          ?? result.nodes.find((node) => node.tier > 0)
+          ?? result.nodes[0]
+          ?? null;
+        setSelectedOrdinal(emittedRoot?.ordinal ?? null);
         setSelectedPacked(0);
         setOccupiedRanks((value) => Math.min(result.atom_window, value));
       })
@@ -415,7 +420,18 @@ export function StorageProofView() {
     () => new Map((proof?.nodes ?? []).map((node) => [node.ordinal, node])),
     [proof],
   );
-  const selected = selectedOrdinal == null ? null : byOrdinal.get(selectedOrdinal) ?? null;
+  const selected = useMemo(() => {
+    if (!proof) return null;
+    if (selectedOrdinal != null) {
+      const exact = byOrdinal.get(selectedOrdinal);
+      if (exact) return exact;
+    }
+    return proof.nodes.find((node) => node.id_hex === proof.root_id_hex)
+      ?? proof.nodes.find((node) => node.ordinal === proof.natural_unit_ordinal)
+      ?? proof.nodes.find((node) => node.tier > 0)
+      ?? proof.nodes[0]
+      ?? null;
+  }, [proof, selectedOrdinal, byOrdinal]);
 
   useEffect(() => {
     if (!selected) {
