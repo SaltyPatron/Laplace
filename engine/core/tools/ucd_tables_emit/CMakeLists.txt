@@ -34,6 +34,8 @@ set(_LAPLACE_GEN_SRCS
     "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/unicode_seed.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/super_fibonacci.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include/laplace/core/super_fibonacci.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include/laplace/core/perfcache_format.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/hilbert4d.c")
 set(_LAPLACE_GEN_MIX "")
 foreach(_src IN LISTS _LAPLACE_GEN_SRCS)
