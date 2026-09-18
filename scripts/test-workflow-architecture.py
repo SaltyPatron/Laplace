@@ -41,6 +41,30 @@ class WorkflowArchitecture(unittest.TestCase):
         ):
             self.assertFalse((WORKFLOWS / name).exists())
 
+    def test_surviving_workflows_use_operator_categories_not_laplace_prefix_clutter(self):
+        expected = {
+            "api-observability.yml": "name: Observe — API",
+            "ui-observability.yml": "name: Observe — UI",
+            "benchmark-evidence.yml": "name: Measure — benchmark",
+            "competitive-proof.yml": "name: Product — competitive proof",
+            "db-ops.yml": "name: Database — maintenance",
+            "ci-contract.yml": "name: Policy — CI contract",
+            "full-qualification.yml": "name: Audit — full product qualification",
+            "laplace.yml": "name: Product — main delivery",
+            "product-operator.yml": "name: Product — manual operation",
+            "product-stage.yml": "name: Internal — product stage",
+            "seed.yml": "name: Internal — substrate ingest",
+            "seed-foundation.yml": "name: Data — foundation ingest",
+            "seed-knowledge.yml": "name: Data — knowledge ingest",
+            "seed-documents.yml": "name: Data — documents ingest",
+            "seed-code.yml": "name: Data — code ingest",
+            "seed-chess.yml": "name: Data — chess ingest",
+            "seed-models.yml": "name: Data — models ingest",
+        }
+        actual = {path.name: path.read_text(encoding="utf-8").splitlines()[0]
+                  for path in WORKFLOWS.glob("*.yml")}
+        self.assertEqual(expected, actual)
+
     def test_ci_contract_has_a_lightweight_hosted_lane(self):
         text = (WORKFLOWS / "ci-contract.yml").read_text(encoding="utf-8")
         self.assertIn("pull_request:", text)

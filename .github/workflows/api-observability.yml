@@ -1,4 +1,4 @@
-name: Laplace — API observability
+name: Observe — API
 
 # Explicit evidence lane. The collector runs under the same host reservation as
 # product/database/seed work, uploads its receipt even on failure, then reports

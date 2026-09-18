@@ -1,4 +1,4 @@
-name: Laplace — CI contract
+name: Policy — CI contract
 
 on:
   pull_request:

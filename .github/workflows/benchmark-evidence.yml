@@ -1,4 +1,4 @@
-name: Laplace — manual benchmark evidence
+name: Measure — benchmark
 
 # Explicit calibration/evidence lane. The complete measured preparation and run
 # hold the real host file reservation; there is no Actions-level concurrency group
