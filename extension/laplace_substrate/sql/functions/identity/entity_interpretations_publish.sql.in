@@ -1,8 +1,8 @@
 -- ONE owner for interpretation publication. Callers provide the already
 -- content-identified entity ids and their observed structural facets. Canonical
--- entity rows are locked in bytewise id order, so overlapping ids serialize while
--- unrelated ids remain parallel. Separate statements after the lock receive a
--- fresh READ COMMITTED snapshot; no ON CONFLICT arbitration is needed.
+-- entity rows are verified set-wise before mutation. Publication remains optimistic:
+-- unrelated ids stay parallel, and exact absent-facet races are handled by the
+-- existing whole-apply retry; no conflict-upsert arbitration is needed.
 CREATE OR REPLACE FUNCTION @extschema@.entity_interpretations_publish(
     p_entity_ids bytea[],
     p_tiers smallint[],
@@ -40,8 +40,8 @@ BEGIN
     /*
      * Publication is deliberately optimistic and set-sized. Canonical ingest
      * already verifies identity immediately before pure COPY and retries a rare
-     * uniqueness race. Do not turn the normal path back into a lock convoy by
-     * FOR UPDATE-ing every content id here.
+     * uniqueness race. Do not turn the normal path back into a per-content row
+     * locking convoy here.
      *
      * Materialize the observed facet set once. Existing facets only change when
      * a lower non-null compatibility source arrives; missing facets are inserted
