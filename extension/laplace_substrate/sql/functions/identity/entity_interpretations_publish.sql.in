@@ -41,8 +41,7 @@ BEGIN
     -- canonical identity, not a process/global advisory mutex.
     PERFORM e.id
     FROM @extschema@.entities e
-    JOIN (SELECT DISTINCT entity_id FROM unnest(p_entity_ids) AS u(entity_id)) i
-      ON i.entity_id = e.id
+    WHERE e.id = ANY(p_entity_ids)
     ORDER BY e.id
     FOR UPDATE;
 
