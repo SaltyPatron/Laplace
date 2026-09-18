@@ -33,13 +33,194 @@ application_revision_verify() {
   bash "$ROOT/scripts/check-deployed-revision.sh" "$expected"
 }
 
+
+application_web_backup_root() {
+  printf '%s\n' "${LAPLACE_APP_BACKUP_ROOT:-/opt/laplace/app-backups}"
+}
+
+application_web_restore_revision() {
+  local state="$1" app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  local receipt="$app_dir/.laplace-source-revision" temporary
+  if [[ -f "$state/previous-revision" && ! -L "$state/previous-revision" ]]; then
+    temporary="$app_dir/.laplace-source-revision.restore.${BASHPID}"
+    install -m 0644 "$state/previous-revision" "$temporary"
+    mv -f "$temporary" "$receipt"
+  elif [[ -f "$state/previous-revision-absent" ]]; then
+    rm -f "$receipt"
+  else
+    echo "::error::web recovery lost prior application revision disposition" >&2
+    return 1
+  fi
+}
+
+application_web_recover() {
+  local marker="$ROOT/build/.web-publish-pending"
+  [[ -e "$marker" || -L "$marker" ]] || return 0
+  [[ -f "$marker" && ! -L "$marker" ]] || {
+    echo "::error::invalid web publication recovery marker" >&2
+    return 1
+  }
+
+  local app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}" backup_root state swap
+  local stage_inode live_inode swap_inode previous_digest current_digest
+  backup_root="$(application_web_backup_root)"
+  state="$(<"$marker")"
+  [[ -d "$backup_root" && ! -L "$backup_root" ]] || {
+    echo "::error::web publication backup root is unavailable" >&2
+    return 1
+  }
+  case "$state" in
+    "$backup_root"/web.*) ;;
+    *) echo "::error::invalid web publication recovery state: $state" >&2; return 1 ;;
+  esac
+  [[ -d "$state" && ! -L "$state" && -f "$state/stage-inode" ]] || {
+    echo "::error::web publication recovery state is incomplete" >&2
+    return 1
+  }
+  swap="$state/swap-wwwroot"
+  [[ -d "$swap" && ! -L "$swap" && -d "$app_dir/wwwroot" && ! -L "$app_dir/wwwroot" ]] || {
+    echo "::error::web publication directories are not recoverable real directories" >&2
+    return 1
+  }
+
+  stage_inode="$(<"$state/stage-inode")"
+  live_inode="$(stat -c '%i' "$app_dir/wwwroot")"
+  swap_inode="$(stat -c '%i' "$swap")"
+  if [[ "$live_inode" == "$stage_inode" ]]; then
+    python3 "$ROOT/scripts/atomic-directory-exchange.py" "$app_dir/wwwroot" "$swap"
+  elif [[ "$swap_inode" != "$stage_inode" ]]; then
+    echo "::error::web publication ownership is ambiguous; refusing recovery" >&2
+    return 1
+  fi
+
+  application_web_restore_revision "$state"
+
+  previous_digest="$(<"$state/previous-web-digest")"
+  current_digest="$(python3 "$ROOT/scripts/web-artifact.py" digest --directory "$app_dir/wwwroot")"
+  [[ "$current_digest" == "$previous_digest" ]] || {
+    echo "::error::restored web artifact differs from the pre-publication snapshot" >&2
+    return 1
+  }
+
+  rm "$marker"
+  rm -rf -- "$state"
+  echo "web publication recovery complete"
+}
+
+application_web_main() (
+  set -euo pipefail
+  local mode="$1" marker="$ROOT/build/.web-publish-pending"
+  if [[ "$mode" == web-recover ]]; then
+    application_web_recover
+    exit 0
+  fi
+  [[ "$mode" == web-deploy ]] || return 2
+
+  for pending in .managed-publish-backup .application-publish-owner .application-restore-pending .api-publish-backup .uci-publish-pending .web-publish-pending; do
+    [[ ! -e "$ROOT/build/$pending" && ! -L "$ROOT/build/$pending" ]] || {
+      echo "::error::prior application transaction unresolved; no web changes made" >&2
+      exit 1
+    }
+  done
+  local managed_transaction="${LAPLACE_MANAGED_TRANSACTION_PATH:-/var/lib/laplace-managed/transaction.json}"
+  [[ ! -e "$managed_transaction" ]] || {
+    echo "::error::managed service transaction unresolved; no web changes made" >&2
+    exit 1
+  }
+
+  local app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}" backup_root state swap
+  local manifest="$ROOT/build/.laplace-web-artifact.json" attempted=0 rc=0
+  application_revision_expected >/dev/null
+  python3 "$ROOT/scripts/web-artifact.py" verify --root "$ROOT" --manifest "$manifest"
+
+  # shellcheck source=deploy/linux/app-dir-contract.sh
+  source "$ROOT/deploy/linux/app-dir-contract.sh"
+  laplace_reconcile_app_dir_contract "$app_dir"
+  [[ -d "$app_dir/wwwroot" && ! -L "$app_dir/wwwroot" ]] || {
+    echo "::error::installed wwwroot is not a real directory" >&2
+    exit 1
+  }
+
+  backup_root="$(application_web_backup_root)"
+  [[ -d "$backup_root" && ! -L "$backup_root" ]] || {
+    echo "::error::bootstrap-owned application backup root is missing" >&2
+    exit 1
+  }
+  state="$(mktemp -d "$backup_root/web.XXXXXX")"
+  chmod 0700 "$state"
+  swap="$state/swap-wwwroot"
+  mkdir -m 0755 "$swap"
+
+  trap 'rc=$?; trap - EXIT; trap "" INT TERM HUP
+    if [[ "$attempted" == 1 ]]; then
+      application_web_recover || rc=1
+    elif [[ -n "${state:-}" && -d "$state" ]]; then
+      rm -rf -- "$state"
+    fi
+    exit "$rc"' EXIT
+  trap 'exit 143' TERM HUP
+  trap 'exit 130' INT
+
+  python3 "$ROOT/scripts/web-artifact.py" digest --directory "$app_dir/wwwroot" > "$state/previous-web-digest"
+  if [[ -f "$app_dir/.laplace-source-revision" && ! -L "$app_dir/.laplace-source-revision" ]]; then
+    cp -- "$app_dir/.laplace-source-revision" "$state/previous-revision"
+  elif [[ ! -e "$app_dir/.laplace-source-revision" && ! -L "$app_dir/.laplace-source-revision" ]]; then
+    : > "$state/previous-revision-absent"
+  else
+    echo "::error::installed application revision receipt is not a regular file" >&2
+    exit 1
+  fi
+
+  rsync -a --delete --no-perms --no-owner --no-group --executability     "$ROOT/web/dist/" "$swap/"
+  install -m 0644 "$ROOT/build/.laplace-source-revision" "$swap/.laplace-web-source-revision"
+  python3 "$ROOT/scripts/web-artifact.py" verify-installed     --root "$ROOT" --manifest "$manifest" --directory "$swap"
+  stat -c '%i' "$swap" > "$state/stage-inode"
+
+  mkdir -p "$ROOT/build"
+  (set -o noclobber; printf '%s\n' "$state" > "$marker")
+  attempted=1
+
+  python3 "$ROOT/scripts/atomic-directory-exchange.py" "$app_dir/wwwroot" "$swap"
+  application_revision_install
+  python3 "$ROOT/scripts/web-artifact.py" verify-installed     --root "$ROOT" --manifest "$manifest" --directory "$app_dir/wwwroot"
+  application_revision_verify
+
+  rm "$marker"
+  attempted=0
+  rm -rf -- "$state"
+  trap - EXIT INT TERM HUP
+  echo "PASS: exact qualified SPA published atomically; API/UCI/MCP/Lichess bytes unchanged"
+)
+
 recover() {
   local keep_api_stopped="${1:-0}"
-  if [[ -f "$ROOT/build/.api-publish-backup" ]]; then
-    application_api_recover "${GITHUB_RUN_ID:-local-$$}"
+  local web_owner=0 api_owner=0 uci_owner=0 managed_owner=0 owners
+  [[ ! -e "$ROOT/build/.web-publish-pending" && ! -L "$ROOT/build/.web-publish-pending" ]] || web_owner=1
+  if [[ -e "$ROOT/build/.api-publish-backup" || -L "$ROOT/build/.api-publish-backup" ||
+        -e "$ROOT/build/.application-publish-owner" || -L "$ROOT/build/.application-publish-owner" ]]; then
+    api_owner=1
+  fi
+  [[ ! -e "$ROOT/build/.uci-publish-pending" && ! -L "$ROOT/build/.uci-publish-pending" ]] || uci_owner=1
+  if [[ -e "$ROOT/build/.managed-publish-backup" || -L "$ROOT/build/.managed-publish-backup" ||
+        -e "$ROOT/build/.application-restore-pending" || -L "$ROOT/build/.application-restore-pending" ||
+        -e "${LAPLACE_MANAGED_TRANSACTION_PATH:-/var/lib/laplace-managed/transaction.json}" ]]; then
+    managed_owner=1
+  fi
+  owners=$((web_owner + api_owner + uci_owner + managed_owner))
+  if (( owners > 1 )); then
+    echo "::error::application publication recovery is ambiguous across multiple transaction owners; no files changed" >&2
+    return 1
+  fi
+
+  if (( web_owner == 1 )); then
+    application_web_recover
     return $?
   fi
-  if [[ -e "$ROOT/build/.uci-publish-pending" ]]; then
+  if (( api_owner == 1 )); then
+    application_api_recover "${GITHUB_RUN_ID:-local-$}"
+    return $?
+  fi
+  if (( uci_owner == 1 )); then
     bash "$ROOT/deploy/linux/deploy.sh" --uci-recover
     return $?
   fi
@@ -67,6 +248,9 @@ main() {
     fi
   fi
   case "$mode" in
+    web-deploy|web-recover)
+      application_web_main "$mode"
+      ;;
     api-deploy|api-recover)
       application_api_main "$mode"
       ;;
@@ -81,7 +265,7 @@ main() {
       recover
       ;;
     deploy)
-      [[ ! -e "$ROOT/build/.api-publish-backup" && ! -e "$ROOT/build/.application-publish-owner" && ! -e "$ROOT/build/.uci-publish-pending" ]] || {
+      [[ ! -e "$ROOT/build/.api-publish-backup" && ! -e "$ROOT/build/.application-publish-owner" && ! -e "$ROOT/build/.uci-publish-pending" && ! -e "$ROOT/build/.web-publish-pending" ]] || {
         echo "::error::application publication recovery is unresolved; no full deployment changes made" >&2
         return 1
       }
@@ -116,7 +300,7 @@ main() {
       return 1
       ;;
     *)
-      echo "usage: publish-applications.sh check|deploy [--keep-api-stopped-on-failure]|recover|api-deploy|api-recover|uci-deploy|uci-recover" >&2
+      echo "usage: publish-applications.sh check|deploy [--keep-api-stopped-on-failure]|recover|web-deploy|web-recover|api-deploy|api-recover|uci-deploy|uci-recover" >&2
       return 2
       ;;
   esac
@@ -182,7 +366,7 @@ application_api_active() {
 application_api_control() { sudo -n systemctl "$1" laplace-api; }
 
 application_api_recover() {
-  [[ ! -e "$ROOT/build/.managed-publish-backup" && ! -e "$ROOT/build/.uci-publish-pending" && ! -e /var/lib/laplace-managed/transaction.json ]] || {
+  [[ ! -e "$ROOT/build/.managed-publish-backup" && ! -e "$ROOT/build/.uci-publish-pending" && ! -e "$ROOT/build/.web-publish-pending" && ! -e /var/lib/laplace-managed/transaction.json ]] || {
     echo "::error::API and managed transaction state is ambiguous; no recovery changes made" >&2
     return 1
   }
@@ -225,7 +409,7 @@ application_api_main() (
     exit 0
   fi
   [[ "$mode" == api-deploy ]] || return 2
-  for pending in .managed-publish-backup .application-publish-owner .application-restore-pending .api-publish-backup .uci-publish-pending; do
+  for pending in .managed-publish-backup .application-publish-owner .application-restore-pending .api-publish-backup .uci-publish-pending .web-publish-pending; do
     [[ ! -e "$ROOT/build/$pending" ]] || {
       echo "::error::prior application transaction unresolved; no changes made" >&2; exit 1;
     }

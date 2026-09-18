@@ -23,22 +23,14 @@ class ImpactPlanTests(unittest.TestCase):
     def test_web_only_change_qualifies_and_publishes_without_native_or_database_mutation(self):
         value = plan("web/src/App.tsx")
         self.assertEqual(value["components"], ["web"])
-        self.assertEqual(value["build_components"], ["managed", "web"])
-        self.assertEqual(
-            value["managed_build_projects"],
-            [
-                "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
-                "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj",
-                "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj",
-                "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
-            ],
-        )
+        self.assertEqual(value["build_components"], ["web"])
+        self.assertEqual(value["managed_build_projects"], [])
         self.assertEqual(value["managed_test_projects"], [])
         self.assertEqual(value["managed_test_filter"], "")
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
-        self.assertEqual(value["publish_scope"], "full")
+        self.assertEqual(value["publish_scope"], "web")
         self.assertEqual(value["live_suites"], ["live-floor", "live-api"])
         self.assertFalse(value["full_qualification"])
 
@@ -263,19 +255,12 @@ class ImpactPlanTests(unittest.TestCase):
     def test_mixed_policy_and_web_change_only_invalidates_web(self):
         value = plan("scripts/ci-impact-plan.py", "web/src/App.tsx")
         self.assertEqual(value["components"], ["web"])
-        self.assertEqual(value["build_components"], ["managed", "web"])
-        self.assertEqual(
-            value["managed_build_projects"],
-            [
-                "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
-                "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj",
-                "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj",
-                "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
-            ],
-        )
+        self.assertEqual(value["build_components"], ["web"])
+        self.assertEqual(value["managed_build_projects"], [])
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
+        self.assertEqual(value["publish_scope"], "web")
         self.assertIn("scripts/ci-impact-plan.py", value["ignored_paths"])
 
     def test_git_diff_includes_deleted_production_files(self):

@@ -40,7 +40,7 @@ done
 # secret reads, API replacement, or MCP/Lichess selection.
 uci_no_other_transaction() {
   local pending
-  for pending in .managed-publish-backup .api-publish-backup .application-publish-owner .application-restore-pending; do
+  for pending in .managed-publish-backup .api-publish-backup .application-publish-owner .application-restore-pending .web-publish-pending; do
     [[ ! -e "$REPO_ROOT/build/$pending" ]] || {
       echo "::error::another application transaction is unresolved" >&2; return 1;
     }

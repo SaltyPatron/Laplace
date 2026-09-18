@@ -43,7 +43,9 @@ run_ci_contract_checks() {
     scripts/ci-qualification-cache.py \
     scripts/ci-product-freshness.py \
     scripts/ci_product_scope.py \
-    scripts/ci_managed_projects.py
+    scripts/ci_managed_projects.py \
+    scripts/web-artifact.py \
+    scripts/atomic-directory-exchange.py
   python3 scripts/validate-pipeline.py
   python3 scripts/test-ci-workspace.py
   python3 scripts/test-product-ci-artifact-ownership.py
@@ -66,6 +68,8 @@ run_ci_contract_checks() {
   python3 scripts/test-codegen-configure.py
   python3 scripts/test-cmake-release.py
   python3 scripts/test-web-artifact.py
+  python3 scripts/test-atomic-directory-exchange.py
+  python3 scripts/test-web-publication.py
 }
 
 require_built_revision() {
@@ -298,22 +302,15 @@ append_csv_env() {
 }
 
 force_web_carry_forward_impact() {
-  # The SPA participates in the full application transaction. Full deploy uses
-  # --no-build for all four managed runtimes, so a forced web carry-forward must
-  # materialize those exact payload roots even when their source did not change.
-  append_csv_env LAPLACE_BUILD_COMPONENTS managed
+  # The SPA owns an isolated sealed-artifact transaction. A missing/stale installed
+  # web receipt therefore requires only the web artifact and bounded live checks;
+  # qualification that already passed is not widened and managed binaries stay valid.
   append_csv_env LAPLACE_BUILD_COMPONENTS web
-  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj
-  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj
-  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj
-  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj
-  # A missing installed SPA receipt requires rebuilding/publishing the SPA, not
-  # rerunning browser qualification when the current source plan did not select it.
   append_csv_env LAPLACE_LIVE_SUITES live-floor
   append_csv_env LAPLACE_LIVE_SUITES live-api
   append_csv_env LAPLACE_DELIVERY_ACTIONS publish
   append_csv_env LAPLACE_DELIVERY_ACTIONS live
-  export LAPLACE_PUBLISH_SCOPE=full
+  export LAPLACE_PUBLISH_SCOPE=web
 }
 
 carry_forward_installed_web_impact() {
@@ -483,6 +480,7 @@ run_db_tests() {
 run_publish() {
   local scope="${LAPLACE_PUBLISH_SCOPE:-full}"
   case "$scope" in
+    web) bash scripts/publish-applications.sh web-recover ;;
     api) bash scripts/publish-applications.sh api-recover ;;
     uci) bash scripts/publish-applications.sh uci-recover ;;
     full|all) bash scripts/publish-applications.sh recover ;;
@@ -494,6 +492,7 @@ run_publish() {
 
   require_built_revision
   case "$scope" in
+    web) bash scripts/publish-applications.sh web-deploy ;;
     api) bash scripts/publish-applications.sh api-deploy ;;
     uci) bash scripts/publish-applications.sh uci-deploy ;;
     full|all) bash scripts/publish-applications.sh deploy ;;
@@ -513,6 +512,15 @@ assert value["status"] == "passed", value
 assert value["bestmove"], value
 assert value["substrate_access_verified"] is False, value
 PY
+}
+
+verify_isolated_web_delivery() {
+  require_deployed_revision
+  python3 scripts/web-artifact.py verify-installed \
+    --root "$ROOT" \
+    --manifest "$ROOT/build/.laplace-web-artifact.json" \
+    --directory "${LAPLACE_APP_DIR:-/opt/laplace/app}/wwwroot"
+  check_application_live
 }
 run_live_tests() {
   require_deployed_revision
@@ -851,6 +859,10 @@ run_release_delivery() {
     # The isolated publisher atomically selects and executes the installed UCI
     # runtime before committing its revision receipt. API/database state is unchanged.
     verify_isolated_uci_delivery
+  elif [[ "$publish_scope" == web ]]; then
+    # Static-file middleware reads wwwroot directly; the web transaction atomically
+    # exchanges only the sealed SPA directory. Managed process bytes remain unchanged.
+    verify_isolated_web_delivery
   else
     verify_installed_product
   fi

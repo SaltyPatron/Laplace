@@ -176,15 +176,10 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("force_web_carry_forward_impact", web)
 
         forced = function("force_web_carry_forward_impact")
-        self.assertIn("LAPLACE_BUILD_COMPONENTS managed", forced)
-        for project in (
-            "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
-            "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj",
-            "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj",
-            "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
-        ):
-            self.assertIn(project, forced)
-        self.assertIn("LAPLACE_PUBLISH_SCOPE=full", forced)
+        self.assertIn("LAPLACE_BUILD_COMPONENTS web", forced)
+        self.assertNotIn("LAPLACE_BUILD_COMPONENTS managed", forced)
+        self.assertNotIn("LAPLACE_MANAGED_BUILD_PROJECTS", forced)
+        self.assertIn("LAPLACE_PUBLISH_SCOPE=web", forced)
         self.assertNotIn("LAPLACE_DEV_SUITES", forced)
 
         verify = function("verify_installed_web_receipt")
@@ -199,6 +194,31 @@ class ProductStageOwnershipContract(unittest.TestCase):
         live = function("run_live_tests")
         self.assertIn("LAPLACE_PUBLIC_UI_BASE", live)
         self.assertIn("http://127.0.0.1:8080", live)
+
+    def test_web_only_publication_does_not_rebuild_or_restart_managed_services(self):
+        publish = function("run_publish")
+        self.assertIn("web) bash scripts/publish-applications.sh web-recover", publish)
+        self.assertIn("web) bash scripts/publish-applications.sh web-deploy", publish)
+
+        isolated = function("verify_isolated_web_delivery")
+        self.assertIn("web-artifact.py verify-installed", isolated)
+        self.assertIn("check_application_live", isolated)
+
+        delivery = function("run_release_delivery")
+        self.assertIn('[[ "$publish_scope" == web ]]', delivery)
+        self.assertIn("verify_isolated_web_delivery", delivery)
+
+        source = PUBLISH.read_text(encoding="utf-8")
+        start = source.index("application_web_main() (\n")
+        finish = source.index("\n)\n\nrecover() {", start)
+        web = source[start:finish]
+        self.assertIn("atomic-directory-exchange.py", web)
+        self.assertIn("web-artifact.py", web)
+        self.assertNotIn("systemctl restart", web)
+        self.assertNotIn("dotnet", web)
+        self.assertNotIn("managed begin", web)
+        self.assertIn("web-deploy", source)
+        self.assertIn("web-recover", source)
 
     def test_automatic_delivery_carries_impact_from_the_installed_revision(self):
         carry = function("carry_forward_undelivered_impact")
