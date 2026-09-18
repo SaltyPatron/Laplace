@@ -37,7 +37,7 @@ permissions:
 # cancels obsolete read-only CI immediately. Explicit operator/deploy/proof runs
 # keep unique groups and are never preempted.
 concurrency:
-  group: ${{ github.event_name == 'push' && 'laplace-main-qualification' || format('laplace-product-dispatch-{0}', github.run_id) }}
+  group: ${{ github.event_name == 'push' && 'laplace-main-product-lifecycle' || format('laplace-product-dispatch-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
