@@ -419,16 +419,19 @@ int main(void) {
         CHECK(memcmp(&sources[0].source_id, &placement, 16) == 0);
         CHECK(memcmp(&sources[1].source_id, &entity, 16) == 0);
         CHECK(memcmp(&sources[0].source_unit_id, &entity, 16) == 0);
-        CHECK(sources[0].source_trust == .6 && sources[1].source_trust == .9);
+        CHECK(sources[0].source_trust == 0.0 && sources[1].source_trust == 0.0);
         REFUSES((void)admission_sources(s, source_arrays, 1), "must align");
-        trusts[1] = Float8GetDatum(NAN);
-        REFUSES((void)admission_sources(s, source_arrays, 2), "finite registered prior");
-        trusts[1] = Float8GetDatum(INFINITY);
-        REFUSES((void)admission_sources(s, source_arrays, 2), "finite registered prior");
-        trusts[1] = Float8GetDatum(-.1);
-        REFUSES((void)admission_sources(s, source_arrays, 2), "finite registered prior");
-        trusts[1] = Float8GetDatum(1.1);
-        REFUSES((void)admission_sources(s, source_arrays, 2), "finite registered prior");
+        /* Trust remains in the SQL compatibility signature but is deliberately
+         * inert for physical-form provenance. Every value normalizes to zero;
+         * semantic source policy belongs to ordinary attestation ingestion. */
+        const double compatibility_values[] = {NAN, INFINITY, -.1, 1.1};
+        for (size_t i = 0; i < sizeof(compatibility_values) / sizeof(compatibility_values[0]); ++i) {
+            trusts[1] = Float8GetDatum(compatibility_values[i]);
+            sources = admission_sources(s, source_arrays, 2);
+            CHECK(sources[0].source_trust == 0.0 && sources[1].source_trust == 0.0);
+            CHECK(memcmp(&sources[1].source_id, &entity, 16) == 0);
+            CHECK(memcmp(&sources[1].source_unit_id, &placement, 16) == 0);
+        }
     }
     {
         /* The SQL output uses zero-based E/P/A/interpretation fields, distinct
