@@ -1195,7 +1195,7 @@ TEST_F(PhysicalityDescriptorAdmission, CachedStructuralProvenanceKeepsCancellati
         }
     }
 }
-TEST_F(PhysicalityDescriptorAdmission, SourceContextObservationWorkload) {
+TEST_F(PhysicalityDescriptorAdmission, StructuralProvenanceObservationWorkload) {
     // Finite genuine native materialization fixture, also compiled unchanged
     // against the pre-optimization library by the hosted comparison. Timings
     // are observations, never a speed threshold or recorded-game benchmark.
@@ -1244,7 +1244,13 @@ TEST_F(PhysicalityDescriptorAdmission, SourceContextObservationWorkload) {
                 &kSource, 200, kBudget, &cancellation, &diagnostics, &raw), PHYSICALITY_DESCRIPTOR_OK);
             Materialization phased(raw, physicality_descriptor_materialization_free);
             ASSERT_TRUE(probe.finished);
-            ASSERT_GT(probe.observations_checkpoints, rows);
+            ASSERT_EQ(probe.observations_checkpoints, rows);
+            const auto phased_provenance = observations(phased);
+            ASSERT_EQ(phased_provenance.size(), rows);
+            for (size_t i = 0; i < rows; ++i) {
+                EXPECT_TRUE(hash128_equals(&phased_provenance[i].source_id, &sources[i].source_id));
+                EXPECT_TRUE(hash128_equals(&phased_provenance[i].source_unit_id, &sources[i].source_unit_id));
+            }
             const auto phase_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                 probe.serialized - probe.entered).count();
             ASSERT_GT(phase_ns, 0);
@@ -1277,18 +1283,24 @@ TEST_F(PhysicalityDescriptorAdmission, SourceContextObservationWorkload) {
                     static_cast<intent_stage_table_t>(table), &bytes);
                 const auto* plain_data = intent_stage_tuple_ptr(plain_stage.get(),
                     static_cast<intent_stage_table_t>(table), &plain_bytes);
-                ASSERT_GT(bytes, 0u);
                 ASSERT_EQ(plain_bytes, bytes);
-                EXPECT_EQ(std::memcmp(plain_data, data, bytes), 0);
-                const auto hash = fingerprint(data, bytes);
-                if (sample == 0) {
-                    expected_hash[slot] = hash;
-                    expected_bytes[slot] = bytes;
-                    RecordProperty(std::string(labels[pattern]) + "_table" + std::to_string(table) + "_hash128", hash);
-                    RecordProperty(std::string(labels[pattern]) + "_table" + std::to_string(table) + "_bytes", std::to_string(bytes));
+                if (table == static_cast<int>(INTENT_STAGE_TABLE_ATTESTATIONS)) {
+                    EXPECT_EQ(bytes, 0u);
+                    expected_bytes[slot] = 0u;
+                    expected_hash[slot].clear();
+                } else {
+                    ASSERT_GT(bytes, 0u);
+                    EXPECT_EQ(std::memcmp(plain_data, data, bytes), 0);
+                    const auto hash = fingerprint(data, bytes);
+                    if (sample == 0) {
+                        expected_hash[slot] = hash;
+                        expected_bytes[slot] = bytes;
+                        RecordProperty(std::string(labels[pattern]) + "_table" + std::to_string(table) + "_hash128", hash);
+                        RecordProperty(std::string(labels[pattern]) + "_table" + std::to_string(table) + "_bytes", std::to_string(bytes));
+                    }
+                    EXPECT_EQ(hash, expected_hash[slot]);
+                    EXPECT_EQ(bytes, expected_bytes[slot]);
                 }
-                EXPECT_EQ(hash, expected_hash[slot]);
-                EXPECT_EQ(bytes, expected_bytes[slot]);
             }
             if (sample != 0) {
                 const std::string key = std::string(labels[pattern]) + "_sample" + std::to_string(sample);
@@ -1756,8 +1768,12 @@ TEST_F(PhysicalityDescriptorAdmission, CurrentCapturePreservesEveryFormAndComple
         {a.value.entity_id, b.value.entity_id}, sources, admitted), PHYSICALITY_DESCRIPTOR_OK);
     std::vector<physicality_descriptor_admitted_form_t> wanted_forms;
     for (size_t i = 0; i < sources.size(); ++i) wanted_forms.push_back(form(admitted, i));
+    const auto wanted_provenance = observations(admitted);
+    ASSERT_EQ(wanted_provenance.size(), sources.size());
     const auto wanted = take_complete_provider_bytes(admitted);
-    for (const auto& stream : wanted) ASSERT_FALSE(stream.empty());
+    ASSERT_FALSE(wanted[0].empty());
+    ASSERT_FALSE(wanted[1].empty());
+    EXPECT_TRUE(wanted[2].empty());
     record_complete_provider_bytes("current-capture-admitted-reference", wanted);
     for (size_t sample = 0; sample < 6; ++sample) {
         Materialization current(nullptr, physicality_descriptor_materialization_free);
@@ -1780,8 +1796,17 @@ TEST_F(PhysicalityDescriptorAdmission, CurrentCapturePreservesEveryFormAndComple
         EXPECT_TRUE(hash128_equals(&forms[0].descriptor_id, &forms[2].descriptor_id));
         EXPECT_TRUE(hash128_equals(&forms[0].descriptor_id, &forms[3].descriptor_id));
         EXPECT_FALSE(hash128_equals(&forms[0].descriptor_id, &forms[1].descriptor_id));
+        const auto actual_provenance = observations(current);
+        ASSERT_EQ(actual_provenance.size(), wanted_provenance.size());
+        for (size_t i = 0; i < actual_provenance.size(); ++i) {
+            EXPECT_TRUE(hash128_equals(&actual_provenance[i].entity_id, &wanted_provenance[i].entity_id));
+            EXPECT_TRUE(hash128_equals(&actual_provenance[i].descriptor_id, &wanted_provenance[i].descriptor_id));
+            EXPECT_TRUE(hash128_equals(&actual_provenance[i].source_id, &wanted_provenance[i].source_id));
+            EXPECT_TRUE(hash128_equals(&actual_provenance[i].source_unit_id, &wanted_provenance[i].source_unit_id));
+            EXPECT_EQ(actual_provenance[i].observed_at_unix_us, wanted_provenance[i].observed_at_unix_us);
+        }
         const auto actual = take_complete_provider_bytes(current);
-        EXPECT_EQ(actual, wanted); // Ordered E/P/A/facet bytes retain timestamps and source units.
+        EXPECT_EQ(actual, wanted); // Generated E/P bytes match; A is intentionally empty.
         if (sample == 0) record_complete_provider_bytes("current-capture-current", actual);
         else RecordProperty("current_capture_sample" + std::to_string(sample) + "_materialization_ns",
             std::to_string(elapsed));
