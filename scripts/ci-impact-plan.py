@@ -79,7 +79,13 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
     def full(path: str) -> None:
         nonlocal force_full, publish_scope, product_change
+        nonlocal managed_build_force_all, managed_test_force_all
+        nonlocal managed_db_force_all, managed_live_force_all
         force_full = True
+        managed_build_force_all = True
+        managed_test_force_all = True
+        managed_db_force_all = True
+        managed_live_force_all = True
         product_change = True
         publish_scope = "full"
         components.update(ALL_COMPONENTS)
