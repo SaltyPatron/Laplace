@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Laplace.Api.Contracts;
 using Laplace.Engine.Core;
 using Xunit;
 
