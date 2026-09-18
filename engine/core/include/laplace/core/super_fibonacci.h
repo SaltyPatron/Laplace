@@ -29,6 +29,7 @@ void super_fibonacci_point(size_t n, size_t i, double out[4]);
  */
 void super_fibonacci_point_open(size_t i, double out[4]);
 
+
 #ifdef __cplusplus
 }
 #endif

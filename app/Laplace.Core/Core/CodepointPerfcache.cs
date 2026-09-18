@@ -100,6 +100,21 @@ public static unsafe class CodepointPerfcache
         }
     }
 
+    public static Hash128 Receipt
+    {
+        get
+        {
+            if (!_ready) throw new InvalidOperationException(
+                "codepoint perf-cache not loaded; call CodepointPerfcache.Load first");
+            Hash128 receipt = default;
+            if (NativeInterop.CodepointTableCopyReceipt(&receipt) != 0)
+                throw new InvalidOperationException("codepoint perf-cache receipt unavailable");
+            return receipt;
+        }
+    }
+
+    public static string ReceiptHex => Convert.ToHexStringLower(Receipt.ToBytes());
+
     public static bool TryLookupCodepoint(Hash128 id, out uint codepoint)
     {
         codepoint = 0;

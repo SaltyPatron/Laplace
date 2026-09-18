@@ -1,0 +1,7 @@
+-- DUCET/UCA order is a finite T0 ROM fact, not a PostgreSQL geometry derivation.
+-- v4 decouples collation order from Hopf latitude so early rank prefixes spread
+-- across S3. Remove the retired rank-from-coordinate API and its expression index
+-- when upgrading an existing development substrate. Fresh installs never create them.
+DROP INDEX IF EXISTS laplace.physicalities_ducet_rank_btree;
+DROP FUNCTION IF EXISTS ops.ducet_ordered(integer, integer);
+DROP FUNCTION IF EXISTS ops.ducet_rank(geometry);

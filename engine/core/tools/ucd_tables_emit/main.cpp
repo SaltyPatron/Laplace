@@ -171,9 +171,9 @@ static void put_h128(std::vector<uint8_t>& b, const hash128_t& h) {
 // remember. The literal fallback only applies to a build system that does not
 // define it, and is deliberately marked so such a blob is identifiable.
 #ifdef LAPLACE_GENERATOR_FINGERPRINT
-static const char* GENERATOR_TAG = "ucd_tables_emit/v3-fp/" LAPLACE_GENERATOR_FINGERPRINT;
+static const char* GENERATOR_TAG = "ucd_tables_emit/v4-open-s3/" LAPLACE_GENERATOR_FINGERPRINT;
 #else
-static const char* GENERATOR_TAG = "ucd_tables_emit/v3-NO-FINGERPRINT";
+static const char* GENERATOR_TAG = "ucd_tables_emit/v4-open-s3-NO-FINGERPRINT";
 #endif
 
 static bool read_file_bytes(const fs::path& p, std::vector<uint8_t>& out) {

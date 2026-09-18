@@ -87,7 +87,9 @@ The native composer in `engine/core/src/hash_composer.c` calls `math4d_centroid`
 
 For child points inside/on the unit 4-ball, the Euclidean centroid remains inside/on that same ball. This is the current native bounded-composition proof used in `INVENTION.md`.
 
-Tier-0 atom placement is implemented by `engine/core/src/super_fibonacci.c`; the finite Unicode generation is exhaustively exercised by `engine/core/tests/test_super_fibonacci.cpp` within its declared floating-point tolerance.
+Tier-0 atom placement is generated once into the versioned T0 perfcache. DUCET/UCA rank supplies the deterministic atom order, and `super_fibonacci_point_open(rank)` maps that rank onto S³ with a base-2 radical-inverse radial parameter. This deliberately decouples collation order from Hopf latitude: every early rank prefix spreads across the whole shell instead of filling one band. The runtime authority is the mmap'd `laplace_t0_perfcache.bin` record (`id + uca_order + coord + hilbert + segmentation flags`); native/C# consumers read that record rather than independently regenerating Tier-0 geometry. Perfcache format v4 rejects the retired bounded rank/N geometry.
+
+The finite Unicode generation and open-prefix distribution are exercised by `engine/core/tests/test_super_fibonacci.cpp` and `engine/core/tests/test_codepoint_table.cpp`, including exact perfcache-coordinate agreement.
 
 ### 3.2 packed `trajectory` is an exact manifest, not a spatial path
 

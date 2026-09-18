@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Laplace.Api.Contracts;
 using Laplace.Engine.Core;
 using Xunit;
 
@@ -21,6 +22,25 @@ public sealed class ExplorePerfcacheRegressionTests
             ref MemoryMarshal.GetReference(after)),
             "Explorer initialization replaced a mapping already published to other readers.");
         Assert.NotEmpty(result.Nodes);
+    }
+
+    [Fact]
+    public void StorageProof_UsesThePublishedTier0Rom()
+    {
+        CodepointPerfcache.LoadDefault();
+        ref readonly CodepointRecord cached = ref CodepointPerfcache.Records['A'];
+
+        StorageProofResponse proof = new ExploreDecomposeService().StorageProof("A");
+        StorageProofNodeRow leaf = Assert.Single(proof.Nodes);
+
+        Assert.Equal((uint)'A', leaf.Atom);
+        Assert.Equal(cached.UcaOrder, leaf.DucetRank);
+        Assert.Equal(Convert.ToHexStringLower(cached.Hash.ToBytes()), leaf.IdHex);
+        Assert.Equal(cached.CoordX, leaf.X);
+        Assert.Equal(cached.CoordY, leaf.Y);
+        Assert.Equal(cached.CoordZ, leaf.Z);
+        Assert.Equal(cached.CoordM, leaf.M);
+        Assert.Equal(Convert.ToHexStringLower(cached.Hilbert.ToByteArray()), leaf.HilbertHex);
     }
 
     [Fact]

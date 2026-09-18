@@ -206,6 +206,51 @@ internal static class ExploreEndpoints
         .Produces<DecomposeResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPost("/v1/explore/storage-proof", async (
+            HttpRequest request,
+            ExploreDecomposeService decompose,
+            ISubstrateClient substrate,
+            CancellationToken ct) =>
+        {
+            var payload = await EndpointJson.ReadJsonAsync<DecomposeRequest>(request, ct);
+            if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
+                return EndpointJson.BadRequest("invalid_request_error", "Field 'text' is required.");
+
+            try
+            {
+                StorageProofResponse proof = decompose.StorageProof(payload.Text);
+                string? databaseReceipt = null;
+                try
+                {
+                    databaseReceipt = await substrate.PerfcacheReceiptHexAsync(ct);
+                }
+                catch (SubstrateUnavailableException)
+                {
+                    // The mathematical/storage proof remains valid without PostgreSQL.
+                    // Alignment is unknown rather than false when the DB is unavailable.
+                }
+
+                return Results.Json(proof with
+                {
+                    DatabasePerfcacheReceiptHex = databaseReceipt,
+                    PerfcacheAligned = databaseReceipt is null
+                        ? null
+                        : string.Equals(
+                            proof.PerfcacheReceiptHex,
+                            databaseReceipt,
+                            StringComparison.OrdinalIgnoreCase),
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return EndpointJson.ServiceUnavailable("storage_proof_unavailable", ex.Message);
+            }
+        })
+        .WithTags("explore")
+        .Accepts<DecomposeRequest>("application/json")
+        .Produces<StorageProofResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapPost("/v1/explore/entities/{idHex}/export", async (
             HttpRequest request,
             string idHex,

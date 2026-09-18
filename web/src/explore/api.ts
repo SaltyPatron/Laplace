@@ -8,6 +8,7 @@ import type {
   ExploreResolveResponse,
   ExploreTrainingExportDetailResponse,
   SalientFactRow,
+  StorageProofResponse,
 } from './types';
 
 export interface DecomposeResponse {
@@ -57,6 +58,10 @@ export function exploreExport(
 
 export function exploreDecompose(text: string, opts: ApiOptions = {}) {
   return apiPost<DecomposeResponse>('/v1/explore/decompose', { text }, opts);
+}
+
+export function exploreStorageProof(text: string, opts: ApiOptions = {}) {
+  return apiPost<StorageProofResponse>('/v1/explore/storage-proof', { text }, opts);
 }
 
 export function exploreNeighbors(idHex: string, k = 10, opts: ApiOptions = {}) {

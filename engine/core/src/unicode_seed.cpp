@@ -311,12 +311,13 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
     std::vector<uint32_t> uca_rank(CP_COUNT);
     for (uint32_t r = 0; r < CP_COUNT; ++r) uca_rank[order[r]] = r;
 
-    std::vector<double> sf(4ull * CP_COUNT);
-    super_fibonacci(CP_COUNT, sf.data());
-
+    // DUCET rank is identity order, not latitude.  Use the open
+    // radical-inverse placement so every prefix of the rank sequence spreads
+    // over the whole S3 shell instead of filling one band as the corpus grows.
     for (uint32_t cp = 0; cp < CP_COUNT; ++cp) {
         uint32_t rank = uca_rank[cp];
-        double coord[4] = { sf[4ull*rank+0], sf[4ull*rank+1], sf[4ull*rank+2], sf[4ull*rank+3] };
+        double coord[4];
+        super_fibonacci_point_open(rank, coord);
         hilbert128_t hb; hilbert4d_encode(coord, &hb);
         uint8_t u8[4]; size_t n = laplace_utf8_encode(cp, u8);
         hash128_t h; hash128_blake3(u8, n, &h);

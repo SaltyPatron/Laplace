@@ -57,6 +57,11 @@ export function EntityHeader({
         <Button asChild>
           <RouterLink to={`/explore/mesh/${preview.id_hex}`}>View in mesh</RouterLink>
         </Button>
+        <Button asChild>
+          <RouterLink to={`/proof?q=${encodeURIComponent(preview.label)}`}>
+            Prove storage
+          </RouterLink>
+        </Button>
         <Button disabled={!unlocked || exportBusy} loading={exportBusy} onClick={onExport}>
           Export for training
         </Button>

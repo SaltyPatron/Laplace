@@ -43,6 +43,186 @@ internal sealed class ExploreDecomposeService
             Nodes: nodes);
     }
 
+    /// <summary>
+    /// Exact, database-independent storage proof for a text surface.  The same
+    /// TextDecomposer + HashComposer kernels compute identity, 4-D placement and
+    /// Hilbert locality; the same flagged-RLE trajectory builder emits the
+    /// 212-bit-per-vertex carrier that Content witnessing writes.
+    ///
+    /// Packed vertices are identity cargo, never spatial positions.  Realized
+    /// vertices are the immediate children's actual 4-D coordinates.
+    /// </summary>
+    public StorageProofResponse StorageProof(string text)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(text);
+        EnsurePerfcache();
+
+        using var tree = TextDecomposer.Run(text);
+        unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
+
+        var utf8 = Encoding.UTF8.GetBytes(text);
+        var naturalUnit = tree.NaturalUnitIndex();
+        var root = tree.GetNode(naturalUnit);
+
+        var emitted = new List<uint>(tree.NodeCount);
+        var emittedSet = new HashSet<uint>();
+        for (uint i = 0; i < tree.NodeCount; i++)
+        {
+            var node = tree.GetNode(i);
+            if (node.Tier != 0 && !tree.ShouldEmitCompositional(i)) continue;
+            emitted.Add(i);
+            emittedSet.Add(i);
+        }
+
+        string Label(TierNodeView node) =>
+            Encoding.UTF8.GetString(utf8, (int)node.TextRangeOff, (int)node.TextRangeLen);
+
+        uint? EmittedParent(TierNodeView node)
+        {
+            var parent = node.ParentIdx;
+            while (parent != TierTree.Invalid)
+            {
+                if (emittedSet.Contains(parent)) return parent;
+                parent = tree.GetNode(parent).ParentIdx;
+            }
+            return null;
+        }
+
+        var rows = new List<StorageProofNodeRow>(emitted.Count);
+        foreach (var index in emitted)
+        {
+            var node = tree.GetNode(index);
+            double x, y, z, m;
+            unsafe
+            {
+                x = node.Coord[0];
+                y = node.Coord[1];
+                z = node.Coord[2];
+                m = node.Coord[3];
+            }
+
+            var packed = new List<StorageProofPackedVertexRow>();
+            var realized = new List<StorageProofRealizedVertexRow>();
+
+            if (node.Tier != 0 && node.ChildCount > 0)
+            {
+                var children = new List<(TierNodeView Node, string Label, ulong Flags)>((int)node.ChildCount);
+                for (uint ci = 0; ci < node.ChildCount; ci++)
+                {
+                    var childIndex = tree.CollapseIndex(node.FirstChildIdx + ci);
+                    var child = tree.GetNode(childIndex);
+                    var childLabel = Label(child);
+                    var childFlags = Trajectory.VertexFlags(
+                        child.Tier, hasAtom: child.Tier == 0, atom: child.Atom);
+                    children.Add((child, childLabel, childFlags));
+
+                    double cx, cy, cz, cm;
+                    unsafe
+                    {
+                        cx = child.Coord[0];
+                        cy = child.Coord[1];
+                        cz = child.Coord[2];
+                        cm = child.Coord[3];
+                    }
+                    realized.Add(new StorageProofRealizedVertexRow(
+                        Ordinal: checked((int)ci + 1),
+                        ChildIdHex: Convert.ToHexStringLower(child.Id.ToBytes()),
+                        ChildLabel: childLabel,
+                        ChildTier: child.Tier,
+                        X: cx, Y: cy, Z: cz, M: cm,
+                        Radius: Math.Sqrt(cx * cx + cy * cy + cz * cz + cm * cm)));
+                }
+
+                var ids = children.Select(static child => child.Node.Id).ToArray();
+                var flags = children.Select(static child => child.Flags).ToArray();
+                var trajectory = Trajectory.Build(ids, flags);
+
+                var vertex = 0;
+                var childPosition = 0;
+                while (childPosition < children.Count)
+                {
+                    var exemplar = children[childPosition];
+                    var run = 1;
+                    while (childPosition + run < children.Count
+                           && children[childPosition + run].Node.Id == exemplar.Node.Id
+                           && children[childPosition + run].Flags == exemplar.Flags)
+                        run++;
+
+                    var emittedInRun = 0;
+                    while (emittedInRun < run)
+                    {
+                        var chunk = Math.Min(run - emittedInRun, ushort.MaxValue);
+                        var offset = checked(vertex * 4);
+                        packed.Add(new StorageProofPackedVertexRow(
+                            Vertex: vertex + 1,
+                            LogicalOrdinal: childPosition + emittedInRun + 1,
+                            X: trajectory[offset],
+                            Y: trajectory[offset + 1],
+                            Z: trajectory[offset + 2],
+                            M: trajectory[offset + 3],
+                            ChildIdHex: Convert.ToHexStringLower(exemplar.Node.Id.ToBytes()),
+                            ChildLabel: exemplar.Label,
+                            ChildTier: exemplar.Node.Tier,
+                            RunLength: chunk,
+                            Flags: unchecked((long)exemplar.Flags)));
+                        emittedInRun += chunk;
+                        vertex++;
+                    }
+
+                    childPosition += run;
+                }
+
+                if (vertex * 4 != trajectory.Length)
+                    throw new InvalidOperationException("Storage proof RLE metadata diverged from native trajectory output.");
+            }
+
+            uint? ducetRank = null;
+            if (node.Tier == 0)
+            {
+                var records = CodepointPerfcache.Records;
+                if (node.Atom >= (uint)records.Length)
+                    throw new InvalidOperationException(
+                        $"Tier-0 atom U+{node.Atom:X} is outside the published perfcache ROM.");
+
+                ref readonly var atom = ref records[(int)node.Atom];
+                if (node.Id != atom.Hash
+                    || x != atom.CoordX || y != atom.CoordY
+                    || z != atom.CoordZ || m != atom.CoordM
+                    || node.Hilbert.CompareToBytewise(atom.Hilbert) != 0)
+                    throw new InvalidOperationException(
+                        $"Tier-0 node U+{node.Atom:X} diverged from the published perfcache ROM.");
+
+                ducetRank = atom.UcaOrder;
+            }
+
+            rows.Add(new StorageProofNodeRow(
+                Ordinal: index,
+                ParentOrdinal: EmittedParent(node),
+                IdHex: Convert.ToHexStringLower(node.Id.ToBytes()),
+                Label: Label(node),
+                Tier: node.Tier,
+                Atom: node.Tier == 0 ? node.Atom : null,
+                DucetRank: ducetRank,
+                TextOffset: checked((int)node.TextRangeOff),
+                TextLength: checked((int)node.TextRangeLen),
+                X: x, Y: y, Z: z, M: m,
+                Radius: Math.Sqrt(x * x + y * y + z * z + m * m),
+                HilbertHex: Convert.ToHexStringLower(node.Hilbert.ToByteArray()),
+                PackedVertices: packed,
+                RealizedVertices: realized));
+        }
+
+        return new StorageProofResponse(
+            Text: text,
+            RootIdHex: Convert.ToHexStringLower(root.Id.ToBytes()),
+            NaturalUnitOrdinal: naturalUnit,
+            AtomWindow: UnicodeSeed.CodepointCount,
+            PerfcacheReceiptHex: CodepointPerfcache.ReceiptHex,
+            DatabasePerfcacheReceiptHex: null,
+            PerfcacheAligned: null,
+            Nodes: rows);
+    }
+
         // Compute the anchor for a surface: the natural-unit centroid coord + a
         // REALIZED grapheme-level curve WKT (LINESTRING ZM of child live coords),
         // plus the decomposition tree for display. This is the Frechet operand

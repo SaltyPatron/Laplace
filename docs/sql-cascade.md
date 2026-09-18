@@ -166,7 +166,7 @@ for them; do not delete them without knowing why each was built.
   `consensus_export_unary`
 - **ops diagnostics** — `index_health`, `index_usage_detail`, `index_usage_report`,
   `ingest_integrity_gate`, `placement_health`, `placement_health_by_tier`,
-  `orphan_physicality_count`, `ducet_ordered`, `metric_ladder_words`
+  `orphan_physicality_count`, `metric_ladder_words`
 - **chess** — `distance_to_syzygy`, `missed_finish`, `opening_endgames`, `opening_preference`,
   `opening_record`, `opening_shape_peers`
 - **other** — `consensus.related_objects`, `converse.recall_interaction_response`,

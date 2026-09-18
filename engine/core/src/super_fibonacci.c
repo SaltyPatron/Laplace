@@ -48,6 +48,8 @@ void super_fibonacci_point_open(size_t i, double out[4]) {
     out[3] = R * cos(beta);
 }
 
+
+
 void super_fibonacci(size_t n, double* out) {
     if (n == 0 || out == NULL) return;
     const double inv_phi = LAPLACE_SUPER_FIB_TWO_PI / LAPLACE_SUPER_FIB_PHI;

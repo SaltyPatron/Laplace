@@ -302,6 +302,59 @@ public sealed record DecomposeResponse(
     [property: JsonPropertyName("natural_unit_ordinal")] uint NaturalUnitOrdinal,
     [property: JsonPropertyName("nodes")] IReadOnlyList<DecomposeNodeRow> Nodes);
 
+public sealed record StorageProofPackedVertexRow(
+    [property: JsonPropertyName("vertex")] int Vertex,
+    [property: JsonPropertyName("logical_ordinal")] int LogicalOrdinal,
+    [property: JsonPropertyName("x")] double X,
+    [property: JsonPropertyName("y")] double Y,
+    [property: JsonPropertyName("z")] double Z,
+    [property: JsonPropertyName("m")] double M,
+    [property: JsonPropertyName("child_id_hex")] string ChildIdHex,
+    [property: JsonPropertyName("child_label")] string ChildLabel,
+    [property: JsonPropertyName("child_tier")] byte ChildTier,
+    [property: JsonPropertyName("run_length")] int RunLength,
+    [property: JsonPropertyName("flags")] long Flags);
+
+public sealed record StorageProofRealizedVertexRow(
+    [property: JsonPropertyName("ordinal")] int Ordinal,
+    [property: JsonPropertyName("child_id_hex")] string ChildIdHex,
+    [property: JsonPropertyName("child_label")] string ChildLabel,
+    [property: JsonPropertyName("child_tier")] byte ChildTier,
+    [property: JsonPropertyName("x")] double X,
+    [property: JsonPropertyName("y")] double Y,
+    [property: JsonPropertyName("z")] double Z,
+    [property: JsonPropertyName("m")] double M,
+    [property: JsonPropertyName("radius")] double Radius);
+
+public sealed record StorageProofNodeRow(
+    [property: JsonPropertyName("ordinal")] uint Ordinal,
+    [property: JsonPropertyName("parent_ordinal")] uint? ParentOrdinal,
+    [property: JsonPropertyName("id_hex")] string IdHex,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("tier")] byte Tier,
+    [property: JsonPropertyName("atom")] uint? Atom,
+    [property: JsonPropertyName("ducet_rank")] uint? DucetRank,
+    [property: JsonPropertyName("text_offset")] int TextOffset,
+    [property: JsonPropertyName("text_length")] int TextLength,
+    [property: JsonPropertyName("x")] double X,
+    [property: JsonPropertyName("y")] double Y,
+    [property: JsonPropertyName("z")] double Z,
+    [property: JsonPropertyName("m")] double M,
+    [property: JsonPropertyName("radius")] double Radius,
+    [property: JsonPropertyName("hilbert_hex")] string HilbertHex,
+    [property: JsonPropertyName("packed_vertices")] IReadOnlyList<StorageProofPackedVertexRow> PackedVertices,
+    [property: JsonPropertyName("realized_vertices")] IReadOnlyList<StorageProofRealizedVertexRow> RealizedVertices);
+
+public sealed record StorageProofResponse(
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("root_id_hex")] string RootIdHex,
+    [property: JsonPropertyName("natural_unit_ordinal")] uint NaturalUnitOrdinal,
+    [property: JsonPropertyName("atom_window")] int AtomWindow,
+    [property: JsonPropertyName("perfcache_receipt_hex")] string PerfcacheReceiptHex,
+    [property: JsonPropertyName("database_perfcache_receipt_hex")] string? DatabasePerfcacheReceiptHex,
+    [property: JsonPropertyName("perfcache_aligned")] bool? PerfcacheAligned,
+    [property: JsonPropertyName("nodes")] IReadOnlyList<StorageProofNodeRow> Nodes);
+
 public sealed record DecomposeRequest(
     [property: JsonPropertyName("text")] string? Text);
 

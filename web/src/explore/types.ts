@@ -87,6 +87,60 @@ export interface DecomposeNodeRow {
   text_offset: number;
   text_length: number;
 }
+
+export interface StorageProofPackedVertexRow {
+  vertex: number;
+  logical_ordinal: number;
+  x: number;
+  y: number;
+  z: number;
+  m: number;
+  child_id_hex: string;
+  child_label: string;
+  child_tier: number;
+  run_length: number;
+  flags: number;
+}
+export interface StorageProofRealizedVertexRow {
+  ordinal: number;
+  child_id_hex: string;
+  child_label: string;
+  child_tier: number;
+  x: number;
+  y: number;
+  z: number;
+  m: number;
+  radius: number;
+}
+export interface StorageProofNodeRow {
+  ordinal: number;
+  parent_ordinal?: number | null;
+  id_hex: string;
+  label: string;
+  tier: number;
+  atom?: number | null;
+  ducet_rank?: number | null;
+  text_offset: number;
+  text_length: number;
+  x: number;
+  y: number;
+  z: number;
+  m: number;
+  radius: number;
+  hilbert_hex: string;
+  packed_vertices: StorageProofPackedVertexRow[];
+  realized_vertices: StorageProofRealizedVertexRow[];
+}
+export interface StorageProofResponse {
+  text: string;
+  root_id_hex: string;
+  natural_unit_ordinal: number;
+  atom_window: number;
+  perfcache_receipt_hex: string;
+  database_perfcache_receipt_hex?: string | null;
+  perfcache_aligned?: boolean | null;
+  nodes: StorageProofNodeRow[];
+}
 export interface ExploreAnchorNeighborRow {
   axis: string;
   id_hex: string;

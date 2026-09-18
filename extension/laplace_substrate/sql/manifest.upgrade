@@ -17,7 +17,6 @@ indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
 indexes/physicalities_direction_gist.sql.in
 indexes/physicalities_hilbert_btree.sql.in
-indexes/physicalities_ducet_rank_btree.sql.in
 indexes/physicalities_radius_btree.sql.in
 indexes/physicalities_residual_btree.sql.in
 indexes/physicalities_observed_brin.sql.in
@@ -273,6 +272,7 @@ functions/identity/compositional_tier_distribution.sql.in
 functions/identity/substrate_health.sql.in
 functions/identity/hash128_lo.sql.in
 functions/identity/atom_window.sql.in
+functions/identity/perfcache_receipt.sql.in
 functions/identity/atom_census.sql.in
 functions/ops/source_tier_census.sql.in
 functions/ops/surface_sample.sql.in
@@ -437,12 +437,12 @@ functions/structural/word_anchor.sql.in
 functions/geometry/structural_cluster_batch.sql.in
 functions/geometry/structural_cluster.sql.in
 functions/analysis/drop_retired_eff_mu.sql.in
+functions/analysis/drop_retired_ducet_geometry.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
 functions/analysis/laplace_ancestry.sql.in
 functions/analysis/model_jitter_catalog.sql.in
 functions/analysis/laplace_translations.sql.in
-functions/analysis/ducet_rank.sql.in
 functions/analysis/placement_health.sql.in
 functions/analysis/metric_ladder.sql.in
 functions/analysis/ingest_integrity_gate.sql.in

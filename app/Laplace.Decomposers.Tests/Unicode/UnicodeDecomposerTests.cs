@@ -88,6 +88,13 @@ public sealed class UnicodeDecomposerTests
         Assert.NotNull(aEntity);
         Assert.NotNull(aPhys);
         Assert.Equal(PhysicalityType.Content, aPhys!.Type);
+        ref readonly CodepointRecord cachedA = ref CodepointPerfcache.Records['A'];
+        Assert.Equal(cachedA.Hash, aPhys.EntityId);
+        Assert.Equal(cachedA.CoordX, aPhys.CoordX);
+        Assert.Equal(cachedA.CoordY, aPhys.CoordY);
+        Assert.Equal(cachedA.CoordZ, aPhys.CoordZ);
+        Assert.Equal(cachedA.CoordM, aPhys.CoordM);
+        Assert.Equal(0, cachedA.Hilbert.CompareToBytewise(aPhys.HilbertIndex));
         double r2 = aPhys.CoordX * aPhys.CoordX + aPhys.CoordY * aPhys.CoordY
                   + aPhys.CoordZ * aPhys.CoordZ + aPhys.CoordM * aPhys.CoordM;
         Assert.InRange(Math.Sqrt(r2), 1.0 - 1e-9, 1.0 + 1e-9);
