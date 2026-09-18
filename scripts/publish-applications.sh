@@ -194,15 +194,33 @@ application_web_main() (
 
 recover() {
   local keep_api_stopped="${1:-0}"
-  if [[ -e "$ROOT/build/.web-publish-pending" ]]; then
+  local web_owner=0 api_owner=0 uci_owner=0 managed_owner=0 owners
+  [[ ! -e "$ROOT/build/.web-publish-pending" && ! -L "$ROOT/build/.web-publish-pending" ]] || web_owner=1
+  if [[ -e "$ROOT/build/.api-publish-backup" || -L "$ROOT/build/.api-publish-backup" ||
+        -e "$ROOT/build/.application-publish-owner" || -L "$ROOT/build/.application-publish-owner" ]]; then
+    api_owner=1
+  fi
+  [[ ! -e "$ROOT/build/.uci-publish-pending" && ! -L "$ROOT/build/.uci-publish-pending" ]] || uci_owner=1
+  if [[ -e "$ROOT/build/.managed-publish-backup" || -L "$ROOT/build/.managed-publish-backup" ||
+        -e "$ROOT/build/.application-restore-pending" || -L "$ROOT/build/.application-restore-pending" ||
+        -e "${LAPLACE_MANAGED_TRANSACTION_PATH:-/var/lib/laplace-managed/transaction.json}" ]]; then
+    managed_owner=1
+  fi
+  owners=$((web_owner + api_owner + uci_owner + managed_owner))
+  if (( owners > 1 )); then
+    echo "::error::application publication recovery is ambiguous across multiple transaction owners; no files changed" >&2
+    return 1
+  fi
+
+  if (( web_owner == 1 )); then
     application_web_recover
     return $?
   fi
-  if [[ -f "$ROOT/build/.api-publish-backup" ]]; then
-    application_api_recover "${GITHUB_RUN_ID:-local-$$}"
+  if (( api_owner == 1 )); then
+    application_api_recover "${GITHUB_RUN_ID:-local-$}"
     return $?
   fi
-  if [[ -e "$ROOT/build/.uci-publish-pending" ]]; then
+  if (( uci_owner == 1 )); then
     bash "$ROOT/deploy/linux/deploy.sh" --uci-recover
     return $?
   fi
