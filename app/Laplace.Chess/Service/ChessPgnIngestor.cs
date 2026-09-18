@@ -305,16 +305,21 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
 
         foreach (var (lineId, expectedMoves) in expectedLines)
         {
+            var game = games.First(candidate => candidate.LineId == lineId);
             var actual = rows
                 .Where(row => row.Type == PhysicalityType.Content
                               && Hash128.FromBytes(row.ParentId) == lineId)
                 .OrderBy(static row => row.Ordinal)
                 .ToArray();
-            if (actual.Length != expectedMoves.Length)
-                return $"provider game line {lineId} persisted {actual.Length} moves; expected {expectedMoves.Length}";
+            int expectedConstituents = expectedMoves.Length + 1;
+            if (actual.Length != expectedConstituents)
+                return $"provider game line {lineId} persisted {actual.Length} content constituents; expected start + {expectedMoves.Length} moves";
+
+            if (Hash128.FromBytes(actual[0].EntityId) != game.PositionIds[0])
+                return $"provider game line {lineId} failed exact start-position readback";
 
             for (int i = 0; i < expectedMoves.Length; i++)
-                if (Hash128.FromBytes(actual[i].EntityId) != expectedMoves[i])
+                if (Hash128.FromBytes(actual[i + 1].EntityId) != expectedMoves[i])
                     return $"provider game line {lineId} move {i + 1} failed exact typed-trajectory readback";
         }
         return null;
