@@ -31,10 +31,13 @@ class QualificationCacheTests(unittest.TestCase):
     def run_cache(
         self, operation: str, suite: str, check: bool = False,
         managed_projects: str | None = None,
+        managed_filter: str | None = None,
     ):
         environment = dict(os.environ)
         if managed_projects is not None:
             environment["LAPLACE_MANAGED_TEST_PROJECTS"] = managed_projects
+        if managed_filter is not None:
+            environment["LAPLACE_MANAGED_TEST_FILTER"] = managed_filter
         result = subprocess.run(
             [
                 sys.executable,
@@ -57,9 +60,18 @@ class QualificationCacheTests(unittest.TestCase):
             self.fail(result.stdout + result.stderr)
         return result
 
-    def fingerprint(self, suite: str, managed_projects: str | None = None) -> str:
+    def fingerprint(
+        self,
+        suite: str,
+        managed_projects: str | None = None,
+        managed_filter: str | None = None,
+    ) -> str:
         result = self.run_cache(
-            "fingerprint", suite, check=True, managed_projects=managed_projects
+            "fingerprint",
+            suite,
+            check=True,
+            managed_projects=managed_projects,
+            managed_filter=managed_filter,
         )
         return result.stdout.strip()
 
@@ -100,6 +112,25 @@ class QualificationCacheTests(unittest.TestCase):
         (self.repo / "app/A/a.cs").write_text("a-v2\n", encoding="utf-8")
         subprocess.run(["git", "add", "app/A/a.cs"], cwd=self.repo, check=True)
         self.assertNotEqual(before, self.fingerprint("managed-dev", selected))
+
+    def test_managed_test_filter_changes_receipt_fingerprint(self):
+        selected = "app/A.Tests/A.Tests.csproj"
+        for name in ("A", "A.Tests"):
+            (self.repo / "app" / name).mkdir(parents=True, exist_ok=True)
+        (self.repo / "app/A/A.csproj").write_text("<Project />\n", encoding="utf-8")
+        (self.repo / "app/A.Tests/A.Tests.csproj").write_text(
+            '<Project><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup>'
+            '<ItemGroup><ProjectReference Include="../A/A.csproj" /></ItemGroup></Project>\n',
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
+        one = self.fingerprint(
+            "managed-dev", selected, "FullyQualifiedName=Example.One"
+        )
+        two = self.fingerprint(
+            "managed-dev", selected, "FullyQualifiedName=Example.Two"
+        )
+        self.assertNotEqual(one, two)
 
     def test_targeted_managed_receipt_is_reusable(self):
         for name in ("A", "A.Tests"):
