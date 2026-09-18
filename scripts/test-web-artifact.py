@@ -66,6 +66,43 @@ class WebArtifactTests(unittest.TestCase):
         self.assertNotEqual(0, verified.returncode)
         self.assertIn("dist_sha256", verified.stderr)
 
+    def test_installed_directory_must_match_sealed_dist_and_receipt(self):
+        self.assertEqual(0, self.run_artifact("seal").returncode)
+        installed = self.repo / "installed-wwwroot"
+        installed.mkdir()
+        for source in (self.repo / "web/dist").rglob("*"):
+            if source.is_file():
+                target = installed / source.relative_to(self.repo / "web/dist")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source.read_bytes())
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.repo, text=True,
+            capture_output=True, check=True,
+        ).stdout.strip()
+        (installed / ".laplace-web-source-revision").write_text(revision + "\n")
+
+        verified = subprocess.run(
+            [
+                sys.executable, str(SCRIPT), "verify-installed",
+                "--root", str(self.repo), "--manifest", str(self.manifest),
+                "--directory", str(installed),
+            ],
+            text=True, capture_output=True,
+        )
+        self.assertEqual(0, verified.returncode, verified.stderr)
+
+        (installed / "assets/app.js").write_text("corrupt\n", encoding="utf-8")
+        rejected = subprocess.run(
+            [
+                sys.executable, str(SCRIPT), "verify-installed",
+                "--root", str(self.repo), "--manifest", str(self.manifest),
+                "--directory", str(installed),
+            ],
+            text=True, capture_output=True,
+        )
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("installed web artifact differs", rejected.stderr)
+
     def test_openapi_mutation_invalidates_qualified_artifact(self):
         self.assertEqual(0, self.run_artifact("seal").returncode)
         (self.repo / "web/openapi/openapi.json").write_text('{"openapi":"3.1.0"}\n', encoding="utf-8")
