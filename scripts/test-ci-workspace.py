@@ -143,11 +143,22 @@ class WorkspaceReservation(WorkspaceFixture):
         stale.parent.mkdir(parents=True, exist_ok=True)
         self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
         (stale / "build-junk.bin").write_bytes(b"x" * 4096)
+        (self.work / f"product-{self.old}.lock").touch()
 
         result = self.execute("operator")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(stale.exists())
         self.assertEqual(self.git(self.candidate(), "rev-parse", "HEAD").strip(), self.target)
+
+    def test_stale_cleanup_does_not_create_missing_revision_lock(self):
+        stale = self.candidate(self.old)
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        self.git(self.workspace, "worktree", "add", "--detach", str(stale), self.old)
+
+        result = self.execute("operator")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(stale.exists())
+        self.assertFalse((self.work / f"product-{self.old}.lock").exists())
 
     def test_active_superseded_candidate_is_never_reclaimed(self):
         stale = self.candidate(self.old)

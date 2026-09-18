@@ -198,33 +198,28 @@ jobs:
             git fetch --no-tags --depth=2 origin "$TARGET_SHA"
           unset checkout_auth CHECKOUT_TOKEN
 
-          # Reserve this exact candidate BEFORE creating or mutating its worktree.
-          # Holding the metadata lock at the same time closes the old create->unlock->lock
-          # race where a newer run could reclaim a candidate before its owner locked it.
-          exec 8>"$work_root/product-$TARGET_SHA.lock"
-          flock 8
-
-          # Candidate worktrees are generated build state, not source authority. Reclaim every
-          # inactive superseded candidate before a new build so cancelled pushes cannot fill
-          # /build indefinitely. An active candidate keeps its per-revision lock and is never
-          # touched. Dirty tracked state is preserved for diagnosis instead of force-deleted.
+          # Candidate worktrees are generated build state, not source authority. Reclaim
+          # inactive superseded candidates BEFORE allocating any new lock/worktree files.
+          # This path must work even when /build is completely full. Therefore it opens
+          # only pre-existing revision locks and frees the worktree bytes with rm first;
+          # git metadata is pruned after space has been recovered.
           for stale_workspace in "$worktree_root"/*; do
             [[ -d "$stale_workspace" ]] || continue
             [[ "$stale_workspace" != "$candidate_workspace" ]] || continue
             stale_sha="${stale_workspace##*/}"
             [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+            stale_lock="$work_root/product-$stale_sha.lock"
+            [[ -e "$stale_lock" ]] || continue
 
-            exec {stale_fd}>"$work_root/product-$stale_sha.lock"
+            exec {stale_fd}<>"$stale_lock"
             if flock -n "$stale_fd"; then
               if [[ -e "$stale_workspace/.git" ]]; then
                 if [[ -z "$(git -C "$stale_workspace" status --porcelain --untracked-files=no)" ]]; then
-                  git worktree remove --force "$stale_workspace"
+                  rm -rf "$stale_workspace"
                 else
                   echo "::warning::preserving dirty inactive candidate worktree: $stale_workspace" >&2
                 fi
               else
-                # A SHA-named partial directory can be left by a killed worktree add/build.
-                # Its inactive revision lock proves no stage owns it.
                 rm -rf "$stale_workspace"
               fi
               flock -u "$stale_fd"
@@ -233,6 +228,11 @@ jobs:
           done
 
           git worktree prune
+
+          # Reserve this exact candidate only after stale candidates have yielded space.
+          # Holding the metadata lock at the same time closes the create->unlock->lock race.
+          exec 8>"$work_root/product-$TARGET_SHA.lock"
+          flock 8
           if [[ -e "$candidate_workspace/.git" ]]; then
             [[ "$(git -C "$candidate_workspace" rev-parse HEAD)" == "$TARGET_SHA" ]] || {
               echo "::error::candidate worktree path belongs to a different revision: $candidate_workspace" >&2
