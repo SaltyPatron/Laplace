@@ -21,6 +21,11 @@ DELIVERY_ACTIONS = ("install", "database", "reconcile", "publish", "live")
 BASE_LIVE_SUITES = ("live-floor", "live-api")
 ALL_DEV_COMPONENTS = ("native", "managed", "uci", "web")
 ALL_COMPONENTS = ("native", "managed", "uci", "web", "database", "deployment")
+API_PUBLISH_PROJECT = "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj"
+UCI_PUBLISH_PROJECT = "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj"
+MCP_PUBLISH_PROJECT = "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj"
+LICHESS_PUBLISH_PROJECT = "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj"
+FULL_PUBLISH_PROJECTS = (API_PUBLISH_PROJECT, UCI_PUBLISH_PROJECT, MCP_PUBLISH_PROJECT, LICHESS_PUBLISH_PROJECT)
 
 ROOT_FILES_FULL = {
     "Directory.Build.props",
@@ -44,6 +49,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     managed_test_force_all = False
     managed_db_force_all = False
     managed_live_force_all = False
+    managed_build_required: set[str] = set()
     delivery_paths = [
         path for path in paths
         if not product_ignored(path) and not managed_test_path(path)
