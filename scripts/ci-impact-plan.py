@@ -31,6 +31,7 @@ def _starts(path: str, prefix: str) -> bool:
 
 def classify_paths(paths: list[str]) -> dict:
     components: set[str] = set()
+    build_components: set[str] = set()
     dev_suites: set[str] = set()
     db_suites: set[str] = set()
     live_suites: set[str] = set()
@@ -54,6 +55,7 @@ def classify_paths(paths: list[str]) -> dict:
         product_change = True
         publish_scope = "full"
         components.update(ALL_COMPONENTS)
+        build_components.update(("native", "managed", "web"))
         dev_suites.update(DEV_SUITES)
         db_suites.update(DB_SUITES)
         live_suites.update(LIVE_SUITES)
@@ -82,6 +84,7 @@ def classify_paths(paths: list[str]) -> dict:
             matched = product_change = True
             publish_scope = "full"
             components.update(("native", "managed", "uci", "database"))
+            build_components.update(("native", "managed"))
             dev_suites.update(("native-dev", "managed-dev", "uci-dev"))
             db_suites.update(DB_SUITES)
             live_suites.update(LIVE_SUITES)
@@ -93,6 +96,7 @@ def classify_paths(paths: list[str]) -> dict:
         if path.startswith("app/"):
             matched = product_change = True
             components.add("managed")
+            build_components.add("managed")
             dev_suites.add("managed-dev")
             live_suites.update(LIVE_SUITES)
             delivery_actions.update(("publish", "live"))
@@ -131,6 +135,7 @@ def classify_paths(paths: list[str]) -> dict:
         if path.startswith("web/"):
             matched = product_change = True
             components.add("web")
+            build_components.update(("managed", "web"))
             dev_suites.add("browser-dev")
             live_suites.update(BASE_LIVE_SUITES)
             delivery_actions.update(("publish", "live"))
@@ -140,6 +145,7 @@ def classify_paths(paths: list[str]) -> dict:
         if path.startswith("db/"):
             matched = product_change = True
             components.add("database")
+            build_components.add("managed")
             db_suites.update(DB_SUITES)
             live_suites.update(LIVE_SUITES)
             delivery_actions.update(("database", "reconcile", "publish", "live"))
@@ -150,6 +156,7 @@ def classify_paths(paths: list[str]) -> dict:
             matched = product_change = True
             publish_scope = "full"
             components.add("deployment")
+            build_components.add("managed")
             live_suites.update(LIVE_SUITES)
             delivery_actions.update(("publish", "live"))
             invalidate(LIVE_SUITES, path)
@@ -167,6 +174,7 @@ def classify_paths(paths: list[str]) -> dict:
 
     return {
         "components": sorted(components),
+        "build_components": sorted(build_components),
         "dev_suites": [suite for suite in DEV_SUITES if suite in dev_suites],
         "db_suites": [suite for suite in DB_SUITES if suite in db_suites],
         "live_suites": [suite for suite in LIVE_SUITES if suite in live_suites],
@@ -204,6 +212,7 @@ def git_changed_files(root: Path, base: str, head: str) -> tuple[list[str], bool
 def force_full_plan(plan: dict) -> None:
     plan["full_qualification"] = True
     plan["components"] = list(ALL_COMPONENTS)
+    plan["build_components"] = ["native", "managed", "web"]
     plan["dev_suites"] = list(DEV_SUITES)
     plan["db_suites"] = list(DB_SUITES)
     plan["live_suites"] = list(LIVE_SUITES)
@@ -224,6 +233,7 @@ def write_github_outputs(path: Path, plan: dict) -> None:
             "live_suites",
             "delivery_actions",
             "components",
+            "build_components",
         ):
             stream.write(f"{name}={','.join(plan[name])}\n")
         stream.write(f"publish_scope={plan['publish_scope']}\n")
@@ -241,6 +251,7 @@ def write_summary(path: Path, plan: dict) -> None:
         stream.write("## Product impact plan\n\n")
         stream.write(f"- Changed files: {len(plan['changed_files'])}\n")
         stream.write(f"- Affected components: {joined('components')}\n")
+        stream.write(f"- Candidate build components: {joined('build_components')}\n")
         stream.write(f"- Development suites: {joined('dev_suites')}\n")
         stream.write(f"- Database suites: {joined('db_suites')}\n")
         stream.write(f"- Delivery actions: {joined('delivery_actions')}\n")
