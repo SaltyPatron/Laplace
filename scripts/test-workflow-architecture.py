@@ -22,7 +22,10 @@ class MainPushQueueContract(unittest.TestCase):
             "\n  mainline-delivery:\n", 1)[0]
         delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
         self.assertIn("laplace-main-product-qualification-dispatch", qualification)
-        self.assertIn("laplace-main-test-qualification-dispatch", qualification)
+        self.assertIn("laplace-main-test-qualification-{0}-{1}", qualification)
+        self.assertIn("needs.plan.outputs.dev_suites", qualification)
+        self.assertIn("needs.plan.outputs.managed_test_projects", qualification)
+        self.assertNotIn("'laplace-main-test-qualification-dispatch'", qualification)
         self.assertIn("needs.plan.outputs.delivery_actions != ''", qualification)
         self.assertIn("cancel-in-progress: true", qualification)
         self.assertIn("group: laplace-main-delivery-dispatch", delivery)
@@ -45,7 +48,10 @@ class WorkflowArchitecture(unittest.TestCase):
         qualification = lifecycle.split("  mainline-qualification:\n", 1)[1].split(
             "\n  mainline-delivery:\n", 1)[0]
         self.assertIn("laplace-main-product-qualification-dispatch", qualification)
-        self.assertIn("laplace-main-test-qualification-dispatch", qualification)
+        self.assertIn("laplace-main-test-qualification-{0}-{1}", qualification)
+        self.assertIn("needs.plan.outputs.dev_suites", qualification)
+        self.assertIn("needs.plan.outputs.managed_test_projects", qualification)
+        self.assertNotIn("'laplace-main-test-qualification-dispatch'", qualification)
         self.assertIn("needs.plan.outputs.delivery_actions != ''", qualification)
 
     def test_no_ephemeral_repair_workflows_remain(self):
@@ -233,7 +239,14 @@ class WorkflowArchitecture(unittest.TestCase):
             "delivery_actions",
         ):
             with self.subTest(name=name):
-                block = inputs.split(f"      {name}:\n", 1)[1].split("\n      ", 1)[0]
+                start = inputs.index(f"      {name}:\n")
+                rest = inputs[start + len(f"      {name}:\n"):]
+                next_input = rest.find("\n      " + "".join(()))
+                # Input fields are eight-space-indented; the next six-space key
+                # begins with exactly six spaces after a newline.
+                import re
+                match = re.search(r"\n      [a-zA-Z_][a-zA-Z0-9_]*:\n", rest)
+                block = rest if match is None else rest[:match.start()]
                 self.assertIn('default: ""', block)
                 self.assertNotIn("default: all", block)
 
