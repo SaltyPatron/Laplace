@@ -4,12 +4,10 @@ namespace Laplace.SubstrateCRUD;
 
 public static class PhysicalityId
 {
-    // Compatibility lookup address for the current typed placement of entityId.
-    // Keep it bit-identical to laplace_physicality_id_compute. Several exact
-    // physicality bodies may be observed at this address while entityId stays
-    // unchanged. Native physicality descriptors represent those bodies as
-    // ordinary canonical content; this address is not their immutable form ID.
-    // Derived geometry never replaces the realized entity's ordered identity.
+    // Canonical address of the entity's typed native physicality. The Merkle
+    // entity identity owns structure and the physicality trajectory owns exact
+    // constituent order; ingestion must not serialize the row into a second
+    // ordinary-content descriptor graph.
     // LAYOUT IS LITTLE-ENDIAN BY SPECIFICATION, not by host accident (GH #904).
     // BitConverter writes the HOST's byte order, and the C twin
     // (laplace_physicality_id_compute) memcpy'd an int16_t, also host order: the

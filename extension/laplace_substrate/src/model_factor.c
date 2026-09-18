@@ -7,8 +7,24 @@
 
 #include "spi_common.h"
 #include "laplace/core/mantissa.h"
+#include "trajectory_wkb.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_model_testimony_decode);
+PG_FUNCTION_INFO_V1(pg_laplace_trajectory_bits);
+
+Datum
+pg_laplace_trajectory_bits(PG_FUNCTION_ARGS)
+{
+    bytea *wkb = PG_GETARG_BYTEA_PP(0);
+    uint32 vertices = 0;
+    const unsigned char *points = laplace_trajectory_wkb_points(wkb, &vertices);
+    Size bytes = (Size) vertices * 4 * sizeof(double);
+    bytea *result = palloc(VARHDRSZ + bytes);
+    SET_VARSIZE(result, VARHDRSZ + bytes);
+    if (bytes != 0)
+        memcpy(VARDATA(result), points, bytes);
+    PG_RETURN_BYTEA_P(result);
+}
 
 Datum
 pg_laplace_model_testimony_decode(PG_FUNCTION_ARGS)

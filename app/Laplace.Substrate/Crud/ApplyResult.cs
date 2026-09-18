@@ -47,7 +47,8 @@ public sealed record PhysicalityAdmissionReceipt(
     public int PhysicalityObservationRows { get; init; }
     /// <summary>Rows inserted or timestamp-advanced by this apply.</summary>
     public long PhysicalityObservationWrites { get; init; }
-    /// <summary>Source-order immutable descriptors and their explicitly selected view disposition.</summary>
+    /// <summary>Source-order canonical typed physicalities. ViewId is the same
+    /// native physicality address; no parallel descriptor entity is generated.</summary>
     public ImmutableArray<PhysicalityFormReceipt> Forms { get; init; } = [];
     /// <summary>Exact missing entity IDs, addressed by each form's first/count slice.
     /// Each nonempty slice is sorted by canonical ID bytes with no duplicates.</summary>
@@ -60,11 +61,14 @@ public enum PhysicalityViewState : short
     MissingReference = 1,
 }
 
-/// <summary>A retained descriptor is independent of its optional selected geometry view.
-/// MissingFirst and MissingCount index the enclosing receipt's MissingViewReferences.</summary>
+/// <summary>A canonical typed physicality and its directly available native view.</summary>
 public readonly record struct PhysicalityFormReceipt(
-    Hash128 DescriptorId, Hash128? ViewId, PhysicalityViewState ViewState,
-    long MissingFirst, long MissingCount);
+    Hash128 PhysicalityId, Hash128? ViewId, PhysicalityViewState ViewState,
+    long MissingFirst, long MissingCount)
+{
+    [Obsolete("Use PhysicalityId; ordinary descriptor entities are no longer generated during ingestion.")]
+    public Hash128 DescriptorId => PhysicalityId;
+}
 
 /// <summary>Caller-selected acknowledgement policy; neither mode changes the staged rows,
 /// the working-set identity, or the evidence/consensus transaction boundary.</summary>

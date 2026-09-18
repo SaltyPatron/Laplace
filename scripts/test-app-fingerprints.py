@@ -31,6 +31,22 @@ class PreparedIngestTests(unittest.TestCase):
         self.native = self.root / "build/engine/core/liblaplace_core.so"
         self.native.parent.mkdir(parents=True)
         self.native.write_bytes(b"exact prepared native fixture")
+        production = self.root / "app/Laplace.Decomposers/Fixture.cs"
+        production.parent.mkdir(parents=True)
+        production.write_text("// prepared runtime input\n")
+        subprocess.run(["git", "init", "--initial-branch=main"], cwd=self.root,
+                       check=True, capture_output=True, text=True)
+        subprocess.run(["git", "config", "user.name", "runtime fixture"], cwd=self.root,
+                       check=True)
+        subprocess.run(["git", "config", "user.email", "fixture@example.invalid"],
+                       cwd=self.root, check=True)
+        subprocess.run(["git", "add", "app/Laplace.Decomposers/Fixture.cs"], cwd=self.root,
+                       check=True)
+        subprocess.run(["git", "commit", "-m", "prepared runtime"], cwd=self.root,
+                       check=True, capture_output=True, text=True)
+        revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root,
+                                  check=True, capture_output=True, text=True).stdout
+        (self.root / "build/.laplace-source-revision").write_text(revision)
 
     def exercise(self, alternate):
         conventional = self.root / "app/Laplace.Cli/bin/Release/net10.0"
@@ -78,6 +94,25 @@ dotnet() { printf 'unexpected compilation\n' >> "$ROOT/compile-events"; return 9
         self.assertEqual(0, run().returncode)
         self.assertEqual(original_dll, dll.read_bytes())
         self.assertFalse((self.root / "compile-events").exists())
+
+        # An unrelated revision remains runtime-equivalent and must not force an
+        # operator build. A production dependency change must fail before launch.
+        docs = self.root / "docs/note.md"
+        docs.parent.mkdir()
+        docs.write_text("operator note\n")
+        subprocess.run(["git", "add", "docs/note.md"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "docs only"], cwd=self.root,
+                       check=True, capture_output=True, text=True)
+        self.assertEqual(0, run().returncode)
+
+        production = self.root / "app/Laplace.Decomposers/Fixture.cs"
+        production.write_text("// changed runtime input\n")
+        subprocess.run(["git", "add", str(production)], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "runtime change"], cwd=self.root,
+                       check=True, capture_output=True, text=True)
+        stale = run()
+        self.assertNotEqual(0, stale.returncode)
+        self.assertIn("prepared ingest runtime is stale", stale.stderr)
 
     def test_default_prepared_cli_requires_exact_native_bytes_without_building(self):
         self.exercise(False)

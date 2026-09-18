@@ -13,7 +13,7 @@ internal sealed record WorkingSetAcceptedEvidence(
 
 internal readonly record struct PhysicalityObservationRow(
     Hash128 EntityId,
-    Hash128 DescriptorId,
+    Hash128 PhysicalityId,
     Hash128 SourceId,
     Hash128 SourceUnitId,
     long ObservedAtUnixUs);
@@ -26,6 +26,7 @@ public sealed partial class NpgsqlSubstrateWriter
         internal readonly List<IntentStage> RawStages = [];
         internal readonly List<IntentStage> OwnedRawStages = [];
         internal readonly List<IntentStage> GeneratedStages = [];
+        internal readonly List<Hash128> ObservationPhysicalityIds = [];
         internal readonly List<Hash128> ObservationEntities = [];
         internal readonly List<Hash128> ObservationSources = [];
         internal readonly List<Hash128> ObservationUnits = [];
@@ -62,11 +63,9 @@ public sealed partial class NpgsqlSubstrateWriter
         {
             ct.ThrowIfCancellationRequested();
             var result = new PhysicalityAdmissionBatch { OriginalStages = originalStages };
-            long activeScratchBytes = 0;
             try
             {
                 long count = 0;
-                long largestScratch = 0;
                 foreach (var change in changes)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -80,15 +79,14 @@ public sealed partial class NpgsqlSubstrateWriter
                     // sidecar can add observations but cannot hide selected rows.
                     count = checked(count + observations.Length
                         + (supplement ? change.Physicalities.Length : 0));
-                    largestScratch = Math.Max(largestScratch, CaptureScratchBytes(change, ct));
                 }
-                // Exact payload widths, excluding managed object/allocator bookkeeping.
-                // Reserve all source metadata and the largest reused transport before
-                // any owned raw native stage is allocated.
-                // entity/source/unit/time plus the retained SQL compatibility double.
-                result.ObservationPayloadBytes = checked(count * 64L);
-                if (count > Array.MaxLength || result.ObservationPayloadBytes + largestScratch > result.MaximumBytes)
+                // physicality/entity/source/unit/time. The physicality is already
+                // the native typed realization of canonical Merkle content; no
+                // second descriptor tree is constructed from these fields.
+                result.ObservationPayloadBytes = checked(count * 72L);
+                if (count > Array.MaxLength || result.ObservationPayloadBytes > result.MaximumBytes)
                     throw new InvalidOperationException("physicality source capture exceeds its aggregate allocation grant");
+                result.ObservationPhysicalityIds.Capacity = checked((int)count);
                 result.ObservationEntities.Capacity = checked((int)count);
                 result.ObservationSources.Capacity = checked((int)count);
                 result.ObservationUnits.Capacity = checked((int)count);
@@ -100,7 +98,6 @@ public sealed partial class NpgsqlSubstrateWriter
                         foreach (var stage in change.IntentStages)
                         {
                             if (stage.IsInvalid || stage.PhysicalityCount == 0) continue;
-                            result.RawStages.Add(stage);
                             var physicalityBlob = stage.TupleBuffer(IntentStageTable.Physicalities);
                             var physicalityRows = CopyTupleParser.ParsePhysicalities([physicalityBlob]);
                             if (physicalityRows.EntityIds.Count != stage.PhysicalityCount
@@ -117,6 +114,7 @@ public sealed partial class NpgsqlSubstrateWriter
                                     ct.ThrowIfCancellationRequested();
                                     int row = checked(covered + i);
                                     result.AddObservation(
+                                        physicalityRows.Ids[row],
                                         physicalityRows.EntityIds[row],
                                         range.SourceId,
                                         change.Metadata.IntentId,
@@ -127,23 +125,11 @@ public sealed partial class NpgsqlSubstrateWriter
                             if (covered != stage.PhysicalityCount)
                                 throw new InvalidOperationException("native physicality observations lack exact source ownership");
                         }
-                    long scratch = CaptureScratchBytes(change, ct);
-                    activeScratchBytes = scratch;
-                    if (scratch == 0) continue;
-                    long remaining = checked(result.MaximumBytes - result.ObservationPayloadBytes
-                        - result.OwnedRawBytes - scratch);
-                    if (remaining <= 0)
-                        throw new InvalidOperationException("physicality source stages exhausted their aggregate allocation grant");
                     var observations = CaptureManagedObservations(change, ct);
-                    long transport = ManagedObservationBufferBytes(observations.AsSpan(), ct);
-                    var raw = CaptureManagedPhysicalityStage(observations.AsSpan(), remaining, transport, ct);
-                    result.OwnedRawStages.Add(raw);
-                    result.RawStages.Add(raw);
-                    result.OwnedRawBytes = checked(result.OwnedRawBytes + raw.AllocatedBytes);
                     foreach (var physicality in observations)
                     {
                         ct.ThrowIfCancellationRequested();
-                        result.AddObservation(physicality.EntityId, physicality.SourceId,
+                        result.AddObservation(physicality.Id, physicality.EntityId, physicality.SourceId,
                             change.Metadata.IntentId, physicality.ObservedAtUnixUs);
                     }
                 }
@@ -156,7 +142,7 @@ public sealed partial class NpgsqlSubstrateWriter
             {
                 string context = $"physicality admission capture failed: aggregateGrantBytes={result.MaximumBytes}, "
                     + $"observationMetadataBytes={result.ObservationPayloadBytes}, "
-                    + $"ownedRawStageBytes={result.OwnedRawBytes}, scratchBytes={activeScratchBytes}; {error.Message}";
+                    + $"ownedRawStageBytes={result.OwnedRawBytes}; {error.Message}";
                 result.Dispose();
                 if (error is OutOfMemoryException)
                     throw new OutOfMemoryException(context, error);
@@ -166,8 +152,10 @@ public sealed partial class NpgsqlSubstrateWriter
             }
         }
 
-        private void AddObservation(Hash128 entity, Hash128 source, Hash128 unit, long observedAtUnixUs)
+        private void AddObservation(
+            Hash128 physicality, Hash128 entity, Hash128 source, Hash128 unit, long observedAtUnixUs)
         {
+            ObservationPhysicalityIds.Add(physicality);
             ObservationEntities.Add(entity);
             ObservationSources.Add(source);
             ObservationUnits.Add(unit);
@@ -182,7 +170,7 @@ public sealed partial class NpgsqlSubstrateWriter
             {
                 int c = left.EntityId.CompareToBytewise(right.EntityId);
                 if (c != 0) return c;
-                c = left.DescriptorId.CompareToBytewise(right.DescriptorId);
+                c = left.PhysicalityId.CompareToBytewise(right.PhysicalityId);
                 if (c != 0) return c;
                 c = left.SourceId.CompareToBytewise(right.SourceId);
                 return c != 0 ? c : left.SourceUnitId.CompareToBytewise(right.SourceUnitId);
@@ -194,7 +182,7 @@ public sealed partial class NpgsqlSubstrateWriter
             foreach (var row in rows)
             {
                 row.EntityId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
-                row.DescriptorId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
+                row.PhysicalityId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
                 row.SourceId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
                 row.SourceUnitId.WriteBytes(bytes.AsSpan(offset, 16)); offset += 16;
             }
@@ -415,12 +403,7 @@ public sealed partial class NpgsqlSubstrateWriter
         if (physicalityAdmission is not null)
         {
             using var admissionDiagnostic = MeasureApplyPhase("physicality-provider-admission");
-            // The SQL function performs its complete finite provider read within
-            // one active snapshot; the control transaction remains ReadCommitted
-            // so later COPY connections' commits are visible to the apply owner.
-            await MaterializePhysicalitiesAsync(connection, transaction, physicalityAdmission, ct)
-                .ConfigureAwait(false);
-            preparationRoundTrips++;
+            PrepareCanonicalPhysicalityObservations(physicalityAdmission, ct);
             physicalityAdmission.OriginalToken = workingSetToken;
             if (workingSetToken is { } original)
             {
@@ -432,7 +415,6 @@ public sealed partial class NpgsqlSubstrateWriter
                 physicalityAdmission.OriginalReplay = physicalityAdmission.OriginalReceiptPresent;
                 preparationRoundTrips++;
             }
-            stages = stages.Concat(physicalityAdmission.GeneratedStages).ToArray();
             // Physicality observations have already been authenticated even when
             // the older source-only receipt exists. A changed form is not hidden
             // behind that receipt, and a backfill cannot replay original callbacks.
@@ -533,7 +515,7 @@ public sealed partial class NpgsqlSubstrateWriter
         command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
             rows.Select(static r => r.EntityId.ToBytes()).ToArray());
         command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            rows.Select(static r => r.DescriptorId.ToBytes()).ToArray());
+            rows.Select(static r => r.PhysicalityId.ToBytes()).ToArray());
         command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
             rows.Select(static r => r.SourceId.ToBytes()).ToArray());
         command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
@@ -546,161 +528,44 @@ public sealed partial class NpgsqlSubstrateWriter
         return 1;
     }
 
-    private async Task MaterializePhysicalitiesAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction,
+    private void PrepareCanonicalPhysicalityObservations(
         PhysicalityAdmissionBatch input, CancellationToken ct)
     {
-        // The additional client payload has one aggregate grant. Borrowed caller
-        // stages and allocator/Npgsql bookkeeping are outside this payload count.
-        // Reserve the source parameter copies before exporting any tuple arrays.
-        long transportBytes = checked(input.ObservationPayloadBytes
-            + input.ObservationSources.Count * (long)(2 * IntPtr.Size));
-        long transportGrant = checked(input.MaximumBytes - input.OwnedRawBytes - input.ObservationPayloadBytes);
-        if (transportBytes >= transportGrant)
-            throw new InvalidOperationException("physicality source parameters exhausted their allocation grant");
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = SqlCatalog.Get("ingest.physicality_descriptor_materialize").Text;
-        foreach (var stages in new[] { (IReadOnlyList<IntentStage>)input.RawStages, input.OriginalStages })
-            foreach (var table in new[] { IntentStageTable.Entities, IntentStageTable.Physicalities, IntentStageTable.Attestations })
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                    ExportStageTuples(stages, table, transportGrant, ref transportBytes));
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            input.ObservationSources.Select(id => id.ToBytes()).ToArray());
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            input.ObservationUnits.Select(id => id.ToBytes()).ToArray());
-        // Kept only for the installed SQL ABI during this greenfield cutover.
-        // Physical provenance has no trust/standing channel.
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double,
-            new double[input.ObservationSources.Count]);
-        // SQL now owns independent parameter copies in the PostgreSQL backend;
-        // the extra client-side raw native stages can be released before
-        // receiving the generated stages. The backend is a distinct allocation
-        // owner and must receive the operation's full declared grant. Subtracting
-        // the client transport here caused large, valid Unicode/UCA batches to
-        // arrive with only the unused tail of the client grant, even though the
-        // native materializer accounts its parameter copies, decoded stages and
-        // result serialization against its own process-local grant.
-        input.ReleaseRawStages();
-        long receiverGrant = input.MaximumBytes;
-        command.Parameters.AddWithValue(NpgsqlDbType.Bigint,
-            (DateTimeOffset.UtcNow.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10);
-        command.Parameters.AddWithValue(NpgsqlDbType.Bigint, receiverGrant);
-        // A provider round uses both a metadata set and a body set. Content tiers
-        // are byte-valued. Include the two actual SPI plan preparations as well.
-        const int maximumOperations = 2 + 2 * (byte.MaxValue + 1);
-        // Explicit expanded hashing work grant: one 16-byte canonical ID per
-        // occurrence. This is a work limit, not a compressed-carrier byte claim.
-        long maximumLogicalWork = Math.Max(1, input.MaximumBytes / 16);
-        command.Parameters.AddWithValue(NpgsqlDbType.Integer, maximumOperations);
-        command.Parameters.AddWithValue(NpgsqlDbType.Bigint, maximumLogicalWork);
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
-            throw new InvalidOperationException("physicality materializer returned no receipt");
-        long reportedTupleBytes = reader.GetInt64(13);
-        long reportedPeak = reader.GetInt64(12);
-        if (reportedTupleBytes < 0 || reportedPeak <= 0 || reportedPeak > receiverGrant
-            || reportedTupleBytes > reportedPeak)
-            throw new InvalidOperationException("physicality materializer exceeded its declared allocation grant");
-        var entities = reader.GetFieldValue<byte[][]>(0);
-        var physicalities = reader.GetFieldValue<byte[][]>(1);
-        var attestations = reader.GetFieldValue<byte[][]>(2);
-        var descriptors = reader.GetFieldValue<byte[][]>(3);
-        var views = reader.GetFieldValue<byte[]?[]>(4);
-        var floor = reader.GetFieldValue<byte[]>(5);
-        long forms = reader.GetInt64(7);
-        byte[] generatedSource = reader.GetFieldValue<byte[]>(17);
-        var viewStates = reader.GetFieldValue<short[]>(18);
-        var viewMissingFirst = reader.GetFieldValue<long[]>(19);
-        var viewMissingCount = reader.GetFieldValue<long[]>(20);
-        var viewMissingIds = reader.GetFieldValue<byte[][]>(21);
-        var interpretations = reader.GetFieldValue<byte[][]>(22);
-        var interpretationsComplete = reader.GetFieldValue<bool[]>(23);
-        if (entities.Length != 3 || physicalities.Length != 3 || attestations.Length != 3
-            || interpretations.Length != 3 || interpretationsComplete.Length != 3
-            || entities.Any(bytes => bytes is null) || physicalities.Any(bytes => bytes is null)
-            || attestations.Any(bytes => bytes is null) || interpretations.Any(bytes => bytes is null)
-            || forms != input.ObservationSources.Count || descriptors.LongLength != forms
-            || views.LongLength != forms || floor.Length != 16 || generatedSource.Length != 16
-            || descriptors.Any(id => id is not { Length: 16 }))
-            throw new InvalidOperationException("physicality materializer receipt and native source forms do not align");
-        if (attestations.Any(static bytes => bytes.Length != 0))
-            throw new InvalidOperationException(
-                "physicality materializer emitted semantic testimony; provenance must remain structural");
-        input.StructuralObservations.Capacity = checked((int)forms);
-        for (int i = 0; i < descriptors.Length; ++i)
+        int count = input.ObservationPhysicalityIds.Count;
+        if (input.ObservationEntities.Count != count || input.ObservationSources.Count != count
+            || input.ObservationUnits.Count != count || input.ObservationTimesUnixUs.Count != count)
+            throw new InvalidOperationException("physicality provenance lost positional alignment");
+
+        input.StructuralObservations.Capacity = count;
+        var forms = ImmutableArray.CreateBuilder<PhysicalityFormReceipt>(count);
+        for (int i = 0; i < count; ++i)
+        {
+            ct.ThrowIfCancellationRequested();
+            Hash128 physicalityId = input.ObservationPhysicalityIds[i];
             input.StructuralObservations.Add(new PhysicalityObservationRow(
-                input.ObservationEntities[i], Hash128.FromBytes(descriptors[i]),
+                input.ObservationEntities[i], physicalityId,
                 input.ObservationSources[i], input.ObservationUnits[i],
                 input.ObservationTimesUnixUs[i]));
+            forms.Add(new PhysicalityFormReceipt(
+                physicalityId, physicalityId, PhysicalityViewState.Available, 0, 0));
+        }
 
         input.Receipt = new PhysicalityAdmissionReceipt(
-            Hash128.FromBytes(floor), Hash128.FromBytes(generatedSource), reader.GetString(6), forms,
-            reader.GetInt64(8), reader.GetInt64(9), reader.GetInt32(10), reader.GetInt32(11),
-            reportedPeak, reportedTupleBytes, reader.GetInt64(14), reader.GetInt64(15), reader.GetInt64(16))
+            default, default, "canonical-merkle-physicality/v1", count,
+            0, 0, 0, 0, input.ObservationPayloadBytes, 0, 0, count, 0)
         {
             ClientPayloadGrantBytes = input.MaximumBytes,
-            SqlPayloadGrantBytes = receiverGrant,
-            LogicalWorkGrant = maximumLogicalWork,
-            DatabaseOperationGrant = maximumOperations,
+            SqlPayloadGrantBytes = 0,
+            LogicalWorkGrant = count,
+            DatabaseOperationGrant = 1,
+            GeneratedEntityRows = 0,
+            GeneratedPhysicalityRows = 0,
+            PhysicalityObservationRows = count,
+            Forms = forms.MoveToImmutable(),
+            MissingViewReferences = [],
         };
-        if (string.IsNullOrWhiteSpace(input.Receipt.SnapshotReceipt)
-            || input.Receipt.CurrentContentBodies < 0 || input.Receipt.MissingContentBodies < 0
-            || input.Receipt.ProviderRounds < 0 || input.Receipt.DatabaseOperations < 0
-            || input.Receipt.DatabaseOperations != 2L + 2L * input.Receipt.ProviderRounds
-            || input.Receipt.DatabaseOperations > maximumOperations
-            || input.Receipt.FloorIndexAddedBytes < 0 || input.Receipt.FloorIndexAddedBytes > reportedPeak
-            || input.Receipt.LogicalWork < 0 || input.Receipt.LogicalWork > maximumLogicalWork
-            || input.Receipt.StoredVertices < 0)
-            throw new InvalidOperationException("physicality materializer returned invalid work or snapshot accounting");
-        long returnedTupleBytes = 0;
-        for (int i = 0; i < entities.Length; ++i)
-            returnedTupleBytes = checked(returnedTupleBytes + entities[i].LongLength
-                + physicalities[i].LongLength + attestations[i].LongLength + interpretations[i].LongLength);
-        if (returnedTupleBytes != reportedTupleBytes)
-            throw new InvalidOperationException("physicality tuple transport differs from its retained receipt");
-        // Raw ID arrays, view-state/slice arrays, table arrays, floor/source IDs
-        // and snapshot coexist with retained receipts and imported native stages.
-        // Reserve both raw transport and decoded immutable receipt payloads.
-        long returnedBytes = checked(returnedTupleBytes + forms * (32L + 2 * IntPtr.Size + 2 + 2 * sizeof(long))
-            + viewMissingIds.LongLength * (16L + IntPtr.Size)
-            + 12L * IntPtr.Size + 3L * sizeof(bool) + 32 + input.Receipt.SnapshotReceipt.Length * sizeof(char));
-        var decodedViews = PhysicalityViewReceipts.Decode(descriptors, views, viewStates,
-            viewMissingFirst, viewMissingCount, viewMissingIds,
-            checked(receiverGrant - returnedBytes), maximumLogicalWork);
-        returnedBytes = checked(returnedBytes
-            + PhysicalityViewReceipts.RetainedPayloadBytes(forms, viewMissingIds.LongLength));
-        input.Receipt = input.Receipt with
-        {
-            Forms = decodedViews.Forms,
-            MissingViewReferences = decodedViews.Missing,
-        };
-        long generatedBytes = 0;
-        for (int i = 0; i < entities.Length; ++i)
-        {
-            long remaining = checked(receiverGrant - returnedBytes - generatedBytes);
-            if (remaining <= 0)
-                throw new InvalidOperationException("physicality output exhausted its aggregate allocation grant");
-            var stage = ImportPhysicalityOutputStage(entities[i], physicalities[i], attestations[i],
-                interpretations[i], interpretationsComplete[i], remaining);
-            input.GeneratedStages.Add(stage);
-            generatedBytes = checked(generatedBytes + stage.AllocatedBytes);
-        }
-        if (await reader.ReadAsync(ct).ConfigureAwait(false))
-            throw new InvalidOperationException("physicality materializer returned multiple receipts");
-        if (input.GeneratedAttestationCount != 0)
-            throw new InvalidOperationException(
-                "generated physicality stages contain attestations; geometry cannot manufacture testimony");
-        input.Receipt = input.Receipt with
-        {
-            GeneratedEntityRows = input.GeneratedEntityCount,
-            GeneratedPhysicalityRows = input.GeneratedPhysicalityCount,
-            PhysicalityObservationRows = input.StructuralObservations.Count,
-        };
-        _log.LogInformation("PHYSICALITY_ADMISSION forms={Forms} available_views={AvailableViews} missing_views={MissingViews} missing_reference_entries={MissingReferences} provider_rounds={Rounds} database_operations={Operations} peak_bytes={PeakBytes} tuple_bytes={TupleBytes}",
-            forms, input.Receipt.Forms.LongCount(form => form.ViewState == PhysicalityViewState.Available),
-            input.Receipt.Forms.LongCount(form => form.ViewState == PhysicalityViewState.MissingReference),
-            input.Receipt.MissingViewReferences.Length, input.Receipt.ProviderRounds, input.Receipt.DatabaseOperations,
-            input.Receipt.ReservedPeakBytes, input.Receipt.TupleBytes);
+        _log.LogInformation(
+            "PHYSICALITY_RECORDING forms={Forms} generated_entities=0 generated_physicalities=0 observation_bytes={Bytes}",
+            count, input.ObservationPayloadBytes);
     }
 }

@@ -295,14 +295,15 @@ COMMENT ON FUNCTION generation.adjudicated_row(bytea, integer, text) IS
     'softmax output layer''s maximum-inner-product search over the vocabulary.';
 
 
-CREATE OR REPLACE FUNCTION generation.model_circuit_testimony(
+DROP FUNCTION IF EXISTS generation.model_circuit_testimony(bytea,text,integer,integer);
+CREATE FUNCTION generation.model_circuit_testimony(
     p_source bytea,
     p_plane text,
     p_layer integer DEFAULT NULL,
     p_head integer DEFAULT NULL)
 RETURNS TABLE(
     circuit_id bytea,
-    descriptor_id bytea,
+    physicality_id bytea,
     token bytea,
     score_fp1e9 bigint,
     logical_ordinal integer)
@@ -313,27 +314,23 @@ BEGIN ATOMIC
             p_plane, p_layer, p_head) AS id
     ),
     forms AS MATERIALIZED (
-        SELECT DISTINCT o.descriptor_id
+        SELECT DISTINCT o.physicality_id
         FROM circuit c
         JOIN laplace.physicality_observations o ON o.entity_id = c.id
         WHERE o.source_id = p_source
     ),
     bodies AS MATERIALIZED (
         SELECT c.id AS circuit_id,
-               f.descriptor_id,
-               (d.physicality_types)[1] AS physicality_type,
-               (d.trajectory_bits)[1] AS trajectory_bits
+               f.physicality_id,
+               p.type AS physicality_type,
+               generation.trajectory_bits(public.ST_AsBinary(p.trajectory, 'NDR')) AS trajectory_bits
         FROM circuit c
         JOIN forms f ON true
-        CROSS JOIN LATERAL
-          structural.physicality_descriptor_read(
-            ARRAY[f.descriptor_id],
-            536870912::bigint,
-            16,
-            10000000::bigint) d
-        WHERE cardinality(d.descriptor_ids) = 1
+        JOIN laplace.physicalities p
+          ON p.id = f.physicality_id AND p.entity_id = c.id
+        WHERE p.trajectory IS NOT NULL
     )
-    SELECT b.circuit_id, b.descriptor_id,
+    SELECT b.circuit_id, b.physicality_id,
            t.token, t.score_fp1e9,
            t.logical_ordinal
     FROM bodies b
@@ -342,7 +339,7 @@ BEGIN ATOMIC
         b.trajectory_bits) t
     WHERE b.physicality_type = 3
       AND b.trajectory_bits IS NOT NULL
-    ORDER BY b.descriptor_id, t.logical_ordinal;
+    ORDER BY b.physicality_id, t.logical_ordinal;
 END;
 
 COMMENT ON FUNCTION generation.model_circuit_testimony(

@@ -15,6 +15,14 @@ DROP FUNCTION IF EXISTS laplace.pg_laplace_model_forward(bytea, bytea[], bytea, 
 DROP FUNCTION IF EXISTS laplace.model_row_topk(bytea, bytea, bytea, integer);
 DROP FUNCTION IF EXISTS laplace.model_pair_score(bytea, bytea, bytea, bytea);
 
+CREATE OR REPLACE FUNCTION generation.trajectory_bits(p_trajectory_wkb bytea)
+RETURNS bytea
+AS 'MODULE_PATHNAME', 'pg_laplace_trajectory_bits'
+LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+
+COMMENT ON FUNCTION generation.trajectory_bits(bytea) IS
+'Return the exact little-endian XYZM vertex payload from an ISO-WKB physicality trajectory.';
+
 CREATE OR REPLACE FUNCTION generation.model_testimony_decode(
     p_trajectory_bits bytea)
 RETURNS TABLE(
@@ -27,6 +35,6 @@ AS 'MODULE_PATHNAME', 'pg_laplace_model_testimony_decode'
 LANGUAGE C IMMUTABLE STRICT;
 
 COMMENT ON FUNCTION generation.model_testimony_decode(bytea) IS
-'Decode exact model-circuit TestimonyWalk payload retained by a physicality descriptor. '
+'Decode exact model-circuit TestimonyWalk payload retained by its native physicality trajectory. '
 'This reads Laplace-native decomposed structure only; it does not load checkpoint weights '
 'or execute a conventional model.';

@@ -1,2 +1,3 @@
-CREATE INDEX IF NOT EXISTS physicality_observations_source_entity_btree
-ON physicality_observations (source_id,entity_id,descriptor_id);
+DROP INDEX IF EXISTS physicality_observations_source_entity_btree;
+CREATE INDEX physicality_observations_source_entity_btree
+ON physicality_observations (source_id,entity_id,physicality_id);

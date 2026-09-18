@@ -165,6 +165,7 @@ typedef struct SessionAdmission {
     size_t maximum_bytes, bytes, peak_bytes;
     intent_stage_t *raw[2], *declaration;
     size_t observation_count;
+    int64 observation_times[2];
     hash128_t source, unit;
 } SessionAdmission;
 
@@ -189,54 +190,6 @@ static void *session_alloc(SessionAdmission *state, size_t bytes)
 static void session_release(SessionAdmission *state, void *pointer, size_t bytes)
 {
     if (pointer != NULL) { pfree(pointer); state->bytes -= bytes; }
-}
-
-/* Statement disposition, not a commit claim. Append observes at most its
- * previous and replacement body; every missing identifier remains explicit. */
-static char *session_view_receipt(SessionAdmission *state,
-    const laplace_physicality_pg_admission_result *result, size_t *out_bytes)
-{
-    size_t unavailable = 0;
-    *out_bytes = 0;
-    for (size_t i = 0; i < result->form_count; ++i)
-        if (result->forms[i].view_state == PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE) ++unavailable;
-    if (!unavailable) return NULL;
-    if (result->form_count > 2 || result->view_missing_count > (SIZE_MAX - 512) / 35)
-        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-            errmsg("session view receipt exceeds its finite extent")));
-    size_t capacity = 512 + result->view_missing_count * 35;
-    char *buffer = session_alloc(state, capacity);
-    size_t used = 0;
-#define SESSION_RECEIPT_APPEND(...) do { \
-    int written = snprintf(buffer + used, capacity - used, __VA_ARGS__); \
-    if (written < 0 || (size_t) written >= capacity - used) \
-        elog(ERROR, "session view receipt reservation is insufficient"); \
-    used += (size_t) written; \
-} while (0)
-    SESSION_RECEIPT_APPEND("{\"schema\":\"laplace.session-descriptor-views/v1\",\"transaction_pending\":true,\"forms\":[");
-    size_t emitted = 0;
-    for (size_t i = 0; i < result->form_count; ++i)
-    {
-        const physicality_descriptor_admitted_form_t *form = &result->forms[i];
-        if (form->view_state != PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE) continue;
-        char id[33];
-        hex_encode((const char *) &form->descriptor_id, 16, id);
-        id[32] = 0;
-        SESSION_RECEIPT_APPEND("%s{\"descriptor_id\":\"%s\",\"view_state\":1,\"missing_first\":%zu,\"missing_count\":%zu}",
-            emitted++ ? "," : "", id, form->missing_first, form->missing_count);
-    }
-    SESSION_RECEIPT_APPEND("],\"missing_ids\":[");
-    for (size_t i = 0; i < result->view_missing_count; ++i)
-    {
-        char id[33];
-        hex_encode((const char *) &result->view_missing_ids[i], 16, id);
-        id[32] = 0;
-        SESSION_RECEIPT_APPEND("%s\"%s\"", i ? "," : "", id);
-    }
-    SESSION_RECEIPT_APPEND("]}");
-#undef SESSION_RECEIPT_APPEND
-    *out_bytes = capacity;
-    return buffer;
 }
 
 static void session_cleanup(void *arg)
@@ -277,6 +230,7 @@ static void session_observe(SessionAdmission *state, const hash128_t *placement,
     session_charge(state, intent_stage_memory_peak_bytes(*slot));
     state->bytes -= intent_stage_memory_peak_bytes(*slot);
     session_charge(state, intent_stage_memory_bytes(*slot));
+    state->observation_times[state->observation_count] = observed;
     ++state->observation_count;
 }
 
@@ -573,57 +527,37 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
             errmsg("session_append_turns: ordinary projection source creation failed (%d)", (int)source_status)));
     session_charge(admission, source_peak); admission->bytes -= source_peak;
     session_charge(admission, intent_stage_memory_bytes(admission->declaration));
-    physicality_descriptor_source_observation_t observations[2];
     size_t observation_count = admission->observation_count;
     if (observation_count < 1 || observation_count > 2)
         elog(ERROR, "session_append_turns: exact projection observation count is invalid");
-    for (size_t i = 0; i < observation_count; ++i) {
-        observations[i].source_id = admission->source;
-        observations[i].source_unit_id = admission->unit;
-        observations[i].source_trust = 0.0; /* compatibility only; provenance is not testimony */
-    }
-    laplace_physicality_pg_admission_result *materialized = laplace_physicality_pg_materialize(
-        (const intent_stage_t *const *)admission->raw, observation_count,
-        NULL, 0, observations, observation_count, observed_unix,
-        admission->maximum_bytes - admission->bytes, maximum_operations - SESSION_OPERATION_RESERVATION,
-        (size_t) maximum_logical - composition_work);
-    session_charge(admission, materialized->peak_bytes); admission->bytes -= materialized->peak_bytes;
-    session_charge(admission, materialized->retained_bytes);
-    const intent_stage_t *generated[4] = {admission->declaration,
-        materialized->stages[0], materialized->stages[1], materialized->stages[2]};
-    if (maximum_operations <= materialized->database_operations + SESSION_OPERATION_RESERVATION)
+    const intent_stage_t *generated[1] = {admission->declaration};
+    if (maximum_operations <= SESSION_OPERATION_RESERVATION)
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-            errmsg("session_append_turns: generated stage sink has no operation grant")));
-    if ((size_t) maximum_logical - composition_work <= materialized->logical_work)
-        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-            errmsg("session_append_turns: generated stage sink has no logical-work grant")));
+            errmsg("session_append_turns: source declaration sink has no operation grant")));
     LaplaceGeneratedStageSinkLimits sink_limits = {
         (admission->maximum_bytes - admission->bytes) / sizeof(hash128_t),
         admission->maximum_bytes - admission->bytes,
-        (size_t) maximum_logical - composition_work - materialized->logical_work,
-        (uint32) (maximum_operations - SESSION_OPERATION_RESERVATION - materialized->database_operations)};
+        (size_t) maximum_logical - composition_work,
+        (uint32) (maximum_operations - SESSION_OPERATION_RESERVATION)};
     LaplaceGeneratedStageSinkReceipt sink_receipt;
-    laplace_generated_stage_sink(generated, 4, &sink_limits, &sink_receipt);
-    if (materialized->observation_count != observation_count)
-        elog(ERROR, "session_append_turns: structural provenance count changed during materialization");
+    laplace_generated_stage_sink(generated, 1, &sink_limits, &sink_receipt);
     {
         Datum *entities = palloc(sizeof(Datum) * observation_count);
-        Datum *descriptors = palloc(sizeof(Datum) * observation_count);
+        Datum *physicalities = palloc(sizeof(Datum) * observation_count);
         Datum *sources = palloc(sizeof(Datum) * observation_count);
         Datum *units = palloc(sizeof(Datum) * observation_count);
         Datum *times = palloc(sizeof(Datum) * observation_count);
         for (size_t i = 0; i < observation_count; ++i) {
-            const physicality_descriptor_form_observation_t *o = &materialized->observations[i];
-            entities[i] = hash128_to_datum(&o->entity_id);
-            descriptors[i] = hash128_to_datum(&o->descriptor_id);
-            sources[i] = hash128_to_datum(&o->source_id);
-            units[i] = hash128_to_datum(&o->source_unit_id);
-            times[i] = Int64GetDatum(o->observed_at_unix_us);
+            entities[i] = hash128_to_datum(&session_id);
+            physicalities[i] = hash128_to_datum(&physicality_id);
+            sources[i] = hash128_to_datum(&admission->source);
+            units[i] = hash128_to_datum(&admission->unit);
+            times[i] = Int64GetDatum(admission->observation_times[i]);
         }
         Oid types[5] = {BYTEAARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID,INT8ARRAYOID};
         Datum args[5] = {
             PointerGetDatum(construct_array(entities, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
-            PointerGetDatum(construct_array(descriptors, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
+            PointerGetDatum(construct_array(physicalities, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
             PointerGetDatum(construct_array(sources, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
             PointerGetDatum(construct_array(units, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
             PointerGetDatum(construct_array(times, observation_count, INT8OID,8,true,TYPALIGN_DOUBLE))
@@ -638,13 +572,11 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
      * legacy canonical-name helper hashes whole label bytes and therefore is
      * not an identity constructor for these content-tree entities. */
     Oid registration_types[2] = {BYTEAARRAYOID, TEXTARRAYOID};
-    Datum source_ids[2] = {hash128_to_datum(&admission->source),
-        hash128_to_datum(&materialized->generated_source_id)};
-    Datum names[2] = {CStringGetTextDatum(physicality_descriptor_session_source_name()),
-        CStringGetTextDatum(physicality_descriptor_generated_source_name())};
+    Datum source_ids[1] = {hash128_to_datum(&admission->source)};
+    Datum names[1] = {CStringGetTextDatum(physicality_descriptor_session_source_name())};
     Datum registration_args[2] = {
-        PointerGetDatum(construct_array(source_ids, 2, BYTEAOID, -1, false, TYPALIGN_INT)),
-        PointerGetDatum(construct_array(names, 2, TEXTOID, -1, false, TYPALIGN_INT))};
+        PointerGetDatum(construct_array(source_ids, 1, BYTEAOID, -1, false, TYPALIGN_INT)),
+        PointerGetDatum(construct_array(names, 1, TEXTOID, -1, false, TYPALIGN_INT))};
     SPIPlanPtr registration = SPI_prepare(laplace_sql_query_text("conversation.register_projection_sources"),
         2, registration_types);
     if (registration == NULL || SPI_execute_plan(registration, registration_args, NULL, false, 1) != SPI_OK_SELECT ||
@@ -652,13 +584,10 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
         elog(ERROR, "session_append_turns: registering actual projection source names failed");
     bool missing_mapping;
     Datum registered = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &missing_mapping);
-    if (missing_mapping || DatumGetInt64(registered) != 2)
+    if (missing_mapping || DatumGetInt64(registered) != 1)
         elog(ERROR, "session_append_turns: projection source display name conflicts with its actual content ID");
     SPI_freetuptable(SPI_tuptable);
     SPI_freeplan(registration);
-    size_t view_receipt_bytes = 0;
-    char *view_receipt = session_view_receipt(admission, materialized, &view_receipt_bytes);
-    laplace_physicality_pg_admission_release(materialized);
     Oid write_types[10] = {BYTEAOID, BYTEAOID, BYTEAOID, FLOAT8OID, FLOAT8OID,
                            FLOAT8OID, FLOAT8OID, BYTEAOID, INT4OID, TIMESTAMPTZOID};
     hash128_t hilbert_bytes;
@@ -673,11 +602,6 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
         elog(ERROR, "session_append_turns: persisting session trajectory failed");
     PopActiveSnapshot();
     laplace_spi_finish(spi_top);
-    if (view_receipt != NULL)
-    {
-        ereport(NOTICE, (errmsg("session descriptor view unavailable; transaction pending: %s", view_receipt)));
-        session_release(admission, view_receipt, view_receipt_bytes);
-    }
     session_cleanup(admission);
     PG_RETURN_INT32((int32) total);
 }

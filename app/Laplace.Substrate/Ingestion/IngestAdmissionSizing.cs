@@ -4,11 +4,9 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Ingestion;
 
 /// <summary>
-/// Known source-local payload that the physicality admission owners must retain
-/// together. Descriptor recipes, tuple widths and capture layout stay native.
-/// This predicts neither provider closure nor complete admission: fixed SQL and
-/// vocabulary/floor state, imported-buffer spare capacity, allocator overhead,
-/// elected views and provider materialization remain under the real runtime grant.
+/// Known source-local payload retained while canonical physicality provenance is
+/// recorded. Entity identity and native trajectories already carry the Merkle
+/// structure; this envelope never budgets a parallel descriptor graph.
 /// </summary>
 internal readonly record struct IngestAdmissionSizing(
     long SerializedBytes,
@@ -40,34 +38,16 @@ internal readonly record struct IngestAdmissionSizing(
             checked
             {
                 long forms = (long)Source.Forms;
-                long stages = SourceStages + AdmittedStages;
-                // NpgsqlPhysicalityAdmission reserves two IDs and one double per
-                // source observation, then exports another aligned parameter set.
-                long metadata = forms * (2 * 16L + sizeof(double));
-                long tupleBytes = SourceTupleBytes + AdmittedTupleBytes;
-                long clientTransport = metadata + forms * (2L * IntPtr.Size)
-                    + tupleBytes + stages * (3L * IntPtr.Size);
-
-                // Nine flat non-null PostgreSQL arrays: six stage bytea arrays,
-                // two 16-byte identity arrays and one float8 array. A nonempty
-                // array header is 24 bytes; each bytea has four header bytes and
-                // at most three alignment bytes. Empty arrays fit that upper bound.
-                // admission_array also retains Datum and bool deconstruction arrays.
-                long sqlArrays = 9L * 24
-                    + tupleBytes + stages * (3L * (4 + 3))
-                    + forms * (2L * (4 + 16) + sizeof(double))
-                    + (3L * stages + 3L * forms) * (IntPtr.Size + sizeof(bool));
-                long sqlSourceMetadata = metadata;
-                // Encoded source/admitted payload coexists during capture.
-                // This is payload, not spare native capacity or allocator RSS.
-                long encodedPayload = tupleBytes;
-                long captures = Source.CapturePayloadBound + Admitted.CapturePayloadBound;
-                // The later source-local plan may contain both source and admitted
-                // bodies. Its no-reuse upper bound also covers original-only validation.
-                long plan = Source.Add(Admitted).PlanPayloadBound;
-                return Math.Max(SerializedBytes, HeldNativeBytes + metadata + clientTransport
-                    + sqlArrays + sqlSourceMetadata + encodedPayload + captures + plan
-                    + CaptureReservationBytes);
+                // Client: physicality/entity/source/unit ids + timestamp.
+                long metadata = forms * (4 * 16L + sizeof(long));
+                // One set-sized PostgreSQL write receives four bytea arrays and
+                // one int8 array. Account element varlena headers, array headers,
+                // Npgsql reference vectors and the retained client metadata.
+                long sqlArrays = 5L * 24
+                    + forms * (4L * (4 + 16) + sizeof(long))
+                    + forms * 5L * IntPtr.Size;
+                return Math.Max(SerializedBytes,
+                    HeldNativeBytes + metadata + sqlArrays + CaptureReservationBytes);
             }
         }
     }
@@ -145,12 +125,10 @@ internal readonly record struct IngestAdmissionSizing(
         long captureReservation = 0;
         if (selectedRowsAlreadyObserved && raw.Forms != 0 && selected.Forms != 0)
         {
-            // Capture still reserves raw+selected metadata capacity before its
-            // reference union, plus a possible merged reference array and the
-            // selected-reference set. Retain those actual client reservations;
-            // only the duplicated source tuple/capture/descriptor bodies vanish.
-            captureReservation = checked((long)selected.Forms * 40L
-                + ((long)raw.Forms + 2L * (long)selected.Forms) * IntPtr.Size);
+            // The builder already records source-order references. Only the
+            // selected-reference set used to avoid repeating the same object is
+            // additional to the direct provenance arrays.
+            captureReservation = checked((long)selected.Forms * IntPtr.Size);
         }
         if (managedSource.Forms != 0)
         {

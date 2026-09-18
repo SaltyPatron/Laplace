@@ -55,6 +55,40 @@ require_cli() {
         echo "::error::rebuild the product; ingest never repairs or compiles runtime artifacts" >&2
         return 1
     }
+
+    # The self-hosted runner keeps bin/ and build/ between checkouts. Existence and
+    # native-byte parity therefore prove only that one coherent runtime was built,
+    # not that it implements this checkout. Accept an older receipt only when every
+    # production input in the CLI's managed/native dependency closure is unchanged.
+    # Docs, tests, workflows and the web application are deliberately outside this
+    # closure, so an operator ingest does not pay for an unrelated product rebuild.
+    local prepared current
+    prepared="$(cat "$ROOT/build/.laplace-source-revision" 2>/dev/null || true)"
+    current="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+    [[ "$prepared" =~ ^[0-9a-fA-F]{40}$ && "$current" =~ ^[0-9a-fA-F]{40}$ ]] || {
+        echo "::error::ingest runtime has no valid prepared source revision" >&2
+        return 1
+    }
+    if [[ "$prepared" != "$current" ]]; then
+        git -C "$ROOT" cat-file -e "$prepared^{commit}" 2>/dev/null || {
+            echo "::error::prepared ingest revision $prepared is unavailable in this checkout" >&2
+            return 1
+        }
+        git -C "$ROOT" diff --quiet "$prepared" "$current" -- \
+            CMakeLists.txt cmake Directory.Packages.props global.json \
+            engine/core \
+            app/Directory.Build.props \
+            app/Laplace.Cli \
+            app/Laplace.Core \
+            app/Laplace.Decomposers \
+            app/Laplace.Substrate \
+            app/Laplace.Ops \
+            app/Laplace.Chess || {
+                echo "::error::prepared ingest runtime is stale for this checkout (built $prepared, selected $current)" >&2
+                echo "::error::build/deploy the changed CLI dependency closure before ingest" >&2
+                return 1
+            }
+    fi
 }
 
 ingest() {
