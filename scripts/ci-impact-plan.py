@@ -204,7 +204,7 @@ def git_changed_files(root: Path, base: str, head: str) -> tuple[list[str], bool
         return [], True
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", "--diff-filter=ACMRT", f"{base}..{head}"],
+            ["git", "diff", "--name-only", "--diff-filter=ACMRTD", f"{base}..{head}"],
             cwd=root,
             check=True,
             text=True,
