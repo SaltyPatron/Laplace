@@ -95,6 +95,12 @@ def classify_paths(paths: list[str]) -> dict:
 
         if path.startswith("app/"):
             matched = product_change = True
+            api_scoped = (
+                path.startswith("app/Laplace.Api.Contracts")
+                or path.startswith("app/Laplace.Endpoints.OpenAICompat")
+            )
+            if not api_scoped:
+                publish_scope = "full"
             components.add("managed")
             build_components.add("managed")
             dev_suites.add("managed-dev")
