@@ -118,6 +118,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
         self.assertIn("managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}", lifecycle)
         self.assertIn("managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}", lifecycle)
+        self.assertIn("managed_test_filter: ${{ needs.plan.outputs.managed_test_filter }}", lifecycle)
         qualification = lifecycle.split("  mainline-qualification:\n", 1)[1].split(
             "\n  mainline-delivery:\n", 1)[0]
         self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", qualification)
@@ -279,6 +280,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("run_managed_dotnet_tests", common)
         self.assertIn("LAPLACE_MANAGED_TEST_TIMEOUT", common)
         self.assertIn("LAPLACE_MANAGED_TEST_PROJECTS", managed)
+        self.assertIn("LAPLACE_MANAGED_TEST_FILTER", common)
         self.assertIn("LAPLACE_MANAGED_DB_TEST_PROJECTS", managed_db)
         self.assertIn("LAPLACE_MANAGED_LIVE_TEST_PROJECTS", managed_live)
         for suite in (
@@ -365,6 +367,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("LAPLACE_BUILD_COMPONENTS:", reusable)
         self.assertIn("LAPLACE_MANAGED_BUILD_PROJECTS:", reusable)
         self.assertIn("LAPLACE_MANAGED_TEST_PROJECTS:", reusable)
+        self.assertIn("LAPLACE_MANAGED_TEST_FILTER:", reusable)
         self.assertIn("LAPLACE_MANAGED_DB_TEST_PROJECTS:", reusable)
         self.assertIn("LAPLACE_MANAGED_LIVE_TEST_PROJECTS:", reusable)
         self.assertIn("LAPLACE_DB_SUITES:", reusable)
