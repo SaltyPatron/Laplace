@@ -7,7 +7,7 @@ import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
 import { ensureVisualizationContrast, lerpColor, useVisualizationPalette, visualizationPalette, type VisualizationPalette } from '../visualizationPalette';
 import styles from './GlomeCanvas.module.css';
 
-export type GlomeProjection = 'packed' | 'placement';
+export type GlomeProjection = 'packed' | 'carrier' | 'placement';
 
 export interface GlomeNode {
   id: string;
@@ -63,6 +63,21 @@ export function packedDisplayPos(n: GlomeNode): [number, number, number] {
 }
 
 /**
+ * Exact carrier bit-space view used by Storage Proof.
+ * X/Y/Z have already been decoded from their 53-bit sign+mantissa payload slots
+ * into [-1,1]. Keep those three axes independent instead of normalizing them
+ * onto a shell, otherwise a second visualization transform would discard payload
+ * magnitude. M remains metadata and is deliberately not a spatial axis here.
+ */
+export function carrierDisplayPos(n: GlomeNode): [number, number, number] {
+  return [
+    Math.max(-1, Math.min(1, n.x)) * SHELL,
+    Math.max(-1, Math.min(1, n.y)) * SHELL,
+    Math.max(-1, Math.min(1, n.z)) * SHELL,
+  ];
+}
+
+/**
  * Placement is a 3-D view of the real PointZM ball, not a flat XYZ slice.
  *
  * First rotate the actual 4-D point through X-M and Z-M planes so M remains
@@ -111,7 +126,9 @@ function project(
 ): [number, number, number] {
   return mode === 'packed'
     ? packedDisplayPos(n)
-    : placementBallPos(n, xmAngle, zmAngle);
+    : mode === 'carrier'
+      ? carrierDisplayPos(n)
+      : placementBallPos(n, xmAngle, zmAngle);
 }
 
 /** Demand-mode: redraw when node set changes; OrbitControls still invalidates on input. */
@@ -242,7 +259,7 @@ function GlomeScene({
       {trajectory.length > 1 ? (
         <Line
           points={trajectory}
-          color={projection === 'packed' ? palette.packedLine : palette.placementLine}
+          color={projection === 'packed' || projection === 'carrier' ? palette.packedLine : palette.placementLine}
           lineWidth={1.25}
           transparent
           opacity={0.82}
@@ -267,6 +284,9 @@ function GlomeScene({
             {hover.mu != null ? <span> · μ {hover.mu.toFixed(1)}</span> : null}
             {projection === 'placement' && Number.isFinite(hover.radius)
               ? <span> · r {hover.radius.toFixed(3)}</span>
+              : null}
+            {projection === 'carrier' && hover.m != null && Number.isFinite(hover.m)
+              ? <span> · Mmeta {hover.m.toFixed(3)}</span>
               : null}
           </div>
         </Html>
