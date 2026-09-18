@@ -83,6 +83,16 @@ class WorkflowArchitecture(unittest.TestCase):
         activation = product.split("run_release_activation() {", 1)[1].split("\n}", 1)[0]
         for token in ("run_build", "run_dev_tests", "run_install", "run_database_maintenance --prepare", "run_db_tests"):
             self.assertIn(token, candidate)
+        self.assertIn("release_candidate_current_before_mutation", candidate)
+        self.assertLess(candidate.index("run_dev_tests"),
+                        candidate.index("release_candidate_current_before_mutation"))
+        self.assertLess(candidate.index("release_candidate_current_before_mutation"),
+                        candidate.index("run_install"))
+        supersession = product.split(
+            "release_candidate_current_before_mutation() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("git ls-remote --heads origin refs/heads/main", supersession)
+        self.assertIn("install/database mutation skipped", supersession)
+        self.assertIn("return 3", supersession)
         for token in ("run_publish", "reconcile_installed_product", "run_live_tests"):
             self.assertIn(token, activation)
     def test_observability_is_explicit_evidence_not_push_queue_load(self):

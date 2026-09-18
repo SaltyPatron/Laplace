@@ -164,10 +164,48 @@ run_mainline() {
   run_dev_tests
 }
 
+release_candidate_current_before_mutation() {
+  [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]] || return 0
+
+  local selected latest
+  selected="$(git rev-parse HEAD)"
+  latest="$(git ls-remote --heads origin refs/heads/main | awk '{print $1}')"
+  if [[ -z "$latest" ]]; then
+    echo "::error::release candidate could not resolve current main before mutation" >&2
+    return 2
+  fi
+  if [[ "$latest" == "$selected" ]]; then
+    return 0
+  fi
+
+  echo "::notice::release candidate $selected became superseded by $latest after build/dev qualification; install/database mutation skipped"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      echo "## Superseded release candidate"
+      echo
+      printf '%s\n' "- Selected: \`$selected\`"
+      printf '%s\n' "- Current main: \`$latest\`"
+      echo "- Qualification completed; install/database mutation was not started."
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
+  return 3
+}
+
 run_release_candidate() {
   check_deps
   run_build
   run_dev_tests
+
+  # Build/dev qualification is read-only with respect to the installed product.
+  # Re-check main at the last safe cancellation boundary. Once install/database
+  # mutation starts, the candidate owns the stage through its coherent finish.
+  local current_rc=0
+  release_candidate_current_before_mutation || current_rc=$?
+  if (( current_rc == 3 )); then
+    return 0
+  fi
+  (( current_rc == 0 )) || return "$current_rc"
+
   run_install
   run_database_maintenance --prepare
   run_db_tests
