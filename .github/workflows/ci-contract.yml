@@ -24,8 +24,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: laplace-ci-contract-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[actions-history-cleanup]') && format('laplace-actions-history-cleanup-{0}', github.run_id) || format('laplace-ci-contract-{0}', github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[actions-history-cleanup]') }}
 
 jobs:
   contract:
@@ -69,19 +69,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          report="$RUNNER_TEMP/actions-history-cleanup.json"
           python3 .github/scripts/cleanup-actions-history.py \
             --delete \
             --max-deletes 3000 \
-            --report "$report" \
+            --report "$RUNNER_TEMP/actions-history-cleanup.json" \
             --summary "$GITHUB_STEP_SUMMARY"
-          echo "ACTIONS_HISTORY_CLEANUP_REPORT=$report" >> "$GITHUB_ENV"
 
       - name: Upload cleanup audit
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: actions-history-cleanup-${{ github.run_id }}
-          path: ${{ env.ACTIONS_HISTORY_CLEANUP_REPORT }}
+          path: ${{ runner.temp }}/actions-history-cleanup.json
           if-no-files-found: error
           retention-days: 90
