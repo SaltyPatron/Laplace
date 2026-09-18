@@ -9,11 +9,14 @@ on:
         required: true
         default: status
         options: [status, migrate, repair, reindex, remigrate, recreate]
-      confirm:
-        description: "recreate only: type laplace"
-        type: string
-        required: false
-        default: ""
+      confirm_recreate:
+        description: "RECREATE only: confirm that the current database will be destroyed and recreated"
+        type: boolean
+        default: false
+      confirm_data_loss:
+        description: "RECREATE only: second confirmation that current database contents may be lost"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,7 +37,8 @@ jobs:
     timeout-minutes: 420
     env:
       LAPLACE_DB_OPERATION: ${{ inputs.operation }}
-      LAPLACE_DB_CONFIRM: ${{ inputs.confirm }}
+      LAPLACE_DB_CONFIRM_RECREATE: ${{ inputs.confirm_recreate && '1' || '0' }}
+      LAPLACE_DB_CONFIRM_DATA_LOSS: ${{ inputs.confirm_data_loss && '1' || '0' }}
     steps:
       - name: Run ${{ inputs.operation }} against the installed database runtime
         env:
@@ -78,13 +82,10 @@ jobs:
           source scripts/ci-environment.sh
 
           if [[ "$LAPLACE_DB_OPERATION" == recreate ]]; then
-            case "$LAPLACE_DB_CONFIRM" in
-              "$PGDATABASE"|"RECREATE"|"RECREATE $PGDATABASE") ;;
-              *)
-                echo "::error::recreate requires confirmation: type $PGDATABASE" >&2
-                exit 2
-                ;;
-            esac
+            [[ "$LAPLACE_DB_CONFIRM_RECREATE" == 1 && "$LAPLACE_DB_CONFIRM_DATA_LOSS" == 1 ]] || {
+              echo "::error::recreate requires both destructive-operation confirmations" >&2
+              exit 2
+            }
           fi
 
           health() {

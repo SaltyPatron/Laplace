@@ -51,7 +51,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "ci-contract.yml": "name: Policy — CI contract",
             "full-qualification.yml": "name: Audit — full product qualification",
             "laplace.yml": "name: Product — main delivery",
-            "product-operator.yml": "name: Product — manual operation",
+            "product-operator.yml": "name: Product — maintenance",
             "product-stage.yml": "name: Internal — product stage",
             "seed.yml": "name: Internal — substrate ingest",
             "seed-foundation.yml": "name: Data — foundation ingest",
@@ -314,6 +314,38 @@ class WorkflowArchitecture(unittest.TestCase):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertNotIn("runs-on: [self-hosted, laplace]", lifecycle)
         self.assertNotIn("host-resource.lock", lifecycle)
+
+
+    def test_operator_runbook_documents_every_operator_and_internal_surface(self):
+        runbook = (ROOT / "docs" / "guides" / "CI_OPERATOR_RUNBOOK.md").read_text(encoding="utf-8")
+        for name in (
+            "Product — main delivery",
+            "Product — maintenance",
+            "Product — competitive proof",
+            "Audit — full product qualification",
+            "Database — maintenance",
+            "Data — foundation ingest",
+            "Data — knowledge ingest",
+            "Data — documents ingest",
+            "Data — code ingest",
+            "Data — chess ingest",
+            "Data — models ingest",
+            "Observe — API",
+            "Observe — UI",
+            "Measure — benchmark",
+            "Policy — CI contract",
+            "Internal — product stage",
+            "Internal — substrate ingest",
+        ):
+            self.assertIn(name, runbook)
+        self.assertIn("Resource / concurrency contract", runbook)
+        self.assertIn("Outputs", runbook)
+
+    def test_internal_workflows_are_not_manually_dispatchable(self):
+        for name in ("product-stage.yml", "seed.yml"):
+            text = (WORKFLOWS / name).read_text(encoding="utf-8")
+            self.assertIn("workflow_call:", text)
+            self.assertNotIn("workflow_dispatch:", text)
 
 
 if __name__ == "__main__":

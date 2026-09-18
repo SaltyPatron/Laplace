@@ -44,6 +44,13 @@ class WorkflowOwnership(unittest.TestCase):
         self.assertNotIn("workflow_dispatch:", text)
         self.assertNotIn("\nconcurrency:\n", text)
 
+    def test_manual_product_surface_exposes_only_meaningful_operator_operations(self):
+        text = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("name: Product — maintenance"))
+        self.assertIn("options: [reconcile, deploy]", text)
+        for internal in ("test-dev", "test-db", "test-live", "applications", "install", "check", "provision"):
+            self.assertNotIn(f", {internal}", text)
+
     def test_expensive_competitive_proof_is_dispatch_only(self):
         text = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
         self.assertIn("on:\n  workflow_dispatch:\n", text)
@@ -75,8 +82,10 @@ class WorkflowOwnership(unittest.TestCase):
             "options: [status, migrate, repair, reindex, remigrate, recreate]",
             text,
         )
-        self.assertIn('description: "recreate only: type laplace"', text)
-        self.assertIn('"$PGDATABASE"|"RECREATE"|"RECREATE $PGDATABASE")', text)
+        self.assertIn("confirm_recreate:", text)
+        self.assertIn("confirm_data_loss:", text)
+        self.assertIn('LAPLACE_DB_CONFIRM_RECREATE', text)
+        self.assertIn('LAPLACE_DB_CONFIRM_DATA_LOSS', text)
         self.assertNotIn("check-installed-extension-current.py", text)
         self.assertNotIn("group: laplace-host-lifecycle", text)
         for operation in ("migrate", "repair", "reindex", "remigrate", "recreate"):
