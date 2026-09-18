@@ -61,7 +61,7 @@ public sealed class IngestWorkingSetBatchingGateTests
     [Fact]
     public void FileBackedApply_UsesOneAccumulatorPerFileOwner()
     {
-        var root = TypeIdLawTests.FindRepoRootPublic();
+        var root = Laplace.Decomposers.Abstractions.Tests.TypeIdLawTests.FindRepoRootPublic();
         var source = File.ReadAllText(Path.Combine(
             root, "app", "Laplace.Substrate", "Ingestion", "IngestRunner.cs"));
 
