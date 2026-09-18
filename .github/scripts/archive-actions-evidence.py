@@ -44,6 +44,10 @@ MAX_RELEASE_ASSET_BYTES = 1_850_000_000
 PART_BYTES = 1_500_000_000
 
 
+def progress(message: str) -> None:
+    print(f"[actions-evidence] {message}", flush=True)
+
+
 def safe_name(value: str, limit: int = 80) -> str:
     value = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-._")
     return (value or "artifact")[:limit]
@@ -282,7 +286,12 @@ def create_chunk_archive(
     payload_root.mkdir(parents=True, exist_ok=True)
     chunk_entries: list[dict] = []
 
-    for run_id in run_ids:
+    for position, run_id in enumerate(run_ids, start=1):
+        if position == 1 or position == len(run_ids) or position % 10 == 0:
+            progress(
+                f"workflow {workflow_id} chunk {chunk_index}: "
+                f"collecting artifact-bearing run {position}/{len(run_ids)} (run {run_id})"
+            )
         run_dir = payload_root / f"run-{run_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
         run = runs_by_id[run_id]
@@ -444,6 +453,7 @@ def main() -> int:
     client = CLEANUP.GitHub(args.repo, args.token, args.api)
     active = CLEANUP.current_workflow_paths(root)
 
+    progress("snapshotting workflow runs and retained artifacts")
     runs = list(client.pages(f"/repos/{args.repo}/actions/runs?", "workflow_runs"))
     artifacts = list(client.pages(f"/repos/{args.repo}/actions/artifacts?", "artifacts"))
     by_run = artifact_map(artifacts)
@@ -462,6 +472,10 @@ def main() -> int:
                 continue
             evidence_groups.append(entry)
     evidence_groups.sort(key=lambda item: (item["path"], item["workflow_id"]))
+    progress(
+        f"found {len(evidence_groups)} stale evidence-bearing workflow identities "
+        f"across {len(runs)} current run records"
+    )
 
     ensure_release(args.repo, args.release_tag, args.target_sha)
     existing_assets = release_asset_names(args.repo, args.release_tag)
@@ -510,6 +524,16 @@ def main() -> int:
         }
 
         try:
+            live_artifacts = [
+                artifact
+                for run in entry["runs"]
+                for artifact in retrievable_artifacts(by_run.get(int(run["id"]), []))
+            ]
+            progress(
+                f"workflow {workflow_id}: {entry['path']} — "
+                f"{len(entry['runs'])} runs, {len(live_artifacts)} retained artifacts, "
+                f"{sum(int(a.get('size_in_bytes') or 0) for a in live_artifacts):,} source bytes"
+            )
             if not marker_present:
                 with tempfile.TemporaryDirectory(
                     prefix=f"actions-evidence-{workflow_id}-"
@@ -522,6 +546,7 @@ def main() -> int:
                         encoding="utf-8",
                     )
                     upload_assets(args.repo, args.release_tag, [metadata_path])
+                    progress(f"workflow {workflow_id}: metadata uploaded")
 
                     artifact_run_ids = [
                         int(run["id"])
@@ -531,6 +556,16 @@ def main() -> int:
                     chunks = plan_chunks(artifact_run_ids, by_run, args.chunk_bytes)
                     chunk_records: list[dict] = []
                     for index, chunk in enumerate(chunks, start=1):
+                        estimated_bytes = sum(
+                            int(artifact.get("size_in_bytes") or 0)
+                            for run_id in chunk
+                            for artifact in retrievable_artifacts(by_run.get(run_id, []))
+                        )
+                        progress(
+                            f"workflow {workflow_id}: building chunk {index}/{len(chunks)} "
+                            f"from {len(chunk)} artifact-bearing run(s), "
+                            f"~{estimated_bytes:,} source bytes"
+                        )
                         paths, chunk_record = create_chunk_archive(
                             repo=args.repo,
                             token=args.token,
@@ -542,6 +577,13 @@ def main() -> int:
                             directory=directory,
                         )
                         upload_assets(args.repo, args.release_tag, paths)
+                        progress(
+                            f"workflow {workflow_id}: uploaded chunk {index}/{len(chunks)} — "
+                            + ", ".join(
+                                f"{path.name} ({path.stat().st_size:,} bytes)"
+                                for path in paths
+                            )
+                        )
                         chunk_records.append(chunk_record)
                         workflow_record["archive_assets"].extend(
                             asset["name"] for asset in chunk_record["assets"]
@@ -571,6 +613,10 @@ def main() -> int:
                         encoding="utf-8",
                     )
                     upload_assets(args.repo, args.release_tag, [marker_path])
+                    progress(
+                        f"workflow {workflow_id}: archive marker uploaded; "
+                        "old run deletion is now permitted"
+                    )
 
                 existing_assets = release_asset_names(args.repo, args.release_tag)
                 if marker_name not in existing_assets:
@@ -578,9 +624,15 @@ def main() -> int:
                 report["archived_workflow_count"] += 1
             else:
                 report["already_archived_workflow_count"] += 1
+                progress(
+                    f"workflow {workflow_id}: archive marker already exists; "
+                    "resuming old run deletion"
+                )
 
             # The archive marker is the commit point. Only now may old runs disappear.
-            for run in sorted(entry["runs"], key=lambda item: int(item["id"])):
+            sorted_runs = sorted(entry["runs"], key=lambda item: int(item["id"]))
+            progress(f"workflow {workflow_id}: deleting {len(sorted_runs)} archived old run(s)")
+            for delete_index, run in enumerate(sorted_runs, start=1):
                 run_id = int(run["id"])
                 if (
                     client.remaining is not None
@@ -592,16 +644,23 @@ def main() -> int:
                 client.delete_run(run_id)
                 workflow_record["deleted_run_ids"].append(run_id)
                 report["deleted_run_count"] += 1
+                if delete_index == 1 or delete_index == len(sorted_runs) or delete_index % 50 == 0:
+                    progress(
+                        f"workflow {workflow_id}: deleted "
+                        f"{delete_index}/{len(sorted_runs)} old run(s)"
+                    )
                 if args.delete_delay:
                     time.sleep(args.delete_delay)
 
             report["deleted_workflow_count"] += 1
             report["archived"].append(workflow_record)
             persist_report()
+            progress(f"workflow {workflow_id}: transaction complete")
         except Exception as error:
             workflow_record["error"] = str(error)
             report["failed"].append(workflow_record)
             persist_report()
+            progress(f"workflow {workflow_id}: FAILED safely — {error}")
             # Preserve the workflow's remaining runs on any archive/delete failure.
             continue
 
@@ -611,6 +670,7 @@ def main() -> int:
         encoding="utf-8",
     )
     try:
+        progress("uploading final archive index")
         upload_assets(args.repo, args.release_tag, [index_path])
     except Exception as error:
         report["failed"].append(
@@ -623,6 +683,11 @@ def main() -> int:
         persist_report()
 
     summary = report_summary(report)
+    progress(
+        f"done: {report['deleted_workflow_count']} stale workflow identities removed, "
+        f"{report['deleted_run_count']} old runs deleted, "
+        f"{len(report['failed'])} unresolved"
+    )
     print(summary)
     if args.summary:
         with Path(args.summary).open("a", encoding="utf-8") as stream:
