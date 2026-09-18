@@ -28,6 +28,11 @@ on:
         type: string
         required: false
         default: all
+      build_components:
+        description: "comma-separated candidate components that must be built/materialized"
+        type: string
+        required: false
+        default: all
       db_suites:
         description: "comma-separated database suites selected by the impact planner"
         type: string
@@ -123,6 +128,7 @@ jobs:
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
       LAPLACE_DEV_SUITES: ${{ inputs.dev_suites }}
+      LAPLACE_BUILD_COMPONENTS: ${{ inputs.build_components }}
       LAPLACE_DB_SUITES: ${{ inputs.db_suites }}
       LAPLACE_LIVE_SUITES: ${{ inputs.live_suites }}
       LAPLACE_DELIVERY_ACTIONS: ${{ inputs.delivery_actions }}
