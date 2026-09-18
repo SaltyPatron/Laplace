@@ -390,12 +390,14 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("suite_use_cache", matrix)
         self.assertNotIn("project-subset pass is not a whole", matrix)
 
-    def test_test_only_qualification_never_carries_installed_product_work(self):
+    def test_test_only_successor_can_carry_undelivered_product_work(self):
         product = (ROOT / "scripts" / "product-ci.sh").read_text(encoding="utf-8")
         carry = product.split("carry_forward_undelivered_impact() {", 1)[1].split(
             "\n}\n\nrun_db_tests", 1)[0]
-        self.assertIn('[[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]]', carry)
-        self.assertIn("deployed product carry-forward skipped", carry)
+        self.assertNotIn('[[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]]', carry)
+        self.assertNotIn("deployed product carry-forward skipped", carry)
+        self.assertIn("--base \"$deployed\" --head \"$target\"", carry)
+        self.assertIn("strands those product changes forever", carry)
 
     def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
