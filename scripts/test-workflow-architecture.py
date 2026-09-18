@@ -70,7 +70,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("stage: release-qualification", lifecycle)
         self.assertIn("stage: release-delivery", lifecycle)
 
-    def test_superseded_push_is_rejected_before_self_hosted_scheduling_and_host_mutation(self):
+    def test_superseded_push_is_rejected_before_self_hosted_scheduling_and_candidate_mutation(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         preflight = reusable.split("  preflight:\n", 1)[1].split("\n  stage:\n", 1)[0]
         stage = reusable.split("  stage:\n", 1)[1]
@@ -85,14 +85,16 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("runs-on: [self-hosted, laplace]", stage)
 
         resolve = stage.index("git ls-remote --heads origin refs/heads/main")
-        checkout = stage.index('git checkout --no-overwrite-ignore --detach "$TARGET_SHA"')
-        build_lock = stage.index("build-resource.lock")
-        host_lock = stage.index("host-resource.lock")
-        self.assertLess(resolve, checkout)
-        self.assertLess(checkout, build_lock)
-        self.assertLess(build_lock, host_lock)
-        self.assertIn("release-qualification|mainline|build|test-dev|check", stage)
-        self.assertIn("release-activation|test-live|reconcile", stage)
+        fetch = stage.index('git fetch --no-tags --depth=2 origin "$TARGET_SHA"')
+        worktree = stage.index('git worktree add --detach "$candidate_workspace" "$TARGET_SHA"')
+        candidate_lock = stage.index('product-$TARGET_SHA.lock')
+        self.assertLess(resolve, fetch)
+        self.assertLess(fetch, worktree)
+        self.assertLess(worktree, candidate_lock)
+        self.assertIn("product-worktrees", stage)
+        self.assertIn("git-metadata.lock", stage)
+        self.assertIn("host-resource.lock", stage)
+        self.assertNotIn("build-resource.lock", stage)
 
     def test_main_qualification_reuses_exact_valid_suite_receipts(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
@@ -186,8 +188,10 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertEqual(1, reusable.count("runs-on: ubuntu-24.04"))
         self.assertEqual(1, reusable.count("runs-on: [self-hosted, laplace]"))
         self.assertIn("needs: preflight", reusable)
-        self.assertIn("build-resource.lock", reusable)
+        self.assertIn("product-worktrees", reusable)
+        self.assertIn('product-$TARGET_SHA.lock', reusable)
         self.assertIn("host-resource.lock", reusable)
+        self.assertNotIn("build-resource.lock", reusable)
         self.assertIn('exec bash scripts/product-ci.sh "$LAPLACE_STAGE"', reusable)
 
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
