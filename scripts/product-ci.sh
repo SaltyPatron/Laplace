@@ -94,9 +94,9 @@ run_build() {
     need_web=1
   fi
 
-  # Web generation consumes the managed OpenAPI contract, so a web artifact
-  # always materializes the managed contract first in this exact candidate.
-  (( need_web == 0 )) || need_managed=1
+  # The checked-in OpenAPI document is an explicit web build input. API
+  # contract changes select both managed and web in the impact plan; a pure web
+  # change therefore does not need an unrelated managed rebuild.
 
   # Managed applications execute the native core from the candidate build tree.
   # When native inputs are unchanged, reference the immutable build belonging to
