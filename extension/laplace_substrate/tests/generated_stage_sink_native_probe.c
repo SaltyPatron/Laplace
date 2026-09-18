@@ -327,71 +327,71 @@ int main(void)
     reset_spi();omit_reference=true;missing_entity=children[1];s=probe_state(stages,1);sink_parse(s,stages,1);
     REFUSES(sink_validate_bodies(s,stages,1),"referenced entity");sink_cleanup(s);
 
-    /* Exercise the exported entry, including context cleanup and the explicit
-     * presence probes, prepare and execution receipt. PostgreSQL services remain
-     * explicit doubles; transaction rollback belongs to the backend fixture. */
+    /* Exercise the exported generated-descriptor entry with structural rows
+     * only. Low-level helpers above retain independent attestation/fold coverage,
+     * while this public boundary must reject manufactured semantic testimony. */
+    size_t entity_bytes,physicality_bytes,interpretation_bytes;
+    const uint8 *entities=intent_stage_tuple_ptr(stage,INTENT_STAGE_TABLE_ENTITIES,&entity_bytes);
+    const uint8 *physicalities=intent_stage_tuple_ptr(stage,INTENT_STAGE_TABLE_PHYSICALITIES,&physicality_bytes);
+    const uint8 *interpretations=intent_stage_entity_interpretation_tuple_ptr(stage,&interpretation_bytes);
+    CHECK(intent_stage_entity_interpretations_complete(stage));
+    intent_stage_t *parts[2]={NULL,NULL};
+    CHECK(intent_stage_from_tuple_bytes(entities,entity_bytes,NULL,0,NULL,0,1024*1024,&parts[0])==0);
+    CHECK(intent_stage_import_entity_interpretations(parts[0],interpretations,interpretation_bytes)==0);
+    CHECK(intent_stage_from_tuple_bytes(NULL,0,physicalities,physicality_bytes,NULL,0,1024*1024,&parts[1])==0);
+    const intent_stage_t *generated_stages[1]={parts[0]};
+    const intent_stage_t *generated_pair[2]={parts[0],parts[1]};
+
     reset_spi();LaplaceGeneratedStageSinkReceipt receipt;
     LaplaceGeneratedStageSinkLimits limits={1000,64*1024*1024,1000,100};
     unsigned prepares_before=prepares,contexts_before=deleted_contexts;
-    laplace_generated_stage_sink(stages,1,&limits,&receipt);
+    laplace_generated_stage_sink(generated_pair,2,&limits,&receipt);
     unsigned executions=0;for(unsigned i=0;i<SQ_COUNT;++i)executions+=query_calls[i];
     CHECK(receipt.operations==executions+prepares-prepares_before);
-    CHECK(query_calls[SQ_EPOCH]==1 && query_calls[SQ_PHYSICALITY_PRESENCE]==1 && query_calls[SQ_ATTESTATION_PRESENCE]==1);
-    CHECK(receipt.inserted_rows[2]==3 && deleted_contexts==contexts_before+1);
+    CHECK(receipt.input_rows[2]==0 && receipt.distinct_rows[2]==0 && receipt.inserted_rows[2]==0);
+    CHECK(query_calls[SQ_EPOCH]==1 && query_calls[SQ_PHYSICALITY_PRESENCE]==1);
+    CHECK(query_calls[SQ_ATTESTATION_PRESENCE]==0 && query_calls[SQ_FOLD]==0 && query_calls[SQ_MASKS]==0);
+    CHECK(receipt.inserted_rows[0]==1 && receipt.inserted_rows[1]==1);
+    CHECK(deleted_contexts==contexts_before+1);
 
-    /* Session admission supplies its own source declaration alongside the
-     * descriptor source/vocabulary/generated stages. Exercise four nonempty
-     * native stages through the public sink, retaining aggregate validation,
-     * dedup and all fourth-stage evidence. These are real native COPY tuples;
-     * only persistence services are doubled. */
-    size_t entity_bytes,physicality_bytes,attestation_bytes,first_two=0;
-    const uint8 *entities=intent_stage_tuple_ptr(stage,INTENT_STAGE_TABLE_ENTITIES,&entity_bytes);
-    const uint8 *physicalities=intent_stage_tuple_ptr(stage,INTENT_STAGE_TABLE_PHYSICALITIES,&physicality_bytes);
-    const uint8 *attestations=intent_stage_tuple_ptr(stage,INTENT_STAGE_TABLE_ATTESTATIONS,&attestation_bytes);
-    SinkRow witness_row={0};
-    for(unsigned i=0;i<2;++i)sink_read_row(attestations,attestation_bytes,&first_two,14,&witness_row);
-    CHECK(first_two>0 && first_two<attestation_bytes);
-    intent_stage_t *parts[4]={NULL,NULL,NULL,NULL};
-    CHECK(intent_stage_from_tuple_bytes(entities,entity_bytes,NULL,0,NULL,0,1024*1024,&parts[0])==0);
-    size_t interpretation_bytes;
-    const uint8 *interpretations=intent_stage_entity_interpretation_tuple_ptr(stage,&interpretation_bytes);
-    CHECK(intent_stage_entity_interpretations_complete(stage));
-    CHECK(intent_stage_import_entity_interpretations(parts[0],interpretations,interpretation_bytes)==0);
-    CHECK(intent_stage_from_tuple_bytes(NULL,0,physicalities,physicality_bytes,NULL,0,1024*1024,&parts[1])==0);
-    CHECK(intent_stage_from_tuple_bytes(NULL,0,NULL,0,attestations,first_two,1024*1024,&parts[2])==0);
-    CHECK(intent_stage_from_tuple_bytes(NULL,0,NULL,0,attestations+first_two,
-                                      attestation_bytes-first_two,1024*1024,&parts[3])==0);
-    const intent_stage_t *session_stages[5]={parts[0],parts[1],parts[2],parts[3],parts[0]};
+    /* Four nonempty native stages can repeat the structural declaration/body
+     * owners. Dedup remains exact; no fourth-stage testimony exists anymore. */
+    const intent_stage_t *session_stages[5]={parts[0],parts[1],parts[0],parts[1],parts[0]};
     LaplaceGeneratedStageSinkReceipt combined=receipt;
     reset_spi();prepares_before=prepares;
     laplace_generated_stage_sink(session_stages,4,&limits,&receipt);
-    for(unsigned i=0;i<3;++i) {
-        CHECK(receipt.input_rows[i]==combined.input_rows[i]);
-        CHECK(receipt.distinct_rows[i]==combined.distinct_rows[i]);
-        CHECK(receipt.inserted_rows[i]==combined.inserted_rows[i]);
-    }
-    CHECK(receipt.tuple_bytes==combined.tuple_bytes && receipt.logical_work==combined.logical_work);
-    CHECK(receipt.stored_vertices==combined.stored_vertices && receipt.folded_cells==combined.folded_cells);
-    CHECK(receipt.folded_observations==6 && actual_groups==2 && actual_score==3500000000);
+    CHECK(receipt.input_rows[0]==2*combined.input_rows[0]);
+    CHECK(receipt.input_rows[1]==2*combined.input_rows[1]);
+    CHECK(receipt.input_rows[2]==0);
+    CHECK(receipt.distinct_rows[0]==combined.distinct_rows[0]);
+    CHECK(receipt.distinct_rows[1]==combined.distinct_rows[1]);
+    CHECK(receipt.distinct_rows[2]==0);
+    CHECK(receipt.inserted_rows[0]==combined.inserted_rows[0]);
+    CHECK(receipt.inserted_rows[1]==combined.inserted_rows[1]);
+    CHECK(receipt.inserted_rows[2]==0);
+    CHECK(receipt.logical_work==2*combined.logical_work);
+    CHECK(receipt.stored_vertices==2*combined.stored_vertices);
+    CHECK(receipt.folded_cells==0 && receipt.folded_observations==0 && receipt.mask_pairs==0);
     executions=0;for(unsigned i=0;i<SQ_COUNT;++i)executions+=query_calls[i];
     CHECK(receipt.operations==executions+prepares-prepares_before);
+
     reset_spi();LaplaceGeneratedStageSinkReceipt four_stage_receipt=receipt;
     REFUSES(laplace_generated_stage_sink(session_stages,5,&limits,&receipt),"at most four");
     CHECK(memcmp(&receipt,&four_stage_receipt,sizeof(receipt))==0);
-    limits.maximum_rows=combined.input_rows[0]+combined.input_rows[1]+combined.input_rows[2]-1;
+    limits.maximum_rows=receipt.input_rows[0]+receipt.input_rows[1]-1;
     REFUSES(laplace_generated_stage_sink(session_stages,4,&limits,&receipt),"row grant");
     CHECK(memcmp(&receipt,&four_stage_receipt,sizeof(receipt))==0);
     limits.maximum_rows=1000;
-    for(unsigned i=0;i<4;++i)intent_stage_free(parts[i]);
 
     reset_spi();memset(&receipt,0x55,sizeof(receipt));
     LaplaceGeneratedStageSinkReceipt unchanged=receipt;
     limits.maximum_operations=0;
-    REFUSES(laplace_generated_stage_sink(stages,1,&limits,&receipt),"operation grant");
+    REFUSES(laplace_generated_stage_sink(generated_pair,2,&limits,&receipt),"operation grant");
     CHECK(memcmp(&receipt,&unchanged,sizeof(receipt))==0);
     limits.maximum_operations=100;limits.maximum_rows=1;
-    REFUSES(laplace_generated_stage_sink(stages,1,&limits,&receipt),"row grant");
+    REFUSES(laplace_generated_stage_sink(generated_pair,2,&limits,&receipt),"row grant");
     CHECK(memcmp(&receipt,&unchanged,sizeof(receipt))==0);
+    limits.maximum_rows=1000;
 
     /* A complete metadata declaration must cover every staged E identity. */
     intent_stage_t *omitted=intent_stage_new(0);
@@ -489,6 +489,7 @@ int main(void)
     XactIsoLevel=XACT_REPEATABLE_READ;REFUSES(laplace_generated_stage_sink_lock(),"READ COMMITTED");
     XactIsoLevel=XACT_READ_COMMITTED;laplace_generated_stage_sink_lock();laplace_generated_stage_sink_lock();
     REFUSES((void)sink_sum(INT64_MAX,1),"aggregate overflow");
+    for(unsigned i=0;i<2;++i)intent_stage_free(parts[i]);
     intent_stage_free(stage);
     printf("%u checks passed: production sink parsing, budgets, references, actual accepted-subset grouping, replay and lock contract; controlled PostgreSQL services only\n",checks);
     return 0;
