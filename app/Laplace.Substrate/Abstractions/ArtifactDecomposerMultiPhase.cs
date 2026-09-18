@@ -98,6 +98,13 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
 
         fileLabel = ClaimArtifact(context, fullPath, fileLabel);
         Hash128? fileRoot = IngestBatchPipeline.TryResolveFileIdentity(fullPath);
+        IngestArtifact? artifact = context.HasArtifactGraph
+            ? context.SelectedArtifacts.SingleOrDefault(selected => string.Equals(
+                Path.GetFullPath(selected.Path), fullPath, StringComparison.Ordinal))
+            : null;
+        SourceArtifactIdentity? semanticArtifact = artifact is null
+            ? null
+            : SourceArtifactProvenance.Resolve(artifact, fileRoot);
         var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
 
         if (fileRoot is { } root
@@ -109,7 +116,8 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
             Console.Error.WriteLine(
                 $"INGEST_FILE_SKIPPED file={fileLabel} reason=marker-complete");
             observability.OnFileComposed(
-                phase.SourceName, fileLabel, resumeFingerprint: fileRoot);
+                phase.SourceName, fileLabel, semanticArtifact?.ArtifactId,
+                resumeFingerprint: fileRoot);
             yield return IngestBatchPipeline.BuildSkippedBoundary(phase.SourceId, fileLabel);
             yield break;
         }
@@ -121,6 +129,18 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
         long entities = 0;
         long physicalities = 0;
         long attestations = 0;
+
+        if (artifact is not null && semanticArtifact is { } artifactIdentity)
+        {
+            SubstrateChange provenance = SourceArtifactProvenance.BuildChange(
+                artifact, phase.SourceId, phase.TrustClassId, fileRoot)
+                with { CountsAsUnit = false };
+            provenance = IngestBatchPipeline.BindFileLabel(provenance, fileLabel);
+            yield return provenance;
+            entities += provenance.Entities.Length;
+            physicalities += provenance.Physicalities.Length;
+            attestations += provenance.Attestations.Length;
+        }
 
         await foreach (var change in base.RunPhaseAsync(phase, context, options, ct))
         {
@@ -138,11 +158,14 @@ public abstract class ArtifactDecomposerMultiPhase : DecomposerMultiPhase, IDeco
                     attestations += stage.AttestationCount;
                 }
             }
-            yield return IngestBatchPipeline.BindFileLabel(change, fileLabel);
+            SubstrateChange bound = IngestBatchPipeline.BindFileLabel(change, fileLabel);
+            if (semanticArtifact is { } identity)
+                bound = SourceArtifactProvenance.Bind(bound, identity.ArtifactId);
+            yield return bound;
         }
 
         observability.OnFileComposed(
-            phase.SourceName, fileLabel, null,
+            phase.SourceName, fileLabel, semanticArtifact?.ArtifactId,
             records, entities, physicalities, attestations,
             resumeFingerprint: fileRoot);
 

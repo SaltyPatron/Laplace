@@ -126,7 +126,7 @@ public static class SourceVocabularyBootstrap
             manifest.SourceName,
             manifest.TrustClass,
             typeNodeNames: manifest.TypeNodeNames,
-            relationNodeNames: CreditRelations.Concat(manifest.Relations),
+            relationNodeNames: CreditRelations.Concat(ArtifactRelations).Concat(manifest.Relations),
             readbackNames: readbackNames,
             ct: ct);
         if (depositLicense)
@@ -137,6 +137,11 @@ public static class SourceVocabularyBootstrap
     private static readonly string[] CreditRelations =
     [
         "HAS_LICENSE", "HAS_ATTRIBUTION", "HAS_SOURCE_URL", "HAS_CITATION", "HAS_VERSION",
+    ];
+
+    private static readonly string[] ArtifactRelations =
+    [
+        "CONTAINS", "IS_TYPED_AS", "REQUIRES", "HAS_PROPERTY",
     ];
 
     /// <summary>

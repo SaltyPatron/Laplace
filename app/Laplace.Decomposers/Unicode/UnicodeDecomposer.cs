@@ -113,6 +113,23 @@ public sealed class UnicodeDecomposer
         string ducetLabel = ClaimArtifact(context, ducet.Path, ducet.Label);
         Hash128? xmlRoot = IngestBatchPipeline.TryResolveFileIdentity(xml.Path);
         Hash128? ducetRoot = IngestBatchPipeline.TryResolveFileIdentity(ducet.Path);
+        IngestArtifact? xmlArtifact = context.HasArtifactGraph
+            ? context.SelectedArtifacts.SingleOrDefault(a => string.Equals(
+                Path.GetFullPath(a.Path), Path.GetFullPath(xml.Path), StringComparison.Ordinal))
+            : null;
+        IngestArtifact? ducetArtifact = context.HasArtifactGraph
+            ? context.SelectedArtifacts.SingleOrDefault(a => string.Equals(
+                Path.GetFullPath(a.Path), Path.GetFullPath(ducet.Path), StringComparison.Ordinal))
+            : null;
+        SourceArtifactIdentity? xmlIdentity = xmlArtifact is null
+            ? null : SourceArtifactProvenance.Resolve(xmlArtifact, xmlRoot);
+        SourceArtifactIdentity? ducetIdentity = ducetArtifact is null
+            ? null : SourceArtifactProvenance.Resolve(ducetArtifact, ducetRoot);
+        Hash128? floorRecipeId = xmlIdentity is { } xi && ducetIdentity is { } di
+            ? SourceArtifactProvenance.RecipeId(
+                SourceName, Manifest.License.Version ?? "unknown", "tier0-floor",
+                [xi.ArtifactId, di.ArtifactId])
+            : null;
         var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
 
         bool xmlDone = xmlRoot is { } xr
@@ -125,8 +142,10 @@ public sealed class UnicodeDecomposer
                 dr, Source, LayerOrder, ct).ConfigureAwait(false);
         if (xmlDone && ducetDone)
         {
-            observability.OnFileComposed(SourceName, xmlLabel, resumeFingerprint: xmlRoot);
-            observability.OnFileComposed(SourceName, ducetLabel, resumeFingerprint: ducetRoot);
+            observability.OnFileComposed(
+                SourceName, xmlLabel, xmlIdentity?.ArtifactId, resumeFingerprint: xmlRoot);
+            observability.OnFileComposed(
+                SourceName, ducetLabel, ducetIdentity?.ArtifactId, resumeFingerprint: ducetRoot);
             yield return IngestBatchPipeline.BuildSkippedBoundary(Source, xmlLabel);
             yield return IngestBatchPipeline.BuildSkippedBoundary(Source, ducetLabel);
             yield break;
@@ -152,14 +171,46 @@ public sealed class UnicodeDecomposer
                     physicalities += stage.PhysicalityCount;
                     attestations += stage.AttestationCount;
                 }
+            if (floorRecipeId is { } recipeId)
+                change = SourceArtifactProvenance.Bind(change, recipeId);
             yield return change;
         }
 
+        if (xmlArtifact is not null && xmlIdentity is { } xmlSemantic)
+        {
+            SubstrateChange provenance = SourceArtifactProvenance.BuildChange(
+                xmlArtifact, Source, TrustClass, xmlRoot)
+                with { CountsAsUnit = false };
+            yield return IngestBatchPipeline.BindFileLabel(provenance, xmlLabel);
+            entities += provenance.Entities.Length;
+            physicalities += provenance.Physicalities.Length;
+            attestations += provenance.Attestations.Length;
+        }
+        if (ducetArtifact is not null && ducetIdentity is { } ducetSemantic)
+        {
+            SubstrateChange provenance = SourceArtifactProvenance.BuildChange(
+                ducetArtifact, Source, TrustClass, ducetRoot)
+                with { CountsAsUnit = false };
+            yield return IngestBatchPipeline.BindFileLabel(provenance, ducetLabel);
+            entities += provenance.Entities.Length;
+            physicalities += provenance.Physicalities.Length;
+            attestations += provenance.Attestations.Length;
+        }
+        if (xmlIdentity is { } xmlSemanticIdentity && ducetIdentity is { } ducetSemanticIdentity)
+            yield return SourceArtifactProvenance.BuildRecipeChange(
+                SourceName,
+                Manifest.License.Version ?? "unknown",
+                "tier0-floor",
+                Source,
+                TrustClass,
+                [xmlSemanticIdentity.ArtifactId, ducetSemanticIdentity.ArtifactId]);
+
         observability.OnFileComposed(
-            SourceName, xmlLabel, null, records, entities, physicalities, attestations,
+            SourceName, xmlLabel, xmlIdentity?.ArtifactId,
+            records, entities, physicalities, attestations,
             resumeFingerprint: xmlRoot);
         observability.OnFileComposed(
-            SourceName, ducetLabel, null, 0, 0, 0, 0,
+            SourceName, ducetLabel, ducetIdentity?.ArtifactId, 0, 0, 0, 0,
             resumeFingerprint: ducetRoot);
 
         if (options.MaxInputUnits > 0)

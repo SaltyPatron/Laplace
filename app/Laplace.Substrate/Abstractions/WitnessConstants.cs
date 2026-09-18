@@ -36,4 +36,36 @@ public static class SourceTrust
     public const double UserPrompt = 0.30;
     public const double Response = 0.20;
     public const double Adversarial = 0.00;
+
+    /// <summary>
+    /// Resolve the numeric witness prior from the governed trust-class identity.
+    /// Unknown classes fail closed; source code must not silently inherit a user/default prior.
+    /// </summary>
+    public static double ForClass(Laplace.Engine.Core.Hash128 trustClassId)
+    {
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("SubstrateMandate"))
+            return SubstrateMandate;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("StandardsDerived"))
+            return StandardsDerived;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("AcademicCurated"))
+            return AcademicCurated;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("AcademicCuratedUserInput"))
+            return AcademicCuratedUserInput;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("StructuredCorpus"))
+            return StructuredCorpus;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("UserCuratedResource"))
+            return UserCuratedResource;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("AiModelProbe"))
+            return AiModelProbe;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("AppDerived"))
+            return AppDerived;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("UserPrompt"))
+            return UserPrompt;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("Response"))
+            return Response;
+        if (trustClassId == Laplace.Engine.Core.SubstrateCanonicalIds.TrustClass("Adversarial"))
+            return Adversarial;
+        throw new InvalidOperationException(
+            $"No governed witness prior is registered for trust class {trustClassId}.");
+    }
 }
