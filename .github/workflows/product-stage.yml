@@ -115,28 +115,41 @@ jobs:
             target_tree="$(git -C "$probe_repo" rev-parse "$TARGET_SHA^{tree}")"
             latest_tree="$(git -C "$probe_repo" rev-parse "$latest_main^{tree}")"
 
-            if [[ "$latest_tree" != "$target_tree" ]]; then
+            product_delta=()
+            while IFS= read -r changed_path; do
+              [[ -n "$changed_path" ]] || continue
+              case "$changed_path" in
+                docs/*|.github/*|*.md|scripts/api-diagnostics.py|web/scripts/capture-ui-diagnostics.mjs)
+                  ;;
+                *)
+                  product_delta+=("$changed_path")
+                  ;;
+              esac
+            done < <(git -C "$probe_repo" diff --name-only "$TARGET_SHA" "$latest_main")
+
+            if [[ "$latest_tree" != "$target_tree" && ${#product_delta[@]} -gt 0 ]]; then
               echo "execute=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::selected revision $TARGET_SHA is superseded by content-changing main $latest_main; self-hosted product work was not scheduled"
+              echo "::notice::selected revision $TARGET_SHA is superseded by product-changing main $latest_main; self-hosted product work was not scheduled"
               {
                 echo "## Superseded product stage"
                 echo
                 echo "- Selected: $TARGET_SHA"
                 echo "- Current main: $latest_main"
-                echo "- Selected tree: $target_tree"
-                echo "- Current tree: $latest_tree"
+                echo "- Product-changing paths:"
+                printf '  - `%s`\n' "${product_delta[@]}"
                 echo "- Result: no self-hosted product work scheduled"
               } >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::notice::main advanced from $TARGET_SHA to tree-equivalent $latest_main; candidate remains valid"
+            elif [[ "$latest_tree" != "$target_tree" ]]; then
+              echo "::notice::main advanced from $TARGET_SHA only through product-ignored paths; candidate remains valid"
               {
-                echo "## Tree-equivalent successor"
+                echo "## Product-equivalent successor"
                 echo
                 echo "- Selected: $TARGET_SHA"
                 echo "- Current main: $latest_main"
-                echo "- Shared tree: $target_tree"
-                echo "- Result: candidate remains valid"
+                echo "- Result: later changes are product-ignored; candidate remains valid"
               } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::notice::main advanced from $TARGET_SHA to tree-equivalent $latest_main; candidate remains valid"
             fi
             rm -rf "$probe_repo"
             trap - EXIT
@@ -228,12 +241,27 @@ jobs:
                 git fetch --no-tags --depth=1 origin "$latest_main"
               target_tree="$(git rev-parse "$TARGET_SHA^{tree}")"
               latest_tree="$(git rev-parse "$latest_main^{tree}")"
-              if [[ "$latest_tree" != "$target_tree" ]]; then
+              product_delta=()
+              while IFS= read -r changed_path; do
+                [[ -n "$changed_path" ]] || continue
+                case "$changed_path" in
+                  docs/*|.github/*|*.md|scripts/api-diagnostics.py|web/scripts/capture-ui-diagnostics.mjs)
+                    ;;
+                  *)
+                    product_delta+=("$changed_path")
+                    ;;
+                esac
+              done < <(git diff --name-only "$TARGET_SHA" "$latest_main")
+              if [[ "$latest_tree" != "$target_tree" && ${#product_delta[@]} -gt 0 ]]; then
                 unset checkout_auth CHECKOUT_TOKEN
-                echo "::notice::selected revision $TARGET_SHA is superseded by content-changing main $latest_main; no product stage executed"
+                echo "::notice::selected revision $TARGET_SHA is superseded by product-changing main $latest_main; no product stage executed"
                 exit 0
               fi
-              echo "::notice::main advanced from $TARGET_SHA to tree-equivalent $latest_main; continuing exact candidate"
+              if [[ "$latest_tree" != "$target_tree" ]]; then
+                echo "::notice::main advanced from $TARGET_SHA only through product-ignored paths; continuing exact candidate"
+              else
+                echo "::notice::main advanced from $TARGET_SHA to tree-equivalent $latest_main; continuing exact candidate"
+              fi
             fi
           fi
 
