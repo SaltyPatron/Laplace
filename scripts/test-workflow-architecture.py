@@ -178,6 +178,8 @@ class WorkflowArchitecture(unittest.TestCase):
             "scripts/ci-product-freshness.py",
             "scripts/ci_product_scope.py",
             "scripts/test-parallel.sh",
+            "deploy/linux/deploy.sh",
+            "scripts/publish-applications.sh",
             "scripts/test-suites/**",
             "scripts/product-ci.sh",
             "scripts/pipeline.sh",
@@ -244,6 +246,26 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("test-managed-policy.py", checks)
         self.assertIn("test-ci-managed-projects.py", checks)
 
+
+    def test_pure_uci_change_uses_isolated_atomic_publication(self):
+        impact = (ROOT / "scripts" / "ci-impact-plan.py").read_text(encoding="utf-8")
+        product = (ROOT / "scripts" / "product-ci.sh").read_text(encoding="utf-8")
+        publish = (ROOT / "scripts" / "publish-applications.sh").read_text(encoding="utf-8")
+        deploy = (ROOT / "deploy" / "linux" / "deploy.sh").read_text(encoding="utf-8")
+
+        self.assertIn("pure_uci", impact)
+        self.assertIn('publish_scope = "uci"', impact)
+        self.assertIn('uci) bash scripts/publish-applications.sh uci-recover', product)
+        self.assertIn('uci) bash scripts/publish-applications.sh uci-deploy', product)
+        self.assertIn("verify_isolated_uci_delivery", product)
+        self.assertIn("uci-deploy|uci-recover", publish)
+        self.assertIn("LAPLACE_UCI_REVISION_RECEIPT=1", publish)
+        self.assertIn("--uci-only", deploy)
+        self.assertIn("uci_revision_snapshot", deploy)
+        self.assertIn("uci_revision_restore", deploy)
+
+        checks = product.split("run_ci_contract_checks() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("test-application-publish.py", checks)
 
     def test_web_only_plan_does_not_force_managed_rebuild(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
