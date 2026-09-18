@@ -321,3 +321,28 @@ pg_laplace_atom_window(PG_FUNCTION_ARGS)
 {
     PG_RETURN_INT64((int64) LAPLACE_PERFCACHE_RECORD_COUNT);
 }
+
+
+PG_FUNCTION_INFO_V1(pg_laplace_perfcache_receipt);
+
+Datum
+pg_laplace_perfcache_receipt(PG_FUNCTION_ARGS)
+{
+    hash128_t receipt;
+    bytea *out;
+
+    if (!laplace_perfcache_ready())
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("perfcache_receipt requires the configured T0 perfcache")));
+
+    if (codepoint_table_copy_receipt(&receipt) != 0)
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_CORRUPTED),
+                 errmsg("perfcache_receipt could not read the loaded T0 receipt")));
+
+    out = (bytea *) palloc(VARHDRSZ + sizeof(receipt));
+    SET_VARSIZE(out, VARHDRSZ + sizeof(receipt));
+    memcpy(VARDATA(out), &receipt, sizeof(receipt));
+    PG_RETURN_BYTEA_P(out);
+}
