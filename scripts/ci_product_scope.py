@@ -36,7 +36,11 @@ PRODUCT_IGNORED_EXACT = frozenset({
 })
 
 PRODUCT_IGNORED_GLOBS = (
-    "scripts/test-ci-*.py",
+    "scripts/test-*.py",
+    "scripts/test-*.sh",
+    "scripts/tests/**",
+    "web/scripts/test-*.mjs",
+    "web/e2e/**",
 )
 
 # These are the equivalent GitHub Actions paths-ignore entries. A contract test
@@ -55,7 +59,11 @@ GITHUB_PATH_IGNORES = (
     "scripts/pipeline.sh",
     "scripts/ci_managed_projects.py",
     "scripts/test-parallel.sh",
-    "scripts/test-ci-*.py",
+    "scripts/test-*.py",
+    "scripts/test-*.sh",
+    "scripts/tests/**",
+    "web/scripts/test-*.mjs",
+    "web/e2e/**",
     "scripts/test-workflow-architecture.py",
     "scripts/test-seed-workflow-ownership.py",
     "scripts/test-product-ci-artifact-ownership.py",

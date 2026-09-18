@@ -44,12 +44,19 @@ with (root / "owner.lock").open("a") as owner:
 sys.exit(9 if os.environ.get("SCHEDULER_FAIL_PROJECT") == name else 0)
 '''
 
-def owner_function():
+def owner_functions():
     source = (ROOT / "scripts/test-parallel.sh").read_text()
-    match = re.search(r"(?m)^run_managed_db\(\) \{\n.*?^\}", source, re.S)
-    if match is None:
-        raise AssertionError("canonical managed DB function not found")
-    return match.group(0)
+    blocks = []
+    for name in ("managed_test_solution", "run_managed_dotnet_tests", "run_managed_db"):
+        match = re.search(
+            rf"(?m)^{name}\(\) \{{\n.*?^\}}",
+            source,
+            re.S,
+        )
+        if match is None:
+            raise AssertionError(f"canonical managed DB helper not found: {name}")
+        blocks.append(match.group(0))
+    return "\n\n".join(blocks)
 
 class ManagedDbSchedulingTests(unittest.TestCase):
     def exercise(self, fail_project=None, parallel_mutant=False):
@@ -80,12 +87,13 @@ class ManagedDbSchedulingTests(unittest.TestCase):
                     f'<Project Path="{project}/{project}.csproj" />'
                     for project in projects) + '</Solution>'
             )
-            function = owner_function()
+            function = owner_functions()
             if parallel_mutant:
                 function = function.replace("-m:1", "-m:3").replace(
                     "-p:BuildInParallel=false", "-p:BuildInParallel=true")
             script = (
                 "set -euo pipefail\n"
+                'ROOT="$PWD"\n'
                 "set_installed_perfcache() { :; }\n"
                 "sync_managed_native() { :; }\n" +
                 function + "\nrun_managed_db\n"
