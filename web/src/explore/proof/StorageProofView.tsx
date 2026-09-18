@@ -498,7 +498,12 @@ export function StorageProofView() {
   }
 
   return (
-    <div className={styles.root} data-storage-proof-surface={STORAGE_PROOF_SURFACE_VERSION}>
+    <div
+      className={styles.root}
+      data-storage-proof-surface={STORAGE_PROOF_SURFACE_VERSION}
+      data-storage-proof-root={proof?.root_id_hex ?? ''}
+      data-storage-proof-rom={proof?.perfcache_receipt_hex ?? ''}
+    >
       <header className={styles.hero}>
         <div>
           <span className={styles.eyebrow}>Executable storage proof · T0 ROM {STORAGE_PROOF_SURFACE_VERSION}</span>
