@@ -23,7 +23,7 @@ class ImpactPlanTests(unittest.TestCase):
     def test_web_only_change_qualifies_and_publishes_without_native_or_database_mutation(self):
         value = plan("web/src/App.tsx")
         self.assertEqual(value["components"], ["web"])
-        self.assertEqual(value["build_components"], ["managed", "web"])
+        self.assertEqual(value["build_components"], ["web"])
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
