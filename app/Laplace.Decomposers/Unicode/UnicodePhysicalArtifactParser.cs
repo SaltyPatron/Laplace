@@ -64,6 +64,38 @@ internal static class UnicodePhysicalArtifactParser
         uint Codepoint,
         bool CountsSourceRow);
 
+    internal readonly record struct CjkRadicalRow(
+        string Radical,
+        uint RadicalCodepoint,
+        uint UnifiedIdeograph);
+
+    internal readonly record struct DoNotEmitRow(
+        string Sequence,
+        string Replacement,
+        string Kind);
+
+    internal readonly record struct PropertyAliasRow(
+        string CanonicalProperty,
+        string Alias,
+        bool CountsSourceRow);
+
+    internal readonly record struct PropertyValueAliasRow(
+        string Property,
+        string CanonicalValue,
+        string Alias,
+        bool CountsSourceRow);
+
+    internal readonly record struct IndexTermRow(
+        uint Codepoint,
+        string Term);
+
+    internal readonly record struct USourcePropertyRow(
+        string SourceId,
+        uint? Codepoint,
+        string Property,
+        string Value,
+        bool CountsSourceRow);
+
     internal static async IAsyncEnumerable<UnicodeDataRow> UnicodeDataAsync(
         string path,
         [EnumeratorCancellation] CancellationToken ct)
@@ -322,6 +354,158 @@ internal static class UnicodePhysicalArtifactParser
         }
     }
 
+    internal static async IAsyncEnumerable<CjkRadicalRow> CjkRadicalsAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 3) continue;
+            string radical = fields[0].Trim();
+            if (radical.Length == 0
+                || !TrySingleCodepoint(fields[1].Trim(), out uint radicalCp)
+                || !TrySingleCodepoint(fields[2].Trim(), out uint unified))
+                continue;
+            yield return new CjkRadicalRow(radical, radicalCp, unified);
+        }
+    }
+
+    internal static async IAsyncEnumerable<DoNotEmitRow> DoNotEmitAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 3
+                || !TryHexSequenceText(fields[0].Trim(), out string sequence)
+                || !TryHexSequenceText(fields[1].Trim(), out string replacement))
+                continue;
+            string kind = fields[2].Trim();
+            if (kind.Length == 0) continue;
+            yield return new DoNotEmitRow(sequence, replacement, kind);
+        }
+    }
+
+    internal static async IAsyncEnumerable<PropertyAliasRow> PropertyAliasesAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 2) continue;
+            string shortName = fields[0].Trim();
+            string canonical = fields[1].Trim();
+            if (canonical.Length == 0) continue;
+            bool first = true;
+            if (shortName.Length > 0)
+            {
+                yield return new PropertyAliasRow(canonical, shortName, first);
+                first = false;
+            }
+            for (int i = 2; i < fields.Length; ++i)
+            {
+                string alias = fields[i].Trim();
+                if (alias.Length == 0) continue;
+                yield return new PropertyAliasRow(canonical, alias, first);
+                first = false;
+            }
+        }
+    }
+
+    internal static async IAsyncEnumerable<PropertyValueAliasRow> PropertyValueAliasesAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 3) continue;
+            string property = fields[0].Trim();
+            if (property.Length == 0) continue;
+
+            int canonicalIndex = string.Equals(property, "ccc", StringComparison.Ordinal)
+                && fields.Length >= 4 ? 3 : 2;
+            string canonical = fields[canonicalIndex].Trim();
+            if (canonical.Length == 0) continue;
+
+            bool first = true;
+            for (int i = 1; i < fields.Length; ++i)
+            {
+                if (i == canonicalIndex) continue;
+                string alias = fields[i].Trim();
+                if (alias.Length == 0) continue;
+                yield return new PropertyValueAliasRow(
+                    property, canonical, alias, first);
+                first = false;
+            }
+        }
+    }
+
+    internal static async IAsyncEnumerable<IndexTermRow> IndexTermsAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            if (lineMem.IsEmpty) continue;
+            string line = Encoding.UTF8.GetString(lineMem.Span);
+            if (line.Length == 0 || line[0] == '#') continue;
+            string[] fields = line.Split('\t');
+            if (fields.Length < 2) continue;
+            string term = fields[0].Trim();
+            if (term.Length == 0 || !TrySingleCodepoint(fields[1].Trim(), out uint cp))
+                continue;
+            yield return new IndexTermRow(cp, term);
+        }
+    }
+
+    internal static async IAsyncEnumerable<USourcePropertyRow> USourceDataAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        string[] names =
+        [
+            "USource_Status", "USource_Codepoint", "kRSUnicode",
+            "USource_Virtual_KangXi_Position", "USource_IDS", "USource_Sources",
+            "USource_Comment", "kTotalStrokes", "USource_First_Residual_Stroke"
+        ];
+
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 3) continue;
+            string id = fields[0].Trim();
+            if (id.Length == 0) continue;
+
+            uint? cp = TrySingleCodepoint(fields[2].Trim(), out uint parsedCp)
+                ? parsedCp
+                : null;
+            bool first = true;
+            int available = Math.Min(names.Length, fields.Length - 1);
+            for (int i = 0; i < available; ++i)
+            {
+                string value = fields[i + 1].Trim();
+                if (value.Length == 0) continue;
+                yield return new USourcePropertyRow(
+                    id, cp, names[i], value, first);
+                first = false;
+            }
+        }
+    }
+
     internal static async IAsyncEnumerable<MirrorRow> MirrorsAsync(
         string path,
         [EnumeratorCancellation] CancellationToken ct)
@@ -413,6 +597,17 @@ internal static class UnicodePhysicalArtifactParser
                 if (cp == 0x10FFFFu) break;
             }
         }
+    }
+
+    private static bool TrySingleCodepoint(string value, out uint codepoint)
+    {
+        string token = value.Trim();
+        if (token.StartsWith("U+", StringComparison.OrdinalIgnoreCase))
+            token = token[2..];
+        return uint.TryParse(
+                token, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out codepoint)
+            && codepoint <= 0x10FFFFu
+            && codepoint is < 0xD800u or > 0xDFFFu;
     }
 
     private static bool TryHexSequenceText(string value, out string sequence)
