@@ -17,6 +17,21 @@ $env:PGCONNECT_TIMEOUT = '3'
 
 function Section($t) { Write-Host "`n=== $t ===" }
 
+function Get-T0ReceiptHex([string]$Path) {
+    if (-not (Test-Path $Path)) { return $null }
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+        if ($stream.Length -lt 16) { return $null }
+        [void]$stream.Seek(-16, [System.IO.SeekOrigin]::End)
+        $bytes = New-Object byte[] 16
+        $read = $stream.Read($bytes, 0, $bytes.Length)
+        if ($read -ne 16) { return $null }
+        return (($bytes | ForEach-Object { $_.ToString('x2') }) -join '')
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 Section 'GIT'
 Push-Location $Root
 $branch = git rev-parse --abbrev-ref HEAD
@@ -126,6 +141,23 @@ if ($svc.Status -eq 'Running' -or $port5432) {
         Write-Host "row estimates: $(($counts | Where-Object { $_ }) -join ', ')"
         $ver = & $psql -h localhost -U postgres -d laplace -tAc "SELECT extversion FROM pg_extension WHERE extname = 'laplace_substrate';" 2>&1
         Write-Host "laplace db substrate version: $ver"
+
+        $fileReceipt = Get-T0ReceiptHex (Join-Path $deployShare 'laplace_t0_perfcache.bin')
+        $receiptOutput = & $psql -h localhost -U postgres -d laplace -tAc "SELECT encode(laplace.perfcache_receipt(),'hex');" 2>&1
+        $receiptRc = $LASTEXITCODE
+        $dbReceipt = if ($receiptRc -eq 0) { ($receiptOutput | Where-Object { $_ } | Select-Object -Last 1).Trim() } else { $null }
+        if (-not $fileReceipt) {
+            Write-Host "T0 ROM receipt: deployed file unreadable" -ForegroundColor Red
+        } elseif (-not $dbReceipt) {
+            Write-Host "T0 ROM receipt: DB unavailable (extension upgrade/postmaster restart required)" -ForegroundColor Yellow
+        } elseif ($dbReceipt -eq $fileReceipt) {
+            Write-Host "T0 ROM receipt: DB mmap = deployed v4 file ($dbReceipt)"
+        } else {
+            Write-Host "T0 ROM receipt: MISMATCH" -ForegroundColor Red
+            Write-Host "  deployed: $fileReceipt" -ForegroundColor Red
+            Write-Host "  database: $dbReceipt" -ForegroundColor Red
+            Write-Host "  Restart postgresql-x64-18; backend recycle alone cannot replace a shared-preload mmap." -ForegroundColor Yellow
+        }
     }
 }
 
