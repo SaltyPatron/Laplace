@@ -47,27 +47,27 @@ on:
         description: "comma-separated DB-tier managed test csproj paths"
         type: string
         required: false
-        default: all
+        default: ""
       managed_live_test_projects:
         description: "comma-separated live-tier managed test csproj paths"
         type: string
         required: false
-        default: all
+        default: ""
       db_suites:
         description: "comma-separated database suites selected by the impact planner"
         type: string
         required: false
-        default: all
+        default: ""
       live_suites:
         description: "comma-separated live suites selected by the impact planner"
         type: string
         required: false
-        default: all
+        default: ""
       delivery_actions:
         description: "comma-separated release-delivery mutations selected by the impact planner"
         type: string
         required: false
-        default: all
+        default: ""
       publish_scope:
         description: "full or api publication scope"
         type: string
