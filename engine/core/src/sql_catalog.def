@@ -521,3 +521,22 @@ SQL_QUERY("billing.complete_webhook", "text,text",
     "UPDATE app.billing_webhook_events SET status=$2,updated_at=now() WHERE event_id=$1")
 SQL_QUERY("billing.webhook_status", "text",
     "SELECT status FROM app.billing_webhook_events WHERE event_id=$1")
+
+SQL_QUERY("entities.present_ordinals_fallback", "bytea[]",
+    "SELECT (u.ord-1)::int FROM unnest($1::bytea[]) WITH ORDINALITY u(id,ord) "
+    "JOIN laplace.entities e ON e.id=u.id")
+
+SQL_QUERY("consensus.evidence_rows_typed", "bytea[],bytea[]",
+    "WITH requested AS MATERIALIZED ("
+    " SELECT * FROM unnest($1::bytea[],$2::bytea[]) WITH ORDINALITY AS b(s,o,ord)) "
+    "SELECT b.ord,a.id,a.last_observed_at,a.observation_count,a.sum_score_fp1e9,"
+    " a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,a.fold_replayable "
+    " FROM requested b JOIN laplace.attestations a "
+    " ON a.type_id='\\x%s'::bytea AND a.subject_id=b.s AND a.object_id=b.o "
+    " WHERE b.o IS NOT NULL "
+    " UNION ALL "
+    "SELECT b.ord,a.id,a.last_observed_at,a.observation_count,a.sum_score_fp1e9,"
+    " a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,a.fold_replayable "
+    " FROM requested b JOIN laplace.attestations a "
+    " ON a.type_id='\\x%s'::bytea AND a.subject_id=b.s AND a.object_id IS NULL "
+    " WHERE b.o IS NULL ORDER BY 1,3,2")

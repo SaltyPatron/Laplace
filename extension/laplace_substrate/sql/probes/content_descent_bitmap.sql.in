@@ -6,5 +6,5 @@
 -- pg_laplace_content_descent_bitmap() in laplace_substrate.c.
 CREATE OR REPLACE FUNCTION laplace.content_descent_bitmap(ids bytea[], parents int[])
     RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_content_descent_bitmap'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_content_descent_bitmap'
     LANGUAGE C STABLE;

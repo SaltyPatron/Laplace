@@ -1,14 +1,9 @@
--- Generic id-only entity presence is a thin fixed SQL surface over one set
--- operation. It is intentionally PARALLEL RESTRICTED: caller-side batching owns
--- concurrency, so a single probe must not recursively fan into Gather workers.
+-- Ordinals and bitmaps share the native HASH(id) set scan. The input's order,
+-- duplicates and zero-based ordinals survive routing; NULL/malformed ids miss.
 CREATE OR REPLACE FUNCTION laplace.entities_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
-    LANGUAGE sql STABLE PARALLEL RESTRICTED
-AS $$
-    SELECT (u.ord - 1)::int
-    FROM unnest(p_ids) WITH ORDINALITY u(id, ord)
-    JOIN laplace.entities e ON e.id = u.id
-$$;
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_entities_present_ordinals'
+    LANGUAGE C STABLE PARALLEL RESTRICTED;
 
 -- The old (ids,tiers) plpgsql overload materialized a temp table, built an index,
 -- looped tiers, and dynamically relied on per-iteration planning. It has no caller:

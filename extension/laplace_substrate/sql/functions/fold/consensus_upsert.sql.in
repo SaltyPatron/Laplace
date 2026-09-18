@@ -91,7 +91,7 @@ CREATE OR REPLACE FUNCTION consensus.upsert(
     p_period_games bigint[] DEFAULT NULL,
     p_period_sums bigint[] DEFAULT NULL)
     RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert'
     LANGUAGE C VOLATILE
     SET plan_cache_mode = force_custom_plan
     SET enable_material = off
@@ -116,7 +116,7 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     p_period_games bigint[] DEFAULT NULL,
     p_period_sums bigint[] DEFAULT NULL)
     RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert_type'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert_type'
     LANGUAGE C VOLATILE
     SET plan_cache_mode = force_custom_plan
     SET enable_material = off
@@ -144,7 +144,7 @@ CREATE OR REPLACE FUNCTION consensus.upsert_evidence_type(
     p_period_games bigint[] DEFAULT NULL,
     p_period_sums bigint[] DEFAULT NULL)
     RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert_evidence_type'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert_evidence_type'
     LANGUAGE C VOLATILE
     SET plan_cache_mode = force_custom_plan
     SET enable_material = off
@@ -159,7 +159,7 @@ CREATE OR REPLACE FUNCTION consensus.upsert_evidence_type(
 CREATE OR REPLACE FUNCTION consensus.refold_evidence_type(
     p_type bytea, p_subjects bytea[], p_objects bytea[])
     RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_refold_evidence_type'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_refold_evidence_type'
     LANGUAGE C VOLATILE
     SET plan_cache_mode = force_custom_plan
     SET enable_material = off
@@ -175,5 +175,5 @@ CREATE OR REPLACE FUNCTION consensus.partition_leaf(
     p_type bytea,
     p_subject bytea)
     RETURNS regclass
-    AS 'MODULE_PATHNAME', 'pg_laplace_consensus_partition_leaf'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_partition_leaf'
     LANGUAGE C STABLE STRICT PARALLEL RESTRICTED;

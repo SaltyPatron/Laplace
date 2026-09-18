@@ -62,13 +62,12 @@ topic AS (
 -- capital-family intersection scored ZERO hits and sacramento ranked flat.
 -- The bias head is a DISTRIBUTION over the token's senses; collapsing it to
 -- one sense before the intersection is the KVP mistake this function exists
--- to not make. lexical.senses() per bias token is a per-row SRF over 2-6 rows --
--- tolerated here, ported to C with the rest when this graduates.
+-- to not make. Elect the complete bias-token set in one batch.
 bias AS (
     SELECT DISTINCT s.synset_id
-    FROM ranked r
-    CROSS JOIN LATERAL lexical.senses(r.tok) s
-    WHERE r.rk > 1 AND s.synset_id IS NOT NULL
+    FROM lexical.senses_batch(ARRAY(
+        SELECT DISTINCT r.tok FROM ranked r WHERE r.rk > 1)) s
+    WHERE s.synset_id IS NOT NULL
 ),
 -- The in-edge arm probes with = ANY(array), never a join. laplace.consensus is
 -- LIST(type_id) with hash sub-partitions and this read constrains only

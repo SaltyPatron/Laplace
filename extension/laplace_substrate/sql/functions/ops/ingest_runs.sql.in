@@ -86,18 +86,29 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    UPDATE @extschema@.ingest_run_journal
+    -- File lifecycle writes are sets. Touch each owning run once per statement,
+    -- including COPY and conflict-update statements, rather than once per file.
+    UPDATE @extschema@.ingest_run_journal j
        SET heartbeat_at = clock_timestamp()
-     WHERE run_id = NEW.run_id
-       AND status = 'running';
+      FROM (SELECT DISTINCT run_id FROM changed_files) f
+     WHERE j.run_id = f.run_id
+       AND j.status = 'running';
     RETURN NULL;
 END
 $$;
 
 DROP TRIGGER IF EXISTS ingest_file_touch_run ON @extschema@.ingest_file_journal;
-CREATE TRIGGER ingest_file_touch_run
-AFTER INSERT OR UPDATE ON @extschema@.ingest_file_journal
-FOR EACH ROW
+DROP TRIGGER IF EXISTS ingest_file_touch_run_insert ON @extschema@.ingest_file_journal;
+DROP TRIGGER IF EXISTS ingest_file_touch_run_update ON @extschema@.ingest_file_journal;
+CREATE TRIGGER ingest_file_touch_run_insert
+AFTER INSERT ON @extschema@.ingest_file_journal
+REFERENCING NEW TABLE AS changed_files
+FOR EACH STATEMENT
+EXECUTE FUNCTION ops.ingest_file_touch_run();
+CREATE TRIGGER ingest_file_touch_run_update
+AFTER UPDATE ON @extschema@.ingest_file_journal
+REFERENCING NEW TABLE AS changed_files
+FOR EACH STATEMENT
 EXECUTE FUNCTION ops.ingest_file_touch_run();
 
 CREATE OR REPLACE FUNCTION ops.ingest_reconcile_orphans(
@@ -111,7 +122,7 @@ LANGUAGE sql
 VOLATILE
 SECURITY DEFINER
 SET search_path = pg_catalog, laplace, ops
-AS $$
+BEGIN ATOMIC
     WITH dead AS (
         UPDATE laplace.ingest_run_journal j
            SET status = 'cancelled',
@@ -133,7 +144,7 @@ AS $$
     )
     SELECT d.run_id, d.source_name, d.input_units_done, d.input_units_total
       FROM dead d;
-$$;
+END;
 
 -- Ingest run history, newest first. This is a read surface and must stay valid
 -- inside the Operator API's read-only transaction. A stale persisted `running`
@@ -146,7 +157,7 @@ LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, laplace, ops
-AS $$
+BEGIN ATOMIC
     SELECT jsonb_populate_record(
                j,
                CASE
@@ -164,4 +175,4 @@ AS $$
       FROM laplace.ingest_run_journal j
      ORDER BY j.started_at DESC
      LIMIT greatest(p_limit, 0);
-$$;
+END;

@@ -247,9 +247,12 @@ spi_mark_present_ordinals(const char *sql, int narg, Oid *argtypes, Datum *args,
  * only when probing `entities` (a codepoint id IS an entity id by axiom);
  * other tables' ids derive differently and must always hit the real query.
  */
+static int identity_presence_core(ArrayType *ids_array, uint8_t *bm,
+    int candidate_count, const char *relation_name, const char *ordinals_sql);
+
 static int
 batch_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count,
-                    const char *ordinals_sql, bool use_perfcache)
+                    const char *ordinals_sql, bool use_perfcache, const char *identity_relation)
 {
     Datum      *elems;
     bool       *nulls;
@@ -318,9 +321,10 @@ batch_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count,
     argtypes[0] = BYTEAARRAYOID;
     args[0] = PointerGetDatum(probe_array);
 
-    spi_rc = spi_mark_present_ordinals(
-        ordinals_sql,
-        1, argtypes, args, sub_bm, probe_n);
+    spi_rc = identity_relation != NULL
+        ? identity_presence_core(probe_array, sub_bm, probe_n,
+                                 identity_relation, ordinals_sql)
+        : spi_mark_present_ordinals(ordinals_sql, 1, argtypes, args, sub_bm, probe_n);
 
     if (spi_rc == SPI_OK_SELECT)
     {
@@ -344,16 +348,16 @@ int
 laplace_entities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 {
     return batch_presence_core(ids_array, bm, candidate_count,
-                               "SELECT idx FROM laplace.entities_present_ordinals($1)",
-                               true);
+                               laplace_sql_query_text("entities.present_ordinals_fallback"),
+                               true, "entities");
 }
 
 int
 laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 {
     return batch_presence_core(ids_array, bm, candidate_count,
-                               "SELECT idx FROM laplace.entities_present_ordinals($1)",
-                               true);
+                               laplace_sql_query_text("entities.present_ordinals_fallback"),
+                               true, "entities");
 }
 
 /*
@@ -532,14 +536,14 @@ laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_
                                      "SELECT idx FROM laplace.attestations_present_ordinals($1, $2, $3)");
 }
 
-typedef struct PhysicalityPresence
+typedef struct IdentityPresence
 {
     unsigned char id[16];
     bool present;
-} PhysicalityPresence;
+} IdentityPresence;
 
 static void
-mark_physicality_presence(TupleTableSlot *slot, AttrNumber id, void *opaque)
+mark_identity_presence(TupleTableSlot *slot, AttrNumber id, void *opaque)
 {
     bool isnull;
     Datum value = slot_getattr(slot, id, &isnull);
@@ -548,22 +552,21 @@ mark_physicality_presence(TupleTableSlot *slot, AttrNumber id, void *opaque)
         bytea *bytes = DatumGetByteaPP(value);
         if (VARSIZE_ANY_EXHDR(bytes) == 16)
         {
-            PhysicalityPresence *entry = hash_search(opaque, VARDATA_ANY(bytes), HASH_FIND, NULL);
+            IdentityPresence *entry = hash_search(opaque, VARDATA_ANY(bytes), HASH_FIND, NULL);
             if (entry != NULL) entry->present = true;
         }
     }
 }
 
-int
-laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+static int
+identity_presence_core(ArrayType *ids_array, uint8_t *bm, int candidate_count,
+                       const char *relation_name, const char *ordinals_sql)
 {
-    /* Physicality ids are their own content hashes, never codepoint ids --
-     * perfcache fast path off by construction. Serves the write lane's
-     * in-transaction verification: a physicality row may legitimately be
-     * staged for an entity that already exists (projections, building
-     * blocks land after the entity), so presence is decided by the
-     * physicality's OWN id, never inferred from its entity. */
-    Oid root_oid = get_relname_relid("physicalities", get_namespace_oid("laplace", false));
+    /* One physical implementation for every HASH(id) presence operation.
+     * Route the complete set with PostgreSQL's partition hash support, then
+     * perform native array index scans under the caller's MVCC snapshot. */
+    if (candidate_count <= 0) return SPI_OK_SELECT;
+    Oid root_oid = get_relname_relid(relation_name, get_namespace_oid("laplace", false));
     Relation root = table_open(root_oid, AccessShareLock);
     PartitionKey key = RelationGetPartitionKey(root);
     PartitionDesc desc;
@@ -585,7 +588,7 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
     {
         table_close(root, AccessShareLock);
         return batch_presence_core(ids_array, bm, candidate_count,
-            laplace_sql_query_text("physicalities.present_ordinals"), false);
+            ordinals_sql, false, NULL);
     }
     desc = RelationGetPartitionDesc(root, false);
     /* Parent grants need not be repeated on children. Keep the parent query
@@ -601,12 +604,12 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
         {
             table_close(root, AccessShareLock);
             return batch_presence_core(ids_array, bm, candidate_count,
-                laplace_sql_query_text("physicalities.present_ordinals"), false);
+                ordinals_sql, false, NULL);
         }
     }
     deconstruct_array(ids_array, BYTEAOID, -1, false, 'i', &ids, &nulls, &n);
     if (n != candidate_count)
-        ereport(ERROR, (errmsg("physicality probe candidate count mismatch")));
+        ereport(ERROR, (errmsg("identity probe candidate count mismatch")));
     owners = palloc(sizeof(int) * n);
     counts = palloc0(sizeof(int) * desc->nparts);
     offsets = palloc0(sizeof(int) * (desc->nparts + 1));
@@ -614,9 +617,9 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
     routed_ids = palloc(sizeof(Datum) * n);
     memset(&presence_ctl, 0, sizeof(presence_ctl));
     presence_ctl.keysize = 16;
-    presence_ctl.entrysize = sizeof(PhysicalityPresence);
+    presence_ctl.entrysize = sizeof(IdentityPresence);
     presence_ctl.hcxt = CurrentMemoryContext;
-    presence = hash_create("physicality batch presence", Max(n, 1), &presence_ctl,
+    presence = hash_create("identity batch presence", Max(n, 1), &presence_ctl,
         HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     for (int i = 0; i < n; i++)
     {
@@ -632,7 +635,7 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
         owner = desc->boundinfo->indexes[hash % desc->boundinfo->nindexes];
         if (owner < 0) continue;
         if (!desc->is_leaf[owner])
-            ereport(ERROR, (errmsg("physicality HASH child must be a leaf")));
+            ereport(ERROR, (errmsg("identity HASH child must be a leaf")));
         owners[i] = owner;
         counts[owner]++;
     }
@@ -645,7 +648,7 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
         int at = offsets[owner] + next[owner]++;
         routed_ids[at] = ids[i];
         bool found;
-        PhysicalityPresence *entry = hash_search(presence,
+        IdentityPresence *entry = hash_search(presence,
             VARDATA_ANY(DatumGetByteaPP(ids[i])), HASH_ENTER, &found);
         if (!found) entry->present = false;
     }
@@ -655,10 +658,10 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
         CHECK_FOR_INTERRUPTS();
         ArrayType *id_array = construct_array(routed_ids + offsets[p], counts[p],
             BYTEAOID, -1, false, 'i');
-        if (!laplace_identity_scan(desc->oids[p], id_array, mark_physicality_presence, presence))
+        if (!laplace_identity_scan(desc->oids[p], id_array, mark_identity_presence, presence))
         {
             rc = batch_presence_core(ids_array, bm, candidate_count,
-                laplace_sql_query_text("physicalities.present_ordinals"), false);
+                ordinals_sql, false, NULL);
             pfree(id_array);
             break;
         }
@@ -667,7 +670,7 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
     for (int i = 0; i < n; i++)
     {
         if (owners[i] < 0) continue;
-        PhysicalityPresence *entry = hash_search(presence,
+        IdentityPresence *entry = hash_search(presence,
             VARDATA_ANY(DatumGetByteaPP(ids[i])), HASH_FIND, NULL);
         if (entry != NULL && entry->present) bitmap_set(bm, i);
     }
@@ -684,6 +687,13 @@ laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int cand
 }
 
 int
+laplace_physicalities_present_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
+{
+    return batch_presence_core(ids_array, bm, candidate_count,
+        laplace_sql_query_text("physicalities.present_ordinals"), false, "physicalities");
+}
+
+int
 laplace_entities_stored_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_count)
 {
     /* Perfcache fast path deliberately OFF: this probe answers "is there a
@@ -693,8 +703,8 @@ laplace_entities_stored_bitmap(ArrayType *ids_array, uint8_t *bm, int candidate_
      * axiomatically here would subtract them from the write list and the
      * rows would never land. */
     return batch_presence_core(ids_array, bm, candidate_count,
-                               "SELECT idx FROM laplace.entities_present_ordinals($1)",
-                               false);
+                               laplace_sql_query_text("entities.present_ordinals_fallback"),
+                               false, "entities");
 }
 
 /*

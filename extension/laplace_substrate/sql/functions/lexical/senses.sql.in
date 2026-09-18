@@ -6,37 +6,22 @@
 -- lexical.senses — GH #862. Every call site moves in this same commit; a rename
 -- with a live caller is a tree that does not install.
 DROP FUNCTION IF EXISTS laplace.senses(bytea);
+-- One election for a set of distinct terms. Scalar callers delegate here;
+-- stream callers bind the whole term set before entering the taxonomy cascade.
+CREATE OR REPLACE FUNCTION lexical.senses_batch(p_words bytea[])
+    RETURNS TABLE(term bytea, sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    SELECT b.term, b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
+    FROM taxonomy.bubble_up_batch(p_words, NULL::bytea[], 64) b
+    ORDER BY b.term, b.witnesses DESC, b.score DESC;
+END;
+
 CREATE OR REPLACE FUNCTION lexical.senses(p_word bytea)
     RETURNS TABLE(sense_id bytea, synset_id bytea, eff_mu numeric, witnesses bigint)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    -- ROWS is the STRUCTURAL bound below, not an estimate: bubble_up is called with
-    -- p_k = 64, so this cannot return more. Undeclared, Postgres assumes 1000 for a
-    -- set-returning function -- 15.6x high on the bias-expansion path, where the
-    -- estimate decides join order. 239 of the 244 set-returning functions in this
-    -- surface still ship that default; each needs a measured cardinality or a bound
-    -- like this one, never a guessed number.
-    ROWS 64
+    LANGUAGE sql STABLE PARALLEL SAFE ROWS 64
 BEGIN ATOMIC
-    SELECT b.sense_id, b.synset_id, b.base_eff_mu, b.witnesses
-    FROM taxonomy.bubble_up(p_word, NULL::bytea[], 64) b
-    -- EVIDENCE BEFORE ADJUDICATED STRENGTH — see the matching note in
-    -- bubble_up.sql.in. This ORDER BY is the one that decides what callers see:
-    -- bubble_up's own ordering only selects which 64 candidates survive its
-    -- LIMIT, and this re-sorts them.
-    --
-    -- Measured on the foundation ladder before the change,
-    -- lexical.senses(laplace.word_id('water')):
-    --     urine   1 witness   1169.73   <- elected
-    --     water   1 witness   1169.73
-    --     water   1 witness   1169.73
-    --     water   2 witnesses 1168.45
-    --     water   2 witnesses 1165.57
-    -- Three senses tie exactly at the top on one witness each, so the id memcmp
-    -- decided, and it chose urine over water for the word "water". Senses with
-    -- twice the evidence sat below, losing by 1.28 on a quantity whose
-    -- uncertainty term exceeds its signal — W16 3.2 measured mean
-    -- |rating - neutral| 192.85 against mean rd 262.24 across 447,145 consensus
-    -- rows, so 2*rd runs ~2.7x the signal and consensus.eff_mu sorts substantially by how
-    -- little rd has shrunk.
-    ORDER BY b.witnesses DESC, b.score DESC;
+    SELECT b.sense_id, b.synset_id, b.eff_mu, b.witnesses
+    FROM lexical.senses_batch(ARRAY[p_word]) WITH ORDINALITY b
+    ORDER BY b.ordinality;
 END;

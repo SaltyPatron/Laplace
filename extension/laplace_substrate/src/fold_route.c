@@ -38,7 +38,7 @@
  * neutral prior. The scalar remains only in the collision MERGE fallback for
  * a concurrently-inserted cell (see UPSERT_MERGE_SQL). The atomic evidence-backed
  * entry point instead folds ALL replayable testimony from neutral with the
- * existing consensus_fold aggregate; arbitrary storage flushes are not periods.
+ * same grouped-period kernel as consensus_fold; storage flushes are not periods.
  * Cells containing transient continuous evidence retain the explicit delta law.
  * consensus_id stays one implementation the same way: the SQL definition IS
  * blake3(subject || type || COALESCE(object, 16 zero bytes)) via the core
@@ -68,6 +68,7 @@
 #include "laplace/core/hash128.h"
 #include "laplace/core/glicko2.h"
 
+#include "laplace/core/sql_catalog.h"
 #include "consensus_fold_math.h"
 #include "consensus_bulk_write.h"
 
@@ -1647,47 +1648,10 @@ static const char *EVIDENCE_LOCK_SQL =
     "ORDER BY b.id,b.s "
     "ON CONFLICT (id,type_id,subject_id) DO UPDATE SET rating=c.rating WHERE false";
 
-/* The complete indexed testimony of the requested cells is selected once.
- * Only fully replayable cells enter the existing consensus_fold aggregate.
- * A continuous transient score is never reconstructed from its categorical
- * receipt, including when the incoming delta itself is replayable. */
-/* Qualify the entire evidence cell before invoking the native aggregate.
- * Joining materialized flags back to evidence can choose one full evidence
- * rescan per requested cell when cardinality estimates are low. The window
- * preserves every observation and excludes every row of a mixed/transient
- * cell without that cross-cell join. Keep aggregate ordering and response
- * flags/counts unchanged. */
-static const char *EVIDENCE_FOLD_SQL =
-    "WITH requested AS MATERIALIZED ("
-    " SELECT * FROM unnest($1::bytea[],$2::bytea[]) WITH ORDINALITY AS b(s,o,ord)), "
-    "evidence AS MATERIALIZED ("
-    " SELECT b.ord,a.id,a.last_observed_at,a.observation_count,a.sum_score_fp1e9,"
-    " a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,a.fold_replayable "
-    " FROM requested b JOIN laplace.attestations a "
-    " ON a.type_id='\\x%s'::bytea AND a.subject_id=b.s AND a.object_id=b.o "
-    " WHERE b.o IS NOT NULL "
-    " UNION ALL "
-    " SELECT b.ord,a.id,a.last_observed_at,a.observation_count,a.sum_score_fp1e9,"
-    " a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,a.fold_replayable "
-    " FROM requested b JOIN laplace.attestations a "
-    " ON a.type_id='\\x%s'::bytea AND a.subject_id=b.s AND a.object_id IS NULL "
-    " WHERE b.o IS NULL), "
-    "flags AS MATERIALIZED ("
-    " SELECT ord,bool_and(fold_replayable) AS replayable,count(*) AS n "
-    " FROM evidence GROUP BY ord), "
-    "folded AS MATERIALIZED ("
-    " SELECT a.ord,laplace.consensus_fold(false,NULL,NULL,NULL,"
-    " a.opponent_rating_fp1e9,a.opponent_rd_fp1e9,GREATEST(a.observation_count,1),"
-    " a.sum_score_fp1e9,consensus.glicko2_tau() ORDER BY a.last_observed_at,a.id) AS acc,"
-    " max(a.last_observed_at) AS ts "
-    " FROM (SELECT evidence.*,"
-    " bool_and(fold_replayable) OVER (PARTITION BY ord) AS cell_replayable"
-    " FROM evidence) a WHERE a.cell_replayable "
-    " GROUP BY a.ord) "
-    "SELECT b.ord,f.replayable,f.n,(g.acc).rating,(g.acc).rd,(g.acc).volatility,"
-    " (g.acc).witness_count,g.ts "
-    "FROM requested b LEFT JOIN flags f ON f.ord=b.ord "
-    "LEFT JOIN folded g ON g.ord=b.ord";
+/* PostgreSQL selects the complete typed workset once. Native code owns cell
+ * qualification and grouped-period reduction. Preserve the aggregate's exact
+ * evidence order without SQL window/flag/fold materializations and rejoins. */
+
 
 static const char *EVIDENCE_WRITE_SQL =
     "UPDATE laplace.consensus c SET "
@@ -1745,7 +1709,7 @@ read_evidence_states(const uint8_t *type16, const InArray *subjects,
     static const Oid args[2] = {BYTEAARRAYOID,BYTEAARRAYOID};
     Datum vals[2] = {PointerGetDatum(subjects->array),PointerGetDatum(objects->array)};
     SPIPlanPtr plan = typed_plan(&evidence_fold_plans,
-        "consensus exact durable evidence",type16,EVIDENCE_FOLD_SQL,2,args);
+        "consensus exact durable evidence",type16,laplace_sql_query_text("consensus.evidence_rows_typed"),2,args);
     FoldEvidenceStates *out = palloc(sizeof(*out));
     bool *visited = palloc0(sizeof(bool)*subjects->n);
     out->recomputed = palloc0(sizeof(bool)*subjects->n);
@@ -1757,46 +1721,97 @@ read_evidence_states(const uint8_t *type16, const InArray *subjects,
     /* Non-readonly SPI takes a fresh READ COMMITTED snapshot AFTER all target
      * locks. A writer which waited for another apply must see its committed A. */
     int rc = SPI_execute_plan(plan,vals,NULL,false,0);
-    if (rc != SPI_OK_SELECT || SPI_processed != (uint64)subjects->n)
-        ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
-                       errmsg("%s: durable evidence read lost target coverage",label)));
-    for (uint64 r=0;r<SPI_processed;r++)
+    if (rc != SPI_OK_SELECT)
+        elog(ERROR, "%s: durable evidence read failed", label);
+    uint64 rows = SPI_processed;
+    SPITupleTable *tuples = SPI_tuptable;
+    int64_t *opponents = NULL, *phis = NULL, *counts = NULL, *sums = NULL;
+    Size capacity = 0;
+    uint64 row = 0;
+    while (row < rows)
     {
-        HeapTuple tuple=SPI_tuptable->vals[r];
-        TupleDesc desc=SPI_tuptable->tupdesc;
-        Datum values[8];
-        bool nulls[8];
-        for (int c=0;c<8;c++)
-            values[c]=SPI_getbinval(tuple,desc,c+1,&nulls[c]);
-        int64 ord=DatumGetInt64(values[0]);
-        if (nulls[0] || ord<1 || ord>subjects->n || visited[ord-1])
-            ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
-                           errmsg("%s: invalid durable evidence target ordinal",label)));
-        int i=(int)ord-1;
-        visited[i]=true;
-        if (nulls[1] || nulls[2] || DatumGetInt64(values[2])<=0)
-            ereport(ERROR,(errcode(ERRCODE_DATA_EXCEPTION),
-                           errmsg("%s: target has no durable accepted testimony",label),
-                           errdetail("cell_index=%d",i)));
-        if (!DatumGetBool(values[1]))
+        CHECK_FOR_INTERRUPTS();
+        bool isnull;
+        int64 ord = DatumGetInt64(SPI_getbinval(tuples->vals[row], tuples->tupdesc, 1, &isnull));
+        if (isnull || ord < 1 || ord > subjects->n || visited[ord - 1])
+            elog(ERROR, "%s: invalid durable evidence target ordinal", label);
+        int i = (int) ord - 1;
+        visited[i] = true;
+        Size groups = 0;
+        int64 witnesses = 0;
+        Datum latest = (Datum) 0;
+        bool replayable = true;
+        do
+        {
+            Datum values[8];
+            bool nulls[8];
+            for (int c = 0; c < 8; ++c)
+                values[c] = SPI_getbinval(tuples->vals[row], tuples->tupdesc, c + 1, &nulls[c]);
+            for (int c = 0; c < 8; ++c)
+                if (nulls[c]) elog(ERROR, "%s: incomplete durable evidence row", label);
+            replayable &= DatumGetBool(values[7]);
+            if (groups == capacity)
+            {
+                Size next = capacity == 0 ? 8 : capacity * 2;
+                if (next > MaxAllocSize / sizeof(int64_t))
+                    ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                        errmsg("%s: evidence cell exceeds allocation capacity", label)));
+                opponents = opponents ? repalloc(opponents, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
+                phis = phis ? repalloc(phis, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
+                counts = counts ? repalloc(counts, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
+                sums = sums ? repalloc(sums, next * sizeof(int64_t)) : palloc(next * sizeof(int64_t));
+                capacity = next;
+            }
+            opponents[groups] = DatumGetInt64(values[5]);
+            if (opponents[groups] == 0) opponents[groups] = CONSENSUS_FOLD_NEUTRAL_MU;
+            phis[groups] = DatumGetInt64(values[6]);
+            counts[groups] = Max(DatumGetInt64(values[3]), INT64CONST(1));
+            sums[groups] = DatumGetInt64(values[4]);
+            ++groups;
+            latest = values[2];
+            ++row;
+            if (row == rows) break;
+            int64 next = DatumGetInt64(SPI_getbinval(tuples->vals[row], tuples->tupdesc, 1, &isnull));
+            if (isnull || next != ord) break;
+        } while (true);
+        if (!replayable)
         {
             if (replayable_only)
-                ereport(ERROR,(errcode(ERRCODE_DATA_EXCEPTION),
-                               errmsg("%s: non-replayable testimony has no retained continuous score",label),
-                               errdetail("cell_index=%d",i)));
+                ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                    errmsg("%s: non-replayable testimony has no retained continuous score", label),
+                    errdetail("cell_index=%d", i)));
             continue;
         }
-        for (int c=3;c<8;c++)
-            if (nulls[c])
-                ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
-                               errmsg("%s: incomplete canonical evidence fold",label)));
-        out->recomputed[i]=true;
-        priors->ratings[i]=values[3];
-        priors->rds[i]=values[4];
-        priors->volatilities[i]=values[5];
-        out->counts[i]=values[6];
-        out->timestamps[i]=values[7];
+        for (Size g = 0; g < groups; ++g)
+        {
+            if (witnesses > PG_INT64_MAX - counts[g])
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("%s: witness count exceeds bigint capacity", label)));
+            witnesses += counts[g];
+        }
+        glicko2_state_t state;
+        glicko2_init(&state, CONSENSUS_FOLD_NEUTRAL_MU,
+            CONSENSUS_FOLD_INITIAL_RD, CONSENSUS_FOLD_INITIAL_VOLATILITY);
+        if (glicko2_fold_grouped_period(&state, opponents, phis, counts, sums,
+                groups, LAPLACE_GLICKO2_DEFAULT_TAU, 0) != 0)
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("%s: grouped rating-period update failed", label)));
+        out->recomputed[i] = true;
+        priors->ratings[i] = Int64GetDatum(state.rating);
+        priors->rds[i] = Int64GetDatum(state.rd);
+        priors->volatilities[i] = Int64GetDatum(state.volatility);
+        out->counts[i] = Int64GetDatum(witnesses);
+        out->timestamps[i] = latest;
     }
+    for (int i = 0; i < subjects->n; ++i)
+        if (!visited[i])
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                errmsg("%s: target has no durable accepted testimony", label),
+                errdetail("cell_index=%d", i)));
+    if (opponents) pfree(opponents);
+    if (phis) pfree(phis);
+    if (counts) pfree(counts);
+    if (sums) pfree(sums);
     SPI_freetuptable(SPI_tuptable);
     pfree(visited);
     return out;
