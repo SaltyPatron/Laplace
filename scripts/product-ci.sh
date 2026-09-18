@@ -184,9 +184,17 @@ reconcile_installed_product() {
 
 run_release_qualification() {
   check_deps
+
+  # Do not spend build/test time on a revision that was already superseded
+  # while waiting for the self-hosted runner.
+  local current_rc=0
+  release_selected_revision_current || current_rc=$?
+  if (( current_rc == 3 )); then return 0; fi
+  (( current_rc == 0 )) || return "$current_rc"
+
   run_build
 
-  local current_rc=0
+  current_rc=0
   release_selected_revision_current || current_rc=$?
   if (( current_rc == 3 )); then return 0; fi
   (( current_rc == 0 )) || return "$current_rc"
