@@ -97,7 +97,7 @@ BEGIN
     )
     UPDATE @extschema@.entities e
        SET tier = LEAST(e.tier, s.tier),
-           type_id = LEAST(e.type_id, s.type_id),
+           type_id = CASE WHEN e.type_id <= s.type_id THEN e.type_id ELSE s.type_id END,
            first_observed_by = CASE
                WHEN e.first_observed_by IS NULL THEN s.first_observed_by
                WHEN s.first_observed_by IS NULL THEN e.first_observed_by
@@ -109,7 +109,7 @@ BEGIN
        AND (e.tier, e.type_id, e.first_observed_by)
            IS DISTINCT FROM
            (LEAST(e.tier, s.tier),
-            LEAST(e.type_id, s.type_id),
+            CASE WHEN e.type_id <= s.type_id THEN e.type_id ELSE s.type_id END,
             CASE
                 WHEN e.first_observed_by IS NULL THEN s.first_observed_by
                 WHEN s.first_observed_by IS NULL THEN e.first_observed_by
