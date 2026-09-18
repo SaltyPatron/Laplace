@@ -44,6 +44,7 @@ class ProductFreshnessTests(unittest.TestCase):
             "scripts/validate-pipeline.py",
             "web/e2e/chat.spec.ts",
             "web/scripts/test-chess-ui.mjs",
+            "web/scripts/verify-storage-proof-live.mjs",
             "scripts/tests/classify-ingest-exit.test.sh",
             "scripts/test-application-publish.py",
             "scripts/test-managed-db-scheduling.py",
