@@ -70,6 +70,9 @@ main() {
     api-deploy|api-recover)
       application_api_main "$mode"
       ;;
+    uci-deploy|uci-recover)
+      application_uci_main "$mode"
+      ;;
     check)
       managed preflight
       echo "application publish preflight OK"
@@ -113,7 +116,7 @@ main() {
       return 1
       ;;
     *)
-      echo "usage: publish-applications.sh check|deploy [--keep-api-stopped-on-failure]|recover|api-deploy|api-recover" >&2
+      echo "usage: publish-applications.sh check|deploy [--keep-api-stopped-on-failure]|recover|api-deploy|api-recover|uci-deploy|uci-recover" >&2
       return 2
       ;;
   esac
@@ -124,6 +127,26 @@ application_guard() { python3 "$ROOT/scripts/check-application-runtime.py" "$@";
 # API-only publication reuses the same application transaction owner, payload
 # sync law, and fixed systemd controls. MCP/Lichess policy and payloads are not
 # involved. The invoking deployment owner holds the host-wide lease.
+application_uci_main() {
+  local mode="$1"
+  case "$mode" in
+    uci-recover)
+      bash "$ROOT/deploy/linux/deploy.sh" --uci-recover
+      ;;
+    uci-deploy)
+      application_revision_expected >/dev/null
+      LAPLACE_UCI_REVISION_RECEIPT=1 \
+        LAPLACE_ENGINE_BUILD="$ROOT/build/engine" \
+        bash "$ROOT/deploy/linux/deploy.sh" --uci-only
+      application_revision_verify
+      ;;
+    *)
+      echo "::error::unknown UCI publication mode: $mode" >&2
+      return 2
+      ;;
+  esac
+}
+
 application_api_snapshot() (
   local destination="$1"
   source "$ROOT/deploy/linux/managed-publish.sh"
