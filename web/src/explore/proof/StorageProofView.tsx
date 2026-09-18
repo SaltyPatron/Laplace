@@ -891,10 +891,10 @@ export function StorageProofView() {
                     <div className={styles.canvasTall}>
                       <GlomeCanvas
                         nodes={carrierNodes}
-                        projection="packed"
+                        projection="carrier"
                         highlightOrdinal={selectedPackedRow?.logical_ordinal ?? null}
                         fill
-                        note="Packed X/Y/Z payload lanes form the 3-D carrier shell. M is metadata (ordinal/run/flags), not a spatial axis; its exact bits are decoded below."
+                        note="Packed X/Y/Z sign+mantissa payloads are mapped independently into 3-D bit-space. M is metadata (ordinal/run/flags), not a spatial axis; its exact bits are decoded below."
                       />
                     </div>
                   </article>
