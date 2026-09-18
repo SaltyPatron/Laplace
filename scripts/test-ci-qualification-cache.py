@@ -41,7 +41,7 @@ class QualificationCacheTests(unittest.TestCase):
                 "--cache-root",
                 str(self.cache),
                 "--source-sha",
-                "test-source",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             ],
             text=True,
             capture_output=True,
@@ -65,12 +65,12 @@ class QualificationCacheTests(unittest.TestCase):
     def test_source_returns_revision_that_owns_matching_receipt(self):
         self.run_cache("record", "native-dev", check=True)
         source = self.run_cache("source", "native-dev", check=True)
-        self.assertEqual(source.stdout.strip(), "test-source")
+        self.assertEqual(source.stdout.strip(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
     def test_latest_source_tracks_most_recent_success_for_bounded_artifact_reuse(self):
         self.run_cache("record", "native-dev", check=True)
         latest = self.run_cache("latest-source", "native-dev", check=True)
-        self.assertEqual(latest.stdout.strip(), "test-source")
+        self.assertEqual(latest.stdout.strip(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
     def test_recorded_receipt_is_reused_until_relevant_input_changes(self):
         miss = self.run_cache("check", "managed-dev")
