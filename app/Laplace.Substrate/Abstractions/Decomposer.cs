@@ -643,6 +643,7 @@ public abstract class DecomposerMultiPhase : IDecomposer
     private long _runMaxInputUnits;
     private HashSet<string>? _runSelectedArtifactPaths;
     private HashSet<string>? _runVisitedArtifactPaths;
+    private readonly object _artifactClaimGate = new();
 
     public abstract Hash128 SourceId { get; }
     public abstract string SourceName { get; }
@@ -759,9 +760,12 @@ public abstract class DecomposerMultiPhase : IDecomposer
         if (!_runSelectedArtifactPaths.Contains(fullPath))
             throw new InvalidOperationException(
                 $"{SourceName} attempted undeclared artifact '{fullPath}'.");
-        if (!_runVisitedArtifactPaths!.Add(fullPath))
-            throw new InvalidOperationException(
-                $"{SourceName} attempted to consume selected artifact more than once: '{fullPath}'.");
+        lock (_artifactClaimGate)
+        {
+            if (!_runVisitedArtifactPaths!.Add(fullPath))
+                throw new InvalidOperationException(
+                    $"{SourceName} attempted to consume selected artifact more than once: '{fullPath}'.");
+        }
         return context.SelectedArtifacts
             .Single(artifact => string.Equals(
                 Path.GetFullPath(artifact.Path), fullPath, StringComparison.Ordinal))
