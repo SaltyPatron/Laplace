@@ -94,5 +94,14 @@ def managed_test_path(path: str) -> bool:
     return len(parts) >= 3 and parts[0] == "app" and parts[1].endswith(".Tests")
 
 
+def native_test_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return (
+        normalized.startswith("engine/") and "/tests/" in normalized
+    ) or (
+        normalized.startswith("extension/") and "/tests/" in normalized
+    )
+
+
 def candidate_equivalent(path: str) -> bool:
-    return ignored(path) or managed_test_path(path)
+    return ignored(path) or managed_test_path(path) or native_test_path(path)
