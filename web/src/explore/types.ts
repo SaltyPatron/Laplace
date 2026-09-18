@@ -138,6 +138,7 @@ export interface StorageProofResponse {
   atom_window: number;
   perfcache_receipt_hex: string;
   database_perfcache_receipt_hex?: string | null;
+  database_perfcache_error?: string | null;
   perfcache_aligned?: boolean | null;
   nodes: StorageProofNodeRow[];
 }
