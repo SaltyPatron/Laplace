@@ -5,7 +5,7 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  provision|reconcile|check|build|install|applications|deploy|proof|release-candidate|release-activation|proof-model|mainline|test-dev|test-db|test-live) ;;
+  provision|reconcile|check|build|install|applications|deploy|proof|release-qualification|release-candidate|release-activation|proof-model|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
@@ -158,10 +158,14 @@ reconcile_installed_product() {
   python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
 }
 
-run_mainline() {
+run_release_qualification() {
   check_deps
   run_build
   run_dev_tests
+}
+
+run_mainline() {
+  run_release_qualification
 }
 
 release_candidate_current_before_mutation() {
@@ -193,12 +197,10 @@ release_candidate_current_before_mutation() {
 
 run_release_candidate() {
   check_deps
-  run_build
-  run_dev_tests
+  require_built_revision
 
-  # Build/dev qualification is read-only with respect to the installed product.
-  # Re-check main at the last safe cancellation boundary. Once install/database
-  # mutation starts, the candidate owns the stage through its coherent finish.
+  # This stage begins at the mutation boundary. Qualification is a separate,
+  # preemptible job; once install starts, finish this candidate coherently.
   local current_rc=0
   release_candidate_current_before_mutation || current_rc=$?
   if (( current_rc == 3 )); then
@@ -223,15 +225,16 @@ run_proof_model() {
 }
 
 run_deploy() {
-  # Local convenience composition. GitHub Actions composes these as separate
-  # reusable jobs so qualification and activation remain independently visible,
-  # retryable, and observable.
+  # Local convenience composition. GitHub Actions owns these as three separate
+  # jobs: read-only qualification, candidate mutation, then activation.
+  run_release_qualification
   run_release_candidate
   run_release_activation
 }
 
 run_proof() {
-  # Local convenience composition; CI uses the three modular stages directly.
+  # Local convenience composition; CI uses the four modular stages directly.
+  run_release_qualification
   run_release_candidate
   run_proof_model
   run_release_activation
@@ -268,6 +271,9 @@ case "$stage" in
     ;;
   mainline)
     run_mainline
+    ;;
+  release-qualification)
+    run_release_qualification
     ;;
   release-candidate)
     run_release_candidate
