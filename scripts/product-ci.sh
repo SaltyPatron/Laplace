@@ -358,6 +358,7 @@ run_publish() {
   local scope="${LAPLACE_PUBLISH_SCOPE:-full}"
   case "$scope" in
     api) bash scripts/publish-applications.sh api-recover ;;
+    uci) bash scripts/publish-applications.sh uci-recover ;;
     full|all) bash scripts/publish-applications.sh recover ;;
     *)
       echo "::error::unknown publication scope: $scope" >&2
@@ -368,8 +369,24 @@ run_publish() {
   require_built_revision
   case "$scope" in
     api) bash scripts/publish-applications.sh api-deploy ;;
+    uci) bash scripts/publish-applications.sh uci-deploy ;;
     full|all) bash scripts/publish-applications.sh deploy ;;
   esac
+}
+
+verify_isolated_uci_delivery() {
+  require_deployed_revision
+  python3 - "$ROOT/build/.uci-publish-verified.json" <<'PY'
+import json
+import pathlib
+import sys
+path = pathlib.Path(sys.argv[1])
+value = json.loads(path.read_text(encoding="utf-8"))
+assert value["schema"] == "laplace.uci-payload-verification/v1", value
+assert value["status"] == "passed", value
+assert value["bestmove"], value
+assert value["substrate_access_verified"] is False, value
+PY
 }
 run_live_tests() {
   require_deployed_revision
@@ -633,7 +650,8 @@ run_release_delivery() {
   export LAPLACE_SKIP_IF_SUPERSEDED=0
 
   local actions="${LAPLACE_DELIVERY_ACTIONS:-all}"
-  echo "::notice::delivery actions=$actions publish_scope=${LAPLACE_PUBLISH_SCOPE:-full} db_suites=${LAPLACE_DB_SUITES:-all} live_suites=${LAPLACE_LIVE_SUITES:-all}"
+  local publish_scope="${LAPLACE_PUBLISH_SCOPE:-full}"
+  echo "::notice::delivery actions=$actions publish_scope=$publish_scope db_suites=${LAPLACE_DB_SUITES:-all} live_suites=${LAPLACE_LIVE_SUITES:-all}"
 
   if csv_selected "$actions" install; then
     run_install
@@ -670,15 +688,22 @@ run_release_delivery() {
 
   if csv_selected "$actions" reconcile; then
     reconcile_installed_product
+  elif [[ "$publish_scope" == uci ]]; then
+    # The isolated publisher atomically selects and executes the installed UCI
+    # runtime before committing its revision receipt. API/database state is unchanged.
+    verify_isolated_uci_delivery
   else
     verify_installed_product
   fi
 
-  csv_selected "$actions" live || {
+  if csv_selected "$actions" live; then
+    run_live_tests
+  elif [[ "$publish_scope" != uci ]]; then
     echo "::error::release-delivery plan omitted mandatory live verification" >&2
     return 2
-  }
-  run_live_tests
+  else
+    echo "::notice::isolated UCI publication already executed installed runtime verification"
+  fi
 }
 run_proof_model() {
   require_built_revision
