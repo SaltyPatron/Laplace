@@ -110,7 +110,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             or path.startswith("extension/")
         ):
             matched = product_change = True
-            managed_build_force_all = True
+            managed_build_required.update(FULL_PUBLISH_PROJECTS)
             managed_test_force_all = True
             managed_db_force_all = True
             managed_live_force_all = True
@@ -143,12 +143,12 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             )
             if isolated_uci:
                 publish_scope = "uci"
-            elif not api_scoped:
+                managed_build_required.add(UCI_PUBLISH_PROJECT)
+            elif api_scoped:
+                managed_build_required.add(API_PUBLISH_PROJECT)
+            else:
                 publish_scope = "full"
-                # Shared managed libraries can feed API + UCI + MCP + Lichess.
-                # Keep the broad publication closure only when dependency impact
-                # actually crosses those runtime owners.
-                managed_build_force_all = True
+                managed_build_required.update(FULL_PUBLISH_PROJECTS)
             components.add("managed")
             build_components.add("managed")
             if not isolated_uci:
@@ -201,7 +201,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
         if path.startswith("db/"):
             matched = product_change = True
-            managed_build_force_all = True
+            managed_build_required.add(API_PUBLISH_PROJECT)
             managed_db_force_all = True
             managed_live_force_all = True
             components.add("database")
@@ -214,7 +214,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
         if path.startswith("deploy/"):
             matched = product_change = True
-            managed_build_force_all = True
+            managed_build_required.update(FULL_PUBLISH_PROJECTS)
             managed_live_force_all = True
             publish_scope = "full"
             components.add("deployment")
