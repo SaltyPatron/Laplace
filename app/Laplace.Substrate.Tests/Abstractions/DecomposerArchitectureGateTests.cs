@@ -875,6 +875,19 @@ public sealed class DecomposerArchitectureGateTests
         var writerApply = new Regex(@"Writer\.ApplyAsync\s*\(", RegexOptions.Compiled);
         var yieldBuild = new Regex(@"yield\s+return\s+Build\w+\s*\(", RegexOptions.Compiled);
 
+        var artifactBase = File.ReadAllText(Path.Combine(
+            repoRoot, "app", "Laplace.Substrate", "Abstractions",
+            "ArtifactDecomposerMultiPhase.cs"));
+        int artifactExecutorStart = artifactBase.IndexOf(
+            "RunArtifactPhasesAsync<TArtifact>", StringComparison.Ordinal);
+        int artifactExecutorEnd = artifactBase.IndexOf(
+            "protected readonly record struct ArtifactPhaseWork", StringComparison.Ordinal);
+        Assert.True(artifactExecutorStart >= 0 && artifactExecutorEnd > artifactExecutorStart);
+        Assert.Contains(
+            "RunPhaseAsync(",
+            artifactBase[artifactExecutorStart..artifactExecutorEnd],
+            StringComparison.Ordinal);
+
         foreach (var rel in MultiPhaseAllowlist)
         {
             var path = Path.Combine(repoRoot, "app", rel.Replace('/', Path.DirectorySeparatorChar));
@@ -887,8 +900,12 @@ public sealed class DecomposerArchitectureGateTests
                 continue;
             }
             var body = m.Value;
-            if (!body.Contains("RunPhaseAsync", StringComparison.Ordinal))
-                violations.Add($"{rel}: RunIngestAsync never calls RunPhaseAsync");
+            bool routesSharedPhase =
+                body.Contains("RunPhaseAsync", StringComparison.Ordinal)
+                || body.Contains("RunArtifactPhasesAsync", StringComparison.Ordinal)
+                || body.Contains("RunArtifactDependencyLevelsAsync", StringComparison.Ordinal);
+            if (!routesSharedPhase)
+                violations.Add($"{rel}: RunIngestAsync bypasses the shared phase executors");
             if (MultiPhaseRunIngestHandAllowlist.Contains(rel)) continue;
             if (handBuild.IsMatch(body))
                 violations.Add($"{rel}: RunIngestAsync constructs SubstrateChangeBuilder");
@@ -961,7 +978,7 @@ public sealed class DecomposerArchitectureGateTests
         var codepoint = File.ReadAllText(Path.Combine(
             repoRoot, "engine", "core", "src", "codepoint_table.c"));
         Assert.Contains("LAPLACE_UCD_RELEASE_README", cmake, StringComparison.Ordinal);
-        Assert.Contains("LAPLACE_EXPECTED_UCD_VERSION=\\\"${LAPLACE_UNICODE_VERSION}\\\"",
+        Assert.Contains("LAPLACE_EXPECTED_UCD_VERSION=\"${LAPLACE_UNICODE_VERSION}\"",
             coreCmake, StringComparison.Ordinal);
         Assert.DoesNotContain("#define LAPLACE_EXPECTED_UCD_VERSION \\\"17.0.0\\\"",
             codepoint, StringComparison.Ordinal);
