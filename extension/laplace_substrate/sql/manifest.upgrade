@@ -437,6 +437,7 @@ functions/structural/word_anchor.sql.in
 functions/geometry/structural_cluster_batch.sql.in
 functions/geometry/structural_cluster.sql.in
 functions/analysis/drop_retired_eff_mu.sql.in
+functions/analysis/drop_retired_ducet_geometry.sql.in
 functions/analysis/laplace_entity_attestations.sql.in
 functions/analysis/laplace_entities_at_depth.sql.in
 functions/analysis/laplace_ancestry.sql.in
