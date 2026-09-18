@@ -63,17 +63,22 @@ def validate_retired_workflows() -> list[str]:
     else:
         text = read_text(laplace)
         compact = re.sub(r"\s+", "", text)
-        # Main-only self-hosted pipeline: push + manual dispatch. No pull_request —
-        # PRs must not burn the laplace runner (see laplace.yml on: comment).
+        # Main delivery is automatic only. Manual maintenance lives in a separate
+        # operator workflow so the main Actions graph remains one source-to-product chain.
         if "push:branches:[main]" not in compact:
             errs.append("laplace.yml: expected push trigger on main")
-        if "workflow_dispatch:" not in compact:
-            errs.append("laplace.yml: expected workflow_dispatch trigger")
+        if "workflow_dispatch:" in compact:
+            errs.append("laplace.yml: manual dispatch belongs in product-operator.yml")
         if "pull_request:" in compact:
             errs.append("laplace.yml: pull_request trigger forbidden (self-hosted runner)")
-        for stale in ("integration.yml", "deploy-app.yml", "seed-ladder.yml"):
+        for stale in ("integration.yml", "deploy-app.yml", "seed-ladder.yml", "mainline-delivery.yml"):
             if stale in text:
                 errs.append(f"laplace.yml: references retired workflow {stale}")
+        operator = workflows / "product-operator.yml"
+        if not operator.is_file():
+            errs.append("missing manual product operator workflow: .github/workflows/product-operator.yml")
+        elif "workflow_dispatch:" not in re.sub(r"\\s+", "", read_text(operator)):
+            errs.append("product-operator.yml: expected workflow_dispatch trigger")
     if not (workflows / "seed.yml").is_file():
         errs.append("missing canonical ingestion workflow: .github/workflows/seed.yml")
     return errs
