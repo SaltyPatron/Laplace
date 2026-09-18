@@ -29,7 +29,7 @@ const TABS: { id: string; label: string; path: string }[] = [
   { id: 'chat', label: 'Chat', path: '/chat' },
   { id: 'query', label: 'Query', path: '/query' },
   { id: 'explore', label: 'Explore', path: '/explore' },
-  { id: 'proof', label: 'Proof', path: '/proof' },
+  { id: 'proof', label: 'Storage Proof', path: '/proof' },
   { id: 'data', label: 'Data', path: '/data' },
   { id: 'chess', label: 'Chess', path: '/chess' },
   { id: 'play', label: 'Play', path: '/play' },
