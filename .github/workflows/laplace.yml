@@ -31,6 +31,7 @@ jobs:
       delivery_actions: ${{ steps.plan.outputs.delivery_actions }}
       publish_scope: ${{ steps.plan.outputs.publish_scope }}
       components: ${{ steps.plan.outputs.components }}
+      build_components: ${{ steps.plan.outputs.build_components }}
       full_qualification: ${{ steps.plan.outputs.full_qualification }}
       changed_count: ${{ steps.plan.outputs.changed_count }}
     steps:
@@ -62,6 +63,7 @@ jobs:
       stage: release-qualification
       target_sha: ${{ github.sha }}
       dev_suites: ${{ needs.plan.outputs.dev_suites }}
+      build_components: ${{ needs.plan.outputs.build_components }}
       skip_if_superseded: true
     secrets: inherit
 
