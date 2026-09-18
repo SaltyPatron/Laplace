@@ -237,6 +237,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "native-dev", "managed-dev", "uci-dev", "browser-dev",
             "db-health", "native-db", "managed-db",
             "live-floor", "live-api", "managed-live", "generation-eval",
+            "chess-provider-live",
         ):
             with self.subTest(suite=suite):
                 self.assertTrue((ROOT / "scripts" / "test-suites" / f"{suite}.sh").is_file())
