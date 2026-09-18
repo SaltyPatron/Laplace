@@ -355,6 +355,7 @@ import os
 
 proof = json.loads(os.environ["PROOF_JSON"])
 expected = os.environ["DB_RECEIPT"].lower()
+assert proof["atom_window"] == 0x110000, proof
 assert proof["perfcache_aligned"] is True, proof
 assert proof["perfcache_receipt_hex"].lower() == expected, proof
 assert proof["database_perfcache_receipt_hex"].lower() == expected, proof
