@@ -231,25 +231,40 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     if pure_uci and managed_impact["test_projects"]:
         dev_suites.add("managed-dev")
 
-    def managed_selection(
-        selected: bool,
-        force_all: bool,
-        field: str,
-    ) -> list[str]:
+    def managed_test_selection(selected: bool, force_all: bool) -> list[str]:
         if not selected:
             return []
-        if force_all or managed_impact["full"] or not managed_changed_paths:
+        if force_all or managed_impact["full"]:
             return ["all"]
-        return list(managed_impact[field])
+        return list(managed_impact["test_projects"])
 
-    managed_build_projects = managed_selection(
-        "managed" in build_components, managed_build_force_all, "build_projects")
-    managed_test_projects = managed_selection(
-        "managed-dev" in dev_suites, managed_test_force_all, "test_projects")
-    managed_db_test_projects = managed_selection(
-        "managed-db" in db_suites, managed_db_force_all, "test_projects")
-    managed_live_test_projects = managed_selection(
-        "managed-live" in live_suites, managed_live_force_all, "test_projects")
+    managed_test_projects = managed_test_selection(
+        "managed-dev" in dev_suites, managed_test_force_all)
+    managed_db_test_projects = managed_test_selection(
+        "managed-db" in db_suites, managed_db_force_all)
+    managed_live_test_projects = managed_test_selection(
+        "managed-live" in live_suites, managed_live_force_all)
+
+    if "managed" not in build_components:
+        managed_build_projects: list[str] = []
+    elif managed_build_force_all or managed_impact["full"]:
+        managed_build_projects = ["all"]
+    else:
+        build_roots = set(managed_impact["build_projects"])
+        build_roots.update(managed_build_required)
+        all_tests = {
+            path for path, project in managed_projects.items() if project.is_test
+        }
+        for selection in (
+            managed_test_projects,
+            managed_db_test_projects,
+            managed_live_test_projects,
+        ):
+            if selection == ["all"]:
+                build_roots.update(all_tests)
+            else:
+                build_roots.update(selection)
+        managed_build_projects = sorted(build_roots)
 
     # Every delivered revision has an exact application revision receipt and a
     # universal live floor. This is deliberately much smaller than full live
