@@ -12,6 +12,7 @@ from ci_managed_projects import (
     load_projects as load_managed_projects,
     plan_changed as plan_managed_projects,
     project_for_path as managed_project_for_path,
+    test_filter_for_paths as managed_test_filter_for_paths,
 )
 
 DEV_SUITES = ("native-dev", "managed-dev", "uci-dev", "browser-dev")
@@ -261,6 +262,9 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             full(path)
 
     managed_impact = plan_managed_projects(root, managed_changed_paths)
+    managed_test_filter = ""
+    if managed_changed_paths and all(managed_test_path(path) for path in managed_changed_paths):
+        managed_test_filter = managed_test_filter_for_paths(root, managed_changed_paths)
     if pure_uci and managed_impact["test_projects"]:
         dev_suites.add("managed-dev")
 
@@ -313,6 +317,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         "build_components": sorted(build_components),
         "managed_build_projects": managed_build_projects,
         "managed_test_projects": managed_test_projects,
+        "managed_test_filter": managed_test_filter,
         "managed_db_test_projects": managed_db_test_projects,
         "managed_live_test_projects": managed_live_test_projects,
         "dev_suites": [suite for suite in DEV_SUITES if suite in dev_suites],
@@ -355,6 +360,7 @@ def force_full_plan(plan: dict) -> None:
     plan["build_components"] = ["native", "managed", "web"]
     plan["managed_build_projects"] = ["all"]
     plan["managed_test_projects"] = ["all"]
+    plan["managed_test_filter"] = ""
     plan["managed_db_test_projects"] = ["all"]
     plan["managed_live_test_projects"] = ["all"]
     plan["dev_suites"] = list(DEV_SUITES)
@@ -384,8 +390,8 @@ def write_github_outputs(path: Path, plan: dict) -> None:
             "managed_live_test_projects",
         ):
             stream.write(f"{name}={','.join(plan[name])}\n")
-        stream.write(f"publish_scope={plan['publish_scope']}\n")
-        stream.write(
+        stream.write(f"managed_test_filter={plan.get('managed_test_filter', '')}\n")
+        stream.write(f"publish_scope={plan['publish_scope']}\n")        stream.write(
             f"full_qualification={'true' if plan['full_qualification'] else 'false'}\n"
         )
         stream.write(f"changed_count={len(plan['changed_files'])}\n")
@@ -402,7 +408,7 @@ def write_summary(path: Path, plan: dict) -> None:
         stream.write(f"- Candidate build components: {joined('build_components')}\n")
         stream.write(f"- Managed build projects: {joined('managed_build_projects')}\n")
         stream.write(f"- Managed unit-test projects: {joined('managed_test_projects')}\n")
-        stream.write(f"- Managed DB-test projects: {joined('managed_db_test_projects')}\n")
+        stream.write(f"- Managed test filter: {plan.get('managed_test_filter') or 'none'}\n")        stream.write(f"- Managed DB-test projects: {joined('managed_db_test_projects')}\n")
         stream.write(f"- Managed live-test projects: {joined('managed_live_test_projects')}\n")
         stream.write(f"- Development suites: {joined('dev_suites')}\n")
         stream.write(f"- Database suites: {joined('db_suites')}\n")
