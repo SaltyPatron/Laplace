@@ -171,6 +171,11 @@ run_live_api() {
     printf '%s\n' "$storage_proof" >&2
     return 1
   fi
+  proof_html=$(curl -fsS "$base/proof")
+  if ! grep -q '<div id="root"' <<<"$proof_html"; then
+    echo "::error::deployed application does not serve the Storage Proof SPA route at /proof" >&2
+    return 1
+  fi
   completion=$(curl -fsS -X POST "$base/v1/chat/completions" -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
     --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')
   grep -q '"object":"chat.completion"' <<<"$completion"
