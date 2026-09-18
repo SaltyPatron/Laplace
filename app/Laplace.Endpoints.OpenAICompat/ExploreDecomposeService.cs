@@ -177,8 +177,23 @@ internal sealed class ExploreDecomposeService
             }
 
             uint? ducetRank = null;
-            if (node.Tier == 0 && node.Atom < (uint)CodepointPerfcache.Records.Length)
-                ducetRank = CodepointPerfcache.Records[(int)node.Atom].UcaOrder;
+            if (node.Tier == 0)
+            {
+                var records = CodepointPerfcache.Records;
+                if (node.Atom >= (uint)records.Length)
+                    throw new InvalidOperationException(
+                        $"Tier-0 atom U+{node.Atom:X} is outside the published perfcache ROM.");
+
+                ref readonly var atom = ref records[(int)node.Atom];
+                if (node.Id != atom.Hash
+                    || x != atom.CoordX || y != atom.CoordY
+                    || z != atom.CoordZ || m != atom.CoordM
+                    || node.Hilbert.CompareToBytewise(atom.Hilbert) != 0)
+                    throw new InvalidOperationException(
+                        $"Tier-0 node U+{node.Atom:X} diverged from the published perfcache ROM.");
+
+                ducetRank = atom.UcaOrder;
+            }
 
             rows.Add(new StorageProofNodeRow(
                 Ordinal: index,
