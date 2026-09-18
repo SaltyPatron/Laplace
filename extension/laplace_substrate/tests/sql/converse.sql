@@ -159,9 +159,24 @@ SELECT word, (id IS NOT NULL) AS resolved FROM converse.prompt_words('what is a 
 -- A content id may exist at multiple tiers; each input position still occurs
 -- exactly once. Repeated input positions must not be collapsed with DISTINCT.
 SAVEPOINT token_identity;
-INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-SELECT id, 2, type_id, first_observed_by FROM laplace.entities
-WHERE id = laplace.word_id('p') AND tier = 0;
+DO $token_facet$
+DECLARE
+    entity_id bytea := laplace.word_id('p');
+    entity_type bytea;
+    source_id bytea;
+BEGIN
+    SELECT type_id, first_observed_by
+      INTO STRICT entity_type, source_id
+      FROM laplace.entities
+     WHERE id = entity_id;
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[entity_id]::bytea[],
+        ARRAY[2]::smallint[],
+        ARRAY[entity_type]::bytea[],
+        ARRAY[source_id]::bytea[],
+        ARRAY[source_id IS NULL]::boolean[]);
+END
+$token_facet$;
 SELECT count(*) = 2 AND count(DISTINCT ord) = 2
        AND bool_and(id = laplace.word_id('p')) AS words_keep_positions
 FROM converse.prompt_words('p p');

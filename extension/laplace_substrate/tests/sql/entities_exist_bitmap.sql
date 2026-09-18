@@ -60,11 +60,22 @@ SELECT
 -- The keyed native path groups mixed tiers and executes one session-cached,
 -- literal-tier plan per run.  It must preserve the caller's original bitmap
 -- positions without the historical per-call temp table/index/ANALYZE path.
-INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-SELECT id, 2::smallint, (SELECT id FROM test_fixtures LIMIT 1), NULL
-FROM test_fixtures
-ORDER BY test_fixtures.id
-LIMIT 2;
+DO $facet_fixture$
+DECLARE
+    ids bytea[];
+    kind bytea;
+BEGIN
+    SELECT array_agg(id ORDER BY id) INTO ids
+    FROM (SELECT id FROM test_fixtures ORDER BY id LIMIT 2) q;
+    SELECT id INTO STRICT kind FROM test_fixtures ORDER BY id LIMIT 1;
+    PERFORM laplace.entity_interpretations_publish(
+        ids,
+        ARRAY[2,2]::smallint[],
+        ARRAY[kind,kind]::bytea[],
+        ARRAY[NULL::bytea,NULL::bytea]::bytea[],
+        ARRAY[true,true]::boolean[]);
+END
+$facet_fixture$;
 
 WITH keyed AS (
     SELECT array_agg(id ORDER BY ord)::bytea[] AS ids,
