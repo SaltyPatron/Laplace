@@ -323,14 +323,26 @@ cache of key/value tensors for previously processed token positions. Laplace use
 only as a functional comparison. Its durable memory is not a literal KV tensor cache
 and is not a transient query-owned DAG.
 
-The durable memory is the shared substrate: canonical content/entity identities and
-their recursive composition DAG, exact occurrences and trajectories, typed
-attestations/witnesses, consensus standing and uncertainty, physicalities and
-coordinates, indexed locality such as Hilbert keys, source/context/time provenance,
-session trajectory, and admitted calculated state/receipts. A forward operation may
-hold a bounded frontier/residual/working projection in memory, but that working set
-references shared identities and typed routes. It cannot become a second semantic
-authority and it cannot silently replace durable state with private session state.
+The durable memory is the shared substrate, not an opaque tensor/blob store.
+Canonical entities carry recursive composition identity. Ordered/structured
+realizations are stored through typed physicalities and trajectories over those
+canonical identities, with coordinates and indexed locality such as Hilbert keys.
+Occurrences/session history retain trajectory/order state. Testimony remains typed
+attestations/witnesses with consensus standing and uncertainty. Source/context/time
+provenance and declared calculation receipts remain separately attributable.
+
+For conventional-model ingestion this distinction is binding: checkpoint tensor
+values are transient calculation operands used to derive circuit structure,
+physicality trajectories, placements/locality and typed evidence. Raw parameter
+arrays/weights are not durable Laplace memory and are not persisted merely because a
+source checkpoint arrived as SafeTensors/GGUF or another binary container. The
+container is input packaging; the durable product is Laplace-native entity,
+physicality/trajectory and evidence state.
+
+A forward operation may hold a bounded frontier/residual/working projection in memory,
+but that working set references shared identities and typed routes. It cannot become a
+second semantic authority and it cannot silently replace durable state with private
+session state.
 
 Laplace therefore has no architectural fixed **token context window**. Every concrete
 operation is finite and resource-bounded by its declared execution envelope — hops,
