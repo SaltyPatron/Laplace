@@ -10,9 +10,10 @@ namespace Laplace.Decomposers.Unicode;
 /// <summary>
 /// Unicode/UCD ingestion at physical-artifact grain. No source is preloaded during
 /// Initialize: every selected file is claimed exactly once by the shared multi-phase
-/// artifact executor and streamed through parse → compose → shared apply. DUCET owns
-/// tier-0 UCA geometry; UCD XML is independently parsed/validated; property tables own
-/// only the claims they physically state.
+/// artifact executor and streamed through parse → compose → shared apply. The generated
+/// T0 perfcache is the sole runtime geometry/Hilbert authority; DUCET is the build-time
+/// ordering input for that ROM. UCD XML is independently parsed/validated; property tables
+/// own only the claims they physically state.
 /// </summary>
 public sealed class UnicodeDecomposer
     : DecomposerMultiPhase<UnicodeSource, FullScope>, IIngestInventoryProvider, IIngestArtifactGraphProvider
