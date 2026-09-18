@@ -145,7 +145,12 @@ public sealed class UnicodeDecomposer
             IngestArtifactDisposition disposition;
             string notes;
 
-            if (TryClassifyArtifact(full, root, xml, ducet, out _))
+            if (IsEquivalentFallbackPackaging(full, relative, root, xml))
+            {
+                disposition = IngestArtifactDisposition.EquivalentPackaging;
+                notes = "alternate packaging of a selected Unicode semantic role; retained but not admitted as another witness";
+            }
+            else if (TryClassifyArtifact(full, root, xml, ducet, out _))
             {
                 disposition = IngestArtifactDisposition.Admitted;
                 notes = "";
@@ -191,6 +196,24 @@ public sealed class UnicodeDecomposer
         }
 
         return Task.FromResult<IngestArtifactGraph?>(new IngestArtifactGraph(artifacts));
+    }
+
+    private static bool IsEquivalentFallbackPackaging(
+        string fullPath,
+        string relative,
+        string root,
+        string selectedXml)
+    {
+        if (relative is "ucdxml/ucd.nounihan.flat.xml" or "ucdxml/ucd.nounihan.flat.zip")
+            return !string.Equals(fullPath, selectedXml, StringComparison.Ordinal);
+
+        if (relative == "ucd/DerivedJoiningType.txt")
+            return File.Exists(Path.Combine(root, "ucd", "extracted", "DerivedJoiningType.txt"));
+
+        if (relative == "ucd/DerivedNumericType.txt")
+            return File.Exists(Path.Combine(root, "ucd", "extracted", "DerivedNumericType.txt"));
+
+        return false;
     }
 
     private static bool IsUnicodeControlArtifact(string relative)
