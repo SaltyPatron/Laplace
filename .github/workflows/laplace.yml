@@ -42,6 +42,8 @@ jobs:
       publish_scope: ${{ steps.plan.outputs.publish_scope }}
       components: ${{ steps.plan.outputs.components }}
       build_components: ${{ steps.plan.outputs.build_components }}
+      managed_test_projects: ${{ steps.plan.outputs.managed_test_projects }}
+      managed_build_projects: ${{ steps.plan.outputs.managed_build_projects }}
       full_qualification: ${{ steps.plan.outputs.full_qualification }}
       changed_count: ${{ steps.plan.outputs.changed_count }}
     steps:
@@ -74,6 +76,8 @@ jobs:
       target_sha: ${{ github.sha }}
       dev_suites: ${{ needs.plan.outputs.dev_suites }}
       build_components: ${{ needs.plan.outputs.build_components }}
+      managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}
+      managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}
       skip_if_superseded: true
     secrets: inherit
 
@@ -85,6 +89,7 @@ jobs:
       stage: release-delivery
       target_sha: ${{ github.sha }}
       build_components: ${{ needs.plan.outputs.build_components }}
+      managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}
       delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
       db_suites: ${{ needs.plan.outputs.db_suites }}
       live_suites: ${{ needs.plan.outputs.live_suites }}
