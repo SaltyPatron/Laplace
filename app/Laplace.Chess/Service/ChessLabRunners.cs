@@ -511,6 +511,9 @@ public static class ChessLabRunners
             int parsedWhileFetching = 0;
             int novelWhileFetching = 0;
             int appliedWhileFetching = 0;
+            int repairedWhileFetching = 0;
+            int verifiedWhileFetching = 0;
+            long verifiedPliesWhileFetching = 0;
             int games = await ChessGameFetcher.FetchAsync(user, site, max, 0, outPath,
                 msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
                 ingest && site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase)
@@ -523,6 +526,9 @@ public static class ChessLabRunners
                         parsedWhileFetching += part.Parsed;
                         novelWhileFetching += part.Novel;
                         appliedWhileFetching += part.Applied;
+                        repairedWhileFetching += part.Repaired;
+                        verifiedWhileFetching += part.Verified;
+                        verifiedPliesWhileFetching += part.VerifiedPlies;
                         lab.UpdateSummary(slot, new ChessLabJobSummary(
                             appliedWhileFetching, 0, $"{appliedWhileFetching} new games recorded while downloading"));
                     }
@@ -535,19 +541,57 @@ public static class ChessLabRunners
                 bool chessCom = site.Trim().Equals("chesscom", StringComparison.OrdinalIgnoreCase);
                 var gameResult = chessCom
                     ? new ChessPgnIngestor.Result(
-                        parsedWhileFetching, novelWhileFetching, appliedWhileFetching)
+                        parsedWhileFetching, novelWhileFetching, appliedWhileFetching,
+                        repairedWhileFetching, verifiedWhileFetching, verifiedPliesWhileFetching)
                     : await ingestor!.IngestFileAsync(outPath,
                         msg => lab.Publish(slot, new ChessLabLogEvent("info", msg)), ct,
                         requireCompleteSource: true);
                 if (gameResult.Parsed != games)
                     throw new InvalidDataException(
                         $"provider returned {games} games but only {gameResult.Parsed} complete legal games validated");
+                if (gameResult.Verified != games)
+                    throw new InvalidDataException(
+                        $"provider returned {games} games but exact persisted readback verified only {gameResult.Verified}");
                 lab.Publish(slot, new ChessLabMetricEvent("games_validated", gameResult.Parsed));
                 lab.Publish(slot, new ChessLabMetricEvent("games_ingested", gameResult.Applied));
+                lab.Publish(slot, new ChessLabMetricEvent("games_repaired", gameResult.Repaired));
+                lab.Publish(slot, new ChessLabMetricEvent("games_persisted_verified", gameResult.Verified));
+                lab.Publish(slot, new ChessLabMetricEvent("plies_persisted_verified", gameResult.VerifiedPlies));
+
+                long pgnBytes = new FileInfo(outPath).Length;
+                string pgnSha256;
+                await using (var pgnStream = File.OpenRead(outPath))
+                using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                    pgnSha256 = Convert.ToHexStringLower(await sha256.ComputeHashAsync(pgnStream, ct));
+
+                string proofPath = Path.Combine(LabDir, slot.Job.Id, "recording-proof.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(proofPath)!);
+                await File.WriteAllTextAsync(proofPath, JsonSerializer.Serialize(new
+                {
+                    schema = "laplace.chess-provider-recording/v1",
+                    jobId = slot.Job.Id,
+                    provider = site.Trim().ToLowerInvariant(),
+                    providerUser = user,
+                    sourcePgnBytes = pgnBytes,
+                    sourcePgnSha256 = pgnSha256,
+                    fetchedGames = games,
+                    parsedGames = gameResult.Parsed,
+                    novelGames = gameResult.Novel,
+                    newlyAppliedGames = gameResult.Applied,
+                    repairedGames = gameResult.Repaired,
+                    persistedVerifiedGames = gameResult.Verified,
+                    persistedVerifiedPlies = gameResult.VerifiedPlies,
+                    exactPersistedReadback = gameResult.Verified == games,
+                    profiles = profileResult.Profiles,
+                    identityLinks = profileResult.Links,
+                }, new JsonSerializerOptions { WriteIndented = true }), ct);
+                lab.AddArtifact(slot, "recording-proof.json", proofPath);
+
                 lab.UpdateSummary(slot, new ChessLabJobSummary(
-                    gameResult.Applied, games,
+                    gameResult.Verified, games,
                     $"{profileResult.Profiles} profiles · {profileResult.Links} identity links · "
-                    + $"{games} fetched + fully validated oldest-to-newest · {gameResult.Applied} new games"));
+                    + $"{games} provider games fetched and exact-readback verified · "
+                    + $"{gameResult.Applied} new · {gameResult.Repaired} repaired"));
             }
             else
             {
