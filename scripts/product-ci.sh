@@ -5,7 +5,7 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  provision|reconcile|check|build|install|applications|deploy|proof|release-qualification|release-candidate|release-activation|proof-model|mainline|test-dev|test-db|test-live) ;;
+  provision|reconcile|check|build|install|applications|deploy|proof|release-qualification|release-delivery|release-candidate|release-activation|proof-model|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
@@ -270,6 +270,29 @@ run_release_activation() {
   run_live_tests
 }
 
+run_release_delivery() {
+  check_deps
+  require_built_revision
+
+  # Qualification is allowed to be superseded and cancelled. Delivery is not.
+  # Recheck freshness after this stage owns the build+host locks; once a current
+  # revision crosses the mutation boundary, finish publication and activation
+  # coherently even if a newer main revision appears while this transaction runs.
+  local current_rc=0
+  release_candidate_current_before_mutation || current_rc=$?
+  if (( current_rc == 3 )); then
+    return 0
+  fi
+  (( current_rc == 0 )) || return "$current_rc"
+  export LAPLACE_SKIP_IF_SUPERSEDED=0
+
+  run_install
+  run_database_maintenance --prepare
+  run_db_tests
+  run_publish
+  run_release_activation
+}
+
 run_proof_model() {
   require_built_revision
   LAPLACE_MODEL_PROOF_CODE_CORPORA=1 bash scripts/model-synthesize-ci.sh
@@ -325,6 +348,9 @@ case "$stage" in
     ;;
   release-qualification)
     run_release_qualification
+    ;;
+  release-delivery)
+    run_release_delivery
     ;;
   release-candidate)
     run_release_candidate

@@ -33,9 +33,10 @@ on:
 permissions:
   contents: read
 
-# Main pushes are disposable qualification, not deployment. A newer revision
-# cancels obsolete read-only CI immediately. Explicit operator/deploy/proof runs
-# keep unique groups and are never preempted.
+# Main pushes own only cancellable read-only qualification. A successful exact
+# revision is handed to mainline-delivery.yml, whose shared-state mutation and
+# activation lane is non-preemptible. Explicit operator/deploy/proof runs keep
+# unique groups and are never preempted.
 concurrency:
   group: ${{ github.event_name == 'push' && 'laplace-main-product-lifecycle' || format('laplace-product-dispatch-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'push' }}

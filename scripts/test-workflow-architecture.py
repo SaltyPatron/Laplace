@@ -10,12 +10,17 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 class MainPushQueueContract(unittest.TestCase):
-    def test_main_push_cancels_obsolete_qualification_instead_of_queueing_delivery(self):
-        text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertIn("concurrency:", text)
-        self.assertIn("laplace-main-product-lifecycle", text)
-        self.assertIn("cancel-in-progress: ${{ github.event_name == 'push' }}", text)
-        self.assertNotIn("cancel-in-progress: false", text)
+    def test_main_push_cancels_obsolete_qualification_but_delivery_is_nonpreemptible(self):
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("concurrency:", lifecycle)
+        self.assertIn("laplace-main-product-lifecycle", lifecycle)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'push' }}", lifecycle)
+        self.assertNotIn("cancel-in-progress: false", lifecycle)
+
+        delivery = (WORKFLOWS / "mainline-delivery.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_run:", delivery)
+        self.assertIn("laplace-main-delivery", delivery)
+        self.assertIn("cancel-in-progress: false", delivery)
 
 
 
@@ -76,13 +81,23 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("release-qualification|mainline|build|test-dev|check", stage)
         self.assertIn("release-activation|test-live|reconcile", stage)
 
-    def test_main_push_qualifies_only_and_manual_deploy_owns_mutation(self):
+    def test_main_push_qualifies_then_hands_off_exact_revision_delivery(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         mainline = lifecycle.split("  mainline-qualification:\n", 1)[1].split("\n  operator:\n", 1)[0]
         self.assertIn("stage: release-qualification", mainline)
         self.assertNotIn("release-candidate", mainline)
         self.assertNotIn("release-activation", mainline)
         self.assertEqual(1, mainline.count("skip_if_superseded: true"))
+
+        delivery = (WORKFLOWS / "mainline-delivery.yml").read_text(encoding="utf-8")
+        self.assertIn('workflows: ["Laplace — product lifecycle"]', delivery)
+        self.assertIn("github.event.workflow_run.event == 'push'", delivery)
+        self.assertIn("github.event.workflow_run.head_branch == 'main'", delivery)
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", delivery)
+        self.assertIn("stage: release-delivery", delivery)
+        self.assertIn("target_sha: ${{ github.event.workflow_run.head_sha }}", delivery)
+        self.assertIn("skip_if_superseded: true", delivery)
+        self.assertIn("cancel-in-progress: false", delivery)
 
         self.assertIn("deploy-qualification:", lifecycle)
         self.assertIn("deploy-candidate:", lifecycle)
@@ -94,11 +109,17 @@ class WorkflowArchitecture(unittest.TestCase):
         qualification = product.split("run_release_qualification() {", 1)[1].split("\n}", 1)[0]
         candidate = product.split("run_release_candidate() {", 1)[1].split("\n}", 1)[0]
         activation = product.split("run_release_activation() {", 1)[1].split("\n}", 1)[0]
+        automatic = product.split("run_release_delivery() {", 1)[1].split("\n}", 1)[0]
         self.assertIn("run_build", qualification)
         self.assertIn("run_dev_test_matrix 1", qualification)
         for token in ("run_install", "run_database_maintenance --prepare", "run_db_tests", "run_publish"):
             self.assertIn(token, candidate)
+            self.assertIn(token, automatic)
         self.assertNotIn("run_build", candidate)
+        self.assertNotIn("run_build", automatic)
+        self.assertIn("release_candidate_current_before_mutation", automatic)
+        self.assertIn("export LAPLACE_SKIP_IF_SUPERSEDED=0", automatic)
+        self.assertIn("run_release_activation", automatic)
         self.assertNotIn("run_publish", activation)
         self.assertIn("reconcile_installed_product", activation)
         self.assertIn("run_live_tests", activation)
