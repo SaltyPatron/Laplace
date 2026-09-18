@@ -171,7 +171,7 @@ class WorkflowArchitecture(unittest.TestCase):
         impact = (ROOT / "scripts" / "ci-impact-plan.py").read_text(encoding="utf-8")
         freshness = (ROOT / "scripts" / "ci-product-freshness.py").read_text(encoding="utf-8")
         self.assertIn('from ci_product_scope import ignored as product_ignored', impact)
-        self.assertIn('from ci_product_scope import ignored', freshness)
+        self.assertIn('from ci_product_scope import candidate_equivalent, ignored', freshness)
         for path in (
             "scripts/ci-impact-plan.py",
             "scripts/ci-qualification-cache.py",
@@ -181,7 +181,11 @@ class WorkflowArchitecture(unittest.TestCase):
             "scripts/product-ci.sh",
             "scripts/pipeline.sh",
             "scripts/ci_managed_projects.py",
-            "scripts/test-ci-*.py",
+            "scripts/test-*.py",
+            "scripts/test-*.sh",
+            "scripts/tests/**",
+            "web/scripts/test-*.mjs",
+            "web/e2e/**",
             "scripts/test-workflow-architecture.py",
             "scripts/test-seed-workflow-ownership.py",
             "scripts/test-product-ci-artifact-ownership.py",
