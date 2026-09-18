@@ -163,6 +163,14 @@ run_live_api() {
   inventory=$(curl -fsS -X POST "$base/v1/op" -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
     --data '{"name":"ops.substrate_counts","max_rows":20}')
   grep -q '"object":"op.result"' <<<"$inventory"
+  storage_proof=$(curl -fsS -X POST "$base/v1/explore/storage-proof" \
+    -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
+    --data '{"text":"aa"}')
+  if ! python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["atom_window"]==0x110000; assert d["perfcache_receipt_hex"]; assert d["database_perfcache_receipt_hex"]; assert d["perfcache_aligned"] is True; r=next(n for n in d["nodes"] if n["ordinal"]==d["natural_unit_ordinal"]); assert r["packed_vertices"]; assert sum(v["run_length"] for v in r["packed_vertices"])==len(r["realized_vertices"])' <<<"$storage_proof"; then
+    echo "::error::live storage proof does not demonstrate app/database ROM alignment and exact packed composition" >&2
+    printf '%s\n' "$storage_proof" >&2
+    return 1
+  fi
   completion=$(curl -fsS -X POST "$base/v1/chat/completions" -H 'Content-Type: application/json' -H 'X-Laplace-Tenant: ci' \
     --data '{"model":"laplace-converse-001","messages":[{"role":"user","content":"dog"}]}')
   grep -q '"object":"chat.completion"' <<<"$completion"
