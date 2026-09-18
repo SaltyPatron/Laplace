@@ -1,61 +1,53 @@
 name: Data — chess ingest
-run-name: "Chess ingest — ${{ inputs.source }} / ${{ inputs.corpus }} → ${{ inputs.database }}"
+run-name: "Chess ingest — ${{ inputs.preset }} → ${{ inputs.database }}"
 
 on:
   workflow_dispatch:
     inputs:
-      source:
-        description: "Chess data or derived operation"
+      preset:
+        description: "What chess corpus or derived operation to run"
         type: choice
         required: true
-        default: chess
-        options: [chess, openings, chess-books, chess-analyze, chess-eval, chess-move-outcomes, chess-transitions, chess-syzygy, chess-trajectory, chess-opening-match]
-      corpus:
-        description: "Named corpus for file-backed sources; derived operations ignore this"
-        type: choice
-        required: true
-        default: lumbras-elite
-        options: [lumbras-elite, chesscom-all, magnus, hikaru, firouzja, nihalsarin, caruana, gukesh, pragg, anish-giri, owner-games, twic, lumbras-otb, lumbras-online, openings-book, syzygy-tablebase, books, custom-path]
+        default: games-lumbras-elite
+        options: [games-lumbras-elite, games-chesscom-all, games-magnus, games-hikaru, games-firouzja, games-nihalsarin, games-caruana, games-gukesh, games-pragg, games-anish-giri, games-owner, games-twic, games-lumbras-otb, games-lumbras-online, openings, books, syzygy, chess-analyze, chess-eval, chess-move-outcomes, chess-tactic-outcomes, chess-transitions, chess-trajectory, chess-opening-match, custom-games, custom-openings, custom-books, custom-syzygy]
       slice:
-        description: "Lumbras OTB/online era slice; leave all for every other corpus"
+        description: "Only for games-lumbras-otb / games-lumbras-online; otherwise leave all"
         type: choice
+        required: true
         default: all
         options: [all, otb-1900-1949, otb-1950-1969, otb-1970-1989, otb-1990-1999, otb-2000-2004, otb-2005-2009, otb-2010-2014, otb-2015-2019, otb-2020-2024, otb-2025, otb-2026-partial, online-1995-2009, online-2010-2014, online-2015-2019, online-2020, online-2021, online-2022, online-2023, online-2024, online-2025]
       advanced_path_override:
-        description: "ADVANCED: local file/directory override; normally use the corpus dropdown"
+        description: "ADVANCED: override the selected corpus path; required for custom-* presets"
         type: string
         required: false
         default: ""
       database:
-        description: "target database"
+        description: "Target database"
         type: choice
         options: [laplace]
         default: laplace
       derive_after_games:
-        description: "After source=chess, also derive move outcomes and transitions"
+        description: "Game presets only: also derive move outcomes and transitions"
         type: boolean
         default: true
       replace_existing_source:
-        description: "DESTRUCTIVE, derived pathless sources only: retract the complete selected derived source before re-running it"
+        description: "DESTRUCTIVE, derived operations only: retract the complete derived source first"
         type: boolean
         default: false
       confirm_replace_existing:
-        description: "Second confirmation for derived-source replacement; leave false for normal corpus ingests"
+        description: "Second confirmation required for destructive derived-source replacement"
         type: boolean
         default: false
       run_idempotency:
-        description: "re-ingest the selected source and prove evidence does not double-count"
+        description: "Re-run the selected operation and prove evidence does not double-count"
         type: boolean
         default: false
+
   workflow_call:
     inputs:
-      source:
+      preset:
         type: string
         required: true
-      corpus:
-        type: string
-        required: false
-        default: lumbras-elite
       slice:
         type: string
         required: false
@@ -90,46 +82,29 @@ permissions:
 
 jobs:
   resolve:
+    name: Resolve chess preset
     runs-on: [self-hosted, laplace]
     timeout-minutes: 2
     outputs:
+      source: ${{ steps.pick.outputs.source }}
       path: ${{ steps.pick.outputs.path }}
     steps:
       - id: pick
+        shell: bash
         env:
-          SOURCE_INPUT: ${{ inputs.source }}
-          CORPUS_INPUT: ${{ inputs.corpus }}
+          PRESET: ${{ inputs.preset }}
           SLICE_INPUT: ${{ inputs.slice }}
           PATH_INPUT: ${{ inputs.advanced_path_override }}
+          REPLACE_INPUT: ${{ inputs.replace_existing_source && '1' || '0' }}
+          CONFIRM_REPLACE_INPUT: ${{ inputs.confirm_replace_existing && '1' || '0' }}
         run: |
           set -euo pipefail
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
           chess="$root/Games/Chess"
           lum="$chess/Lumbras"
-          src="$SOURCE_INPUT"
-          corpus="$CORPUS_INPUT"
-          slice="$SLICE_INPUT"
-          user_path="$PATH_INPUT"
-
-          case "$src" in
-            chess-analyze|chess-eval|chess-move-outcomes|chess-transitions|chess-trajectory|chess-opening-match)
-              echo "path=" >> "$GITHUB_OUTPUT"
-              exit 0 ;;
-          esac
-
-          if [[ -n "$user_path" ]]; then
-            [[ -e "$user_path" ]] || { echo "::error::$user_path does not exist"; exit 1; }
-            echo "path=$user_path" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          case "$src" in
-            openings) corpus=openings-book ;;
-            chess-books) corpus=books ;;
-            chess-syzygy) corpus=syzygy-tablebase ;;
-            chess) ;;
-            *) echo "::error::unknown source $src"; exit 1 ;;
-          esac
+          source=""
+          p=""
+          pathless_derived=0
 
           slice_file() {
             case "$1" in
@@ -157,47 +132,209 @@ jobs:
             esac
           }
 
-          case "$corpus" in
-            lumbras-elite) p="$lum/pgn/export_ELO2400.pgn" ;;
-            chesscom-all) p="$chess" ;;
-            magnus) p="$chess/MagnusCarlsen_chesscom.pgn" ;;
-            hikaru) p="$chess/Hikaru_chesscom.pgn" ;;
-            firouzja) p="$chess/Firouzja2003_chesscom.pgn" ;;
-            nihalsarin) p="$chess/nihalsarin_chesscom.pgn" ;;
-            caruana) p="$chess/FabianoCaruana_chesscom.pgn" ;;
-            gukesh) p="$chess/GukeshDommaraju_chesscom.pgn" ;;
-            pragg) p="$chess/rpragchess_chesscom.pgn" ;;
-            anish-giri) p="$chess/AnishGiri_chesscom.pgn" ;;
-            owner-games) p="$chess/Anthony-Hart_chesscom.pgn" ;;
-            twic) p="$chess/twic" ;;
-            openings-book) p="$chess/openings" ;;
-            books) p="$root/ProjectGutenberg/text" ;;
-            syzygy-tablebase)
-              p="$chess/syzygy"
-              [[ ! -d "$p/3-4-5" ]] || p="$p/3-4-5" ;;
-            lumbras-otb|lumbras-online)
-              venue="${corpus#lumbras-}"
-              if [[ "$slice" == all ]]; then
-                p="$lum/$venue"
+          case "$PRESET" in
+            games-lumbras-elite)
+              source=chess
+              p="$lum/pgn/export_ELO2400.pgn"
+              ;;
+            games-chesscom-all)
+              source=chess
+              p="$chess"
+              ;;
+            games-magnus)
+              source=chess
+              p="$chess/MagnusCarlsen_chesscom.pgn"
+              ;;
+            games-hikaru)
+              source=chess
+              p="$chess/Hikaru_chesscom.pgn"
+              ;;
+            games-firouzja)
+              source=chess
+              p="$chess/Firouzja2003_chesscom.pgn"
+              ;;
+            games-nihalsarin)
+              source=chess
+              p="$chess/nihalsarin_chesscom.pgn"
+              ;;
+            games-caruana)
+              source=chess
+              p="$chess/FabianoCaruana_chesscom.pgn"
+              ;;
+            games-gukesh)
+              source=chess
+              p="$chess/GukeshDommaraju_chesscom.pgn"
+              ;;
+            games-pragg)
+              source=chess
+              p="$chess/rpragchess_chesscom.pgn"
+              ;;
+            games-anish-giri)
+              source=chess
+              p="$chess/AnishGiri_chesscom.pgn"
+              ;;
+            games-owner)
+              source=chess
+              p="$chess/Anthony-Hart_chesscom.pgn"
+              ;;
+            games-twic)
+              source=chess
+              p="$chess/twic"
+              ;;
+            games-lumbras-otb)
+              source=chess
+              if [[ "$SLICE_INPUT" == all ]]; then
+                p="$lum/otb"
               else
-                [[ "$slice" == "$venue"-* ]] || { echo "::error::slice $slice does not belong to $corpus"; exit 1; }
-                p=$(slice_file "$slice") || { echo "::error::unknown slice $slice"; exit 1; }
-              fi ;;
-            custom-path) echo "::error::custom-path requires the advanced path override"; exit 2 ;;
-            *) echo "::error::unknown corpus $corpus"; exit 1 ;;
+                [[ "$SLICE_INPUT" == otb-* ]] || {
+                  echo "::error::slice $SLICE_INPUT is not an OTB slice"
+                  exit 2
+                }
+                p="$(slice_file "$SLICE_INPUT")" || {
+                  echo "::error::unknown OTB slice: $SLICE_INPUT"
+                  exit 2
+                }
+              fi
+              ;;
+            games-lumbras-online)
+              source=chess
+              if [[ "$SLICE_INPUT" == all ]]; then
+                p="$lum/online"
+              else
+                [[ "$SLICE_INPUT" == online-* ]] || {
+                  echo "::error::slice $SLICE_INPUT is not an online slice"
+                  exit 2
+                }
+                p="$(slice_file "$SLICE_INPUT")" || {
+                  echo "::error::unknown online slice: $SLICE_INPUT"
+                  exit 2
+                }
+              fi
+              ;;
+            openings)
+              source=openings
+              p="$chess/openings"
+              ;;
+            books)
+              source=chess-books
+              p="$root/ProjectGutenberg/text"
+              ;;
+            syzygy)
+              source=chess-syzygy
+              p="$chess/syzygy"
+              [[ ! -d "$p/3-4-5" ]] || p="$p/3-4-5"
+              ;;
+            chess-analyze)
+              source=chess-analyze
+              pathless_derived=1
+              ;;
+            chess-eval)
+              source=chess-eval
+              pathless_derived=1
+              ;;
+            chess-move-outcomes)
+              source=chess-move-outcomes
+              pathless_derived=1
+              ;;
+            chess-tactic-outcomes)
+              source=chess-tactic-outcomes
+              pathless_derived=1
+              ;;
+            chess-transitions)
+              source=chess-transitions
+              pathless_derived=1
+              ;;
+            chess-trajectory)
+              source=chess-trajectory
+              pathless_derived=1
+              ;;
+            chess-opening-match)
+              source=chess-opening-match
+              pathless_derived=1
+              ;;
+            custom-games)
+              source=chess
+              ;;
+            custom-openings)
+              source=openings
+              ;;
+            custom-books)
+              source=chess-books
+              ;;
+            custom-syzygy)
+              source=chess-syzygy
+              ;;
+            *)
+              echo "::error::unknown chess preset: $PRESET"
+              exit 2
+              ;;
           esac
-          [[ -e "$p" ]] || { echo "::error::$p does not exist"; exit 1; }
+
+          case "$PRESET" in
+            games-lumbras-otb|games-lumbras-online) ;;
+            *)
+              [[ "$SLICE_INPUT" == all ]] || {
+                echo "::error::slice is only valid for games-lumbras-otb or games-lumbras-online"
+                exit 2
+              }
+              ;;
+          esac
+
+          if [[ -n "$PATH_INPUT" ]]; then
+            (( pathless_derived == 0 )) || {
+              echo "::error::$PRESET is a pathless derived operation; remove the advanced path override"
+              exit 2
+            }
+            p="$PATH_INPUT"
+          fi
+
+          case "$PRESET" in
+            custom-*)
+              [[ -n "$p" ]] || {
+                echo "::error::$PRESET requires the advanced path override"
+                exit 2
+              }
+              ;;
+          esac
+
+          if [[ -n "$p" ]]; then
+            [[ -e "$p" ]] || {
+              echo "::error::resolved chess input does not exist: $p"
+              exit 1
+            }
+          fi
+
+          if [[ "$REPLACE_INPUT" == 1 && "$pathless_derived" != 1 ]]; then
+            echo "::error::replace-existing is only valid for complete pathless derived operations"
+            exit 2
+          fi
+          if [[ "$CONFIRM_REPLACE_INPUT" == 1 && "$REPLACE_INPUT" != 1 ]]; then
+            echo "::error::replacement confirmation was selected without replacement"
+            exit 2
+          fi
+
+          echo "source=$source" >> "$GITHUB_OUTPUT"
           echo "path=$p" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Chess ingest selection"
+            echo
+            echo "- Preset: $PRESET"
+            echo "- Source mode: $source"
+            echo "- Resolved input: ${p:-derived/database state}"
+            echo "- Lumbras slice: $SLICE_INPUT"
+            echo "- Replace derived source first: $REPLACE_INPUT"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   seed:
     needs: resolve
     uses: ./.github/workflows/seed.yml
     with:
       mode: source
-      source: ${{ inputs.source }}
+      source: ${{ needs.resolve.outputs.source }}
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
-      chess_derived: ${{ inputs.source == 'chess' && inputs.derive_after_games }}
+      chess_derived: ${{ needs.resolve.outputs.source == 'chess' && inputs.derive_after_games }}
       evict_before_ingest: ${{ inputs.replace_existing_source }}
       confirm_evict: ${{ inputs.confirm_replace_existing }}
       run_gate: true
