@@ -132,7 +132,7 @@ public sealed class UnicodeDecomposer
 
         string root = Path.GetFullPath(ecosystemPath);
         string xml = Path.GetFullPath(
-            _ucdxmlZip ?? Path.Combine(root, "ucdxml", "ucd.nounihan.flat.zip"));
+            _ucdxmlZip ?? Path.Combine(root, "ucdxml", "ucd.all.flat.zip"));
         string ducet = Path.GetFullPath(
             _ducet ?? Path.Combine(root, "uca", "allkeys.txt"));
 
@@ -490,7 +490,7 @@ public sealed class UnicodeDecomposer
     {
         string baseDir = Path.GetFullPath(context.EcosystemPath);
         string xml = Path.GetFullPath(
-            _ucdxmlZip ?? Path.Combine(baseDir, "ucdxml", "ucd.nounihan.flat.zip"));
+            _ucdxmlZip ?? Path.Combine(baseDir, "ucdxml", "ucd.all.flat.zip"));
         string ducet = Path.GetFullPath(
             _ducet ?? Path.Combine(baseDir, "uca", "allkeys.txt"));
 
@@ -514,7 +514,7 @@ public sealed class UnicodeDecomposer
 
         var legacy = new List<ArtifactJob>();
         AddIfPresent(legacy, ArtifactKind.Ducet, ducet, "uca/allkeys.txt");
-        AddIfPresent(legacy, ArtifactKind.UcdXml, xml, "ucdxml/ucd.nounihan.flat.zip");
+        AddIfPresent(legacy, ArtifactKind.UcdXml, xml, "ucdxml/ucd.all.flat.zip");
         AddIfPresent(legacy, ArtifactKind.UnicodeData,
             Path.Combine(baseDir, "ucd", "UnicodeData.txt"), "ucd/UnicodeData.txt");
         AddIfPresent(legacy, ArtifactKind.Scripts,
@@ -693,7 +693,7 @@ public sealed class UnicodeDecomposer
         kind = relative switch
         {
             "uca/allkeys.txt" => ArtifactKind.Ducet,
-            "ucdxml/ucd.nounihan.flat.zip" or "ucdxml/ucd.nounihan.flat.xml" => ArtifactKind.UcdXml,
+            "ucdxml/ucd.all.flat.zip" or "ucdxml/ucd.all.flat.xml" => ArtifactKind.UcdXml,
             "ucd/UnicodeData.txt" => ArtifactKind.UnicodeData,
             "ucd/Scripts.txt" => ArtifactKind.Scripts,
             "ucd/Blocks.txt" => ArtifactKind.Blocks,
