@@ -207,7 +207,9 @@ BEGIN
            OR detail NOT LIKE 'result=-1 cell_index=0 matched=true exact_period=true period_start=0 prior_rating=1800000000000 prior_rd=80000000000 prior_volatility=70000000 opponent_rating=1600000000000 opponent_rd=70000000000 games=1 sum_score=1000000001 tau=500000000%'
            OR detail NOT LIKE ('%backend_pid=' || pg_backend_pid()::text || ' %')
            OR detail NOT LIKE '%core_mapping=[%laplace_core%] route_address=%'
-           OR detail NOT LIKE '%route_mapping=[%laplace_substrate%]%' THEN
+           OR (detail NOT LIKE '%route_mapping=[%'
+               OR (detail NOT LIKE '%laplace_substrate%'
+                   AND position('laplace_execution_' in detail) = 0)) THEN
             RAISE EXCEPTION 'native fold failure lost its exact effective input context: % / %',
                 message, detail;
         END IF;

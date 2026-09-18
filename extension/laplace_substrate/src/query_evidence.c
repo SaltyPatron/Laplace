@@ -9,7 +9,6 @@
 
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/hash128.h"
-#include "laplace/core/relation_law.h"
 
 #include "consensus_scan.h"
 #include "observation_read.h"
@@ -579,8 +578,10 @@ bind_calculation_source_classes(QueryEvidenceState *state, MemoryContext work)
         ereport(ERROR, (errmsg("query evidence: witness source set changed during classification")));
     hash_destroy(unique);
 
-    if (laplace_relation_type_id("HAS_TRUST_CLASS", &classify.relation) != 0)
-        ereport(ERROR, (errmsg("query evidence: HAS_TRUST_CLASS identity is unavailable")));
+    /* HAS_TRUST_CLASS is a canonical spine relation but intentionally is not
+     * governed by the generated relation-law table. Its durable identity is the
+     * same canonical hash used by bootstrap and managed ingestion. */
+    hash128_blake3_str("HAS_TRUST_CLASS", &classify.relation);
     hash128_blake3_str("substrate/trust_class/DerivedCalculation/v1",
                        &classify.trust_class);
     classify.sources = state->calculation_sources;
