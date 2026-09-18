@@ -350,6 +350,9 @@ public sealed record StorageProofResponse(
     [property: JsonPropertyName("root_id_hex")] string RootIdHex,
     [property: JsonPropertyName("natural_unit_ordinal")] uint NaturalUnitOrdinal,
     [property: JsonPropertyName("atom_window")] int AtomWindow,
+    [property: JsonPropertyName("perfcache_receipt_hex")] string PerfcacheReceiptHex,
+    [property: JsonPropertyName("database_perfcache_receipt_hex")] string? DatabasePerfcacheReceiptHex,
+    [property: JsonPropertyName("perfcache_aligned")] bool? PerfcacheAligned,
     [property: JsonPropertyName("nodes")] IReadOnlyList<StorageProofNodeRow> Nodes);
 
 public sealed record DecomposeRequest(
