@@ -35,7 +35,9 @@ run_ci_contract_checks() {
     scripts/model-synthesize-ci.sh \
     scripts/maintain-installed-database.sh \
     scripts/ingest-source.sh \
-    scripts/check-deployed-revision.sh
+    scripts/check-deployed-revision.sh \
+    scripts/publish-applications.sh \
+    deploy/linux/deploy.sh
   python3 scripts/validate-pipeline.py
   python3 scripts/test-ci-workspace.py
   python3 scripts/test-product-ci-artifact-ownership.py
@@ -48,6 +50,7 @@ run_ci_contract_checks() {
   python3 scripts/test-ci-managed-projects.py
   python3 scripts/test-managed-policy.py
   python3 scripts/test-application-payload.py
+  python3 scripts/test-application-publish.py
   python3 scripts/test-cutechess-calibration.py
   python3 scripts/test-chess-x11-runtime.py
   python3 scripts/test-chess-floor-artifacts.py
