@@ -1,4 +1,4 @@
-name: Laplace — reusable product stage
+name: Internal — product stage
 
 on:
   workflow_call:
