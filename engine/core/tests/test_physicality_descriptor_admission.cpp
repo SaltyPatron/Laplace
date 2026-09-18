@@ -824,116 +824,31 @@ bool next_row(const uint8_t* data, size_t bytes, size_t& at, std::vector<Field>&
     return true;
 }
 
-TEST_F(PhysicalityDescriptorAdmission, DuplicateSourceUnitWitnessesKeepOneObservationAndLatestTime) {
+TEST_F(PhysicalityDescriptorAdmission, DuplicateSourceUnitObservationsPreserveEveryOccurrenceAndExactTime) {
     const auto a = composition({atom('a'), atom('b')});
-    auto original = stage({a, a, a}, {3, 9, 5});
+    const std::array<int64_t, 3> times{3, 9, 5};
+    auto original = stage({a, a, a}, {times.begin(), times.end()});
     auto captured = capture(original.get());
     auto sources = witnesses(3);
     sources[2].source_unit_id.lo += 1;
     Materialization result(nullptr, physicality_descriptor_materialization_free);
     ASSERT_EQ(run(captured, {}, {}, {}, sources, result), PHYSICALITY_DESCRIPTOR_OK);
-    const auto descriptor = form(result).descriptor_id;
+    const auto provenance = observations(result);
+    ASSERT_EQ(provenance.size(), sources.size());
+    for (size_t i = 0; i < provenance.size(); ++i) {
+        EXPECT_TRUE(hash128_equals(&provenance[i].entity_id, &a.value.entity_id));
+        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &form(result, i).descriptor_id));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &sources[i].source_id));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &sources[i].source_unit_id));
+        EXPECT_EQ(provenance[i].observed_at_unix_us, times[i]);
+    }
+    EXPECT_TRUE(hash128_equals(&provenance[0].source_unit_id, &provenance[1].source_unit_id));
+    EXPECT_FALSE(hash128_equals(&provenance[1].source_unit_id, &provenance[2].source_unit_id));
     Stage generated(physicality_descriptor_materialization_take_stage(result.get()), intent_stage_free);
     ASSERT_NE(generated, nullptr);
-    ASSERT_EQ(intent_stage_attestation_count(generated.get()), 2u);
-    // Capture validates canonical Content identities from the actual emitted
-    // physicalities before the attestation context is interpreted below.
-    auto emitted = capture(generated.get());
-    ASSERT_NE(emitted, nullptr);
-    size_t body_count = 0;
-    const auto* bodies = physicality_descriptor_capture_inputs(emitted.get(), &body_count);
-    const auto* basis = physicality_descriptor_vocabulary_basis(vocabulary.get());
-    const char* schema_names[] = {"PhysicalitySourceUnitContextV1",
-        "PhysicalitySourceIdentifierV1", "PhysicalitySourceUnitReceiptV1"};
-    std::array<hash128_t, 3> schemas{};
-    for (size_t i = 0; i < schemas.size(); ++i)
-        ASSERT_EQ(laplace_content_root_id(reinterpret_cast<const uint8_t*>(schema_names[i]),
-            std::strlen(schema_names[i]), &schemas[i]), 0);
-    std::vector<hash128_t> entities;
-    size_t entity_bytes = 0, entity_at = 0;
-    const auto* entity_data = intent_stage_tuple_ptr(generated.get(), INTENT_STAGE_TABLE_ENTITIES, &entity_bytes);
-    std::vector<Field> fields;
-    while (entity_at < entity_bytes) {
-        ASSERT_TRUE(next_row(entity_data, entity_bytes, entity_at, fields));
-        ASSERT_EQ(fields.size(), 4u);
-        ASSERT_EQ(fields[0].size, sizeof(hash128_t));
-        hash128_t id;
-        std::memcpy(&id, fields[0].bytes, sizeof(id));
-        entities.push_back(id);
-    }
-    const auto find_body = [&](const hash128_t& id) {
-        return std::find_if(bodies, bodies + body_count, [&](const auto& body) {
-            return hash128_equals(&id, &body.entity_id);
-        });
-    };
-    const auto has_entity = [&](const hash128_t& id) {
-        return std::any_of(entities.begin(), entities.end(), [&](const hash128_t& entity) {
-            return hash128_equals(&id, &entity);
-        });
-    };
-    size_t bytes = 0, at = 0, rows = 0;
-    const auto* data = intent_stage_tuple_ptr(generated.get(), INTENT_STAGE_TABLE_ATTESTATIONS, &bytes);
-    std::array<bool, 2> seen_units{};
-    while (at < bytes) {
-        ASSERT_TRUE(next_row(data, bytes, at, fields));
-        ASSERT_EQ(fields.size(), 14u);
-        ASSERT_EQ(fields[3].size, sizeof(hash128_t));
-        ASSERT_EQ(fields[4].size, sizeof(hash128_t));
-        ASSERT_EQ(fields[5].size, sizeof(hash128_t));
-        EXPECT_EQ(std::memcmp(fields[3].bytes, &descriptor, sizeof(descriptor)), 0);
-        EXPECT_EQ(std::memcmp(fields[4].bytes, &kSource, sizeof(kSource)), 0);
-        hash128_t context;
-        std::memcpy(&context, fields[5].bytes, sizeof(context));
-        EXPECT_FALSE(hash128_equals(&context, &kUnit));
-        EXPECT_FALSE(hash128_equals(&context, &sources[2].source_unit_id));
-        ASSERT_TRUE(has_entity(context));
-        const auto* context_body = find_body(context);
-        ASSERT_NE(context_body, bodies + body_count);
-        ASSERT_EQ(context_body->type, 1);
-        ASSERT_EQ(context_body->n_constituents, 3);
-        std::array<hash128_t, 3> context_children{};
-        ASSERT_EQ(trajectory_constituents(context_body->trajectory_xyzm,
-            context_body->trajectory_vertices, context_children.data(), context_children.size()), 3);
-        EXPECT_TRUE(hash128_equals(&context_children[0], &schemas[0]));
-        std::array<hash128_t, 2> decoded{};
-        for (size_t identifier = 0; identifier < decoded.size(); ++identifier) {
-            ASSERT_TRUE(has_entity(context_children[identifier + 1]));
-            const auto* identifier_body = find_body(context_children[identifier + 1]);
-            ASSERT_NE(identifier_body, bodies + body_count);
-            ASSERT_EQ(identifier_body->type, 1);
-            ASSERT_EQ(identifier_body->n_constituents, 17);
-            std::array<hash128_t, 17> identifier_children{};
-            ASSERT_EQ(trajectory_constituents(identifier_body->trajectory_xyzm,
-                identifier_body->trajectory_vertices, identifier_children.data(), identifier_children.size()), 17);
-            EXPECT_TRUE(hash128_equals(&identifier_children[0], &schemas[identifier + 1]));
-            auto* octets = reinterpret_cast<uint8_t*>(&decoded[identifier]);
-            for (size_t octet = 0; octet < sizeof(hash128_t); ++octet) {
-                size_t value = 0;
-                while (value < 256u && !hash128_equals(&identifier_children[octet + 1],
-                    &basis->byte_numbers[value])) ++value;
-                ASSERT_LT(value, 256u);
-                octets[octet] = static_cast<uint8_t>(value);
-            }
-        }
-        EXPECT_TRUE(hash128_equals(&decoded[0], &kSource));
-        const bool first_unit = hash128_equals(&decoded[1], &kUnit);
-        EXPECT_TRUE(first_unit || hash128_equals(&decoded[1], &sources[2].source_unit_id));
-        EXPECT_FALSE(seen_units[first_unit ? 0 : 1]);
-        seen_units[first_unit ? 0 : 1] = true;
-        EXPECT_EQ(big_word(fields[6].bytes, fields[6].size), 2u);
-        EXPECT_EQ(big_word(fields[8].bytes, fields[8].size), 1u);
-        const uint64_t encoded = big_word(fields[7].bytes, fields[7].size);
-        int64_t pg_time;
-        std::memcpy(&pg_time, &encoded, sizeof(pg_time));
-        EXPECT_EQ(pg_time + INTENT_STAGE_PG_EPOCH_UNIX_US, first_unit ? 9 : 5);
-        ++rows;
-    }
-    EXPECT_EQ(rows, 2u);
-    EXPECT_TRUE(seen_units[0]);
-    EXPECT_TRUE(seen_units[1]);
+    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
 }
-
-TEST_F(PhysicalityDescriptorAdmission, RejectsInvalidOrConflictingSourcePriorWithoutPublishingStage) {
+TEST_F(PhysicalityDescriptorAdmission, RejectsInvalidSourceTrustButValidTrustDifferencesDoNotCreateTestimony) {
     const auto a = composition({atom('a'), atom('b')});
     auto original = stage({a, a});
     auto captured = capture(original.get());
@@ -944,14 +859,23 @@ TEST_F(PhysicalityDescriptorAdmission, RejectsInvalidOrConflictingSourcePriorWit
         EXPECT_EQ(run(captured, {}, {}, {}, sources, result), PHYSICALITY_DESCRIPTOR_INVALID);
         EXPECT_EQ(result, nullptr);
     }
-    auto conflicting = witnesses(2);
-    conflicting[1].source_trust = 0.2;
-    EXPECT_EQ(run(captured, {}, {}, {}, conflicting, result), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
-    EXPECT_EQ(result, nullptr);
+
+    auto differing = witnesses(2);
+    differing[1].source_trust = 0.2;
+    ASSERT_EQ(run(captured, {}, {}, {}, differing, result), PHYSICALITY_DESCRIPTOR_OK);
+    const auto provenance = observations(result);
+    ASSERT_EQ(provenance.size(), differing.size());
+    for (size_t i = 0; i < provenance.size(); ++i) {
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &differing[i].source_id));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &differing[i].source_unit_id));
+    }
+    Stage generated(physicality_descriptor_materialization_take_stage(result.get()), intent_stage_free);
+    ASSERT_NE(generated, nullptr);
+    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
+
     EXPECT_EQ(run(captured, {}, {}, {}, witnesses(1), result), PHYSICALITY_DESCRIPTOR_INVALID);
     EXPECT_EQ(result, nullptr);
 }
-
 TEST_F(PhysicalityDescriptorAdmission, RetainedReceiptTracksStageTransferAndBudgetFailurePublishesNothing) {
     const auto a = composition({atom('a'), atom('b')});
     auto original = stage({a});
