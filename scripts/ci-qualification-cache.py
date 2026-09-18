@@ -13,41 +13,15 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ci_managed_projects import load_projects as load_managed_projects
+
 SCHEMA_VERSION = 1
 
 SUITE_SCOPES = {
-    "native-dev": (
-        "CMakeLists.txt",
-        "cmake/",
-        "engine/",
-        "extension/",
-        "scripts/",
-    ),
-    "managed-dev": (
-        "CMakeLists.txt",
-        "Directory.Build.*",
-        "Directory.Packages.props",
-        "global.json",
-        "app/",
-        "engine/",
-        "extension/",
-        "scripts/",
-    ),
-    "uci-dev": (
-        "CMakeLists.txt",
-        "Directory.Build.*",
-        "global.json",
-        "app/Laplace.Chess",
-        "app/Laplace.Chess.Uci",
-        "engine/",
-        "scripts/",
-    ),
-    "browser-dev": (
-        "web/",
-        "app/Laplace.Api.Contracts",
-        "app/Laplace.Endpoints.OpenAICompat",
-        "scripts/",
-    ),
+    "native-dev": ("CMakeLists.txt","cmake/","engine/","extension/","scripts/test-parallel.sh","scripts/test-suites/common.sh","scripts/test-suites/native-dev.sh","scripts/provision-cmake.py"),
+    "managed-dev": ("CMakeLists.txt","Directory.Build.*","Directory.Packages.props","global.json","engine/","extension/","scripts/test-parallel.sh","scripts/test-suites/common.sh","scripts/test-suites/managed-dev.sh","scripts/ci_managed_projects.py","scripts/sync-managed-native-artifacts.sh","scripts/place-build-directory.py"),
+    "uci-dev": ("CMakeLists.txt","Directory.Build.*","global.json","app/Laplace.Core/","app/Laplace.Ops/","app/Laplace.Substrate/","app/Laplace.Chess/","app/Laplace.Chess.Uci/","engine/","scripts/test-parallel.sh","scripts/test-suites/common.sh","scripts/test-suites/uci-dev.sh","scripts/sync-managed-native-artifacts.sh","scripts/place-build-directory.py"),
+    "browser-dev": ("web/","app/Laplace.Api.Contracts/","app/Laplace.Endpoints.OpenAICompat/","scripts/test-parallel.sh","scripts/test-suites/common.sh","scripts/test-suites/browser-dev.sh"),
 }
 
 TOOL_COMMANDS = {
@@ -63,6 +37,7 @@ ENV_KEYS = (
     "LAPLACE_PG_PREFIX",
     "LAPLACE_UCD_PATH",
     "LAPLACE_DATA_ROOT",
+    "LAPLACE_MANAGED_TEST_PROJECTS",
 )
 
 
@@ -106,10 +81,30 @@ def command_version(command: tuple[str, ...]) -> str:
     return text[0] if text else f"<exit-{result.returncode}>"
 
 
+def managed_dependency_selectors(root: Path) -> tuple[str, ...]:
+    selected = os.environ.get("LAPLACE_MANAGED_TEST_PROJECTS", "all").strip()
+    if not selected or selected == "all":
+        return ("app/",)
+    projects = load_managed_projects(root)
+    queue = [item for item in selected.split(",") if item]
+    seen: set[str] = set()
+    while queue:
+        project = queue.pop()
+        if project in seen:
+            continue
+        if project not in projects:
+            raise ValueError(f"managed qualification project is not registered: {project}")
+        seen.add(project)
+        queue.extend(projects[project].refs)
+    return tuple(sorted({project.rsplit("/", 1)[0] + "/" for project in seen}))
+
+
 def fingerprint(root: Path, suite: str) -> tuple[str, dict]:
     selectors = SUITE_SCOPES.get(suite)
     if not selectors:
         raise ValueError(f"unknown qualification suite: {suite}")
+    if suite == "managed-dev":
+        selectors = (*selectors, *managed_dependency_selectors(root))
 
     files = [
         {"path": path, "mode": mode, "blob": sha}
