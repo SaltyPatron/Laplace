@@ -32,8 +32,6 @@ PRODUCT_IGNORED_EXACT = frozenset({
     "scripts/test-parallel.sh",
     "deploy/linux/deploy.sh",
     "scripts/publish-applications.sh",
-    "deploy/linux/deploy.sh",
-    "scripts/publish-applications.sh",
     "scripts/test-workflow-architecture.py",
     "scripts/test-seed-workflow-ownership.py",
     "scripts/test-product-ci-artifact-ownership.py",
