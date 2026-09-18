@@ -113,7 +113,9 @@ jobs:
               GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
               git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"
             freshness_tool="$probe_repo/ci-product-freshness.py"
+            scope_tool="$probe_repo/ci_product_scope.py"
             git -C "$probe_repo" show "$TARGET_SHA:scripts/ci-product-freshness.py" > "$freshness_tool"
+            git -C "$probe_repo" show "$TARGET_SHA:scripts/ci_product_scope.py" > "$scope_tool"
             freshness_rc=0
             python3 "$freshness_tool" --root "$probe_repo" --base "$TARGET_SHA" --head "$latest_main" || freshness_rc=$?
             if (( freshness_rc == 3 )); then
@@ -227,11 +229,14 @@ jobs:
                 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
                 GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
                 git fetch --no-tags --depth=1 origin "$latest_main"
-              freshness_tool="$(mktemp "$work_root/product-freshness.XXXXXX.py")"
+              freshness_dir="$(mktemp -d "$work_root/product-freshness.XXXXXX")"
+              freshness_tool="$freshness_dir/ci-product-freshness.py"
+              scope_tool="$freshness_dir/ci_product_scope.py"
               git show "$TARGET_SHA:scripts/ci-product-freshness.py" > "$freshness_tool"
+              git show "$TARGET_SHA:scripts/ci_product_scope.py" > "$scope_tool"
               freshness_rc=0
               python3 "$freshness_tool" --root "$control_workspace" --base "$TARGET_SHA" --head "$latest_main" || freshness_rc=$?
-              rm -f "$freshness_tool"
+              rm -rf "$freshness_dir"
               if (( freshness_rc == 3 )); then
                 unset checkout_auth CHECKOUT_TOKEN
                 echo "::notice::selected revision $TARGET_SHA is superseded by product-changing main $latest_main; no product stage executed"
