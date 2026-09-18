@@ -28,6 +28,7 @@ public sealed class UnicodeDecomposerTests
 
     [Fact]
     [Trait("Tier", "perf")]
+    [Trait("Scope", "full-corpus")]
     public async Task Emits_All_Codepoints_As_T0_Entities_With_Content_Physicalities()
     {
         var dec = NewDecomposer();
