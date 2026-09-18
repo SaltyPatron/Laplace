@@ -497,7 +497,7 @@ export function StorageProofView() {
   }
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} data-storage-proof-surface="v4">
       <header className={styles.hero}>
         <div>
           <span className={styles.eyebrow}>Executable storage proof · T0 ROM v4</span>
