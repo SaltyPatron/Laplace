@@ -132,6 +132,41 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["build_components"], [])
         self.assertFalse(value["full_qualification"])
 
+    def test_git_diff_includes_deleted_production_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="impact-delete-") as tmp:
+            repo = Path(tmp)
+            (repo / "web/src").mkdir(parents=True)
+            target = repo / "web/src/Removed.tsx"
+            target.write_text("export const removed = 1;\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "ci@example.invalid"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "CI"], cwd=repo, check=True)
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            base = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repo, check=True, text=True, capture_output=True
+            ).stdout.strip()
+            target.unlink()
+            subprocess.run(["git", "add", "-u"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "delete"], cwd=repo, check=True)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repo, check=True, text=True, capture_output=True
+            ).stdout.strip()
+
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--root", str(repo),
+                    "--base", base,
+                    "--head", head,
+                ],
+                check=True, text=True, capture_output=True,
+            )
+            value = json.loads(result.stdout)
+            self.assertEqual(value["changed_files"], ["web/src/Removed.tsx"])
+            self.assertIn("browser-dev", value["dev_suites"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
