@@ -203,6 +203,87 @@ csv_selected() {
   [[ "$selected" == all ]] || [[ ",$selected," == *",$wanted,"* ]]
 }
 
+force_full_carry_forward_impact() {
+  export LAPLACE_BUILD_COMPONENTS=all
+  export LAPLACE_DEV_SUITES=all
+  export LAPLACE_DB_SUITES=all
+  export LAPLACE_LIVE_SUITES=all
+  export LAPLACE_DELIVERY_ACTIONS=all
+  export LAPLACE_PUBLISH_SCOPE=full
+}
+
+carry_forward_undelivered_impact() {
+  # Only automatic main delivery owns this reconciliation. Manual/operator stages
+  # deliberately keep the scope they were dispatched with.
+  [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]] || return 0
+  case "${LAPLACE_STAGE:-}" in
+    release-qualification|release-delivery) ;;
+    *) return 0 ;;
+  esac
+
+  local target deployed receipt plan
+  target="$(git rev-parse HEAD)"
+  receipt="${LAPLACE_APP_DIR:-/opt/laplace/app}/.laplace-source-revision"
+  deployed="$(cat "$receipt" 2>/dev/null || true)"
+
+  if [[ ! "$deployed" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "::warning::installed application revision receipt is unavailable; carrying full product impact forward"
+    force_full_carry_forward_impact
+    return 0
+  fi
+  if [[ "$deployed" == "$target" ]]; then
+    return 0
+  fi
+
+  if ! git cat-file -e "$deployed^{commit}" 2>/dev/null; then
+    if ! git fetch --no-tags --depth=1 origin "$deployed"; then
+      echo "::warning::could not resolve deployed revision $deployed; carrying full product impact forward"
+      force_full_carry_forward_impact
+      return 0
+    fi
+  fi
+
+  if ! plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")"; then
+    echo "::warning::could not compute deployed-to-target impact; carrying full product impact forward"
+    force_full_carry_forward_impact
+    return 0
+  fi
+
+  eval "$(CARRY_PLAN_JSON="$plan" python3 - <<'PY'
+import json
+import os
+import shlex
+
+plan = json.loads(os.environ["CARRY_PLAN_JSON"])
+
+orders = {
+    "LAPLACE_BUILD_COMPONENTS": ("build_components", ("native", "managed", "web")),
+    "LAPLACE_DEV_SUITES": ("dev_suites", ("native-dev", "managed-dev", "uci-dev", "browser-dev")),
+    "LAPLACE_DB_SUITES": ("db_suites", ("db-health", "native-db", "managed-db")),
+    "LAPLACE_LIVE_SUITES": ("live_suites", ("live-floor", "live-api", "managed-live", "generation-eval")),
+    "LAPLACE_DELIVERY_ACTIONS": ("delivery_actions", ("install", "database", "reconcile", "publish", "live")),
+}
+
+for env_name, (field, order) in orders.items():
+    current = os.environ.get(env_name, "")
+    if current == "all":
+        value = "all"
+    else:
+        selected = {item for item in current.split(",") if item}
+        selected.update(plan.get(field, []))
+        value = ",".join(item for item in order if item in selected)
+    print(f"export {env_name}={shlex.quote(value)}")
+
+scope = os.environ.get("LAPLACE_PUBLISH_SCOPE", "api")
+if scope == "full" or plan.get("publish_scope") == "full":
+    scope = "full"
+print(f"export LAPLACE_PUBLISH_SCOPE={shlex.quote(scope)}")
+PY
+)"
+
+  echo "::notice::carried forward undelivered impact from $deployed to $target: build=$LAPLACE_BUILD_COMPONENTS dev=$LAPLACE_DEV_SUITES db=$LAPLACE_DB_SUITES delivery=$LAPLACE_DELIVERY_ACTIONS publish=$LAPLACE_PUBLISH_SCOPE live=$LAPLACE_LIVE_SUITES"
+}
+
 run_db_tests() {
   require_built_revision
   local selected="${LAPLACE_DB_SUITES:-all}"
@@ -392,6 +473,7 @@ reconcile_installed_product() {
 }
 run_release_qualification() {
   check_deps
+  carry_forward_undelivered_impact
 
   # Do not spend build/test time on a revision that was already superseded
   # while waiting for the self-hosted runner.
@@ -497,6 +579,7 @@ run_release_activation() {
 
 run_release_delivery() {
   check_deps
+  carry_forward_undelivered_impact
   require_built_revision
 
   # Qualification is allowed to be superseded and cancelled. Delivery is not.
