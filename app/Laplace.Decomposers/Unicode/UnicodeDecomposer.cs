@@ -204,7 +204,9 @@ public sealed class UnicodeDecomposer
         string root,
         string selectedXml)
     {
-        if (relative is "ucdxml/ucd.nounihan.flat.xml" or "ucdxml/ucd.nounihan.flat.zip")
+        if (relative.StartsWith("ucdxml/ucd.", StringComparison.Ordinal)
+            && (relative.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+                || relative.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)))
             return !string.Equals(fullPath, selectedXml, StringComparison.Ordinal);
 
         if (relative == "ucd/DerivedJoiningType.txt")
@@ -212,6 +214,35 @@ public sealed class UnicodeDecomposer
 
         if (relative == "ucd/DerivedNumericType.txt")
             return File.Exists(Path.Combine(root, "ucd", "extracted", "DerivedNumericType.txt"));
+
+        if (relative is "ucd/extracted/DerivedGeneralCategory.txt"
+            or "ucd/extracted/DerivedCombiningClass.txt"
+            or "ucd/extracted/DerivedBidiClass.txt")
+            return File.Exists(Path.Combine(root, "ucd", "UnicodeData.txt"));
+
+        if (relative == "ucd/extracted/DerivedEastAsianWidth.txt")
+            return File.Exists(Path.Combine(root, "ucd", "EastAsianWidth.txt"));
+
+        if (relative == "ucd/extracted/DerivedLineBreak.txt")
+            return File.Exists(Path.Combine(root, "ucd", "LineBreak.txt"));
+
+        if (relative == "ucd/UCD.zip")
+            return Directory.Exists(Path.Combine(root, "ucd"))
+                && File.Exists(Path.Combine(root, "ucd", "UnicodeData.txt"));
+
+        if (relative == "ucd/Unihan.zip")
+            return Directory.EnumerateFiles(Path.Combine(root, "ucd"), "Unihan_*.txt",
+                SearchOption.TopDirectoryOnly).Any()
+                || Directory.Exists(Path.Combine(root, "ucd", "Unihan"));
+
+        if (relative == "ucd/NamesList.html")
+            return File.Exists(Path.Combine(root, "ucd", "NamesList.txt"));
+
+        if (relative == "security/uts39-data-17.0.0.zip")
+            return File.Exists(Path.Combine(root, "security", "confusables.txt"));
+
+        if (relative == "security/confusablesSummary.txt")
+            return File.Exists(Path.Combine(root, "security", "confusables.txt"));
 
         return false;
     }
@@ -223,6 +254,10 @@ public sealed class UnicodeDecomposer
             || name.StartsWith("README", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase)
             || name.Contains("copyright", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("index.html", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".dtd", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".xsd", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".md5", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".sig", StringComparison.OrdinalIgnoreCase);
@@ -625,7 +660,8 @@ public sealed class UnicodeDecomposer
             "security/confusables.txt" => ArtifactKind.Confusables,
             "ucd/DerivedNormalizationProps.txt" => ArtifactKind.DerivedNormalization,
             "ucd/ScriptExtensions.txt" => ArtifactKind.ScriptExtensions,
-            "ucd/PropList.txt" or "ucd/DerivedCoreProperties.txt" => ArtifactKind.BinaryProperties,
+            "ucd/PropList.txt" or "ucd/DerivedCoreProperties.txt"
+                or "ucd/extracted/DerivedBinaryProperties.txt" => ArtifactKind.BinaryProperties,
             "ucd/auxiliary/GraphemeBreakProperty.txt" => ArtifactKind.GraphemeBreak,
             "ucd/auxiliary/WordBreakProperty.txt" => ArtifactKind.WordBreak,
             "ucd/auxiliary/SentenceBreakProperty.txt" => ArtifactKind.SentenceBreak,
@@ -663,7 +699,8 @@ public sealed class UnicodeDecomposer
             "ucd/PropertyValueAliases.txt" => ArtifactKind.PropertyValueAliases,
             "ucd/Index.txt" => ArtifactKind.IndexTerms,
             "ucd/USourceData.txt" => ArtifactKind.USourceData,
-            _ when relative.StartsWith("ucd/Unihan/", StringComparison.Ordinal)
+            _ when (relative.StartsWith("ucd/Unihan/", StringComparison.Ordinal)
+                    || relative.StartsWith("ucd/Unihan_", StringComparison.Ordinal))
                 && relative.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
                 => ArtifactKind.UnihanProperties,
             _ => ArtifactKind.Unknown,
@@ -689,10 +726,18 @@ public sealed class UnicodeDecomposer
 
     private static void AddUnihanFiles(List<ArtifactJob> jobs, string baseDir)
     {
-        string dir = Path.Combine(baseDir, "ucd", "Unihan");
-        if (!Directory.Exists(dir)) return;
-        foreach (string path in Directory.EnumerateFiles(dir, "*.txt", SearchOption.TopDirectoryOnly)
-                                             .OrderBy(static p => p, StringComparer.Ordinal))
+        string ucd = Path.Combine(baseDir, "ucd");
+        var paths = new List<string>();
+        if (Directory.Exists(ucd))
+            paths.AddRange(Directory.EnumerateFiles(
+                ucd, "Unihan_*.txt", SearchOption.TopDirectoryOnly));
+        string dir = Path.Combine(ucd, "Unihan");
+        if (Directory.Exists(dir))
+            paths.AddRange(Directory.EnumerateFiles(
+                dir, "*.txt", SearchOption.TopDirectoryOnly));
+
+        foreach (string path in paths.Distinct(StringComparer.Ordinal)
+                                     .OrderBy(static p => p, StringComparer.Ordinal))
         {
             string label = Path.GetRelativePath(baseDir, path).Replace('\\', '/');
             AddIfPresent(jobs, ArtifactKind.UnihanProperties, path, label);
@@ -1569,9 +1614,10 @@ public sealed class UnicodeDecomposer
             if (aliasId is null) return;
             double weight = RelationTypeRank.StandardsStructural * TC.StandardsDerived;
 
-            builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                propertyKey, UcdProperties.RelTypeHasProperty,
-                valueId, Source, null, weight));
+            if (row.CountsSourceRow)
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    propertyKey, UcdProperties.RelTypeHasProperty,
+                    valueId, Source, null, weight));
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
                 valueId, UcdProperties.RelTypeHasProperty,
                 aliasId.Value, Source, propertyKey, weight));
@@ -1644,7 +1690,7 @@ public sealed class UnicodeDecomposer
                     value.Value, Source, key,
                     RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
-            if (row.Codepoint is { } cp)
+            if (row.CountsSourceRow && row.Codepoint is { } cp)
             {
                 Hash128 cpKey = _owner.ClassifierEntity(
                     builder, "unicode/property_key", "USource_Codepoint_Reference");
