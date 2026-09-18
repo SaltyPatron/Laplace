@@ -73,10 +73,14 @@ run_managed_dotnet_tests() {
   fi
 
   local solution generated="" rc=0 deadline="${LAPLACE_MANAGED_TEST_TIMEOUT:-15m}"
+  local impact_filter="${LAPLACE_MANAGED_TEST_FILTER:-}"
+  if [[ "$label" == managed-dev && -n "$impact_filter" ]]; then
+    filter="($filter)&($impact_filter)"
+  fi
   solution="$(managed_test_solution "$selected" "$label")" || return $?
   [[ "$solution" == "$ROOT/app/Laplace.slnx" ]] || generated="$solution"
 
-  echo "::notice::$label projects=$selected deadline=$deadline"
+  echo "::notice::$label projects=$selected deadline=$deadline filter=$filter"
   timeout --signal=TERM --kill-after=30s "$deadline" \
     dotnet test "$solution" -c Release --no-build --nologo --verbosity minimal \
       "$@" --filter "$filter" || rc=$?
