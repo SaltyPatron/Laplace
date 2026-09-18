@@ -110,6 +110,22 @@ if(NOT DEFINED LAPLACE_UCD_PATH)
 endif()
 set(LAPLACE_UCD_PATH "${LAPLACE_UCD_PATH}"
     CACHE PATH "Path to the UCD tree (contains ucd/, ucdxml/, uca/, etc.)")
+set(LAPLACE_UCD_RELEASE_README "${LAPLACE_UCD_PATH}/ReadMe.txt")
+if(NOT EXISTS "${LAPLACE_UCD_RELEASE_README}")
+    message(FATAL_ERROR
+        "UCD release identity missing: ${LAPLACE_UCD_RELEASE_README}\n"
+        "Laplace requires the numbered release ReadMe even when LAPLACE_UCD_PATH uses a local 'latest' alias.")
+endif()
+file(READ "${LAPLACE_UCD_RELEASE_README}" _laplace_ucd_release_readme LIMIT 4096)
+string(FIND "${_laplace_ucd_release_readme}"
+    "for Version ${LAPLACE_UNICODE_VERSION} of the Unicode Standard."
+    _laplace_ucd_release_match)
+if(_laplace_ucd_release_match EQUAL -1)
+    message(FATAL_ERROR
+        "UCD release mismatch: LAPLACE_UNICODE_VERSION=${LAPLACE_UNICODE_VERSION}\n"
+        "but ${LAPLACE_UCD_RELEASE_README} does not declare that release.\n"
+        "Do not let a moving 'latest' alias change content identity.")
+endif()
 set(LAPLACE_UCDXML_ZIP "${LAPLACE_UCD_PATH}/ucdxml/ucd.all.flat.zip"
     CACHE FILEPATH "Complete UCDXML flat zip (CJK + non-CJK); canonical Unicode property authority for engine codegen.")
 if(NOT EXISTS "${LAPLACE_UCDXML_ZIP}")
