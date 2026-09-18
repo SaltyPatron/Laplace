@@ -143,6 +143,21 @@ def receipt_path(root: Path, suite: str, digest: str) -> Path:
     return root / suite / f"{digest}.json"
 
 
+def latest_path(root: Path, suite: str) -> Path:
+    return root / suite / "latest.json"
+
+
+def read_latest_source(root: Path, suite: str) -> str:
+    try:
+        payload = json.loads(latest_path(root, suite).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if payload.get("schema") != SCHEMA_VERSION or payload.get("suite") != suite:
+        return ""
+    source_sha = str(payload.get("source_sha") or "")
+    return source_sha if len(source_sha) == 40 else ""
+
+
 def read_receipt(path: Path, suite: str, digest: str) -> dict | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -180,12 +195,32 @@ def record(root: Path, suite: str, digest: str, source_sha: str, inputs: dict) -
             os.unlink(temp_name)
         except FileNotFoundError:
             pass
+
+    latest = latest_path(root, suite)
+    latest_payload = {
+        "schema": SCHEMA_VERSION,
+        "suite": suite,
+        "fingerprint": digest,
+        "source_sha": source_sha,
+        "qualified_at": payload["qualified_at"],
+    }
+    fd, temp_name = tempfile.mkstemp(prefix="latest.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(latest_payload, stream, sort_keys=True, indent=2)
+            stream.write("\n")
+        os.replace(temp_name, latest)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
     return path
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("fingerprint", "check", "source", "record"))
+    parser.add_argument("operation", choices=("fingerprint", "check", "source", "latest-source", "record"))
     parser.add_argument("--suite", required=True, choices=tuple(SUITE_SCOPES))
     parser.add_argument("--root", default=".")
     parser.add_argument("--cache-root")
@@ -193,12 +228,20 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
+    receipts = cache_root(args.cache_root)
+
+    if args.operation == "latest-source":
+        source_sha = read_latest_source(receipts, args.suite)
+        if not source_sha:
+            return 1
+        print(source_sha)
+        return 0
+
     digest, inputs = fingerprint(root, args.suite)
     if args.operation == "fingerprint":
         print(digest)
         return 0
 
-    receipts = cache_root(args.cache_root)
     path = receipt_path(receipts, args.suite, digest)
 
     if args.operation in ("check", "source"):
