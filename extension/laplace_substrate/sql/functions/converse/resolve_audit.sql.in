@@ -42,7 +42,7 @@ CREATE OR REPLACE FUNCTION converse.resolve_audit(p_prompt text, p_lang_rel byte
                   senses bigint, top_language text, verdict text)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-WITH tok AS (
+WITH tok AS MATERIALIZED (
     -- prompt_words is the UAX-29 segmentation with its entity lookup. It
     -- returns one row per (ord, id) and an id living at two tiers appears
     -- TWICE (GH #752), so DISTINCT ON keeps one row per position -- otherwise
@@ -51,17 +51,25 @@ WITH tok AS (
     FROM converse.prompt_words(p_prompt) w
     ORDER BY w.ord, w.id
 ),
-enriched AS (
-    SELECT t.ord, t.word, t.id,
-           (SELECT min(e.tier) FROM laplace.entities e WHERE e.id = t.id) AS tier,
-           (SELECT count(*) FROM lexical.senses(t.id)) AS n_senses,
-           (SELECT c.object_id
-              FROM laplace.consensus c
-             WHERE c.subject_id = t.id
-               AND c.type_id = p_lang_rel
-             ORDER BY consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
-             LIMIT 1) AS lang_id
+sense_counts AS MATERIALIZED (
+    SELECT s.term, count(*) AS n
+    FROM lexical.senses_batch(ARRAY(SELECT t.id FROM tok t)) s
+    GROUP BY s.term
+),
+languages AS MATERIALIZED (
+    SELECT DISTINCT ON (c.subject_id) c.subject_id, c.object_id
+    FROM laplace.consensus c
+    WHERE c.type_id = p_lang_rel
+      AND c.subject_id = ANY(ARRAY(SELECT t.id FROM tok t))
+    ORDER BY c.subject_id, consensus.eff_mu(c.rating, c.rd) DESC, c.object_id
+),
+enriched AS NOT MATERIALIZED (
+    SELECT t.ord, t.word, t.id, e.tier, COALESCE(s.n, 0) AS n_senses,
+           l.object_id AS lang_id
     FROM tok t
+    LEFT JOIN laplace.entities e ON e.id = t.id
+    LEFT JOIN sense_counts s ON s.term = t.id
+    LEFT JOIN languages l ON l.subject_id = t.id
 ),
 ord AS (
     SELECT e.*, row_number() OVER (ORDER BY e.ord) AS ix FROM enriched e

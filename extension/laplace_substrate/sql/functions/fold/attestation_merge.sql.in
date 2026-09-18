@@ -13,7 +13,7 @@ CREATE OR REPLACE FUNCTION consensus.attestation_merge(
     p_ts       timestamptz[],
     p_fold_replayable boolean[])
     RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pg_laplace_attestation_merge'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_attestation_merge'
     LANGUAGE C VOLATILE;
 
 -- First-party ingest owns type-major runs and uses this direct routed form.
@@ -28,5 +28,5 @@ CREATE OR REPLACE FUNCTION consensus.attestation_merge_type(
     p_ts       timestamptz[],
     p_fold_replayable boolean[])
     RETURNS bigint
-    AS 'MODULE_PATHNAME', 'pg_laplace_attestation_merge_type'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_attestation_merge_type'
     LANGUAGE C VOLATILE;

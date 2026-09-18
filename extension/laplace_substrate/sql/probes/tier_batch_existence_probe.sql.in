@@ -7,7 +7,7 @@
 -- it. Bits are set only by a positive perfcache/codepoint or committed-row hit.
 CREATE OR REPLACE FUNCTION laplace.tier_batch_existence_probe(ids bytea[])
     RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_tier_batch_existence_probe'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_tier_batch_existence_probe'
     LANGUAGE C STABLE;
 
 -- Compatibility overload for callers whose round state already carries tiers.

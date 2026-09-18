@@ -4,7 +4,7 @@
 -- PL/pgSQL/RBAR loop or another database crossing.
 CREATE OR REPLACE FUNCTION laplace.physicalities_exist_bitmap_native(ids bytea[])
     RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_physicalities_exist_bitmap'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_physicalities_exist_bitmap'
     LANGUAGE C STABLE;
 
 CREATE OR REPLACE FUNCTION laplace.physicalities_exist_bitmap(ids bytea[])

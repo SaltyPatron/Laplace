@@ -128,8 +128,8 @@ public sealed class ConsensusMutationRoutingTests
         var entry = Read("extension", "laplace_substrate", "sql", "functions",
             "fold", "consensus_upsert.sql.in");
         Assert.Contains("CREATE OR REPLACE FUNCTION consensus.upsert_evidence_type(", entry);
-        Assert.Contains("AS 'MODULE_PATHNAME', 'pg_laplace_consensus_upsert_evidence_type'", entry);
+        Assert.Contains("AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert_evidence_type'", entry);
         Assert.Contains("CREATE OR REPLACE FUNCTION consensus.refold_evidence_type(", entry);
-        Assert.Contains("AS 'MODULE_PATHNAME', 'pg_laplace_consensus_refold_evidence_type'", entry);
+        Assert.Contains("AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_refold_evidence_type'", entry);
     }
 }

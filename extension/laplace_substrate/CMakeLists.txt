@@ -6,6 +6,10 @@ set(EXT_MODULE_PATHNAME "${EXT_NAME}")
 # without replacing a library mapped by the postmaster or restarting PostgreSQL.
 set(EXT_EXECUTION_SOURCES
     src/execution_module.c
+    src/presence.c
+    src/descent_probe.c
+    src/fold_route.c
+    src/consensus_bulk_write.c
     ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.c
     src/content_resolve.c
     src/text_root_placements.c
@@ -134,6 +138,7 @@ string(SUBSTRING ${_ext_sql_hash} 0 16 EXT_VERSION)
 # `undefined symbol` when the extension is first loaded — never at build time.
 set(EXT_C_SOURCES
     src/laplace_substrate.c
+    src/presence.c
     src/identity_scan.c
     src/content_membership_read.c
     src/content_text_read.c

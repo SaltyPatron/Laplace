@@ -1,6 +1,6 @@
 CREATE OR REPLACE FUNCTION laplace.entities_stored_bitmap(ids bytea[])
     RETURNS bytea
-    AS 'MODULE_PATHNAME', 'pg_laplace_entities_stored_bitmap'
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_entities_stored_bitmap'
     LANGUAGE C STABLE;
 
 -- Compatibility overload. Canonical entity storage is id-only/HASH(id): tier is

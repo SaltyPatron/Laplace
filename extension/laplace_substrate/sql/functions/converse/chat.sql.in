@@ -137,8 +137,8 @@ BEGIN
                 SELECT DISTINCT x.sid FROM (
                     SELECT t.id AS sid FROM ptok t
                     UNION ALL
-                    SELECT s.synset_id FROM ptok t
-                    CROSS JOIN LATERAL lexical.senses(t.id) s
+                    SELECT s.synset_id FROM lexical.senses_batch(
+                        ARRAY(SELECT t.id FROM ptok t)) s
                     WHERE s.synset_id IS NOT NULL
                 ) x
             ),

@@ -95,13 +95,14 @@ BEGIN
         SELECT DISTINCT ON (x.tok)
                x.tok, x.syn, x.denote_mu, x.tok_breadth
         FROM (
-            SELECT p.id AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
+            SELECT s.term AS tok, s.synset_id AS syn, s.eff_mu AS denote_mu,
                    max(consensus.highway_popcount(e.highway_mask))
-                       OVER (PARTITION BY p.id) AS tok_breadth
-            FROM converse.prompt_state(p_prompt) p
-            CROSS JOIN LATERAL lexical.senses(p.id) s
+                       OVER (PARTITION BY s.term) AS tok_breadth
+            FROM lexical.senses_batch(ARRAY(
+                SELECT p.id FROM converse.prompt_state(p_prompt) p
+                WHERE p.id IS NOT NULL)) s
             LEFT JOIN laplace.entities e ON e.id = s.synset_id
-            WHERE p.id IS NOT NULL AND s.synset_id IS NOT NULL
+            WHERE s.synset_id IS NOT NULL
         ) x
         ORDER BY x.tok, x.denote_mu DESC NULLS LAST, x.syn
     ) y
