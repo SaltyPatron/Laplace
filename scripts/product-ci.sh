@@ -299,8 +299,13 @@ PY
 
 carry_forward_undelivered_impact() {
   # Only automatic main delivery owns this reconciliation. Manual/operator stages
-  # deliberately keep the scope they were dispatched with.
+  # deliberately keep the scope they were dispatched with. A qualification with
+  # no delivery actions is test-only and must never inherit installed-product work.
   [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]] || return 0
+  [[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]] || {
+    echo "::notice::qualification has no delivery actions; deployed product carry-forward skipped"
+    return 0
+  }
   case "${LAPLACE_STAGE:-}" in
     release-qualification|release-delivery) ;;
     *) return 0 ;;
