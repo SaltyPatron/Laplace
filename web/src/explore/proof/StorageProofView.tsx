@@ -480,7 +480,7 @@ export function StorageProofView() {
     <div className={styles.root}>
       <header className={styles.hero}>
         <div>
-          <span className={styles.eyebrow}>Executable storage proof</span>
+          <span className={styles.eyebrow}>Executable storage proof · T0 ROM v4</span>
           <h2>Finite coordinate address · exact reversible trajectory</h2>
           <p>
             One prompt, one native decomposition: identity, O(Tier) trunk/leaf structure,
