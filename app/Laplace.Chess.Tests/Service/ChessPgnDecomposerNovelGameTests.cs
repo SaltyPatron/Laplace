@@ -193,7 +193,7 @@ public sealed class ChessPgnDecomposerNovelGameTests
 
             1-0
             """;
-        var game = ChessPgnDecomposer.TryParseGame(pgn);
+        var game = ChessPgnDecomposer.TryParseGame(pgn, requireCompleteSource: true);
         Assert.NotNull(game);
         Assert.Equal("Anthony-Hart", game.WhiteName);
         Assert.Equal("fishygoldycamel007", game.BlackName);
@@ -203,6 +203,27 @@ public sealed class ChessPgnDecomposerNovelGameTests
         Assert.Equal(game.PositionIds[0], game.LineId);
         Assert.NotEqual(default, game.PlayingId);
         Assert.Equal(game.PlayingId, ChessPgnDecomposer.TryParseGame(pgn)!.PlayingId);
+    }
+
+    [Fact]
+    public void TryParseGame_SourceDeclaredCheckmateWithoutMoves_IsRejected()
+    {
+        const string pgn = """
+            [Event "Live Chess"]
+            [Site "Chess.com"]
+            [Date "2026.04.05"]
+            [White "Oujj24"]
+            [Black "Anthony-Hart"]
+            [Result "1-0"]
+            [Termination "Oujj24 won by checkmate"]
+            [TimeControl "600"]
+            [ECO "B06"]
+
+            1-0
+            """;
+        var ex = Assert.Throws<InvalidDataException>(() =>
+            ChessPgnDecomposer.TryParseGame(pgn, requireCompleteSource: true));
+        Assert.Contains("board-terminal finish", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
