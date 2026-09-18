@@ -125,10 +125,21 @@ jobs:
           set -euo pipefail
           umask 0002
 
-          cd "$GITHUB_WORKSPACE"
+          control_workspace="$GITHUB_WORKSPACE"
+          work_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+          worktree_root="$work_root/product-worktrees"
+          candidate_workspace="$worktree_root/$TARGET_SHA"
+          mkdir -p "$worktree_root"
+
+          # The runner checkout is only the Git metadata/control repository.
+          # Product work happens in an exact-revision worktree so another revision
+          # can never overwrite this candidate's source or build outputs.
+          exec 7>"$work_root/git-metadata.lock"
+          flock 7
+          cd "$control_workspace"
           if [[ ! -e .git ]]; then
             [[ -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
-              echo "::error::nonempty workspace has no repository; preserving its files" >&2
+              echo "::error::nonempty control workspace has no repository; preserving its files" >&2
               exit 1
             }
             git init --initial-branch=main
@@ -156,29 +167,55 @@ jobs:
             GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $checkout_auth" \
             git fetch --no-tags --depth=2 origin "$TARGET_SHA"
           unset checkout_auth CHECKOUT_TOKEN
-          git checkout --no-overwrite-ignore --detach "$TARGET_SHA"
+
+          git worktree prune
+          if [[ -e "$candidate_workspace/.git" ]]; then
+            [[ "$(git -C "$candidate_workspace" rev-parse HEAD)" == "$TARGET_SHA" ]] || {
+              echo "::error::candidate worktree path belongs to a different revision: $candidate_workspace" >&2
+              exit 1
+            }
+          else
+            [[ ! -e "$candidate_workspace" || -z "$(find "$candidate_workspace" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]] || {
+              echo "::error::candidate worktree path is nonempty but is not a Git worktree: $candidate_workspace" >&2
+              exit 1
+            }
+            rm -rf "$candidate_workspace"
+            git worktree add --detach "$candidate_workspace" "$TARGET_SHA"
+          fi
+          flock -u 7
+
+          export GITHUB_WORKSPACE="$candidate_workspace"
+          cd "$candidate_workspace"
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
           git diff --quiet
           git diff --cached --quiet
 
-          workspace_lock_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
-          mkdir -p "$workspace_lock_root"
+          # Serialize only jobs touching the SAME candidate build tree. Different
+          # revisions have independent source/build trees. Stateful operations also
+          # reserve the installed host/database, while read-only qualification does not.
+          exec 8>"$work_root/product-$TARGET_SHA.lock"
+          flock 8
           case "$LAPLACE_STAGE" in
             release-qualification|mainline|build|test-dev|check)
-              exec 8>"$workspace_lock_root/build-resource.lock"
-              flock 8
-              ;;
-            release-activation|test-live|reconcile)
-              exec 9>"$workspace_lock_root/host-resource.lock"
-              flock 9
               ;;
             *)
-              exec 8>"$workspace_lock_root/build-resource.lock"
-              exec 9>"$workspace_lock_root/host-resource.lock"
-              flock 8
+              exec 9>"$work_root/host-resource.lock"
               flock 9
               ;;
           esac
+
+          {
+            echo "## Product stage execution"
+            echo
+            echo "- Stage: $LAPLACE_STAGE"
+            echo "- Revision: $TARGET_SHA"
+            echo "- Candidate workspace: $candidate_workspace"
+            if [[ "$LAPLACE_STAGE" == release-qualification || "$LAPLACE_STAGE" == mainline || "$LAPLACE_STAGE" == build || "$LAPLACE_STAGE" == test-dev || "$LAPLACE_STAGE" == check ]]; then
+              echo "- Shared installed-host reservation: no"
+            else
+              echo "- Shared installed-host reservation: yes"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
           source scripts/ci-environment.sh
           exec bash scripts/product-ci.sh "$LAPLACE_STAGE"
