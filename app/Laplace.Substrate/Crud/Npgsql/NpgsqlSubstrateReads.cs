@@ -132,6 +132,21 @@ public static partial class NpgsqlSubstrateReads
                 r.IsDBNull(2) ? (decimal?)null : r.GetDecimal(2)),
             ct: ct, label: "partition_pressure", onError: onError);
 
+    /// <summary>
+    /// <c>laplace.perfcache_receipt()</c> — checksum of the exact mmap'd T0 ROM.
+    /// SQL exposes the native receipt only; no Tier-0 geometry is reconstructed here.
+    /// </summary>
+    public static async Task<string?> PerfcacheReceiptHexAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null)
+    {
+        var rows = await NpgsqlRead.ReadRowsAsync(dataSource,
+            "SELECT encode(laplace.perfcache_receipt(), 'hex')",
+            static r => r.IsDBNull(0) ? null : r.GetString(0),
+            ct: ct, label: "perfcache_receipt", onError: onError).ConfigureAwait(false);
+        return rows.Count == 0 ? null : rows[0];
+    }
+
     /// <summary><c>laplace.atom_census()</c> — tier-0 window invariant (GH #813).</summary>
     public static async Task<(long Tier0, long Window, long Over, long Unresolvable)?> AtomCensusAsync(
         NpgsqlDataSource dataSource, CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null)
