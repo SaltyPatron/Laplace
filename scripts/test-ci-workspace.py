@@ -17,7 +17,7 @@ def body(job: str, workflow: str = "laplace.yml") -> str:
         workflow = "product-stage.yml"
         job = "stage"
     text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
-    section = text.split("  " + job + ":\n", 1)[1]
+    section = text.split("\n  " + job + ":\n", 1)[1]
     raw = section.split("        run: |\n", 1)[1]
     return "\n".join(line[10:] for line in raw.splitlines()
                      if line.startswith("          ")) + "\n"
