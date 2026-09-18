@@ -111,6 +111,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$TARGET_SHA"', preflight)
         self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"', preflight)
         self.assertIn('git -C "$probe_repo" show "$TARGET_SHA:scripts/ci-product-freshness.py"', preflight)
+        self.assertIn('git -C "$probe_repo" show "$TARGET_SHA:scripts/ci_product_scope.py"', preflight)
         self.assertIn('python3 "$freshness_tool" --root "$probe_repo" --base "$TARGET_SHA" --head "$latest_main"', preflight)
         self.assertIn("product-equivalent", preflight)
         self.assertIn("product-relevant content changed", preflight)
@@ -130,6 +131,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertLess(resolve, tree_probe)
         self.assertLess(tree_probe, candidate_lock)
         self.assertIn('git show "$TARGET_SHA:scripts/ci-product-freshness.py"', stage)
+        self.assertIn('git show "$TARGET_SHA:scripts/ci_product_scope.py"', stage)
         self.assertIn('python3 "$freshness_tool" --root "$control_workspace" --base "$TARGET_SHA" --head "$latest_main"', stage)
         self.assertIn("product-equivalent", stage)
         self.assertIn("product-changing main", stage)
@@ -151,6 +153,26 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn('status --porcelain --untracked-files=no', stage)
         self.assertNotIn('exec {stale_fd}>"$work_root/product-$stale_sha.lock"', stage)
         self.assertNotIn("build-resource.lock", stage)
+
+    def test_ci_policy_scripts_do_not_trigger_or_invalidate_product_delivery(self):
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        impact = (ROOT / "scripts" / "ci-impact-plan.py").read_text(encoding="utf-8")
+        freshness = (ROOT / "scripts" / "ci-product-freshness.py").read_text(encoding="utf-8")
+        self.assertIn('from ci_product_scope import ignored as product_ignored', impact)
+        self.assertIn('from ci_product_scope import ignored', freshness)
+        for path in (
+            "scripts/ci-impact-plan.py",
+            "scripts/ci-qualification-cache.py",
+            "scripts/ci-product-freshness.py",
+            "scripts/ci_product_scope.py",
+            "scripts/test-ci-*.py",
+            "scripts/test-workflow-architecture.py",
+            "scripts/test-seed-workflow-ownership.py",
+            "scripts/test-product-ci-artifact-ownership.py",
+            "scripts/test-benchmark-suite.py",
+            "scripts/validate-pipeline.py",
+        ):
+            self.assertIn(f'- "{path}"', lifecycle)
 
     def test_full_qualification_audit_is_manual_and_weekly(self):
         audit = (WORKFLOWS / "full-qualification.yml").read_text(encoding="utf-8")

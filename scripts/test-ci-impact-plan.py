@@ -132,6 +132,26 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["build_components"], [])
         self.assertFalse(value["full_qualification"])
 
+    def test_ci_policy_script_does_not_create_product_work(self):
+        value = plan("scripts/test-workflow-architecture.py")
+        self.assertEqual(value["components"], [])
+        self.assertEqual(value["build_components"], [])
+        self.assertEqual(value["dev_suites"], [])
+        self.assertEqual(value["db_suites"], [])
+        self.assertEqual(value["live_suites"], [])
+        self.assertEqual(value["delivery_actions"], [])
+        self.assertFalse(value["full_qualification"])
+        self.assertEqual(value["ignored_paths"], ["scripts/test-workflow-architecture.py"])
+
+    def test_mixed_policy_and_web_change_only_invalidates_web(self):
+        value = plan("scripts/ci-impact-plan.py", "web/src/App.tsx")
+        self.assertEqual(value["components"], ["web"])
+        self.assertEqual(value["build_components"], ["web"])
+        self.assertEqual(value["dev_suites"], ["browser-dev"])
+        self.assertEqual(value["db_suites"], [])
+        self.assertEqual(value["delivery_actions"], ["publish", "live"])
+        self.assertIn("scripts/ci-impact-plan.py", value["ignored_paths"])
+
     def test_git_diff_includes_deleted_production_files(self):
         import tempfile
         with tempfile.TemporaryDirectory(prefix="impact-delete-") as tmp:

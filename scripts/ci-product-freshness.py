@@ -12,19 +12,7 @@ import json
 import subprocess
 from pathlib import Path
 
-EXACT_IGNORES = {
-    "scripts/api-diagnostics.py",
-    "web/scripts/capture-ui-diagnostics.mjs",
-}
-
-
-def ignored(path: str) -> bool:
-    return (
-        path.startswith(".github/")
-        or path.startswith("docs/")
-        or path.endswith(".md")
-        or path in EXACT_IGNORES
-    )
+from ci_product_scope import ignored
 
 
 def changed_files(root: Path, base: str, head: str) -> list[str]:

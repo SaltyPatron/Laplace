@@ -52,6 +52,10 @@ class WorkspaceFixture(unittest.TestCase):
             ROOT / "scripts" / "ci-product-freshness.py",
             self.seed / "scripts" / "ci-product-freshness.py",
         )
+        shutil.copyfile(
+            ROOT / "scripts" / "ci_product_scope.py",
+            self.seed / "scripts" / "ci_product_scope.py",
+        )
         (self.seed / ".gitignore").write_text("build/\n", encoding="utf-8")
         (self.seed / "source.txt").write_text("old\n", encoding="utf-8")
         (self.seed / "scripts/ci-environment.sh").write_text(
