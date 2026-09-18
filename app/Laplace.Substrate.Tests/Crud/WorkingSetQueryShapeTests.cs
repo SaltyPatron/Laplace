@@ -135,17 +135,16 @@ public sealed class WorkingSetQueryShapeTests
             Assert.IsType<LiteralExpressionSyntax>(arguments[1].Expression).Token.ValueText);
         Assert.Equal("TransactionGucs(Durability)", arguments[2].Expression.ToString());
 
-        var materialize = Assert.Single(calls.Where(call =>
-            call.Expression.ToString() == "MaterializePhysicalitiesAsync"));
+        var prepare = Assert.Single(calls.Where(call =>
+            call.Expression.ToString() == "PrepareCanonicalPhysicalityObservations"));
         var applyPrepared = Assert.Single(calls.Where(call =>
             call.Expression.ToString() == "ApplyPreparedStagesCoreAsync"));
-        Assert.True(acquire.SpanStart < materialize.SpanStart);
-        Assert.True(materialize.SpanStart < applyPrepared.SpanStart);
-        foreach (var operation in new[] { materialize, applyPrepared })
-        {
-            Assert.Equal("connection", operation.ArgumentList.Arguments[0].Expression.ToString());
-            Assert.Equal("transaction", operation.ArgumentList.Arguments[1].Expression.ToString());
-        }
+        Assert.True(acquire.SpanStart < prepare.SpanStart);
+        Assert.True(prepare.SpanStart < applyPrepared.SpanStart);
+        Assert.Equal("physicalityAdmission",
+            prepare.ArgumentList.Arguments[0].Expression.ToString());
+        Assert.Equal("connection", applyPrepared.ArgumentList.Arguments[0].Expression.ToString());
+        Assert.Equal("transaction", applyPrepared.ArgumentList.Arguments[1].Expression.ToString());
         Assert.DoesNotContain("AdvisoryTxLock.BeginWithLockAsync",
             MethodSource(apply, "ApplyPreparedStagesCoreAsync"), StringComparison.Ordinal);
         apply += admission;

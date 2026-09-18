@@ -129,12 +129,20 @@ public sealed partial class NpgsqlSubstrateWriter
                     foreach (var physicality in observations)
                     {
                         ct.ThrowIfCancellationRequested();
+                        ValidateManagedPhysicality(physicality);
                         result.AddObservation(physicality.Id, physicality.EntityId, physicality.SourceId,
                             change.Metadata.IntentId, physicality.ObservedAtUnixUs);
                     }
                 }
                 ct.ThrowIfCancellationRequested();
-                if (result.ObservationSources.Count != 0) return result;
+                if (result.ObservationSources.Count != 0)
+                {
+                    // The initial count is intentionally conservative so capacity/grant
+                    // checks happen before allocation. Once reference overlap is known,
+                    // retain the bytes for the rows that actually cross into PostgreSQL.
+                    result.ObservationPayloadBytes = checked(result.ObservationSources.Count * 72L);
+                    return result;
+                }
                 result.Dispose();
                 return null;
             }
@@ -150,6 +158,38 @@ public sealed partial class NpgsqlSubstrateWriter
                     throw new InvalidOperationException(context, error);
                 throw;
             }
+        }
+
+        private static void ValidateManagedPhysicality(PhysicalityRow row)
+        {
+            if (row.NConstituents < 0)
+                throw new InvalidOperationException("physicality constituent count cannot be negative");
+            Hash128 expected = PhysicalityId.Compute(row.EntityId, row.Type);
+            if (row.Id != expected)
+                throw new InvalidOperationException(
+                    $"physicality identity mismatch: entity={row.EntityId} type={(short)row.Type} "
+                    + $"declared={row.Id} recomputed={expected}");
+
+            var trajectory = row.TrajectoryXyzm;
+            if (trajectory is null || trajectory.Length == 0)
+            {
+                if (row.NConstituents != 0)
+                    throw new InvalidOperationException(
+                        $"physicality declares {row.NConstituents} constituents without a trajectory");
+                return;
+            }
+            if (trajectory.Length % 4 != 0)
+                throw new InvalidOperationException("physicality trajectory is not an XYZM vertex sequence");
+
+            Hash128 manifest = Trajectory.ContentIdentity(trajectory, out int logicalCount);
+            if (logicalCount != row.NConstituents)
+                throw new InvalidOperationException(
+                    $"physicality trajectory count mismatch: entity={row.EntityId} type={(short)row.Type} "
+                    + $"declared={row.NConstituents} decoded={logicalCount}");
+            if (row.Type == PhysicalityType.Content && manifest != row.EntityId)
+                throw new InvalidOperationException(
+                    $"content trajectory identity mismatch: entity={row.EntityId} "
+                    + $"recomputed={manifest} constituents={logicalCount}");
         }
 
         private void AddObservation(

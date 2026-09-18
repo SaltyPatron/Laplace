@@ -80,17 +80,21 @@ public sealed class IngestAdmissionSizingTests
     }
 
     [Fact]
-    public unsafe void NativeCaptureAndDescriptorPlanFitTheirModeledFiniteWindow()
+    public void DirectProvenanceCaptureFitsItsModeledFiniteWindow()
     {
         var changes = Enumerable.Range(1, 4).Select(Change).ToArray();
         var size = changes.Select(change => IngestAdmissionSizing.Measure(change, 152))
             .Aggregate(default(IngestAdmissionSizing), (left, right) => left.Add(right));
-        var rows = changes.SelectMany(change => change.PhysicalityObservations).ToArray();
-        using var stage = NpgsqlSubstrateWriter.CaptureManagedPhysicalityStage(
-            rows, size.ModeledSourcePayloadBytes, 200);
-        var shape = PhysicalityDescriptorSizing.FromStages([stage]);
-        Assert.Equal((ulong)rows.Length, shape.Forms);
-        AssertNativeCaptureFits(stage, shape);
+        using var capture = NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.Capture(
+            changes, Array.Empty<IntentStage>(), CancellationToken.None);
+        Assert.NotNull(capture);
+        Assert.Equal(changes.Sum(change => change.PhysicalityObservations.Length),
+            capture.ObservationPhysicalityIds.Count);
+        Assert.Equal(capture.ObservationPhysicalityIds.Count * 72L,
+            capture.ObservationPayloadBytes);
+        Assert.True(capture.ObservationPayloadBytes <= size.ModeledSourcePayloadBytes);
+        Assert.Empty(capture.RawStages);
+        Assert.Equal(0, capture.OwnedRawBytes);
     }
 
     [Fact]

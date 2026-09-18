@@ -35,7 +35,9 @@ public sealed class ChessRecordingDiagnosticsTests
             measurement.Work.WriterApplyAttempts++;
             var failure = await Assert.ThrowsAsync<InvalidOperationException>(
                 () => writer.ApplyAsync(change));
-            Assert.Contains("native physicality batch staging failed", failure.Message);
+            Assert.Contains(
+                failDuringCapture ? "physicality identity mismatch" : "native physicality batch staging failed",
+                failure.Message);
         }
         measurement.Complete("failed", "expected native identity rejection");
         string expectedPhase = failDuringCapture ? "physicality-capture" : "managed-staging";
