@@ -207,7 +207,10 @@ internal static class ExploreEndpoints
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
         app.MapPost("/v1/explore/storage-proof", async (
-            HttpRequest request, ExploreDecomposeService decompose, CancellationToken ct) =>
+            HttpRequest request,
+            ExploreDecomposeService decompose,
+            ISubstrateClient substrate,
+            CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<DecomposeRequest>(request, ct);
             if (payload is null || string.IsNullOrWhiteSpace(payload.Text))
@@ -215,7 +218,28 @@ internal static class ExploreEndpoints
 
             try
             {
-                return Results.Json(decompose.StorageProof(payload.Text));
+                StorageProofResponse proof = decompose.StorageProof(payload.Text);
+                string? databaseReceipt = null;
+                try
+                {
+                    databaseReceipt = await substrate.PerfcacheReceiptHexAsync(ct);
+                }
+                catch (SubstrateUnavailableException)
+                {
+                    // The mathematical/storage proof remains valid without PostgreSQL.
+                    // Alignment is unknown rather than false when the DB is unavailable.
+                }
+
+                return Results.Json(proof with
+                {
+                    DatabasePerfcacheReceiptHex = databaseReceipt,
+                    PerfcacheAligned = databaseReceipt is null
+                        ? null
+                        : string.Equals(
+                            proof.PerfcacheReceiptHex,
+                            databaseReceipt,
+                            StringComparison.OrdinalIgnoreCase),
+                });
             }
             catch (InvalidOperationException ex)
             {
