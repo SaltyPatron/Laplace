@@ -1,0 +1,38 @@
+name: Audit — full product qualification
+run-name: "Full qualification audit — ${{ github.sha }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_clean:
+        description: "Discard candidate build outputs before the audit"
+        type: boolean
+        default: false
+      force_codegen:
+        description: "Regenerate attestation-law source before the audit"
+        type: boolean
+        default: false
+      serial_tests:
+        description: "Force serial native tests"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 7 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: Rebuild and qualify every source component
+    uses: ./.github/workflows/product-stage.yml
+    with:
+      stage: release-qualification
+      target_sha: ${{ github.sha }}
+      build_components: all
+      dev_suites: all
+      full_clean: ${{ github.event_name == 'workflow_dispatch' && inputs.full_clean || false }}
+      force_codegen: ${{ github.event_name == 'workflow_dispatch' && inputs.force_codegen || false }}
+      serial_tests: ${{ github.event_name == 'workflow_dispatch' && inputs.serial_tests || false }}
+      skip_if_superseded: false
+    secrets: inherit

@@ -64,7 +64,7 @@ usage() {
   cat <<'EOF'
 Usage: pipeline.sh <phase> [<phase> ...] [options]
 
-Phases: clean codegen build install activate-postgres migrate sync-extension tune-pg tune-laplace
+Phases: clean codegen build build-native build-app build-web install activate-postgres migrate sync-extension tune-pg tune-laplace
         perfcache-guc api-env publish foundation test
 Options:
   --fresh-db --force --force-codegen --clean-first --force-rebuild --serial-tests
@@ -266,6 +266,25 @@ phase_build_app() {
   ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
 }
 
+phase_build_web() {
+  echo "===== PHASE — BUILD WEB ====="
+  local lock_hash stamp previous
+  [[ -f "$ROOT/web/openapi/openapi.json" ]] || {
+    echo "::error::web/openapi/openapi.json missing — build the managed API contract first" >&2
+    return 1
+  }
+
+  mkdir -p "$LAPLACE_BUILD_DIRECTORY/.stamps"
+  lock_hash="$(sha256sum "$ROOT/web/package-lock.json" | awk '{print $1}')"
+  stamp="$LAPLACE_BUILD_DIRECTORY/.stamps/npm-lock.sha256"
+  previous="$(cat "$stamp" 2>/dev/null || true)"
+  if [[ ! -d "$ROOT/web/node_modules" || "$previous" != "$lock_hash" ]]; then
+    ( cd "$ROOT/web" && npm ci --no-audit --no-fund --prefer-offline )
+    printf '%s\n' "$lock_hash" > "$stamp"
+  fi
+  ( cd "$ROOT/web" && npm run build )
+}
+
 phase_build_native() {
   "$PYTHON" "$ROOT/scripts/postgresql-release.py" build-inputs --prefix "$LAPLACE_PG_PREFIX" || return $?
   [[ "$FORCE_REBUILD" != 1 ]] || phase_clean
@@ -312,6 +331,7 @@ phase_build_native() {
 phase_build() {
   phase_build_native
   phase_build_app
+  phase_build_web
 }
 
 phase_test() {
@@ -602,7 +622,7 @@ while [[ $# -gt 0 ]]; do
     --serial-tests) SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
     --force-all) shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|build-native|build-app|install|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
+    clean|codegen|build|build-native|build-app|build-web|install|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -616,6 +636,7 @@ for phase in "${PHASES[@]}"; do
     build) phase_build ;;
     build-native) phase_build_native ;;
     build-app) phase_build_app ;;
+    build-web) phase_build_web ;;
     install) phase_install ;;
     activate-postgres) phase_activate_postgres ;;
     migrate) phase_migrate ;;

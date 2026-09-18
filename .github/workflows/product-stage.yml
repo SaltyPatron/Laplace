@@ -241,14 +241,20 @@ jobs:
 
           # Candidate worktrees are generated build state, not source authority. Reclaim
           # inactive superseded candidates BEFORE allocating any new lock/worktree files.
-          # This path must work even when /build is completely full. Therefore it opens
-          # only pre-existing revision locks and frees the worktree bytes with rm first;
-          # git metadata is pruned after space has been recovered.
+          # Preserve exactly the most recent native-qualified owner so an unchanged
+          # native graph can be reused instead of rebuilt; the next successful native
+          # qualification advances this pointer and the prior owner becomes reclaimable.
+          preserve_native_source="$(python3 "$control_workspace/scripts/ci-qualification-cache.py" \
+            latest-source --suite native-dev --root "$control_workspace" 2>/dev/null || true)"
           for stale_workspace in "$worktree_root"/*; do
             [[ -d "$stale_workspace" ]] || continue
             [[ "$stale_workspace" != "$candidate_workspace" ]] || continue
             stale_sha="${stale_workspace##*/}"
             [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+            if [[ -n "$preserve_native_source" && "$stale_sha" == "$preserve_native_source" ]]; then
+              echo "::notice::preserving latest native-qualified candidate $stale_sha for artifact reuse"
+              continue
+            fi
             stale_lock="$work_root/product-$stale_sha.lock"
             [[ -e "$stale_lock" ]] || continue
 
