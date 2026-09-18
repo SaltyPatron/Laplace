@@ -340,10 +340,16 @@ internal sealed partial class SubstrateClient
         await Task.WhenAll(rowsTask, setupIdTask).ConfigureAwait(false);
 
         var rows = rowsTask.Result;
-        var moves = rows.Where(r => r.Type == PhysicalityType.Content
-                                  && r.ParentId.AsSpan().SequenceEqual(lineId))
+        // The canonical line Content preimage is [start-position, move-1, ... move-N].
+        // The old reader passed the start-position id to ChessReplay as move zero, so the
+        // replay stopped immediately and perfectly valid stored games surfaced as carrying
+        // no playable moves. Preserve the content identity contract and decode only the
+        // tail as moves.
+        var content = rows.Where(r => r.Type == PhysicalityType.Content
+                                    && r.ParentId.AsSpan().SequenceEqual(lineId))
             .OrderBy(static r => r.Ordinal)
             .Select(static r => Laplace.Engine.Core.Hash128.FromBytes(r.EntityId)).ToArray();
+        var moves = content.Length <= 1 ? Array.Empty<Laplace.Engine.Core.Hash128>() : content[1..];
         byte[]? setupId = setupIdTask.Result;
         string? setup = null;
         if (setupId is not null)
@@ -354,6 +360,16 @@ internal sealed partial class SubstrateClient
             if (boards.TryGetValue(Laplace.Engine.Core.Hash128.FromBytes(setupId), out var board))
                 setup = board.ToFen();
         }
+        if (content.Length > 0)
+        {
+            var startFen = setup ?? Laplace.Modality.Chess.ChessModality.StartFen;
+            if (!Laplace.Chess.Service.ChessPositionRef.TryComposeId(startFen, out var expectedStart)
+                || expectedStart != content[0])
+                return Laplace.Chess.Service.ChessReplay.Replay(
+                    Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
+                    with { Truncated = "stored line start position does not match its replay setup" };
+        }
+
         var replay = Laplace.Chess.Service.ChessReplay.Replay(moves, setup);
         var commentRows = rows.Where(r => r.Type == PhysicalityType.ChessComment
                                          && r.ParentId.AsSpan().SequenceEqual(playingId))
