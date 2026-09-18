@@ -175,14 +175,11 @@ internal static partial class IngestCommands
                         + "  sources: " + string.Join(" | ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k)) + "\n"
                         + "  --langs: language scope for this run\n"
                         + "  --no-evidence: fold consensus only; skip laplace.attestations\n"
-                        + "  chain: run several ingests sequentially in ONE process (one startup, one\n"
-                        + "         perfcache load); stops at the first failing spec");
+                        + "  chain: run several ingests sequentially in ONE process; Unicode admits its\n"
+                        + "         floor before T0 runtime acceleration is mapped; stops at the first failing spec");
 
 
 
-
-        CodepointPerfcache.Load(ResolveBlob());
-        HighwayPerfcache.LoadDefault();
 
         string sourceKey = cli.Source.ToLowerInvariant();
 
@@ -195,8 +192,8 @@ internal static partial class IngestCommands
     /// <summary>
     /// Sequential multi-source ingest in one process: each spec is a complete
     /// `ingest` argument vector ("wordnet", "document D:\\data\\text",
-    /// "wiktionary --langs en"). One process start, one perfcache map, one
-    /// native runtime init for the whole ladder instead of one per source.
+    /// "wiktionary --langs en"). Runtime accelerators are loaded only when their
+    /// prerequisite foundation has been admitted.
     /// Specs split on whitespace — a path containing spaces needs its own
     /// single-source invocation. First nonzero exit stops the chain.
     /// </summary>
@@ -208,9 +205,6 @@ internal static partial class IngestCommands
 
         var parsed = specs.Select(spec => ParseIngestCliArgs(spec.Split(' ',
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))).ToArray();
-        CodepointPerfcache.Load(ResolveBlob());
-        HighwayPerfcache.LoadDefault();
-
         for (int i = 0; i < specs.Length; i++)
         {
             var cli = parsed[i];
@@ -684,11 +678,22 @@ internal static partial class IngestCommands
         IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,
         bool skipSourceCompletion = false)
     {
-        // IngestAsync already loaded the blob when dispatching here; don't pay it twice.
-        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
-        HighwayPerfcache.LoadDefault();
-
-        LanguageReference.EnsureLoaded();
+        bool unicodeFoundation =
+            dec.LayerOrder == 0 && dec.SourceId == UnicodeSource.SourceId;
+        if (unicodeFoundation)
+        {
+            // Relation-law acceleration is independent of the Unicode content floor.
+            // The T0 content ROM is deliberately unavailable until source-derived
+            // Tier-0 rows have crossed the shared persistence barrier.
+            HighwayPerfcache.LoadDefault();
+            CodepointPerfcache.Unload();
+        }
+        else
+        {
+            if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
+            HighwayPerfcache.LoadDefault();
+            LanguageReference.EnsureLoaded();
+        }
         var topo = IngestTopology.EnsureReady();
 
         NativeCorpusRuntime? corpusRuntime = dec is RepoDecomposer { VerifiedRepository: not null }

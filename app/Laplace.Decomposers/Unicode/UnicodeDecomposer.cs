@@ -11,8 +11,8 @@ namespace Laplace.Decomposers.Unicode;
 /// Unicode/UCD ingestion at physical-artifact grain. No source is preloaded during
 /// Initialize. The Tier-0 floor is generated from the selected complete UCD XML + DUCET
 /// inputs by one native source snapshot and persisted through the ordinary working-set/COPY
-/// writer. Unicode admission never reads the installed T0 perfcache; that ROM is downstream
-/// derived acceleration state. After the floor barrier, independent property artifacts run
+/// writer. Tier-0 admission never reads the installed T0 perfcache; runtime acceleration is
+/// unavailable until the floor persistence barrier. After that barrier, independent property artifacts run
 /// through the shared bounded artifact executor.
 /// </summary>
 public sealed class UnicodeDecomposer
@@ -76,17 +76,28 @@ public sealed class UnicodeDecomposer
                 $"Unicode floor requires exactly one admitted complete UCD XML and one DUCET artifact; "
                 + $"selected xml={xml.Length}, ducet={ducet.Length}.");
 
-        // Real dependency barrier: the database floor must exist before any property/name/
-        // sequence witness can point at codepoint identities. The two physical authority
-        // artifacts are parsed once together by the native source snapshot; the installed
-        // runtime perfcache is not read anywhere on this path.
-        await foreach (SubstrateChange change in RunFloorAsync(
-                           xml[0], ducet[0], context, options, batch, ct).ConfigureAwait(false))
+        FloorRunState floor = PrepareFloor(xml[0], ducet[0], context);
+        await foreach (SubstrateChange change in RunFloorDataAsync(
+                           floor, context, options, batch, ct).ConfigureAwait(false))
             yield return change;
 
-        await foreach (SubstrateChange barrier in ApplyBarrierAsync(
-                           "unicode/tier0-floor-persisted", ct).ConfigureAwait(false))
-            yield return barrier;
+        if (!floor.Skipped)
+            await foreach (SubstrateChange barrier in ApplyBarrierAsync(
+                               "unicode/tier0-floor-persisted", ct).ConfigureAwait(false))
+                yield return barrier;
+
+        // Runtime text composition is permitted only after the database's Tier-0 floor
+        // is committed (or an existing completed floor was proven). The ROM accelerates
+        // downstream composition; it never supplies the Tier-0 database rows.
+        if (!CodepointPerfcache.IsLoaded)
+            CodepointPerfcache.LoadDefault();
+
+        await foreach (SubstrateChange change in FinalizeFloorAsync(
+                           floor, options, ct).ConfigureAwait(false))
+            yield return change;
+
+        if (options.MaxInputUnits > 0)
+            yield break;
 
         if (SourceVocabularyBootstrap.BuildLicenseChange(Manifest) is { } licenseChange)
             yield return licenseChange;
@@ -105,13 +116,30 @@ public sealed class UnicodeDecomposer
             yield return change;
     }
 
-    private async IAsyncEnumerable<SubstrateChange> RunFloorAsync(
+    private sealed class FloorRunState
+    {
+        public required ArtifactJob Xml { get; init; }
+        public required ArtifactJob Ducet { get; init; }
+        public required string XmlLabel { get; init; }
+        public required string DucetLabel { get; init; }
+        public Hash128? XmlRoot { get; init; }
+        public Hash128? DucetRoot { get; init; }
+        public IngestArtifact? XmlArtifact { get; init; }
+        public IngestArtifact? DucetArtifact { get; init; }
+        public SourceArtifactIdentity? XmlIdentity { get; init; }
+        public SourceArtifactIdentity? DucetIdentity { get; init; }
+        public Hash128? RecipeId { get; init; }
+        public bool Skipped { get; set; }
+        public long Records { get; set; }
+        public long Entities { get; set; }
+        public long Physicalities { get; set; }
+        public long Attestations { get; set; }
+    }
+
+    private FloorRunState PrepareFloor(
         ArtifactJob xml,
         ArtifactJob ducet,
-        IDecomposerContext context,
-        DecomposerOptions options,
-        int batch,
-        [EnumeratorCancellation] CancellationToken ct)
+        IDecomposerContext context)
     {
         string xmlLabel = ClaimArtifact(context, xml.Path, xml.Label);
         string ducetLabel = ClaimArtifact(context, ducet.Path, ducet.Label);
@@ -129,113 +157,166 @@ public sealed class UnicodeDecomposer
             ? null : SourceArtifactProvenance.Resolve(xmlArtifact, xmlRoot);
         SourceArtifactIdentity? ducetIdentity = ducetArtifact is null
             ? null : SourceArtifactProvenance.Resolve(ducetArtifact, ducetRoot);
-        Hash128? floorRecipeId = xmlIdentity is { } xi && ducetIdentity is { } di
+        Hash128? recipeId = xmlIdentity is { } xi && ducetIdentity is { } di
             ? SourceArtifactProvenance.RecipeId(
                 SourceName, Manifest.License.Version ?? "unknown", "tier0-floor",
                 [xi.ArtifactId, di.ArtifactId])
             : null;
-        var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
 
-        bool xmlDone = xmlRoot is { } xr
+        return new FloorRunState
+        {
+            Xml = xml,
+            Ducet = ducet,
+            XmlLabel = xmlLabel,
+            DucetLabel = ducetLabel,
+            XmlRoot = xmlRoot,
+            DucetRoot = ducetRoot,
+            XmlArtifact = xmlArtifact,
+            DucetArtifact = ducetArtifact,
+            XmlIdentity = xmlIdentity,
+            DucetIdentity = ducetIdentity,
+            RecipeId = recipeId,
+        };
+    }
+
+    private async IAsyncEnumerable<SubstrateChange> RunFloorDataAsync(
+        FloorRunState floor,
+        IDecomposerContext context,
+        DecomposerOptions options,
+        int batch,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        bool xmlDone = floor.XmlRoot is { } xr
             && !options.ReObservePresent
             && await context.Reader.HasFileCompletedAsync(
                 xr, Source, LayerOrder, ct).ConfigureAwait(false);
-        bool ducetDone = ducetRoot is { } dr
+        bool ducetDone = floor.DucetRoot is { } dr
             && !options.ReObservePresent
             && await context.Reader.HasFileCompletedAsync(
                 dr, Source, LayerOrder, ct).ConfigureAwait(false);
         if (xmlDone && ducetDone)
         {
-            observability.OnFileComposed(
-                SourceName, xmlLabel, xmlIdentity?.ArtifactId, resumeFingerprint: xmlRoot);
-            observability.OnFileComposed(
-                SourceName, ducetLabel, ducetIdentity?.ArtifactId, resumeFingerprint: ducetRoot);
-            yield return IngestBatchPipeline.BuildSkippedBoundary(Source, xmlLabel);
-            yield return IngestBatchPipeline.BuildSkippedBoundary(Source, ducetLabel);
+            floor.Skipped = true;
             yield break;
         }
 
-        observability.OnFileStarted(SourceName, xmlLabel, IngestBatchPipeline.TryFileBytes(xml.Path));
-        observability.OnFileStarted(SourceName, ducetLabel, IngestBatchPipeline.TryFileBytes(ducet.Path));
+        var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
+        observability.OnFileStarted(
+            SourceName, floor.XmlLabel, IngestBatchPipeline.TryFileBytes(floor.Xml.Path));
+        observability.OnFileStarted(
+            SourceName, floor.DucetLabel, IngestBatchPipeline.TryFileBytes(floor.Ducet.Path));
 
-        long records = 0, entities = 0, physicalities = 0, attestations = 0;
-        var phase = new UnicodeFloorPhase(xml.Path, ducet.Path, batch);
-        await foreach (SubstrateChange change in base.RunPhaseAsync(
+        var phase = new UnicodeFloorPhase(floor.Xml.Path, floor.Ducet.Path, batch);
+        await foreach (SubstrateChange original in base.RunPhaseAsync(
                            phase, context, options, ct).ConfigureAwait(false))
         {
-            records += change.Metadata.InputUnitsConsumed;
-            entities += change.Entities.Length;
-            physicalities += change.Physicalities.Length;
-            attestations += change.Attestations.Length;
+            SubstrateChange change = original;
+            floor.Records += change.Metadata.InputUnitsConsumed;
+            floor.Entities += change.Entities.Length;
+            floor.Physicalities += change.Physicalities.Length;
+            floor.Attestations += change.Attestations.Length;
             if (!change.IntentStages.IsDefaultOrEmpty)
                 foreach (IntentStage stage in change.IntentStages)
                 {
                     if (stage.IsInvalid) continue;
-                    entities += stage.EntityCount;
-                    physicalities += stage.PhysicalityCount;
-                    attestations += stage.AttestationCount;
+                    floor.Entities += stage.EntityCount;
+                    floor.Physicalities += stage.PhysicalityCount;
+                    floor.Attestations += stage.AttestationCount;
                 }
-            if (floorRecipeId is { } recipeId)
+            if (floor.RecipeId is { } recipeId)
                 change = SourceArtifactProvenance.Bind(change, recipeId);
             yield return change;
         }
+    }
 
-        if (xmlArtifact is not null && xmlIdentity is { } xmlSemantic)
+    private async IAsyncEnumerable<SubstrateChange> FinalizeFloorAsync(
+        FloorRunState floor,
+        DecomposerOptions options,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
+        if (floor.Skipped)
+        {
+            observability.OnFileComposed(
+                SourceName, floor.XmlLabel, floor.XmlIdentity?.ArtifactId,
+                resumeFingerprint: floor.XmlRoot);
+            observability.OnFileComposed(
+                SourceName, floor.DucetLabel, floor.DucetIdentity?.ArtifactId,
+                resumeFingerprint: floor.DucetRoot);
+            yield return IngestBatchPipeline.BuildSkippedBoundary(Source, floor.XmlLabel);
+            yield return IngestBatchPipeline.BuildSkippedBoundary(Source, floor.DucetLabel);
+            yield break;
+        }
+
+        if (options.MaxInputUnits > 0)
+        {
+            observability.OnFileComposed(
+                SourceName, floor.XmlLabel, floor.XmlIdentity?.ArtifactId,
+                floor.Records, floor.Entities, floor.Physicalities, floor.Attestations,
+                resumeFingerprint: floor.XmlRoot);
+            observability.OnFileComposed(
+                SourceName, floor.DucetLabel, floor.DucetIdentity?.ArtifactId,
+                resumeFingerprint: floor.DucetRoot);
+            yield return IngestBatchPipeline.BuildCancelledBoundary(Source, floor.XmlLabel);
+            yield return IngestBatchPipeline.BuildCancelledBoundary(Source, floor.DucetLabel);
+            yield break;
+        }
+
+        if (floor.XmlArtifact is not null)
         {
             SubstrateChange provenance = SourceArtifactProvenance.BuildChange(
-                xmlArtifact, Source, TrustClass, xmlRoot)
+                floor.XmlArtifact, Source, TrustClass, floor.XmlRoot)
                 with { CountsAsUnit = false };
-            yield return IngestBatchPipeline.BindFileLabel(provenance, xmlLabel);
-            entities += provenance.Entities.Length;
-            physicalities += provenance.Physicalities.Length;
-            attestations += provenance.Attestations.Length;
+            provenance = IngestBatchPipeline.BindFileLabel(provenance, floor.XmlLabel);
+            yield return provenance;
+            floor.Entities += provenance.Entities.Length;
+            floor.Physicalities += provenance.Physicalities.Length;
+            floor.Attestations += provenance.Attestations.Length;
         }
-        if (ducetArtifact is not null && ducetIdentity is { } ducetSemantic)
+        if (floor.DucetArtifact is not null)
         {
             SubstrateChange provenance = SourceArtifactProvenance.BuildChange(
-                ducetArtifact, Source, TrustClass, ducetRoot)
+                floor.DucetArtifact, Source, TrustClass, floor.DucetRoot)
                 with { CountsAsUnit = false };
-            yield return IngestBatchPipeline.BindFileLabel(provenance, ducetLabel);
-            entities += provenance.Entities.Length;
-            physicalities += provenance.Physicalities.Length;
-            attestations += provenance.Attestations.Length;
+            provenance = IngestBatchPipeline.BindFileLabel(provenance, floor.DucetLabel);
+            yield return provenance;
+            floor.Entities += provenance.Entities.Length;
+            floor.Physicalities += provenance.Physicalities.Length;
+            floor.Attestations += provenance.Attestations.Length;
         }
-        if (xmlIdentity is { } xmlSemanticIdentity && ducetIdentity is { } ducetSemanticIdentity)
+        if (floor.XmlIdentity is { } xi && floor.DucetIdentity is { } di)
             yield return SourceArtifactProvenance.BuildRecipeChange(
                 SourceName,
                 Manifest.License.Version ?? "unknown",
                 "tier0-floor",
                 Source,
                 TrustClass,
-                [xmlSemanticIdentity.ArtifactId, ducetSemanticIdentity.ArtifactId]);
+                [xi.ArtifactId, di.ArtifactId]);
+
+        await foreach (SubstrateChange barrier in ApplyBarrierAsync(
+                           "unicode/tier0-provenance-persisted", ct).ConfigureAwait(false))
+            yield return barrier;
 
         observability.OnFileComposed(
-            SourceName, xmlLabel, xmlIdentity?.ArtifactId,
-            records, entities, physicalities, attestations,
-            resumeFingerprint: xmlRoot);
+            SourceName, floor.XmlLabel, floor.XmlIdentity?.ArtifactId,
+            floor.Records, floor.Entities, floor.Physicalities, floor.Attestations,
+            resumeFingerprint: floor.XmlRoot);
         observability.OnFileComposed(
-            SourceName, ducetLabel, ducetIdentity?.ArtifactId, 0, 0, 0, 0,
-            resumeFingerprint: ducetRoot);
-
-        if (options.MaxInputUnits > 0)
-        {
-            yield return IngestBatchPipeline.BuildCancelledBoundary(Source, xmlLabel);
-            yield return IngestBatchPipeline.BuildCancelledBoundary(Source, ducetLabel);
-            yield break;
-        }
+            SourceName, floor.DucetLabel, floor.DucetIdentity?.ArtifactId,
+            resumeFingerprint: floor.DucetRoot);
 
         var names = new HashSet<string>(CanonicalNamesForReadback, StringComparer.Ordinal)
         {
             $"substrate/source/{SourceName}/v1",
         };
-        yield return xmlRoot is { } completedXml
+        yield return floor.XmlRoot is { } completedXml
             ? IngestBatchPipeline.BuildFileCompletion(
-                Source, xmlLabel, completedXml, LayerOrder, names)
-            : IngestBatchPipeline.BuildPeriodBoundary(Source, xmlLabel);
-        yield return ducetRoot is { } completedDucet
+                Source, floor.XmlLabel, completedXml, LayerOrder, names)
+            : IngestBatchPipeline.BuildPeriodBoundary(Source, floor.XmlLabel);
+        yield return floor.DucetRoot is { } completedDucet
             ? IngestBatchPipeline.BuildFileCompletion(
-                Source, ducetLabel, completedDucet, LayerOrder, names)
-            : IngestBatchPipeline.BuildPeriodBoundary(Source, ducetLabel);
+                Source, floor.DucetLabel, completedDucet, LayerOrder, names)
+            : IngestBatchPipeline.BuildPeriodBoundary(Source, floor.DucetLabel);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
