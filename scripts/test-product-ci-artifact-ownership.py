@@ -153,6 +153,9 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("release_candidate_current_before_mutation", delivery)
         self.assertIn("export LAPLACE_SKIP_IF_SUPERSEDED=0", delivery)
         self.assertIn("LAPLACE_DELIVERY_ACTIONS", delivery)
+        self.assertIn('local actions="${LAPLACE_DELIVERY_ACTIONS:-}"', delivery)
+        self.assertIn('[[ -z "$actions" ]]\', delivery)
+        self.assertNotIn('LAPLACE_DELIVERY_ACTIONS:-all', delivery)
         self.assertIn('csv_selected "$actions" install', delivery)
         self.assertIn('csv_selected "$actions" database', delivery)
         self.assertIn('csv_selected "$actions" reconcile', delivery)
@@ -229,6 +232,8 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("LAPLACE_DEV_SUITES", carry)
         self.assertIn("LAPLACE_DELIVERY_ACTIONS", carry)
         self.assertIn("force_full_carry_forward_impact", carry)
+        self.assertNotIn("qualification has no delivery actions", carry)
+        self.assertNotIn('[[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]]\', carry)
 
         fallback = function("force_full_carry_forward_impact")
         self.assertIn("LAPLACE_BUILD_COMPONENTS=all", fallback)
