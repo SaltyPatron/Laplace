@@ -41,8 +41,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  mainline-qualification:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/product-stage.yml
+    with:
+      stage: release-qualification
+      target_sha: ${{ github.sha }}
+      skip_if_superseded: true
+    secrets: inherit
+
   mainline-candidate:
     if: github.event_name == 'push'
+    needs: mainline-qualification
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-candidate
@@ -71,14 +81,24 @@ jobs:
       serial_tests: ${{ inputs.serial_tests }}
     secrets: inherit
 
+  deploy-qualification:
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'deploy'
+    uses: ./.github/workflows/product-stage.yml
+    with:
+      stage: release-qualification
+      target_sha: ${{ github.sha }}
+      full_clean: ${{ inputs.full_clean }}
+      force_codegen: ${{ inputs.force_codegen }}
+      serial_tests: ${{ inputs.serial_tests }}
+    secrets: inherit
+
   deploy-candidate:
     if: github.event_name == 'workflow_dispatch' && inputs.stage == 'deploy'
+    needs: deploy-qualification
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-candidate
       target_sha: ${{ github.sha }}
-      full_clean: ${{ inputs.full_clean }}
-      force_codegen: ${{ inputs.force_codegen }}
       serial_tests: ${{ inputs.serial_tests }}
     secrets: inherit
 
@@ -92,14 +112,24 @@ jobs:
       serial_tests: ${{ inputs.serial_tests }}
     secrets: inherit
 
+  proof-qualification:
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'proof'
+    uses: ./.github/workflows/product-stage.yml
+    with:
+      stage: release-qualification
+      target_sha: ${{ github.sha }}
+      full_clean: ${{ inputs.full_clean }}
+      force_codegen: ${{ inputs.force_codegen }}
+      serial_tests: ${{ inputs.serial_tests }}
+    secrets: inherit
+
   proof-candidate:
     if: github.event_name == 'workflow_dispatch' && inputs.stage == 'proof'
+    needs: proof-qualification
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-candidate
       target_sha: ${{ github.sha }}
-      full_clean: ${{ inputs.full_clean }}
-      force_codegen: ${{ inputs.force_codegen }}
       serial_tests: ${{ inputs.serial_tests }}
     secrets: inherit
 
