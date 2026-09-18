@@ -227,7 +227,10 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("build-native", build)
         self.assertIn("build-app", build)
         self.assertIn("reuse_qualified_native_build", build)
-        self.assertIn("ci-qualification-cache.py source --suite native-dev", reuse)
+        self.assertIn("ci-qualification-cache.py latest-source --suite native-dev", reuse)
+        self.assertIn("git diff --quiet", reuse)
+        self.assertIn("' :(exclude)engine/**/tests/**'".replace(" '", "'"), reuse)
+        self.assertIn("' :(exclude)extension/**/tests/**'".replace(" '", "'"), reuse)
         self.assertIn("product-worktrees", reuse)
         self.assertIn('ln -s "$source_root/build/engine" build/engine', reuse)
 
