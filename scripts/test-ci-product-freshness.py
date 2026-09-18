@@ -70,6 +70,18 @@ class ProductFreshnessTests(unittest.TestCase):
             self.assertEqual(MODULE.ignored(path), ignored(path))
             self.assertEqual(MODULE.candidate_equivalent(path), candidate_equivalent(path))
 
+    def test_native_test_change_qualifies_without_invalidating_candidate(self):
+        for path in (
+            "engine/core/tests/test_content_root_placement.cpp",
+            "extension/laplace_substrate/tests/physicality_descriptor_native_probe.c",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(ignored(path))
+                self.assertTrue(candidate_equivalent(path))
+                value = MODULE.product_delta([path])
+                self.assertTrue(value["product_equivalent"])
+                self.assertEqual(value["product_paths"], [])
+
     def test_managed_test_change_qualifies_without_invalidating_candidate(self):
         path = "app/Laplace.Substrate.Tests/Abstractions/ExampleTests.cs"
         self.assertFalse(ignored(path))
