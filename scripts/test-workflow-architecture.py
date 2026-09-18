@@ -34,7 +34,10 @@ class MainPushQueueContract(unittest.TestCase):
         # The called workflow keeps an independent inner guard. Distinct group
         # names avoid self-deadlock while caller cancellation tears down the
         # superseded reusable-workflow invocation before it owns the runner.
-        self.assertIn("laplace-main-qualification", reusable)
+        self.assertIn("laplace-main-product-qualification", reusable)
+        self.assertIn("laplace-main-test-qualification-{0}-{1}", reusable)
+        self.assertIn("inputs.dev_suites", reusable)
+        self.assertIn("inputs.managed_test_projects", reusable)
         self.assertIn("laplace-main-delivery", reusable)
         self.assertIn(
             "cancel-in-progress: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' }}",
@@ -241,7 +244,6 @@ class WorkflowArchitecture(unittest.TestCase):
             with self.subTest(name=name):
                 start = inputs.index(f"      {name}:\n")
                 rest = inputs[start + len(f"      {name}:\n"):]
-                next_input = rest.find("\n      " + "".join(()))
                 # Input fields are eight-space-indented; the next six-space key
                 # begins with exactly six spaces after a newline.
                 import re
