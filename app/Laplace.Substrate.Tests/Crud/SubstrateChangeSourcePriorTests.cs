@@ -175,7 +175,7 @@ public sealed class SubstrateChangeSourcePriorTests
     [InlineData(true, 0.0)]
     [InlineData(true, 0.375)]
     [InlineData(true, 1.0)]
-    public void FilelessGrammarProducerCarriesItsExactPriorThroughActualCapture(bool observedPrompt, double prior)
+    public void FilelessGrammarProducerDeclaresPriorButPhysicalCaptureCarriesOnlyStructuralProvenance(bool observedPrompt, double prior)
     {
         CodepointPerfcache.LoadDefault();
         var record = new GrammarComposeRecord("def keep(x):\n    return x\n"u8.ToArray(), "python",
@@ -205,8 +205,11 @@ public sealed class SubstrateChangeSourcePriorTests
             Assert.Equal(ranges.Sum(range => range.RowCount) + change.PhysicalityObservations.Length,
                 captured.ObservationSources.Count);
             Assert.All(captured.ObservationSources, source => Assert.Equal(Source, source));
-            Assert.All(captured.ObservationPriors, actual => Assert.Equal(prior, actual));
-            Assert.Equal(captured.ObservationSources.Count, captured.ObservationPriors.Count);
+            Assert.Equal(captured.ObservationSources.Count, captured.ObservationUnits.Count);
+            Assert.Equal(captured.ObservationSources.Count, captured.ObservationTimesUnixUs.Count);
+            // Trust is a source declaration used by semantic testimony/folding. Physical
+            // provenance is structural only and must not duplicate that standing channel.
+            Assert.Equal(prior, change.RequireSourcePrior(Source));
         }
         finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
     }
