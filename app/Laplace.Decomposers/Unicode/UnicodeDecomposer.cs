@@ -253,6 +253,7 @@ public sealed class UnicodeDecomposer
         return relative.StartsWith("charts/", StringComparison.OrdinalIgnoreCase)
             || name.Equals("ReadMe.txt", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("README", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("readme", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase)
             || name.Contains("copyright", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("index.html", StringComparison.OrdinalIgnoreCase)
@@ -475,6 +476,12 @@ public sealed class UnicodeDecomposer
                 new HashSet<int> { 1 }),
             ArtifactKind.UcaCommonTemplate => new CttPhase(this, job.Path, batch),
             ArtifactKind.NamesList => new NamesListPhase(this, job.Path, batch),
+            ArtifactKind.LinkBracket => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch, ["Link_Bracket"], new HashSet<int> { 0 }),
+            ArtifactKind.LinkEmail => new CodepointListPropertyPhase(
+                this, job.Path, batch, "Link_Email"),
+            ArtifactKind.LinkTerm => new CodepointListPropertyPhase(
+                this, job.Path, batch, "Link_Term"),
             _ => throw new InvalidOperationException($"Unsupported Unicode artifact kind {job.Kind}."),
         };
 
@@ -640,6 +647,12 @@ public sealed class UnicodeDecomposer
             Path.Combine(baseDir, "uca", "ctt.txt"), "uca/ctt.txt");
         AddIfPresent(legacy, ArtifactKind.NamesList,
             Path.Combine(baseDir, "ucd", "NamesList.txt"), "ucd/NamesList.txt");
+        AddIfPresent(legacy, ArtifactKind.LinkBracket,
+            Path.Combine(baseDir, "linkification", "LinkBracket.txt"), "linkification/LinkBracket.txt");
+        AddIfPresent(legacy, ArtifactKind.LinkEmail,
+            Path.Combine(baseDir, "linkification", "LinkEmail.txt"), "linkification/LinkEmail.txt");
+        AddIfPresent(legacy, ArtifactKind.LinkTerm,
+            Path.Combine(baseDir, "linkification", "LinkTerm.txt"), "linkification/LinkTerm.txt");
         AddUnihanFiles(legacy, baseDir);
         legacy.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return legacy;
@@ -741,6 +754,9 @@ public sealed class UnicodeDecomposer
             "uca/decomps.txt" => ArtifactKind.UcaDecompositions,
             "uca/ctt.txt" => ArtifactKind.UcaCommonTemplate,
             "ucd/NamesList.txt" => ArtifactKind.NamesList,
+            "linkification/LinkBracket.txt" => ArtifactKind.LinkBracket,
+            "linkification/LinkEmail.txt" => ArtifactKind.LinkEmail,
+            "linkification/LinkTerm.txt" => ArtifactKind.LinkTerm,
             _ when (relative.StartsWith("ucd/Unihan/", StringComparison.Ordinal)
                     || relative.StartsWith("ucd/Unihan_", StringComparison.Ordinal))
                 && relative.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
@@ -864,6 +880,9 @@ public sealed class UnicodeDecomposer
         UcaDecompositions = 58,
         UcaCommonTemplate = 59,
         NamesList = 60,
+        LinkBracket = 61,
+        LinkEmail = 62,
+        LinkTerm = 63,
         Unknown = int.MaxValue,
     }
 
