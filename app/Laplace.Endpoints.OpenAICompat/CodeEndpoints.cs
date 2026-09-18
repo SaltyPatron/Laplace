@@ -66,7 +66,7 @@ internal static class CodeEndpoints
             if (result.Verified)
                 return Results.Json(response);
 
-            int status = result.FailureKind is "toolchain_unavailable" or "code_evidence_unavailable"
+            int status = result.FailureKind is "toolchain_unavailable"
                 ? StatusCodes.Status503ServiceUnavailable
                 : StatusCodes.Status422UnprocessableEntity;
             return Results.Json(response, statusCode: status);

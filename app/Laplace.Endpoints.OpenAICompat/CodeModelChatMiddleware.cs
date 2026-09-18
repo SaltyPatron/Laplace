@@ -159,7 +159,7 @@ internal sealed class CodeModelChatMiddleware(RequestDelegate next)
                     "invalid_request_error",
                     result.FailureKind ?? "code_verification_failed",
                     diagnostic));
-                int status = result.FailureKind is "toolchain_unavailable" or "code_evidence_unavailable"
+                int status = result.FailureKind is "toolchain_unavailable"
                     ? StatusCodes.Status503ServiceUnavailable
                     : StatusCodes.Status422UnprocessableEntity;
                 await WriteAsync(context, Results.Json(error, statusCode: status));

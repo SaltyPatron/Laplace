@@ -75,10 +75,10 @@ internal sealed class CodePlayerService(SubstrateClient substrate)
         {
             var candidate = await NpgsqlSubstrateReads.ForwardCodeAsync(
                 substrate.DataSource, prompt, steps, maxStride, spread, topK,
-                frontierLimit: Math.Max(16, topK * 4), feedback, ct).ConfigureAwait(false);
+                feedback, ct).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(candidate))
                 return new Result(modality, lastCode, lastRoot?.ToString(), false,
-                    receipts.Count == 0 ? "code_evidence_unavailable" : "code_generation_exhausted", receipts);
+                    receipts.Count == 0 ? "code_forward_unresolved" : "code_generation_exhausted", receipts);
 
             lastCode = candidate;
             byte[] utf8 = Encoding.UTF8.GetBytes(candidate);
