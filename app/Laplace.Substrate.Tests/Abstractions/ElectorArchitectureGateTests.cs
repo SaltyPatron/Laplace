@@ -228,7 +228,9 @@ public sealed class ElectorArchitectureGateTests
         Assert.Contains("context_array, frontier_array, discourse, walk_context", native);
         Assert.Contains("roles[used++] = LAPLACE_QUERY_OPERAND_DISCOURSE;", native);
         Assert.Contains("p_prior_frontier is the historical public parameter name", sql);
-        Assert.DoesNotContain("prompt_frontier_add(&frontier, &id);\n    }\n\n    if (!PG_ARGISNULL(8))", native);
+        Assert.DoesNotMatch(
+            @"if\s*\(!PG_ARGISNULL\(8\)\)\s*\{(?:(?!\}\s*LOCAL_FCINFO).)*prompt_frontier_add",
+            native);
         Assert.Contains("return forward_prompt(fcinfo, false);", native);
         Assert.Contains("return forward_prompt(fcinfo, true);", native);
         Assert.Contains("laplace_trajectory_scope_bind_input(trajectory_scope, input)", native);
