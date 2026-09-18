@@ -30,15 +30,15 @@ set_target_properties(laplace_ucd_tables_emit PROPERTIES
 # Hash the generator's own sources at configure time instead. Any edit to the
 # emit logic or the seed computation changes the fingerprint, which changes
 # source_hash, which forces the regenerate — with no one having to remember.
-# perfcache_format.h is intentionally not in CMAKE_CONFIGURE_DEPENDS: CMake already
-# owns that public header in the native target graph, and registering it here creates
-# a duplicate Ninja output rule. Format incompatibility is independently enforced by
-# LAPLACE_PERFCACHE_VERSION in the emitter/loader (v4 rejects the retired v3 blob).
+# Public headers are intentionally not in CMAKE_CONFIGURE_DEPENDS: CMake already owns
+# them in the native target graph, and registering them here creates duplicate Ninja
+# output rules. Placement implementation changes are fingerprinted by super_fibonacci.c;
+# format incompatibility is independently enforced by LAPLACE_PERFCACHE_VERSION in the
+# emitter/loader (v4 rejects the retired v3 blob).
 set(_LAPLACE_GEN_SRCS
     "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/unicode_seed.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/super_fibonacci.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../include/laplace/core/super_fibonacci.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/hilbert4d.c")
 set(_LAPLACE_GEN_MIX "")
 foreach(_src IN LISTS _LAPLACE_GEN_SRCS)
