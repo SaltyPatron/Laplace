@@ -183,8 +183,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
 
     internal void StageScriptRecord(ScriptRecord rec, SubstrateChangeBuilder b)
     {
-        var langId = LanguageReference.Resolve(rec.Subtag);
-        if (langId.Equals(LanguageEntityId.FromIso639_3("und"))) return;
+        var langId = LanguageEntityId.FromIso639_3(rec.LanguageCode);
         b.AddEntity(langId, EntityTier.Word, LanguageTypeId, Source);
         _codeNames.Add($"unicode/script/{rec.ScriptName}/v1");
         var scriptId = LanguageGraph.ScriptEntityId(rec.ScriptName);
@@ -194,13 +193,12 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
             RelationTypeRank.StandardsStructural * TC.StandardsDerived));
     }
 
-    internal void StageVariantRecord((string Subtag, string Prefix) rec, SubstrateChangeBuilder b)
+    internal void StageVariantRecord((string Subtag, string ParentCode) rec, SubstrateChangeBuilder b)
     {
         var variantId = LanguageGraph.VariantEntityId(rec.Subtag);
         _codeNames.Add($"substrate/iso639/variant/{rec.Subtag.ToLowerInvariant()}/v1");
         b.AddEntity(variantId, EntityTier.Word, LanguageVariantTypeId, Source);
-        var parentId = LanguageReference.Resolve(rec.Prefix);
-        if (parentId.Equals(LanguageEntityId.FromIso639_3("und"))) return;
+        var parentId = LanguageEntityId.FromIso639_3(rec.ParentCode);
         b.AddEntity(parentId, EntityTier.Word, LanguageTypeId, Source);
         b.AddAttestation(NativeAttestation.Categorical(
             variantId, "HAS_VARIANT_OF", parentId, Source, TC.StandardsDerived));
@@ -355,7 +353,15 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         string Id, string Part2b, string Part2t, string Part1,
         string Scope, string Type, string RefName);
 
-    internal readonly record struct ScriptRecord(string Subtag, string ScriptName);
+    internal readonly record struct ScriptRecord(string LanguageCode, string ScriptName);
+
+    internal readonly record struct Iso6392Record(
+        string Bibliographic,
+        string Terminological,
+        string Part1,
+        string English,
+        string French,
+        string? LanguageCode);
 
     private abstract class IsoComposePhase<T> : ComposeDecomposerPhase<T>
     {
@@ -436,13 +442,17 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
             string unidata = Path.GetFullPath(
                 Path.Combine(ecosystemPath, "..", "UCD", "Public", "UCD", "latest", "ucd"));
             var scriptName = LanguageGraph.LoadScriptCodeToUcdName(unidata);
+            var languageAliases = LanguageGraph.LoadIso6393Aliases(ecosystemPath);
             foreach (var (subtag, scriptCodes) in LanguageGraph.LanguageScripts(ecosystemPath))
             {
                 ct.ThrowIfCancellationRequested();
+                string? languageCode =
+                    LanguageGraph.ResolveIso6393Code(languageAliases, subtag);
+                if (languageCode is null) continue;
                 foreach (var code in scriptCodes)
                 {
                     if (!scriptName.TryGetValue(code, out var name)) continue;
-                    yield return new ScriptRecord(subtag, name);
+                    yield return new ScriptRecord(languageCode, name);
                 }
             }
             await Task.CompletedTask;
@@ -506,42 +516,41 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         }
     }
 
-    private sealed class VariantPhase : IsoComposePhase<(string Subtag, string Prefix)>
+    private sealed class VariantPhase : IsoComposePhase<(string Subtag, string ParentCode)>
     {
         public VariantPhase(ISODecomposer owner) : base(owner) { }
         protected override string PhaseLabel => "iso639/variants";
-        protected override void Compose((string Subtag, string Prefix) rec, SubstrateChangeBuilder b) =>
+        protected override void Compose((string Subtag, string ParentCode) rec, SubstrateChangeBuilder b) =>
             Owner.StageVariantRecord(rec, b);
-        protected override async IAsyncEnumerable<(string Subtag, string Prefix)> ExtractRecordsAsync(
+        protected override async IAsyncEnumerable<(string Subtag, string ParentCode)> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct)
         {
+            var languageAliases = LanguageGraph.LoadIso6393Aliases(ecosystemPath);
             foreach (var (subtag, prefixes) in LanguageGraph.Variants(ecosystemPath))
             {
                 ct.ThrowIfCancellationRequested();
                 foreach (var prefix in prefixes)
-                    yield return (subtag, prefix);
+                {
+                    string? parentCode =
+                        LanguageGraph.ResolveIso6393Code(languageAliases, prefix);
+                    if (parentCode is not null)
+                        yield return (subtag, parentCode);
+                }
             }
             await Task.CompletedTask;
         }
     }
 
-    private sealed class Iso6392Phase
-        : IsoComposePhase<(string Bibliographic, string Terminological, string Part1, string English, string French)>
+    private sealed class Iso6392Phase : IsoComposePhase<Iso6392Record>
     {
         public Iso6392Phase(ISODecomposer owner) : base(owner) { }
         protected override string PhaseLabel => "iso639-2";
 
-        protected override void Compose(
-            (string Bibliographic, string Terminological, string Part1, string English, string French) rec,
-            SubstrateChangeBuilder b)
+        protected override void Compose(Iso6392Record rec, SubstrateChangeBuilder b)
         {
-            string canonicalCode = rec.Terminological.Length == 3
-                ? rec.Terminological
-                : rec.Bibliographic;
-            string? resolved = LanguageReference.ResolveCode(canonicalCode);
-            Hash128? languageId = resolved is { Length: 3 }
-                ? LanguageEntityId.FromIso639_3(resolved)
+            Hash128? languageId = rec.LanguageCode is { Length: 3 } languageCode
+                ? LanguageEntityId.FromIso639_3(languageCode)
                 : null;
 
             StageCode(rec.Bibliographic, "HAS_ISO639_2B_CODE");
@@ -571,14 +580,12 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
             }
         }
 
-        protected override async IAsyncEnumerable<
-            (string Bibliographic, string Terminological, string Part1, string English, string French)>
-            ExtractRecordsAsync(
-                string ecosystemPath,
-                DecomposerOptions options,
-                [EnumeratorCancellation] CancellationToken ct)
+        protected override async IAsyncEnumerable<Iso6392Record> ExtractRecordsAsync(
+            string ecosystemPath,
+            DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
         {
-            LanguageReference.EnsureLoaded(ecosystemPath);
+            var languageAliases = LanguageGraph.LoadIso6393Aliases(ecosystemPath);
             string path = Path.Combine(ecosystemPath, "ISO-639-2_utf-8.txt");
             await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
             {
@@ -591,7 +598,12 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
                 string en = fields[3].Trim();
                 string fr = fields[4].Trim();
                 if (b.Length != 3) continue;
-                yield return (b, t, p1, en, fr);
+
+                string? languageCode =
+                    LanguageGraph.ResolveIso6393Code(languageAliases, t)
+                    ?? LanguageGraph.ResolveIso6393Code(languageAliases, b)
+                    ?? LanguageGraph.ResolveIso6393Code(languageAliases, p1);
+                yield return new Iso6392Record(b, t, p1, en, fr, languageCode);
             }
         }
     }

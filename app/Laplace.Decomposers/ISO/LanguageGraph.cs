@@ -11,6 +11,50 @@ internal static class LanguageGraph
     public static Laplace.Engine.Core.Hash128 VariantEntityId(string subtag) =>
         Laplace.Engine.Core.Hash128.OfCanonical($"substrate/iso639/variant/{subtag.ToLowerInvariant()}/v1");
 
+    public static Dictionary<string, string> LoadIso6393Aliases(string iso639Dir)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        string path = Path.Combine(iso639Dir, "iso-639-3.tab");
+        if (!File.Exists(path)) return map;
+
+        bool header = false;
+        foreach (string line in File.ReadLines(path))
+        {
+            if (!header) { header = true; continue; }
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            string[] fields = line.Split('\t');
+            if (fields.Length < 7) continue;
+            string id = fields[0].Trim().ToLowerInvariant();
+            if (id.Length != 3) continue;
+
+            map[id] = id;
+            Add(fields[1]);
+            Add(fields[2]);
+            Add(fields[3]);
+
+            void Add(string raw)
+            {
+                string alias = raw.Trim().ToLowerInvariant();
+                if (alias.Length > 0) map[alias] = id;
+            }
+        }
+        return map;
+    }
+
+    public static string? ResolveIso6393Code(
+        IReadOnlyDictionary<string, string> aliases,
+        string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+        string key = input.Trim().ToLowerInvariant().Replace('_', '-');
+        if (aliases.TryGetValue(key, out string? canonical)) return canonical;
+
+        int dash = key.IndexOf('-');
+        return dash > 0 && aliases.TryGetValue(key[..dash], out canonical)
+            ? canonical
+            : null;
+    }
+
     public static Dictionary<string, string> LoadScriptCodeToUcdName(string unidataDir)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
