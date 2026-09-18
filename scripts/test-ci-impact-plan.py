@@ -101,10 +101,16 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["build_components"], ["managed"])
         self.assertEqual(
             value["managed_build_projects"],
-            ["app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj"],
+            [
+                "app/Laplace.Chess.Tests/Laplace.Chess.Tests.csproj",
+                "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
+            ],
         )
-        self.assertEqual(value["managed_test_projects"], [])
-        self.assertEqual(value["dev_suites"], ["uci-dev"])
+        self.assertEqual(
+            value["managed_test_projects"],
+            ["app/Laplace.Chess.Tests/Laplace.Chess.Tests.csproj"],
+        )
+        self.assertEqual(value["dev_suites"], ["managed-dev", "uci-dev"])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["live_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish"])
