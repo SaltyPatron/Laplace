@@ -223,7 +223,7 @@ public sealed class ElectorArchitectureGateTests
         var compileOffset = native.IndexOf("laplace_prompt_intent_compile(", StringComparison.Ordinal);
         Assert.True(queryOffset >= 0 && queryOffset < coupleOffset && coupleOffset < compileOffset,
             "Operational interpretation must consume the coupled substrate response after query creation.");
-        Assert.Matches(@"walk_continuations\\(\\s*walk_call,\\s*input,\\s*hops,\\s*trace,\\s*NULL,\\s*invocation_context,\\s*discourse\\s*\\)", native);
+        Assert.Matches(@"walk_continuations\(\s*walk_call,\s*input,\s*hops,\s*trace,\s*NULL,\s*invocation_context,\s*discourse\s*\)", native);
         Assert.Contains("laplace_prompt_intent_bind_discourse(&coupled_intent, discourse)", native);
         Assert.Contains("return forward_prompt(fcinfo, false);", native);
         Assert.Contains("return forward_prompt(fcinfo, true);", native);
