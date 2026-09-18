@@ -33,6 +33,7 @@ class ProductFreshnessTests(unittest.TestCase):
             "scripts/pipeline.sh",
             "scripts/ci_managed_projects.py",
             "scripts/test-parallel.sh",
+            "scripts/test-suites/live-api.sh",
             "scripts/test-ci-workspace.py",
             "scripts/test-workflow-architecture.py",
             "scripts/test-seed-workflow-ownership.py",
