@@ -1,63 +1,7 @@
-name: Seed — substrate
+name: Internal — substrate ingest
+run-name: "Ingest — ${{ inputs.mode }} ${{ inputs.source }} → ${{ inputs.database }}"
 
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: "operation"
-        type: choice
-        required: true
-        default: source
-        options: [source, foundation-ladder, model]
-      source:
-        description: "ingest source key when mode=source"
-        type: string
-        required: false
-        default: ""
-      path:
-        description: "optional file, directory, corpus, or model snapshot path"
-        type: string
-        required: false
-        default: ""
-      langs:
-        description: "optional language scope; blank means all"
-        type: string
-        required: false
-        default: ""
-      database:
-        description: "target database"
-        type: choice
-        options: [laplace]
-        default: laplace
-      force:
-        description: "foundation-ladder: re-ingest every rung"
-        type: boolean
-        default: false
-      evict_before_ingest:
-        description: "source mode: retract the selected source before re-ingesting"
-        type: boolean
-        default: false
-      evict_confirm:
-        description: "exact decomposer source name required for eviction"
-        type: string
-        required: false
-        default: ""
-      chess_derived:
-        description: "after source=chess, derive move outcomes and transitions"
-        type: boolean
-        default: false
-      synthesize_model:
-        description: "after mode=model, synthesize the substrate GGUF"
-        type: boolean
-        default: true
-      run_gate:
-        description: "source mode: prove journal completion and source consensus/layer gates when registered"
-        type: boolean
-        default: true
-      run_idempotency:
-        description: "source mode: re-ingest and prove source evidence does not double-count"
-        type: boolean
-        default: false
   workflow_call:
     inputs:
       mode:
@@ -88,14 +32,20 @@ on:
         type: boolean
         required: false
         default: false
-      evict_confirm:
-        type: string
+      confirm_evict:
+        description: "second explicit confirmation for destructive source replacement"
+        type: boolean
         required: false
-        default: ""
+        default: false
       chess_derived:
         type: boolean
         required: false
         default: false
+      model_preset:
+        description: "named model selection resolved on the runner"
+        type: string
+        required: false
+        default: auto
       synthesize_model:
         type: boolean
         required: false
@@ -129,13 +79,14 @@ jobs:
       SOURCE_KEY: ${{ inputs.source }}
       PATH_INPUT: ${{ inputs.path }}
       LANGS_INPUT: ${{ inputs.langs }}
-      EVICT_CONFIRM: ${{ inputs.evict_confirm }}
+      MODEL_PRESET: ${{ inputs.model_preset }}
       GGUF_OUT: /build/laplace/work/model-outputs/laplace-model-substrate.gguf
     steps:
       - name: Run substrate operation
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
           EVICT_BEFORE_INGEST: ${{ inputs.evict_before_ingest && '1' || '0' }}
+          CONFIRM_EVICT: ${{ inputs.confirm_evict && '1' || '0' }}
           CHESS_DERIVED: ${{ inputs.chess_derived && '1' || '0' }}
           FORCE_INPUT: ${{ inputs.force && '1' || '0' }}
           SYNTHESIZE_MODEL: ${{ inputs.synthesize_model && '1' || '0' }}
@@ -192,14 +143,106 @@ jobs:
             unset LAPLACE_INGEST_LANGS || true
           fi
 
+          newest_weighted_snapshot() {
+            local family="$1" candidate
+            for candidate in "/vault/models/$family"/snapshots/*; do
+              [[ -d "$candidate" ]] || continue
+              if find "$candidate" -maxdepth 1 -type f \
+                   \( -name '*.safetensors' -o -name 'pytorch_model*.bin' \) \
+                   -print -quit | grep -q .; then
+                printf '%s\n' "$candidate"
+              fi
+            done | sort | tail -1
+          }
+
+          resolve_model_dir() {
+            if [[ -n "$PATH_INPUT" ]]; then
+              printf '%s\n' "$PATH_INPUT"
+              return 0
+            fi
+            case "$MODEL_PRESET" in
+              auto|proof-default)
+                local qwen tiny
+                qwen="${LAPLACE_MODEL_PROOF_DIR:-${LAPLACE_QWEN25_CODER_DIR:-}}"
+                [[ -n "$qwen" ]] || qwen="$(newest_weighted_snapshot 'models--Qwen--Qwen2.5-Coder-3B-Instruct' || true)"
+                if [[ -n "$qwen" ]]; then printf '%s\n' "$qwen"; return 0; fi
+                tiny="${LAPLACE_TINYLLAMA_DIR:-}"
+                [[ -n "$tiny" ]] || tiny="$(newest_weighted_snapshot 'models--TinyLlama--TinyLlama-1.1B-Chat-v1.0' || true)"
+                printf '%s\n' "$tiny"
+                ;;
+              qwen25-coder)
+                local qwen="${LAPLACE_QWEN25_CODER_DIR:-}"
+                [[ -n "$qwen" ]] || qwen="$(newest_weighted_snapshot 'models--Qwen--Qwen2.5-Coder-3B-Instruct' || true)"
+                printf '%s\n' "$qwen"
+                ;;
+              tinyllama)
+                local tiny="${LAPLACE_TINYLLAMA_DIR:-}"
+                [[ -n "$tiny" ]] || tiny="$(newest_weighted_snapshot 'models--TinyLlama--TinyLlama-1.1B-Chat-v1.0' || true)"
+                printf '%s\n' "$tiny"
+                ;;
+              phi2)
+                local phi="${LAPLACE_PHI2_DIR:-}"
+                [[ -n "$phi" ]] || phi="$(newest_weighted_snapshot 'models--microsoft--phi-2' || true)"
+                printf '%s\n' "$phi"
+                ;;
+              custom-path)
+                echo "::error::model preset custom-path requires an advanced path override" >&2
+                return 2
+                ;;
+              *)
+                echo "::error::unknown model preset: $MODEL_PRESET" >&2
+                return 2
+                ;;
+            esac
+          }
+
+          model_dir=""
+          if [[ "$MODE" == model ]]; then
+            model_dir="$(resolve_model_dir)"
+            [[ -n "$model_dir" && -d "$model_dir" ]] || {
+              echo "::error::model preset $MODEL_PRESET did not resolve to an installed snapshot" >&2
+              exit 1
+            }
+          fi
+
+          {
+            echo "## Ingest plan"
+            echo
+            echo "- Revision: $current_sha"
+            echo "- Mode: $MODE"
+            echo "- Database: $PGDATABASE"
+            if [[ "$MODE" == source ]]; then
+              echo "- Source: $SOURCE_KEY"
+              if [[ -n "$PATH_INPUT" ]]; then
+                echo "- Input: $PATH_INPUT"
+              else
+                echo "- Input: source default"
+              fi
+              echo "- Languages: ${LANGS_INPUT:-all}"
+              echo "- Replace existing source first: $EVICT_BEFORE_INGEST"
+              echo "- Verify source gate: $RUN_GATE"
+              echo "- Verify idempotency: $RUN_IDEMPOTENCY"
+              [[ "$SOURCE_KEY" != chess ]] || echo "- Derive move outcomes/transitions: $CHESS_DERIVED"
+            elif [[ "$MODE" == foundation-ladder ]]; then
+              echo "- Campaign: ordered foundation ladder"
+              echo "- Force every rung: $FORCE_INPUT"
+            elif [[ "$MODE" == model ]]; then
+              echo "- Model preset: $MODEL_PRESET"
+              echo "- Resolved snapshot: $model_dir"
+              echo "- Synthesize GGUF: $SYNTHESIZE_MODEL"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
           if [[ "$MODE" == source && "$EVICT_BEFORE_INGEST" == 1 ]]; then
+            [[ "$CONFIRM_EVICT" == 1 ]] || {
+              echo "::error::source replacement requires both replacement confirmations" >&2
+              exit 2
+            }
             [[ -z "$PATH_INPUT" && -z "$LANGS_INPUT" ]] || {
               echo "::error::source eviction requires a complete source ingest" >&2
               exit 1
             }
             src_name=$(python3 -c 'import json,os; x=json.load(open("scripts/decomposer-gates.json"))["sources"].get(os.environ["SOURCE_KEY"]); print(x["decomposer"] if x else "")')
             [[ -n "$src_name" ]] || { echo "::error::no source mapping for $SOURCE_KEY" >&2; exit 1; }
-            [[ "$EVICT_CONFIRM" == "$src_name" ]] || { echo "::error::type '$src_name' in evict_confirm" >&2; exit 1; }
             scripts/measure-lane.sh -- "$GITHUB_WORKSPACE/scripts/laplace" evict "$src_name"
             export LAPLACE_INGEST_FORCE=1
           fi
@@ -279,9 +322,6 @@ jobs:
               exec bash scripts/ensure-foundation.sh "${args[@]}"
               ;;
             model)
-              model_dir="$PATH_INPUT"
-              [[ -n "$model_dir" ]] || model_dir="${LAPLACE_TINYLLAMA_DIR:-}"
-              [[ -n "$model_dir" && -d "$model_dir" ]] || { echo "::error::model snapshot directory is missing"; exit 1; }
               if [[ "$SYNTHESIZE_MODEL" == 1 ]]; then
                 mkdir -p "$(dirname "$GGUF_OUT")"
                 LAPLACE_GGUF_OUT="$GGUF_OUT" scripts/model-synthesize-ci.sh "$model_dir"
