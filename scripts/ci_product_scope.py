@@ -1,8 +1,9 @@
-"""One source of truth for repository paths that do not change the product.
+"""Repository path laws for product triggering and candidate freshness.
 
-These paths may change CI policy, tests, diagnostics, or documentation. They are
-validated by the Policy workflow, but they do not invalidate a qualified product
-candidate and do not trigger Product — main delivery by themselves.
+`ignored` paths are pure policy/verification/diagnostic surfaces: they neither
+trigger Product — main delivery nor invalidate an existing candidate.
+`candidate_equivalent` additionally admits managed test-project changes. Those
+still trigger targeted qualification, but they do not change shipped product bytes.
 """
 from __future__ import annotations
 
@@ -79,3 +80,12 @@ def ignored(path: str) -> bool:
         or path in PRODUCT_IGNORED_EXACT
         or any(fnmatch.fnmatch(path, pattern) for pattern in PRODUCT_IGNORED_GLOBS)
     )
+
+
+def managed_test_path(path: str) -> bool:
+    parts = path.replace("\\", "/").split("/")
+    return len(parts) >= 3 and parts[0] == "app" and parts[1].endswith(".Tests")
+
+
+def candidate_equivalent(path: str) -> bool:
+    return ignored(path) or managed_test_path(path)
