@@ -82,6 +82,37 @@ def find_player(client: Client, user: str) -> dict:
     return exact or players[0]
 
 
+def latest_readback(client: Client, player_id: str) -> dict:
+    page = client.request(
+        f"/v1/chess/players/{urllib.parse.quote(player_id)}/games?limit=1&offset=0")
+    games = page.get("games")
+    require(isinstance(games, list) and len(games) == 1,
+            "provider player has no latest readable game")
+    game_id = str(games[0].get("id", ""))
+    require(re.fullmatch(r"[0-9a-fA-F]{32}", game_id) is not None,
+            "latest provider game id is not canonical Hash128")
+    detail = client.request(f"/v1/chess/games/{game_id}")
+    plies = client.request(f"/v1/chess/games/{game_id}/plies")
+    rows = plies.get("plies")
+    require(isinstance(rows, list), "latest provider game replay is malformed")
+    termination = str(detail.get("termination") or "")
+    terminal_finish = "checkmate" in termination.casefold() or "stalemate" in termination.casefold()
+    if terminal_finish:
+        require(rows, "source-declared board-terminal latest game has no persisted move trajectory")
+        require(plies.get("truncated") is None,
+                f"latest board-terminal game replay truncated: {plies.get('truncated')}")
+    return {
+        "gameId": game_id.lower(),
+        "playedOn": detail.get("played_on"),
+        "white": detail.get("white"),
+        "black": detail.get("black"),
+        "result": detail.get("result"),
+        "termination": detail.get("termination"),
+        "plies": len(rows),
+        "terminalFinishRequiresMoves": terminal_finish,
+    }
+
+
 def playable_readback(client: Client, player_id: str) -> dict:
     page = client.request(
         f"/v1/chess/players/{urllib.parse.quote(player_id)}/games?limit=50&offset=0")
@@ -136,14 +167,14 @@ def main() -> int:
         default=os.environ.get("LAPLACE_CHESS_PROVIDER_PROOF_SITE", "chesscom"))
     parser.add_argument(
         "--games", type=int,
-        default=int(os.environ.get("LAPLACE_CHESS_PROVIDER_PROOF_GAMES", "100")))
-    parser.add_argument("--timeout", type=float, default=300.0)
+        default=int(os.environ.get("LAPLACE_CHESS_PROVIDER_PROOF_GAMES", "0")))
+    parser.add_argument("--timeout", type=float, default=900.0)
     parser.add_argument("--poll", type=float, default=1.0)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    require(1 <= args.games <= 1000,
-            "provider proof game count must be in 1..1000")
+    require(0 <= args.games <= 1000,
+            "provider proof game count must be 0 (all) or in 1..1000")
     require(args.user.strip() == args.user and bool(args.user),
             "provider proof username is invalid")
 
@@ -154,8 +185,8 @@ def main() -> int:
         "config": {
             "user": args.user,
             "site": args.site,
-            "all": "false",
-            "max": str(args.games),
+            "all": "true" if args.games == 0 else "false",
+            "max": str(max(1, args.games)),
             "ingest": "true",
             "persistPgn": "true",
         },
@@ -183,8 +214,11 @@ def main() -> int:
     fetched = proof.get("fetchedGames")
     verified = proof.get("persistedVerifiedGames")
     verified_plies = proof.get("persistedVerifiedPlies")
-    require(fetched == args.games,
-            f"provider returned {fetched} games, expected {args.games}")
+    require(isinstance(fetched, int) and fetched > 0,
+            "provider recording proof contains no games")
+    if args.games > 0:
+        require(fetched == args.games,
+                f"provider returned {fetched} games, expected {args.games}")
     require(proof.get("parsedGames") == fetched,
             "provider source parse count differs from fetched count")
     require(verified == fetched and proof.get("exactPersistedReadback") is True,
@@ -213,6 +247,7 @@ def main() -> int:
         for item in provider_profiles),
         "provider identity profile was not persisted on the player")
 
+    latest = latest_readback(client, player_id)
     sample = playable_readback(client, player_id)
     receipt = {
         "schema": "laplace.chess-provider-live-acceptance/v1",
@@ -228,6 +263,7 @@ def main() -> int:
             "name": player.get("name"),
             "games": player.get("games"),
         },
+        "latestReadback": latest,
         "playableReadback": sample,
     }
 
@@ -254,6 +290,9 @@ def main() -> int:
             stream.write(
                 f"- Source PGN: {proof.get('sourcePgnBytes')} bytes · "
                 f"SHA256 {proof.get('sourcePgnSha256')}\n")
+            stream.write(
+                f"- Latest readback: {latest['gameId']} · {latest['playedOn']} · "
+                f"{latest['termination']} · {latest['plies']} plies\n")
             stream.write(
                 f"- Independent playable readback: {sample['gameId']} · "
                 f"{sample['plies']} plies\n")
