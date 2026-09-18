@@ -222,6 +222,21 @@ class WorkflowArchitecture(unittest.TestCase):
         ):
             self.assertIn(f'- "{path}"', lifecycle)
 
+    def test_reusable_stage_defaults_unscheduled_selectors_to_empty(self):
+        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
+        inputs = reusable.split("    inputs:\n", 1)[1].split("\npermissions:", 1)[0]
+        for name in (
+            "managed_db_test_projects",
+            "managed_live_test_projects",
+            "db_suites",
+            "live_suites",
+            "delivery_actions",
+        ):
+            with self.subTest(name=name):
+                block = inputs.split(f"      {name}:\n", 1)[1].split("\n      ", 1)[0]
+                self.assertIn('default: ""', block)
+                self.assertNotIn("default: all", block)
+
     def test_full_qualification_audit_is_manual_and_weekly(self):
         audit = (WORKFLOWS / "full-qualification.yml").read_text(encoding="utf-8")
         self.assertIn("name: Audit — full product qualification", audit)
