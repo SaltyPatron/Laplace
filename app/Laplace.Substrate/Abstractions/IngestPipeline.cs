@@ -530,7 +530,7 @@ public static class IngestBatchPipeline
     public const string ApplyBarrierUnitPrefix = "apply-barrier/";
 
     /// <summary>Attach the physical-file execution owner without changing content identity.</summary>
-    internal static SubstrateChange BindFileLabel(SubstrateChange change, string fileLabel)
+    public static SubstrateChange BindFileLabel(SubstrateChange change, string fileLabel)
     {
         ArgumentNullException.ThrowIfNull(change);
         ArgumentException.ThrowIfNullOrWhiteSpace(fileLabel);
@@ -620,14 +620,14 @@ public static class IngestBatchPipeline
 
     /// <summary>Input size for the ledger. Best-effort: a stream-backed source has no path,
     /// and a missing file is the enumerator's problem, not the journal's.</summary>
-    internal static long TryFileBytes(string? filePath)
+    public static long TryFileBytes(string? filePath)
     {
         if (string.IsNullOrEmpty(filePath)) return 0;
         try { return new FileInfo(filePath).Length; }
         catch { return 0; }
     }
 
-    internal static Hash128? TryResolveFileIdentity(string? filePath)
+    public static Hash128? TryResolveFileIdentity(string? filePath)
     {
         if (filePath is null) return null;
         byte[]? buffer = null;
