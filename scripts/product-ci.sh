@@ -250,7 +250,15 @@ append_csv_env() {
 }
 
 force_web_carry_forward_impact() {
+  # The SPA participates in the full application transaction. Full deploy uses
+  # --no-build for all four managed runtimes, so a forced web carry-forward must
+  # materialize those exact payload roots even when their source did not change.
+  append_csv_env LAPLACE_BUILD_COMPONENTS managed
   append_csv_env LAPLACE_BUILD_COMPONENTS web
+  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj
+  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj
+  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj
+  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj
   append_csv_env LAPLACE_DEV_SUITES browser-dev
   append_csv_env LAPLACE_LIVE_SUITES live-floor
   append_csv_env LAPLACE_LIVE_SUITES live-api
