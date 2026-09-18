@@ -267,7 +267,7 @@ terminal execution receipt
 
 Its returned trace/receipt contains fields including root id, candidate/context/channel counts, occurrence coverage, relation families, opposition, support anchor/relation/rating/RD/witness/source/context state, routing round, program id, required/satisfied/remaining obligations, completion/disposition, output fingerprint and semantic-act id.
 
-`extension/laplace_substrate/sql/functions/generation/walk_text.sql.in` makes `generation.forward_text(...)` invoke that canonical program once and only realize output after a completed semantic act exists. `converse.forward_turn(...)` supplies prior session turn/content identities as prior frontier state rather than rendering a transcript and reparsing it. `converse.chat(...)` currently projects the canonical forward-turn surface for normal chat.
+`extension/laplace_substrate/sql/functions/generation/walk_text.sql.in` makes `generation.forward_text(...)` invoke that canonical program once and only realize output after a completed semantic act exists. `converse.forward_turn(...)` supplies prior session turn/content identities as ordered discourse state rather than rendering a transcript and reparsing it. The legacy SQL parameter name `p_prior_frontier` is therefore not the semantic type: native `forward_prompt()` binds that array as `DISCOURSE`, separate from prompt semantic seeds. `converse.chat(...)` currently projects the canonical forward-turn surface for normal chat.
 
 Naming, sense and frame connections in the active query evidence resolve candidate identities. They do not establish an instruction or assign request/operand roles. The initial query is constrained only by an explicit caller relation mask.
 
