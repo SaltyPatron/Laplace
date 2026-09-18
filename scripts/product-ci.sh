@@ -273,12 +273,13 @@ csv_selected() {
 }
 
 force_full_carry_forward_impact() {
+  # Missing installed-revision evidence makes the mutation/build closure uncertain;
+  # it does NOT make unrelated development-test inputs uncertain. Keep the planner's
+  # exact dev suites/projects and widen only what delivery must materialize/verify.
   export LAPLACE_BUILD_COMPONENTS=all
   export LAPLACE_MANAGED_BUILD_PROJECTS=all
-  export LAPLACE_MANAGED_TEST_PROJECTS=all
   export LAPLACE_MANAGED_DB_TEST_PROJECTS=all
   export LAPLACE_MANAGED_LIVE_TEST_PROJECTS=all
-  export LAPLACE_DEV_SUITES=all
   export LAPLACE_DB_SUITES=all
   export LAPLACE_LIVE_SUITES=all
   export LAPLACE_DELIVERY_ACTIONS=all
@@ -306,7 +307,8 @@ force_web_carry_forward_impact() {
   append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj
   append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj
   append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj
-  append_csv_env LAPLACE_DEV_SUITES browser-dev
+  # A missing installed SPA receipt requires rebuilding/publishing the SPA, not
+  # rerunning browser qualification when the current source plan did not select it.
   append_csv_env LAPLACE_LIVE_SUITES live-floor
   append_csv_env LAPLACE_LIVE_SUITES live-api
   append_csv_env LAPLACE_DELIVERY_ACTIONS publish
@@ -373,7 +375,7 @@ carry_forward_undelivered_impact() {
   deployed="$(cat "$receipt" 2>/dev/null || true)"
 
   if [[ ! "$deployed" =~ ^[0-9a-fA-F]{40}$ ]]; then
-    echo "::warning::installed application revision receipt is unavailable; carrying full product impact forward"
+    echo "::warning::installed application revision receipt is unavailable; carrying full build/delivery closure forward without widening dev tests"
     force_full_carry_forward_impact
     return 0
   fi
@@ -383,14 +385,14 @@ carry_forward_undelivered_impact() {
 
   if ! git cat-file -e "$deployed^{commit}" 2>/dev/null; then
     if ! git fetch --no-tags --depth=1 origin "$deployed"; then
-      echo "::warning::could not resolve deployed revision $deployed; carrying full product impact forward"
+      echo "::warning::could not resolve deployed revision $deployed; carrying full build/delivery closure forward without widening dev tests"
       force_full_carry_forward_impact
       return 0
     fi
   fi
 
   if ! plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")"; then
-    echo "::warning::could not compute deployed-to-target impact; carrying full product impact forward"
+    echo "::warning::could not compute deployed-to-target impact; carrying full build/delivery closure forward without widening dev tests"
     force_full_carry_forward_impact
     return 0
   fi
