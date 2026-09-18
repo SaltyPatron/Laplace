@@ -553,7 +553,7 @@ export function StorageProofView() {
               <code title={proof.perfcache_receipt_hex}>{compactId(proof.perfcache_receipt_hex)}</code>
             </div>
             <div>
-              <span>DB uses same ROM</span>
+              <span>DB mmap = app ROM</span>
               <strong>
                 {proof.perfcache_aligned == null ? 'UNVERIFIED' : proof.perfcache_aligned ? 'YES' : 'MISMATCH'}
               </strong>
