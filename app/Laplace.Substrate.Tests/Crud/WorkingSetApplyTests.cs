@@ -315,8 +315,8 @@ public class WorkingSetApplyTests
         // the routed merge lane.
         var second = await writer.ApplyWorkingSetAsync(Change("structural-b", 5));
         PhysicalityWriterTestSupport.AssertAttempts(second, 1, 1, 1, 1);
-        // The new source unit contributes a distinct generated HAS_PHYSICALITY
-        // witness; the explicitly supplied original attestation remains unchanged.
+        // The new source unit contributes direct structural physicality provenance;
+        // the explicitly supplied semantic attestation remains unchanged.
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
             [subj], [Phys("structural/e1").Id], [H("att/structural")]);
         (games, _) = await AttStateAsync(H("att/structural"));

@@ -224,8 +224,10 @@ public class NpgsqlSubstrateWriterTests
         PhysicalityWriterTestSupport.AssertAttempts(same, 0, 2, 0, 2);
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
 
-        // The legacy E/type placement still has one selected row. The new
-        // descriptor/evidence graph separately preserves the alternate raw body.
+        // The canonical typed placement remains one selected row. A later
+        // observation of that same E/type address records source-unit provenance
+        // against the existing physicality id; it does not serialize the row back
+        // into descriptor entities or HAS_PHYSICALITY testimony.
         var changedSameIdentity = new SubstrateChangeBuilder(src, "phys-identity-changed")
             .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddPhysicality(Phys(PhysicalityType.Content, 0.55))
@@ -235,19 +237,30 @@ public class NpgsqlSubstrateWriterTests
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
         await using var original = _pg.DataSource.CreateCommand(
             "SELECT ST_X(coord) FROM laplace.physicalities WHERE id=$1");
-        original.Parameters.AddWithValue(PhysicalityId.Compute(entId, PhysicalityType.Content).ToBytes());
+        original.Parameters.AddWithValue(
+            PhysicalityId.Compute(entId, PhysicalityType.Content).ToBytes());
         Assert.Equal(0.1, (double)(await original.ExecuteScalarAsync())!);
+
         await using var observations = _pg.DataSource.CreateCommand("""
-            SELECT count(*),count(DISTINCT object_id) FROM laplace.attestations
-            WHERE subject_id=$1 AND source_id=$2 AND type_id=$3
+            SELECT
+              count(*),
+              count(DISTINCT physicality_id),
+              count(DISTINCT source_unit_id),
+              (SELECT count(*) FROM laplace.attestations
+               WHERE subject_id=$1 AND source_id=$2 AND type_id=$3)
+            FROM laplace.physicality_observations
+            WHERE entity_id=$1 AND source_id=$2
             """);
         observations.Parameters.AddWithValue(entId.ToBytes());
         observations.Parameters.AddWithValue(src.ToBytes());
-        observations.Parameters.AddWithValue(RelationTypeRegistry.Resolve("HAS_PHYSICALITY").Id.ToBytes());
+        observations.Parameters.AddWithValue(
+            RelationTypeRegistry.Resolve("HAS_PHYSICALITY").Id.ToBytes());
         await using var rows = await observations.ExecuteReaderAsync();
         Assert.True(await rows.ReadAsync());
-        Assert.Equal(5L, rows.GetInt64(0)); // two original, two next-unit, one alternate body
-        Assert.Equal(3L, rows.GetInt64(1));
+        Assert.Equal(5L, rows.GetInt64(0)); // two + two + one source-unit observations
+        Assert.Equal(2L, rows.GetInt64(1)); // Content and Projection typed addresses
+        Assert.Equal(3L, rows.GetInt64(2)); // three actual source units
+        Assert.Equal(0L, rows.GetInt64(3)); // structural provenance is not testimony
     }
 
     [Fact]
