@@ -121,6 +121,33 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn('exec {stale_fd}>"$work_root/product-$stale_sha.lock"', stage)
         self.assertNotIn("build-resource.lock", stage)
 
+    def test_full_qualification_audit_is_manual_and_weekly(self):
+        audit = (WORKFLOWS / "full-qualification.yml").read_text(encoding="utf-8")
+        self.assertIn("name: Audit — full product qualification", audit)
+        self.assertIn("workflow_dispatch:", audit)
+        self.assertIn("schedule:", audit)
+        self.assertIn('cron: "17 7 * * 0"', audit)
+        self.assertIn("stage: release-qualification", audit)
+        self.assertIn("build_components: all", audit)
+        self.assertIn("dev_suites: all", audit)
+        self.assertIn("skip_if_superseded: false", audit)
+
+    def test_candidate_reclamation_preserves_one_native_qualified_artifact_owner(self):
+        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
+        self.assertIn("latest-source --suite native-dev", reusable)
+        self.assertIn("preserve_native_source", reusable)
+        self.assertIn("preserving latest native-qualified candidate", reusable)
+
+    def test_planned_web_component_is_built_before_delivery(self):
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        pipeline = (ROOT / "scripts/pipeline.sh").read_text(encoding="utf-8")
+        run_build = product.split("run_build() {", 1)[1].split("\n}\n\nrun_dev_test_matrix", 1)[0]
+        self.assertIn("need_web", run_build)
+        self.assertIn('phases+=(build-web)', run_build)
+        self.assertIn("phase_build_web()", pipeline)
+        self.assertIn("npm run build", pipeline)
+        self.assertIn("build-web) phase_build_web", pipeline)
+
     def test_main_qualification_reuses_exact_valid_suite_receipts(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         self.assertIn("dev_suites:", reusable)
