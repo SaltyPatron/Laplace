@@ -485,6 +485,9 @@ export function StorageProofView() {
   const selectedPackedRow = selected?.packed_vertices[selectedPacked] ?? null;
   const maxTier = proof ? Math.max(...proof.nodes.map((node) => node.tier), 0) : 0;
   const tier0Count = proof?.nodes.filter((node) => node.tier === 0).length ?? 0;
+  const emittedRoot = proof?.nodes.find((node) => node.id_hex === proof.root_id_hex) ?? null;
+  const rootPackedVertices = emittedRoot?.packed_vertices.length ?? 0;
+  const rootRealizedVertices = emittedRoot?.realized_vertices.length ?? 0;
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -554,6 +557,18 @@ export function StorageProofView() {
               <strong>
                 {proof.perfcache_aligned == null ? 'UNVERIFIED' : proof.perfcache_aligned ? 'YES' : 'MISMATCH'}
               </strong>
+            </div>
+            <div>
+              <span>Root emitted</span>
+              <strong>{emittedRoot ? 'YES' : 'NO'}</strong>
+            </div>
+            <div>
+              <span>Root packed vertices</span>
+              <strong>{rootPackedVertices.toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>Root realized vertices</span>
+              <strong>{rootRealizedVertices.toLocaleString()}</strong>
             </div>
           </section>
 
