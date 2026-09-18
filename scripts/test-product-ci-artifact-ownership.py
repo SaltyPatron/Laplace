@@ -209,7 +209,9 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("verify_isolated_web_delivery", delivery)
 
         source = PUBLISH.read_text(encoding="utf-8")
-        web = publish_function("application_web_main")
+        start = source.index("application_web_main() (\n")
+        finish = source.index("\n)\n\nrecover() {", start)
+        web = source[start:finish]
         self.assertIn("atomic-directory-exchange.py", web)
         self.assertIn("web-artifact.py", web)
         self.assertNotIn("systemctl restart", web)
