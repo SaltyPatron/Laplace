@@ -238,7 +238,8 @@ force_full_carry_forward_impact() {
 }
 
 append_csv_env() {
-  local name="$1" value="$2" current="${!1:-}"
+  local name="$1" value="$2" current
+  current="$(printenv "$name" 2>/dev/null || true)"
   [[ "$current" == all ]] && return 0
   [[ ",$current," == *",$value,"* ]] || {
     current="${current:+$current,}$value"
@@ -482,6 +483,31 @@ run_live_tests() {
     echo "::notice::live planner kept chess-provider-live valid; suite not scheduled"
   fi
 }
+verify_installed_web_receipt() {
+  local target app_dir receipt deployed plan needs_web
+  target="$(git rev-parse HEAD)"
+  app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  receipt="$app_dir/wwwroot/.laplace-web-source-revision"
+  deployed="$(cat "$receipt" 2>/dev/null || true)"
+  [[ "$deployed" =~ ^[0-9a-fA-F]{40}$ ]] || {
+    echo "::error::installed SPA has no valid source revision receipt: $receipt" >&2
+    return 1
+  }
+  [[ "$deployed" != "$target" ]] || return 0
+  git cat-file -e "$deployed^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$deployed"
+  plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")" || return 1
+  needs_web="$(WEB_RECEIPT_PLAN_JSON="$plan" python3 - <<'PY'
+import json, os
+plan = json.loads(os.environ["WEB_RECEIPT_PLAN_JSON"])
+print("1" if "web" in plan.get("build_components", []) else "0")
+PY
+)"
+  [[ "$needs_web" == 0 ]] || {
+    echo "::error::installed SPA revision $deployed is stale relative to delivered source $target" >&2
+    return 1
+  }
+}
+
 check_application_live() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local body
@@ -585,6 +611,7 @@ verify_installed_product() {
   require_deployed_revision
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
   check_application_live
+  verify_installed_web_receipt
   check_t0_perfcache_runtime
   python3 scripts/verify-application-release.py --base "$ui_base" --timeout-seconds 60
 }
