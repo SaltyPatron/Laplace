@@ -554,6 +554,7 @@ export function StorageProofView() {
             <div><span>Max tier</span><strong>{maxTier}</strong></div>
             <div><span>Tier-0 leaves</span><strong>{tier0Count.toLocaleString()}</strong></div>
             <div><span>Atom window</span><strong>{proof.atom_window.toLocaleString()}</strong></div>
+            <div><span>Proof surface</span><strong>{STORAGE_PROOF_SURFACE_VERSION}</strong></div>
             <div>
               <span>T0 ROM receipt</span>
               <code title={proof.perfcache_receipt_hex}>{compactId(proof.perfcache_receipt_hex)}</code>
