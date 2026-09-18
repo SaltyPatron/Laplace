@@ -30,6 +30,7 @@ class ProductFreshnessTests(unittest.TestCase):
             "scripts/ci-qualification-cache.py",
             "scripts/ci-product-freshness.py",
             "scripts/ci_product_scope.py",
+            "scripts/test-parallel.sh",
             "scripts/test-ci-workspace.py",
             "scripts/test-workflow-architecture.py",
             "scripts/test-seed-workflow-ownership.py",
