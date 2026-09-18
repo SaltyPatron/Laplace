@@ -37,6 +37,7 @@ run_ci_contract_checks() {
   python3 scripts/test-workflow-architecture.py
   python3 scripts/test-benchmark-suite.py
   python3 scripts/test-ci-impact-plan.py
+  python3 scripts/test-ci-managed-graph.py
   python3 scripts/test-ci-qualification-cache.py
   python3 scripts/test-ci-product-freshness.py
   python3 scripts/test-web-artifact.py
