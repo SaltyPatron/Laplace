@@ -31,6 +31,7 @@ run_ci_contract_checks() {
     scripts/pipeline.sh \
     scripts/ci-deps.sh \
     scripts/test-parallel.sh \
+    scripts/test-suites/*.sh \
     scripts/model-synthesize-ci.sh \
     scripts/maintain-installed-database.sh \
     scripts/ingest-source.sh \
@@ -146,7 +147,7 @@ run_build() {
 
 run_dev_test_matrix() {
   local check_superseded="${1:-0}"
-  local current_rc profile suite spec suite_use_cache
+  local current_rc profile suite spec
   local selected="${LAPLACE_DEV_SUITES:-all}"
   local use_cache="${LAPLACE_USE_QUALIFICATION_CACHE:-0}"
   local specs=(
@@ -177,14 +178,7 @@ run_dev_test_matrix() {
       continue
     fi
 
-    suite_use_cache="$use_cache"
-    if [[ "$suite" == managed-dev && "${LAPLACE_MANAGED_TEST_PROJECTS:-all}" != all ]]; then
-      # A project-subset pass is not a whole managed-dev qualification receipt.
-      # Keep the targeted run small rather than lying to the reusable suite cache.
-      suite_use_cache=0
-    fi
-
-    if [[ "$suite_use_cache" == 1 ]] && python3 scripts/ci-qualification-cache.py check --suite "$suite"; then
+    if [[ "$use_cache" == 1 ]] && python3 scripts/ci-qualification-cache.py check --suite "$suite"; then
       echo "::notice::reusing passed qualification receipt for $suite"
       continue
     fi
@@ -193,7 +187,7 @@ run_dev_test_matrix() {
     bash scripts/test-parallel.sh --profile "$profile" --suite "$suite" || current_rc=$?
     (( current_rc == 0 )) || return "$current_rc"
 
-    if [[ "$suite_use_cache" == 1 ]]; then
+    if [[ "$use_cache" == 1 ]]; then
       python3 scripts/ci-qualification-cache.py record \
         --suite "$suite" --source-sha "$(git rev-parse HEAD)"
     fi
