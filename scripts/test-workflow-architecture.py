@@ -7,21 +7,23 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
-
-
 class MainPushQueueContract(unittest.TestCase):
-    def test_main_push_cancels_obsolete_qualification_but_delivery_is_nonpreemptible(self):
+    def test_main_push_is_one_chain_with_job_scoped_preemption(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertIn("concurrency:", lifecycle)
-        self.assertIn("laplace-main-product-lifecycle", lifecycle)
-        self.assertIn("cancel-in-progress: ${{ github.event_name == 'push' }}", lifecycle)
-        self.assertNotIn("cancel-in-progress: false", lifecycle)
+        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
 
-        delivery = (WORKFLOWS / "mainline-delivery.yml").read_text(encoding="utf-8")
-        self.assertIn("workflow_run:", delivery)
-        self.assertIn("laplace-main-delivery", delivery)
-        self.assertIn("cancel-in-progress: false", delivery)
+        self.assertIn("name: Product — main delivery", lifecycle)
+        self.assertIn("\n  push:\n", lifecycle)
+        self.assertNotIn("workflow_dispatch:", lifecycle)
+        self.assertNotIn("\nconcurrency:\n", lifecycle)
+        self.assertFalse((WORKFLOWS / "mainline-delivery.yml").exists())
 
+        self.assertIn("laplace-main-qualification", reusable)
+        self.assertIn("laplace-main-delivery", reusable)
+        self.assertIn(
+            "cancel-in-progress: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' }}",
+            reusable,
+        )
 
 
 class WorkflowArchitecture(unittest.TestCase):
@@ -48,16 +50,27 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("bash scripts/product-ci.sh check", text)
         self.assertIn("cancel-in-progress: true", text)
 
+    def test_main_delivery_plans_then_qualifies_then_delivers(self):
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("  plan:", lifecycle)
+        self.assertIn("scripts/ci-impact-plan.py", lifecycle)
+        self.assertIn("  mainline-qualification:", lifecycle)
+        self.assertIn("needs: plan", lifecycle)
+        self.assertIn("stage: release-qualification", lifecycle)
+        self.assertIn("dev_suites: ${{ needs.plan.outputs.dev_suites }}", lifecycle)
+        self.assertIn("  mainline-delivery:", lifecycle)
+        self.assertIn("needs: [plan, mainline-qualification]", lifecycle)
+        self.assertIn("stage: release-delivery", lifecycle)
+        self.assertEqual(2, lifecycle.count("uses: ./.github/workflows/product-stage.yml"))
+        self.assertEqual(2, lifecycle.count("skip_if_superseded: true"))
+
     def test_targeted_code_player_does_not_duplicate_mainline_build(self):
         self.assertFalse((WORKFLOWS / "code-player-ci.yml").exists())
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        mainline = lifecycle.split("  mainline-qualification:\n", 1)[1].split("\n  operator:\n", 1)[0]
-        self.assertEqual(1, mainline.count("uses: ./.github/workflows/product-stage.yml"))
-        self.assertIn("stage: release-qualification", mainline)
-        self.assertNotIn("stage: release-candidate", mainline)
-        self.assertNotIn("stage: release-activation", mainline)
+        self.assertIn("stage: release-qualification", lifecycle)
+        self.assertIn("stage: release-delivery", lifecycle)
 
-    def test_superseded_push_is_rejected_before_self_hosted_scheduling_and_host_mutation(self):
+    def test_superseded_push_is_rejected_before_self_hosted_scheduling_and_candidate_mutation(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         preflight = reusable.split("  preflight:\n", 1)[1].split("\n  stage:\n", 1)[0]
         stage = reusable.split("  stage:\n", 1)[1]
@@ -72,50 +85,41 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("runs-on: [self-hosted, laplace]", stage)
 
         resolve = stage.index("git ls-remote --heads origin refs/heads/main")
-        checkout = stage.index('git checkout --no-overwrite-ignore --detach "$TARGET_SHA"')
-        build_lock = stage.index("build-resource.lock")
-        host_lock = stage.index("host-resource.lock")
-        self.assertLess(resolve, checkout)
-        self.assertLess(checkout, build_lock)
-        self.assertLess(build_lock, host_lock)
-        self.assertIn("release-qualification|mainline|build|test-dev|check", stage)
-        self.assertIn("release-activation|test-live|reconcile", stage)
+        fetch = stage.index('git fetch --no-tags --depth=2 origin "$TARGET_SHA"')
+        worktree = stage.index('git worktree add --detach "$candidate_workspace" "$TARGET_SHA"')
+        candidate_lock = stage.index('product-$TARGET_SHA.lock')
+        self.assertLess(resolve, fetch)
+        self.assertLess(fetch, worktree)
+        self.assertLess(worktree, candidate_lock)
+        self.assertIn("product-worktrees", stage)
+        self.assertIn("git-metadata.lock", stage)
+        self.assertIn("host-resource.lock", stage)
+        self.assertNotIn("build-resource.lock", stage)
 
-    def test_main_push_qualifies_then_hands_off_exact_revision_delivery(self):
-        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        mainline = lifecycle.split("  mainline-qualification:\n", 1)[1].split("\n  operator:\n", 1)[0]
-        self.assertIn("stage: release-qualification", mainline)
-        self.assertNotIn("release-candidate", mainline)
-        self.assertNotIn("release-activation", mainline)
-        self.assertEqual(1, mainline.count("skip_if_superseded: true"))
-
-        delivery = (WORKFLOWS / "mainline-delivery.yml").read_text(encoding="utf-8")
-        self.assertIn('workflows: ["Laplace — product lifecycle"]', delivery)
-        self.assertIn("github.event.workflow_run.event == 'push'", delivery)
-        self.assertIn("github.event.workflow_run.head_branch == 'main'", delivery)
-        self.assertIn("github.event.workflow_run.conclusion == 'success'", delivery)
-        self.assertIn("stage: release-delivery", delivery)
-        self.assertIn("target_sha: ${{ github.event.workflow_run.head_sha }}", delivery)
-        self.assertIn("skip_if_superseded: true", delivery)
-        self.assertIn("cancel-in-progress: false", delivery)
-
-        self.assertIn("deploy-qualification:", lifecycle)
-        self.assertIn("deploy-candidate:", lifecycle)
-        self.assertIn("needs: deploy-qualification", lifecycle)
-        self.assertIn("deploy-activation:", lifecycle)
-        self.assertIn("needs: deploy-candidate", lifecycle)
+    def test_main_qualification_reuses_exact_valid_suite_receipts(self):
+        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
+        self.assertIn("dev_suites:", reusable)
+        self.assertIn("LAPLACE_DEV_SUITES:", reusable)
+        self.assertIn("LAPLACE_USE_QUALIFICATION_CACHE:", reusable)
 
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        matrix = product.split("run_dev_test_matrix() {", 1)[1].split("\n}\n\nrun_dev_tests", 1)[0]
+        self.assertIn("LAPLACE_DEV_SUITES", matrix)
+        self.assertIn("ci-qualification-cache.py check", matrix)
+        self.assertIn("ci-qualification-cache.py record", matrix)
+        self.assertIn("qualification planner kept", matrix)
+        self.assertNotIn("|| rc=$?", matrix)
+
+    def test_main_delivery_crosses_mutation_boundary_once_and_finishes_coherently(self):
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
         qualification = product.split("run_release_qualification() {", 1)[1].split("\n}", 1)[0]
-        candidate = product.split("run_release_candidate() {", 1)[1].split("\n}", 1)[0]
-        activation = product.split("run_release_activation() {", 1)[1].split("\n}", 1)[0]
         automatic = product.split("run_release_delivery() {", 1)[1].split("\n}", 1)[0]
+        activation = product.split("run_release_activation() {", 1)[1].split("\n}", 1)[0]
+
         self.assertIn("run_build", qualification)
         self.assertIn("run_dev_test_matrix 1", qualification)
         for token in ("run_install", "run_database_maintenance --prepare", "run_db_tests", "run_publish"):
-            self.assertIn(token, candidate)
             self.assertIn(token, automatic)
-        self.assertNotIn("run_build", candidate)
         self.assertNotIn("run_build", automatic)
         self.assertIn("release_candidate_current_before_mutation", automatic)
         self.assertIn("export LAPLACE_SKIP_IF_SUPERSEDED=0", automatic)
@@ -123,6 +127,24 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("run_publish", activation)
         self.assertIn("reconcile_installed_product", activation)
         self.assertIn("run_live_tests", activation)
+
+    def test_manual_product_operations_are_outside_main_delivery_graph(self):
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        manual = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
+        self.assertNotIn("workflow_dispatch:", lifecycle)
+        self.assertIn("workflow_dispatch:", manual)
+        self.assertEqual(1, manual.count("uses: ./.github/workflows/product-stage.yml"))
+        self.assertIn("stage: ${{ inputs.operation }}", manual)
+        self.assertIn("normal main delivery is automatic", manual)
+
+    def test_competitive_proof_remains_explicit_and_composed(self):
+        proof = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", proof)
+        self.assertNotIn("\n  push:\n", proof)
+        for stage in ("release-qualification", "release-candidate", "proof-model", "release-activation"):
+            self.assertIn(f"stage: {stage}", proof)
+        self.assertNotIn("scripts/product-ci.sh", proof)
+        self.assertNotIn("runs-on: [self-hosted, laplace]", proof)
 
     def test_observability_is_explicit_evidence_not_push_queue_load(self):
         for name in ("ui-observability.yml", "api-observability.yml"):
@@ -166,34 +188,15 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertEqual(1, reusable.count("runs-on: ubuntu-24.04"))
         self.assertEqual(1, reusable.count("runs-on: [self-hosted, laplace]"))
         self.assertIn("needs: preflight", reusable)
-        self.assertIn("build-resource.lock", reusable)
+        self.assertIn("product-worktrees", reusable)
+        self.assertIn('product-$TARGET_SHA.lock', reusable)
         self.assertIn("host-resource.lock", reusable)
+        self.assertNotIn("build-resource.lock", reusable)
         self.assertIn('exec bash scripts/product-ci.sh "$LAPLACE_STAGE"', reusable)
 
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertNotIn("runs-on: [self-hosted, laplace]", lifecycle)
         self.assertNotIn("host-resource.lock", lifecycle)
-
-    def test_deploy_and_proof_are_composed_from_retryable_stage_jobs(self):
-        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertIn("deploy-qualification:", lifecycle)
-        self.assertIn("deploy-candidate:", lifecycle)
-        self.assertIn("needs: deploy-qualification", lifecycle)
-        self.assertIn("deploy-activation:", lifecycle)
-        self.assertIn("needs: deploy-candidate", lifecycle)
-        self.assertIn("proof-qualification:", lifecycle)
-        self.assertIn("proof-candidate:", lifecycle)
-        self.assertIn("needs: proof-qualification", lifecycle)
-        self.assertIn("proof-model:", lifecycle)
-        self.assertIn("proof-activation:", lifecycle)
-        self.assertIn("needs: proof-candidate", lifecycle)
-        self.assertIn("needs: proof-model", lifecycle)
-
-        proof = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
-        for stage in ("release-qualification", "release-candidate", "proof-model", "release-activation"):
-            self.assertIn(f"stage: {stage}", proof)
-        self.assertNotIn("scripts/product-ci.sh", proof)
-        self.assertNotIn("runs-on: [self-hosted, laplace]", proof)
 
 
 if __name__ == "__main__":

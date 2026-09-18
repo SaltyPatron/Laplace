@@ -1,4 +1,5 @@
-name: Laplace — product lifecycle
+name: Product — main delivery
+run-name: "Deliver main — ${{ github.sha }}"
 
 on:
   push:
@@ -9,126 +10,63 @@ on:
       - ".github/**"
       - "scripts/api-diagnostics.py"
       - "web/scripts/capture-ui-diagnostics.mjs"
-  workflow_dispatch:
-    inputs:
-      stage:
-        description: "explicit product lifecycle stage"
-        type: choice
-        required: true
-        default: build
-        options: [provision, build, install, applications, deploy, proof, test-dev, test-db, test-live, reconcile, check]
-      full_clean:
-        description: "build/deploy/proof: wipe build/ before building"
-        type: boolean
-        default: false
-      force_codegen:
-        description: "build/deploy/proof: regenerate attestation-law source before building"
-        type: boolean
-        default: false
-      serial_tests:
-        description: "test stages: force serial ctest"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
-# Main pushes own only cancellable read-only qualification. A successful exact
-# revision is handed to mainline-delivery.yml, whose shared-state mutation and
-# activation lane is non-preemptible. Explicit operator/deploy/proof runs keep
-# unique groups and are never preempted.
-concurrency:
-  group: ${{ github.event_name == 'push' && 'laplace-main-product-lifecycle' || format('laplace-product-dispatch-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
-
+# A main push is one product story. Read-only qualification is cancellable inside
+# the reusable stage owner; once delivery starts its own concurrency group is
+# non-preemptible. There is deliberately no workflow-level concurrency here,
+# because workflow-level cancellation would also kill a delivery already mutating
+# the installed product.
 jobs:
+  plan:
+    name: Plan affected product work
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      dev_suites: ${{ steps.plan.outputs.dev_suites }}
+      components: ${{ steps.plan.outputs.components }}
+      full_qualification: ${{ steps.plan.outputs.full_qualification }}
+      changed_count: ${{ steps.plan.outputs.changed_count }}
+    steps:
+      - name: Check out exact revision with comparison history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Plan invalidated components and qualification suites
+        id: plan
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-impact-plan.py \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --github-output "$GITHUB_OUTPUT" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
   mainline-qualification:
-    if: github.event_name == 'push'
+    name: Qualify affected product inputs
+    needs: plan
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-qualification
       target_sha: ${{ github.sha }}
+      dev_suites: ${{ needs.plan.outputs.dev_suites }}
       skip_if_superseded: true
     secrets: inherit
 
-  operator:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage != 'deploy' && inputs.stage != 'proof'
+  mainline-delivery:
+    name: Install, validate, publish, and activate exact candidate
+    needs: [plan, mainline-qualification]
     uses: ./.github/workflows/product-stage.yml
     with:
-      stage: ${{ inputs.stage }}
+      stage: release-delivery
       target_sha: ${{ github.sha }}
-      full_clean: ${{ inputs.full_clean }}
-      force_codegen: ${{ inputs.force_codegen }}
-      serial_tests: ${{ inputs.serial_tests }}
-    secrets: inherit
-
-  deploy-qualification:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'deploy'
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-qualification
-      target_sha: ${{ github.sha }}
-      full_clean: ${{ inputs.full_clean }}
-      force_codegen: ${{ inputs.force_codegen }}
-      serial_tests: ${{ inputs.serial_tests }}
-    secrets: inherit
-
-  deploy-candidate:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'deploy'
-    needs: deploy-qualification
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-candidate
-      target_sha: ${{ github.sha }}
-      serial_tests: ${{ inputs.serial_tests }}
-    secrets: inherit
-
-  deploy-activation:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'deploy'
-    needs: deploy-candidate
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-activation
-      target_sha: ${{ github.sha }}
-      serial_tests: ${{ inputs.serial_tests }}
-    secrets: inherit
-
-  proof-qualification:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'proof'
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-qualification
-      target_sha: ${{ github.sha }}
-      full_clean: ${{ inputs.full_clean }}
-      force_codegen: ${{ inputs.force_codegen }}
-      serial_tests: ${{ inputs.serial_tests }}
-    secrets: inherit
-
-  proof-candidate:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'proof'
-    needs: proof-qualification
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-candidate
-      target_sha: ${{ github.sha }}
-      serial_tests: ${{ inputs.serial_tests }}
-    secrets: inherit
-
-  proof-model:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'proof'
-    needs: proof-candidate
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: proof-model
-      target_sha: ${{ github.sha }}
-    secrets: inherit
-
-  proof-activation:
-    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'proof'
-    needs: proof-model
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-activation
-      target_sha: ${{ github.sha }}
-      serial_tests: ${{ inputs.serial_tests }}
+      skip_if_superseded: true
     secrets: inherit
