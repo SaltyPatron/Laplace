@@ -19,7 +19,7 @@ public sealed class FrameNetInstalledEstateAuditTests
         Add(files, "lu", "lu*.xml", "lu");
         Add(files, "fulltext", "*.xml", "fulltext");
         Assert.NotEmpty(files);
-
+        // Parse the complete admitted physical estate without opening a database writer.
         var failures = new ConcurrentBag<string>();
         var options = new ParallelOptions
         {
