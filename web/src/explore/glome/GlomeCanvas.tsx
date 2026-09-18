@@ -175,6 +175,12 @@ function GlomeScene({
     const mesh = instances.current;
     if (!mesh) return;
     const hadInstanceColor = mesh.instanceColor != null;
+    const densityScale =
+      nodes.length <= 8 ? 2.8
+        : nodes.length <= 24 ? 2.2
+          : nodes.length <= 96 ? 1.6
+            : nodes.length >= 1000 ? 0.8
+              : 1;
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
       const [x, y, z] = project(n, projection, xmAngle, zmAngle);
@@ -182,7 +188,7 @@ function GlomeScene({
       // Run length is metadata, not literal volume. Keep dense trajectories
       // legible while still giving repeated constituents a visible cue.
       const runScale = Math.min(0.009, Math.log2(Math.max(1, n.runLength ?? 1)) * 0.0015);
-      const radius = ordHit ? 0.032 : 0.016 + runScale;
+      const radius = (ordHit ? 0.036 : 0.016 + runScale) * densityScale;
       transform.position.set(x, y, z);
       transform.scale.setScalar(radius);
       transform.updateMatrix();
@@ -248,7 +254,7 @@ function GlomeScene({
           color={palette.wireframe}
           wireframe
           transparent
-          opacity={0.22}
+          opacity={0.34}
           toneMapped={false}
         />
       </mesh>
