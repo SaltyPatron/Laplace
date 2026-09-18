@@ -176,3 +176,103 @@ test('Gated expand shows GatePrompt when billing bypass is off', async ({ page }
   await expect(page.getByRole('button', { name: /Unlock \(inspect\)/ })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/inspect/i)).toBeVisible();
 });
+
+
+test('Storage Proof selects the emitted root and renders its exact packed composition', async ({ page }) => {
+  const rootId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const aId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  const bId = 'cccccccccccccccccccccccccccccccc';
+  const receipt = '0123456789abcdef0123456789abcdef';
+
+  await page.route('**/v1/explore/storage-proof', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        text: 'aa',
+        root_id_hex: rootId,
+        // Deliberately points at a collapsed parser wrapper that is not emitted.
+        // The UI must select by the emitted root identity instead.
+        natural_unit_ordinal: 99,
+        atom_window: 0x110000,
+        perfcache_receipt_hex: receipt,
+        database_perfcache_receipt_hex: null,
+        database_perfcache_error: 'database receipt probe unavailable in fixture',
+        perfcache_aligned: null,
+        nodes: [
+          {
+            ordinal: 1, parent_ordinal: 7, id_hex: aId, label: 'a', tier: 0,
+            atom: 97, ducet_rank: 1234, text_offset: 0, text_length: 1,
+            x: 0.6, y: 0.2, z: 0.3, m: 0.7141428429, radius: 1,
+            hilbert_hex: '11111111111111111111111111111111',
+            packed_vertices: [], realized_vertices: [],
+          },
+          {
+            ordinal: 2, parent_ordinal: 7, id_hex: bId, label: 'a', tier: 0,
+            atom: 97, ducet_rank: 1234, text_offset: 1, text_length: 1,
+            x: -0.2, y: 0.7, z: 0.4, m: 0.5567764363, radius: 1,
+            hilbert_hex: '22222222222222222222222222222222',
+            packed_vertices: [], realized_vertices: [],
+          },
+          {
+            ordinal: 7, parent_ordinal: null, id_hex: rootId, label: 'aa', tier: 2,
+            atom: null, ducet_rank: null, text_offset: 0, text_length: 2,
+            x: 0.2, y: 0.45, z: 0.35, m: 0.6354596396, radius: 0.8845903,
+            hilbert_hex: '33333333333333333333333333333333',
+            packed_vertices: [
+              {
+                vertex: 1, logical_ordinal: 1,
+                x: 1.0000000000000002, y: 1.0000000000000004,
+                z: 1.0000000000000007, m: 1.0000000000000009,
+                child_id_hex: aId, child_label: 'a', child_tier: 0,
+                run_length: 1, flags: 97,
+              },
+              {
+                vertex: 2, logical_ordinal: 2,
+                x: 1.000000000000001, y: 1.0000000000000013,
+                z: 1.0000000000000016, m: 1.0000000000000018,
+                child_id_hex: bId, child_label: 'a', child_tier: 0,
+                run_length: 1, flags: 97,
+              },
+            ],
+            realized_vertices: [
+              { ordinal: 1, child_id_hex: aId, child_label: 'a', child_tier: 0, x: 0.6, y: 0.2, z: 0.3, m: 0.7141428429, radius: 1 },
+              { ordinal: 2, child_id_hex: bId, child_label: 'a', child_tier: 0, x: -0.2, y: 0.7, z: 0.4, m: 0.5567764363, radius: 1 },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route(`**/v1/explore/entities/${rootId}/preview`, async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id_hex: rootId,
+        label: 'aa',
+        tier: 2,
+        type: 'Content',
+        exists: false,
+        evidence_count: 0,
+        preview_facts: [],
+      }),
+    });
+  });
+
+  await page.goto('/proof?q=aa');
+
+  await expect(page.getByRole('heading', { name: 'Selected storage address' })).toBeVisible();
+  await expect(page.getByTitle(rootId)).toBeVisible();
+  await expect(page.getByText('Select a node from the composition walk.')).toHaveCount(0);
+  await expect(page.getByText('212-bit carrier projection')).toBeVisible();
+  await expect(page.getByText('Realized constituent curve')).toBeVisible();
+  await expect(page.getByText('UNVERIFIED — database ROM receipt unavailable')).toBeVisible();
+  await expect(page.getByText('database receipt probe unavailable in fixture')).toBeVisible();
+
+  const vertexButtons = page.getByRole('button', { name: /v\d+ · ord/ });
+  await expect(vertexButtons).toHaveCount(2);
+
+  // The proof page owns five independent WebGL evidence panes:
+  // placement, carrier, realized curve, legacy distribution, canonical distribution.
+  await expect(page.locator('canvas')).toHaveCount(5, { timeout: 15_000 });
+});
