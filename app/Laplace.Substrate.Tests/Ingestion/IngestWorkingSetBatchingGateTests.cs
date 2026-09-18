@@ -58,4 +58,18 @@ public sealed class IngestWorkingSetBatchingGateTests
         Assert.False(EntityIdentityPolicy.RequiresPhysicality(EntityTypeRegistry.Pos));
         Assert.False(EntityIdentityPolicy.RequiresPhysicality(EntityTypeRegistry.Ordinal));
     }
+    [Fact]
+    public void FileBackedApply_UsesOneAccumulatorPerFileOwner()
+    {
+        var root = TypeIdLawTests.FindRepoRootPublic();
+        var source = File.ReadAllText(Path.Combine(
+            root, "app", "Laplace.Substrate", "Ingestion", "IngestRunner.cs"));
+
+        Assert.Contains("Dictionary<string, ApplyBatchBucket>", source);
+        Assert.Contains("intent.Metadata.FileLabel ?? string.Empty", source);
+        Assert.Contains("if (terminal && bucket.Batch.Count > 0)", source);
+        Assert.Contains("await _writer.CompleteFileAsync(fileLabel", source);
+        Assert.DoesNotContain("boundaryCommitFloor", source);
+    }
+
 }

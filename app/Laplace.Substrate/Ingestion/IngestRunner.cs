@@ -66,6 +66,15 @@ public sealed class IngestRunner
         }
     }
 
+    private static bool IsPeriodBoundaryIntent(SubstrateChange change) =>
+        change.Metadata.SourceContentUnitName.StartsWith(
+            IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal);
+
+    private static bool IsFileTerminalIntent(SubstrateChange change) =>
+        IsPeriodBoundaryIntent(change)
+        || change.Metadata.SourceContentUnitName.StartsWith(
+            IngestBatchPipeline.FileFailedUnitPrefix, StringComparison.Ordinal);
+
     private async Task<IngestRunResult> RunCoreAsync(
         IDecomposer decomposer,
         IngestRunOptions options,
@@ -211,10 +220,6 @@ public sealed class IngestRunner
             IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
             Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
         var admissionWindow = new IngestAdmissionWindow(applyEnvelope);
-        static bool IsPeriodBoundary(SubstrateChange c) =>
-            c.Metadata.SourceContentUnitName.StartsWith(
-                IngestBatchPipeline.PeriodBoundaryUnitPrefix, StringComparison.Ordinal);
-
         bool ShouldFlushWithCap(int intents, int rows) =>
             workingSet
                 ? ShouldFlushWorkingSet(wsBytes, applyEnvelope)
@@ -307,7 +312,7 @@ public sealed class IngestRunner
                     sbatchRows += RowsOf(intent);
                     wsBytes += sib;
                     if (ShouldFlushWithCap(sbatch.Count, sbatchRows)
-                        || IsPeriodBoundary(intent))
+                        || IsPeriodBoundaryIntent(intent))
                     {
                         LogAdmissionWindow(sbatch.Count);
                         await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
@@ -381,20 +386,42 @@ public sealed class IngestRunner
                     }
                 }, "ingest-decompose-pcore", pipelineCts.Token);
 
-                async Task FlushBatchAsync(List<SubstrateChange> b)
+                var buckets = new Dictionary<string, ApplyBatchBucket>(StringComparer.Ordinal);
+
+                ApplyBatchBucket BucketFor(SubstrateChange intent)
                 {
-                    if (b.Count == 0) return;
-                    LogAdmissionWindow(b.Count);
-                    await ProcessOwnedBatchAsync(b, decomposer, options, rng,
-                        counters, failures, log, workingSet, runCt).ConfigureAwait(false);
-                    b.Clear();
+                    string owner = intent.Metadata.FileLabel ?? string.Empty;
+                    if (!buckets.TryGetValue(owner, out var bucket))
+                    {
+                        bucket = new ApplyBatchBucket(batchSize, applyEnvelope);
+                        buckets.Add(owner, bucket);
+                    }
+                    return bucket;
                 }
 
-                var batch = new List<SubstrateChange>(batchSize);
+                async Task FlushBucketAsync(ApplyBatchBucket bucket)
+                {
+                    if (bucket.Batch.Count == 0) return;
+                    if (workingSet)
+                        log.LogInformation(
+                            "INGEST_ADMISSION_WINDOW source={Source} file={File} intents={Intents} "
+                            + "source_forms_upper={Forms} source_vertices_upper={Vertices} "
+                            + "modeled_source_payload_bytes={Modeled} grant_bytes={Grant}",
+                            decomposer.SourceName,
+                            bucket.Batch[0].Metadata.FileLabel ?? "<source>",
+                            bucket.Batch.Count,
+                            bucket.AdmissionWindow.Sizing.Source.Forms,
+                            bucket.AdmissionWindow.Sizing.Source.StoredVertices,
+                            bucket.AdmissionWindow.ModeledSourcePayloadBytes,
+                            applyEnvelope);
+                    await ProcessOwnedBatchAsync(bucket.Batch, decomposer, options, rng,
+                        counters, failures, log, workingSet, runCt).ConfigureAwait(false);
+                    bucket.Reset();
+                }
+
                 await using var pipelineCleanup = new ApplyPipelineCleanup(
-                    pipelineCts, producer, batch, channel.Reader);
-                int batchRows = 0;
-                Hash128? batchSource = null;
+                    pipelineCts, producer, buckets, channel.Reader);
+
                 while (await channel.Reader.WaitToReadAsync(runCt))
                 {
                     while (channel.Reader.TryRead(out var queued))
@@ -413,46 +440,52 @@ public sealed class IngestRunner
                                                          counters, failures, log, runCt);
                             continue;
                         }
+
+                        string owner = intent.Metadata.FileLabel ?? string.Empty;
+                        var bucket = BucketFor(intent);
+                        bool terminal = IsFileTerminalIntent(intent);
                         long ib = queued.SerializedBytes;
                         var admission = queued.Admission;
+
+                        // A file's terminal marker is never coalesced with its data. Its
+                        // preceding data batches are applied first; then the terminal marker
+                        // is applied and CompleteFileAsync closes only that file's fold tasks.
+                        if (terminal && bucket.Batch.Count > 0)
+                            await FlushBucketAsync(bucket);
+
                         if (workingSet && ShouldFlushWorkingSetSourceBoundary(
-                                batchSource, intent.Metadata.SourceId))
-                        {
-                            await FlushBatchAsync(batch);
-                            batchRows = 0;
-                            wsBytes = 0;
-                            admissionWindow.Reset();
-                            batchSource = null;
-                        }
-                        if (workingSet && batch.Count > 0
-                            && (wsBytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
-                                || admissionWindow.ShouldFlushBefore(admission)))
-                        {
-                            await FlushBatchAsync(batch);
-                            batchRows = 0;
-                            wsBytes = 0;
-                            admissionWindow.Reset();
-                            batchSource = null;
-                        }
-                        if (workingSet) admissionWindow.Add(admission);
-                        batch.Add(intent);
+                                bucket.Source, intent.Metadata.SourceId))
+                            await FlushBucketAsync(bucket);
+
+                        if (workingSet && bucket.Batch.Count > 0
+                            && (bucket.Bytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
+                                || bucket.AdmissionWindow.ShouldFlushBefore(admission)))
+                            await FlushBucketAsync(bucket);
+
+                        if (workingSet) bucket.AdmissionWindow.Add(admission);
+                        bucket.Batch.Add(intent);
                         transfer.Complete();
-                        batchSource ??= intent.Metadata.SourceId;
-                        batchRows += RowsOf(intent);
-                        wsBytes += ib;
-                        if (ShouldFlushWithCap(batch.Count, batchRows)
-                            || IsPeriodBoundary(intent))
+                        bucket.Source ??= intent.Metadata.SourceId;
+                        bucket.Rows += queued.Rows;
+                        bucket.Bytes += ib;
+
+                        bool capacityReached = workingSet
+                            ? ShouldFlushWorkingSet(bucket.Bytes, applyEnvelope)
+                                || bucket.AdmissionWindow.ModeledSourcePayloadBytes >= applyEnvelope
+                            : ShouldFlush(bucket.Batch.Count, bucket.Rows)
+                                || bucket.Batch.Count >= maxIntentsPerCommit;
+
+                        if (terminal || capacityReached)
                         {
-                            await FlushBatchAsync(batch);
-                            batchRows = 0;
-                            wsBytes = 0;
-                            admissionWindow.Reset();
-                            batchSource = null;
+                            await FlushBucketAsync(bucket);
+                            if (terminal)
+                                buckets.Remove(owner);
                         }
                     }
                 }
-                if (batch.Count > 0)
-                    await FlushBatchAsync(batch);
+
+                foreach (var bucket in buckets.Values.ToArray())
+                    await FlushBucketAsync(bucket);
 
                 await producer;
             }
@@ -750,6 +783,9 @@ public sealed class IngestRunner
                 Interlocked.Add(ref counters._attestationsInserted, apply.AttestationsInserted);
                 Interlocked.Add(ref counters._roundTrips, apply.RoundTrips);
 
+                if (IsFileTerminalIntent(intent)
+                    && intent.Metadata.FileLabel is { Length: > 0 } fileLabel)
+                    await _writer.CompleteFileAsync(fileLabel, ct).ConfigureAwait(false);
                 TrackIntent(counters, intent, failures);
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
@@ -870,8 +906,7 @@ public sealed class IngestRunner
                 foreach (var intent in batch)
                 {
                     string unit = intent.Metadata.SourceContentUnitName;
-                    if ((IsPeriodBoundary(intent)
-                         || unit.StartsWith(IngestBatchPipeline.FileFailedUnitPrefix, StringComparison.Ordinal))
+                    if (IsFileTerminalIntent(intent)
                         && intent.Metadata.FileLabel is { Length: > 0 } fileLabel)
                         await _writer.CompleteFileAsync(fileLabel, ct).ConfigureAwait(false);
                 }
@@ -1165,6 +1200,24 @@ public sealed class IngestRunner
     private readonly record struct QueuedIntent(
         SubstrateChange Intent, int Rows, long SerializedBytes, IngestAdmissionSizing Admission);
 
+    private sealed class ApplyBatchBucket(int capacity, long envelope)
+    {
+        internal List<SubstrateChange> Batch { get; } = new(capacity);
+        internal IngestAdmissionWindow AdmissionWindow { get; } = new(envelope);
+        internal int Rows;
+        internal long Bytes;
+        internal Hash128? Source;
+
+        internal void Reset()
+        {
+            Batch.Clear();
+            AdmissionWindow.Reset();
+            Rows = 0;
+            Bytes = 0;
+            Source = null;
+        }
+    }
+
     private sealed class ApplyEnvelopeTransfer(SubstrateChange change) : IDisposable
     {
         private bool _completed;
@@ -1185,7 +1238,7 @@ public sealed class IngestRunner
     private sealed class ApplyPipelineCleanup(
         CancellationTokenSource cancellation,
         Task producer,
-        IReadOnlyList<SubstrateChange> batch,
+        IReadOnlyDictionary<string, ApplyBatchBucket> buckets,
         ChannelReader<QueuedIntent> reader) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
@@ -1193,7 +1246,8 @@ public sealed class IngestRunner
             cancellation.Cancel();
             try { await producer.ConfigureAwait(false); }
             catch (OperationCanceledException) { }
-            SubstrateApplyEnvelope.Release(batch);
+            foreach (var bucket in buckets.Values)
+                SubstrateApplyEnvelope.Release(bucket.Batch);
             while (reader.TryRead(out QueuedIntent abandoned))
                 abandoned.Intent.ApplyEnvelope?.Dispose();
         }
