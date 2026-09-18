@@ -60,6 +60,10 @@ internal static class UnicodePhysicalArtifactParser
         string Name,
         bool CountsSourceRow);
 
+    internal readonly record struct CodepointListRow(
+        uint Codepoint,
+        bool CountsSourceRow);
+
     internal static async IAsyncEnumerable<UnicodeDataRow> UnicodeDataAsync(
         string path,
         [EnumeratorCancellation] CancellationToken ct)
@@ -290,6 +294,30 @@ internal static class UnicodePhysicalArtifactParser
                         sequence, propertyNames[i], value, sourceRow);
                     sourceRow = false;
                 }
+            }
+        }
+    }
+
+    internal static async IAsyncEnumerable<CodepointListRow> CodepointListAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            int semi = line.IndexOf(';');
+            string rangeText = (semi >= 0 ? line[..semi] : line).Trim();
+            if (rangeText.StartsWith("U+", StringComparison.OrdinalIgnoreCase))
+                rangeText = rangeText[2..];
+            if (!TryRange(rangeText, out uint start, out uint end)) continue;
+            bool first = true;
+            for (uint cp = start; cp <= end; ++cp)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return new CodepointListRow(cp, first);
+                first = false;
+                if (cp == 0x10FFFFu) break;
             }
         }
     }
