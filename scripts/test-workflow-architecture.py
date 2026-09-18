@@ -45,12 +45,13 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertFalse((WORKFLOWS / "code-player-ci.yml").exists())
         mainline = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("uses: ./.github/workflows/product-stage.yml", mainline)
+        self.assertIn("stage: release-qualification", mainline)
         self.assertIn("stage: release-candidate", mainline)
         self.assertIn("stage: release-activation", mainline)
 
     def test_mainline_preserves_every_run_and_skips_only_superseded_work(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        mainline = text.split("  mainline-candidate:\n", 1)[1].split("\n  operator:\n", 1)[0]
+        mainline = text.split("  mainline-qualification:\n", 1)[1].split("\n  operator:\n", 1)[0]
         self.assertNotIn("concurrency:", mainline)
 
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
@@ -71,28 +72,40 @@ class WorkflowArchitecture(unittest.TestCase):
 
     def test_main_push_qualifies_installs_publishes_and_live_verifies(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("mainline-qualification:", lifecycle)
+        self.assertIn("stage: release-qualification", lifecycle)
         self.assertIn("mainline-candidate:", lifecycle)
+        self.assertIn("needs: mainline-qualification", lifecycle)
         self.assertIn("stage: release-candidate", lifecycle)
         self.assertIn("mainline-activation:", lifecycle)
         self.assertIn("needs: mainline-candidate", lifecycle)
         self.assertIn("stage: release-activation", lifecycle)
-        self.assertEqual(2, lifecycle.count("skip_if_superseded: true"))
+        self.assertEqual(3, lifecycle.count("skip_if_superseded: true"))
 
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        qualification = product.split("run_release_qualification() {", 1)[1].split("\n}", 1)[0]
         candidate = product.split("run_release_candidate() {", 1)[1].split("\n}", 1)[0]
         activation = product.split("run_release_activation() {", 1)[1].split("\n}", 1)[0]
-        for token in ("run_build", "run_dev_tests", "run_install", "run_database_maintenance --prepare", "run_db_tests"):
+        self.assertIn("run_build", qualification)
+        self.assertIn("run_dev_test_matrix 1", qualification)
+        self.assertIn("release_selected_revision_current", qualification)
+        self.assertNotIn("run_install", qualification)
+        self.assertNotIn("run_database_maintenance", qualification)
+        self.assertNotIn("run_db_tests", qualification)
+        for token in ("require_built_revision", "release_candidate_current_before_mutation",
+                      "run_install", "run_database_maintenance --prepare", "run_db_tests"):
             self.assertIn(token, candidate)
-        self.assertIn("release_candidate_current_before_mutation", candidate)
-        self.assertLess(candidate.index("run_dev_tests"),
-                        candidate.index("release_candidate_current_before_mutation"))
+        self.assertNotIn("run_build", candidate)
+        self.assertNotIn("run_dev_tests", candidate)
         self.assertLess(candidate.index("release_candidate_current_before_mutation"),
                         candidate.index("run_install"))
         supersession = product.split(
-            "release_candidate_current_before_mutation() {", 1)[1].split("\n}", 1)[0]
+            "release_selected_revision_current() {", 1)[1].split("\n}", 1)[0]
         self.assertIn("git ls-remote --heads origin refs/heads/main", supersession)
-        self.assertIn("install/database mutation skipped", supersession)
-        self.assertIn("return 3", supersession)
+        mutation_guard = product.split(
+            "release_candidate_current_before_mutation() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("install/database mutation", mutation_guard)
+        self.assertIn("return 3", mutation_guard)
         for token in ("run_publish", "reconcile_installed_product", "run_live_tests"):
             self.assertIn(token, activation)
     def test_observability_is_explicit_evidence_not_push_queue_load(self):
@@ -144,17 +157,21 @@ class WorkflowArchitecture(unittest.TestCase):
 
     def test_deploy_and_proof_are_composed_from_retryable_stage_jobs(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("deploy-qualification:", lifecycle)
         self.assertIn("deploy-candidate:", lifecycle)
+        self.assertIn("needs: deploy-qualification", lifecycle)
         self.assertIn("deploy-activation:", lifecycle)
         self.assertIn("needs: deploy-candidate", lifecycle)
+        self.assertIn("proof-qualification:", lifecycle)
         self.assertIn("proof-candidate:", lifecycle)
+        self.assertIn("needs: proof-qualification", lifecycle)
         self.assertIn("proof-model:", lifecycle)
         self.assertIn("proof-activation:", lifecycle)
         self.assertIn("needs: proof-candidate", lifecycle)
         self.assertIn("needs: proof-model", lifecycle)
 
         proof = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
-        for stage in ("release-candidate", "proof-model", "release-activation"):
+        for stage in ("release-qualification", "release-candidate", "proof-model", "release-activation"):
             self.assertIn(f"stage: {stage}", proof)
         self.assertNotIn("scripts/product-ci.sh", proof)
         self.assertNotIn("runs-on: [self-hosted, laplace]", proof)

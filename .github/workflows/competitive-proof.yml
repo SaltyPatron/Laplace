@@ -8,7 +8,16 @@ permissions:
 
 jobs:
   qualify:
-    name: Qualify exact product candidate
+    name: Qualify exact product source
+    uses: ./.github/workflows/product-stage.yml
+    with:
+      stage: release-qualification
+      target_sha: ${{ github.sha }}
+    secrets: inherit
+
+  candidate:
+    name: Prepare and database-test exact product candidate
+    needs: qualify
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-candidate
@@ -17,7 +26,7 @@ jobs:
 
   synthesize:
     name: Synthesize competitive model proof
-    needs: qualify
+    needs: candidate
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: proof-model

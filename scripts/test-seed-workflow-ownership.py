@@ -32,14 +32,16 @@ class WorkflowOwnership(unittest.TestCase):
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
-    def test_mainline_delegates_qualification_and_activation_to_reusable_product_stage(self):
+    def test_mainline_delegates_qualification_candidate_and_activation_to_reusable_product_stage(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        mainline = text.split("  mainline-candidate:\n", 1)[1].split("\n  operator:\n", 1)[0]
-        self.assertEqual(2, mainline.count("uses: ./.github/workflows/product-stage.yml"))
+        mainline = text.split("  mainline-qualification:\n", 1)[1].split("\n  operator:\n", 1)[0]
+        self.assertEqual(3, mainline.count("uses: ./.github/workflows/product-stage.yml"))
+        self.assertIn("stage: release-qualification", mainline)
         self.assertIn("stage: release-candidate", mainline)
         self.assertIn("stage: release-activation", mainline)
+        self.assertIn("needs: mainline-qualification", mainline)
         self.assertIn("needs: mainline-candidate", mainline)
-        self.assertEqual(2, mainline.count("skip_if_superseded: true"))
+        self.assertEqual(3, mainline.count("skip_if_superseded: true"))
         self.assertNotIn("cancel-in-progress:", mainline)
         self.assertNotIn("runs-on:", mainline)
 

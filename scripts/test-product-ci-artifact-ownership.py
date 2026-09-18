@@ -113,20 +113,30 @@ class ProductStageOwnershipContract(unittest.TestCase):
     def test_deploy_is_composed_from_release_modules_not_policy_work(self):
         deploy = function("run_deploy")
         self.assertNotIn("run_ci_contract_checks", deploy)
-        self.assertLess(deploy.index("run_release_candidate"),
-                        deploy.index("run_release_activation"))
+        stages = ["run_release_qualification", "run_release_candidate", "run_release_activation"]
+        positions = [deploy.index(token) for token in stages]
+        self.assertEqual(positions, sorted(positions))
+
+        qualification = function("run_release_qualification")
+        self.assertIn("check_deps", qualification)
+        self.assertIn("run_build", qualification)
+        self.assertIn("run_dev_test_matrix 1", qualification)
+        for forbidden in ("run_install", "run_database_maintenance", "run_db_tests"):
+            self.assertNotIn(forbidden, qualification)
 
         candidate = function("run_release_candidate")
-        qualification = [
+        mutation = [
             "check_deps",
-            "run_build",
-            "run_dev_tests",
+            "require_built_revision",
+            "release_candidate_current_before_mutation",
             "run_install",
             "run_database_maintenance --prepare",
             "run_db_tests",
         ]
-        positions = [candidate.index(token) for token in qualification]
+        positions = [candidate.index(token) for token in mutation]
         self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("run_build", candidate)
+        self.assertNotIn("run_dev_tests", candidate)
 
         activation = function("run_release_activation")
         delivery = ["run_publish", "reconcile_installed_product", "run_live_tests"]
@@ -135,10 +145,14 @@ class ProductStageOwnershipContract(unittest.TestCase):
 
     def test_competitive_proof_extends_the_same_release_modules(self):
         proof = function("run_proof")
-        self.assertLess(proof.index("run_release_candidate"),
-                        proof.index("run_proof_model"))
-        self.assertLess(proof.index("run_proof_model"),
-                        proof.index("run_release_activation"))
+        stages = [
+            "run_release_qualification",
+            "run_release_candidate",
+            "run_proof_model",
+            "run_release_activation",
+        ]
+        positions = [proof.index(token) for token in stages]
+        self.assertEqual(positions, sorted(positions))
 
         model = function("run_proof_model")
         self.assertLess(model.index("require_built_revision"),
@@ -146,11 +160,13 @@ class ProductStageOwnershipContract(unittest.TestCase):
 
     def test_mainline_is_only_build_and_development_tests(self):
         owner = function("run_mainline")
-        self.assertIn("check_deps", owner)
-        self.assertIn("run_build", owner)
-        self.assertIn("run_dev_tests", owner)
+        self.assertIn("run_release_qualification", owner)
+        qualification = function("run_release_qualification")
+        self.assertIn("check_deps", qualification)
+        self.assertIn("run_build", qualification)
+        self.assertIn("run_dev_test_matrix 1", qualification)
         for forbidden in ("run_install", "run_database_maintenance", "run_db_tests", "run_publish", "run_live_tests"):
-            self.assertNotIn(forbidden, owner)
+            self.assertNotIn(forbidden, qualification)
 
     def test_database_maintenance_never_recreates_or_seeds_implicitly(self):
         source = (ROOT / "scripts/maintain-installed-database.sh").read_text(encoding="utf-8")
