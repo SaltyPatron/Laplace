@@ -35,6 +35,8 @@ run_ci_contract_checks() {
   python3 scripts/test-seed-workflow-ownership.py
   python3 scripts/test-workflow-architecture.py
   python3 scripts/test-benchmark-suite.py
+  python3 scripts/test-ci-impact-plan.py
+  python3 scripts/test-ci-qualification-cache.py
 }
 
 require_built_revision() {
@@ -66,13 +68,22 @@ run_build() {
 
 run_dev_test_matrix() {
   local check_superseded="${1:-0}"
-  local rc=0 current_rc profile suite spec
+  local current_rc profile suite spec
+  local selected="${LAPLACE_DEV_SUITES:-all}"
+  local use_cache="${LAPLACE_USE_QUALIFICATION_CACHE:-0}"
   local specs=(
     "dev-native:native-dev"
     "dev-managed:managed-dev"
     "dev-managed:uci-dev"
     "dev-managed:browser-dev"
   )
+
+  suite_selected() {
+    local wanted="$1"
+    [[ "$selected" == all ]] && return 0
+    [[ -n "$selected" ]] || return 1
+    [[ ",$selected," == *",$wanted,"* ]]
+  }
 
   for spec in "${specs[@]}"; do
     if [[ "$check_superseded" == 1 ]]; then
@@ -81,8 +92,26 @@ run_dev_test_matrix() {
       if (( current_rc == 3 )); then return 3; fi
       (( current_rc == 0 )) || return "$current_rc"
     fi
+
     IFS=: read -r profile suite <<< "$spec"
-    bash scripts/test-parallel.sh --profile "$profile" --suite "$suite" || rc=$?
+    if ! suite_selected "$suite"; then
+      echo "::notice::qualification planner kept $suite valid; suite not scheduled"
+      continue
+    fi
+
+    if [[ "$use_cache" == 1 ]] && python3 scripts/ci-qualification-cache.py check --suite "$suite"; then
+      echo "::notice::reusing passed qualification receipt for $suite"
+      continue
+    fi
+
+    current_rc=0
+    bash scripts/test-parallel.sh --profile "$profile" --suite "$suite" || current_rc=$?
+    (( current_rc == 0 )) || return "$current_rc"
+
+    if [[ "$use_cache" == 1 ]]; then
+      python3 scripts/ci-qualification-cache.py record \
+        --suite "$suite" --source-sha "$(git rev-parse HEAD)"
+    fi
   done
 
   if [[ "$check_superseded" == 1 ]]; then
@@ -91,7 +120,7 @@ run_dev_test_matrix() {
     if (( current_rc == 3 )); then return 3; fi
     (( current_rc == 0 )) || return "$current_rc"
   fi
-  return "$rc"
+  return 0
 }
 
 run_dev_tests() {
