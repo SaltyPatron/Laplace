@@ -33,6 +33,29 @@ public sealed class GlomeProjectionThemeGateTests
     }
 
     [Fact]
+    public void DemandRenderer_InvalidatesAfterWritingInstanceTransforms()
+    {
+        var canvas = Read("web", "src", "explore", "glome", "GlomeCanvas.tsx");
+
+        Assert.Contains("const invalidate = useThree((s) => s.invalidate);", canvas, StringComparison.Ordinal);
+        Assert.Contains("mesh.instanceMatrix.needsUpdate = true;", canvas, StringComparison.Ordinal);
+        Assert.Contains("invalidate();", canvas, StringComparison.Ordinal);
+        Assert.Contains("nodes.length <= 8 ? 2.8", canvas, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StorageProof_SelectsTheEmittedRootAndNeverSoftHidesRomFailure()
+    {
+        var proof = Read("web", "src", "explore", "proof", "StorageProofView.tsx");
+
+        Assert.Contains("node.id_hex === result.root_id_hex", proof, StringComparison.Ordinal);
+        Assert.Contains("node.id_hex === proof.root_id_hex", proof, StringComparison.Ordinal);
+        Assert.Contains("UNVERIFIED — database ROM receipt unavailable", proof, StringComparison.Ordinal);
+        Assert.Contains("Database verification failed", proof, StringComparison.Ordinal);
+        Assert.DoesNotContain("'alignment unknown'", proof, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Theme_FollowsLiveUiTokens_WithoutHardBlackVisualizationSurfaces()
     {
         var theme = Read("web", "src", "ui", "theme.css");
