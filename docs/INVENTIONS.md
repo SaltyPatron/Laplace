@@ -71,8 +71,8 @@ The catalog is deliberately implementation-aware without making today's finite m
 
 ## Conventional models as witnesses
 
-51. **Checkpoint-as-source.** SafeTensors/config/tokenizer/tensor structure enters as source-scoped recorded/calculated state rather than an opaque runtime authority.
-52. **Circuit testimony trajectories.** Layers, heads, experts, factors, projections, token effects and completions can be represented with exact source/recipe provenance.
+51. **Checkpoint-as-source, not checkpoint storage.** SafeTensors/config/tokenizer/tensor structure is decomposed as source provenance and transient calculation input; raw parameter arrays are not the durable substrate model.
+52. **Circuit physicality/testimony trajectories.** Layers, heads, experts, factors, projections, token effects and completions are retained as canonical entities plus typed physicality trajectories/placement and source-attributed evidence with exact source/recipe provenance.
 53. **Structural-versus-functional circuit identity.** Source coordinates can align structural roles while functional correlation remains separately calculated evidence.
 54. **Cross-architecture circuit cube.** Entity × source × plane × circuit queries can compare causal, encoder, reranker, MoE and multimodal models without pretending the architectures are identical.
 55. **Model round table as pooled evidence.** Heterogeneous models/sources may contribute to one decision without tensor merging, equal architectures, voting or one hidden judge model.
