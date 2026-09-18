@@ -58,7 +58,8 @@ public static class ChessGameFetcher
         // Route the archive-index request through the same visible provider retry
         // channel as monthly PGNs. A throttle on the very first request must not look
         // like a hung import while later requests report their backoff.
-        var archJson = await GetStringWithRetryAsync(archUrl, ct, log: log);
+        var archJson = await GetStringWithRetryAsync(
+            archUrl, ct, retryNotFound: true, log: log);
         using var doc = JsonDocument.Parse(archJson);
         var archives = ChronologicalArchiveUrls(
             doc.RootElement.GetProperty("archives").EnumerateArray()
