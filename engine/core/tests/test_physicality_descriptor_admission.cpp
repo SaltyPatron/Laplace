@@ -548,7 +548,8 @@ TEST_F(PhysicalityDescriptorAdmission, MixedWriterStagesSelectFirstContentPlacem
     ASSERT_EQ(provenance.size(), 6u);
     const auto expected_sources = witnesses(6);
     for (size_t i = 0; i < provenance.size(); ++i) {
-        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &form(fallback, i).descriptor_id));
+        const auto expected_form = form(fallback, i);
+        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &expected_form.descriptor_id));
         EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &expected_sources[i].source_id));
         EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &expected_sources[i].source_unit_id));
     }
@@ -837,7 +838,8 @@ TEST_F(PhysicalityDescriptorAdmission, DuplicateSourceUnitObservationsPreserveEv
     ASSERT_EQ(provenance.size(), sources.size());
     for (size_t i = 0; i < provenance.size(); ++i) {
         EXPECT_TRUE(hash128_equals(&provenance[i].entity_id, &a.value.entity_id));
-        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &form(result, i).descriptor_id));
+        const auto expected_form = form(result, i);
+        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &expected_form.descriptor_id));
         EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &sources[i].source_id));
         EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &sources[i].source_unit_id));
         EXPECT_EQ(provenance[i].observed_at_unix_us, times[i]);
@@ -865,7 +867,8 @@ TEST_F(PhysicalityDescriptorAdmission, CompatibilityTrustValuesNeverAffectStruct
         ASSERT_EQ(provenance.size(), sources.size());
         for (size_t i = 0; i < provenance.size(); ++i) {
             EXPECT_TRUE(hash128_equals(&provenance[i].entity_id, &a.value.entity_id));
-            EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &form(result, i).descriptor_id));
+            const auto expected_form = form(result, i);
+        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &expected_form.descriptor_id));
             EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &sources[i].source_id));
             EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &sources[i].source_unit_id));
         }
