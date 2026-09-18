@@ -133,6 +133,7 @@ public sealed class IngestRunner
             Logger: _loggerFactory.CreateLogger($"Decomposer:{decomposer.SourceName}"),
             SubstrateVersion: "v1");
 
+        await using var bulkRun = await BulkRunLease.BeginAsync(_writer, ct).ConfigureAwait(false);
         await decomposer.InitializeAsync(ctx, ct);
 
         NativeRuntimeEnv.ApplyFromTopologyIfUnset();
@@ -247,12 +248,8 @@ public sealed class IngestRunner
         }
         var runCt = ct;
 
-        bool bulkRunStarted = false;
         try
         {
-            await _writer.BeginBulkRunAsync(runCt);
-            bulkRunStarted = true;
-
             if (syncIngest)
             {
                 CpuTopology.RequirePerformanceCorePin();
@@ -535,17 +532,16 @@ public sealed class IngestRunner
         {
             try
             {
-                if (bulkRunStarted)
+                try
                 {
-                    try
+                    await bulkRun.CompleteAsync(
+                        phase => _obs.OnCompletionPhase(decomposer.SourceName, phase))
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    if (foldMetrics is not null)
                     {
-                        await _writer.CompleteBulkRunAsync(
-                            phase => _obs.OnCompletionPhase(decomposer.SourceName, phase), ct);
-                    }
-                    finally
-                    {
-                        if (foldMetrics is not null)
-                        {
                             _obs.OnBulkCompletion(
                                 decomposer.SourceName,
                                 foldMetrics.LastFoldDrainWallClock,
@@ -568,9 +564,8 @@ public sealed class IngestRunner
                                 foldMetrics.ConsensusUpsertBackendWallClock.TotalMilliseconds,
                                 foldMetrics.ConsensusUpsertCalls,
                                 foldMetrics.HighwayMaskBackendWallClock.TotalMilliseconds,
-                                foldMetrics.HighwayMaskCalls,
-                                foldMetrics.HighwayMaskPairs);
-                        }
+                            foldMetrics.HighwayMaskCalls,
+                            foldMetrics.HighwayMaskPairs);
                     }
                 }
             }
@@ -1291,6 +1286,35 @@ public sealed class IngestRunner
                 SubstrateApplyEnvelope.Release(bucket.Batch);
             while (reader.TryRead(out QueuedIntent abandoned))
                 abandoned.Intent.ApplyEnvelope?.Dispose();
+        }
+    }
+
+    private sealed class BulkRunLease : IAsyncDisposable
+    {
+        private readonly ISubstrateWriter _writer;
+        private int _completed;
+
+        private BulkRunLease(ISubstrateWriter writer) => _writer = writer;
+
+        public static async Task<BulkRunLease> BeginAsync(
+            ISubstrateWriter writer, CancellationToken ct)
+        {
+            await writer.BeginBulkRunAsync(ct).ConfigureAwait(false);
+            return new BulkRunLease(writer);
+        }
+
+        public async Task CompleteAsync(Action<BulkRunCompletionPhase>? onPhase)
+        {
+            if (Interlocked.Exchange(ref _completed, 1) != 0) return;
+            await _writer.CompleteBulkRunAsync(onPhase, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _completed, 1) != 0) return;
+            await _writer.CompleteBulkRunAsync(CancellationToken.None)
+                .ConfigureAwait(false);
         }
     }
 

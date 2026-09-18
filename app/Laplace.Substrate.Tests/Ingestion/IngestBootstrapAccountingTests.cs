@@ -227,15 +227,25 @@ public sealed class IngestBootstrapAccountingTests
         public long HighwayMaskPairs => ConsensusUpsertCalls * 2;
         public TimeSpan ConsensusUpsertBackendWallClock => TimeSpan.FromMilliseconds(ConsensusUpsertCalls * 37);
         public TimeSpan HighwayMaskBackendWallClock => TimeSpan.FromMilliseconds(ConsensusUpsertCalls * 11);
+        public bool Begun { get; private set; }
         public bool Completed { get; private set; }
+
+        public Task BeginBulkRunAsync(CancellationToken ct = default)
+        {
+            Begun = true;
+            return Task.CompletedTask;
+        }
+
         public Task CompleteBulkRunAsync(CancellationToken ct = default)
         {
+            Assert.True(Begun, "bulk-run completion cannot precede bulk-run begin");
             Completed = true;
             return Task.CompletedTask;
         }
 
         public Task<ApplyResult> ApplyAsync(SubstrateChange change, CancellationToken ct = default)
         {
+            Assert.True(Begun, $"writer apply '{change.Metadata.SourceContentUnitName}' occurred before BeginBulkRunAsync");
             AppliedUnits.Add(change.Metadata.SourceContentUnitName);
             int entities = change.Entities.Length;
             int physicalities = change.Physicalities.Length;
