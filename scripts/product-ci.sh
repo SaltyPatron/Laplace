@@ -38,6 +38,12 @@ run_ci_contract_checks() {
     scripts/check-deployed-revision.sh \
     scripts/publish-applications.sh \
     deploy/linux/deploy.sh
+  python3 -m py_compile \
+    scripts/ci-impact-plan.py \
+    scripts/ci-qualification-cache.py \
+    scripts/ci-product-freshness.py \
+    scripts/ci_product_scope.py \
+    scripts/ci_managed_projects.py
   python3 scripts/validate-pipeline.py
   python3 scripts/test-ci-workspace.py
   python3 scripts/test-product-ci-artifact-ownership.py
