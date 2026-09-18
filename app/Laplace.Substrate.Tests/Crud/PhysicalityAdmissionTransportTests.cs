@@ -266,7 +266,15 @@ public class PhysicalityAdmissionTransportTests
         Assert.NotNull(capture);
         Assert.Equal([H(50), H(50), H(50), H(50), H(51)], capture.ObservationSources.ToArray());
         Assert.Equal([H(100), H(100), H(100), H(100), H(101)], capture.ObservationUnits.ToArray());
-        Assert.Equal([.75, .75, .75, .75, .25], capture.ObservationPriors.ToArray());
+        Assert.Equal(5, capture.ObservationTimesUnixUs.Count);
+        Assert.Equal(
+            [rows[0].ObservedAtUnixUs, rows[0].ObservedAtUnixUs, rows[0].ObservedAtUnixUs,
+             rows[1].ObservedAtUnixUs, secondRow.ObservedAtUnixUs],
+            capture.ObservationTimesUnixUs.ToArray());
+        // Physical provenance has no trust/standing lane. The source-prior values
+        // remain on the originating changes and are deliberately absent here.
+        Assert.Equal(.75, first.RequireSourcePrior(H(50)));
+        Assert.Equal(.25, second.RequireSourcePrior(H(51)));
         Assert.Equal(2, capture.RawStages.Count);
         using var expectedFirst = ScalarCapture([rows[0], rows[0], rows[0], rows[1]]);
         Assert.Equal(Tuples(expectedFirst, IntentStageTable.Physicalities),
