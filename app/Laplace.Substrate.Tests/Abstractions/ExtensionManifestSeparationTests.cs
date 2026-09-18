@@ -78,13 +78,21 @@ public sealed class ExtensionManifestSeparationTests
             "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIndexCycle.cs");
         var program = Read("app", "Laplace.Cli", "Program.cs");
         var seedWorkflow = Read(".github", "workflows", "seed.yml");
+        var foundation = Read("scripts", "ensure-foundation.sh");
+        var foundationIndexes = Read("scripts", "foundation-bulk-indexes.sh");
 
         Assert.DoesNotContain("DropSecondariesAsync", recovery);
         Assert.DoesNotContain("JournalAndDropAsync", recovery);
+        Assert.DoesNotContain("RecoveryDeferred", recovery);
+        Assert.DoesNotContain("LAPLACE_INDEX_RECOVERY_DEFER", recovery);
         Assert.DoesNotContain("cycle.BeginAsync", writer);
         Assert.DoesNotContain("DropIndexesCommand", program);
         Assert.DoesNotContain("LAPLACE_INDEX_CYCLE", seedWorkflow);
         Assert.DoesNotContain("drop-indexes", seedWorkflow);
+        Assert.DoesNotContain("foundation-bulk-indexes.sh\" begin", foundation);
+        Assert.DoesNotContain("LAPLACE_INDEX_RECOVERY_DEFER", foundation);
+        Assert.Contains("foundation-bulk-indexes.sh\" recover", foundation);
+        Assert.DoesNotContain("DROP INDEX", foundationIndexes);
     }
 
     [Fact]

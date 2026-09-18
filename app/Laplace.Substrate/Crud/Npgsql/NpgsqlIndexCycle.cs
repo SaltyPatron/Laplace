@@ -5,39 +5,24 @@ using Microsoft.Extensions.Logging;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Recovery for secondary indexes left absent by an interrupted bulk-load campaign.
+/// Recovery for secondary indexes left absent by a historical interrupted bulk-load campaign.
 ///
-/// Ordinary ingest keeps production indexes online. The explicit foundation campaign is different:
-/// it may journal and remove plain secondaries once for the whole multi-source load, while keeping
-/// primary/unique/exclusion indexes live. Child ingests defer recovery until that campaign ends.
-/// A killed campaign loses the defer environment, so the next ordinary ingest repairs the journal
-/// before accepting new writes.
+/// O(tier) ingestion requires its production secondary indexes online for indexed
+/// presence, tier/type and physicality lookups. Recovery therefore always runs before
+/// accepting new writes; there is no supported state in which ingest defers it.
 /// </summary>
 public static class NpgsqlIndexCycle
 {
-    private static bool RecoveryDeferred => EnvFlag.IsSet("LAPLACE_INDEX_RECOVERY_DEFER");
-
     /// <summary>
-    /// Restore any journaled index before accepting ordinary writes. An explicit bulk campaign
-    /// temporarily defers this automatic repair so every source shares one drop/load/rebuild window.
+    /// Restore every journaled secondary before accepting writes. This barrier may
+    /// repair residue from an older interrupted campaign, but it is never deferrable.
     /// </summary>
-    public static async Task RecoverAsync(NpgsqlDataSource ds, ILogger log, CancellationToken ct)
-    {
-        if (RecoveryDeferred)
-        {
-            log.LogInformation(
-                "INDEX_RECOVERY deferred by explicit foundation bulk campaign; "
-                + "journaled secondaries remain down until campaign completion");
-            return;
-        }
-
-        await RebuildJournaledAsync(ds, log, ct);
-    }
+    public static Task RecoverAsync(NpgsqlDataSource ds, ILogger log, CancellationToken ct)
+        => RebuildJournaledAsync(ds, log, ct);
 
     /// <summary>
     /// Rebuild every journaled index and prove PostgreSQL reports it valid before clearing its row.
-    /// This method deliberately ignores the defer flag: it is the explicit campaign-end/crash-repair
-    /// operation the flag is waiting for.
+    /// Historical journal rows are crash residue only; ordinary ingest repairs them eagerly.
     /// </summary>
     public static async Task RebuildJournaledAsync(
         NpgsqlDataSource ds, ILogger log, CancellationToken ct)

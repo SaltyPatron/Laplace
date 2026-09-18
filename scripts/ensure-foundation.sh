@@ -112,45 +112,15 @@ for entry in "${FOUNDATION[@]}"; do
   fi
 done
 
-bulk_indexes_active=0
-finish_bulk_indexes() {
-  local rc="${1:-0}"
-  if [[ "$bulk_indexes_active" == 1 ]]; then
-    bulk_indexes_active=0
-    unset LAPLACE_INDEX_RECOVERY_DEFER || true
-    if ! "$SCRIPTS/foundation-bulk-indexes.sh" end; then
-      echo "foundation bulk-index recovery failed" >&2
-      [[ "$rc" -ne 0 ]] || rc=1
-    fi
-  fi
-  return "$rc"
-}
-
-on_foundation_exit() {
-  local rc=$?
-  trap - EXIT INT TERM
-  finish_bulk_indexes "$rc" || rc=$?
-  exit "$rc"
-}
-
 if [[ ${#CHAIN[@]} -gt 0 ]]; then
   echo "ingest foundation chain (${#CHAIN[@]} source(s)): ${CHAIN[*]}"
 
-  # Foundation admission is an explicit bulk-load campaign, not an online serving
-  # transaction. Drop plain secondaries once, keep PK/unique constraints live for
-  # correctness, ingest the whole chain, then rebuild once. The journal makes a killed
-  # campaign recoverable by the next ordinary ingest.
-  "$SCRIPTS/foundation-bulk-indexes.sh" begin
-  export LAPLACE_INDEX_RECOVERY_DEFER=1
-  bulk_indexes_active=1
-  trap on_foundation_exit EXIT INT TERM
-
+  # O(tier) admission depends on the production secondary indexes for indexed
+  # presence, tier/type and physicality lookups. Repair any journal left by an
+  # older interrupted campaign before the first source, then keep every secondary
+  # online for the entire ladder.
+  "$SCRIPTS/foundation-bulk-indexes.sh" recover
   "$SCRIPTS/ingest-source.sh" chain "${CHAIN[@]}"
-
-  unset LAPLACE_INDEX_RECOVERY_DEFER
-  "$SCRIPTS/foundation-bulk-indexes.sh" end
-  bulk_indexes_active=0
-  trap - EXIT INT TERM
 fi
 
 echo "foundation journal (latest per source)"
