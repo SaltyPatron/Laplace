@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ErrorText, LoadingText, Muted } from '@ui';
 
@@ -528,6 +528,16 @@ export function StorageProofView() {
             <div><span>Max tier</span><strong>{maxTier}</strong></div>
             <div><span>Tier-0 leaves</span><strong>{tier0Count.toLocaleString()}</strong></div>
             <div><span>Atom window</span><strong>{proof.atom_window.toLocaleString()}</strong></div>
+            <div>
+              <span>T0 ROM receipt</span>
+              <code title={proof.perfcache_receipt_hex}>{compactId(proof.perfcache_receipt_hex)}</code>
+            </div>
+            <div>
+              <span>DB uses same ROM</span>
+              <strong>
+                {proof.perfcache_aligned == null ? 'unknown' : proof.perfcache_aligned ? 'yes' : 'NO'}
+              </strong>
+            </div>
           </section>
 
           <section className={styles.proofGrid}>
@@ -568,7 +578,7 @@ export function StorageProofView() {
                         setSelectedPacked(0);
                       }}
                     >
-                      <span className={styles.depthMark} style={{ '--depth': depth } as React.CSSProperties} />
+                      <span className={styles.depthMark} style={{ '--depth': depth } as CSSProperties} />
                       <span className={styles.tierBadge}>T{node.tier}</span>
                       <span className={styles.nodeLabel} title={node.label}>{node.label || '∅'}</span>
                       <code>{compactId(node.id_hex)}</code>
@@ -617,6 +627,27 @@ export function StorageProofView() {
                     {preview?.exists ? (
                       <Link to={`/explore/entity/${selected.id_hex}`}>open persisted entity →</Link>
                     ) : null}
+                  </div>
+                  <div className={styles.romWitness}>
+                    <div>
+                      <span>App mmap</span>
+                      <code title={proof.perfcache_receipt_hex}>{proof.perfcache_receipt_hex}</code>
+                    </div>
+                    <div>
+                      <span>PostgreSQL mmap</span>
+                      <code title={proof.database_perfcache_receipt_hex ?? ''}>
+                        {proof.database_perfcache_receipt_hex ?? 'unavailable'}
+                      </code>
+                    </div>
+                    <strong className={
+                      proof.perfcache_aligned === false ? styles.romMismatch : styles.romMatch
+                    }>
+                      {proof.perfcache_aligned == null
+                        ? 'alignment unknown'
+                        : proof.perfcache_aligned
+                          ? 'same exact T0 ROM'
+                          : 'T0 ROM MISMATCH'}
+                    </strong>
                   </div>
                 </>
               ) : (
