@@ -1,52 +1,87 @@
-name: Seed — knowledge
+name: Data — knowledge ingest
+run-name: "Knowledge ingest — ${{ inputs.source }} → ${{ inputs.database }}"
 
 on:
   workflow_dispatch:
     inputs:
       source:
-        description: "knowledge source"
+        description: "Knowledge source"
         type: choice
         required: true
+        default: omw
         options: [omw, conceptnet, atomic2020, ud, wiktionary, tatoeba, opensubtitles]
-      path:
-        description: "optional path; blank uses source default"
+      language_scope:
+        description: "Language scope for multilingual sources"
+        type: choice
+        required: true
+        default: all
+        options: [all, english, custom]
+      custom_languages:
+        description: "Only for custom scope: comma-separated codes such as en,de,fr"
         type: string
+        required: false
         default: ""
-      langs:
-        description: "optional language scope; blank means all"
+      advanced_path_override:
+        description: "ADVANCED: local file/directory override; normally leave blank to use the registered source"
         type: string
+        required: false
         default: ""
       database:
-        description: "target database"
+        description: "Target database"
         type: choice
         options: [laplace]
         default: laplace
+      replace_existing_source:
+        description: "DESTRUCTIVE: retract the complete selected source before re-ingesting it"
+        type: boolean
+        default: false
+      confirm_replace_existing:
+        description: "Second confirmation required when replace_existing_source is enabled"
+        type: boolean
+        default: false
       run_idempotency:
-        description: "re-ingest and prove no double-count"
+        description: "Re-ingest once more and prove evidence does not double-count"
         type: boolean
         default: false
-      evict_before_ingest:
-        description: "retract this source before full re-ingest"
-        type: boolean
-        default: false
-      evict_confirm:
-        description: "exact decomposer source name required for eviction"
-        type: string
-        default: ""
 
 permissions:
   contents: read
 
 jobs:
+  resolve:
+    name: Resolve language scope
+    runs-on: ubuntu-24.04
+    outputs:
+      langs: ${{ steps.scope.outputs.langs }}
+    steps:
+      - id: scope
+        shell: bash
+        env:
+          SCOPE: ${{ inputs.language_scope }}
+          CUSTOM: ${{ inputs.custom_languages }}
+        run: |
+          set -euo pipefail
+          case "$SCOPE" in
+            all) value="" ;;
+            english) value="en" ;;
+            custom)
+              value="${CUSTOM//[[:space:]]/}"
+              [[ -n "$value" ]] || { echo "::error::custom language scope requires at least one language code"; exit 2; }
+              ;;
+            *) echo "::error::unknown language scope: $SCOPE"; exit 2 ;;
+          esac
+          echo "langs=$value" >> "$GITHUB_OUTPUT"
+
   seed:
+    needs: resolve
     uses: ./.github/workflows/seed.yml
     with:
       mode: source
       source: ${{ inputs.source }}
-      path: ${{ inputs.path }}
-      langs: ${{ inputs.langs }}
+      path: ${{ inputs.advanced_path_override }}
+      langs: ${{ needs.resolve.outputs.langs }}
       database: ${{ inputs.database }}
-      evict_before_ingest: ${{ inputs.evict_before_ingest }}
-      evict_confirm: ${{ inputs.evict_confirm }}
+      evict_before_ingest: ${{ inputs.replace_existing_source }}
+      confirm_evict: ${{ inputs.confirm_replace_existing }}
       run_gate: true
       run_idempotency: ${{ inputs.run_idempotency }}
