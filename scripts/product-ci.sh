@@ -237,6 +237,64 @@ force_full_carry_forward_impact() {
   export LAPLACE_PUBLISH_SCOPE=full
 }
 
+append_csv_env() {
+  local name="$1" value="$2" current="${!1:-}"
+  [[ "$current" == all ]] && return 0
+  [[ ",$current," == *",$value,"* ]] || {
+    current="${current:+$current,}$value"
+    printf -v "$name" '%s' "$current"
+    export "$name"
+  }
+}
+
+force_web_carry_forward_impact() {
+  append_csv_env LAPLACE_BUILD_COMPONENTS web
+  append_csv_env LAPLACE_DEV_SUITES browser-dev
+  append_csv_env LAPLACE_LIVE_SUITES live-floor
+  append_csv_env LAPLACE_LIVE_SUITES live-api
+  append_csv_env LAPLACE_DELIVERY_ACTIONS publish
+  append_csv_env LAPLACE_DELIVERY_ACTIONS live
+  export LAPLACE_PUBLISH_SCOPE=full
+}
+
+carry_forward_installed_web_impact() {
+  local target="$1" app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  local receipt="$app_dir/wwwroot/.laplace-web-source-revision"
+  local deployed plan needs_web
+
+  deployed="$(cat "$receipt" 2>/dev/null || true)"
+  if [[ ! "$deployed" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "::warning::installed SPA revision receipt is unavailable; forcing web rebuild/publication"
+    force_web_carry_forward_impact
+    return 0
+  fi
+  [[ "$deployed" != "$target" ]] || return 0
+
+  if ! git cat-file -e "$deployed^{commit}" 2>/dev/null; then
+    if ! git fetch --no-tags --depth=1 origin "$deployed"; then
+      echo "::warning::could not resolve installed SPA revision $deployed; forcing web rebuild/publication"
+      force_web_carry_forward_impact
+      return 0
+    fi
+  fi
+
+  if ! plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")"; then
+    echo "::warning::could not compute installed-SPA impact; forcing web rebuild/publication"
+    force_web_carry_forward_impact
+    return 0
+  fi
+  needs_web="$(CARRY_WEB_PLAN_JSON="$plan" python3 - <<'PY'
+import json, os
+plan = json.loads(os.environ["CARRY_WEB_PLAN_JSON"])
+print("1" if "web" in plan.get("build_components", []) else "0")
+PY
+)"
+  if [[ "$needs_web" == 1 ]]; then
+    echo "::notice::installed SPA $deployed is behind web inputs at $target; carrying web publication forward"
+    force_web_carry_forward_impact
+  fi
+}
+
 carry_forward_undelivered_impact() {
   # Only automatic main delivery owns this reconciliation. Manual/operator stages
   # deliberately keep the scope they were dispatched with.
@@ -248,6 +306,7 @@ carry_forward_undelivered_impact() {
 
   local target deployed receipt plan
   target="$(git rev-parse HEAD)"
+  carry_forward_installed_web_impact "$target"
   receipt="${LAPLACE_APP_DIR:-/opt/laplace/app}/.laplace-source-revision"
   deployed="$(cat "$receipt" 2>/dev/null || true)"
 
@@ -395,6 +454,7 @@ run_live_tests() {
   require_deployed_revision
   local selected="${LAPLACE_LIVE_SUITES:-all}"
   export LAPLACE_API_BASE="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
+  export LAPLACE_PUBLIC_UI_BASE="${LAPLACE_PUBLIC_UI_BASE:-http://127.0.0.1:8080}"
 
   if csv_selected "$selected" live-floor; then
     bash scripts/test-parallel.sh --profile live --suite live-floor
@@ -521,11 +581,12 @@ PY
 
 verify_installed_product() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
+  local ui_base="${LAPLACE_PUBLIC_UI_BASE:-http://127.0.0.1:8080}"
   require_deployed_revision
   bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
   check_application_live
   check_t0_perfcache_runtime
-  python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
+  python3 scripts/verify-application-release.py --base "$ui_base" --timeout-seconds 60
 }
 
 reconcile_installed_product() {
