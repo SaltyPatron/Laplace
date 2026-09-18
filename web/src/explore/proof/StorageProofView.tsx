@@ -283,8 +283,9 @@ function DistributionLab({
         <div>
           <h3>Tier-0 distribution experiment</h3>
           <p>
-            Compare the canonical DUCET-prefix placement with the native open/radical-inverse
-            interleave. The right pane is a migration experiment, not stored geometry.
+            Compare the retired bounded/latitude mapping with the canonical open/radical-inverse
+            mapping. Both preserve DUCET identity order; only the canonical mapping spreads every
+            early prefix across the whole shell.
           </p>
         </div>
         <div className={styles.rankControl}>
@@ -324,29 +325,29 @@ function DistributionLab({
       <div className={styles.glomePair}>
         <article className={styles.visualCard}>
           <header>
-            <strong>Canonical · DUCET rank → Super-Fibonacci i</strong>
-            <span>Current Tier-0 law</span>
+            <strong>Legacy · rank/N latitude</strong>
+            <span>Retired band-filling law</span>
           </header>
           <div className={styles.canvasTall}>
             <GlomeCanvas
               nodes={canonical}
               projection="placement"
               fill
-              note="Sampled prefix of canonical S³ atom placement. X–M / Z–M rotation keeps the fourth coordinate visible."
+              note="Retired bounded placement: early DUCET ranks occupy a narrow Hopf-latitude band."
             />
           </div>
         </article>
         <article className={styles.visualCard}>
           <header>
-            <strong>Interleaved · rank → radical inverse</strong>
-            <span>Deterministic comparison only</span>
+            <strong>Canonical · rank → radical inverse</strong>
+            <span>Current Tier-0 law after reseed</span>
           </header>
           <div className={styles.canvasTall}>
             <GlomeCanvas
               nodes={interleaved}
               projection="placement"
               fill
-              note="Same ranks and angular sequence; radial parameter is bit-reversed so early ranks occupy the shell instead of one latitude band."
+              note="Canonical placement: same DUCET ranks, bit-reversed radial parameter, full-shell prefix coverage."
             />
           </div>
         </article>
@@ -354,8 +355,9 @@ function DistributionLab({
 
       <p className={styles.caveat}>
         This slider models a contiguous occupied DUCET prefix; it is not a measured census of
-        every codepoint humanity actually uses. Changing canonical Tier-0 placement would change
-        atom coordinates, Hilbert keys, and all composed centroids derived from them.
+        every codepoint humanity actually uses. The reseed intentionally changes Tier-0
+        coordinates, Hilbert keys, and all composed centroids so the new substrate starts with
+        full-shell coverage rather than inheriting the old latitude band.
       </p>
     </section>
   );
@@ -496,7 +498,7 @@ export function StorageProofView() {
             placeholder="Paste any text, or link here with ?q=..."
           />
           <div className={styles.formActions}>
-            <span>Shareable: /explore/proof?q=…</span>
+            <span>Shareable: /proof?q=…</span>
             <button type="submit" disabled={!draft.trim() || busy}>
               {busy ? 'Computing…' : 'Prove storage'}
             </button>
