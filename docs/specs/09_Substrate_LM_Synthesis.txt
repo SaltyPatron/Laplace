@@ -25,6 +25,14 @@ axes. Spatial proximity contributes evidence; it is not semantic truth by itself
 Checkpoint witnessing
 ----------------------
 
+Model ingestion storage law
+---------------------------
+Checkpoint/tensor numerics are transient operands for declared decomposition and
+circuit reductions. Durable model state is canonical structure plus typed
+physicality/trajectory and evidence. Do not persist raw weight arrays/tensor payloads
+as the native model representation, and do not treat PostgreSQL as a binary checkpoint
+archive. Source containers/codecs remain provenance/input packaging.
+
 Model ingestion records source-scoped evidence for:
 
 - tensor identity, dtype, shape, slice, and architecture role;
