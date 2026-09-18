@@ -51,7 +51,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "ci-contract.yml": "name: Policy — CI contract",
             "full-qualification.yml": "name: Audit — full product qualification",
             "laplace.yml": "name: Product — main delivery",
-            "product-operator.yml": "name: Product — manual operation",
+            "product-operator.yml": "name: Product — maintenance",
             "product-stage.yml": "name: Internal — product stage",
             "seed.yml": "name: Internal — substrate ingest",
             "seed-foundation.yml": "name: Data — foundation ingest",
