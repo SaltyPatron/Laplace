@@ -20,6 +20,10 @@ provision_deps() {
 # Repository-policy checks are an explicit `check` operation. They are not a
 # prerequisite hidden inside build, deploy, database, or ingest operations.
 run_ci_contract_checks() {
+  local ci_tmp="${RUNNER_TEMP:-$ROOT/build/ci-policy-tmp}"
+  mkdir -p "$ci_tmp"
+  export TMPDIR="$ci_tmp" TMP="$ci_tmp" TEMP="$ci_tmp"
+
   bash -n \
     scripts/product-ci.sh \
     scripts/pipeline.sh \
@@ -38,6 +42,17 @@ run_ci_contract_checks() {
   python3 scripts/test-ci-impact-plan.py
   python3 scripts/test-ci-qualification-cache.py
   python3 scripts/test-ci-product-freshness.py
+  python3 scripts/test-ci-managed-projects.py
+  python3 scripts/test-managed-policy.py
+  python3 scripts/test-application-payload.py
+  python3 scripts/test-cutechess-calibration.py
+  python3 scripts/test-chess-x11-runtime.py
+  python3 scripts/test-chess-floor-artifacts.py
+  python3 scripts/test-recorded-chess-selection.py
+  python3 scripts/test-chess-environment-benchmark.py ChessEnvironmentTests
+  python3 scripts/test-managed-db-scheduling.py
+  python3 scripts/test-codegen-configure.py
+  python3 scripts/test-cmake-release.py
   python3 scripts/test-web-artifact.py
 }
 
@@ -129,7 +144,7 @@ run_build() {
 
 run_dev_test_matrix() {
   local check_superseded="${1:-0}"
-  local current_rc profile suite spec
+  local current_rc profile suite spec suite_use_cache
   local selected="${LAPLACE_DEV_SUITES:-all}"
   local use_cache="${LAPLACE_USE_QUALIFICATION_CACHE:-0}"
   local specs=(
@@ -160,7 +175,14 @@ run_dev_test_matrix() {
       continue
     fi
 
-    if [[ "$use_cache" == 1 ]] && python3 scripts/ci-qualification-cache.py check --suite "$suite"; then
+    suite_use_cache="$use_cache"
+    if [[ "$suite" == managed-dev && "${LAPLACE_MANAGED_TEST_PROJECTS:-all}" != all ]]; then
+      # A project-subset pass is not a whole managed-dev qualification receipt.
+      # Keep the targeted run small rather than lying to the reusable suite cache.
+      suite_use_cache=0
+    fi
+
+    if [[ "$suite_use_cache" == 1 ]] && python3 scripts/ci-qualification-cache.py check --suite "$suite"; then
       echo "::notice::reusing passed qualification receipt for $suite"
       continue
     fi
@@ -169,7 +191,7 @@ run_dev_test_matrix() {
     bash scripts/test-parallel.sh --profile "$profile" --suite "$suite" || current_rc=$?
     (( current_rc == 0 )) || return "$current_rc"
 
-    if [[ "$use_cache" == 1 ]]; then
+    if [[ "$suite_use_cache" == 1 ]]; then
       python3 scripts/ci-qualification-cache.py record \
         --suite "$suite" --source-sha "$(git rev-parse HEAD)"
     fi
@@ -205,6 +227,10 @@ csv_selected() {
 
 force_full_carry_forward_impact() {
   export LAPLACE_BUILD_COMPONENTS=all
+  export LAPLACE_MANAGED_BUILD_PROJECTS=all
+  export LAPLACE_MANAGED_TEST_PROJECTS=all
+  export LAPLACE_MANAGED_DB_TEST_PROJECTS=all
+  export LAPLACE_MANAGED_LIVE_TEST_PROJECTS=all
   export LAPLACE_DEV_SUITES=all
   export LAPLACE_DB_SUITES=all
   export LAPLACE_LIVE_SUITES=all
@@ -274,6 +300,23 @@ for env_name, (field, order) in orders.items():
         value = ",".join(item for item in order if item in selected)
     print(f"export {env_name}={shlex.quote(value)}")
 
+project_fields = {
+    "LAPLACE_MANAGED_BUILD_PROJECTS": "managed_build_projects",
+    "LAPLACE_MANAGED_TEST_PROJECTS": "managed_test_projects",
+    "LAPLACE_MANAGED_DB_TEST_PROJECTS": "managed_db_test_projects",
+    "LAPLACE_MANAGED_LIVE_TEST_PROJECTS": "managed_live_test_projects",
+}
+for env_name, field in project_fields.items():
+    current = os.environ.get(env_name, "")
+    incoming = plan.get(field, [])
+    if current == "all" or "all" in incoming:
+        value = "all"
+    else:
+        selected = {item for item in current.split(",") if item}
+        selected.update(incoming)
+        value = ",".join(sorted(selected))
+    print(f"export {env_name}={shlex.quote(value)}")
+
 scope = os.environ.get("LAPLACE_PUBLISH_SCOPE", "api")
 if scope == "full" or plan.get("publish_scope") == "full":
     scope = "full"
@@ -281,7 +324,7 @@ print(f"export LAPLACE_PUBLISH_SCOPE={shlex.quote(scope)}")
 PY
 )"
 
-  echo "::notice::carried forward undelivered impact from $deployed to $target: build=$LAPLACE_BUILD_COMPONENTS dev=$LAPLACE_DEV_SUITES db=$LAPLACE_DB_SUITES delivery=$LAPLACE_DELIVERY_ACTIONS publish=$LAPLACE_PUBLISH_SCOPE live=$LAPLACE_LIVE_SUITES"
+  echo "::notice::carried forward undelivered impact from $deployed to $target: build=$LAPLACE_BUILD_COMPONENTS managed_build=$LAPLACE_MANAGED_BUILD_PROJECTS managed_tests=$LAPLACE_MANAGED_TEST_PROJECTS dev=$LAPLACE_DEV_SUITES db=$LAPLACE_DB_SUITES delivery=$LAPLACE_DELIVERY_ACTIONS publish=$LAPLACE_PUBLISH_SCOPE live=$LAPLACE_LIVE_SUITES"
 }
 
 run_db_tests() {

@@ -262,8 +262,27 @@ phase_codegen() {
 }
 
 phase_build_app() {
-  echo "===== PHASE — BUILD APP ====="
-  ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
+  local selected="${LAPLACE_MANAGED_BUILD_PROJECTS:-all}"
+  local solution="$ROOT/app/Laplace.slnx"
+  local generated="" rc=0 work
+
+  if [[ "$selected" != all ]]; then
+    if [[ -z "$selected" ]]; then
+      echo "::notice::managed impact plan selected no build projects"
+      return 0
+    fi
+    work="${LAPLACE_WORK_ROOT:-/build/laplace/work}/managed-solutions"
+    mkdir -p "$work"
+    generated="$(mktemp "$work/build.XXXXXX.slnx")"
+    "$PYTHON" "$ROOT/scripts/ci_managed_projects.py" --root "$ROOT" solution \
+      --projects "$selected" --output "$generated"
+    solution="$generated"
+  fi
+
+  echo "===== PHASE — BUILD APP (${selected}) ====="
+  dotnet build "$solution" -c Release || rc=$?
+  [[ -z "$generated" ]] || rm -f "$generated"
+  return "$rc"
 }
 
 phase_build_web() {

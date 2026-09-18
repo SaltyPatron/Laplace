@@ -83,24 +83,50 @@ run_native_dev() {
   run_ctest --test-dir build --output-on-failure -j "$CTEST_PARALLEL_LEVEL" -LE regress
 }
 
+managed_test_solution() {
+  local selected="$1" label="$2" work solution
+  if [[ "$selected" == all ]]; then
+    printf '%s\n' "$ROOT/app/Laplace.slnx"
+    return 0
+  fi
+  [[ -n "$selected" ]] || return 3
+  work="${LAPLACE_WORK_ROOT:-/build/laplace/work}/managed-solutions"
+  mkdir -p "$work"
+  solution="$(mktemp "$work/${label}.XXXXXX.slnx")"
+  python3 "$ROOT/scripts/ci_managed_projects.py" --root "$ROOT" solution \
+    --projects "$selected" --output "$solution"
+  printf '%s\n' "$solution"
+}
+
+run_managed_dotnet_tests() {
+  local selected="$1" label="$2" filter="$3"
+  shift 3
+  if [[ -z "$selected" ]]; then
+    echo "::notice::managed impact plan selected no $label test projects"
+    return 0
+  fi
+
+  local solution generated="" rc=0 deadline="${LAPLACE_MANAGED_TEST_TIMEOUT:-15m}"
+  solution="$(managed_test_solution "$selected" "$label")" || return $?
+  [[ "$solution" == "$ROOT/app/Laplace.slnx" ]] || generated="$solution"
+
+  echo "::notice::$label projects=$selected deadline=$deadline"
+  timeout --signal=TERM --kill-after=30s "$deadline" \
+    dotnet test "$solution" -c Release --no-build --nologo --verbosity minimal \
+      "$@" --filter "$filter" || rc=$?
+
+  [[ -z "$generated" ]] || rm -f "$generated"
+  if (( rc == 124 || rc == 137 )); then
+    echo "::error::$label exceeded managed test deadline $deadline" >&2
+  fi
+  return "$rc"
+}
+
 run_managed_dev() {
   set_dev_perfcache
   sync_managed_native
-  python3 scripts/test-managed-policy.py
-  python3 scripts/test-application-payload.py
-  python3 scripts/test-cutechess-calibration.py
-  python3 scripts/test-chess-x11-runtime.py
-  python3 scripts/test-chess-floor-artifacts.py
-  python3 scripts/test-recorded-chess-selection.py
-  python3 scripts/test-chess-environment-benchmark.py ChessEnvironmentTests
-  python3 scripts/test-ci-workspace.py
-  python3 scripts/test-product-ci-artifact-ownership.py
-  python3 scripts/test-seed-workflow-ownership.py
-  python3 scripts/test-managed-db-scheduling.py
-  python3 scripts/test-codegen-configure.py
-  python3 scripts/test-cmake-release.py
-  dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-    --filter 'Tier!=db&Tier!=live&Tier!=perf'
+  run_managed_dotnet_tests "${LAPLACE_MANAGED_TEST_PROJECTS:-all}" managed-dev \
+    'Tier!=db&Tier!=live&Tier!=perf'
 }
 
 run_uci_dev() {
@@ -142,8 +168,8 @@ run_native_db() {
 run_managed_db() {
   set_installed_perfcache
   sync_managed_native
-  dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
-    -m:1 -p:BuildInParallel=false --filter 'Tier=db'
+  run_managed_dotnet_tests "${LAPLACE_MANAGED_DB_TEST_PROJECTS:-all}" managed-db \
+    'Tier=db' -m:1 -p:BuildInParallel=false
 }
 
 run_live_floor() {
@@ -207,7 +233,7 @@ run_live_api() {
 run_managed_live() {
   set_installed_perfcache
   sync_managed_native
-  dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal --filter 'Tier=live'
+  run_managed_dotnet_tests "${LAPLACE_MANAGED_LIVE_TEST_PROJECTS:-all}" managed-live 'Tier=live'
 }
 
 run_generation_eval() {

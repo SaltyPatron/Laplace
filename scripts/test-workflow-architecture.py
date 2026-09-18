@@ -200,6 +200,27 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("preserve_native_source", reusable)
         self.assertIn("preserving latest native-qualified candidate", reusable)
 
+    def test_managed_project_impact_drives_build_and_test_selection(self):
+        pipeline = (ROOT / "scripts" / "pipeline.sh").read_text(encoding="utf-8")
+        tests = (ROOT / "scripts" / "test-parallel.sh").read_text(encoding="utf-8")
+        product = (ROOT / "scripts" / "product-ci.sh").read_text(encoding="utf-8")
+
+        self.assertIn("LAPLACE_MANAGED_BUILD_PROJECTS", pipeline)
+        self.assertIn("ci_managed_projects.py", pipeline)
+        self.assertIn("LAPLACE_MANAGED_TEST_PROJECTS", tests)
+        self.assertIn("LAPLACE_MANAGED_DB_TEST_PROJECTS", tests)
+        self.assertIn("LAPLACE_MANAGED_LIVE_TEST_PROJECTS", tests)
+        self.assertIn("run_managed_dotnet_tests", tests)
+        self.assertIn("LAPLACE_MANAGED_TEST_TIMEOUT", tests)
+
+        managed = tests.split("run_managed_dev() {", 1)[1].split("\n}", 1)[0]
+        self.assertNotIn("test-managed-policy.py", managed)
+        self.assertNotIn("test-application-payload.py", managed)
+        checks = product.split("run_ci_contract_checks() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("test-managed-policy.py", checks)
+        self.assertIn("test-application-payload.py", checks)
+        self.assertIn("test-ci-managed-projects.py", checks)
+
     def test_web_only_plan_does_not_force_managed_rebuild(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
         run_build = product.split("run_build() {", 1)[1].split("\n}\n\nrun_dev_test_matrix", 1)[0]
