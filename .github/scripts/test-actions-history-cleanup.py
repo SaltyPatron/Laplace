@@ -15,6 +15,18 @@ assert SPEC.loader
 SPEC.loader.exec_module(MODULE)
 
 
+class CleanupWorkflowContractTests(unittest.TestCase):
+    def test_cleanup_marker_has_unique_nonpreemptible_concurrency(self):
+        workflow = (HERE.parent / "workflows" / "ci-contract.yml").read_text(encoding="utf-8")
+        self.assertIn("laplace-actions-history-cleanup-{0}", workflow)
+        self.assertIn("github.run_id", workflow)
+        self.assertIn(
+            "cancel-in-progress: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[actions-history-cleanup]') }}",
+            workflow,
+        )
+        self.assertIn("if: github.event_name == 'push' && contains(github.event.head_commit.message, '[actions-history-cleanup]')", workflow)
+
+
 class CleanupActionsHistoryTests(unittest.TestCase):
     def test_current_workflow_paths_only_reads_workflow_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
