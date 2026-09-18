@@ -96,6 +96,23 @@ internal static class UnicodePhysicalArtifactParser
         string Value,
         bool CountsSourceRow);
 
+    internal readonly record struct SequencePairRow(
+        string Left,
+        string Right);
+
+    internal readonly record struct CttRow(
+        uint Codepoint,
+        string Primary,
+        string Secondary,
+        string Tertiary,
+        string Quaternary);
+
+    internal readonly record struct NamesListRow(
+        uint Codepoint,
+        string Kind,
+        string Value,
+        bool CountsSourceRow);
+
     internal static async IAsyncEnumerable<UnicodeDataRow> UnicodeDataAsync(
         string path,
         [EnumeratorCancellation] CancellationToken ct)
@@ -503,6 +520,99 @@ internal static class UnicodePhysicalArtifactParser
                     id, cp, names[i], value, first);
                 first = false;
             }
+        }
+    }
+
+    internal static async IAsyncEnumerable<SequencePairRow> SequencePairsAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = StripComment(Encoding.UTF8.GetString(lineMem.Span));
+            if (line.Length == 0) continue;
+            string[] fields = line.Split(';');
+            if (fields.Length < 2
+                || !TryHexSequenceText(fields[0].Trim(), out string left)
+                || !TryHexSequenceText(fields[1].Trim(), out string right))
+                continue;
+            yield return new SequencePairRow(left, right);
+        }
+    }
+
+    internal static async IAsyncEnumerable<CttRow> CttAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            string line = Encoding.UTF8.GetString(lineMem.Span);
+            int comment = line.IndexOf('%');
+            if (comment >= 0) line = line[..comment];
+            line = line.Trim();
+            if (!line.StartsWith("<U", StringComparison.Ordinal)) continue;
+
+            int close = line.IndexOf('>');
+            if (close <= 2) continue;
+            string cpText = line[2..close];
+            if (!uint.TryParse(
+                    cpText, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint cp)
+                || cp > 0x10FFFFu)
+                continue;
+
+            string[] weights = line[(close + 1)..].Trim()
+                .Split(';', StringSplitOptions.TrimEntries);
+            if (weights.Length < 4) continue;
+            yield return new CttRow(
+                cp, weights[0], weights[1], weights[2], weights[3]);
+        }
+    }
+
+    internal static async IAsyncEnumerable<NamesListRow> NamesListAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        uint? current = null;
+        await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            if (lineMem.IsEmpty) continue;
+            string raw = Encoding.UTF8.GetString(lineMem.Span);
+            if (raw.Length == 0 || raw[0] == ';') continue;
+
+            int tab = raw.IndexOf('\t');
+            if (tab > 0)
+            {
+                string head = raw[..tab].Trim();
+                if (uint.TryParse(
+                        head, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint cp)
+                    && cp <= 0x10FFFFu)
+                {
+                    current = cp;
+                    string name = raw[(tab + 1)..].Trim();
+                    if (name.Length > 0)
+                        yield return new NamesListRow(cp, "Name", name, true);
+                    continue;
+                }
+            }
+
+            if (current is not { } owner) continue;
+            string trimmed = raw.Trim();
+            if (trimmed.Length < 2 || trimmed[0] == '@') continue;
+
+            char marker = trimmed[0];
+            string value = trimmed[1..].Trim();
+            if (value.Length == 0) continue;
+            string kind = marker switch
+            {
+                '=' => "Alias",
+                '*' => "Note",
+                'x' or 'X' => "Cross_Reference",
+                '~' => "Variation",
+                ':' => "Canonical_Decomposition_Note",
+                '#' => "Compatibility_Decomposition_Note",
+                _ => $"Annotation_{(int)marker:X2}",
+            };
+            yield return new NamesListRow(owner, kind, value, false);
         }
     }
 
