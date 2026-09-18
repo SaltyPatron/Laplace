@@ -89,6 +89,26 @@ The intended manual surface is:
 | **Measure — benchmark** | Produce versioned benchmark evidence under an explicit measurement reservation. |
 | **Product — competitive proof** | Run the expensive competitive/product proof intentionally. |
 
+### Manual workflow contracts
+
+| Workflow | Primary inputs | Mutates | Resource ownership / concurrency | Durable result |
+| --- | --- | --- | --- | --- |
+| **Data — foundation ingest** | ladder/source, database, force, advanced path override | canonical substrate data | reusable ingest owner; database/ingest host reservation | journal + source/layer gate evidence |
+| **Data — knowledge ingest** | source, language scope, database, optional replacement/idempotency | selected canonical source | reusable ingest owner; database/ingest host reservation | journal + consensus/layer gate evidence |
+| **Data — documents ingest** | named collection, database, optional advanced path | document evidence | reusable ingest owner; database/ingest host reservation | journal + document gate evidence |
+| **Data — code ingest** | ingest mode, named corpus, database, optional advanced path | code/repository evidence | reusable ingest owner; database/ingest host reservation | journal evidence and configured gates |
+| **Data — chess ingest** | source, named corpus, Lumbras slice, derived work, replacement/idempotency | chess evidence/derived layers | reusable ingest owner; database/ingest host reservation | journal + chess gate evidence |
+| **Data — models ingest** | named installed model, database, synthesize toggle | model evidence and optional GGUF output | reusable ingest owner; database/ingest host reservation | model journal/gate and optional synthesized model |
+| **Database — maintenance** | explicit operation and destructive confirmation where required | installed database | serialized installed-database/host mutation | operation result and database checks |
+| **Observe — UI** | base URL, routes | no product state | explicit read-only evidence run; browser/tooling state is separate from product build state | screenshots/browser diagnostics artifact |
+| **Observe — API** | base URL | no product state | explicit read-only evidence run | API diagnostics artifact |
+| **Measure — benchmark** | exact ref, suite, repeats/scale/corpus options | no product/database state by default; reserves quiet host | exclusive measurement reservation | versioned benchmark evidence artifact |
+| **Product — manual operation** | one explicit maintenance operation plus build/test toggles | varies by chosen operation | reusable product-stage resource policy | stage result / installed-product receipt as applicable |
+| **Product — competitive proof** | exact selected revision | candidate/install/product proof state | composed product-stage ownership; intentionally expensive | competitive proof/model evidence plus live verification |
+| **Audit — full product qualification** | optional clean/codegen/serial toggles | candidate build state only, not installed product | weekly/manual read-only qualification; no installed-host mutation lock | complete source-build/test qualification receipts |
+
+The automatic **Product — main delivery** workflow is not a manual control. It owns the single `Plan → Qualify → Deliver` source-to-running-product story. `Internal — product stage` and `Internal — substrate ingest` are reusable implementation owners and expose no normal manual dispatch surface.
+
 The following are not normal operator controls:
 
 - repository contract validation;
