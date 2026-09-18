@@ -848,34 +848,37 @@ TEST_F(PhysicalityDescriptorAdmission, DuplicateSourceUnitObservationsPreserveEv
     ASSERT_NE(generated, nullptr);
     EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
 }
-TEST_F(PhysicalityDescriptorAdmission, RejectsInvalidSourceTrustButValidTrustDifferencesDoNotCreateTestimony) {
+TEST_F(PhysicalityDescriptorAdmission, CompatibilityTrustValuesNeverAffectStructuralProvenance) {
     const auto a = composition({atom('a'), atom('b')});
     auto original = stage({a, a});
     auto captured = capture(original.get());
-    Materialization result(nullptr, physicality_descriptor_materialization_free);
-    for (const double invalid : {-0.01, 1.01, std::numeric_limits<double>::quiet_NaN()}) {
+
+    for (const double compatibility_value : {
+             -0.01, 0.2, 1.01, std::numeric_limits<double>::quiet_NaN()}) {
         auto sources = witnesses(2);
-        sources[0].source_trust = invalid;
-        EXPECT_EQ(run(captured, {}, {}, {}, sources, result), PHYSICALITY_DESCRIPTOR_INVALID);
-        EXPECT_EQ(result, nullptr);
+        sources[0].source_trust = compatibility_value;
+        sources[1].source_trust = std::numeric_limits<double>::infinity();
+
+        Materialization result(nullptr, physicality_descriptor_materialization_free);
+        ASSERT_EQ(run(captured, {}, {}, {}, sources, result), PHYSICALITY_DESCRIPTOR_OK);
+        const auto provenance = observations(result);
+        ASSERT_EQ(provenance.size(), sources.size());
+        for (size_t i = 0; i < provenance.size(); ++i) {
+            EXPECT_TRUE(hash128_equals(&provenance[i].entity_id, &a.value.entity_id));
+            EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &form(result, i).descriptor_id));
+            EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &sources[i].source_id));
+            EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &sources[i].source_unit_id));
+        }
+        Stage generated(physicality_descriptor_materialization_take_stage(result.get()), intent_stage_free);
+        ASSERT_NE(generated, nullptr);
+        EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
     }
 
-    auto differing = witnesses(2);
-    differing[1].source_trust = 0.2;
-    ASSERT_EQ(run(captured, {}, {}, {}, differing, result), PHYSICALITY_DESCRIPTOR_OK);
-    const auto provenance = observations(result);
-    ASSERT_EQ(provenance.size(), differing.size());
-    for (size_t i = 0; i < provenance.size(); ++i) {
-        EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &differing[i].source_id));
-        EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &differing[i].source_unit_id));
-    }
-    Stage generated(physicality_descriptor_materialization_take_stage(result.get()), intent_stage_free);
-    ASSERT_NE(generated, nullptr);
-    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
-
-    EXPECT_EQ(run(captured, {}, {}, {}, witnesses(1), result), PHYSICALITY_DESCRIPTOR_INVALID);
-    EXPECT_EQ(result, nullptr);
+    Materialization mismatch(nullptr, physicality_descriptor_materialization_free);
+    EXPECT_EQ(run(captured, {}, {}, {}, witnesses(1), mismatch), PHYSICALITY_DESCRIPTOR_INVALID);
+    EXPECT_EQ(mismatch, nullptr);
 }
+
 TEST_F(PhysicalityDescriptorAdmission, RetainedReceiptTracksStageTransferAndBudgetFailurePublishesNothing) {
     const auto a = composition({atom('a'), atom('b')});
     auto original = stage({a});
