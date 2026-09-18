@@ -225,6 +225,22 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertFalse(value["full_qualification"])
         self.assertEqual(value["ignored_paths"], ["scripts/test-parallel.sh"])
 
+    def test_native_test_change_runs_native_qualification_without_delivery(self):
+        for path in (
+            "engine/core/tests/test_content_root_placement.cpp",
+            "extension/laplace_substrate/tests/physicality_descriptor_native_probe.c",
+        ):
+            with self.subTest(path=path):
+                value = plan(path)
+                self.assertEqual(value["components"], [])
+                self.assertEqual(value["build_components"], ["native"])
+                self.assertEqual(value["dev_suites"], ["native-dev"])
+                self.assertEqual(value["db_suites"], [])
+                self.assertEqual(value["live_suites"], [])
+                self.assertEqual(value["delivery_actions"], [])
+                self.assertEqual(value["managed_build_projects"], [])
+                self.assertFalse(value["full_qualification"])
+
     def test_test_project_change_qualifies_only_that_managed_project(self):
         target = "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"
         value = plan(
