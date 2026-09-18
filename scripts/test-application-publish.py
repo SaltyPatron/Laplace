@@ -792,7 +792,7 @@ class ApiPayloadVerificationTests(unittest.TestCase):
             'laplace_require_app_dir_contract() { test -d "$1"; }\n')
         for name in ("verify-api-payload.py", "verify-application-release.py",
                      "verify-chess-floor-serving.py", "chess-floor-artifacts.py",
-                     "accept-chess-environment.py"):
+                     "accept-chess-environment.py", "web-artifact.py"):
             shutil.copyfile(ROOT / "scripts" / name, repo / "scripts" / name)
         dotnet = repo / "tools/dotnet"
         dotnet.write_text(
@@ -826,6 +826,11 @@ class ApiPayloadVerificationTests(unittest.TestCase):
                    LAPLACE_APP_DIR=str(app), LAPLACE_API_TRANSACTION="1",
                    LAPLACE_ENGINE_BUILD=str(self.build / "engine"),
                    LAPLACE_API_PAYLOAD_MANIFEST=str(manifest))
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "ci@example.invalid"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "CI"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
         result = subprocess.run(["bash", str(repo / "deploy/linux/deploy.sh"), "--api-only"],
                                 env=env, text=True, capture_output=True, timeout=30)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
