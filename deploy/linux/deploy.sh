@@ -361,6 +361,7 @@ if [[ "$API_ONLY" -eq 1 ]]; then
     cp -r "$APP_DIR/wwwroot/." "$STAGE/wwwroot/"
   else
     cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
+    git -C "$REPO_ROOT" rev-parse HEAD > "$STAGE/wwwroot/.laplace-web-source-revision"
   fi
   python3 "$REPO_ROOT/scripts/verify-api-payload.py" \
     --seal-payload "$STAGE" --native-build "$LAPLACE_ENGINE_BUILD" \
@@ -433,6 +434,7 @@ if [[ "$web_source" == installed ]]; then
   cp -r "$APP_DIR/wwwroot/." "$STAGE/wwwroot/"
 else
   cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
+  git -C "$REPO_ROOT" rev-parse HEAD > "$STAGE/wwwroot/.laplace-web-source-revision"
 fi
 test -x "$UCI_STAGE/laplace-uci"
 test -f "$MCP_STAGE/Laplace.Endpoints.Mcp"
