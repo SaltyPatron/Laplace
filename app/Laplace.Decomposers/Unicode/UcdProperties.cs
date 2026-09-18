@@ -40,6 +40,11 @@ internal sealed class UcdProperties
         RelationTypeRegistry.RelationTypeId(
             RelationSymbol.CanonicalFromField(nameof(RelTypeHasNormalizationForm)));
 
+    public static readonly Hash128 RelTypeHasProperty =
+        RelationTypeRegistry.RelationTypeId("HAS_PROPERTY");
+    public static readonly Hash128 RelTypeUsesScriptExtension =
+        RelationTypeRegistry.RelationTypeId("USES_SCRIPT_EXTENSION");
+
     public readonly string?[] Name;
 
     public readonly string?[] GeneralCategory;
