@@ -496,10 +496,13 @@ Neither proof depends on the current hash width, Unicode size, radix, CPU ISA or
 LaplaceCoreSuperFibonacci.UnitNormHoldsToFourUlpAcrossTheCodespace
 LaplaceCoreSuperFibonacci.OpenPlacementIsPrefixStableWhereBoundedIsNot
 LaplaceCoreSuperFibonacci.OpenPlacementIsInjectiveAndOnTheGlome
+LaplaceCoreSuperFibonacci.OpenPrefixOccupiesEveryRadialBand
 LaplaceCoreSuperFibonacci.HandlesUnicodeCodepointScale
+LaplaceCoreCodepointTable.PerfcacheCarriesCanonicalOpenPlacement
+LaplaceCoreCodepointTable.RejectsLegacyBandedPerfcacheFormat
 ```
 
-The full selected Unicode codepoint window is an executable finite generation and can be exhaustively checked. `OpenPlacementIsInjectiveAndOnTheGlome` additionally exercises a large open-placement prefix and its bounded/unit-norm contract.
+The full selected Unicode codepoint window is an executable finite generation and can be exhaustively checked. The v4 generator stores DUCET/UCA order explicitly and uses open Super-Fibonacci placement; early prefixes are gated to occupy every radial band, and runtime perfcache samples must equal the native open-placement coordinates byte-for-byte. Legacy v3/banded blobs are rejected by the loader.
 
 ### 17.3 Exact carrier and trajectory proof
 
