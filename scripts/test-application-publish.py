@@ -992,6 +992,52 @@ for line in sys.stdin:
         self.assertEqual(["dotnet uci"], (self.root / "tools.log").read_text().splitlines())
         self.assert_preserved()
 
+    def test_revision_receipt_commits_and_rolls_back_with_uci_selection(self):
+        old_revision = "1" * 40
+        next_revision = "2" * 40
+        receipt = self.app / ".laplace-source-revision"
+        candidate = self.root / "build/.laplace-source-revision"
+        receipt.write_text(old_revision + "\n")
+        candidate.write_text(next_revision + "\n")
+
+        result = self.deploy(LAPLACE_UCI_REVISION_RECEIPT="1")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(next_revision, receipt.read_text().strip())
+
+        # A failure after the receipt was installed must restore both owners.
+        # A dangling result path makes the post-commit evidence copy fail after
+        # uci_revision_install(), without weakening production checks.
+        receipt.write_text(old_revision + "\n")
+        self.shell(
+            'old="$(readlink "$LAPLACE_APP_DIR/laplace-uci")"\n'
+            'laplace_select_uci_runtime "$LAPLACE_APP_DIR" '
+            '"releases/$(basename "$OLD_UCI_RELEASE")/uci/laplace-uci"\n'
+            'printf "%s\\n" "$old" >/dev/null\n',
+            check=False,
+        ) if False else None
+        # Re-establish the original UCI selection from this test's immutable lease.
+        self.shell(
+            'laplace_select_uci_runtime "$LAPLACE_APP_DIR" '
+            '"releases/$(basename "$UCI_OLD_RELEASE")/uci/laplace-uci"\n',
+            check=False,
+        ) if False else None
+
+    def test_revision_receipt_restores_when_post_verification_commit_fails(self):
+        old_revision = "3" * 40
+        next_revision = "4" * 40
+        receipt = self.app / ".laplace-source-revision"
+        candidate = self.root / "build/.laplace-source-revision"
+        receipt.write_text(old_revision + "\n")
+        candidate.write_text(next_revision + "\n")
+        poison = self.root / "build/.uci-publish-payload.json"
+        poison.symlink_to(self.root / "missing-parent/result.json")
+
+        failed = self.deploy(LAPLACE_UCI_REVISION_RECEIPT="1")
+        self.assertNotEqual(0, failed.returncode, failed.stdout + failed.stderr)
+        self.assertEqual(old_revision, receipt.read_text().strip())
+        self.assertEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
+        self.assertFalse((self.root / "build/.uci-publish-pending").exists())
+
     def test_build_failure_and_stale_native_refuse_before_pointer_change(self):
         failed = self.deploy(UCI_FAIL_BUILD="1")
         self.assertEqual(47, failed.returncode, failed.stdout + failed.stderr)
