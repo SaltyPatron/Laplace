@@ -29,6 +29,8 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
         self.assertEqual(value["publish_scope"], "api")
         self.assertEqual(value["live_suites"], ["live-floor", "live-api"])
+        self.assertEqual(value["managed_test_projects"], [])
+        self.assertEqual(value["managed_build_projects"], [])
         self.assertFalse(value["full_qualification"])
 
     def test_native_change_invalidates_native_managed_db_and_full_live(self):
@@ -50,6 +52,19 @@ class ImpactPlanTests(unittest.TestCase):
             value["live_suites"],
             ["live-floor", "live-api", "managed-live", "generation-eval"],
         )
+        self.assertEqual(
+            value["managed_test_projects"],
+            ["app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj"],
+        )
+        self.assertEqual(
+            value["managed_build_projects"],
+            [
+                "app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj",
+                "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
+            ],
+        )
+        self.assertEqual(value["managed_test_projects"], ["all"])
+        self.assertEqual(value["managed_build_projects"], ["all"])
         self.assertFalse(value["full_qualification"])
 
     def test_managed_api_change_avoids_native_install_but_runs_product_live_checks(self):
@@ -151,6 +166,25 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
         self.assertIn("scripts/ci-impact-plan.py", value["ignored_paths"])
+
+    def test_test_driver_change_does_not_launch_product_delivery(self):
+        for path in (
+            "scripts/test-parallel.sh",
+            "scripts/test-suites/live-api.sh",
+            "scripts/test-managed-policy.py",
+            "app/Laplace.Core.Tests/HashTests.cs",
+        ):
+            with self.subTest(path=path):
+                value = plan(path)
+                self.assertEqual(value["components"], [])
+                self.assertEqual(value["build_components"], [])
+                self.assertEqual(value["dev_suites"], [])
+                self.assertEqual(value["db_suites"], [])
+                self.assertEqual(value["live_suites"], [])
+                self.assertEqual(value["delivery_actions"], [])
+                self.assertEqual(value["managed_test_projects"], [])
+                self.assertEqual(value["managed_build_projects"], [])
+                self.assertIn(path, value["ignored_paths"])
 
     def test_git_diff_includes_deleted_production_files(self):
         import tempfile
