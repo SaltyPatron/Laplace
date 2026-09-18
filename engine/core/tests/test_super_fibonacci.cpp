@@ -236,6 +236,37 @@ TEST(LaplaceCoreSuperFibonacci, OpenPlacementIsInjectiveAndOnTheGlome) {
         << "open placement " << worst_i << " is " << worst << " ULP off the glome";
 }
 
+
+TEST(LaplaceCoreSuperFibonacci, OpenPlacementRoundTripsUnicodeWindow) {
+    constexpr uint64_t UNICODE_N = 1114112;
+    for (uint64_t i = 0; i < UNICODE_N; ++i) {
+        double p[4];
+        super_fibonacci_point_open((size_t)i, p);
+        uint64_t recovered = UINT64_MAX;
+        ASSERT_EQ(0, super_fibonacci_open_index(p, UNICODE_N, &recovered)) << i;
+        ASSERT_EQ(i, recovered) << "open placement lost DUCET rank identity at " << i;
+    }
+}
+
+TEST(LaplaceCoreSuperFibonacci, OpenPrefixOccupiesEveryRadialBand) {
+    constexpr size_t N = 1u << 18;
+    constexpr size_t BINS = 64;
+    std::vector<size_t> hist(BINS, 0);
+
+    for (size_t i = 0; i < N; ++i) {
+        double p[4];
+        super_fibonacci_point_open(i, p);
+        double t = p[0]*p[0] + p[1]*p[1];
+        size_t bin = (size_t)std::floor(t * (double)BINS);
+        if (bin >= BINS) bin = BINS - 1;
+        hist[bin]++;
+    }
+
+    const size_t expected = N / BINS;
+    for (size_t bin = 0; bin < BINS; ++bin)
+        EXPECT_EQ(expected, hist[bin]) << "prefix failed to cover radial band " << bin;
+}
+
 TEST(LaplaceCoreSuperFibonacci, HandlesUnicodeCodepointScale) {
     constexpr size_t UNICODE_N = 1114112;
     std::vector<double> q(UNICODE_N * 4);
