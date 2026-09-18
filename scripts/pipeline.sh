@@ -283,6 +283,12 @@ phase_build_web() {
     printf '%s\n' "$lock_hash" > "$stamp"
   fi
   ( cd "$ROOT/web" && npm run build )
+  [[ -f "$ROOT/web/dist/index.html" ]] || {
+    echo "::error::web build completed without dist/index.html" >&2
+    return 1
+  }
+  python3 "$ROOT/scripts/web-artifact.py" seal \
+    --root "$ROOT" --manifest "$ROOT/build/.laplace-web-artifact.json"
 }
 
 phase_build_native() {

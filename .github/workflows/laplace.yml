@@ -74,6 +74,7 @@ jobs:
     with:
       stage: release-delivery
       target_sha: ${{ github.sha }}
+      build_components: ${{ needs.plan.outputs.build_components }}
       delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
       db_suites: ${{ needs.plan.outputs.db_suites }}
       live_suites: ${{ needs.plan.outputs.live_suites }}

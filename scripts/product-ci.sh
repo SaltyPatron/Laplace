@@ -37,6 +37,7 @@ run_ci_contract_checks() {
   python3 scripts/test-benchmark-suite.py
   python3 scripts/test-ci-impact-plan.py
   python3 scripts/test-ci-qualification-cache.py
+  python3 scripts/test-web-artifact.py
 }
 
 require_built_revision() {
@@ -446,6 +447,17 @@ run_release_delivery() {
     echo "::error::release-delivery plan omitted mandatory publication" >&2
     return 2
   }
+
+  # Publication consumes the candidate qualified above. If web inputs changed,
+  # require the sealed SPA artifact from this exact revision. If they did not,
+  # preserve the installed SPA instead of rebuilding unrelated frontend work.
+  if csv_selected "${LAPLACE_BUILD_COMPONENTS:-all}" web; then
+    export LAPLACE_REQUIRE_QUALIFIED_WEB=1
+    unset LAPLACE_REUSE_INSTALLED_WEB || true
+  else
+    export LAPLACE_REUSE_INSTALLED_WEB=1
+    unset LAPLACE_REQUIRE_QUALIFIED_WEB || true
+  fi
   run_publish
 
   if csv_selected "$actions" reconcile; then

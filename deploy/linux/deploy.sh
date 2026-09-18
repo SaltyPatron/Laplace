@@ -193,28 +193,63 @@ trap 'rm -rf "$STAGE"' EXIT
 
 laplace_reconcile_app_dir_contract "$APP_DIR"
 
-echo "==> [1/4] build front-end (web/ -> dist)"
-pushd "$REPO_ROOT/web" >/dev/null
-stamp="node_modules/.laplace-npm-ci.stamp"
-need_ci=1
-if [[ "$FORCE_NPM" -eq 0 && -d node_modules && -f package-lock.json && -f "$stamp" ]]; then
-  lock_hash=$(sha256sum package-lock.json | awk '{print $1}')
-  prev=$(cat "$stamp" 2>/dev/null || true)
-  if [[ "$prev" == "$lock_hash" ]]; then
-    echo "    npm ci skipped (package-lock unchanged)"
-    need_ci=0
+web_source=""
+web_manifest="$REPO_ROOT/build/.laplace-web-artifact.json"
+require_qualified_web="${LAPLACE_REQUIRE_QUALIFIED_WEB:-0}"
+reuse_installed_web="${LAPLACE_REUSE_INSTALLED_WEB:-0}"
+
+# Automatic delivery must not mutate a qualified candidate by rebuilding its SPA.
+# Use the sealed exact-revision artifact when web inputs changed. If web inputs
+# did not change, carry forward the installed SPA byte-for-byte.
+if [[ "$require_qualified_web" == 1 || "$FORCE_NPM" -eq 0 ]]; then
+  if [[ -f "$web_manifest" ]] && python3 "$REPO_ROOT/scripts/web-artifact.py" verify \
+       --root "$REPO_ROOT" --manifest "$web_manifest"; then
+    web_source=qualified
+    echo "==> [1/4] use exact qualified front-end artifact"
   fi
 fi
-if [[ "$need_ci" -eq 1 ]]; then
-  npm ci --no-audit --no-fund --prefer-offline
-  mkdir -p node_modules
-  sha256sum package-lock.json | awk '{print $1}' > "$stamp"
+
+if [[ "$require_qualified_web" == 1 && "$web_source" != qualified ]]; then
+  echo "::error::delivery requires the exact qualified web artifact for this revision" >&2
+  exit 1
 fi
-test -f openapi/openapi.json || { echo "::error::web/openapi/openapi.json missing — run pipeline.sh build first"; exit 1; }
-echo "    generating src/api/types.gen.ts from openapi/openapi.json"
-npm run gen:api
-npm run build
-popd >/dev/null
+
+if [[ -z "$web_source" && "$reuse_installed_web" == 1 ]]; then
+  [[ -f "$APP_DIR/wwwroot/index.html" ]] || {
+    echo "::error::web is unchanged but no installed SPA exists to preserve" >&2
+    exit 1
+  }
+  web_source=installed
+  echo "==> [1/4] preserve installed front-end artifact (web inputs unchanged)"
+fi
+
+if [[ -z "$web_source" ]]; then
+  echo "==> [1/4] build front-end (explicit/manual fallback)"
+  pushd "$REPO_ROOT/web" >/dev/null
+  stamp="node_modules/.laplace-npm-ci.stamp"
+  need_ci=1
+  if [[ "$FORCE_NPM" -eq 0 && -d node_modules && -f package-lock.json && -f "$stamp" ]]; then
+    lock_hash=$(sha256sum package-lock.json | awk '{print $1}')
+    prev=$(cat "$stamp" 2>/dev/null || true)
+    if [[ "$prev" == "$lock_hash" ]]; then
+      echo "    npm ci skipped (package-lock unchanged)"
+      need_ci=0
+    fi
+  fi
+  if [[ "$need_ci" -eq 1 ]]; then
+    npm ci --no-audit --no-fund --prefer-offline
+    mkdir -p node_modules
+    sha256sum package-lock.json | awk '{print $1}' > "$stamp"
+  fi
+  test -f openapi/openapi.json || { echo "::error::web/openapi/openapi.json missing — run pipeline.sh build first"; exit 1; }
+  echo "    generating src/api/types.gen.ts from openapi/openapi.json"
+  npm run gen:api
+  npm run build
+  popd >/dev/null
+  python3 "$REPO_ROOT/scripts/web-artifact.py" seal \
+    --root "$REPO_ROOT" --manifest "$web_manifest"
+  web_source=built
+fi
 
 publish_api() {
   echo "==> publish API -> staging ($STAGE)"
@@ -226,7 +261,11 @@ if [[ "$API_ONLY" -eq 1 ]]; then
   publish_api
   rm -rf "$STAGE/wwwroot"
   mkdir -p "$STAGE/wwwroot"
-  cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
+  if [[ "$web_source" == installed ]]; then
+    cp -r "$APP_DIR/wwwroot/." "$STAGE/wwwroot/"
+  else
+    cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
+  fi
   python3 "$REPO_ROOT/scripts/verify-api-payload.py" \
     --seal-payload "$STAGE" --native-build "$LAPLACE_ENGINE_BUILD" \
     --manifest "$LAPLACE_API_PAYLOAD_MANIFEST"
@@ -294,7 +333,11 @@ fi
 echo "==> [3/4] overlay SPA; prepare isolated UCI/MCP/Lichess runtimes"
 rm -rf "$STAGE/wwwroot"
 mkdir -p "$STAGE/wwwroot"
-cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
+if [[ "$web_source" == installed ]]; then
+  cp -r "$APP_DIR/wwwroot/." "$STAGE/wwwroot/"
+else
+  cp -r "$REPO_ROOT/web/dist/." "$STAGE/wwwroot/"
+fi
 test -x "$UCI_STAGE/laplace-uci"
 test -f "$MCP_STAGE/Laplace.Endpoints.Mcp"
 test -f "$LICHESS_STAGE/Laplace.Endpoints.Lichess"

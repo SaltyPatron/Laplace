@@ -62,6 +62,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("  mainline-delivery:", lifecycle)
         self.assertIn("needs: [plan, mainline-qualification]", lifecycle)
         self.assertIn("stage: release-delivery", lifecycle)
+        self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
         self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", lifecycle)
         self.assertIn("db_suites: ${{ needs.plan.outputs.db_suites }}", lifecycle)
         self.assertIn("live_suites: ${{ needs.plan.outputs.live_suites }}", lifecycle)
@@ -148,6 +149,23 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("npm run build", pipeline)
         self.assertIn("build-web) phase_build_web", pipeline)
 
+    def test_automatic_publication_consumes_qualified_or_installed_web_without_rebuild(self):
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        pipeline = (ROOT / "scripts/pipeline.sh").read_text(encoding="utf-8")
+        deploy = (ROOT / "deploy/linux/deploy.sh").read_text(encoding="utf-8")
+
+        delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
+        self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", delivery)
+        self.assertIn("LAPLACE_REQUIRE_QUALIFIED_WEB", product)
+        self.assertIn("LAPLACE_REUSE_INSTALLED_WEB", product)
+        self.assertIn("web-artifact.py", pipeline)
+        self.assertIn(" seal ", pipeline)
+        self.assertIn("web-artifact.py", deploy)
+        self.assertIn(" verify ", deploy)
+        self.assertIn("use exact qualified front-end artifact", deploy)
+        self.assertIn("preserve installed front-end artifact", deploy)
+        self.assertIn('cp -r "$APP_DIR/wwwroot/." "$STAGE/wwwroot/"', deploy)
     def test_main_qualification_reuses_exact_valid_suite_receipts(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         self.assertIn("dev_suites:", reusable)
