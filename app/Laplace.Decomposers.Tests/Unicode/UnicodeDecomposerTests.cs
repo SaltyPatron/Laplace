@@ -138,8 +138,9 @@ public sealed class UnicodeDecomposerTests
     {
         var dec = NewDecomposer();
         var ctx = Context(new NullWriter());
-        // Cap so the test finishes in seconds; uncapped mapping is gated by MaxInputUnits=0 break.
-        var opts = DecomposerOptions.Default with { MaxInputUnits = 512 };
+        // A small deterministic Tier-0 prefix is sufficient to prove the persistence
+        // ordering contract; mapping phases must remain unreachable for any positive cap.
+        var opts = DecomposerOptions.Default with { MaxInputUnits = 64 };
 
         bool sawCodepointEntity = false;
         bool sawMappingAttestation = false;
