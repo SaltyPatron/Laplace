@@ -45,12 +45,16 @@ sys.exit(9 if os.environ.get("SCHEDULER_FAIL_PROJECT") == name else 0)
 '''
 
 def owner_functions():
-    source = (ROOT / "scripts/test-parallel.sh").read_text()
+    sources = {
+        "managed_test_solution": (ROOT / "scripts/test-suites/common.sh").read_text(),
+        "run_managed_dotnet_tests": (ROOT / "scripts/test-suites/common.sh").read_text(),
+        "run_managed_db": (ROOT / "scripts/test-suites/managed-db.sh").read_text(),
+    }
     blocks = []
     for name in ("managed_test_solution", "run_managed_dotnet_tests", "run_managed_db"):
         match = re.search(
             rf"(?m)^{name}\(\) \{{\n.*?^\}}",
-            source,
+            sources[name],
             re.S,
         )
         if match is None:
