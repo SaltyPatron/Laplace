@@ -105,7 +105,10 @@ jobs:
   mainline-delivery:
     name: Install, validate, publish, and activate exact candidate
     needs: [plan, mainline-qualification]
-    if: needs.plan.outputs.delivery_actions != ''
+    # Always enter the delivery owner after successful qualification. The target
+    # may be a test-only successor whose direct diff has no mutations while the
+    # installed product is still behind an earlier product commit. The release
+    # owner reconciles installed->target impact and no-ops when there is none.
     concurrency:
       group: laplace-main-delivery-dispatch
       cancel-in-progress: false
