@@ -15,7 +15,7 @@ namespace Laplace.Decomposers.Unicode;
 /// only the claims they physically state.
 /// </summary>
 public sealed class UnicodeDecomposer
-    : DecomposerMultiPhase<UnicodeSource, FullScope>, IIngestInventoryProvider
+    : DecomposerMultiPhase<UnicodeSource, FullScope>, IIngestInventoryProvider, IIngestArtifactGraphProvider
 {
     public static readonly Hash128 Source = UnicodeSource.SourceId;
     public static readonly Hash128 TrustClass = UnicodeSource.TrustClass;
@@ -112,6 +112,118 @@ public sealed class UnicodeDecomposer
         IngestInventory? inventory = await DescribeInputAsync(
             context, DecomposerOptions.Default, ct).ConfigureAwait(false);
         return inventory?.TotalInputUnits;
+    }
+
+    /// <summary>
+    /// Enumerate the complete local Unicode release tree when no release MANIFEST.tsv is
+    /// installed. Every physical file receives an explicit disposition; the fallback graph
+    /// never silently turns "not recognized by this decomposer" into "not part of the source".
+    /// A release MANIFEST.tsv, when present, remains the higher-authority selection.
+    /// </summary>
+    public Task<IngestArtifactGraph?> DescribeArtifactsAsync(
+        string ecosystemPath,
+        DecomposerOptions options,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!Directory.Exists(ecosystemPath))
+            return Task.FromResult<IngestArtifactGraph?>(null);
+
+        string root = Path.GetFullPath(ecosystemPath);
+        string xml = Path.GetFullPath(
+            _ucdxmlZip ?? Path.Combine(root, "ucdxml", "ucd.nounihan.flat.zip"));
+        string ducet = Path.GetFullPath(
+            _ducet ?? Path.Combine(root, "uca", "allkeys.txt"));
+
+        var artifacts = new List<IngestArtifact>();
+        foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                                      .OrderBy(static p => p, StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            string full = Path.GetFullPath(file);
+            string relative = Path.GetRelativePath(root, full).Replace('\\', '/');
+            IngestArtifactDisposition disposition;
+            string notes;
+
+            if (TryClassifyArtifact(full, root, xml, ducet, out _))
+            {
+                disposition = IngestArtifactDisposition.Admitted;
+                notes = "";
+            }
+            else if (IsUnicodeControlArtifact(relative))
+            {
+                disposition = IngestArtifactDisposition.ExcludedWithReason;
+                notes = "release/provenance/checksum/control artifact; retained in the physical estate but not world testimony";
+            }
+            else if (IsUnicodeConformanceArtifact(relative))
+            {
+                disposition = IngestArtifactDisposition.ExcludedWithReason;
+                notes = "Unicode conformance oracle; retained for validation rather than deposited as world testimony";
+            }
+            else
+            {
+                disposition = IngestArtifactDisposition.Unsupported;
+                notes = "physical Unicode artifact is present but has no admitted semantic handler yet; omission is explicit and must not be reported as complete coverage";
+            }
+
+            var info = new FileInfo(full);
+            artifacts.Add(new IngestArtifact(
+                UnicodeSource.SourceName,
+                UnicodeSource.License.Version ?? "unknown",
+                relative,
+                relative,
+                full,
+                disposition,
+                UpstreamUrl: "",
+                FetchedAtUtc: "",
+                Bytes: info.Length,
+                Sha256: "",
+                UpstreamChecksum: "",
+                MediaType: UnicodeMediaType(relative),
+                License: UnicodeSource.License.Spdx ?? "",
+                Citation: UnicodeSource.License.Citation ?? "",
+                Language: "",
+                Split: "",
+                AnnotationOrigin: "unicode-standard",
+                Notes: notes,
+                JournalLabel: $"unicode/{relative}",
+                ModifiedAt: info.LastWriteTimeUtc));
+        }
+
+        return Task.FromResult<IngestArtifactGraph?>(new IngestArtifactGraph(artifacts));
+    }
+
+    private static bool IsUnicodeControlArtifact(string relative)
+    {
+        string name = Path.GetFileName(relative);
+        return name.Equals("ReadMe.txt", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("README", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("copyright", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".md5", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".sig", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUnicodeConformanceArtifact(string relative)
+    {
+        string name = Path.GetFileName(relative);
+        return name.Contains("Test", StringComparison.OrdinalIgnoreCase)
+            || relative.Contains("/CollationTest/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string UnicodeMediaType(string relative)
+    {
+        string ext = Path.GetExtension(relative);
+        return ext.ToLowerInvariant() switch
+        {
+            ".txt" => "text/plain",
+            ".xml" => "application/xml",
+            ".zip" => "application/zip",
+            ".html" or ".htm" => "text/html",
+            ".json" => "application/json",
+            _ => "application/octet-stream",
+        };
     }
 
     internal static Hash128 CodepointId(uint codepoint)
@@ -211,6 +323,28 @@ public sealed class UnicodeDecomposer
             ArtifactKind.NameAliases => new AliasPhase(job.Path, batch),
             ArtifactKind.Confusables => new ConfusablePhase(job.Path, batch),
             ArtifactKind.DerivedNormalization => new NormalizationPhase(this, job.Path, batch),
+            ArtifactKind.ScriptExtensions => new ScriptExtensionsPhase(this, job.Path, batch),
+            ArtifactKind.BinaryProperties => new BinaryPropertyPhase(this, job.Path, batch),
+            ArtifactKind.GraphemeBreak => new ContextualRangePropertyPhase(this, job.Path, batch, "Grapheme_Cluster_Break"),
+            ArtifactKind.WordBreak => new ContextualRangePropertyPhase(this, job.Path, batch, "Word_Break"),
+            ArtifactKind.SentenceBreak => new ContextualRangePropertyPhase(this, job.Path, batch, "Sentence_Break"),
+            ArtifactKind.IndicConjunctBreak => new ContextualRangePropertyPhase(this, job.Path, batch, "Indic_Conjunct_Break"),
+            ArtifactKind.HangulSyllableType => new ContextualRangePropertyPhase(this, job.Path, batch, "Hangul_Syllable_Type"),
+            ArtifactKind.VerticalOrientation => new ContextualRangePropertyPhase(this, job.Path, batch, "Vertical_Orientation"),
+            ArtifactKind.IndicPositionalCategory => new ContextualRangePropertyPhase(this, job.Path, batch, "Indic_Positional_Category"),
+            ArtifactKind.IndicSyllabicCategory => new ContextualRangePropertyPhase(this, job.Path, batch, "Indic_Syllabic_Category"),
+            ArtifactKind.DerivedGeneralCategory => new RangePropertyPhase(
+                this, job.Path, "derived-general-category", UcdProperties.RelTypeHasGeneralCategory,
+                "unicode/category", batch),
+            ArtifactKind.DerivedCombiningClass => new RangePropertyPhase(
+                this, job.Path, "derived-combining-class", UcdProperties.RelTypeHasCombiningClass,
+                "unicode/combining_class", batch),
+            ArtifactKind.DerivedBidiClass => new RangePropertyPhase(
+                this, job.Path, "derived-bidi-class", UcdProperties.RelTypeHasBidiClass,
+                "unicode/bidi_class", batch),
+            ArtifactKind.IdentifierStatus => new ContextualRangePropertyPhase(this, job.Path, batch, "Identifier_Status"),
+            ArtifactKind.IdentifierType => new ContextualRangePropertyPhase(this, job.Path, batch, "Identifier_Type"),
+            ArtifactKind.UnihanProperties => new UnihanPropertyPhase(this, job.Path, batch),
             _ => throw new InvalidOperationException($"Unsupported Unicode artifact kind {job.Kind}."),
         };
 
@@ -276,6 +410,39 @@ public sealed class UnicodeDecomposer
         AddIfPresent(legacy, ArtifactKind.DerivedNormalization,
             Path.Combine(baseDir, "ucd", "DerivedNormalizationProps.txt"),
             "ucd/DerivedNormalizationProps.txt");
+        AddIfPresent(legacy, ArtifactKind.ScriptExtensions,
+            Path.Combine(baseDir, "ucd", "ScriptExtensions.txt"), "ucd/ScriptExtensions.txt");
+        AddIfPresent(legacy, ArtifactKind.BinaryProperties,
+            Path.Combine(baseDir, "ucd", "PropList.txt"), "ucd/PropList.txt");
+        AddIfPresent(legacy, ArtifactKind.BinaryProperties,
+            Path.Combine(baseDir, "ucd", "DerivedCoreProperties.txt"), "ucd/DerivedCoreProperties.txt");
+        AddIfPresent(legacy, ArtifactKind.GraphemeBreak,
+            Path.Combine(baseDir, "ucd", "auxiliary", "GraphemeBreakProperty.txt"), "ucd/auxiliary/GraphemeBreakProperty.txt");
+        AddIfPresent(legacy, ArtifactKind.WordBreak,
+            Path.Combine(baseDir, "ucd", "auxiliary", "WordBreakProperty.txt"), "ucd/auxiliary/WordBreakProperty.txt");
+        AddIfPresent(legacy, ArtifactKind.SentenceBreak,
+            Path.Combine(baseDir, "ucd", "auxiliary", "SentenceBreakProperty.txt"), "ucd/auxiliary/SentenceBreakProperty.txt");
+        AddIfPresent(legacy, ArtifactKind.IndicConjunctBreak,
+            Path.Combine(baseDir, "ucd", "auxiliary", "IndicConjunctBreak.txt"), "ucd/auxiliary/IndicConjunctBreak.txt");
+        AddIfPresent(legacy, ArtifactKind.HangulSyllableType,
+            Path.Combine(baseDir, "ucd", "HangulSyllableType.txt"), "ucd/HangulSyllableType.txt");
+        AddIfPresent(legacy, ArtifactKind.VerticalOrientation,
+            Path.Combine(baseDir, "ucd", "VerticalOrientation.txt"), "ucd/VerticalOrientation.txt");
+        AddIfPresent(legacy, ArtifactKind.IndicPositionalCategory,
+            Path.Combine(baseDir, "ucd", "IndicPositionalCategory.txt"), "ucd/IndicPositionalCategory.txt");
+        AddIfPresent(legacy, ArtifactKind.IndicSyllabicCategory,
+            Path.Combine(baseDir, "ucd", "IndicSyllabicCategory.txt"), "ucd/IndicSyllabicCategory.txt");
+        AddIfPresent(legacy, ArtifactKind.DerivedGeneralCategory,
+            Path.Combine(baseDir, "ucd", "extracted", "DerivedGeneralCategory.txt"), "ucd/extracted/DerivedGeneralCategory.txt");
+        AddIfPresent(legacy, ArtifactKind.DerivedCombiningClass,
+            Path.Combine(baseDir, "ucd", "extracted", "DerivedCombiningClass.txt"), "ucd/extracted/DerivedCombiningClass.txt");
+        AddIfPresent(legacy, ArtifactKind.DerivedBidiClass,
+            Path.Combine(baseDir, "ucd", "extracted", "DerivedBidiClass.txt"), "ucd/extracted/DerivedBidiClass.txt");
+        AddIfPresent(legacy, ArtifactKind.IdentifierStatus,
+            Path.Combine(baseDir, "security", "IdentifierStatus.txt"), "security/IdentifierStatus.txt");
+        AddIfPresent(legacy, ArtifactKind.IdentifierType,
+            Path.Combine(baseDir, "security", "IdentifierType.txt"), "security/IdentifierType.txt");
+        AddUnihanFiles(legacy, baseDir);
         legacy.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return legacy;
     }
@@ -286,11 +453,32 @@ public sealed class UnicodeDecomposer
         string xml,
         string ducet)
     {
-        if (string.Equals(fullPath, ducet, StringComparison.Ordinal)) return ArtifactKind.Ducet;
-        if (string.Equals(fullPath, xml, StringComparison.Ordinal)) return ArtifactKind.UcdXml;
+        if (TryClassifyArtifact(fullPath, baseDir, xml, ducet, out ArtifactKind kind))
+            return kind;
+        throw new InvalidOperationException(
+            $"Selected Unicode artifact has no ingest disposition/handler: '{fullPath}'.");
+    }
+
+    private static bool TryClassifyArtifact(
+        string fullPath,
+        string baseDir,
+        string xml,
+        string ducet,
+        out ArtifactKind kind)
+    {
+        if (string.Equals(fullPath, ducet, StringComparison.Ordinal))
+        {
+            kind = ArtifactKind.Ducet;
+            return true;
+        }
+        if (string.Equals(fullPath, xml, StringComparison.Ordinal))
+        {
+            kind = ArtifactKind.UcdXml;
+            return true;
+        }
 
         string relative = Path.GetRelativePath(baseDir, fullPath).Replace('\\', '/');
-        return relative switch
+        kind = relative switch
         {
             "uca/allkeys.txt" => ArtifactKind.Ducet,
             "ucdxml/ucd.nounihan.flat.zip" or "ucdxml/ucd.nounihan.flat.xml" => ArtifactKind.UcdXml,
@@ -307,9 +495,27 @@ public sealed class UnicodeDecomposer
             "ucd/NameAliases.txt" => ArtifactKind.NameAliases,
             "security/confusables.txt" => ArtifactKind.Confusables,
             "ucd/DerivedNormalizationProps.txt" => ArtifactKind.DerivedNormalization,
-            _ => throw new InvalidOperationException(
-                $"Selected Unicode artifact has no ingest disposition/handler: '{fullPath}'."),
+            "ucd/ScriptExtensions.txt" => ArtifactKind.ScriptExtensions,
+            "ucd/PropList.txt" or "ucd/DerivedCoreProperties.txt" => ArtifactKind.BinaryProperties,
+            "ucd/auxiliary/GraphemeBreakProperty.txt" => ArtifactKind.GraphemeBreak,
+            "ucd/auxiliary/WordBreakProperty.txt" => ArtifactKind.WordBreak,
+            "ucd/auxiliary/SentenceBreakProperty.txt" => ArtifactKind.SentenceBreak,
+            "ucd/auxiliary/IndicConjunctBreak.txt" => ArtifactKind.IndicConjunctBreak,
+            "ucd/HangulSyllableType.txt" => ArtifactKind.HangulSyllableType,
+            "ucd/VerticalOrientation.txt" => ArtifactKind.VerticalOrientation,
+            "ucd/IndicPositionalCategory.txt" => ArtifactKind.IndicPositionalCategory,
+            "ucd/IndicSyllabicCategory.txt" => ArtifactKind.IndicSyllabicCategory,
+            "ucd/extracted/DerivedGeneralCategory.txt" => ArtifactKind.DerivedGeneralCategory,
+            "ucd/extracted/DerivedCombiningClass.txt" => ArtifactKind.DerivedCombiningClass,
+            "ucd/extracted/DerivedBidiClass.txt" => ArtifactKind.DerivedBidiClass,
+            "security/IdentifierStatus.txt" => ArtifactKind.IdentifierStatus,
+            "security/IdentifierType.txt" => ArtifactKind.IdentifierType,
+            _ when relative.StartsWith("ucd/Unihan/", StringComparison.Ordinal)
+                && relative.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
+                => ArtifactKind.UnihanProperties,
+            _ => ArtifactKind.Unknown,
         };
+        return kind != ArtifactKind.Unknown;
     }
 
     private static void AddIfPresent(
@@ -320,6 +526,18 @@ public sealed class UnicodeDecomposer
     {
         path = Path.GetFullPath(path);
         if (File.Exists(path)) jobs.Add(new ArtifactJob(kind, path, label));
+    }
+
+    private static void AddUnihanFiles(List<ArtifactJob> jobs, string baseDir)
+    {
+        string dir = Path.Combine(baseDir, "ucd", "Unihan");
+        if (!Directory.Exists(dir)) return;
+        foreach (string path in Directory.EnumerateFiles(dir, "*.txt", SearchOption.TopDirectoryOnly)
+                                             .OrderBy(static p => p, StringComparer.Ordinal))
+        {
+            string label = Path.GetRelativePath(baseDir, path).Replace('\\', '/');
+            AddIfPresent(jobs, ArtifactKind.UnihanProperties, path, label);
+        }
     }
 
     private static void AddFirstPresent(
@@ -353,6 +571,23 @@ public sealed class UnicodeDecomposer
         NameAliases = 12,
         Confusables = 13,
         DerivedNormalization = 14,
+        ScriptExtensions = 15,
+        BinaryProperties = 16,
+        GraphemeBreak = 17,
+        WordBreak = 18,
+        SentenceBreak = 19,
+        IndicConjunctBreak = 20,
+        HangulSyllableType = 21,
+        VerticalOrientation = 22,
+        IndicPositionalCategory = 23,
+        IndicSyllabicCategory = 24,
+        DerivedGeneralCategory = 25,
+        DerivedCombiningClass = 26,
+        DerivedBidiClass = 27,
+        IdentifierStatus = 28,
+        IdentifierType = 29,
+        UnihanProperties = 30,
+        Unknown = int.MaxValue,
     }
 
     private readonly record struct ArtifactJob(ArtifactKind Kind, string Path, string Label);
@@ -689,6 +924,151 @@ public sealed class UnicodeDecomposer
                 DecomposerOptions options,
                 CancellationToken ct) =>
             UnicodePhysicalArtifactParser.RangePointsAsync(_path, ct);
+    }
+
+
+    private sealed class BinaryPropertyPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.BinaryPropertyPoint>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+
+        public BinaryPropertyPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch) => (_owner, _path) = (owner, path);
+
+        protected override string PhaseLabel => $"binary-properties/{Path.GetFileNameWithoutExtension(_path)}";
+
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.BinaryPropertyPoint row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.BinaryPropertyPoint row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128 propertyId = _owner.ClassifierEntity(
+                builder, "unicode/property", row.Property);
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                propertyId, Source, null,
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.BinaryPropertyPoint>
+            ExtractRecordsAsync(
+                string ecosystemPath,
+                DecomposerOptions options,
+                CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.BinaryPropertiesAsync(_path, ct);
+    }
+
+    private sealed class ContextualRangePropertyPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.RangePoint>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+        private readonly string _property;
+
+        public ContextualRangePropertyPhase(
+            UnicodeDecomposer owner,
+            string path,
+            int batch,
+            string property)
+            : base(batch) => (_owner, _path, _property) = (owner, path, property);
+
+        protected override string PhaseLabel => $"property/{_property}";
+
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangePoint row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.RangePoint row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128 keyId = _owner.ClassifierEntity(builder, "unicode/property_key", _property);
+            Hash128 valueId = _owner.ClassifierEntity(
+                builder, $"unicode/property_value/{_property}", row.Value);
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                valueId, Source, keyId,
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangePoint>
+            ExtractRecordsAsync(
+                string ecosystemPath,
+                DecomposerOptions options,
+                CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.RangePointsAsync(_path, ct);
+    }
+
+    private sealed class ScriptExtensionsPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.RangePoint>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+
+        public ScriptExtensionsPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch) => (_owner, _path) = (owner, path);
+
+        protected override string PhaseLabel => "script-extensions";
+
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangePoint row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.RangePoint row,
+            SubstrateChangeBuilder builder)
+        {
+            foreach (string script in row.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                Hash128 scriptId = _owner.ClassifierEntity(
+                    builder, "unicode/script", script);
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    CodepointId(row.Codepoint), UcdProperties.RelTypeUsesScriptExtension,
+                    scriptId, Source, null,
+                    RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+            }
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangePoint>
+            ExtractRecordsAsync(
+                string ecosystemPath,
+                DecomposerOptions options,
+                CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.RangePointsAsync(_path, ct);
+    }
+
+    private sealed class UnihanPropertyPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.UnihanPropertyRow>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+
+        public UnihanPropertyPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
+
+        protected override string PhaseLabel => $"unihan/{Path.GetFileNameWithoutExtension(_path)}";
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.UnihanPropertyRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128 keyId = _owner.ClassifierEntity(
+                builder, "unicode/unihan_property", row.Property);
+            Hash128? valueId = ContentEmitter.Emit(builder, row.Value, Source);
+            if (valueId is null) return;
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                valueId.Value, Source, keyId,
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.UnihanPropertyRow>
+            ExtractRecordsAsync(
+                string ecosystemPath,
+                DecomposerOptions options,
+                CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.UnihanPropertiesAsync(_path, ct);
     }
 
     private sealed class MirrorPhase
