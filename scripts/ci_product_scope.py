@@ -11,6 +11,7 @@ import fnmatch
 PRODUCT_IGNORED_PREFIXES = (
     ".github/",
     "docs/",
+    "scripts/test-suites/",
 )
 
 PRODUCT_IGNORED_SUFFIXES = (
