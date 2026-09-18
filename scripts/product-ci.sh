@@ -25,6 +25,7 @@ run_ci_contract_checks() {
     scripts/pipeline.sh \
     scripts/ci-deps.sh \
     scripts/test-parallel.sh \
+    scripts/test-suites/*.sh \
     scripts/model-synthesize-ci.sh \
     scripts/maintain-installed-database.sh \
     scripts/ingest-source.sh \
@@ -39,6 +40,17 @@ run_ci_contract_checks() {
   python3 scripts/test-ci-qualification-cache.py
   python3 scripts/test-ci-product-freshness.py
   python3 scripts/test-web-artifact.py
+  export TMPDIR="${TMPDIR:-${RUNNER_TEMP:-/tmp}}"
+  python3 scripts/test-managed-policy.py
+  python3 scripts/test-application-payload.py
+  python3 scripts/test-cutechess-calibration.py
+  python3 scripts/test-chess-x11-runtime.py
+  python3 scripts/test-chess-floor-artifacts.py
+  python3 scripts/test-recorded-chess-selection.py
+  python3 scripts/test-chess-environment-benchmark.py ChessEnvironmentTests
+  python3 scripts/test-managed-db-scheduling.py
+  python3 scripts/test-codegen-configure.py
+  python3 scripts/test-cmake-release.py
 }
 
 require_built_revision() {
