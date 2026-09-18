@@ -21,6 +21,28 @@ public static class GrammarRowReader
         return ReadFieldsGrammarFramedAsync(filePath, modality.GrammarId, ct);
     }
 
+    /// <summary>
+    /// Line-framed delimiter bridge for legacy standards files whose delimiter has no
+    /// registered tree-sitter grammar. Registered formats must use <see cref="ReadFieldsAsync"/>.
+    /// This keeps delimiter ownership out of individual decomposers without pretending
+    /// an unregistered pipe format is TSV/CSV.
+    /// </summary>
+    public static async IAsyncEnumerable<(string[] Fields, long UnitsConsumed)> ReadDelimitedFieldsAsync(
+        string filePath,
+        char delimiter,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        long units = 0;
+        await foreach (ReadOnlyMemory<byte> lineMem in StreamingUtf8LineReader.ReadLinesAsync(filePath, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (lineMem.Length == 0) continue;
+            units += lineMem.Length;
+            string line = System.Text.Encoding.UTF8.GetString(lineMem.Span);
+            yield return (line.Split(delimiter), units);
+        }
+    }
+
     private static async IAsyncEnumerable<(string[] Fields, long UnitsConsumed)> ReadFieldsLineFramedAsync(
         string filePath,
         string modalityId,
