@@ -992,7 +992,7 @@ for line in sys.stdin:
         self.assertEqual(["dotnet uci"], (self.root / "tools.log").read_text().splitlines())
         self.assert_preserved()
 
-    def test_revision_receipt_commits_and_rolls_back_with_uci_selection(self):
+    def test_revision_receipt_commits_with_uci_selection(self):
         old_revision = "1" * 40
         next_revision = "2" * 40
         receipt = self.app / ".laplace-source-revision"
@@ -1003,24 +1003,7 @@ for line in sys.stdin:
         result = self.deploy(LAPLACE_UCI_REVISION_RECEIPT="1")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(next_revision, receipt.read_text().strip())
-
-        # A failure after the receipt was installed must restore both owners.
-        # A dangling result path makes the post-commit evidence copy fail after
-        # uci_revision_install(), without weakening production checks.
-        receipt.write_text(old_revision + "\n")
-        self.shell(
-            'old="$(readlink "$LAPLACE_APP_DIR/laplace-uci")"\n'
-            'laplace_select_uci_runtime "$LAPLACE_APP_DIR" '
-            '"releases/$(basename "$OLD_UCI_RELEASE")/uci/laplace-uci"\n'
-            'printf "%s\\n" "$old" >/dev/null\n',
-            check=False,
-        ) if False else None
-        # Re-establish the original UCI selection from this test's immutable lease.
-        self.shell(
-            'laplace_select_uci_runtime "$LAPLACE_APP_DIR" '
-            '"releases/$(basename "$UCI_OLD_RELEASE")/uci/laplace-uci"\n',
-            check=False,
-        ) if False else None
+        self.assertNotEqual(self.old_target, os.readlink(self.app / "laplace-uci"))
 
     def test_revision_receipt_restores_when_post_verification_commit_fails(self):
         old_revision = "3" * 40
