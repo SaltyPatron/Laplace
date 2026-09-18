@@ -37,7 +37,15 @@ class ImpactPlanTests(unittest.TestCase):
         value = plan("engine/core/src/example.cpp")
         self.assertEqual(value["components"], ["database", "managed", "native", "uci"])
         self.assertEqual(value["build_components"], ["managed", "native"])
-        self.assertEqual(value["managed_build_projects"], ["all"])
+        self.assertNotEqual(value["managed_build_projects"], ["all"])
+        for project in (
+            "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
+            "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
+            "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj",
+            "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj",
+            "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj",
+        ):
+            self.assertIn(project, value["managed_build_projects"])
         self.assertEqual(value["managed_test_projects"], ["all"])
         self.assertEqual(value["managed_db_test_projects"], ["all"])
         self.assertEqual(value["managed_live_test_projects"], ["all"])
@@ -92,6 +100,15 @@ class ImpactPlanTests(unittest.TestCase):
     def test_shared_managed_library_requires_full_publication(self):
         value = plan("app/Laplace.Core/Core/Foo.cs")
         self.assertEqual(value["build_components"], ["managed"])
+        self.assertNotEqual(value["managed_build_projects"], ["all"])
+        self.assertIn(
+            "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
+            value["managed_build_projects"],
+        )
+        self.assertIn(
+            "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
+            value["managed_build_projects"],
+        )
         self.assertEqual(value["publish_scope"], "full")
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
 
@@ -131,6 +148,11 @@ class ImpactPlanTests(unittest.TestCase):
             value["db_suites"], ["db-health", "managed-db"]
         )
         self.assertEqual(value["build_components"], ["managed"])
+        self.assertNotEqual(value["managed_build_projects"], ["all"])
+        self.assertIn(
+            "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
+            value["managed_build_projects"],
+        )
         self.assertEqual(
             value["delivery_actions"], ["database", "reconcile", "publish", "live"]
         )
