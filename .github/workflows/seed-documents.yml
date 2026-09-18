@@ -1,17 +1,19 @@
-name: Seed — documents
+name: Data — documents ingest
+run-name: "Documents ingest — ${{ inputs.corpus }} → ${{ inputs.database }}"
 
 on:
   workflow_dispatch:
     inputs:
       corpus:
-        description: "document collection"
+        description: "Document collection"
         type: choice
         required: true
         default: project-gutenberg
-        options: [project-gutenberg, fixtures, electronics, smoke-alice, path-override]
-      path:
-        description: "explicit path; overrides corpus"
+        options: [project-gutenberg, fixtures, electronics, smoke-alice, custom-path]
+      advanced_path_override:
+        description: "ADVANCED: local file/directory override; required only for custom-path"
         type: string
+        required: false
         default: ""
       database:
         description: "target database"
@@ -36,7 +38,7 @@ jobs:
       - id: pick
         env:
           CORPUS_INPUT: ${{ inputs.corpus }}
-          PATH_INPUT: ${{ inputs.path }}
+          PATH_INPUT: ${{ inputs.advanced_path_override }}
         run: |
           set -euo pipefail
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
@@ -50,7 +52,7 @@ jobs:
             fixtures) p="$root/test-data/text" ;;
             electronics) p="$root/test-data/electronics" ;;
             smoke-alice) p="$root/ProjectGutenberg/text/alice.txt" ;;
-            path-override) echo "::error::path-override requires path"; exit 1 ;;
+            custom-path) echo "::error::custom-path requires the advanced path override"; exit 2 ;;
             *) echo "::error::unknown corpus $CORPUS_INPUT"; exit 1 ;;
           esac
           [[ -e "$p" ]] || { echo "::error::$p does not exist"; exit 1; }
