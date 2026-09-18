@@ -1,31 +1,46 @@
 -- Exact source provenance for an already canonical typed physicality. The
 -- trajectory remains in laplace.physicalities; provenance never serializes it
 -- into a parallel ordinary-content descriptor tree.
-DO $$
+DO $
+DECLARE
+    observation_table regclass;
+    legacy_table regclass;
 BEGIN
-    IF to_regclass(current_schema() || '.physicality_observations') IS NOT NULL
-       AND EXISTS (
+    -- A fresh/older database may not have this table at all. PostgreSQL does not
+    -- guarantee short-circuit evaluation of SQL boolean expressions, so casting
+    -- the missing name to regclass in the same IF that probes to_regclass() can
+    -- raise before CREATE TABLE below gets a chance to run.
+    observation_table := to_regclass(current_schema() || '.physicality_observations');
+    IF observation_table IS NULL THEN
+        RETURN;
+    END IF;
+
+    IF EXISTS (
            SELECT 1 FROM pg_attribute
-           WHERE attrelid = (current_schema() || '.physicality_observations')::regclass
+           WHERE attrelid = observation_table
              AND attname = 'descriptor_id' AND NOT attisdropped)
        AND NOT EXISTS (
            SELECT 1 FROM pg_attribute
-           WHERE attrelid = (current_schema() || '.physicality_observations')::regclass
+           WHERE attrelid = observation_table
              AND attname = 'physicality_id' AND NOT attisdropped) THEN
-        IF to_regclass(current_schema() || '.physicality_descriptor_observations_legacy') IS NOT NULL THEN
+        legacy_table := to_regclass(
+            current_schema() || '.physicality_descriptor_observations_legacy');
+        IF legacy_table IS NOT NULL THEN
             RAISE EXCEPTION 'legacy physicality observation archive already exists; reconcile it before extension upgrade';
         END IF;
         ALTER TABLE physicality_observations RENAME TO physicality_descriptor_observations_legacy;
+        legacy_table := to_regclass(
+            current_schema() || '.physicality_descriptor_observations_legacy');
         IF EXISTS (
             SELECT 1 FROM pg_constraint
-            WHERE conrelid = (current_schema() || '.physicality_descriptor_observations_legacy')::regclass
+            WHERE conrelid = legacy_table
               AND conname = 'physicality_observations_pkey') THEN
             ALTER TABLE physicality_descriptor_observations_legacy
                 RENAME CONSTRAINT physicality_observations_pkey
                 TO physicality_descriptor_observations_legacy_pkey;
         END IF;
     END IF;
-END $$;
+END $;
 
 CREATE TABLE IF NOT EXISTS physicality_observations (
     entity_id bytea NOT NULL CHECK (octet_length(entity_id)=16),
