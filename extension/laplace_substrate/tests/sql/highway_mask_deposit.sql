@@ -99,8 +99,19 @@ BEGIN
 END $$;
 
 -- A second tier is another interpretation of one canonical content entity.
-INSERT INTO laplace.entities(id,tier,type_id)
-SELECT id,3,decode(repeat('dc',16),'hex') FROM deposit_fixtures WHERE name='entity_a';
+DO $facet_fixture$
+DECLARE
+    entity_id bytea;
+BEGIN
+    SELECT id INTO STRICT entity_id FROM deposit_fixtures WHERE name='entity_a';
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[entity_id]::bytea[],
+        ARRAY[3]::smallint[],
+        ARRAY[decode(repeat('dc',16),'hex')]::bytea[],
+        ARRAY[NULL::bytea]::bytea[],
+        ARRAY[true]::boolean[]);
+END
+$facet_fixture$;
 DO $$
 DECLARE
     n bigint;

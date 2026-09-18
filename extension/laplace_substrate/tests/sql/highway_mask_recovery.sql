@@ -14,8 +14,16 @@ INSERT INTO highway_recovery_pairs VALUES
 INSERT INTO laplace.entities(id,tier,type_id)
 SELECT DISTINCT entity_id,2,decode('d673b68115514712b366347069127aff','hex')
 FROM highway_recovery_pairs;
-INSERT INTO laplace.entities(id,tier,type_id) VALUES
-(decode('d673b68115514712b366347069127a01','hex'),3,decode('d673b68115514712b366347069127aff','hex'));
+DO $recovery_facet$
+BEGIN
+    PERFORM laplace.entity_interpretations_publish(
+        ARRAY[decode('d673b68115514712b366347069127a01','hex')]::bytea[],
+        ARRAY[3]::smallint[],
+        ARRAY[decode('d673b68115514712b366347069127aff','hex')]::bytea[],
+        ARRAY[NULL::bytea]::bytea[],
+        ARRAY[true]::boolean[]);
+END
+$recovery_facet$;
 CREATE TEMP TABLE highway_recovery_interpretations AS
 SELECT DISTINCT entity_id,2::smallint AS tier,
        decode('d673b68115514712b366347069127aff','hex') AS type_id
@@ -148,7 +156,28 @@ CROSS JOIN (VALUES(2),(3)) t(tier)
 CROSS JOIN highway_refresh_fixture k
 WHERE k.name='type' AND f.name IN ('a','b','isolated','untouched','zero');
 INSERT INTO laplace.entities(id,tier,type_id)
-SELECT entity_id,tier,type_id FROM highway_refresh_interpretations;
+SELECT DISTINCT ON (entity_id) entity_id,tier,type_id
+FROM highway_refresh_interpretations
+ORDER BY entity_id,tier,type_id;
+DO $refresh_facets$
+DECLARE
+    entity_ids bytea[];
+    tiers smallint[];
+    type_ids bytea[];
+    source_ids bytea[];
+    source_is_null boolean[];
+BEGIN
+    SELECT array_agg(entity_id ORDER BY entity_id,tier,type_id),
+           array_agg(tier ORDER BY entity_id,tier,type_id),
+           array_agg(type_id ORDER BY entity_id,tier,type_id),
+           array_agg(NULL::bytea ORDER BY entity_id,tier,type_id),
+           array_agg(true ORDER BY entity_id,tier,type_id)
+      INTO entity_ids,tiers,type_ids,source_ids,source_is_null
+      FROM highway_refresh_interpretations;
+    PERFORM laplace.entity_interpretations_publish(
+        entity_ids,tiers,type_ids,source_ids,source_is_null);
+END
+$refresh_facets$;
 INSERT INTO laplace.consensus
     (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
 SELECT laplace.consensus_id(s,r,o),s,r,o,

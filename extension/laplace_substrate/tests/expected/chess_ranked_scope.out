@@ -173,9 +173,18 @@ BEGIN
             before_rows:=before_rows || jsonb_build_object(key,after_rows);
         END LOOP;
     END LOOP;
-    INSERT INTO laplace.entities(id,tier,type_id)
-    SELECT id,1,unrelated FROM unnest(players) id
-    UNION ALL SELECT id,2,player_type FROM unnest(players) id;
+    PERFORM laplace.entity_interpretations_publish(
+        players,
+        array_fill(1::smallint,ARRAY[cardinality(players)]),
+        array_fill(unrelated,ARRAY[cardinality(players)]),
+        array_fill(NULL::bytea,ARRAY[cardinality(players)]),
+        array_fill(true,ARRAY[cardinality(players)]));
+    PERFORM laplace.entity_interpretations_publish(
+        players,
+        array_fill(2::smallint,ARRAY[cardinality(players)]),
+        array_fill(player_type,ARRAY[cardinality(players)]),
+        array_fill(NULL::bytea,ARRAY[cardinality(players)]),
+        array_fill(true,ARRAY[cardinality(players)]));
     IF (SELECT count(*) FROM laplace.entities WHERE id=ANY(players) AND type_id=unrelated)<>5
        OR (SELECT count(*) FROM laplace.entity_interpretations
             WHERE entity_id=ANY(players) AND type_id=player_type)<>10 THEN
