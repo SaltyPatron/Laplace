@@ -1,4 +1,4 @@
-name: Laplace — UI observability
+name: Observe — UI
 
 # Explicit evidence lane. Browser preparation and capture run under the same host
 # reservation as other self-hosted operations. Evidence is uploaded even when the
