@@ -888,6 +888,18 @@ public sealed class DecomposerArchitectureGateTests
             artifactBase[artifactExecutorStart..artifactExecutorEnd],
             StringComparison.Ordinal);
 
+        int dependencyExecutorStart = artifactBase.IndexOf(
+            "RunArtifactDependencyLevelsAsync(", StringComparison.Ordinal);
+        int dependencyExecutorEnd = artifactBase.IndexOf(
+            "/// <summary>\n    /// File-backed phase", dependencyExecutorStart,
+            StringComparison.Ordinal);
+        Assert.True(
+            dependencyExecutorStart >= 0 && dependencyExecutorEnd > dependencyExecutorStart);
+        Assert.Contains(
+            "RunArtifactPhasesAsync(",
+            artifactBase[dependencyExecutorStart..dependencyExecutorEnd],
+            StringComparison.Ordinal);
+
         foreach (var rel in MultiPhaseAllowlist)
         {
             var path = Path.Combine(repoRoot, "app", rel.Replace('/', Path.DirectorySeparatorChar));
@@ -916,7 +928,7 @@ public sealed class DecomposerArchitectureGateTests
         }
 
         Assert.True(violations.Count == 0,
-            "DecomposerMultiPhase.RunIngestAsync must only orchestrate RunPhaseAsync:\n"
+            "DecomposerMultiPhase.RunIngestAsync must route through the shared phase executors:\n"
             + string.Join("\n", violations));
     }
 
