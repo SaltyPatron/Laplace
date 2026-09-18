@@ -368,6 +368,52 @@ public sealed class UnicodeDecomposer
             ArtifactKind.IdentifierStatus => new ContextualRangePropertyPhase(this, job.Path, batch, "Identifier_Status"),
             ArtifactKind.IdentifierType => new ContextualRangePropertyPhase(this, job.Path, batch, "Identifier_Type"),
             ArtifactKind.UnihanProperties => new UnihanPropertyPhase(this, job.Path, batch),
+            ArtifactKind.ArabicShaping => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch,
+                ["Arabic_Shaping_Name", "Arabic_Shaping_Joining_Type", "Arabic_Shaping_Joining_Group"]),
+            ArtifactKind.BidiBrackets => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch,
+                ["Bidi_Paired_Bracket", "Bidi_Paired_Bracket_Type"],
+                new HashSet<int> { 0 }),
+            ArtifactKind.CaseFolding => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch,
+                ["Case_Folding_Status", "Case_Folding_Mapping"],
+                new HashSet<int> { 1 }),
+            ArtifactKind.SpecialCasing => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch,
+                ["Special_Lowercase_Mapping", "Special_Titlecase_Mapping",
+                 "Special_Uppercase_Mapping", "Special_Casing_Condition"],
+                new HashSet<int> { 0, 1, 2 }),
+            ArtifactKind.Jamo => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch, ["Jamo_Short_Name"]),
+            ArtifactKind.NormalizationCorrections => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch,
+                ["Normalization_Old_Mapping", "Normalization_New_Mapping",
+                 "Normalization_Correction_Version"],
+                new HashSet<int> { 0, 1 }),
+            ArtifactKind.EquivalentUnifiedIdeograph => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch, ["Equivalent_Unified_Ideograph"],
+                new HashSet<int> { 0 }),
+            ArtifactKind.DerivedName => new ContextualRangePropertyPhase(
+                this, job.Path, batch, "Derived_Name"),
+            ArtifactKind.DerivedDecompositionType => new ContextualRangePropertyPhase(
+                this, job.Path, batch, "Decomposition_Type"),
+            ArtifactKind.DerivedJoiningGroup => new ContextualRangePropertyPhase(
+                this, job.Path, batch, "Joining_Group"),
+            ArtifactKind.DerivedNumericValues => new ContextualRangePropertyPhase(
+                this, job.Path, batch, "Numeric_Value"),
+            ArtifactKind.CompositionExclusions => new CodepointListPropertyPhase(
+                this, job.Path, batch, "Full_Composition_Exclusion"),
+            ArtifactKind.NamedSequences => new NamedSequencePhase(job.Path, batch),
+            ArtifactKind.StandardizedVariants => new SequenceMetadataPhase(
+                this, job.Path, batch,
+                ["Standardized_Variant_Description", "Standardized_Variant_Condition"]),
+            ArtifactKind.EmojiVariationSequences => new SequenceMetadataPhase(
+                this, job.Path, batch,
+                ["Emoji_Variation_Style", "Emoji_Variation_Description"]),
+            ArtifactKind.EmojiSources => new DelimitedCodepointPropertyPhase(
+                this, job.Path, batch,
+                ["Emoji_Source_Docomo", "Emoji_Source_KDDI", "Emoji_Source_SoftBank"]),
             _ => throw new InvalidOperationException($"Unsupported Unicode artifact kind {job.Kind}."),
         };
 
@@ -465,6 +511,40 @@ public sealed class UnicodeDecomposer
             Path.Combine(baseDir, "security", "IdentifierStatus.txt"), "security/IdentifierStatus.txt");
         AddIfPresent(legacy, ArtifactKind.IdentifierType,
             Path.Combine(baseDir, "security", "IdentifierType.txt"), "security/IdentifierType.txt");
+        AddIfPresent(legacy, ArtifactKind.ArabicShaping,
+            Path.Combine(baseDir, "ucd", "ArabicShaping.txt"), "ucd/ArabicShaping.txt");
+        AddIfPresent(legacy, ArtifactKind.BidiBrackets,
+            Path.Combine(baseDir, "ucd", "BidiBrackets.txt"), "ucd/BidiBrackets.txt");
+        AddIfPresent(legacy, ArtifactKind.CaseFolding,
+            Path.Combine(baseDir, "ucd", "CaseFolding.txt"), "ucd/CaseFolding.txt");
+        AddIfPresent(legacy, ArtifactKind.SpecialCasing,
+            Path.Combine(baseDir, "ucd", "SpecialCasing.txt"), "ucd/SpecialCasing.txt");
+        AddIfPresent(legacy, ArtifactKind.Jamo,
+            Path.Combine(baseDir, "ucd", "Jamo.txt"), "ucd/Jamo.txt");
+        AddIfPresent(legacy, ArtifactKind.NormalizationCorrections,
+            Path.Combine(baseDir, "ucd", "NormalizationCorrections.txt"), "ucd/NormalizationCorrections.txt");
+        AddIfPresent(legacy, ArtifactKind.EquivalentUnifiedIdeograph,
+            Path.Combine(baseDir, "ucd", "EquivalentUnifiedIdeograph.txt"), "ucd/EquivalentUnifiedIdeograph.txt");
+        AddIfPresent(legacy, ArtifactKind.DerivedName,
+            Path.Combine(baseDir, "ucd", "extracted", "DerivedName.txt"), "ucd/extracted/DerivedName.txt");
+        AddIfPresent(legacy, ArtifactKind.DerivedDecompositionType,
+            Path.Combine(baseDir, "ucd", "extracted", "DerivedDecompositionType.txt"), "ucd/extracted/DerivedDecompositionType.txt");
+        AddIfPresent(legacy, ArtifactKind.DerivedJoiningGroup,
+            Path.Combine(baseDir, "ucd", "extracted", "DerivedJoiningGroup.txt"), "ucd/extracted/DerivedJoiningGroup.txt");
+        AddIfPresent(legacy, ArtifactKind.DerivedNumericValues,
+            Path.Combine(baseDir, "ucd", "extracted", "DerivedNumericValues.txt"), "ucd/extracted/DerivedNumericValues.txt");
+        AddIfPresent(legacy, ArtifactKind.CompositionExclusions,
+            Path.Combine(baseDir, "ucd", "CompositionExclusions.txt"), "ucd/CompositionExclusions.txt");
+        AddIfPresent(legacy, ArtifactKind.NamedSequences,
+            Path.Combine(baseDir, "ucd", "NamedSequences.txt"), "ucd/NamedSequences.txt");
+        AddIfPresent(legacy, ArtifactKind.NamedSequences,
+            Path.Combine(baseDir, "ucd", "NamedSequencesProv.txt"), "ucd/NamedSequencesProv.txt");
+        AddIfPresent(legacy, ArtifactKind.StandardizedVariants,
+            Path.Combine(baseDir, "ucd", "StandardizedVariants.txt"), "ucd/StandardizedVariants.txt");
+        AddIfPresent(legacy, ArtifactKind.EmojiVariationSequences,
+            Path.Combine(baseDir, "ucd", "emoji", "emoji-variation-sequences.txt"), "ucd/emoji/emoji-variation-sequences.txt");
+        AddIfPresent(legacy, ArtifactKind.EmojiSources,
+            Path.Combine(baseDir, "ucd", "EmojiSources.txt"), "ucd/EmojiSources.txt");
         AddUnihanFiles(legacy, baseDir);
         legacy.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return legacy;
@@ -533,6 +613,22 @@ public sealed class UnicodeDecomposer
             "ucd/extracted/DerivedBidiClass.txt" => ArtifactKind.DerivedBidiClass,
             "security/IdentifierStatus.txt" => ArtifactKind.IdentifierStatus,
             "security/IdentifierType.txt" => ArtifactKind.IdentifierType,
+            "ucd/ArabicShaping.txt" => ArtifactKind.ArabicShaping,
+            "ucd/BidiBrackets.txt" => ArtifactKind.BidiBrackets,
+            "ucd/CaseFolding.txt" => ArtifactKind.CaseFolding,
+            "ucd/SpecialCasing.txt" => ArtifactKind.SpecialCasing,
+            "ucd/Jamo.txt" => ArtifactKind.Jamo,
+            "ucd/NormalizationCorrections.txt" => ArtifactKind.NormalizationCorrections,
+            "ucd/EquivalentUnifiedIdeograph.txt" => ArtifactKind.EquivalentUnifiedIdeograph,
+            "ucd/extracted/DerivedName.txt" => ArtifactKind.DerivedName,
+            "ucd/extracted/DerivedDecompositionType.txt" => ArtifactKind.DerivedDecompositionType,
+            "ucd/extracted/DerivedJoiningGroup.txt" => ArtifactKind.DerivedJoiningGroup,
+            "ucd/extracted/DerivedNumericValues.txt" => ArtifactKind.DerivedNumericValues,
+            "ucd/CompositionExclusions.txt" => ArtifactKind.CompositionExclusions,
+            "ucd/NamedSequences.txt" or "ucd/NamedSequencesProv.txt" => ArtifactKind.NamedSequences,
+            "ucd/StandardizedVariants.txt" => ArtifactKind.StandardizedVariants,
+            "ucd/emoji/emoji-variation-sequences.txt" => ArtifactKind.EmojiVariationSequences,
+            "ucd/EmojiSources.txt" => ArtifactKind.EmojiSources,
             _ when relative.StartsWith("ucd/Unihan/", StringComparison.Ordinal)
                 && relative.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
                 => ArtifactKind.UnihanProperties,
@@ -553,7 +649,8 @@ public sealed class UnicodeDecomposer
 
     private static bool IsSingletonArtifactRole(ArtifactKind kind) =>
         kind is not ArtifactKind.BinaryProperties
-            and not ArtifactKind.UnihanProperties;
+            and not ArtifactKind.UnihanProperties
+            and not ArtifactKind.NamedSequences;
 
     private static void AddUnihanFiles(List<ArtifactJob> jobs, string baseDir)
     {
@@ -614,6 +711,22 @@ public sealed class UnicodeDecomposer
         IdentifierStatus = 28,
         IdentifierType = 29,
         UnihanProperties = 30,
+        ArabicShaping = 31,
+        BidiBrackets = 32,
+        CaseFolding = 33,
+        SpecialCasing = 34,
+        Jamo = 35,
+        NormalizationCorrections = 36,
+        EquivalentUnifiedIdeograph = 37,
+        DerivedName = 38,
+        DerivedDecompositionType = 39,
+        DerivedJoiningGroup = 40,
+        DerivedNumericValues = 41,
+        CompositionExclusions = 42,
+        NamedSequences = 43,
+        StandardizedVariants = 44,
+        EmojiVariationSequences = 45,
+        EmojiSources = 46,
         Unknown = int.MaxValue,
     }
 
@@ -1096,6 +1209,189 @@ public sealed class UnicodeDecomposer
                 DecomposerOptions options,
                 CancellationToken ct) =>
             UnicodePhysicalArtifactParser.UnihanPropertiesAsync(_path, ct);
+    }
+
+    private sealed class DelimitedCodepointPropertyPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.DelimitedCodepointPropertyRow>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+        private readonly string[] _propertyNames;
+        private readonly HashSet<int>? _sequenceFields;
+
+        public DelimitedCodepointPropertyPhase(
+            UnicodeDecomposer owner,
+            string path,
+            int batch,
+            string[] propertyNames,
+            HashSet<int>? sequenceFields = null)
+            : base(batch, commitEpoch: 1)
+            => (_owner, _path, _propertyNames, _sequenceFields)
+                = (owner, path, propertyNames, sequenceFields);
+
+        protected override string PhaseLabel =>
+            $"structured/{Path.GetFileNameWithoutExtension(_path)}";
+
+        protected override long UnitsPerRecord(
+            UnicodePhysicalArtifactParser.DelimitedCodepointPropertyRow row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.DelimitedCodepointPropertyRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128 keyId = _owner.ClassifierEntity(
+                builder, "unicode/property_key", row.Property);
+            Hash128? valueId;
+            if (row.ValueIsUnicodeSequence)
+            {
+                int first = char.ConvertToUtf32(row.Value, 0);
+                int firstLength = char.IsSurrogatePair(row.Value, 0) ? 2 : 1;
+                valueId = row.Value.Length == firstLength
+                    ? CodepointId((uint)first)
+                    : ContentEmitter.Emit(builder, row.Value, Source);
+            }
+            else
+            {
+                valueId = ContentEmitter.Emit(builder, row.Value, Source);
+            }
+            if (valueId is null) return;
+
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                valueId.Value, Source, keyId,
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.DelimitedCodepointPropertyRow>
+            ExtractRecordsAsync(
+                string ecosystemPath,
+                DecomposerOptions options,
+                CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.DelimitedCodepointPropertiesAsync(
+                _path, _propertyNames, _sequenceFields, ct);
+    }
+
+    private sealed class CodepointListPropertyPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.CodepointListRow>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+        private readonly string _property;
+
+        public CodepointListPropertyPhase(
+            UnicodeDecomposer owner,
+            string path,
+            int batch,
+            string property)
+            : base(batch) => (_owner, _path, _property) = (owner, path, property);
+
+        protected override string PhaseLabel => $"property/{_property}";
+
+        protected override long UnitsPerRecord(
+            UnicodePhysicalArtifactParser.CodepointListRow row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.CodepointListRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128 propertyId = _owner.ClassifierEntity(
+                builder, "unicode/property", _property);
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
+                propertyId, Source, null,
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.CodepointListRow>
+            ExtractRecordsAsync(
+                string ecosystemPath,
+                DecomposerOptions options,
+                CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.CodepointListAsync(_path, ct);
+    }
+
+    private sealed class NamedSequencePhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.NamedSequenceRow>
+    {
+        private readonly string _path;
+
+        public NamedSequencePhase(string path, int batch)
+            : base(batch, commitEpoch: 1) => _path = path;
+
+        protected override string PhaseLabel =>
+            $"named-sequences/{Path.GetFileNameWithoutExtension(_path)}";
+
+        protected override long UnitsPerRecord(
+            UnicodePhysicalArtifactParser.NamedSequenceRow row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.NamedSequenceRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128? subject = ContentEmitter.Emit(builder, row.Sequence, Source);
+            Hash128? name = ContentEmitter.Emit(builder, row.Name, Source);
+            if (subject is null || name is null) return;
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                subject.Value, UcdProperties.RelTypeHasName, name.Value,
+                Source, null,
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.NamedSequenceRow>
+            ExtractRecordsAsync(
+                string ecosystemPath,
+                DecomposerOptions options,
+                CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.NamedSequencesAsync(_path, ct);
+    }
+
+    private sealed class SequenceMetadataPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.SequenceMetadataRow>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+        private readonly string[] _propertyNames;
+
+        public SequenceMetadataPhase(
+            UnicodeDecomposer owner,
+            string path,
+            int batch,
+            string[] propertyNames)
+            : base(batch, commitEpoch: 1)
+            => (_owner, _path, _propertyNames) = (owner, path, propertyNames);
+
+        protected override string PhaseLabel =>
+            $"sequence-metadata/{Path.GetFileNameWithoutExtension(_path)}";
+
+        protected override long UnitsPerRecord(
+            UnicodePhysicalArtifactParser.SequenceMetadataRow row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.SequenceMetadataRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128? subject = ContentEmitter.Emit(builder, row.Sequence, Source);
+            Hash128? value = ContentEmitter.Emit(builder, row.Value, Source);
+            if (subject is null || value is null) return;
+            Hash128 keyId = _owner.ClassifierEntity(
+                builder, "unicode/property_key", row.Property);
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                subject.Value, UcdProperties.RelTypeHasProperty,
+                value.Value, Source, keyId,
+                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.SequenceMetadataRow>
+            ExtractRecordsAsync(
+                string ecosystemPath,
+                DecomposerOptions options,
+                CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.SequenceMetadataAsync(
+                _path, _propertyNames, ct);
     }
 
     private sealed class MirrorPhase
