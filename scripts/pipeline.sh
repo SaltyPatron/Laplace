@@ -266,7 +266,7 @@ phase_build_app() {
   ( cd "$ROOT/app" && dotnet build Laplace.slnx -c Release )
 }
 
-phase_build() {
+phase_build_native() {
   "$PYTHON" "$ROOT/scripts/postgresql-release.py" build-inputs --prefix "$LAPLACE_PG_PREFIX" || return $?
   [[ "$FORCE_REBUILD" != 1 ]] || phase_clean
   [[ "$FORCE_CODEGEN" != 1 ]] || phase_codegen
@@ -307,6 +307,10 @@ phase_build() {
       echo "::error::declared chess transition perfcache was not produced" >&2; return 1;
     }
   fi
+}
+
+phase_build() {
+  phase_build_native
   phase_build_app
 }
 
@@ -598,7 +602,7 @@ while [[ $# -gt 0 ]]; do
     --serial-tests) SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
     --force-all) shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|install|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
+    clean|codegen|build|build-native|build-app|install|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -610,6 +614,8 @@ for phase in "${PHASES[@]}"; do
     clean) phase_clean ;;
     codegen) phase_codegen ;;
     build) phase_build ;;
+    build-native) phase_build_native ;;
+    build-app) phase_build_app ;;
     install) phase_install ;;
     activate-postgres) phase_activate_postgres ;;
     migrate) phase_migrate ;;
