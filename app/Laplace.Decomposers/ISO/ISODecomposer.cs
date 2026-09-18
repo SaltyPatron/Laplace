@@ -7,7 +7,7 @@ using TC = Laplace.Decomposers.Abstractions.SourceTrust;
 
 namespace Laplace.Decomposers.ISO;
 
-public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, IIngestInventoryProvider
+public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, IIngestInventoryProvider, IIngestArtifactGraphProvider
 {
     public static readonly Hash128 Source = ISOSource.SourceId;
     private const string NameAliasRelation = "HAS_NAME_ALIAS";
@@ -42,6 +42,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         "iso-639-3_Retirements.tab",
         Path.Combine("iana", "language-subtag-registry.txt"),
         "iso-639-3_Name_Index.tab",
+        "ISO-639-2_utf-8.txt",
     ];
 
     private static bool SelectedOrUnmanifested(IDecomposerContext context, string path)
@@ -107,6 +108,15 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
             await foreach (var change in RunPhaseAsync(
                 new NameIndexPhase(this), context, options,
                 "iso-639-3_Name_Index.tab", names, ct))
+                yield return change;
+        }
+
+        string iso2 = Path.Combine(context.EcosystemPath, "ISO-639-2_utf-8.txt");
+        if (SelectedOrUnmanifested(context, iso2))
+        {
+            await foreach (var change in RunPhaseAsync(
+                new Iso6392Phase(this), context, options,
+                "ISO-639-2_utf-8.txt", iso2, ct))
                 yield return change;
         }
 
@@ -195,6 +205,122 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         b.AddAttestation(NativeAttestation.Categorical(
             variantId, "HAS_VARIANT_OF", parentId, Source, TC.StandardsDerived));
     }
+
+    public Task<IngestArtifactGraph?> DescribeArtifactsAsync(
+        string ecosystemPath,
+        DecomposerOptions options,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!Directory.Exists(ecosystemPath))
+            return Task.FromResult<IngestArtifactGraph?>(null);
+
+        string root = Path.GetFullPath(ecosystemPath);
+        var admitted = RelativePhysicalFiles
+            .Select(static relative => relative.Replace('\\', '/'))
+            .ToHashSet(StringComparer.Ordinal);
+        var artifacts = new List<IngestArtifact>();
+
+        foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                                      .OrderBy(static p => p, StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            string full = Path.GetFullPath(file);
+            string relative = Path.GetRelativePath(root, full).Replace('\\', '/');
+            IngestArtifactDisposition disposition;
+            string notes;
+
+            if (admitted.Contains(relative))
+            {
+                disposition = IngestArtifactDisposition.Admitted;
+                notes = "";
+            }
+            else if (IsEquivalentIsoPackaging(relative, root))
+            {
+                disposition = IngestArtifactDisposition.EquivalentPackaging;
+                notes = "archive/extracted packaging duplicates an admitted ISO language artifact";
+            }
+            else if (IsIsoControlArtifact(relative))
+            {
+                disposition = IngestArtifactDisposition.ExcludedWithReason;
+                notes = "release/cache/provenance control artifact; retained but not admitted as language testimony";
+            }
+            else
+            {
+                disposition = IngestArtifactDisposition.Unsupported;
+                notes = "physical ISO/IANA/CLDR/Glottolog artifact is installed but has no semantic handler yet";
+            }
+
+            var info = new FileInfo(full);
+            artifacts.Add(new IngestArtifact(
+                ISOSource.SourceName,
+                "installed",
+                relative,
+                relative,
+                full,
+                disposition,
+                UpstreamUrl: "",
+                FetchedAtUtc: "",
+                Bytes: info.Length,
+                Sha256: "",
+                UpstreamChecksum: "",
+                MediaType: IsoMediaType(relative),
+                License: "",
+                Citation: "",
+                Language: "",
+                Split: "",
+                AnnotationOrigin: "language-standard",
+                Notes: notes,
+                JournalLabel: $"iso639/{relative}",
+                ModifiedAt: info.LastWriteTimeUtc));
+        }
+
+        return Task.FromResult<IngestArtifactGraph?>(new IngestArtifactGraph(artifacts));
+    }
+
+    private static bool IsEquivalentIsoPackaging(string relative, string root)
+    {
+        string first = relative.Split('/', 2)[0];
+        if (first.StartsWith("iso-639-3_Code_Tables_", StringComparison.Ordinal)
+            && relative.Contains('/', StringComparison.Ordinal))
+        {
+            string name = Path.GetFileName(relative);
+            if (File.Exists(Path.Combine(root, name))) return true;
+        }
+
+        if (relative.StartsWith("iso-639-3_Code_Tables_", StringComparison.Ordinal)
+            && relative.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            return Directory.EnumerateDirectories(
+                    root, "iso-639-3_Code_Tables_*", SearchOption.TopDirectoryOnly)
+                .Any();
+
+        return false;
+    }
+
+    private static bool IsIsoControlArtifact(string relative)
+    {
+        string name = Path.GetFileName(relative);
+        return name.Equals("checkpoint.bin", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("README", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("readme", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("copyright", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("index.html", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".md5", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".sig", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string IsoMediaType(string relative) =>
+        Path.GetExtension(relative).ToLowerInvariant() switch
+        {
+            ".txt" or ".tab" or ".csv" => "text/plain",
+            ".xml" => "application/xml",
+            ".json" => "application/json",
+            ".zip" => "application/zip",
+            ".html" or ".htm" => "text/html",
+            _ => "application/octet-stream",
+        };
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
@@ -397,6 +523,76 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
                     yield return (subtag, prefix);
             }
             await Task.CompletedTask;
+        }
+    }
+
+    private sealed class Iso6392Phase
+        : IsoComposePhase<(string Bibliographic, string Terminological, string Part1, string English, string French)>
+    {
+        public Iso6392Phase(ISODecomposer owner) : base(owner) { }
+        protected override string PhaseLabel => "iso639-2";
+
+        protected override void Compose(
+            (string Bibliographic, string Terminological, string Part1, string English, string French) rec,
+            SubstrateChangeBuilder b)
+        {
+            string canonicalCode = rec.Terminological.Length == 3
+                ? rec.Terminological
+                : rec.Bibliographic;
+            string? resolved = LanguageReference.ResolveCode(canonicalCode);
+            Hash128? languageId = resolved is { Length: 3 }
+                ? LanguageEntityId.FromIso639_3(resolved)
+                : null;
+
+            StageCode(rec.Bibliographic, "HAS_ISO639_2B_CODE");
+            StageCode(rec.Terminological, "HAS_ISO639_2T_CODE");
+
+            void StageCode(string code, string relation)
+            {
+                if (code.Length != 3) return;
+                string canonical = $"iso639-2:{code.ToLowerInvariant()}";
+                Owner._codeNames.Add(canonical);
+                Hash128 codeId = Hash128.OfCanonical(canonical);
+                b.AddEntity(codeId, EntityTier.Word, Iso639CodeTypeId, Source);
+
+                if (ContentEmitter.Emit(b, rec.English, Source) is { } english)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        codeId, NameAliasRelation, english, Source, TC.StandardsDerived));
+                if (ContentEmitter.Emit(b, rec.French, Source) is { } french)
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        codeId, NameAliasRelation, french, Source, TC.StandardsDerived));
+
+                if (languageId is { } lid)
+                {
+                    b.AddEntity(lid, EntityTier.Word, LanguageTypeId, Source);
+                    b.AddAttestation(NativeAttestation.Categorical(
+                        lid, relation, codeId, Source, TC.StandardsDerived));
+                }
+            }
+        }
+
+        protected override async IAsyncEnumerable<
+            (string Bibliographic, string Terminological, string Part1, string English, string French)>
+            ExtractRecordsAsync(
+                string ecosystemPath,
+                DecomposerOptions options,
+                [EnumeratorCancellation] CancellationToken ct)
+        {
+            LanguageReference.EnsureLoaded(ecosystemPath);
+            string path = Path.Combine(ecosystemPath, "ISO-639-2_utf-8.txt");
+            await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+            {
+                if (lineMem.IsEmpty) continue;
+                string[] fields = Encoding.UTF8.GetString(lineMem.Span).Split('|');
+                if (fields.Length < 5) continue;
+                string b = fields[0].Trim().ToLowerInvariant();
+                string t = fields[1].Trim().ToLowerInvariant();
+                string p1 = fields[2].Trim().ToLowerInvariant();
+                string en = fields[3].Trim();
+                string fr = fields[4].Trim();
+                if (b.Length != 3) continue;
+                yield return (b, t, p1, en, fr);
+            }
         }
     }
 
