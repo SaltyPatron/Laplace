@@ -21,7 +21,9 @@ class MainPushQueueContract(unittest.TestCase):
         qualification = lifecycle.split("  mainline-qualification:\n", 1)[1].split(
             "\n  mainline-delivery:\n", 1)[0]
         delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
-        self.assertIn("group: laplace-main-qualification-dispatch", qualification)
+        self.assertIn("laplace-main-product-qualification-dispatch", qualification)
+        self.assertIn("laplace-main-test-qualification-dispatch", qualification)
+        self.assertIn("needs.plan.outputs.delivery_actions != ''", qualification)
         self.assertIn("cancel-in-progress: true", qualification)
         self.assertIn("group: laplace-main-delivery-dispatch", delivery)
         self.assertIn("cancel-in-progress: false", delivery)
@@ -38,6 +40,14 @@ class MainPushQueueContract(unittest.TestCase):
 
 
 class WorkflowArchitecture(unittest.TestCase):
+    def test_test_only_and_product_qualification_use_distinct_preemption_groups(self):
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        qualification = lifecycle.split("  mainline-qualification:\n", 1)[1].split(
+            "\n  mainline-delivery:\n", 1)[0]
+        self.assertIn("laplace-main-product-qualification-dispatch", qualification)
+        self.assertIn("laplace-main-test-qualification-dispatch", qualification)
+        self.assertIn("needs.plan.outputs.delivery_actions != ''", qualification)
+
     def test_no_ephemeral_repair_workflows_remain(self):
         names = {path.name for path in WORKFLOWS.glob("*.yml")}
         repairs = sorted(name for name in names if "repair" in name)
