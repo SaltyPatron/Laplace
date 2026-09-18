@@ -86,10 +86,13 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("stage: release-qualification", lifecycle)
         self.assertIn("dev_suites: ${{ needs.plan.outputs.dev_suites }}", lifecycle)
         self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
+        self.assertIn("managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}", lifecycle)
+        self.assertIn("managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}", lifecycle)
         self.assertIn("  mainline-delivery:", lifecycle)
         self.assertIn("needs: [plan, mainline-qualification]", lifecycle)
         self.assertIn("stage: release-delivery", lifecycle)
         self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
+        self.assertIn("managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}", lifecycle)
         self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", lifecycle)
         self.assertIn("db_suites: ${{ needs.plan.outputs.db_suites }}", lifecycle)
         self.assertIn("live_suites: ${{ needs.plan.outputs.live_suites }}", lifecycle)
@@ -167,12 +170,11 @@ class WorkflowArchitecture(unittest.TestCase):
             "scripts/ci-qualification-cache.py",
             "scripts/ci-product-freshness.py",
             "scripts/ci_product_scope.py",
-            "scripts/test-ci-*.py",
-            "scripts/test-workflow-architecture.py",
-            "scripts/test-seed-workflow-ownership.py",
-            "scripts/test-product-ci-artifact-ownership.py",
-            "scripts/test-benchmark-suite.py",
-            "scripts/validate-pipeline.py",
+            "scripts/ci_managed_graph.py",
+            "scripts/test-parallel.sh",
+            "scripts/test-suites/**",
+            "scripts/test-*.py",
+            "app/*.Tests/**",
         ):
             self.assertIn(f'- "{path}"', lifecycle)
 
@@ -235,6 +237,8 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("publish_scope:", reusable)
         self.assertIn("LAPLACE_DEV_SUITES:", reusable)
         self.assertIn("LAPLACE_BUILD_COMPONENTS:", reusable)
+        self.assertIn("LAPLACE_MANAGED_TEST_PROJECTS:", reusable)
+        self.assertIn("LAPLACE_MANAGED_BUILD_PROJECTS:", reusable)
         self.assertIn("LAPLACE_DB_SUITES:", reusable)
         self.assertIn("LAPLACE_LIVE_SUITES:", reusable)
         self.assertIn("LAPLACE_DELIVERY_ACTIONS:", reusable)
@@ -248,6 +252,36 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("ci-qualification-cache.py record", matrix)
         self.assertIn("qualification planner kept", matrix)
         self.assertNotIn("|| rc=$?", matrix)
+
+    def test_test_execution_is_owned_by_modular_suite_drivers(self):
+        dispatcher = (ROOT / "scripts" / "test-parallel.sh").read_text(encoding="utf-8")
+        suites = (
+            "native-dev", "managed-dev", "uci-dev", "browser-dev",
+            "db-health", "native-db", "managed-db",
+            "live-floor", "live-api", "managed-live", "generation-eval",
+        )
+        self.assertNotIn("run_managed_dev() {", dispatcher)
+        self.assertNotIn("run_live_api() {", dispatcher)
+        self.assertIn('driver="$ROOT/scripts/test-suites/$1.sh"', dispatcher)
+        for suite in suites:
+            with self.subTest(suite=suite):
+                path = ROOT / "scripts" / "test-suites" / f"{suite}.sh"
+                self.assertTrue(path.is_file())
+                self.assertIn(f"run_{suite.replace('-', '_')}", path.read_text(encoding="utf-8"))
+
+    def test_managed_build_and_test_are_project_graph_scoped(self):
+        planner = (ROOT / "scripts" / "ci-impact-plan.py").read_text(encoding="utf-8")
+        graph = (ROOT / "scripts" / "ci_managed_graph.py").read_text(encoding="utf-8")
+        pipeline = (ROOT / "scripts" / "pipeline.sh").read_text(encoding="utf-8")
+        managed = (ROOT / "scripts" / "test-suites" / "managed-dev.sh").read_text(encoding="utf-8")
+        self.assertIn("plan_managed_graph", planner)
+        self.assertIn("ProjectReference", graph)
+        self.assertIn("LAPLACE_MANAGED_BUILD_PROJECTS", pipeline)
+        self.assertIn('dotnet build "$ROOT/$project"', pipeline)
+        self.assertIn("LAPLACE_MANAGED_TEST_PROJECTS", managed)
+        self.assertIn('dotnet test "$ROOT/$project"', managed)
+        self.assertNotIn("test-ci-workspace.py", managed)
+        self.assertNotIn("test-managed-policy.py", managed)
 
     def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
