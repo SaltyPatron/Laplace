@@ -151,6 +151,32 @@ TEST(LaplaceCoreCodepointTable, ReverseIdentityIncludesNulAndRejectsSurrogates) 
     EXPECT_EQ(codepoint_table_lookup_id(&codepoint_table_lookup(0xD800)->hash, &cp), -1);
 }
 
+TEST(LaplaceCoreCodepointTable, RejectsLegacyBandedPerfcacheFormat) {
+    const std::filesystem::path original = LAPLACE_PERFCACHE_PATH_FOR_TESTS;
+    const std::filesystem::path mutated =
+        std::filesystem::temp_directory_path() / "laplace-v3-banded-perfcache.bin";
+    std::error_code ec;
+    std::filesystem::remove(mutated, ec);
+    ASSERT_TRUE(std::filesystem::copy_file(
+        original, mutated, std::filesystem::copy_options::overwrite_existing));
+
+    {
+        std::fstream stream(mutated, std::ios::in | std::ios::out | std::ios::binary);
+        ASSERT_TRUE(stream.good());
+        laplace_perfcache_header_t header{};
+        stream.read(reinterpret_cast<char*>(&header), sizeof(header));
+        ASSERT_EQ(stream.gcount(), static_cast<std::streamsize>(sizeof(header)));
+        header.format_version = 3u;
+        stream.seekp(0);
+        stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        ASSERT_TRUE(stream.good());
+    }
+
+    EXPECT_EQ(codepoint_table_load_perfcache(mutated.string().c_str()), -2);
+    EXPECT_TRUE(codepoint_table_is_loaded());
+    std::filesystem::remove(mutated, ec);
+}
+
 TEST(LaplaceCoreCodepointTable, RejectsStaleUcdVersionAndKeepsActiveTable) {
     const std::filesystem::path original = LAPLACE_PERFCACHE_PATH_FOR_TESTS;
     const std::filesystem::path mutated =
