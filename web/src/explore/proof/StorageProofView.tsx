@@ -500,6 +500,7 @@ export function StorageProofView() {
   return (
     <div
       className={styles.root}
+      aria-label="Storage Proof workspace"
       data-storage-proof-surface={STORAGE_PROOF_SURFACE_VERSION}
       data-storage-proof-root={proof?.root_id_hex ?? ''}
       data-storage-proof-rom={proof?.perfcache_receipt_hex ?? ''}
