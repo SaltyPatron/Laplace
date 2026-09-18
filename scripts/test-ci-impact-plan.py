@@ -73,6 +73,13 @@ class ImpactPlanTests(unittest.TestCase):
             value["delivery_actions"], ["database", "reconcile", "publish", "live"]
         )
         self.assertNotIn("install", value["delivery_actions"])
+        self.assertEqual(value["publish_scope"], "full")
+
+    def test_shared_managed_library_requires_full_publication(self):
+        value = plan("app/Laplace.Core/Core/Foo.cs")
+        self.assertEqual(value["build_components"], ["managed"])
+        self.assertEqual(value["publish_scope"], "full")
+        self.assertEqual(value["delivery_actions"], ["publish", "live"])
 
     def test_chess_change_keeps_full_publication_and_uci_qualification(self):
         value = plan("app/Laplace.Chess/Service/Foo.cs")
