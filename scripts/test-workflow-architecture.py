@@ -163,6 +163,11 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("preserve_native_source", reusable)
         self.assertIn("preserving latest native-qualified candidate", reusable)
 
+    def test_web_only_plan_does_not_force_managed_rebuild(self):
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        run_build = product.split("run_build() {", 1)[1].split("\n}\n\nrun_dev_test_matrix", 1)[0]
+        self.assertIn("need_web", run_build)
+        self.assertNotIn("need_web == 0 )) || need_managed=1", run_build)
     def test_planned_web_component_is_built_before_delivery(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
         pipeline = (ROOT / "scripts/pipeline.sh").read_text(encoding="utf-8")
