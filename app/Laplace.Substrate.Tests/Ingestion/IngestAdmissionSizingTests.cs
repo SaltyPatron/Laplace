@@ -228,9 +228,10 @@ public sealed class IngestAdmissionSizingTests
             new[] { row.EntityId, row.EntityId, copied.EntityId },
             captured.ObservationEntities.ToArray());
         Assert.Equal(3, captured.ObservationSources.Count);
-        // Capture reserves the possible selected-row supplement before reference
-        // overlap is known. Direct provenance is physicality/entity/source/unit/time.
-        Assert.Equal(4 * 72L, captured.ObservationPayloadBytes);
+        // Capture reserves capacity for the possible selected-row supplement before
+        // reference overlap is known, then reports only the rows that actually cross
+        // into PostgreSQL. Direct provenance is physicality/entity/source/unit/time.
+        Assert.Equal(3 * 72L, captured.ObservationPayloadBytes);
         Assert.Equal(4, captured.ObservationSources.Capacity);
         Assert.True(modeled >= serialized);
         Assert.True(modeled >= captured.ObservationPayloadBytes);
