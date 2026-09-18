@@ -33,6 +33,13 @@ on:
 permissions:
   contents: read
 
+# Keep the currently executing main delivery intact, but collapse queued push
+# revisions to the newest one before they ever consume the self-hosted runner.
+# Explicit operator/dispatch runs get a unique group and are never coalesced.
+concurrency:
+  group: ${{ github.event_name == 'push' && 'laplace-main-product-lifecycle' || format('laplace-product-dispatch-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   mainline-candidate:
     if: github.event_name == 'push'

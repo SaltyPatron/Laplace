@@ -7,6 +7,16 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
+
+
+class MainPushQueueContract(unittest.TestCase):
+    def test_main_push_coalesces_superseded_pending_runs_without_cancelling_active_delivery(self):
+        text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertIn("concurrency:", text)
+        self.assertIn("laplace-main-product-lifecycle", text)
+        self.assertIn("cancel-in-progress: false", text)
+        self.assertIn("github.run_id", text)
+
 class WorkflowArchitecture(unittest.TestCase):
     def test_no_ephemeral_repair_workflows_remain(self):
         names = {path.name for path in WORKFLOWS.glob("*.yml")}
