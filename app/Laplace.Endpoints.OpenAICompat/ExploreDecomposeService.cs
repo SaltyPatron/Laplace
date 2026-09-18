@@ -219,6 +219,7 @@ internal sealed class ExploreDecomposeService
             AtomWindow: UnicodeSeed.CodepointCount,
             PerfcacheReceiptHex: CodepointPerfcache.ReceiptHex,
             DatabasePerfcacheReceiptHex: null,
+            DatabasePerfcacheError: null,
             PerfcacheAligned: null,
             Nodes: rows);
     }
