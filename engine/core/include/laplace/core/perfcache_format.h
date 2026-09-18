@@ -11,7 +11,13 @@ extern "C" {
 #endif
 
 #define LAPLACE_PERFCACHE_MAGIC 0x4652504Cu
-#define LAPLACE_PERFCACHE_VERSION 3u
+/*
+ * v4 changes the canonical tier-0 placement law: DUCET/UCA rank still names the
+ * atom ordering, but coordinates use prefix-stable open Super-Fibonacci
+ * (radical-inverse radius) rather than bounded rank/N latitude.  Reject v3
+ * blobs so the old banded geometry can never be mistaken for the current floor.
+ */
+#define LAPLACE_PERFCACHE_VERSION 4u
 #define LAPLACE_PERFCACHE_RECORD_COUNT 1114112u
 
 typedef struct {
