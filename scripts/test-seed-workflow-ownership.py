@@ -82,10 +82,11 @@ class WorkflowOwnership(unittest.TestCase):
             "options: [status, migrate, repair, reindex, remigrate, recreate]",
             text,
         )
-        self.assertIn("confirm_recreate:", text)
-        self.assertIn("confirm_data_loss:", text)
-        self.assertIn('LAPLACE_DB_CONFIRM_RECREATE', text)
-        self.assertIn('LAPLACE_DB_CONFIRM_DATA_LOSS', text)
+        self.assertNotIn("confirm_recreate:", text)
+        self.assertNotIn("confirm_data_loss:", text)
+        self.assertNotIn('LAPLACE_DB_CONFIRM_RECREATE', text)
+        self.assertNotIn('LAPLACE_DB_CONFIRM_DATA_LOSS', text)
+        self.assertIn("bash scripts/db-migrations.sh nuke --yes", text)
         self.assertNotIn("check-installed-extension-current.py", text)
         self.assertNotIn("group: laplace-host-lifecycle", text)
         for operation in ("migrate", "repair", "reindex", "remigrate", "recreate"):
