@@ -352,14 +352,12 @@ PY
 }
 
 carry_forward_undelivered_impact() {
-  # Only automatic main delivery owns this reconciliation. Manual/operator stages
-  # deliberately keep the scope they were dispatched with. A qualification with
-  # no delivery actions is test-only and must never inherit installed-product work.
+  # Automatic main qualification/delivery must converge from the ACTUALLY installed
+  # revision, not only from this commit's parent. A test-only successor can be the
+  # first revision that survives qualification after several product candidates were
+  # superseded; skipping carry-forward here strands those product changes forever.
+  # Manual/operator stages deliberately keep the scope they were dispatched with.
   [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]] || return 0
-  [[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]] || {
-    echo "::notice::qualification has no delivery actions; deployed product carry-forward skipped"
-    return 0
-  }
   case "${LAPLACE_STAGE:-}" in
     release-qualification|release-delivery) ;;
     *) return 0 ;;
@@ -803,6 +801,16 @@ run_release_activation() {
 run_release_delivery() {
   check_deps
   carry_forward_undelivered_impact
+
+  # Every main revision enters this owner. If the installed->target reconciliation
+  # found no product mutation, finish without touching the host. This is distinct
+  # from defaulting an empty selector to "all".
+  local actions="${LAPLACE_DELIVERY_ACTIONS:-}"
+  if [[ -z "$actions" ]]; then
+    echo "::notice::installed product is current for all product-relevant inputs; delivery no-op"
+    return 0
+  fi
+
   require_built_revision
 
   # Qualification is allowed to be superseded and cancelled. Delivery is not.
@@ -816,7 +824,6 @@ run_release_delivery() {
   (( current_rc == 0 )) || return "$current_rc"
   export LAPLACE_SKIP_IF_SUPERSEDED=0
 
-  local actions="${LAPLACE_DELIVERY_ACTIONS:-all}"
   local publish_scope="${LAPLACE_PUBLISH_SCOPE:-full}"
   echo "::notice::delivery actions=$actions publish_scope=$publish_scope db_suites=${LAPLACE_DB_SUITES:-all} live_suites=${LAPLACE_LIVE_SUITES:-all}"
 
