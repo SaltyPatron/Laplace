@@ -65,6 +65,13 @@ class WorkflowArchitecture(unittest.TestCase):
                   for path in WORKFLOWS.glob("*.yml")}
         self.assertEqual(expected, actual)
 
+    def test_hosted_policy_lane_owns_writable_external_fixture_cache(self):
+        product = (ROOT / "scripts" / "product-ci.sh").read_text(encoding="utf-8")
+        checks = product.split("run_ci_contract_checks() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('LAPLACE_WORK_ROOT="$ci_tmp/laplace-work"', checks)
+        self.assertIn('LAPLACE_CHESS_PGN_CACHE="$LAPLACE_WORK_ROOT/chess-pgn-validation"', checks)
+        self.assertIn('mkdir -p "$ci_tmp" "$LAPLACE_WORK_ROOT" "$LAPLACE_CHESS_PGN_CACHE"', checks)
+
     def test_ci_contract_has_a_lightweight_hosted_lane(self):
         text = (WORKFLOWS / "ci-contract.yml").read_text(encoding="utf-8")
         self.assertIn("pull_request:", text)

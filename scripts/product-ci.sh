@@ -21,7 +21,9 @@ provision_deps() {
 # prerequisite hidden inside build, deploy, database, or ingest operations.
 run_ci_contract_checks() {
   local ci_tmp="${RUNNER_TEMP:-$ROOT/build/ci-policy-tmp}"
-  mkdir -p "$ci_tmp"
+  export LAPLACE_WORK_ROOT="$ci_tmp/laplace-work"
+  export LAPLACE_CHESS_PGN_CACHE="$LAPLACE_WORK_ROOT/chess-pgn-validation"
+  mkdir -p "$ci_tmp" "$LAPLACE_WORK_ROOT" "$LAPLACE_CHESS_PGN_CACHE"
   export TMPDIR="$ci_tmp" TMP="$ci_tmp" TEMP="$ci_tmp"
 
   bash -n \
