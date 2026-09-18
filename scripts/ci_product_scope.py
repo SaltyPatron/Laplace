@@ -11,6 +11,7 @@ import fnmatch
 PRODUCT_IGNORED_PREFIXES = (
     ".github/",
     "docs/",
+    "scripts/test-suites/",
 )
 
 PRODUCT_IGNORED_SUFFIXES = (
@@ -55,6 +56,7 @@ GITHUB_PATH_IGNORES = (
     "scripts/pipeline.sh",
     "scripts/ci_managed_projects.py",
     "scripts/test-parallel.sh",
+    "scripts/test-suites/**",
     "scripts/test-ci-*.py",
     "scripts/test-workflow-architecture.py",
     "scripts/test-seed-workflow-ownership.py",
