@@ -75,8 +75,8 @@ def ensure_release(repo: str, tag: str, target_sha: str) -> None:
         "Historical GitHub Actions evidence moved out of obsolete workflow-run identities.\n\n"
         "Each workflow is archived transactionally: run metadata for every run, plus "
         "artifact ZIPs and logs ZIPs for runs that still had retrievable artifacts. "
-        "A workflow's old runs are deleted only after its \`workflow-<id>-archive.json\` "
-        "marker asset is uploaded. Split \`.part-*\` assets are concatenated in lexical "
+        "A workflow's old runs are deleted only after its `workflow-<id>-archive.json` "
+        "marker asset is uploaded. Split `.part-*` assets are concatenated in lexical "
         "order before opening the resulting tar archive."
     )
     gh(
@@ -401,7 +401,7 @@ def report_summary(report: dict) -> str:
     lines = [
         "## Historical Actions evidence archive",
         "",
-        f"- Release: \`{report['release_tag']}\`",
+        f"- Release: `{report['release_tag']}`",
         f"- Stale evidence-bearing identities discovered: {report['discovered_workflow_count']}",
         f"- Workflow identities archived this run: {report['archived_workflow_count']}",
         f"- Workflow identities already archived: {report['already_archived_workflow_count']}",
@@ -413,7 +413,7 @@ def report_summary(report: dict) -> str:
     if report["failed"]:
         lines += ["### Unresolved", ""]
         for item in report["failed"]:
-            lines.append(f"- \`{item['path']}\`: {item['error']}")
+            lines.append(f"- `{item['path']}`: {item['error']}")
     return "\n".join(lines)
 
 
