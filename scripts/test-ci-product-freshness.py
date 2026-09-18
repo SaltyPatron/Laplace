@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,7 +72,7 @@ class ProductFreshnessTests(unittest.TestCase):
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True, capture_output=True, check=True
             ).stdout.strip()
             equivalent = subprocess.run(
-                [str(SCRIPT), "--root", str(repo), "--base", base, "--head", policy],
+                [sys.executable, str(SCRIPT), "--root", str(repo), "--base", base, "--head", policy],
                 text=True, capture_output=True,
             )
             self.assertEqual(0, equivalent.returncode, equivalent.stdout + equivalent.stderr)
@@ -83,7 +84,7 @@ class ProductFreshnessTests(unittest.TestCase):
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True, capture_output=True, check=True
             ).stdout.strip()
             superseded = subprocess.run(
-                [str(SCRIPT), "--root", str(repo), "--base", policy, "--head", product],
+                [sys.executable, str(SCRIPT), "--root", str(repo), "--base", policy, "--head", product],
                 text=True, capture_output=True,
             )
             self.assertEqual(3, superseded.returncode, superseded.stdout + superseded.stderr)
