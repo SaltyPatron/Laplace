@@ -45,7 +45,7 @@ sys.exit(9 if os.environ.get("SCHEDULER_FAIL_PROJECT") == name else 0)
 '''
 
 def owner_function():
-    source = (ROOT / "scripts/test-parallel.sh").read_text()
+    source = (ROOT / "scripts/test-suites/managed-db.sh").read_text()
     match = re.search(r"(?m)^run_managed_db\(\) \{\n.*?^\}", source, re.S)
     if match is None:
         raise AssertionError("canonical managed DB function not found")
