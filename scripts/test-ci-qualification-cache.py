@@ -28,7 +28,10 @@ class QualificationCacheTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q"], cwd=self.repo, check=True)
         subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
 
-    def run_cache(self, operation: str, suite: str, check: bool = False):
+    def run_cache(self, operation: str, suite: str, check: bool = False, managed_projects: str | None = None):
+        environment = dict(os.environ)
+        if managed_projects is not None:
+            environment["LAPLACE_MANAGED_TEST_PROJECTS"] = managed_projects
         result = subprocess.run(
             [
                 sys.executable,
@@ -45,13 +48,16 @@ class QualificationCacheTests(unittest.TestCase):
             ],
             text=True,
             capture_output=True,
+            env=environment,
         )
         if check and result.returncode != 0:
             self.fail(result.stdout + result.stderr)
         return result
 
-    def fingerprint(self, suite: str) -> str:
-        result = self.run_cache("fingerprint", suite, check=True)
+    def fingerprint(self, suite: str, managed_projects: str | None = None) -> str:
+        result = self.run_cache(
+            "fingerprint", suite, check=True, managed_projects=managed_projects
+        )
         return result.stdout.strip()
 
     def test_unrelated_web_change_does_not_invalidate_managed_receipt(self):
@@ -61,6 +67,37 @@ class QualificationCacheTests(unittest.TestCase):
         subprocess.run(["git", "add", "web/app.ts"], cwd=self.repo, check=True)
         self.assertEqual(managed_before, self.fingerprint("managed-dev"))
         self.assertNotEqual(browser_before, self.fingerprint("browser-dev"))
+
+    def test_selected_managed_project_receipt_ignores_unrelated_project(self):
+        for name in ("A", "A.Tests", "B", "B.Tests"):
+            (self.repo / "app" / name).mkdir(parents=True, exist_ok=True)
+        (self.repo / "app/A/A.csproj").write_text("<Project />\n", encoding="utf-8")
+        (self.repo / "app/A/a.cs").write_text("a-v1\n", encoding="utf-8")
+        (self.repo / "app/A.Tests/A.Tests.csproj").write_text(
+            '<Project><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup>'
+            '<ItemGroup><ProjectReference Include="../A/A.csproj" /></ItemGroup></Project>\n',
+            encoding="utf-8",
+        )
+        (self.repo / "app/A.Tests/test.cs").write_text("test-a\n", encoding="utf-8")
+        (self.repo / "app/B/B.csproj").write_text("<Project />\n", encoding="utf-8")
+        (self.repo / "app/B/b.cs").write_text("b-v1\n", encoding="utf-8")
+        (self.repo / "app/B.Tests/B.Tests.csproj").write_text(
+            '<Project><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup>'
+            '<ItemGroup><ProjectReference Include="../B/B.csproj" /></ItemGroup></Project>\n',
+            encoding="utf-8",
+        )
+        (self.repo / "app/B.Tests/test.cs").write_text("test-b\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
+
+        selected = "app/A.Tests/A.Tests.csproj"
+        before = self.fingerprint("managed-dev", selected)
+        (self.repo / "app/B/b.cs").write_text("b-v2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "app/B/b.cs"], cwd=self.repo, check=True)
+        self.assertEqual(before, self.fingerprint("managed-dev", selected))
+
+        (self.repo / "app/A/a.cs").write_text("a-v2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "app/A/a.cs"], cwd=self.repo, check=True)
+        self.assertNotEqual(before, self.fingerprint("managed-dev", selected))
 
     def test_source_returns_revision_that_owns_matching_receipt(self):
         self.run_cache("record", "native-dev", check=True)
