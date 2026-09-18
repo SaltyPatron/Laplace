@@ -30,7 +30,7 @@ class WebArtifactTests(unittest.TestCase):
         subprocess.run(["git", "commit", "-qm", "source"], cwd=self.repo, check=True)
         self.manifest = self.repo / "build/.laplace-web-artifact.json"
 
-    def run(self, operation: str):
+    def run_artifact(self, operation: str):
         return subprocess.run(
             [
                 sys.executable,
@@ -46,7 +46,7 @@ class WebArtifactTests(unittest.TestCase):
         )
 
     def test_seal_then_verify_exact_artifact(self):
-        sealed = self.run("seal")
+        sealed = self.run_artifact("seal")
         self.assertEqual(0, sealed.returncode, sealed.stderr)
         payload = json.loads(self.manifest.read_text())
         self.assertEqual(
@@ -56,7 +56,7 @@ class WebArtifactTests(unittest.TestCase):
             ).stdout.strip(),
             payload["source_sha"],
         )
-        verified = self.run("verify")
+        verified = self.run_artifact("verify")
         self.assertEqual(0, verified.returncode, verified.stderr)
 
     def test_dist_mutation_invalidates_qualified_artifact(self):
