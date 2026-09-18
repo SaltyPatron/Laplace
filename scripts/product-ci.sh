@@ -297,21 +297,15 @@ append_csv_env() {
 }
 
 force_web_carry_forward_impact() {
-  # The SPA participates in the full application transaction. Full deploy uses
-  # --no-build for all four managed runtimes, so a forced web carry-forward must
-  # materialize those exact payload roots even when their source did not change.
-  append_csv_env LAPLACE_BUILD_COMPONENTS managed
+  # The SPA owns an isolated sealed-artifact transaction. Carrying a missed web
+  # revision forward therefore never requires unrelated managed binaries.
   append_csv_env LAPLACE_BUILD_COMPONENTS web
-  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj
-  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj
-  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj
-  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj
   append_csv_env LAPLACE_DEV_SUITES browser-dev
   append_csv_env LAPLACE_LIVE_SUITES live-floor
   append_csv_env LAPLACE_LIVE_SUITES live-api
   append_csv_env LAPLACE_DELIVERY_ACTIONS publish
   append_csv_env LAPLACE_DELIVERY_ACTIONS live
-  export LAPLACE_PUBLISH_SCOPE=full
+  export LAPLACE_PUBLISH_SCOPE=web
 }
 
 carry_forward_installed_web_impact() {
@@ -481,6 +475,7 @@ run_db_tests() {
 run_publish() {
   local scope="${LAPLACE_PUBLISH_SCOPE:-full}"
   case "$scope" in
+    web) bash scripts/publish-applications.sh web-recover ;;
     api) bash scripts/publish-applications.sh api-recover ;;
     uci) bash scripts/publish-applications.sh uci-recover ;;
     full|all) bash scripts/publish-applications.sh recover ;;
@@ -492,6 +487,7 @@ run_publish() {
 
   require_built_revision
   case "$scope" in
+    web) bash scripts/publish-applications.sh web-deploy ;;
     api) bash scripts/publish-applications.sh api-deploy ;;
     uci) bash scripts/publish-applications.sh uci-deploy ;;
     full|all) bash scripts/publish-applications.sh deploy ;;
@@ -511,6 +507,15 @@ assert value["status"] == "passed", value
 assert value["bestmove"], value
 assert value["substrate_access_verified"] is False, value
 PY
+}
+
+verify_isolated_web_delivery() {
+  require_deployed_revision
+  python3 scripts/web-artifact.py verify-installed \
+    --root "$ROOT" \
+    --manifest "$ROOT/build/.laplace-web-artifact.json" \
+    --directory "${LAPLACE_APP_DIR:-/opt/laplace/app}/wwwroot"
+  check_application_live
 }
 run_live_tests() {
   require_deployed_revision
@@ -849,6 +854,10 @@ run_release_delivery() {
     # The isolated publisher atomically selects and executes the installed UCI
     # runtime before committing its revision receipt. API/database state is unchanged.
     verify_isolated_uci_delivery
+  elif [[ "$publish_scope" == web ]]; then
+    # Static-file middleware reads wwwroot directly; the web transaction atomically
+    # exchanges only the sealed SPA directory and advances the logical product receipt.
+    verify_isolated_web_delivery
   else
     verify_installed_product
   fi
