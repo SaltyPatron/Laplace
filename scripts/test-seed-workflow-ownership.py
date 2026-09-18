@@ -32,18 +32,17 @@ class WorkflowOwnership(unittest.TestCase):
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
-    def test_main_push_only_runs_disposable_qualification(self):
+    def test_main_push_is_one_planned_qualification_delivery_chain(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        mainline = text.split("  mainline-qualification:\n", 1)[1].split("\n  operator:\n", 1)[0]
-        self.assertEqual(1, mainline.count("uses: ./.github/workflows/product-stage.yml"))
-        self.assertIn("stage: release-qualification", mainline)
-        self.assertNotIn("mainline-candidate:", mainline)
-        self.assertNotIn("mainline-activation:", mainline)
-        self.assertNotIn("stage: release-candidate", mainline)
-        self.assertNotIn("stage: release-activation", mainline)
-        self.assertEqual(1, mainline.count("skip_if_superseded: true"))
-        self.assertIn("laplace-main-product-lifecycle", text)
-        self.assertIn("cancel-in-progress: ${{ github.event_name == 'push' }}", text)
+        self.assertIn("  plan:", text)
+        self.assertIn("scripts/ci-impact-plan.py", text)
+        self.assertIn("  mainline-qualification:", text)
+        self.assertIn("stage: release-qualification", text)
+        self.assertIn("  mainline-delivery:", text)
+        self.assertIn("stage: release-delivery", text)
+        self.assertIn("needs: [plan, mainline-qualification]", text)
+        self.assertNotIn("workflow_dispatch:", text)
+        self.assertNotIn("\nconcurrency:\n", text)
 
     def test_expensive_competitive_proof_is_dispatch_only(self):
         text = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")
