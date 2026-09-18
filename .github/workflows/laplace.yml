@@ -14,6 +14,9 @@ on:
       - "scripts/ci-qualification-cache.py"
       - "scripts/ci-product-freshness.py"
       - "scripts/ci_product_scope.py"
+      - "scripts/product-ci.sh"
+      - "scripts/pipeline.sh"
+      - "scripts/ci_managed_projects.py"
       - "scripts/test-parallel.sh"
       - "scripts/test-ci-*.py"
       - "scripts/test-workflow-architecture.py"
@@ -43,6 +46,10 @@ jobs:
       publish_scope: ${{ steps.plan.outputs.publish_scope }}
       components: ${{ steps.plan.outputs.components }}
       build_components: ${{ steps.plan.outputs.build_components }}
+      managed_build_projects: ${{ steps.plan.outputs.managed_build_projects }}
+      managed_test_projects: ${{ steps.plan.outputs.managed_test_projects }}
+      managed_db_test_projects: ${{ steps.plan.outputs.managed_db_test_projects }}
+      managed_live_test_projects: ${{ steps.plan.outputs.managed_live_test_projects }}
       full_qualification: ${{ steps.plan.outputs.full_qualification }}
       changed_count: ${{ steps.plan.outputs.changed_count }}
     steps:
@@ -75,17 +82,23 @@ jobs:
       target_sha: ${{ github.sha }}
       dev_suites: ${{ needs.plan.outputs.dev_suites }}
       build_components: ${{ needs.plan.outputs.build_components }}
+      managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}
+      managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}
       skip_if_superseded: true
     secrets: inherit
 
   mainline-delivery:
     name: Install, validate, publish, and activate exact candidate
     needs: [plan, mainline-qualification]
+    if: needs.plan.outputs.delivery_actions != ''
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-delivery
       target_sha: ${{ github.sha }}
       build_components: ${{ needs.plan.outputs.build_components }}
+      managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}
+      managed_db_test_projects: ${{ needs.plan.outputs.managed_db_test_projects }}
+      managed_live_test_projects: ${{ needs.plan.outputs.managed_live_test_projects }}
       delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
       db_suites: ${{ needs.plan.outputs.db_suites }}
       live_suites: ${{ needs.plan.outputs.live_suites }}

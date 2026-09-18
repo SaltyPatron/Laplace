@@ -30,6 +30,8 @@ class ProductFreshnessTests(unittest.TestCase):
             "scripts/ci-qualification-cache.py",
             "scripts/ci-product-freshness.py",
             "scripts/ci_product_scope.py",
+            "scripts/pipeline.sh",
+            "scripts/ci_managed_projects.py",
             "scripts/test-parallel.sh",
             "scripts/test-ci-workspace.py",
             "scripts/test-workflow-architecture.py",
@@ -41,7 +43,7 @@ class ProductFreshnessTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(MODULE.ignored(path))
         for path in (
-            "scripts/product-ci.sh",
+            "scripts/publish-applications.sh",
             "web/src/App.tsx",
             "app/Laplace.Core/Foo.cs",
             "engine/core/src/foo.c",

@@ -86,8 +86,11 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("stage: release-qualification", lifecycle)
         self.assertIn("dev_suites: ${{ needs.plan.outputs.dev_suites }}", lifecycle)
         self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
+        self.assertIn("managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}", lifecycle)
+        self.assertIn("managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}", lifecycle)
         self.assertIn("  mainline-delivery:", lifecycle)
         self.assertIn("needs: [plan, mainline-qualification]", lifecycle)
+        self.assertIn("if: needs.plan.outputs.delivery_actions != ''", lifecycle)
         self.assertIn("stage: release-delivery", lifecycle)
         self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
         self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", lifecycle)
@@ -167,6 +170,10 @@ class WorkflowArchitecture(unittest.TestCase):
             "scripts/ci-qualification-cache.py",
             "scripts/ci-product-freshness.py",
             "scripts/ci_product_scope.py",
+            "scripts/test-parallel.sh",
+            "scripts/product-ci.sh",
+            "scripts/pipeline.sh",
+            "scripts/ci_managed_projects.py",
             "scripts/test-ci-*.py",
             "scripts/test-workflow-architecture.py",
             "scripts/test-seed-workflow-ownership.py",
@@ -235,6 +242,10 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("publish_scope:", reusable)
         self.assertIn("LAPLACE_DEV_SUITES:", reusable)
         self.assertIn("LAPLACE_BUILD_COMPONENTS:", reusable)
+        self.assertIn("LAPLACE_MANAGED_BUILD_PROJECTS:", reusable)
+        self.assertIn("LAPLACE_MANAGED_TEST_PROJECTS:", reusable)
+        self.assertIn("LAPLACE_MANAGED_DB_TEST_PROJECTS:", reusable)
+        self.assertIn("LAPLACE_MANAGED_LIVE_TEST_PROJECTS:", reusable)
         self.assertIn("LAPLACE_DB_SUITES:", reusable)
         self.assertIn("LAPLACE_LIVE_SUITES:", reusable)
         self.assertIn("LAPLACE_DELIVERY_ACTIONS:", reusable)

@@ -8,6 +8,11 @@ import subprocess
 from pathlib import Path
 
 from ci_product_scope import ignored as product_ignored
+from ci_managed_projects import (
+    load_projects as load_managed_projects,
+    plan_changed as plan_managed_projects,
+    project_for_path as managed_project_for_path,
+)
 
 DEV_SUITES = ("native-dev", "managed-dev", "uci-dev", "browser-dev")
 DB_SUITES = ("db-health", "native-db", "managed-db")
@@ -31,7 +36,15 @@ def _starts(path: str, prefix: str) -> bool:
     return path == prefix.rstrip("/") or path.startswith(prefix)
 
 
-def classify_paths(paths: list[str]) -> dict:
+def classify_paths(paths: list[str], root: Path | None = None) -> dict:
+    root = (root or Path(".")).resolve()
+    managed_projects = load_managed_projects(root)
+    managed_changed_paths: list[str] = []
+    managed_build_force_all = False
+    managed_test_force_all = False
+    managed_db_force_all = False
+    managed_live_force_all = False
+
     components: set[str] = set()
     build_components: set[str] = set()
     dev_suites: set[str] = set()
@@ -84,6 +97,10 @@ def classify_paths(paths: list[str]) -> dict:
             or path.startswith("extension/")
         ):
             matched = product_change = True
+            managed_build_force_all = True
+            managed_test_force_all = True
+            managed_db_force_all = True
+            managed_live_force_all = True
             publish_scope = "full"
             components.update(("native", "managed", "uci", "database"))
             build_components.update(("native", "managed"))
@@ -96,13 +113,26 @@ def classify_paths(paths: list[str]) -> dict:
             invalidate(LIVE_SUITES, path)
 
         if path.startswith("app/"):
-            matched = product_change = True
+            matched = True
+            managed_changed_paths.append(path)
+            managed_project = managed_project_for_path(managed_projects, path)
+            if managed_project is not None and managed_projects[managed_project].is_test:
+                build_components.add("managed")
+                dev_suites.add("managed-dev")
+                invalidate(("managed-dev",), path)
+                continue
+
+            product_change = True
             api_scoped = (
                 path.startswith("app/Laplace.Api.Contracts")
                 or path.startswith("app/Laplace.Endpoints.OpenAICompat")
             )
             if not api_scoped:
                 publish_scope = "full"
+                # The current broad publisher still materializes API + UCI + MCP +
+                # Lichess together. Keep its compile closure whole until those
+                # transaction owners are split; test selection remains project-level.
+                managed_build_force_all = True
             components.add("managed")
             build_components.add("managed")
             dev_suites.add("managed-dev")
@@ -152,6 +182,9 @@ def classify_paths(paths: list[str]) -> dict:
 
         if path.startswith("db/"):
             matched = product_change = True
+            managed_build_force_all = True
+            managed_db_force_all = True
+            managed_live_force_all = True
             components.add("database")
             build_components.add("managed")
             db_suites.update(("db-health", "managed-db"))
@@ -162,6 +195,8 @@ def classify_paths(paths: list[str]) -> dict:
 
         if path.startswith("deploy/"):
             matched = product_change = True
+            managed_build_force_all = True
+            managed_live_force_all = True
             publish_scope = "full"
             components.add("deployment")
             build_components.add("managed")
@@ -173,6 +208,28 @@ def classify_paths(paths: list[str]) -> dict:
             unknown.append(path)
             full(path)
 
+    managed_impact = plan_managed_projects(root, managed_changed_paths)
+
+    def managed_selection(
+        selected: bool,
+        force_all: bool,
+        field: str,
+    ) -> list[str]:
+        if not selected:
+            return []
+        if force_all or managed_impact["full"] or not managed_changed_paths:
+            return ["all"]
+        return list(managed_impact[field])
+
+    managed_build_projects = managed_selection(
+        "managed" in build_components, managed_build_force_all, "build_projects")
+    managed_test_projects = managed_selection(
+        "managed-dev" in dev_suites, managed_test_force_all, "test_projects")
+    managed_db_test_projects = managed_selection(
+        "managed-db" in db_suites, managed_db_force_all, "test_projects")
+    managed_live_test_projects = managed_selection(
+        "managed-live" in live_suites, managed_live_force_all, "test_projects")
+
     # Every delivered revision has an exact application revision receipt and a
     # universal live floor. This is deliberately much smaller than full live
     # qualification and does not imply native/DB mutation.
@@ -183,6 +240,10 @@ def classify_paths(paths: list[str]) -> dict:
     return {
         "components": sorted(components),
         "build_components": sorted(build_components),
+        "managed_build_projects": managed_build_projects,
+        "managed_test_projects": managed_test_projects,
+        "managed_db_test_projects": managed_db_test_projects,
+        "managed_live_test_projects": managed_live_test_projects,
         "dev_suites": [suite for suite in DEV_SUITES if suite in dev_suites],
         "db_suites": [suite for suite in DB_SUITES if suite in db_suites],
         "live_suites": [suite for suite in LIVE_SUITES if suite in live_suites],
@@ -221,6 +282,10 @@ def force_full_plan(plan: dict) -> None:
     plan["full_qualification"] = True
     plan["components"] = list(ALL_COMPONENTS)
     plan["build_components"] = ["native", "managed", "web"]
+    plan["managed_build_projects"] = ["all"]
+    plan["managed_test_projects"] = ["all"]
+    plan["managed_db_test_projects"] = ["all"]
+    plan["managed_live_test_projects"] = ["all"]
     plan["dev_suites"] = list(DEV_SUITES)
     plan["db_suites"] = list(DB_SUITES)
     plan["live_suites"] = list(LIVE_SUITES)
@@ -242,6 +307,10 @@ def write_github_outputs(path: Path, plan: dict) -> None:
             "delivery_actions",
             "components",
             "build_components",
+            "managed_build_projects",
+            "managed_test_projects",
+            "managed_db_test_projects",
+            "managed_live_test_projects",
         ):
             stream.write(f"{name}={','.join(plan[name])}\n")
         stream.write(f"publish_scope={plan['publish_scope']}\n")
@@ -260,6 +329,10 @@ def write_summary(path: Path, plan: dict) -> None:
         stream.write(f"- Changed files: {len(plan['changed_files'])}\n")
         stream.write(f"- Affected components: {joined('components')}\n")
         stream.write(f"- Candidate build components: {joined('build_components')}\n")
+        stream.write(f"- Managed build projects: {joined('managed_build_projects')}\n")
+        stream.write(f"- Managed unit-test projects: {joined('managed_test_projects')}\n")
+        stream.write(f"- Managed DB-test projects: {joined('managed_db_test_projects')}\n")
+        stream.write(f"- Managed live-test projects: {joined('managed_live_test_projects')}\n")
         stream.write(f"- Development suites: {joined('dev_suites')}\n")
         stream.write(f"- Database suites: {joined('db_suites')}\n")
         stream.write(f"- Delivery actions: {joined('delivery_actions')}\n")
@@ -304,7 +377,7 @@ def main() -> int:
     if not changed:
         changed, forced_full = git_changed_files(root, args.base, args.head)
 
-    plan = classify_paths(changed)
+    plan = classify_paths(changed, root)
     if forced_full:
         force_full_plan(plan)
     plan["base"] = args.base

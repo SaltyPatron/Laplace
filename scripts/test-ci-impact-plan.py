@@ -24,6 +24,8 @@ class ImpactPlanTests(unittest.TestCase):
         value = plan("web/src/App.tsx")
         self.assertEqual(value["components"], ["web"])
         self.assertEqual(value["build_components"], ["web"])
+        self.assertEqual(value["managed_build_projects"], [])
+        self.assertEqual(value["managed_test_projects"], [])
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
@@ -35,6 +37,10 @@ class ImpactPlanTests(unittest.TestCase):
         value = plan("engine/core/src/example.cpp")
         self.assertEqual(value["components"], ["database", "managed", "native", "uci"])
         self.assertEqual(value["build_components"], ["managed", "native"])
+        self.assertEqual(value["managed_build_projects"], ["all"])
+        self.assertEqual(value["managed_test_projects"], ["all"])
+        self.assertEqual(value["managed_db_test_projects"], ["all"])
+        self.assertEqual(value["managed_live_test_projects"], ["all"])
         self.assertEqual(
             value["dev_suites"], ["native-dev", "managed-dev", "uci-dev"]
         )
@@ -55,6 +61,14 @@ class ImpactPlanTests(unittest.TestCase):
     def test_managed_api_change_avoids_native_install_but_runs_product_live_checks(self):
         value = plan("app/Laplace.Endpoints.OpenAICompat/Foo.cs")
         self.assertEqual(value["dev_suites"], ["managed-dev", "browser-dev"])
+        self.assertIn(
+            "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
+            value["managed_build_projects"],
+        )
+        self.assertEqual(
+            value["managed_test_projects"],
+            ["app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj"],
+        )
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
         self.assertEqual(value["publish_scope"], "api")
@@ -153,6 +167,20 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["delivery_actions"], [])
         self.assertFalse(value["full_qualification"])
         self.assertEqual(value["ignored_paths"], ["scripts/test-parallel.sh"])
+
+    def test_test_project_change_qualifies_only_that_managed_project(self):
+        target = "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"
+        value = plan(
+            "app/Laplace.Substrate.Tests/Abstractions/DecomposerArchitectureGateTests.cs"
+        )
+        self.assertEqual(value["components"], [])
+        self.assertEqual(value["build_components"], ["managed"])
+        self.assertEqual(value["managed_build_projects"], [target])
+        self.assertEqual(value["managed_test_projects"], [target])
+        self.assertEqual(value["db_suites"], [])
+        self.assertEqual(value["live_suites"], [])
+        self.assertEqual(value["delivery_actions"], [])
+        self.assertFalse(value["full_qualification"])
 
     def test_mixed_policy_and_web_change_only_invalidates_web(self):
         value = plan("scripts/ci-impact-plan.py", "web/src/App.tsx")
