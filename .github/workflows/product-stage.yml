@@ -33,6 +33,16 @@ on:
         type: string
         required: false
         default: all
+      managed_test_projects:
+        description: "comma-separated managed test projects selected from the ProjectReference graph"
+        type: string
+        required: false
+        default: all
+      managed_build_projects:
+        description: "comma-separated managed projects that must be built for this exact candidate"
+        type: string
+        required: false
+        default: all
       db_suites:
         description: "comma-separated database suites selected by the impact planner"
         type: string
@@ -163,6 +173,8 @@ jobs:
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
       LAPLACE_DEV_SUITES: ${{ inputs.dev_suites }}
       LAPLACE_BUILD_COMPONENTS: ${{ inputs.build_components }}
+      LAPLACE_MANAGED_TEST_PROJECTS: ${{ inputs.managed_test_projects }}
+      LAPLACE_MANAGED_BUILD_PROJECTS: ${{ inputs.managed_build_projects }}
       LAPLACE_DB_SUITES: ${{ inputs.db_suites }}
       LAPLACE_LIVE_SUITES: ${{ inputs.live_suites }}
       LAPLACE_DELIVERY_ACTIONS: ${{ inputs.delivery_actions }}
