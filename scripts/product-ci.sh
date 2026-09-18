@@ -37,6 +37,7 @@ run_ci_contract_checks() {
   python3 scripts/test-benchmark-suite.py
   python3 scripts/test-ci-impact-plan.py
   python3 scripts/test-ci-qualification-cache.py
+  python3 scripts/test-ci-product-freshness.py
   python3 scripts/test-web-artifact.py
 }
 
@@ -388,7 +389,7 @@ run_mainline() {
 release_selected_revision_current() {
   [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]] || return 0
 
-  local selected latest
+  local selected latest freshness_rc=0
   selected="$(git rev-parse HEAD)"
   latest="$(git ls-remote --heads origin refs/heads/main | awk '{print $1}')"
   if [[ -z "$latest" ]]; then
@@ -396,8 +397,25 @@ release_selected_revision_current() {
     return 2
   fi
   if [[ "$latest" == "$selected" ]]; then return 0; fi
-  echo "::notice::selected revision $selected is superseded by current main $latest"
-  return 3
+
+  if ! git cat-file -e "$latest^{commit}" 2>/dev/null; then
+    git fetch --no-tags --depth=1 origin "$latest" >/dev/null 2>&1 || {
+      echo "::error::could not fetch current main $latest for product-freshness comparison" >&2
+      return 2
+    }
+  fi
+
+  python3 scripts/ci-product-freshness.py --base "$selected" --head "$latest" || freshness_rc=$?
+  if (( freshness_rc == 0 )); then
+    echo "::notice::main advanced from $selected to product-equivalent $latest; candidate remains valid"
+    return 0
+  fi
+  if (( freshness_rc == 3 )); then
+    echo "::notice::selected revision $selected is superseded by product-changing main $latest"
+    return 3
+  fi
+  echo "::error::could not determine product freshness for $selected against $latest" >&2
+  return 2
 }
 
 release_candidate_current_before_mutation() {
