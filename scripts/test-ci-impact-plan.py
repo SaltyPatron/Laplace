@@ -140,6 +140,7 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertIn("uci-dev", value["dev_suites"])
         self.assertEqual(value["publish_scope"], "full")
         self.assertNotIn("native-dev", value["dev_suites"])
+        self.assertIn("chess-provider-live", value["live_suites"])
 
     def test_database_sql_change_skips_native_install_but_runs_db_and_full_live(self):
         value = plan("db/migrations/example.sql")
