@@ -48,9 +48,19 @@ sync_managed_native() {
 }
 
 set_dev_perfcache() {
-  local candidate
-  candidate=$(find -L build -type f -name 'laplace_t0_perfcache*.bin' -print 2>/dev/null | sort | tail -1 || true)
-  [[ -z "$candidate" ]] || export LAPLACE_PERFCACHE_BIN="$candidate"
+  local build_dir candidate
+  # Pre-install qualification must execute the exact candidate ROM, never the
+  # currently installed floor. The physical CMake tree lives on /build and the
+  # checkout-local build symlink is not an authority for artifact selection.
+  build_dir="$(python3 "$ROOT/scripts/place-build-directory.py" "$ROOT")"
+  candidate=$(find -L "$build_dir" -type f -name 'laplace_t0_perfcache*.bin' -print 2>/dev/null | sort | tail -1 || true)
+  [[ -n "$candidate" ]] || {
+    echo "::error::candidate T0 perfcache missing under $build_dir — build native before managed qualification" >&2
+    return 1
+  }
+  export LAPLACE_PERFCACHE_BIN="$candidate"
+  export LAPLACE_ENGINE_BUILD="$build_dir/engine"
+  echo "::notice::managed dev qualification T0 ROM: $LAPLACE_PERFCACHE_BIN"
 }
 
 set_installed_perfcache() {
