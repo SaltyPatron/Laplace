@@ -26,6 +26,30 @@ public sealed class WorkingSetQueryShapeTests
     }
 
     [Fact]
+    public void EntityInterpretationPublication_StaysOptimisticSetWiseAndIncremental()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        var publisher = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "sql", "functions",
+            "identity", "entity_interpretations_publish.sql.in"));
+        var retry = File.ReadAllText(Path.Combine(
+            repoRoot, "app", "Laplace.Substrate", "Ingestion",
+            "TransientErrorRetryPolicy.cs"));
+
+        Assert.DoesNotContain("FOR UPDATE", publisher, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ON CONFLICT", publisher, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, publisher.Split("input AS MATERIALIZED", StringSplitOptions.None).Length);
+        Assert.DoesNotContain("JOIN touched", publisher, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "FROM @extschema@.entity_interpretations i\n        JOIN",
+            publisher, StringComparison.Ordinal);
+        Assert.Contains("updated_facets AS", publisher, StringComparison.Ordinal);
+        Assert.Contains("inserted_facets AS", publisher, StringComparison.Ordinal);
+        Assert.Contains("incoming_summary AS MATERIALIZED", publisher, StringComparison.Ordinal);
+        Assert.Contains("sqlState is \"23505\" or", retry, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FoldHotPaths_SendOneRoutingTypePerBulkSet()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
