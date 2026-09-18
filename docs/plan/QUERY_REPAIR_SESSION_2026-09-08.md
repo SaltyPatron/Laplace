@@ -40,10 +40,17 @@ round trips and database pages as well as elapsed time and returned rows.
   and parity of ids, order, scores, unknowns, and source scope. A cache that
   exists or loads but is bypassed is unfinished; perfcache must not become a
   second truth or a way to conceal incomplete query results.
-- [ ] Complete the shared native query path (the SQL transformer): search uses
-  the same content composition and substrate operators as a prompt, keeping its
-  complete query DAG in memory and omitting persistence for now. A SQL-string
-  catalog alone does not implement this behavior.
+- [ ] Complete the shared native query path (the SQL transformer): search and
+  prompt compile to the same typed forward program over canonical entities and
+  the shared persistent substrate. The active query/frontier may keep a bounded
+  working projection in memory, but that projection references durable
+  content/composition identities, occurrences/trajectories, attestations and
+  witnesses, consensus state, physicalities/geometry, source/context state and
+  session trajectory; it is never a private semantic world and never a second
+  authority. Persist/witness only mutations required by the operation contract;
+  ordinary reads and deterministic calculations do not manufacture testimony.
+  A SQL-string catalog or an in-memory private DAG alone does not implement this
+  behavior.
 - [ ] Preserve exact ordered physicality paths, repeated ids, run lengths,
   constituent tiers, and intervening content. SPACE is an entity, never an
   assumed universal word boundary. Gap/ordinal relations must preserve their
