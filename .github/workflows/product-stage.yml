@@ -171,7 +171,7 @@ jobs:
     if: needs.preflight.outputs.execute == 'true'
     name: Product — ${{ inputs.stage }}
     concurrency:
-      group: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' && 'laplace-main-qualification' || inputs.skip_if_superseded && inputs.stage == 'release-delivery' && 'laplace-main-delivery' || format('laplace-product-stage-{0}-{1}', inputs.stage, github.run_id) }}
+      group: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' && inputs.delivery_actions != '' && 'laplace-main-product-qualification' || inputs.skip_if_superseded && inputs.stage == 'release-qualification' && format('laplace-main-test-qualification-{0}-{1}', inputs.dev_suites, inputs.managed_test_projects) || inputs.skip_if_superseded && inputs.stage == 'release-delivery' && 'laplace-main-delivery' || format('laplace-product-stage-{0}-{1}', inputs.stage, github.run_id) }}
       cancel-in-progress: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
