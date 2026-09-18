@@ -1040,6 +1040,17 @@ TEST_F(PhysicalityDescriptorAdmission, DiagnosedRefusalsRetainExactOwnerAndRetry
         EXPECT_EQ(full_forms[i].missing_first, retry_forms[i].missing_first);
         EXPECT_EQ(full_forms[i].missing_count, retry_forms[i].missing_count);
     }
+    const auto full_provenance = observations(full);
+    const auto retry_provenance = observations(retry);
+    ASSERT_EQ(full_provenance.size(), bodies.size());
+    ASSERT_EQ(retry_provenance.size(), full_provenance.size());
+    for (size_t i = 0; i < full_provenance.size(); ++i) {
+        EXPECT_TRUE(hash128_equals(&full_provenance[i].entity_id, &retry_provenance[i].entity_id));
+        EXPECT_TRUE(hash128_equals(&full_provenance[i].descriptor_id, &retry_provenance[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&full_provenance[i].source_id, &retry_provenance[i].source_id));
+        EXPECT_TRUE(hash128_equals(&full_provenance[i].source_unit_id, &retry_provenance[i].source_unit_id));
+        EXPECT_EQ(full_provenance[i].observed_at_unix_us, retry_provenance[i].observed_at_unix_us);
+    }
     Stage full_stage(physicality_descriptor_materialization_take_stage(full.get()), intent_stage_free);
     Stage retry_stage(physicality_descriptor_materialization_take_stage(retry.get()), intent_stage_free);
     ASSERT_NE(full_stage, nullptr);
@@ -1049,9 +1060,13 @@ TEST_F(PhysicalityDescriptorAdmission, DiagnosedRefusalsRetainExactOwnerAndRetry
         size_t full_bytes = 0, retry_bytes = 0;
         const auto* full_data = intent_stage_tuple_ptr(full_stage.get(), table, &full_bytes);
         const auto* retry_data = intent_stage_tuple_ptr(retry_stage.get(), table, &retry_bytes);
-        ASSERT_GT(full_bytes, 0u);
         ASSERT_EQ(retry_bytes, full_bytes);
-        EXPECT_EQ(std::memcmp(full_data, retry_data, full_bytes), 0);
+        if (table == INTENT_STAGE_TABLE_ATTESTATIONS) {
+            EXPECT_EQ(full_bytes, 0u);
+        } else {
+            ASSERT_GT(full_bytes, 0u);
+            EXPECT_EQ(std::memcmp(full_data, retry_data, full_bytes), 0);
+        }
     }
     // Both refusals left the caller's borrowed source intact.
     EXPECT_EQ(intent_stage_physicality_count(original.get()), bodies.size());
@@ -1079,7 +1094,7 @@ struct ObservationPhaseProbe {
     }
 };
 
-TEST_F(PhysicalityDescriptorAdmission, SourceContextRunsMatchScalarOwnersAcrossBothIdentifiersAndTimes) {
+TEST_F(PhysicalityDescriptorAdmission, StructuralProvenanceBatchMatchesScalarOwnersAcrossIdentifiersAndTimes) {
     const auto body = composition({atom('a'), atom('b')});
     const hash128_t other_source{kSource.lo + 1u, kSource.hi};
     const hash128_t other_unit{kUnit.lo, kUnit.hi + 1u};
@@ -1091,79 +1106,41 @@ TEST_F(PhysicalityDescriptorAdmission, SourceContextRunsMatchScalarOwnersAcrossB
         INTENT_STAGE_PG_EPOCH_UNIX_US + 33, INTENT_STAGE_PG_EPOCH_UNIX_US + 20,
         5, -1, 11, INTENT_STAGE_PG_EPOCH_UNIX_US + 5};
     std::vector<physicality_descriptor_source_observation_t> sources;
-    std::array<int64_t, 4> latest;
-    latest.fill(std::numeric_limits<int64_t>::min());
-    for (size_t i = 0; i < order.size(); ++i) {
-        sources.push_back(pairs[order[i]]);
-        latest[order[i]] = std::max(latest[order[i]], times[i]);
-    }
+    for (size_t i = 0; i < order.size(); ++i) sources.push_back(pairs[order[i]]);
+
     auto original = stage(std::vector<Body>(order.size(), body), times);
     auto captured = capture(original.get());
     Materialization batch(nullptr, physicality_descriptor_materialization_free);
     ASSERT_EQ(run(captured, {}, {}, {}, sources, batch), PHYSICALITY_DESCRIPTOR_OK);
-    size_t count = 0;
-    const auto* forms = physicality_descriptor_materialization_forms(batch.get(), &count);
-    ASSERT_EQ(count, order.size());
-    for (size_t i = 1; i < count; ++i) {
-        EXPECT_TRUE(hash128_equals(&forms[0].descriptor_id, &forms[i].descriptor_id));
-        EXPECT_TRUE(hash128_equals(&forms[0].view_id, &forms[i].view_id));
+    const auto batch_provenance = observations(batch);
+    ASSERT_EQ(batch_provenance.size(), order.size());
+    size_t form_count = 0;
+    const auto* forms = physicality_descriptor_materialization_forms(batch.get(), &form_count);
+    ASSERT_EQ(form_count, order.size());
+    for (size_t i = 0; i < batch_provenance.size(); ++i) {
+        EXPECT_TRUE(hash128_equals(&batch_provenance[i].entity_id, &body.value.entity_id));
+        EXPECT_TRUE(hash128_equals(&batch_provenance[i].descriptor_id, &forms[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&batch_provenance[i].source_id, &sources[i].source_id));
+        EXPECT_TRUE(hash128_equals(&batch_provenance[i].source_unit_id, &sources[i].source_unit_id));
+        EXPECT_EQ(batch_provenance[i].observed_at_unix_us, times[i]);
+
+        auto scalar_source = stage({body}, {times[i]});
+        auto scalar_capture = capture(scalar_source.get());
+        Materialization scalar(nullptr, physicality_descriptor_materialization_free);
+        ASSERT_EQ(run(scalar_capture, {}, {}, {}, {sources[i]}, scalar), PHYSICALITY_DESCRIPTOR_OK);
+        const auto scalar_provenance = observations(scalar);
+        ASSERT_EQ(scalar_provenance.size(), 1u);
+        EXPECT_TRUE(hash128_equals(&scalar_provenance[0].entity_id, &batch_provenance[i].entity_id));
+        EXPECT_TRUE(hash128_equals(&scalar_provenance[0].descriptor_id, &batch_provenance[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&scalar_provenance[0].source_id, &batch_provenance[i].source_id));
+        EXPECT_TRUE(hash128_equals(&scalar_provenance[0].source_unit_id, &batch_provenance[i].source_unit_id));
+        EXPECT_EQ(scalar_provenance[0].observed_at_unix_us, batch_provenance[i].observed_at_unix_us);
     }
     Stage generated(physicality_descriptor_materialization_take_stage(batch.get()), intent_stage_free);
     ASSERT_NE(generated, nullptr);
-    ASSERT_EQ(intent_stage_attestation_count(generated.get()), pairs.size());
-
-    // Each independent one-observation call must compose its source context.
-    // Union its exact ordinary tuple rows in first-seen order, retaining each
-    // source/unit's latest real timestamp. No second identity recipe is used.
-    std::array<std::vector<std::vector<uint8_t>>, 3> expected_rows;
-    std::array<std::vector<hash128_t>, 3> expected_ids;
-    for (size_t pair = 0; pair < pairs.size(); ++pair) {
-        auto scalar_source = stage({body}, {latest[pair]});
-        auto scalar_capture = capture(scalar_source.get());
-        Materialization scalar(nullptr, physicality_descriptor_materialization_free);
-        ASSERT_EQ(run(scalar_capture, {}, {}, {}, {pairs[pair]}, scalar), PHYSICALITY_DESCRIPTOR_OK);
-        const auto scalar_form = form(scalar);
-        EXPECT_TRUE(hash128_equals(&forms[0].descriptor_id, &scalar_form.descriptor_id));
-        Stage scalar_stage(physicality_descriptor_materialization_take_stage(scalar.get()), intent_stage_free);
-        ASSERT_NE(scalar_stage, nullptr);
-        for (int table = 1; table <= 3; ++table) {
-            const size_t slot = static_cast<size_t>(table - 1);
-            size_t bytes = 0, at = 0;
-            const auto* data = intent_stage_tuple_ptr(scalar_stage.get(),
-                static_cast<intent_stage_table_t>(table), &bytes);
-            std::vector<Field> fields;
-            while (at < bytes) {
-                const size_t first = at;
-                ASSERT_TRUE(next_row(data, bytes, at, fields));
-                ASSERT_FALSE(fields.empty());
-                ASSERT_EQ(fields[0].size, sizeof(hash128_t));
-                hash128_t id;
-                std::memcpy(&id, fields[0].bytes, sizeof(id));
-                std::vector<uint8_t> row(data + first, data + at);
-                auto found = std::find_if(expected_ids[slot].begin(), expected_ids[slot].end(),
-                    [&](const hash128_t& prior) { return hash128_equals(&id, &prior); });
-                if (found == expected_ids[slot].end()) {
-                    expected_ids[slot].push_back(id);
-                    expected_rows[slot].push_back(std::move(row));
-                } else {
-                    EXPECT_EQ(row, expected_rows[slot][static_cast<size_t>(found - expected_ids[slot].begin())]);
-                }
-            }
-        }
-    }
-    for (int table = 1; table <= 3; ++table) {
-        std::vector<uint8_t> expected;
-        for (const auto& row : expected_rows[static_cast<size_t>(table - 1)])
-            expected.insert(expected.end(), row.begin(), row.end());
-        size_t bytes = 0;
-        const auto* data = intent_stage_tuple_ptr(generated.get(), static_cast<intent_stage_table_t>(table), &bytes);
-        ASSERT_EQ(bytes, expected.size());
-        ASSERT_GT(bytes, 0u);
-        EXPECT_EQ(std::memcmp(data, expected.data(), bytes), 0);
-    }
+    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
 }
-
-TEST_F(PhysicalityDescriptorAdmission, CachedObservationContextsKeepCancellationAndPriorConflictChecks) {
+TEST_F(PhysicalityDescriptorAdmission, CachedStructuralProvenanceKeepsCancellationAndIgnoresValidTrustDifferences) {
     const auto body = composition({atom('a'), atom('b')});
     auto original = stage(std::vector<Body>(128, body));
     auto captured = capture(original.get());
@@ -1182,26 +1159,42 @@ TEST_F(PhysicalityDescriptorAdmission, CachedObservationContextsKeepCancellation
         EXPECT_EQ(diagnostics.phase, PHYSICALITY_MATERIALIZATION_OBSERVATIONS);
         EXPECT_EQ(probe.observations_checkpoints, stop);
     }
-    auto conflicting = sources;
-    conflicting[64].source_trust = 0.2;
-    Materialization refused(nullptr, physicality_descriptor_materialization_free);
-    EXPECT_EQ(run(captured, {}, {}, {}, conflicting, refused), PHYSICALITY_DESCRIPTOR_INVALID_BODY);
-    EXPECT_EQ(refused, nullptr);
+
+    auto differing = sources;
+    differing[64].source_trust = 0.2;
+    Materialization compatible(nullptr, physicality_descriptor_materialization_free);
+    ASSERT_EQ(run(captured, {}, {}, {}, differing, compatible), PHYSICALITY_DESCRIPTOR_OK);
+    const auto expected_provenance = observations(complete);
+    const auto compatible_provenance = observations(compatible);
+    ASSERT_EQ(compatible_provenance.size(), expected_provenance.size());
+    for (size_t i = 0; i < expected_provenance.size(); ++i) {
+        EXPECT_TRUE(hash128_equals(&compatible_provenance[i].entity_id, &expected_provenance[i].entity_id));
+        EXPECT_TRUE(hash128_equals(&compatible_provenance[i].descriptor_id, &expected_provenance[i].descriptor_id));
+        EXPECT_TRUE(hash128_equals(&compatible_provenance[i].source_id, &expected_provenance[i].source_id));
+        EXPECT_TRUE(hash128_equals(&compatible_provenance[i].source_unit_id, &expected_provenance[i].source_unit_id));
+        EXPECT_EQ(compatible_provenance[i].observed_at_unix_us, expected_provenance[i].observed_at_unix_us);
+    }
+
     Materialization retry(nullptr, physicality_descriptor_materialization_free);
     ASSERT_EQ(run(captured, {}, {}, {}, sources, retry), PHYSICALITY_DESCRIPTOR_OK);
     EXPECT_EQ(intent_stage_physicality_count(original.get()), sources.size());
     Stage expected(physicality_descriptor_materialization_take_stage(complete.get()), intent_stage_free);
     Stage actual(physicality_descriptor_materialization_take_stage(retry.get()), intent_stage_free);
+    ASSERT_NE(expected, nullptr);
+    ASSERT_NE(actual, nullptr);
     for (int table = 1; table <= 3; ++table) {
         size_t want_bytes = 0, got_bytes = 0;
         const auto* want = intent_stage_tuple_ptr(expected.get(), static_cast<intent_stage_table_t>(table), &want_bytes);
         const auto* got = intent_stage_tuple_ptr(actual.get(), static_cast<intent_stage_table_t>(table), &got_bytes);
         ASSERT_EQ(got_bytes, want_bytes);
-        ASSERT_GT(got_bytes, 0u);
-        EXPECT_EQ(std::memcmp(got, want, got_bytes), 0);
+        if (table == static_cast<int>(INTENT_STAGE_TABLE_ATTESTATIONS)) {
+            EXPECT_EQ(got_bytes, 0u);
+        } else {
+            ASSERT_GT(got_bytes, 0u);
+            EXPECT_EQ(std::memcmp(got, want, got_bytes), 0);
+        }
     }
 }
-
 TEST_F(PhysicalityDescriptorAdmission, SourceContextObservationWorkload) {
     // Finite genuine native materialization fixture, also compiled unchanged
     // against the pre-optimization library by the hosted comparison. Timings
