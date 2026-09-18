@@ -62,6 +62,11 @@ class QualificationCacheTests(unittest.TestCase):
         self.assertEqual(managed_before, self.fingerprint("managed-dev"))
         self.assertNotEqual(browser_before, self.fingerprint("browser-dev"))
 
+    def test_source_returns_revision_that_owns_matching_receipt(self):
+        self.run_cache("record", "native-dev", check=True)
+        source = self.run_cache("source", "native-dev", check=True)
+        self.assertEqual(source.stdout.strip(), "test-source")
+
     def test_recorded_receipt_is_reused_until_relevant_input_changes(self):
         miss = self.run_cache("check", "managed-dev")
         self.assertEqual(miss.returncode, 1)

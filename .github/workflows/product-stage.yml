@@ -28,6 +28,31 @@ on:
         type: string
         required: false
         default: all
+      build_components:
+        description: "comma-separated candidate components that must be built/materialized"
+        type: string
+        required: false
+        default: all
+      db_suites:
+        description: "comma-separated database suites selected by the impact planner"
+        type: string
+        required: false
+        default: all
+      live_suites:
+        description: "comma-separated live suites selected by the impact planner"
+        type: string
+        required: false
+        default: all
+      delivery_actions:
+        description: "comma-separated release-delivery mutations selected by the impact planner"
+        type: string
+        required: false
+        default: all
+      publish_scope:
+        description: "full or api publication scope"
+        type: string
+        required: false
+        default: full
       skip_if_superseded:
         description: "skip this selected revision if main advanced before host ownership"
         type: boolean
@@ -103,6 +128,11 @@ jobs:
       LAPLACE_FORCE_CODEGEN: ${{ inputs.force_codegen && '1' || '' }}
       LAPLACE_TEST_SERIAL: ${{ inputs.serial_tests && '1' || '' }}
       LAPLACE_DEV_SUITES: ${{ inputs.dev_suites }}
+      LAPLACE_BUILD_COMPONENTS: ${{ inputs.build_components }}
+      LAPLACE_DB_SUITES: ${{ inputs.db_suites }}
+      LAPLACE_LIVE_SUITES: ${{ inputs.live_suites }}
+      LAPLACE_DELIVERY_ACTIONS: ${{ inputs.delivery_actions }}
+      LAPLACE_PUBLISH_SCOPE: ${{ inputs.publish_scope }}
       LAPLACE_USE_QUALIFICATION_CACHE: ${{ inputs.skip_if_superseded && inputs.stage == 'release-qualification' && '1' || '0' }}
       LAPLACE_SKIP_IF_SUPERSEDED: ${{ inputs.skip_if_superseded && '1' || '0' }}
       LICHESS_API: ${{ secrets.LICHESS_API }}

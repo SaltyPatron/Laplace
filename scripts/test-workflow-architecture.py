@@ -58,9 +58,14 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("needs: plan", lifecycle)
         self.assertIn("stage: release-qualification", lifecycle)
         self.assertIn("dev_suites: ${{ needs.plan.outputs.dev_suites }}", lifecycle)
+        self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
         self.assertIn("  mainline-delivery:", lifecycle)
         self.assertIn("needs: [plan, mainline-qualification]", lifecycle)
         self.assertIn("stage: release-delivery", lifecycle)
+        self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", lifecycle)
+        self.assertIn("db_suites: ${{ needs.plan.outputs.db_suites }}", lifecycle)
+        self.assertIn("live_suites: ${{ needs.plan.outputs.live_suites }}", lifecycle)
+        self.assertIn("publish_scope: ${{ needs.plan.outputs.publish_scope }}", lifecycle)
         self.assertEqual(2, lifecycle.count("uses: ./.github/workflows/product-stage.yml"))
         self.assertEqual(2, lifecycle.count("skip_if_superseded: true"))
 
@@ -99,7 +104,17 @@ class WorkflowArchitecture(unittest.TestCase):
     def test_main_qualification_reuses_exact_valid_suite_receipts(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         self.assertIn("dev_suites:", reusable)
+        self.assertIn("build_components:", reusable)
+        self.assertIn("db_suites:", reusable)
+        self.assertIn("live_suites:", reusable)
+        self.assertIn("delivery_actions:", reusable)
+        self.assertIn("publish_scope:", reusable)
         self.assertIn("LAPLACE_DEV_SUITES:", reusable)
+        self.assertIn("LAPLACE_BUILD_COMPONENTS:", reusable)
+        self.assertIn("LAPLACE_DB_SUITES:", reusable)
+        self.assertIn("LAPLACE_LIVE_SUITES:", reusable)
+        self.assertIn("LAPLACE_DELIVERY_ACTIONS:", reusable)
+        self.assertIn("LAPLACE_PUBLISH_SCOPE:", reusable)
         self.assertIn("LAPLACE_USE_QUALIFICATION_CACHE:", reusable)
 
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
@@ -110,23 +125,26 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("qualification planner kept", matrix)
         self.assertNotIn("|| rc=$?", matrix)
 
-    def test_main_delivery_crosses_mutation_boundary_once_and_finishes_coherently(self):
+    def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
         qualification = product.split("run_release_qualification() {", 1)[1].split("\n}", 1)[0]
         automatic = product.split("run_release_delivery() {", 1)[1].split("\n}", 1)[0]
-        activation = product.split("run_release_activation() {", 1)[1].split("\n}", 1)[0]
 
         self.assertIn("run_build", qualification)
         self.assertIn("run_dev_test_matrix 1", qualification)
-        for token in ("run_install", "run_database_maintenance --prepare", "run_db_tests", "run_publish"):
-            self.assertIn(token, automatic)
         self.assertNotIn("run_build", automatic)
         self.assertIn("release_candidate_current_before_mutation", automatic)
         self.assertIn("export LAPLACE_SKIP_IF_SUPERSEDED=0", automatic)
-        self.assertIn("run_release_activation", automatic)
-        self.assertNotIn("run_publish", activation)
-        self.assertIn("reconcile_installed_product", activation)
-        self.assertIn("run_live_tests", activation)
+        self.assertIn("LAPLACE_DELIVERY_ACTIONS", automatic)
+        for selector in ("install", "database", "reconcile", "publish", "live"):
+            self.assertIn(f'csv_selected "$actions" {selector}', automatic)
+        self.assertIn("run_install", automatic)
+        self.assertIn("run_database_maintenance --prepare", automatic)
+        self.assertIn("run_db_tests", automatic)
+        self.assertIn("run_publish", automatic)
+        self.assertIn("verify_installed_product", automatic)
+        self.assertIn("run_live_tests", automatic)
+        self.assertNotIn("run_release_activation", automatic)
 
     def test_manual_product_operations_are_outside_main_delivery_graph(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")

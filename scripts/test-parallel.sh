@@ -43,7 +43,9 @@ elif [[ -z "${CTEST_PARALLEL_LEVEL:-}" ]]; then
   export CTEST_PARALLEL_LEVEL
 fi
 
-bash scripts/sync-managed-native-artifacts.sh
+sync_managed_native() {
+  bash scripts/sync-managed-native-artifacts.sh
+}
 
 set_dev_perfcache() {
   local candidate
@@ -73,6 +75,7 @@ run_native_dev() {
 
 run_managed_dev() {
   set_dev_perfcache
+  sync_managed_native
   python3 scripts/test-managed-policy.py
   python3 scripts/test-application-payload.py
   python3 scripts/test-cutechess-calibration.py
@@ -92,6 +95,7 @@ run_managed_dev() {
 
 run_uci_dev() {
   local runtime output
+  sync_managed_native
   runtime=$(mktemp -d)
   trap 'rm -rf "$runtime"' RETURN
   dotnet publish app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj -c Release --no-build --no-self-contained -o "$runtime" --nologo
@@ -126,6 +130,7 @@ run_native_db() {
 
 run_managed_db() {
   set_installed_perfcache
+  sync_managed_native
   dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal \
     -m:1 -p:BuildInParallel=false --filter 'Tier=db'
 }
@@ -177,6 +182,7 @@ run_live_api() {
 
 run_managed_live() {
   set_installed_perfcache
+  sync_managed_native
   dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal --filter 'Tier=live'
 }
 
@@ -188,6 +194,7 @@ run_generation_eval() {
 
 run_perf() {
   set_installed_perfcache
+  sync_managed_native
   dotnet test app/Laplace.slnx -c Release --no-build --nologo --verbosity minimal --filter 'Tier=perf'
   mkdir -p "$ROOT/build/eval-proof"
   python3 scripts/verify-generation.py --api "${LAPLACE_API_BASE:-http://127.0.0.1:8080}" \

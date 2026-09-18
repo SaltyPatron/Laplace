@@ -185,7 +185,7 @@ def record(root: Path, suite: str, digest: str, source_sha: str, inputs: dict) -
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("fingerprint", "check", "record"))
+    parser.add_argument("operation", choices=("fingerprint", "check", "source", "record"))
     parser.add_argument("--suite", required=True, choices=tuple(SUITE_SCOPES))
     parser.add_argument("--root", default=".")
     parser.add_argument("--cache-root")
@@ -201,11 +201,15 @@ def main() -> int:
     receipts = cache_root(args.cache_root)
     path = receipt_path(receipts, args.suite, digest)
 
-    if args.operation == "check":
+    if args.operation in ("check", "source"):
         payload = read_receipt(path, args.suite, digest)
         if payload is None:
-            print(f"QUALIFICATION_MISS suite={args.suite} fingerprint={digest}")
+            if args.operation == "check":
+                print(f"QUALIFICATION_MISS suite={args.suite} fingerprint={digest}")
             return 1
+        if args.operation == "source":
+            print(payload.get("source_sha", ""))
+            return 0
         print(
             f"QUALIFICATION_HIT suite={args.suite} fingerprint={digest} "
             f"qualified_source={payload.get('source_sha', '')}"
