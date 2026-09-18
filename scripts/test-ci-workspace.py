@@ -122,11 +122,20 @@ class WorkspaceReservation(WorkspaceFixture):
                 self.assertEqual(process.stdout.readline(), "started\n")
                 candidate = self.candidate()
                 deadline = time.time() + 2
-                while time.time() < deadline and not (candidate / ".git").exists():
+                candidate_head = None
+                while time.time() < deadline:
+                    if candidate.exists():
+                        probe = subprocess.run(
+                            ["git", "rev-parse", "HEAD"],
+                            cwd=candidate, env=self.env,
+                            text=True, capture_output=True, check=False,
+                        )
+                        if probe.returncode == 0:
+                            candidate_head = probe.stdout.strip()
+                            break
                     time.sleep(0.02)
                 self.assertIsNone(process.poll())
-                self.assertTrue((candidate / ".git").exists())
-                self.assertEqual(self.git(candidate, "rev-parse", "HEAD").strip(), self.target)
+                self.assertEqual(candidate_head, self.target)
                 self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").strip(), self.old)
                 self.assertFalse(self.events.exists())
                 self.assertEqual(self.marker.read_text(), "existing qualified build\n")
