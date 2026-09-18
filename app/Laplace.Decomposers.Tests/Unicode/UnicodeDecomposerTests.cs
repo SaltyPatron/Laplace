@@ -296,4 +296,25 @@ public sealed class UnicodeDecomposerTests
         }
     }
 
+    [SkippableFact]
+    public async Task Installed_Ucd_estate_has_no_unhandled_physical_artifacts()
+    {
+        string root = TestIngestPaths.UcdLatest;
+        Skip.IfNot(Directory.Exists(root), $"UCD not present at {root}");
+
+        var dec = NewDecomposer();
+        IngestArtifactGraph graph = Assert.IsType<IngestArtifactGraph>(
+            await dec.DescribeArtifactsAsync(root, DecomposerOptions.Default));
+
+        string[] unsupported = graph.Artifacts
+            .Where(static a => a.Disposition == IngestArtifactDisposition.Unsupported)
+            .Select(static a => a.RelativePath)
+            .OrderBy(static p => p, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(unsupported.Length == 0,
+            "Installed Unicode estate still has unhandled physical artifacts:\n"
+            + string.Join("\n", unsupported));
+    }
+
 }
