@@ -165,6 +165,10 @@ class ImpactPlanTests(unittest.TestCase):
             ["native-dev", "managed-dev", "uci-dev", "browser-dev"],
         )
         self.assertEqual(value["build_components"], ["managed", "native", "web"])
+        self.assertEqual(value["managed_build_projects"], ["all"])
+        self.assertEqual(value["managed_test_projects"], ["all"])
+        self.assertEqual(value["managed_db_test_projects"], ["all"])
+        self.assertEqual(value["managed_live_test_projects"], ["all"])
         self.assertEqual(
             value["db_suites"], ["db-health", "native-db", "managed-db"]
         )
