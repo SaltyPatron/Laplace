@@ -209,7 +209,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn('csv_selected "$selected" native-db', database)
         self.assertIn('csv_selected "$selected" managed-db', database)
         self.assertIn("LAPLACE_LIVE_SUITES", live)
-        for suite in ("live-floor", "live-api", "managed-live", "generation-eval"):
+        for suite in ("live-floor", "live-api", "managed-live", "generation-eval", "chess-provider-live"):
             self.assertIn(f'csv_selected "$selected" {suite}', live)
 
     def test_competitive_proof_extends_the_same_release_modules(self):
