@@ -34,6 +34,7 @@ class ImpactPlanTests(unittest.TestCase):
             ],
         )
         self.assertEqual(value["managed_test_projects"], [])
+        self.assertEqual(value["managed_test_filter"], "")
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish", "live"])
@@ -250,6 +251,10 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["build_components"], ["managed"])
         self.assertEqual(value["managed_build_projects"], [target])
         self.assertEqual(value["managed_test_projects"], [target])
+        self.assertEqual(
+            value["managed_test_filter"],
+            "FullyQualifiedName=Laplace.Decomposers.Abstractions.Tests.DecomposerArchitectureGateTests",
+        )
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["live_suites"], [])
         self.assertEqual(value["delivery_actions"], [])
