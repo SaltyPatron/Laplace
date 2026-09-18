@@ -197,6 +197,11 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
         if path.startswith("web/"):
             matched = product_change = True
+            # The SPA is part of the full application publication transaction.
+            # api-deploy does not own the web bundle; a web-only candidate must
+            # therefore select full publication or it can qualify successfully
+            # while leaving the installed UI on an older revision.
+            publish_scope = "full"
             components.add("web")
             build_components.add("web")
             dev_suites.add("browser-dev")
