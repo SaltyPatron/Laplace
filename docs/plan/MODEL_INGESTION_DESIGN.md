@@ -8,12 +8,12 @@ Current authority is `docs/INVENTION.md`, `docs/INVENTIONS.md`, `docs/INVENTION_
 
 ---
 
-## 1. A checkpoint is exact digital content **and** an attributed source
+## 1. A checkpoint has exact artifact identity **and** is an attributed source
 
 A conventional model artifact has several simultaneous roles that must not be flattened:
 
 ```text
-checkpoint bytes / files                 exact digital content + artifact occurrence
+checkpoint bytes / files                 exact artifact fingerprint/occurrence; payload remains source packaging
 config/tokenizer/architecture            exact structured content / references
 layers/heads/experts/tensors/components  addressable source structure
 numeric values / slices / factors        transient decode/calculation operands; derived physicality/evidence
@@ -23,7 +23,7 @@ induced semantic/circuit effects         calculated / witnessed provider evidenc
 model claims/completions                 source-attributed observations/testimony when admitted
 ```
 
-The checkpoint is therefore not an opaque runtime authority, but neither is it “nothing but testimony.” Its tokenizer/config/header/component structure is decomposable content. Weight values may be consumed transiently to derive circuit physicalities and evidence without being retained as raw weights or making bit-perfect checkpoint reconstruction an ingest goal.
+The checkpoint is therefore not an opaque runtime authority, but neither is it “nothing but testimony.” Its exact bytes establish artifact identity/provenance without requiring the payload bytes themselves to become durable substrate storage. Its tokenizer/config/header/component structure is decomposable content. Weight values may be consumed transiently to derive circuit physicalities and evidence without being retained as raw weights or making bit-perfect checkpoint reconstruction an ingest goal.
 
 ### Durable model representation is physicality/trajectory, not tensor payload
 
