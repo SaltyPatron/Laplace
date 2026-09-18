@@ -1,0 +1,8 @@
+-- Checksum receipt of the exact mmap'd T0 ROM used by this PostgreSQL backend.
+-- Native code owns the blob and validation; SQL only exposes the receipt for orchestration.
+CREATE OR REPLACE FUNCTION laplace.perfcache_receipt()
+    RETURNS bytea
+    LANGUAGE C
+    STABLE
+    PARALLEL SAFE
+    AS 'MODULE_PATHNAME', 'pg_laplace_perfcache_receipt';
