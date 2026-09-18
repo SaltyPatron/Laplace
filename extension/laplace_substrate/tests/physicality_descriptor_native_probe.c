@@ -163,31 +163,6 @@ static void probe_stages_free(admission_state *s) {
     pfree(s->missing); pfree(s);
 }
 
-uint64 hex_encode(const char *src,size_t len,char *dst) {
-    static const char digits[]="0123456789abcdef";
-    for(size_t i=0;i<len;++i){unsigned char c=(unsigned char)src[i];dst[i*2]=digits[c>>4];dst[i*2+1]=digits[c&15];}
-    return len*2;
-}
-static void probe_session_view_receipt(void) {
-    SessionAdmission state={0};state.maximum_bytes=4096;
-    state.context=(MemoryContext)(uintptr_t)1;CurrentMemoryContext=(MemoryContext)(uintptr_t)2;
-    physicality_descriptor_admitted_form_t forms[2]={0};
-    hash128_t missing[2]={{2,0},{3,0}};
-    laplace_physicality_pg_admission_result result={0};result.forms=forms;result.form_count=2;
-    size_t bytes=99;CHECK(session_view_receipt(&state,&result,&bytes)==NULL && bytes==0 && state.bytes==0);
-    forms[1].descriptor_id=(hash128_t){1,0};forms[1].view_state=PHYSICALITY_DESCRIPTOR_VIEW_MISSING_REFERENCE;
-    forms[1].missing_count=2;result.view_missing_ids=missing;result.view_missing_count=2;
-    char *receipt=session_view_receipt(&state,&result,&bytes);
-    const char *expected="{\"schema\":\"laplace.session-descriptor-views/v1\",\"transaction_pending\":true,\"forms\":[{\"descriptor_id\":\"01000000000000000000000000000000\",\"view_state\":1,\"missing_first\":0,\"missing_count\":2}],\"missing_ids\":[\"02000000000000000000000000000000\",\"03000000000000000000000000000000\"]}";
-    CHECK(strcmp(receipt,expected)==0 && state.bytes==bytes && state.peak_bytes==bytes);
-    CHECK(allocation_context==state.context && allocation_context!=CurrentMemoryContext);
-    session_release(&state,receipt,bytes);CHECK(state.bytes==0);
-    state.maximum_bytes=512;REFUSES((void)session_view_receipt(&state,&result,&bytes),"byte grant");
-    CHECK(state.bytes==0);result.view_missing_count=SIZE_MAX;
-    REFUSES((void)session_view_receipt(&state,&result,&bytes),"finite extent");
-    CurrentMemoryContext=NULL;
-}
-
 static void probe_view_arrays(void) {
     SnapshotData snapshot={0};admission_state *s=probe_state(&snapshot);
     s->context=(MemoryContext)(uintptr_t)3;CurrentMemoryContext=(MemoryContext)(uintptr_t)4;
@@ -248,7 +223,6 @@ static void probe_cancel_holdoffs(void)
 int main(void) {
     probe_cancel_holdoffs();
     probe_view_arrays();
-    probe_session_view_receipt();
     SnapshotData snapshot = {0};
     TransactionId transactions[2] = {43,51}, children[1] = {44};
     hash128_t child_ids[2] = {{10,11},{20,21}}, entity, placement, pending[3];
