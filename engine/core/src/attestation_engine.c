@@ -1,4 +1,19 @@
-#i
+#include "laplace/core/attestation_engine.h"
+
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
+#include "laplace/core/glicko2.h"
+#include "laplace/core/score.h"
+#include "laplace/core/utf8.h"
+
 int laplace_attestation_codepoint_range_add(
     intent_stage_t* stage,
     uint32_t first_codepoint,
@@ -38,20 +53,7 @@ int laplace_attestation_codepoint_range_add(
     }
     return 0;
 }
-nclude "laplace/core/attestation_engine.h"
 
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <time.h>
-#endif
-
-#include "laplace/core/glicko2.h"
-#include "laplace/core/score.h"\n#include "laplace/core/utf8.h"
 
 static const double kPhiTrusted = 30.0;
 static const double kPhiCrank   = 350.0;
