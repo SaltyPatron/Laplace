@@ -2,11 +2,12 @@ import { chromium } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const base = (process.env.LAPLACE_UI_URL ?? process.env.LAPLACE_API_BASE ?? 'http://127.0.0.1:5187').replace(/\/$/, '');
+const apiBase = (process.env.LAPLACE_API_BASE ?? 'http://127.0.0.1:5187').replace(/\/$/, '');
+const uiBase = (process.env.LAPLACE_UI_URL ?? 'http://127.0.0.1:8080').replace(/\/$/, '');
 const outDir = resolve(process.env.LAPLACE_STORAGE_PROOF_EVIDENCE_DIR ?? '../build/eval-proof');
 await mkdir(outDir, { recursive: true });
 
-const proofResponse = await fetch(`${base}/v1/explore/storage-proof`, {
+const proofResponse = await fetch(`${apiBase}/v1/explore/storage-proof`, {
   method: 'POST',
   headers: { 'content-type': 'application/json', 'x-laplace-tenant': 'ci' },
   body: JSON.stringify({ text: 'aa' }),
@@ -37,7 +38,7 @@ page.on('pageerror', (error) => consoleErrors.push(error.message));
 
 const screenshot = resolve(outDir, 'storage-proof-live.png');
 try {
-  await page.goto(`${base}/proof?q=aa`, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+  await page.goto(`${uiBase}/proof?q=aa`, { waitUntil: 'domcontentloaded', timeout: 20_000 });
   await page.getByRole('heading', { name: 'Selected storage address' }).waitFor({ state: 'visible', timeout: 20_000 });
   await page.getByText('same exact T0 ROM').waitFor({ state: 'visible', timeout: 20_000 });
 
