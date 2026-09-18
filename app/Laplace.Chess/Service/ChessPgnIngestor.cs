@@ -281,9 +281,14 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
         IReadOnlyList<ChessGameRecord> games, CancellationToken ct)
     {
         if (games.Count == 0) return null;
+        // A legitimate zero-ply resignation/timeout has a PLAYING witness and the
+        // initial position as its line identity, but deliberately owns no move carrier.
+        // Only non-empty source lines are required to round-trip a Content trajectory.
         var expectedLines = games
+            .Where(static game => game.MoveIds.Length > 0)
             .GroupBy(static game => game.LineId)
             .ToDictionary(static group => group.Key, static group => group.First().MoveIds);
+        if (expectedLines.Count == 0) return null;
         var lineIds = expectedLines.Keys.Select(static id => id.ToBytes()).ToArray();
         var rows = await NpgsqlSubstrateReads.TypedTrajectoryConstituentsAsync(
             _ds, lineIds, [PhysicalityType.Content], ct).ConfigureAwait(false);
