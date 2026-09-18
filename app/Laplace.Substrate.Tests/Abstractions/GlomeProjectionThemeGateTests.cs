@@ -52,6 +52,9 @@ public sealed class GlomeProjectionThemeGateTests
         Assert.Contains("node.id_hex === proof.root_id_hex", proof, StringComparison.Ordinal);
         Assert.Contains("UNVERIFIED — database ROM receipt unavailable", proof, StringComparison.Ordinal);
         Assert.Contains("Database verification failed", proof, StringComparison.Ordinal);
+        Assert.Contains("<h3>Finite address ledger</h3>", proof, StringComparison.Ordinal);
+        Assert.Contains("projection=\"packed\"", proof, StringComparison.Ordinal);
+        Assert.Contains("M is metadata (ordinal/run/flags), not a spatial axis", proof, StringComparison.Ordinal);
         Assert.DoesNotContain("'alignment unknown'", proof, StringComparison.Ordinal);
     }
 
