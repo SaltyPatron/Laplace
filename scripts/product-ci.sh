@@ -80,8 +80,15 @@ reuse_qualified_native_build() {
   [[ -f build/engine/core/liblaplace_core.so ]] && return 0
 
   local source_sha source_root work_root
-  source_sha="$(python3 scripts/ci-qualification-cache.py source --suite native-dev 2>/dev/null || true)"
+  source_sha="$(python3 scripts/ci-qualification-cache.py latest-source --suite native-dev 2>/dev/null || true)"
   [[ "$source_sha" =~ ^[0-9a-fA-F]{40}$ ]] || return 1
+
+  # A native test edit invalidates native-dev qualification, but it does not
+  # change the runtime ELF/ROM consumed by managed projects. Reuse the latest
+  # successfully qualified build only when its runtime/build inputs are byte-
+  # equivalent to this candidate; test-only paths are deliberately excluded.
+  git cat-file -e "$source_sha^{commit}" 2>/dev/null     || git fetch --no-tags --depth=1 origin "$source_sha" >/dev/null 2>&1     || return 1
+  git diff --quiet "$source_sha" HEAD --     CMakeLists.txt cmake engine extension scripts/provision-cmake.py     ':(exclude)engine/**/tests/**'     ':(exclude)extension/**/tests/**'     || return 1
 
   work_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
   source_root="$work_root/product-worktrees/$source_sha"
@@ -91,7 +98,7 @@ reuse_qualified_native_build() {
   mkdir -p build
   [[ ! -e build/engine && ! -L build/engine ]] || return 1
   ln -s "$source_root/build/engine" build/engine
-  echo "::notice::reusing qualified native build from $source_sha"
+  echo "::notice::reusing runtime-equivalent qualified native build from $source_sha"
   return 0
 }
 
