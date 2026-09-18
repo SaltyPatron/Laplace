@@ -18,6 +18,7 @@ const defaultRoutes = [
   ['chat', '/chat'],
   ['query', '/query'],
   ['explore', '/explore'],
+  ['proof', '/proof?q=aa'],
   ['data', '/data'],
   ['chess', '/chess'],
   ['play', '/play'],
