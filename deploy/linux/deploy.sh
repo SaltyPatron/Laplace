@@ -50,6 +50,75 @@ uci_no_other_transaction() {
   }
 }
 
+uci_revision_snapshot() {
+  local state="$1" source="$REPO_ROOT/build/.laplace-source-revision"
+  local receipt="$APP_DIR/.laplace-source-revision"
+  [[ "${LAPLACE_UCI_REVISION_RECEIPT:-0}" == 1 ]] || return 0
+
+  [[ -f "$source" && ! -L "$source" ]] || {
+    echo "::error::UCI delivery requires an exact candidate revision receipt" >&2
+    return 1
+  }
+  local next
+  next="$(<"$source")"
+  [[ "$next" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "::error::invalid candidate revision receipt for UCI delivery" >&2
+    return 1
+  }
+
+  cp -- "$source" "$state/next-revision"
+  if [[ -f "$receipt" && ! -L "$receipt" ]]; then
+    cp -- "$receipt" "$state/previous-revision"
+  elif [[ -e "$receipt" || -L "$receipt" ]]; then
+    echo "::error::installed application revision receipt is not a regular file" >&2
+    return 1
+  else
+    : > "$state/previous-revision-absent"
+  fi
+  : > "$state/revision-managed"
+}
+
+uci_revision_install() {
+  local state="$1" receipt="$APP_DIR/.laplace-source-revision" temporary
+  [[ -f "$state/revision-managed" ]] || return 0
+  temporary="$APP_DIR/.laplace-source-revision.tmp.$"
+  install -m 0644 "$state/next-revision" "$temporary"
+  mv -f "$temporary" "$receipt"
+  [[ "$(<"$receipt")" == "$(<"$state/next-revision")" ]] || {
+    echo "::error::UCI revision receipt did not commit" >&2
+    return 1
+  }
+}
+
+uci_revision_restore() {
+  local state="$1" receipt="$APP_DIR/.laplace-source-revision"
+  local current="" next previous="" temporary
+  [[ -f "$state/revision-managed" ]] || return 0
+
+  next="$(<"$state/next-revision")"
+  [[ ! -f "$receipt" || -L "$receipt" ]] || current="$(<"$receipt")"
+
+  if [[ -f "$state/previous-revision" ]]; then
+    previous="$(<"$state/previous-revision")"
+    [[ "$current" == "$previous" || "$current" == "$next" ]] || {
+      echo "::error::application revision changed outside the UCI transaction" >&2
+      return 1
+    }
+    temporary="$APP_DIR/.laplace-source-revision.restore.$"
+    install -m 0644 "$state/previous-revision" "$temporary"
+    mv -f "$temporary" "$receipt"
+  elif [[ -f "$state/previous-revision-absent" ]]; then
+    [[ -z "$current" || "$current" == "$next" ]] || {
+      echo "::error::application revision appeared outside the UCI transaction" >&2
+      return 1
+    }
+    rm -f "$receipt"
+  else
+    echo "::error::UCI recovery has no prior revision disposition" >&2
+    return 1
+  fi
+}
+
 uci_verify() {
   python3 "$REPO_ROOT/scripts/verify-api-payload.py" --verify-uci "$1" \
     --manifest "$2" --receipt "$3"
@@ -93,6 +162,7 @@ uci_recover() {
       rm "$APP_DIR/laplace-uci" || return 1
     fi
   fi
+  uci_revision_restore "$state" || return 1
   if [[ -n "$old" ]]; then
     uci_verify "$APP_DIR/laplace-uci" "$state/previous.json" "$state/restored.json" || return 1
     cp "$state/restored.json" "$REPO_ROOT/build/.uci-publish-restored.json" || return 1
@@ -125,6 +195,7 @@ publish_uci_only() (
   fi
   mkdir -p "$REPO_ROOT/build"
   state="$(mktemp -d "$(realpath -e "$REPO_ROOT/build")/.uci-publish.XXXXXX")"
+  uci_revision_snapshot "$state"
   trap 'rc=$?; trap - EXIT
     if [[ "$marked" == 1 && "$committed" == 0 ]]; then
       uci_recover || { echo "::error::UCI recovery retained at $state" >&2; rc=1; }
@@ -158,6 +229,7 @@ publish_uci_only() (
   fi
   laplace_select_uci_runtime "$APP_DIR" "$next"
   uci_verify "$APP_DIR/laplace-uci" "$state/next.json" "$state/verified.json"
+  uci_revision_install "$state"
   cp "$state/next.json" "$REPO_ROOT/build/.uci-publish-payload.json"
   cp "$state/verified.json" "$REPO_ROOT/build/.uci-publish-verified.json"
   rm "$marker"
