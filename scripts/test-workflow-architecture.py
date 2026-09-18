@@ -18,6 +18,17 @@ class MainPushQueueContract(unittest.TestCase):
         self.assertNotIn("\nconcurrency:\n", lifecycle)
         self.assertFalse((WORKFLOWS / "mainline-delivery.yml").exists())
 
+        qualification = lifecycle.split("  mainline-qualification:\n", 1)[1].split(
+            "\n  mainline-delivery:\n", 1)[0]
+        delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
+        self.assertIn("group: laplace-main-qualification-dispatch", qualification)
+        self.assertIn("cancel-in-progress: true", qualification)
+        self.assertIn("group: laplace-main-delivery-dispatch", delivery)
+        self.assertIn("cancel-in-progress: false", delivery)
+
+        # The called workflow keeps an independent inner guard. Distinct group
+        # names avoid self-deadlock while caller cancellation tears down the
+        # superseded reusable-workflow invocation before it owns the runner.
         self.assertIn("laplace-main-qualification", reusable)
         self.assertIn("laplace-main-delivery", reusable)
         self.assertIn(
