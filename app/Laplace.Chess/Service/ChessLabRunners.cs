@@ -586,6 +586,10 @@ public static class ChessLabRunners
                     identityLinks = profileResult.Links,
                 }, new JsonSerializerOptions { WriteIndented = true }), ct);
                 lab.AddArtifact(slot, "recording-proof.json", proofPath);
+                lab.Publish(slot, new ChessLabMetricEvent("source_pgn_bytes", pgnBytes));
+                lab.Publish(slot, new ChessLabLogEvent("info",
+                    $"recording proof: {gameResult.Verified} games / {gameResult.VerifiedPlies} plies exact-readback verified · "
+                    + $"PGN sha256 {pgnSha256}"));
 
                 lab.UpdateSummary(slot, new ChessLabJobSummary(
                     gameResult.Verified, games,
