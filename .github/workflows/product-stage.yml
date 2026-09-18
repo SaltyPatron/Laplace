@@ -260,18 +260,52 @@ jobs:
 
             exec {stale_fd}<>"$stale_lock"
             if flock -n "$stale_fd"; then
+              stale_physical="$(readlink -f "$stale_workspace" 2>/dev/null || printf '%s' "$stale_workspace")"
+              stale_identity="$(printf '%s' "$stale_physical" | sha256sum | cut -c1-16)"
+              stale_build="/build/laplace/build/laplace-$stale_identity"
               if [[ -e "$stale_workspace/.git" ]]; then
                 if [[ -z "$(git -C "$stale_workspace" status --porcelain --untracked-files=no)" ]]; then
-                  rm -rf "$stale_workspace"
+                  rm -rf "$stale_workspace" "$stale_build"
                 else
                   echo "::warning::preserving dirty inactive candidate worktree: $stale_workspace" >&2
                 fi
               else
-                rm -rf "$stale_workspace"
+                rm -rf "$stale_workspace" "$stale_build"
               fi
               flock -u "$stale_fd"
             fi
             exec {stale_fd}>&-
+          done
+
+          # Old versions of this workflow removed candidate worktrees without removing
+          # their externally placed CMake trees. Recover those orphaned build trees too.
+          # A CMake tree is eligible only when its recorded source is a deleted
+          # product-worktree candidate; active/current/native-reuse owners are excluded.
+          for stale_build in /build/laplace/build/laplace-*; do
+            [[ -d "$stale_build" ]] || continue
+            cache="$stale_build/CMakeCache.txt"
+            [[ -f "$cache" ]] || continue
+            stale_source="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache" | tail -1)"
+            [[ "$stale_source" == "$worktree_root/"* ]] || continue
+            [[ "$stale_source" != "$candidate_workspace" ]] || continue
+            stale_sha="${stale_source##*/}"
+            [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+            if [[ -n "$preserve_native_source" && "$stale_sha" == "$preserve_native_source" ]]; then
+              continue
+            fi
+            [[ ! -d "$stale_source" ]] || continue
+
+            stale_lock="$work_root/product-$stale_sha.lock"
+            if [[ -e "$stale_lock" ]]; then
+              exec {stale_fd}<>"$stale_lock"
+              if flock -n "$stale_fd"; then
+                rm -rf "$stale_build"
+                flock -u "$stale_fd"
+              fi
+              exec {stale_fd}>&-
+            else
+              rm -rf "$stale_build"
+            fi
           done
 
           git worktree prune
