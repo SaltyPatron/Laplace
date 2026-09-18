@@ -191,7 +191,7 @@ target_link_libraries(laplace_core PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS}
 if(WIN32)
     target_link_libraries(laplace_core_static PRIVATE tree_sitter_rt ${LAPLACE_TS_GRAMMARS})
 endif()
-set(LAPLACE_PERFCACHE_XML "${LAPLACE_PERFCACHE_DIR}/ucd.nounihan.flat.xml")
+set(LAPLACE_PERFCACHE_XML "${LAPLACE_PERFCACHE_DIR}/ucd.all.flat.xml")
 set(LAPLACE_PERFCACHE_BIN "${LAPLACE_PERFCACHE_DIR}/laplace_t0_perfcache.bin"
     CACHE FILEPATH "Built T0 codepoint perf-cache blob (consumed by tests + installed)" FORCE)
 
