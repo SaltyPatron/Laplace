@@ -175,9 +175,13 @@ find_package(LibXml2 REQUIRED)
 find_package(ICU COMPONENTS uc REQUIRED)
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
+target_compile_definitions(laplace_core PRIVATE
+    LAPLACE_EXPECTED_UCD_VERSION="${LAPLACE_UNICODE_VERSION}")
 
 if(WIN32)
     add_library(laplace_core_static STATIC ${LAPLACE_CORE_SOURCES})
+    target_compile_definitions(laplace_core_static PRIVATE
+        LAPLACE_EXPECTED_UCD_VERSION="${LAPLACE_UNICODE_VERSION}")
     target_include_directories(laplace_core_static PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(laplace_core_static
