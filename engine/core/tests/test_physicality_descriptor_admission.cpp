@@ -128,6 +128,24 @@ protected:
         return count > index ? forms[index] : physicality_descriptor_admitted_form_t{};
     }
 
+    physicality_descriptor_form_observation_t observation(
+        const Materialization& materialized, size_t index = 0) {
+        size_t count = 0;
+        const auto* observations =
+            physicality_descriptor_materialization_observations(materialized.get(), &count);
+        EXPECT_GT(count, index);
+        return count > index ? observations[index] : physicality_descriptor_form_observation_t{};
+    }
+
+    std::vector<physicality_descriptor_form_observation_t> observations(
+        const Materialization& materialized) {
+        size_t count = 0;
+        const auto* rows =
+            physicality_descriptor_materialization_observations(materialized.get(), &count);
+        return rows == nullptr ? std::vector<physicality_descriptor_form_observation_t>{}
+                               : std::vector<physicality_descriptor_form_observation_t>(rows, rows + count);
+    }
+
     static std::vector<physicality_descriptor_source_observation_t> witnesses(size_t count) {
         return std::vector<physicality_descriptor_source_observation_t>(count, {kSource, kUnit, 0.8});
     }
@@ -526,8 +544,17 @@ TEST_F(PhysicalityDescriptorAdmission, MixedWriterStagesSelectFirstContentPlacem
     ASSERT_EQ(run(source, {changed_current.get()}, {}, {}, witnesses(6), replay), PHYSICALITY_DESCRIPTOR_OK);
     const auto current_parent = form(replay);
     EXPECT_TRUE(hash128_equals(&changed_parent.view_id, &current_parent.view_id));
+    const auto provenance = observations(fallback);
+    ASSERT_EQ(provenance.size(), 6u);
+    const auto expected_sources = witnesses(6);
+    for (size_t i = 0; i < provenance.size(); ++i) {
+        EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &form(fallback, i).descriptor_id));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &expected_sources[i].source_id));
+        EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &expected_sources[i].source_unit_id));
+    }
     Stage generated(physicality_descriptor_materialization_take_stage(fallback.get()), intent_stage_free);
-    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 5u);
+    ASSERT_NE(generated, nullptr);
+    EXPECT_EQ(intent_stage_attestation_count(generated.get()), 0u);
 }
 
 TEST_F(PhysicalityDescriptorAdmission, ReleasedCaptureKeepsExactMaterializationAndFiniteCoexistence) {
@@ -642,6 +669,18 @@ TEST_F(PhysicalityDescriptorAdmission, ReleasedCaptureKeepsExactMaterializationA
             EXPECT_EQ(before_forms[i].missing_first, after_forms[i].missing_first);
             EXPECT_EQ(before_forms[i].missing_count, after_forms[i].missing_count);
         }
+        const auto before_provenance = observations(before);
+        const auto after_provenance = observations(after);
+        ASSERT_EQ(before_provenance.size(), after_provenance.size());
+        if (selected.status == PHYSICALITY_DESCRIPTOR_OK)
+            ASSERT_EQ(before_provenance.size(), sources.size());
+        for (size_t i = 0; i < before_provenance.size(); ++i) {
+            EXPECT_TRUE(hash128_equals(&before_provenance[i].entity_id, &after_provenance[i].entity_id));
+            EXPECT_TRUE(hash128_equals(&before_provenance[i].descriptor_id, &after_provenance[i].descriptor_id));
+            EXPECT_TRUE(hash128_equals(&before_provenance[i].source_id, &after_provenance[i].source_id));
+            EXPECT_TRUE(hash128_equals(&before_provenance[i].source_unit_id, &after_provenance[i].source_unit_id));
+            EXPECT_EQ(before_provenance[i].observed_at_unix_us, after_provenance[i].observed_at_unix_us);
+        }
         Stage before_stage(physicality_descriptor_materialization_take_stage(before.get()), intent_stage_free);
         Stage after_stage(physicality_descriptor_materialization_take_stage(after.get()), intent_stage_free);
         if (selected.status == PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER) {
@@ -651,17 +690,21 @@ TEST_F(PhysicalityDescriptorAdmission, ReleasedCaptureKeepsExactMaterializationA
         }
         ASSERT_NE(before_stage, nullptr);
         ASSERT_NE(after_stage, nullptr);
-        EXPECT_EQ(intent_stage_attestation_count(before_stage.get()), 3u);
-        // Compare actual COPY bytes, including all timestamps and occurrences;
-        // the semantic digest alone deliberately excludes observation time.
+        EXPECT_EQ(intent_stage_attestation_count(before_stage.get()), 0u);
+        // Compare exact generated structural tuple bytes. Semantic testimony is
+        // intentionally absent from descriptor materialization.
         for (const auto table : {INTENT_STAGE_TABLE_ENTITIES, INTENT_STAGE_TABLE_PHYSICALITIES,
                                 INTENT_STAGE_TABLE_ATTESTATIONS}) {
             size_t before_bytes = 0, after_bytes = 0;
             const auto* before_data = intent_stage_tuple_ptr(before_stage.get(), table, &before_bytes);
             const auto* after_data = intent_stage_tuple_ptr(after_stage.get(), table, &after_bytes);
             ASSERT_EQ(before_bytes, after_bytes);
-            ASSERT_GT(before_bytes, 0u);
-            EXPECT_EQ(std::memcmp(before_data, after_data, before_bytes), 0);
+            if (table == INTENT_STAGE_TABLE_ATTESTATIONS) {
+                EXPECT_EQ(before_bytes, 0u);
+            } else {
+                ASSERT_GT(before_bytes, 0u);
+                EXPECT_EQ(std::memcmp(before_data, after_data, before_bytes), 0);
+            }
         }
     }
 }
