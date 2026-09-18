@@ -219,14 +219,12 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
         if path.startswith("web/"):
             matched = product_change = True
-            # The SPA is part of the full application publication transaction.
-            # api-deploy does not own the web bundle. Full publication uses
-            # --no-build for API/UCI/MCP/Lichess, so materialize exactly those
-            # managed roots as payload prerequisites without adding managed tests.
-            publish_scope = "full"
+            # The SPA has an independent sealed artifact and publication transaction.
+            # A web-only change therefore builds/qualifies/publishes only the web
+            # component; API/UCI/MCP/Lichess binaries remain byte-identical.
+            publish_scope = "web"
             components.add("web")
-            build_components.update(("managed", "web"))
-            managed_build_required.update(FULL_PUBLISH_PROJECTS)
+            build_components.add("web")
             dev_suites.add("browser-dev")
             live_suites.update(BASE_LIVE_SUITES)
             delivery_actions.update(("publish", "live"))
@@ -326,7 +324,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         "delivery_actions": [
             action for action in DELIVERY_ACTIONS if action in delivery_actions
         ],
-        "publish_scope": publish_scope if publish_scope in ("api", "uci", "full") else "full",
+        "publish_scope": publish_scope if publish_scope in ("web", "api", "uci", "full") else "full",
         "full_qualification": force_full or bool(unknown),
         "unknown_paths": sorted(set(unknown)),
         "ignored_paths": sorted(ignored),
