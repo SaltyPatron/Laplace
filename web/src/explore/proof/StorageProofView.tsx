@@ -551,7 +551,7 @@ export function StorageProofView() {
             <div>
               <span>DB uses same ROM</span>
               <strong>
-                {proof.perfcache_aligned == null ? 'unknown' : proof.perfcache_aligned ? 'yes' : 'NO'}
+                {proof.perfcache_aligned == null ? 'UNVERIFIED' : proof.perfcache_aligned ? 'YES' : 'MISMATCH'}
               </strong>
             </div>
           </section>
@@ -743,12 +743,18 @@ export function StorageProofView() {
                       proof.perfcache_aligned === false ? styles.romMismatch : styles.romMatch
                     }>
                       {proof.perfcache_aligned == null
-                        ? 'alignment unknown'
+                        ? 'UNVERIFIED — database ROM receipt unavailable'
                         : proof.perfcache_aligned
                           ? 'same exact T0 ROM'
                           : 'T0 ROM MISMATCH'}
                     </strong>
                   </div>
+                  {proof.database_perfcache_error ? (
+                    <div className={styles.romError}>
+                      <strong>Database verification failed</strong>
+                      <code>{proof.database_perfcache_error}</code>
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <Muted>Select a node from the composition walk.</Muted>
