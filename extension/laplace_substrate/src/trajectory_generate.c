@@ -1701,6 +1701,14 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
 
     if (!PG_ARGISNULL(8))
     {
+        /*
+         * SQL keeps the historical p_prior_frontier parameter name for ABI
+         * compatibility, but the canonical forward program treats this value as
+         * ordered prior discourse/state.  It is deliberately NOT merged into
+         * PromptFrontier semantic seeds: query_operands() assigns every element
+         * LAPLACE_QUERY_OPERAND_DISCOURSE so history keeps occurrence/order
+         * semantics and cannot silently become a bag of instruction candidates.
+         */
         discourse = PG_GETARG_ARRAYTYPE_P(8);
         validate_id_array(discourse, "discourse history", true);
     }
