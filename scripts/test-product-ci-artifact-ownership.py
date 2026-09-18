@@ -144,6 +144,24 @@ class ProductStageOwnershipContract(unittest.TestCase):
         positions = [activation.index(token) for token in delivery]
         self.assertEqual(positions, sorted(positions))
 
+    def test_qualified_main_delivery_owns_mutation_and_activation_without_requalification(self):
+        delivery = function("run_release_delivery")
+        order = [
+            "check_deps",
+            "require_built_revision",
+            "release_candidate_current_before_mutation",
+            "export LAPLACE_SKIP_IF_SUPERSEDED=0",
+            "run_install",
+            "run_database_maintenance --prepare",
+            "run_db_tests",
+            "run_publish",
+            "run_release_activation",
+        ]
+        positions = [delivery.index(token) for token in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("run_release_qualification", delivery)
+        self.assertNotIn("run_build", delivery)
+
     def test_competitive_proof_extends_the_same_release_modules(self):
         proof = function("run_proof")
         stages = [

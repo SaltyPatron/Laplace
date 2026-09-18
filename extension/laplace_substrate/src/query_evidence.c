@@ -9,6 +9,7 @@
 
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/relation_law.h"
 
 #include "consensus_scan.h"
 #include "observation_read.h"
@@ -75,6 +76,21 @@ typedef struct QueryEvidenceKey
     hash128_t id;
 } QueryEvidenceKey;
 
+/* One exact recorded witness retained only for the duration of this set-sized
+ * query coupling pass. The key begins the entry so PostgreSQL's dynahash can
+ * address it directly; the payload lets later source classification reduce a
+ * deterministic-calculation subset without rereading attestations. */
+typedef struct QueryEvidenceWitness
+{
+    QueryEvidenceKey key;
+    hash128_t source;
+    hash128_t context;
+    bool source_null;
+    bool context_null;
+    int16 outcome;
+    int64 occurrences;
+} QueryEvidenceWitness;
+
 typedef struct QueryEvidenceState
 {
     LaplaceQueryChannel *channels;
@@ -82,6 +98,11 @@ typedef struct QueryEvidenceState
     HTAB *sources;
     HTAB *contexts;
     HTAB *provenance;
+    HTAB *witnesses;
+    HTAB *calculation_sources;
+    HTAB *calculation_channel_sources;
+    HTAB *calculation_contexts;
+    HTAB *calculation_provenance;
     LaplaceQueryEvidenceStats *stats;
 } QueryEvidenceState;
 
@@ -103,6 +124,7 @@ struct LaplaceQueryState
     ArrayType *operands;
     ArrayType *types;
     LaplaceQueryChannel *channels;
+    uint32 *operand_roles;
     int channel_count;
     int channel_capacity;
     int operand_count;
@@ -127,6 +149,21 @@ validate_id_array(ArrayType *array, const char *what)
             ereport(ERROR, (errmsg("query evidence: %s ids must be 16 bytes", what)));
     }
     array_free_iterator(iterator);
+}
+
+static bool
+query_operand_role_valid(uint32 role)
+{
+    return role >= LAPLACE_QUERY_OPERAND_OBSERVATION &&
+           role <= LAPLACE_QUERY_OPERAND_WORKING;
+}
+
+static uint32
+query_state_operand_role(const LaplaceQueryState *state, int32 ordinal)
+{
+    if (!state || ordinal <= 0 || ordinal > state->operand_count || !state->operand_roles)
+        ereport(ERROR, (errmsg("query evidence: operand role ordinal is out of range")));
+    return state->operand_roles[ordinal - 1];
 }
 
 static QueryChannelKey
@@ -307,6 +344,7 @@ query_consensus_cell(const LaplaceConsensusRow *row, void *opaque)
         LaplaceQueryChannel channel;
         MemSet(&channel, 0, sizeof(channel));
         channel.ordinal = index + 1;
+        channel.operand_role = LAPLACE_QUERY_OPERAND_OBSERVATION;
         channel.anchor = *anchor;
         channel.candidate = *candidate;
         channel.relation = row->type;
@@ -473,6 +511,237 @@ bind_channel_provenance_roots(QueryEvidenceState *state, int channel_count)
     pfree(items);
 }
 
+typedef struct QueryCalculationClassify
+{
+    HTAB *sources;
+    hash128_t relation;
+    hash128_t trust_class;
+} QueryCalculationClassify;
+
+static void
+query_calculation_source(const LaplaceConsensusRow *row, void *opaque)
+{
+    QueryCalculationClassify *state = (QueryCalculationClassify *) opaque;
+    bool found;
+
+    if (row->object_is_null ||
+        !hash128_eq(&row->type, &state->relation) ||
+        !hash128_eq(&row->object, &state->trust_class) ||
+        !(laplace_walk_edge_weight(row->rating, row->rd) > 0.0))
+        return;
+    (void) hash_search(state->sources, &row->subject, HASH_ENTER, &found);
+}
+
+static void
+bind_calculation_source_classes(QueryEvidenceState *state, MemoryContext work)
+{
+    HASHCTL ctl = {0};
+    HTAB *unique;
+    HASH_SEQ_STATUS sequence;
+    QueryEvidenceKey *source;
+    hash128_t *ids;
+    long count;
+    long used = 0;
+    ArrayType *subjects, *objects, *types;
+    QueryCalculationClassify classify;
+
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = work;
+    unique = hash_create("query evidence unique witness sources",
+                         Max((int) hash_get_num_entries(state->sources), 16),
+                         &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    hash_seq_init(&sequence, state->sources);
+    while ((source = (QueryEvidenceKey *) hash_seq_search(&sequence)) != NULL)
+    {
+        bool found;
+        (void) hash_search(unique, &source->id, HASH_ENTER, &found);
+    }
+    count = hash_get_num_entries(unique);
+    if (count <= 0)
+    {
+        hash_destroy(unique);
+        return;
+    }
+    if ((uint64) count > MaxAllocSize / sizeof(hash128_t))
+        ereport(ERROR,
+                (errmsg("query evidence: witness source set exceeds allocation capacity")));
+
+    ids = (hash128_t *) palloc(sizeof(*ids) * (Size) count);
+    {
+        hash128_t *id;
+        hash_seq_init(&sequence, unique);
+        while ((id = (hash128_t *) hash_seq_search(&sequence)) != NULL)
+            ids[used++] = *id;
+    }
+    if (used != count)
+        ereport(ERROR, (errmsg("query evidence: witness source set changed during classification")));
+    hash_destroy(unique);
+
+    if (laplace_relation_type_id("HAS_TRUST_CLASS", &classify.relation) != 0)
+        ereport(ERROR, (errmsg("query evidence: HAS_TRUST_CLASS identity is unavailable")));
+    hash128_blake3_str("substrate/trust_class/DerivedCalculation/v1",
+                       &classify.trust_class);
+    classify.sources = state->calculation_sources;
+
+    subjects = hash128_array_from_ids(ids, (int) count);
+    objects = hash128_array_from_ids(&classify.trust_class, 1);
+    types = hash128_array_from_ids(&classify.relation, 1);
+    laplace_consensus_scan(subjects, objects, types,
+                           query_calculation_source, &classify,
+                           state->stats ? &state->stats->calculation_sources : NULL);
+    pfree(subjects);
+    pfree(objects);
+    pfree(types);
+    pfree(ids);
+}
+
+static void
+bind_channel_calculation_roots(QueryEvidenceState *state, int channel_count)
+{
+    long total = hash_get_num_entries(state->calculation_provenance);
+    QueryEvidenceKey *items;
+    HASH_SEQ_STATUS sequence;
+    QueryEvidenceKey *entry;
+    long used = 0;
+    hash128_t domain;
+
+    if (total <= 0)
+        return;
+    if ((uint64) total > MaxAllocSize / sizeof(QueryEvidenceKey))
+        ereport(ERROR,
+                (errmsg("query evidence: calculation provenance exceeds allocation capacity")));
+    items = (QueryEvidenceKey *) palloc(sizeof(*items) * (Size) total);
+    hash_seq_init(&sequence, state->calculation_provenance);
+    while ((entry = (QueryEvidenceKey *) hash_seq_search(&sequence)) != NULL)
+        items[used++] = *entry;
+    if (used != total)
+        ereport(ERROR,
+                (errmsg("query evidence: calculation provenance changed during reduction")));
+    qsort(items, (size_t) total, sizeof(*items), query_evidence_key_order);
+    hash128_blake3_str("laplace:query-channel-calculation-provenance:v1", &domain);
+
+    for (long start = 0; start < total; )
+    {
+        long end = start + 1;
+        int channel_index = items[start].channel_index;
+        hash128_t *parts;
+        Size member_count;
+
+        while (end < total && items[end].channel_index == channel_index)
+            ++end;
+        if (channel_index < 0 || channel_index >= channel_count)
+            ereport(ERROR,
+                    (errmsg("query evidence: calculation channel index is invalid")));
+        member_count = (Size) (end - start);
+        if (member_count >= MaxAllocSize / sizeof(hash128_t))
+            ereport(ERROR,
+                    (errmsg("query evidence: calculation witness set exceeds allocation capacity")));
+        parts = (hash128_t *) palloc(sizeof(*parts) * (member_count + 1));
+        parts[0] = domain;
+        for (Size i = 0; i < member_count; ++i)
+            parts[i + 1] = items[start + (long) i].id;
+        hash128_merkle(0, parts, member_count + 1,
+                       &state->channels[channel_index].calculation_provenance_root);
+        pfree(parts);
+        start = end;
+    }
+    pfree(items);
+}
+
+static void
+bind_channel_calculations(QueryEvidenceState *state, int channel_count)
+{
+    HASH_SEQ_STATUS sequence;
+    QueryEvidenceWitness *witness;
+
+    bind_calculation_source_classes(state, CurrentMemoryContext);
+    hash_seq_init(&sequence, state->witnesses);
+    while ((witness = (QueryEvidenceWitness *) hash_seq_search(&sequence)) != NULL)
+    {
+        LaplaceQueryChannel *channel;
+        QueryEvidenceKey key;
+        bool found;
+
+        if (witness->source_null ||
+            !hash_search(state->calculation_sources, &witness->source, HASH_FIND, NULL))
+            continue;
+        if (witness->key.channel_index < 0 ||
+            witness->key.channel_index >= channel_count)
+            ereport(ERROR,
+                    (errmsg("query evidence: calculation witness channel index is invalid")));
+
+        channel = &state->channels[witness->key.channel_index];
+        if (channel->calculation_rows == INT_MAX)
+            ereport(ERROR, (errmsg("query evidence: calculation row count overflow")));
+        channel->calculation_rows++;
+        if (!add_occurrences(&channel->calculation_occurrences, witness->occurrences))
+            ereport(ERROR,
+                    (errmsg("query evidence: calculation occurrence count overflow")));
+
+        switch (witness->outcome)
+        {
+            case LAPLACE_ATTESTATION_OUTCOME_CONFIRM:
+                if (!add_occurrences(&channel->calculation_confirm_occurrences,
+                                     witness->occurrences))
+                    ereport(ERROR,
+                            (errmsg("query evidence: calculation confirmation count overflow")));
+                break;
+            case LAPLACE_ATTESTATION_OUTCOME_DRAW:
+                if (!add_occurrences(&channel->calculation_draw_occurrences,
+                                     witness->occurrences))
+                    ereport(ERROR,
+                            (errmsg("query evidence: calculation draw count overflow")));
+                break;
+            case LAPLACE_ATTESTATION_OUTCOME_REFUTE:
+                if (!add_occurrences(&channel->calculation_refute_occurrences,
+                                     witness->occurrences))
+                    ereport(ERROR,
+                            (errmsg("query evidence: calculation refutation count overflow")));
+                break;
+            default:
+                ereport(ERROR,
+                        (errmsg("query evidence: invalid calculation outcome %d",
+                                witness->outcome)));
+        }
+
+        MemSet(&key, 0, sizeof(key));
+        key.channel_index = witness->key.channel_index;
+        key.id = witness->source;
+        (void) hash_search(state->calculation_channel_sources,
+                           &key, HASH_ENTER, &found);
+        if (!found)
+        {
+            if (channel->distinct_calculation_sources == INT_MAX)
+                ereport(ERROR,
+                        (errmsg("query evidence: calculation source count overflow")));
+            channel->distinct_calculation_sources++;
+        }
+
+        if (!witness->context_null)
+        {
+            key.id = witness->context;
+            (void) hash_search(state->calculation_contexts,
+                               &key, HASH_ENTER, &found);
+            if (!found)
+            {
+                if (channel->distinct_calculation_contexts == INT_MAX)
+                    ereport(ERROR,
+                            (errmsg("query evidence: calculation context count overflow")));
+                channel->distinct_calculation_contexts++;
+            }
+        }
+
+        key.id = witness->key.id;
+        (void) hash_search(state->calculation_provenance,
+                           &key, HASH_ENTER, NULL);
+        if (state->stats)
+            state->stats->calculation_bindings++;
+    }
+    bind_channel_calculation_roots(state, channel_count);
+}
+
 static void
 query_observation(int ordinal, int16 role,
                   const LaplaceObservation *row, void *opaque)
@@ -525,10 +794,32 @@ query_observation(int ordinal, int16 role,
 
     {
         QueryEvidenceKey provenance;
+        QueryEvidenceWitness *witness;
+        bool found;
         MemSet(&provenance, 0, sizeof(provenance));
         provenance.channel_index = index->heap_index;
         provenance.id = query_provenance_witness(row);
         (void) hash_search(state->provenance, &provenance, HASH_ENTER, NULL);
+
+        witness = (QueryEvidenceWitness *)
+            hash_search(state->witnesses, &provenance, HASH_ENTER, &found);
+        if (!found)
+        {
+            witness->source = row->source;
+            witness->context = row->context;
+            witness->source_null = row->source_null;
+            witness->context_null = row->context_null;
+            witness->outcome = row->outcome;
+            witness->occurrences = row->occurrences;
+        }
+        else if (witness->source_null != row->source_null ||
+                 witness->context_null != row->context_null ||
+                 witness->outcome != row->outcome ||
+                 witness->occurrences != row->occurrences ||
+                 (!row->source_null && !hash128_eq(&witness->source, &row->source)) ||
+                 (!row->context_null && !hash128_eq(&witness->context, &row->context)))
+            ereport(ERROR,
+                    (errmsg("query evidence: one witness digest mapped to conflicting recorded state")));
     }
 
     if (!row->source_null)
@@ -579,6 +870,7 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
     if (channel_count <= 0)
         return;
     cells = palloc(sizeof(*cells) * channel_count);
+    MemSet(&evidence, 0, sizeof(evidence));
 
     MemSet(&ctl, 0, sizeof(ctl));
     ctl.keysize = sizeof(QueryChannelKey);
@@ -608,11 +900,35 @@ bind_channel_observations(ArrayType *operands, LaplaceQueryChannel *channels,
         Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     evidence.provenance = hash_create("query evidence provenance routes",
         Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    ctl.entrysize = sizeof(QueryEvidenceWitness);
+    evidence.witnesses = hash_create("query evidence retained witnesses",
+        Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    ctl.entrysize = sizeof(QueryEvidenceKey);
+    evidence.calculation_channel_sources = hash_create(
+        "query calculation channel sources", Max(channel_count, 16),
+        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    evidence.calculation_contexts = hash_create(
+        "query calculation contexts", Max(channel_count, 16),
+        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    evidence.calculation_provenance = hash_create(
+        "query calculation provenance routes", Max(channel_count, 16),
+        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    MemSet(&ctl, 0, sizeof(ctl));
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = work;
+    evidence.calculation_sources = hash_create("query calculation sources",
+        Max(channel_count, 16), &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
     evidence.channels = channels;
     evidence.stats = stats;
 
     laplace_observation_read_cells(operands, NULL, cells, channel_count,
                                    query_observation, &evidence);
+    bind_channel_calculations(&evidence, channel_count);
     bind_channel_provenance_roots(&evidence, channel_count);
     pfree(cells);
 }
@@ -828,6 +1144,7 @@ query_exact_cell(const LaplaceConsensusRow *row, void *opaque)
 
         MemSet(&channel, 0, sizeof(channel));
         channel.ordinal = index + 1;
+        channel.operand_role = LAPLACE_QUERY_OPERAND_OBSERVATION;
         channel.anchor = *anchor;
         channel.candidate = *candidate;
         channel.relation = row->type;
@@ -905,20 +1222,55 @@ laplace_query_state_create(ArrayType *operands, ArrayType *types, int fanout,
     state->operand_count = ArrayGetNItems(ARR_NDIM(operands), ARR_DIMS(operands));
     state->operands = DatumGetArrayTypePCopy(PointerGetDatum(operands));
     state->types = types ? DatumGetArrayTypePCopy(PointerGetDatum(types)) : NULL;
+    if (state->operand_count > 0)
+    {
+        if ((Size) state->operand_count > MaxAllocSize / sizeof(uint32))
+            ereport(ERROR, (errmsg("query evidence: operand role vector exceeds allocation capacity")));
+        state->operand_roles = (uint32 *) palloc(sizeof(uint32) * state->operand_count);
+        for (int i = 0; i < state->operand_count; ++i)
+            state->operand_roles[i] = LAPLACE_QUERY_OPERAND_OBSERVATION;
+    }
     initial = laplace_query_evidence_channels(operands, state->types, fanout, &count, stats);
     query_state_reserve(state, count);
     if (count > 0)
     {
         memcpy(state->channels, initial, sizeof(*initial) * count);
         state->channel_count = count;
+        for (int i = 0; i < count; ++i)
+            state->channels[i].operand_role =
+                query_state_operand_role(state, state->channels[i].ordinal);
         pfree(initial);
     }
     MemoryContextSwitchTo(previous);
     return state;
 }
 
+void
+laplace_query_state_set_operand_roles(LaplaceQueryState *state,
+                                      const uint32 *roles, int role_count)
+{
+    MemoryContext previous;
+
+    if (!state)
+        ereport(ERROR, (errmsg("query evidence: persistent query state is required")));
+    if (role_count != state->operand_count || (role_count > 0 && !roles))
+        ereport(ERROR, (errmsg("query evidence: operand role vector must match operand count")));
+    for (int i = 0; i < role_count; ++i)
+        if (!query_operand_role_valid(roles[i]))
+            ereport(ERROR, (errmsg("query evidence: invalid operand role %u", roles[i])));
+
+    previous = MemoryContextSwitchTo(state->owner);
+    if (role_count > 0)
+        memcpy(state->operand_roles, roles, sizeof(uint32) * role_count);
+    for (int i = 0; i < state->channel_count; ++i)
+        state->channels[i].operand_role =
+            query_state_operand_role(state, state->channels[i].ordinal);
+    MemoryContextSwitchTo(previous);
+}
+
 static void
-query_state_append_operands(LaplaceQueryState *state, ArrayType *selected)
+query_state_append_operands(LaplaceQueryState *state, ArrayType *selected,
+                            int selected_count, uint32 operand_role)
 {
     ArrayBuildState *build = NULL;
     ArrayIterator iterator;
@@ -936,11 +1288,24 @@ query_state_append_operands(LaplaceQueryState *state, ArrayType *selected)
     array_free_iterator(iterator);
     state->operands = DatumGetArrayTypeP(makeArrayResult(build, state->owner));
     pfree(previous);
+
+    if (selected_count > 0)
+    {
+        int64 total = (int64) state->operand_count + selected_count;
+        if (total > INT_MAX || (uint64) total > MaxAllocSize / sizeof(uint32))
+            ereport(ERROR, (errmsg("query evidence: operand role state exceeds allocation capacity")));
+        state->operand_roles = state->operand_roles
+            ? (uint32 *) repalloc(state->operand_roles, sizeof(uint32) * (Size) total)
+            : (uint32 *) palloc(sizeof(uint32) * (Size) total);
+        for (int i = 0; i < selected_count; ++i)
+            state->operand_roles[state->operand_count + i] = operand_role;
+    }
 }
 
 void
-laplace_query_state_extend_batch(LaplaceQueryState *state, ArrayType *selected,
-                                 LaplaceQueryEvidenceStats *stats)
+laplace_query_state_extend_batch_role(LaplaceQueryState *state, ArrayType *selected,
+                                      uint32 operand_role,
+                                      LaplaceQueryEvidenceStats *stats)
 {
     MemoryContext previous;
     LaplaceQueryChannel *added;
@@ -949,6 +1314,8 @@ laplace_query_state_extend_batch(LaplaceQueryState *state, ArrayType *selected,
 
     if (!state)
         return;
+    if (!query_operand_role_valid(operand_role))
+        ereport(ERROR, (errmsg("query evidence: invalid appended operand role %u", operand_role)));
     if (stats) MemSet(stats, 0, sizeof(*stats));
     validate_id_array(selected, "selected frontier");
     if (!selected) return;
@@ -964,13 +1331,22 @@ laplace_query_state_extend_batch(LaplaceQueryState *state, ArrayType *selected,
     for (int i = 0; i < count; ++i)
     {
         added[i].ordinal += state->operand_count;
+        added[i].operand_role = operand_role;
         state->channels[state->channel_count++] = added[i];
     }
     if (added)
         pfree(added);
+    query_state_append_operands(state, selected, selected_count, operand_role);
     state->operand_count += selected_count;
-    query_state_append_operands(state, selected);
     MemoryContextSwitchTo(previous);
+}
+
+void
+laplace_query_state_extend_batch(LaplaceQueryState *state, ArrayType *selected,
+                                 LaplaceQueryEvidenceStats *stats)
+{
+    laplace_query_state_extend_batch_role(
+        state, selected, LAPLACE_QUERY_OPERAND_WORKING, stats);
 }
 
 void
@@ -978,7 +1354,8 @@ laplace_query_state_extend(LaplaceQueryState *state, Datum selected,
                            LaplaceQueryEvidenceStats *stats)
 {
     ArrayType *operand = construct_array(&selected, 1, BYTEAOID, -1, false, TYPALIGN_INT);
-    laplace_query_state_extend_batch(state, operand, stats);
+    laplace_query_state_extend_batch_role(
+        state, operand, LAPLACE_QUERY_OPERAND_WORKING, stats);
     pfree(operand);
 }
 
@@ -1115,6 +1492,9 @@ laplace_query_state_candidate_evidence(const LaplaceQueryState *state,
         MemoryContextSwitchTo(work);
         bind_channel_observations(state->operands, result, exact.count, stats, work);
         MemoryContextSwitchTo(owner);
+        for (int i = 0; i < exact.count; ++i)
+            result[i].operand_role =
+                query_state_operand_role(state, result[i].ordinal);
         qsort(result, (size_t) exact.count, sizeof(*result), query_channel_order);
         *count = exact.count;
         if (stats)

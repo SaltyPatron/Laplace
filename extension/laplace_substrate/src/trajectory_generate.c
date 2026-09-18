@@ -191,31 +191,43 @@ prompt_frontier_add(PromptFrontier *frontier, const hash128_t *id)
 }
 
 static ArrayType *
-query_operands(ArrayType *ordered, ArrayType *frontier, MemoryContext owner)
+query_operands(ArrayType *ordered, ArrayType *frontier, ArrayType *discourse,
+               MemoryContext owner, uint32 **roles_out, int *role_count)
 {
-    Datum *ordered_values = NULL, *frontier_values = NULL;
-    bool *ordered_nulls = NULL, *frontier_nulls = NULL;
-    int ordered_count = 0, frontier_count = 0;
+    Datum *ordered_values = NULL, *frontier_values = NULL, *discourse_values = NULL;
+    bool *ordered_nulls = NULL, *frontier_nulls = NULL, *discourse_nulls = NULL;
+    int ordered_count = 0, frontier_count = 0, discourse_count = 0;
     Datum *combined;
+    uint32 *roles;
     int used = 0;
     HTAB *seen = new_id_index("forward query operand identities", 128, owner,
                               sizeof(hash128_t));
+
+    if (!roles_out || !role_count)
+        ereport(ERROR, (errmsg("forward execution: operand role outputs are required")));
+    *roles_out = NULL;
+    *role_count = 0;
 
     deconstruct_array(ordered, BYTEAOID, -1, false, TYPALIGN_INT,
                       &ordered_values, &ordered_nulls, &ordered_count);
     if (frontier)
         deconstruct_array(frontier, BYTEAOID, -1, false, TYPALIGN_INT,
                           &frontier_values, &frontier_nulls, &frontier_count);
+    if (discourse)
+        deconstruct_array(discourse, BYTEAOID, -1, false, TYPALIGN_INT,
+                          &discourse_values, &discourse_nulls, &discourse_count);
 
-    if ((uint64) ordered_count + (uint64) frontier_count > INT_MAX ||
-        (uint64) (ordered_count + frontier_count) > MaxAllocSize / sizeof(Datum))
+    uint64 capacity = (uint64) ordered_count + (uint64) frontier_count +
+                      (uint64) discourse_count;
+    if (capacity > INT_MAX || capacity > MaxAllocSize / sizeof(Datum) ||
+        capacity > MaxAllocSize / sizeof(uint32))
         ereport(ERROR,
                 (errmsg("forward execution: query operand set exceeds allocation capacity")));
-    combined = palloc(sizeof(Datum) * Max(ordered_count + frontier_count, 1));
+    combined = palloc(sizeof(Datum) * Max((int) capacity, 1));
+    roles = palloc(sizeof(uint32) * Max((int) capacity, 1));
 
-    /* Exact ordered occurrences remain exact occurrences. `seen` is used only
-     * to prevent the supplemental frontier from duplicating identities that
-     * are already represented by the ordered request. */
+    /* Current observation occurrences are never deduplicated: equal content at
+     * two prompt positions is still two exact occurrences. */
     for (int i = 0; i < ordered_count; ++i)
     {
         bytea *value;
@@ -226,10 +238,14 @@ query_operands(ArrayType *ordered, ArrayType *frontier, MemoryContext owner)
         if (VARSIZE_ANY_EXHDR(value) != sizeof(hash128_t))
             ereport(ERROR,
                     (errmsg("forward execution: ordered query identities must be 16 bytes")));
-        combined[used++] = ordered_values[i];
+        combined[used] = ordered_values[i];
+        roles[used++] = LAPLACE_QUERY_OPERAND_OBSERVATION;
         hash_search(seen, VARDATA_ANY(value), HASH_ENTER, &found);
     }
 
+    /* Prompt semantic seeds are supplemental identities. They do not create a
+     * second occurrence when the exact current observation already contains the
+     * same canonical identity. */
     for (int i = 0; i < frontier_count; ++i)
     {
         bytea *value;
@@ -242,7 +258,26 @@ query_operands(ArrayType *ordered, ArrayType *frontier, MemoryContext owner)
                     (errmsg("forward execution: supplemental query identities must be 16 bytes")));
         hash_search(seen, VARDATA_ANY(value), HASH_ENTER, &found);
         if (!found)
-            combined[used++] = frontier_values[i];
+        {
+            combined[used] = frontier_values[i];
+            roles[used++] = LAPLACE_QUERY_OPERAND_SEMANTIC_SEED;
+        }
+    }
+
+    /* Prior discourse is an ordered occurrence plane, not a bag of semantic
+     * seeds. Preserve every turn/content occurrence even when its canonical
+     * identity equals the current prompt or another historical occurrence. */
+    for (int i = 0; i < discourse_count; ++i)
+    {
+        bytea *value;
+        if (discourse_nulls[i])
+            continue;
+        value = DatumGetByteaPP(discourse_values[i]);
+        if (VARSIZE_ANY_EXHDR(value) != sizeof(hash128_t))
+            ereport(ERROR,
+                    (errmsg("forward execution: discourse identities must be 16 bytes")));
+        combined[used] = discourse_values[i];
+        roles[used++] = LAPLACE_QUERY_OPERAND_DISCOURSE;
     }
 
     ArrayType *result = construct_array(combined, used, BYTEAOID, -1, false, TYPALIGN_INT);
@@ -258,6 +293,13 @@ query_operands(ArrayType *ordered, ArrayType *frontier, MemoryContext owner)
         pfree(frontier_values);
         pfree(frontier_nulls);
     }
+    if (discourse_count > 0)
+    {
+        pfree(discourse_values);
+        pfree(discourse_nulls);
+    }
+    *roles_out = roles;
+    *role_count = used;
     return result;
 }
 
@@ -863,7 +905,8 @@ static Datum
 walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                    int semantic_hop_limit, bool trace,
                    const LaplacePromptIntent *intent,
-                   const hash128_t *invocation_context)
+                   const hash128_t *invocation_context,
+                   ArrayType *discourse)
 {
     ReturnSetInfo *result = (ReturnSetInfo *) fcinfo->resultinfo;
     ArrayType *context_array;
@@ -954,8 +997,15 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     }
 
     old = MemoryContextSwitchTo(walk_context);
-    ArrayType *operands = query_operands(context_array, frontier_array, walk_context);
+    uint32 *operand_roles = NULL;
+    int operand_role_count = 0;
+    ArrayType *operands = query_operands(
+        context_array, frontier_array, discourse, walk_context,
+        &operand_roles, &operand_role_count);
     query_state = laplace_query_state_create(operands, relation_types, fanout, NULL);
+    laplace_query_state_set_operand_roles(
+        query_state, operand_roles, operand_role_count);
+    pfree(operand_roles);
     origins = new_id_index("forward occurrence provenance", 128, walk_context, sizeof(OriginEntry));
     route_seen = new_id_index("forward admitted routing identities", 128,
                               walk_context, sizeof(hash128_t));
@@ -1003,6 +1053,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
          * whole-observation contract can bind an executable operation. */
         coupled_intent = laplace_prompt_intent_begin(
             input, walk_context, relation_types, fanout, trajectory_scope);
+        laplace_prompt_intent_bind_discourse(&coupled_intent, discourse);
 
         /* Structural crossings are already exact prompt-relative bindings, but
          * their reached identities also need typed relation/evidence responses
@@ -1026,8 +1077,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                     laplace_prompt_intent_origins(&coupled_intent, &id), walk_context);
             }
             array_free_iterator(structural_iterator);
-            laplace_query_state_extend_batch(
-                query_state, coupled_intent.structural_frontier, NULL);
+            laplace_query_state_extend_batch_role(
+                query_state, coupled_intent.structural_frontier,
+                LAPLACE_QUERY_OPERAND_PHYSICALITY, NULL);
         }
 
         for (;;)
@@ -1592,7 +1644,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 Datum
 pg_laplace_walk_continuations(PG_FUNCTION_ARGS)
 {
-    return walk_continuations(fcinfo, NULL, -1, false, NULL, NULL);
+    return walk_continuations(fcinfo, NULL, -1, false, NULL, NULL, NULL);
 }
 
 static Datum
@@ -1602,6 +1654,7 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
     int fanout;
     hash128_t active_invocation;
     const hash128_t *invocation_context = NULL;
+    ArrayType *discourse = NULL;
 
     if (PG_NARGS() > 10)
     {
@@ -1648,17 +1701,8 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
 
     if (!PG_ARGISNULL(8))
     {
-        ArrayType *history = PG_GETARG_ARRAYTYPE_P(8);
-        validate_id_array(history, "history", true);
-        iterator = array_create_iterator(history, 0, NULL);
-        while (array_iterate(iterator, &value, &isnull))
-        {
-            if (isnull)
-                continue;
-            hash128_t id = datum_to_hash128(value);
-            prompt_frontier_add(&frontier, &id);
-        }
-        array_free_iterator(iterator);
+        discourse = PG_GETARG_ARRAYTYPE_P(8);
+        validate_id_array(discourse, "discourse history", true);
     }
 
     LOCAL_FCINFO(walk_call, 12);
@@ -1701,7 +1745,7 @@ forward_prompt(FunctionCallInfo fcinfo, bool trace)
     walk_call->args[11] = fcinfo->args[9];
 
     return walk_continuations(
-        walk_call, input, hops, trace, NULL, invocation_context);
+        walk_call, input, hops, trace, NULL, invocation_context, discourse);
 }
 
 Datum

@@ -8,6 +8,22 @@
 #include "consensus_scan.h"
 
 /*
+ * Operand role is an explicit input coordinate, not inferred from identity.
+ * Equal content may occur in the current observation, prior discourse, a
+ * semantic seed, a physicality crossing, or generated working state.  Those
+ * occurrences may address the same relation cell while remaining distinct
+ * evidence routes.
+ */
+typedef enum LaplaceQueryOperandRole
+{
+    LAPLACE_QUERY_OPERAND_OBSERVATION = 1,
+    LAPLACE_QUERY_OPERAND_SEMANTIC_SEED = 2,
+    LAPLACE_QUERY_OPERAND_DISCOURSE = 3,
+    LAPLACE_QUERY_OPERAND_PHYSICALITY = 4,
+    LAPLACE_QUERY_OPERAND_WORKING = 5
+} LaplaceQueryOperandRole;
+
+/*
  * One query-side occurrence binding to one typed candidate/value address.
  *
  * This is deliberately not a relevance scalar.  The exact prompt occurrence
@@ -19,6 +35,7 @@
 typedef struct LaplaceQueryChannel
 {
     int32 ordinal;              /* 1-based occurrence in the ordered operand array */
+    uint32 operand_role;         /* exact observation/discourse/working-state role   */
     hash128_t anchor;           /* exact query/working-state operand                 */
     hash128_t candidate;        /* addressed value-side endpoint                    */
     hash128_t relation;         /* typed relation; never a generic adjacency         */
@@ -43,13 +60,29 @@ typedef struct LaplaceQueryChannel
     int32 distinct_sources;
     int32 distinct_contexts;
     hash128_t provenance_root;
+
+    /* Deterministic provider/calculation witnesses remain a distinct response
+     * plane inside the exact same relation cell. They are a typed subset of the
+     * raw witness topology above: storage stays source-attributed testimony,
+     * while COUPLE retains which response state came from sources whose governed
+     * trust class is DerivedCalculation. No scalar authority is implied here. */
+    int64 calculation_confirm_occurrences;
+    int64 calculation_draw_occurrences;
+    int64 calculation_refute_occurrences;
+    int64 calculation_occurrences;
+    int32 calculation_rows;
+    int32 distinct_calculation_sources;
+    int32 distinct_calculation_contexts;
+    hash128_t calculation_provenance_root;
 } LaplaceQueryChannel;
 
 typedef struct LaplaceQueryEvidenceStats
 {
     LaplaceConsensusScanStats forward;
     LaplaceConsensusScanStats reverse;
+    LaplaceConsensusScanStats calculation_sources;
     uint64 observation_bindings;
+    uint64 calculation_bindings;
     uint64 channels;
 } LaplaceQueryEvidenceStats;
 
@@ -85,6 +118,17 @@ extern LaplaceQueryState *laplace_query_state_create(
     int fanout,
     LaplaceQueryEvidenceStats *stats);
 
+/*
+ * Rebind the already-scanned initial operands to their exact input roles.  The
+ * role vector is positional and must match the retained operand array exactly.
+ * This annotates the typed channels; it never changes standing or relation
+ * semantics and therefore cannot turn discourse into testimony.
+ */
+extern void laplace_query_state_set_operand_roles(
+    LaplaceQueryState *state,
+    const uint32 *roles,
+    int role_count);
+
 extern void laplace_query_state_extend(
     LaplaceQueryState *state,
     Datum selected,
@@ -95,6 +139,12 @@ extern void laplace_query_state_extend(
 extern void laplace_query_state_extend_batch(
     LaplaceQueryState *state,
     ArrayType *selected,
+    LaplaceQueryEvidenceStats *stats);
+
+extern void laplace_query_state_extend_batch_role(
+    LaplaceQueryState *state,
+    ArrayType *selected,
+    uint32 operand_role,
     LaplaceQueryEvidenceStats *stats);
 
 extern const LaplaceQueryChannel *laplace_query_state_channels(

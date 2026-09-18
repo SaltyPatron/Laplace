@@ -1,0 +1,29 @@
+name: Laplace — qualified main delivery
+
+on:
+  workflow_run:
+    workflows: ["Laplace — product lifecycle"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+# Qualification may be cancelled by a newer push. Once an exact revision has
+# qualified and owns the delivery transaction, shared-state mutation must finish
+# coherently. At most the newest pending delivery waits behind the active one.
+concurrency:
+  group: laplace-main-delivery
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/product-stage.yml
+    with:
+      stage: release-delivery
+      target_sha: ${{ github.event.workflow_run.head_sha }}
+      skip_if_superseded: true
+    secrets: inherit
