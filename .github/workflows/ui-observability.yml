@@ -10,7 +10,7 @@ on:
         description: "running Laplace UI/API base URL"
         type: string
         required: true
-        default: "http://127.0.0.1:5187"
+        default: "http://127.0.0.1:8080"
       routes:
         description: "optional comma-separated route names/paths; blank captures every primary surface"
         type: string
