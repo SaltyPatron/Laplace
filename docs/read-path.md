@@ -134,7 +134,7 @@ The trace/receipt exposes root/candidate/context/channel/occurrence/relation/opp
 
 `generation.forward_text(...)` in `walk_text.sql.in` executes that canonical program once, accepts only completed semantic-act output, then batch-realizes the selected ids. It does not promote an exhausted/unresolved search frontier into answer text.
 
-`converse.forward_turn(...)` adds prior session turn/content identities as prior frontier state rather than rendering and reparsing a transcript. Normal `converse.chat(...)` projects the canonical forward-turn output.
+`converse.forward_turn(...)` adds prior session turn/content identities as ordered discourse state rather than rendering and reparsing a transcript. The SQL ABI still calls that array `p_prior_frontier`, but the native program assigns it the `DISCOURSE` operand role and does not merge it into the prompt semantic-seed frontier. Normal `converse.chat(...)` projects the canonical forward-turn output.
 
 These facts supersede the old 2026-08 audit statement that the S6/S7/S8 generation path still needed to be wired.
 
