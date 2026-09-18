@@ -23,8 +23,16 @@ class ImpactPlanTests(unittest.TestCase):
     def test_web_only_change_qualifies_and_publishes_without_native_or_database_mutation(self):
         value = plan("web/src/App.tsx")
         self.assertEqual(value["components"], ["web"])
-        self.assertEqual(value["build_components"], ["web"])
-        self.assertEqual(value["managed_build_projects"], [])
+        self.assertEqual(value["build_components"], ["managed", "web"])
+        self.assertEqual(
+            value["managed_build_projects"],
+            [
+                "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj",
+                "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj",
+                "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj",
+                "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
+            ],
+        )
         self.assertEqual(value["managed_test_projects"], [])
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
