@@ -106,6 +106,10 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
         self.assertIn("managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}", lifecycle)
         self.assertIn("managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}", lifecycle)
+        qualification = lifecycle.split("  mainline-qualification:\n", 1)[1].split(
+            "\n  mainline-delivery:\n", 1)[0]
+        self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", qualification)
+        self.assertIn("publish_scope: ${{ needs.plan.outputs.publish_scope }}", qualification)
         self.assertIn("  mainline-delivery:", lifecycle)
         self.assertIn("needs: [plan, mainline-qualification]", lifecycle)
         self.assertIn("if: needs.plan.outputs.delivery_actions != ''", lifecycle)
@@ -345,6 +349,13 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("|| rc=$?", matrix)
         self.assertNotIn("suite_use_cache", matrix)
         self.assertNotIn("project-subset pass is not a whole", matrix)
+
+    def test_test_only_qualification_never_carries_installed_product_work(self):
+        product = (ROOT / "scripts" / "product-ci.sh").read_text(encoding="utf-8")
+        carry = product.split("carry_forward_undelivered_impact() {", 1)[1].split(
+            "\n}\n\nrun_db_tests", 1)[0]
+        self.assertIn('[[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]]', carry)
+        self.assertIn("deployed product carry-forward skipped", carry)
 
     def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
