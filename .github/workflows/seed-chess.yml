@@ -36,11 +36,11 @@ on:
         type: boolean
         default: true
       replace_existing_source:
-        description: "DESTRUCTIVE: retract the complete selected source before re-ingesting it"
+        description: "DESTRUCTIVE, derived pathless sources only: retract the complete selected derived source before re-running it"
         type: boolean
         default: false
       confirm_replace_existing:
-        description: "Second confirmation required when replace_existing_source is enabled"
+        description: "Second confirmation for derived-source replacement; leave false for normal corpus ingests"
         type: boolean
         default: false
       run_idempotency:
