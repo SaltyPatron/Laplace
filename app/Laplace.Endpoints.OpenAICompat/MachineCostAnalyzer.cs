@@ -182,7 +182,9 @@ internal static partial class MachineCostAnalyzer
                     "The recovered executable-section instruction stream is scheduled in file order; runtime branch/loop/input execution counts are not guessed.",
                     "Instruction latency, throughput and execution-resource constraints come from LLVM's scheduling model for the declared target triple and CPU.",
                     "calculated_seconds = total_cycles / clock_hz. Cache contents, OS scheduling, I/O service time and concurrent interference remain separate state unless explicitly modeled."
-                ]);
+                ],
+                CalculationId: null,
+                WitnessId: null);
         }
         finally
         {

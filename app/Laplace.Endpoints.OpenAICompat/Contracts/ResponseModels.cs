@@ -75,7 +75,9 @@ public sealed record MachineCostResponse(
     [property: JsonPropertyName("resource_pressure")] IReadOnlyList<MachineCostResourcePressure> ResourcePressure,
     [property: JsonPropertyName("objdump_version")] string ObjdumpVersion,
     [property: JsonPropertyName("mca_version")] string McaVersion,
-    [property: JsonPropertyName("assumptions")] IReadOnlyList<string> Assumptions);
+    [property: JsonPropertyName("assumptions")] IReadOnlyList<string> Assumptions,
+    [property: JsonPropertyName("calculation_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CalculationId,
+    [property: JsonPropertyName("witness_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? WitnessId);
 
 /// <summary>
 /// Receipt from one routing/election event of the canonical native forward pass.

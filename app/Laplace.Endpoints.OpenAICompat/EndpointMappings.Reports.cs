@@ -86,7 +86,7 @@ internal static class ReportEndpoints
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
-        app.MapPost("/v1/analyze/machine-cost", async (HttpRequest request, CancellationToken ct) =>
+        app.MapPost("/v1/analyze/machine-cost", async (HttpRequest request, MachineCostWitnessService witness, CancellationToken ct) =>
         {
             string cpu = request.Query["cpu"].ToString().Trim();
             if (string.IsNullOrWhiteSpace(cpu))
@@ -124,13 +124,22 @@ internal static class ReportEndpoints
             {
                 MachineCostResponse result = await MachineCostAnalyzer.AnalyzeAsync(
                     request.Body, artifactName, cpu, clockHz, triple, symbol, iterations, ct);
-                return Results.Json(result);
+                MachineCostWitnessService.Deposit deposit = await witness.RecordAsync(result, ct);
+                return Results.Json(result with
+                {
+                    CalculationId = deposit.CalculationId,
+                    WitnessId = deposit.WitnessId
+                });
             }
             catch (MachineCostAnalysisException ex)
             {
                 return ex.ServiceUnavailable
                     ? EndpointJson.ServiceUnavailable(ex.Code, ex.Message)
                     : EndpointJson.BadRequest(ex.Code, ex.Message);
+            }
+            catch (SubstrateUnavailableException ex)
+            {
+                return EndpointJson.ServiceUnavailable("substrate_unavailable", ex.Message);
             }
         })
         .WithTags("analysis")
