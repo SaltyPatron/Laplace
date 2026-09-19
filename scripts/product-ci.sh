@@ -683,7 +683,14 @@ verify_installed_product() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local ui_base="${LAPLACE_PUBLIC_UI_BASE:-http://127.0.0.1:8080}"
   require_deployed_revision
-  bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
+  if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
+    # Managed-only publication deliberately has no source-native build tree.
+    # Validate the live catalog against the independently receipted installed
+    # extension instead of demanding a manifest that this plan did not build.
+    bash scripts/check-database-health.sh --installed-runtime "${PGDATABASE:-laplace}"
+  else
+    bash scripts/check-database-health.sh "${PGDATABASE:-laplace}"
+  fi
   check_application_live
   verify_installed_web_receipt
   check_t0_perfcache_runtime
@@ -716,7 +723,10 @@ run_release_qualification() {
   (( current_rc == 0 )) || return "$current_rc"
 
   require_built_revision
-  echo "::notice::main delivery build complete; automated test suites are not part of the deployment path"
+  current_rc=0
+  run_dev_test_matrix 1 || current_rc=$?
+  if (( current_rc == 3 )); then return 0; fi
+  return "$current_rc"
 }
 
 run_mainline() {

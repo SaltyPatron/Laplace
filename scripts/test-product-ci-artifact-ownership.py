@@ -46,6 +46,10 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertNotIn("require_built_revision", live)
         self.assertLess(live.index("require_deployed_revision"),
                         live.index("test-parallel.sh"))
+        verify = function("verify_installed_product")
+        self.assertIn("LAPLACE_REUSE_INSTALLED_NATIVE", verify)
+        self.assertIn("check-database-health.sh --installed-runtime", verify)
+        self.assertIn('check-database-health.sh "${PGDATABASE:-laplace}"', verify)
         reconcile = function("reconcile_installed_product")
         self.assertLess(reconcile.index("require_deployed_revision"),
                         reconcile.index("reconcile-highway-masks.sh"))

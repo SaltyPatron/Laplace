@@ -87,17 +87,20 @@ jobs:
             --summary "$GITHUB_STEP_SUMMARY"
 
   mainline-qualification:
-    name: Build affected product inputs
+    name: Qualify affected product inputs
     needs: plan
     concurrency:
-      group: laplace-main-product-build-dispatch
+      group: ${{ needs.plan.outputs.delivery_actions != '' && 'laplace-main-product-qualification-dispatch' || format('laplace-main-test-qualification-{0}-{1}', needs.plan.outputs.dev_suites, needs.plan.outputs.managed_test_projects) }}
       cancel-in-progress: true
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-qualification
       target_sha: ${{ github.sha }}
+      dev_suites: ${{ needs.plan.outputs.dev_suites }}
       build_components: ${{ needs.plan.outputs.build_components }}
       managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}
+      managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}
+      managed_test_filter: ${{ needs.plan.outputs.managed_test_filter }}
       delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
       publish_scope: ${{ needs.plan.outputs.publish_scope }}
       skip_if_superseded: true
