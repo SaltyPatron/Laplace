@@ -24,25 +24,25 @@ on:
         required: false
         default: false
       dev_suites:
-        description: "comma-separated development suites selected by the impact planner; all runs the complete matrix"
+        description: "comma-separated development suites selected by the impact planner; empty runs none; all runs the complete matrix"
         type: string
         required: false
-        default: all
+        default: ""
       build_components:
-        description: "comma-separated candidate components that must be built/materialized"
+        description: "comma-separated candidate components that must be built/materialized; empty builds none"
         type: string
         required: false
-        default: all
+        default: ""
       managed_build_projects:
-        description: "comma-separated managed csproj roots selected from ProjectReference impact; all uses Laplace.slnx"
+        description: "comma-separated managed csproj roots selected from ProjectReference impact; empty builds none; all uses Laplace.slnx"
         type: string
         required: false
-        default: all
+        default: ""
       managed_test_projects:
-        description: "comma-separated managed test csproj paths selected from ProjectReference impact"
+        description: "comma-separated managed test csproj paths selected from ProjectReference impact; empty runs none"
         type: string
         required: false
-        default: all
+        default: ""
       managed_test_filter:
         description: "optional VSTest filter for exact test-only class qualification"
         type: string
@@ -74,10 +74,10 @@ on:
         required: false
         default: ""
       publish_scope:
-        description: "full or api publication scope"
+        description: "full, api, or web publication scope; empty means the planner omitted publish"
         type: string
         required: false
-        default: full
+        default: ""
       skip_if_superseded:
         description: "skip this selected revision if main advanced before host ownership"
         type: boolean

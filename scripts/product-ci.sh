@@ -113,7 +113,7 @@ reuse_qualified_native_build() {
 }
 
 run_build() {
-  local args=() selected="${LAPLACE_BUILD_COMPONENTS:-all}"
+  local args=() selected="${LAPLACE_BUILD_COMPONENTS:-}"
   local need_native=0 need_managed=0 need_web=0
 
   [[ "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || args+=(--force-rebuild)
@@ -169,7 +169,7 @@ run_build() {
 run_dev_test_matrix() {
   local check_superseded="${1:-0}"
   local current_rc profile suite spec cache_message record_message
-  local selected="${LAPLACE_DEV_SUITES:-all}"
+  local selected="${LAPLACE_DEV_SUITES:-}"
   local use_cache="${LAPLACE_USE_QUALIFICATION_CACHE:-0}"
   local specs=(
     "dev-native:native-dev"
@@ -446,7 +446,7 @@ PY
 
 run_db_tests() {
   require_built_revision
-  local selected="${LAPLACE_DB_SUITES:-all}"
+  local selected="${LAPLACE_DB_SUITES:-}"
 
   if csv_selected "$selected" db-health; then
     bash scripts/test-parallel.sh --profile db --suite db-health
@@ -522,7 +522,7 @@ verify_isolated_web_delivery() {
 }
 run_live_tests() {
   require_deployed_revision
-  local selected="${LAPLACE_LIVE_SUITES:-all}"
+  local selected="${LAPLACE_LIVE_SUITES:-}"
   export LAPLACE_API_BASE="${LAPLACE_API_BASE:-${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}}"
   export LAPLACE_PUBLIC_UI_BASE="${LAPLACE_PUBLIC_UI_BASE:-http://127.0.0.1:8080}"
 
@@ -825,7 +825,7 @@ run_release_delivery() {
   export LAPLACE_SKIP_IF_SUPERSEDED=0
 
   local publish_scope="${LAPLACE_PUBLISH_SCOPE:-full}"
-  echo "::notice::delivery actions=$actions publish_scope=$publish_scope db_suites=${LAPLACE_DB_SUITES:-all} live_suites=${LAPLACE_LIVE_SUITES:-all}"
+  echo "::notice::delivery actions=$actions publish_scope=$publish_scope db_suites=${LAPLACE_DB_SUITES:-} live_suites=${LAPLACE_LIVE_SUITES:-}"
 
   if csv_selected "$actions" install; then
     run_install
@@ -851,7 +851,7 @@ run_release_delivery() {
   # Publication consumes the candidate qualified above. If web inputs changed,
   # require the sealed SPA artifact from this exact revision. If they did not,
   # preserve the installed SPA instead of rebuilding unrelated frontend work.
-  if csv_selected "${LAPLACE_BUILD_COMPONENTS:-all}" web; then
+  if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" web; then
     export LAPLACE_REQUIRE_QUALIFIED_WEB=1
     unset LAPLACE_REUSE_INSTALLED_WEB || true
   else

@@ -155,6 +155,7 @@ restart_postgres() {
   # install that replaces a mapped .so must bounce the unit, not the process.
   # Changing this file plans install + live-floor/live-api only. It does not
   # rebuild or publish API, MCP, UCI, Lichess, UI, or chess lab.
+  # Empty planner suite lists must not default back to the managed-dev ocean.
   oldpid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)
   [[ "$oldpid" != 0 ]] || oldpid=""
   echo "restart_postgres ($reason): systemctl restart $unit (was pid ${oldpid:-none})"
