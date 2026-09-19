@@ -7,7 +7,8 @@
 --
 -- Closing the run also closes every non-terminal file row. A cancelled run
 -- with files left 'running'/'composed' is a false ledger: last night's
--- PropBank cut-off left 331 such rows.
+-- PropBank cut-off left 331 such rows. Qualification for this SQL is
+-- native-dev / native-db, not the managed-dev ocean.
 DROP FUNCTION IF EXISTS laplace.ingest_run_close(uuid, text);
 
 CREATE OR REPLACE FUNCTION ops.ingest_run_close_open_files(p_run_id uuid)
