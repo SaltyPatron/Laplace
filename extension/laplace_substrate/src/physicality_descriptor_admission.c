@@ -319,11 +319,14 @@ static physicality_descriptor_source_observation_t *admission_sources(
         admission_invalid("source, source-unit and trust arrays must align with every raw physicality observation");
     sources = admission_alloc(s, admission_multiply(count, sizeof(*sources)));
     for (size_t i = 0; i < count; ++i) {
+        const double declared_prior = DatumGetFloat8(arrays[2].values[i]);
         sources[i].source_id = admission_id(arrays[0].values[i]);
         sources[i].source_unit_id = admission_id(arrays[1].values[i]);
-        sources[i].source_trust = 0.0; /* compatibility only; provenance has no trust */
-        if (!isfinite(sources[i].source_trust) || sources[i].source_trust < 0 || sources[i].source_trust > 1)
+        if (!isfinite(declared_prior) || declared_prior < 0 || declared_prior > 1)
             admission_invalid("source trust must be an explicit finite registered prior in [0,1]");
+        /* The compatibility transport is validated, but provenance is not
+         * collapsed into a scalar trust channel in native materialization. */
+        sources[i].source_trust = 0.0; /* compatibility only; provenance has no trust */
     }
     return sources;
 }
