@@ -20,6 +20,7 @@ PRODUCT_IGNORED_SUFFIXES = (
 )
 
 PRODUCT_IGNORED_EXACT = frozenset({
+    "vault-data-directories.list",
     "scripts/api-diagnostics.py",
     "web/scripts/capture-ui-diagnostics.mjs",
     "scripts/ci-impact-plan.py",
@@ -51,6 +52,7 @@ PRODUCT_IGNORED_GLOBS = (
 # These are the equivalent GitHub Actions paths-ignore entries. A contract test
 # keeps the workflow trigger synchronized with ignored().
 GITHUB_PATH_IGNORES = (
+    "vault-data-directories.list",
     "docs/**",
     "**/*.md",
     ".github/**",
