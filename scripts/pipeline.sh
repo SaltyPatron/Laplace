@@ -158,6 +158,7 @@ restart_postgres() {
   # Empty planner suite lists must not default back to the managed-dev ocean.
   # A missing /opt/laplace/app receipt must not force BUILD_COMPONENTS=all.
   # A missing SPA receipt must not force build-web on a native-only SHA.
+  # Native install delivery must not require application publication.
   oldpid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)
   [[ "$oldpid" != 0 ]] || oldpid=""
   echo "restart_postgres ($reason): systemctl restart $unit (was pid ${oldpid:-none})"

@@ -839,47 +839,42 @@ run_release_delivery() {
     echo "::notice::database preparation/regression remains valid; database mutation skipped"
   fi
 
-  # Every delivered source revision owns an exact application revision receipt.
-  # The planner may choose API-only publication, but publication itself is never
-  # omitted for a real product delivery.
-  csv_selected "$actions" publish || {
-    echo "::error::release-delivery plan omitted mandatory publication" >&2
-    return 2
-  }
-
-  # Publication consumes the candidate qualified above. If web inputs changed,
-  # require the sealed SPA artifact from this exact revision. If they did not,
-  # preserve the installed SPA instead of rebuilding unrelated frontend work.
-  if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" web; then
-    export LAPLACE_REQUIRE_QUALIFIED_WEB=1
-    unset LAPLACE_REUSE_INSTALLED_WEB || true
+  # Publication is a planner action, not a tax on native-only SHAs. pipeline.sh
+  # install + postgres bounce does not republish API/MCP/UI.
+  if csv_selected "$actions" publish; then
+    if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" web; then
+      export LAPLACE_REQUIRE_QUALIFIED_WEB=1
+      unset LAPLACE_REUSE_INSTALLED_WEB || true
+    else
+      export LAPLACE_REUSE_INSTALLED_WEB=1
+      unset LAPLACE_REQUIRE_QUALIFIED_WEB || true
+    fi
+    run_publish
   else
-    export LAPLACE_REUSE_INSTALLED_WEB=1
-    unset LAPLACE_REQUIRE_QUALIFIED_WEB || true
+    echo "::notice::application publication omitted by planner"
   fi
-  run_publish
 
   if csv_selected "$actions" reconcile; then
     reconcile_installed_product
-  elif [[ "$publish_scope" == uci ]]; then
-    # The isolated publisher atomically selects and executes the installed UCI
-    # runtime before committing its revision receipt. API/database state is unchanged.
-    verify_isolated_uci_delivery
-  elif [[ "$publish_scope" == web ]]; then
-    # Static-file middleware reads wwwroot directly; the web transaction atomically
-    # exchanges only the sealed SPA directory. Managed process bytes remain unchanged.
-    verify_isolated_web_delivery
+  elif csv_selected "$actions" publish; then
+    if [[ "$publish_scope" == uci ]]; then
+      verify_isolated_uci_delivery
+    elif [[ "$publish_scope" == web ]]; then
+      verify_isolated_web_delivery
+    else
+      verify_installed_product
+    fi
   else
-    verify_installed_product
+    echo "::notice::application verification omitted; planner did not publish"
   fi
 
   if csv_selected "$actions" live; then
     run_live_tests
-  elif [[ "$publish_scope" != uci ]]; then
+  elif csv_selected "$actions" publish && [[ "$publish_scope" != uci ]]; then
     echo "::error::release-delivery plan omitted mandatory live verification" >&2
     return 2
   else
-    echo "::notice::isolated UCI publication already executed installed runtime verification"
+    echo "::notice::live verification omitted by planner"
   fi
 }
 run_proof_model() {
