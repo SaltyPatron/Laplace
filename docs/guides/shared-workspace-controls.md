@@ -1,9 +1,8 @@
 # Shared workspace controls
 
-These controls address common interaction defects in the existing web product.
-They do not complete the product-wide interface work or supply missing native
-operations. Source, query, account and operation semantics remain with their
-existing owners. Related work: Laplace #1404/#1374 and Laplace-Refactor
+These controls own shared interaction mechanics in the web product. Source, query,
+account and native operation semantics remain with their existing owners; this guide
+only defines the workspace behaviors implemented here. Related work: Laplace #1404/#1374 and Laplace-Refactor
 #68/#172/#176/#276/#280/#295.
 
 ## Read lifecycle
@@ -43,8 +42,7 @@ inside an expanded panel cannot start a competing expansion.
 
 The existing direct-child layout is preserved. Fill panels have an intrinsic
 usable minimum instead of collapsing to a title bar. Long content remains
-bounded by its declared scroll container. This is not a promise that every
-existing route's unrelated CSS is now corrected.
+bounded by its declared scroll container. Unrelated route CSS remains outside this component contract.
 
 `Modal` uses native modal dialogs for top-layer placement, focus trapping and
 opener restoration. Supply a visible title or a meaningful `label`. Background
@@ -66,9 +64,8 @@ unrelated parameters. The Operator sections now survive reload and browser Back.
 
 The application shell retains navigation when a routed view throws. Retry and
 navigation recover the view; changing tenant recreates routed local state so
-old-tenant results and effect receipts do not carry into the new view. This does
-not fix the deployment's missing authorization, nor does it make the tenant
-header a security boundary.
+old-tenant results and effect receipts do not carry into the new view. Deployment authorization remains a separate security boundary; the tenant header
+is not itself an authorization mechanism.
 
 ## Development checks
 
@@ -92,9 +89,8 @@ controller/transport. `test:workspace-ui` runs actual React components in an
 ephemeral Vite server, with held/delayed fixture responses. It checks scope
 changes, polling, independent panes, URL state, exact fields, disabled actions,
 retained DOM/editor state, nested dialog focus and expansion at four widths.
-Fixture data is never imported into the application entry point. These tests
-establish component behavior, not native source admission, live authorization,
-whole-product completeness or installed performance. Failed browser traces are
+Fixture data is never imported into the application entry point. These tests establish component behavior. Native source admission, live
+authorization and installed performance require their own direct evidence. Failed browser traces are
 retained at the reported temporary path.
 
 ## Installed-operation forms
@@ -116,8 +112,8 @@ State-changing operations require review of the exact submitted inputs. There
 is no automatic effect retry. An interrupted transport does not prove whether a
 write ran; inspect current state before another explicit attempt. Return tables
 include keys from every returned row and distinguish missing fields from NULL.
-This is a general developer/admin operation form, not completion of specialized
-source management, onboarding, security or the entire data workspace.
+This is the general developer/admin operation form. Specialized source management,
+onboarding, security and durable data-workspace operations remain separate providers.
 
 Projection tests use the real invoker parser/policy. Browser fixtures also
 exercise actual Query, Billing and OpConsole with substituted HTTP responses.

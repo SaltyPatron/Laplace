@@ -8,4 +8,4 @@ Selection uses response identity plus original response ordinal, preserving repe
 
 JSON export includes selected ordinals, received values, request context, time and coverage. It does **not** claim original-byte fidelity, a remote snapshot transaction, all-matching coverage or exact precision that the transport did not preserve. Source-byte export is a separate content-readback operation. Current consumers include Query, installed operations, source assertions, run/file receipts and artifact selection.
 
-This is not the full #277 collection/query engine: server cursors, global filters/top-N, saved native query recipes, grant-aware related queries and durable large-export jobs still need their existing providers.
+`ResultWorkspace` owns received-row selection, inspection and bounded export. Server cursors, global filters/top-N, saved native query recipes, grant-aware related queries and durable large-export jobs remain owned by their existing providers under #277.

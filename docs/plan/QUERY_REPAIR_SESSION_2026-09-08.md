@@ -1,8 +1,8 @@
 # Query, trajectory, and chess repair — 2026-09-08
 
-This checklist preserves the complete accepted session scope. A checked diagnostic
-does not mean its repair has shipped. Delivery requires main, passing required checks,
-installation, and live API/browser/database readback. Existing owners: #588/#429
+> Historical execution record. Do not reuse its generic open/remaining/delivery wording as current project status. Re-check current `main`, installed artifacts and runtime evidence for the exact mechanism being discussed.
+
+This checklist preserves the accepted session scope and the evidence observed on that date. A checked diagnostic records that observation; runtime changes are established by the applicable current main/install/readback evidence. Existing owners: #588/#429
 (native/static execution), #1404 (product queries), #1175/#1080 (readers/navigation).
 
 ## Current inventor clarification
@@ -37,9 +37,8 @@ round trips and database pages as well as elapsed time and returned rows.
   routing, typed number/notation, chess position, trajectory/graph/model caches
   where present. Prove which database work each consumer avoids. Validate
   generation/source compatibility, atomic publication, stale/corrupt rejection,
-  and parity of ids, order, scores, unknowns, and source scope. A cache that
-  exists or loads but is bypassed is unfinished; perfcache must not become a
-  second truth or a way to conceal incomplete query results.
+  and parity of ids, order, scores, unknowns, and source scope. A cache that exists or loads but is bypassed avoids no work; perfcache must not become a
+  second truth or a way to conceal missing query results.
 - [ ] Complete the shared native query path (the SQL transformer): search and
   prompt compile to the same typed forward program over canonical entities and
   the shared persistent substrate. The active query/frontier may keep a bounded
@@ -116,9 +115,9 @@ specified numerical latency requirement. Cache state and selected ids matter.
 
 ## Local state at audit
 
-Local commits implement native display/browse/container reads,
+At the time of this audit, local commits contained native display/browse/container reads,
 overflow arithmetic, chess calibration/repair, public-query controls, a SQL
-catalog/C# bridge, and UI labeling. These are not delivered. Browse currently
+catalog/C# bridge, and UI labeling. That sentence describes branch-local state on 2026-09-08; current main/runtime must be checked mechanism-by-mechanism. Browse currently
 delegates whole-composition membership to the existing containment API; complete
 in-memory query DAG and ordered/gap execution remain open. The earlier broad
 private DAG expansion was removed after a failed diagnostic, not deployed.
