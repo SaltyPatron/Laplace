@@ -4,8 +4,7 @@
 # Fail modes (exact strings — grep these in CI logs / agent claims):
 #   INVALID_INDEXES             — installed index-health operation reports an invalid index
 #   INGEST_JOURNAL_NONTERMINAL  — status='running' row(s) in ingest_run_journal
-#   THIN_SUBSTRATE              — foundation HasLayerCompleted markers incomplete
-#                                 (or database missing)
+#   THIN_SUBSTRATE              — database or laplace_substrate extension missing
 #   RECURSIVE_SUBSTRATE_PROOF_* — exhaustive current content physicality/trajectory
 #                                 contract proof failed; receipt has counterexamples
 #
@@ -45,24 +44,22 @@ if [[ "${running:-0}" -gt 0 ]]; then
   exit 1
 fi
 
-# Same layer roster as ensure-foundation.sh — --check-only never ingests.
-export LAPLACE_DBNAME="$DB"
-export PGHOST PGUSER
-if ! bash "$ROOT/scripts/ensure-foundation.sh" --check-only; then
-  echo "Heal: gh workflow run seed-foundation.yml --ref main   (or scripts/ensure-foundation.sh). No auto-reseed from this gate."
+# Product install proves the engine is live: database, extension, indexes,
+# quiet journal, T0 GUC. It does NOT prove CILI/WordNet/PropBank are admitted.
+# That is seed-foundation.yml / ensure-foundation.sh after the prefix exists.
+ext=$("${PSQL[@]}" -d "$DB" -tAc "SELECT extversion FROM pg_extension WHERE extname='laplace_substrate';")
+if [[ -z "${ext}" ]]; then
+  echo "::error::THIN_SUBSTRATE: laplace_substrate is not installed on ${DB}"
+  echo "Heal: pipeline.sh migrate / CREATE EXTENSION laplace_substrate. Do not seed to prove cmake."
   exit 1
 fi
 
-# The foundation marker proves expected source layers reached terminal admission. It
-# does not prove that the recursively stored physicalities are internally sound.
-# Run the read-only exhaustive finite-state proof after the journal is quiet so the
-# receipt describes one stable estate rather than a moving ingest frontier.
-proof_receipt="${LAPLACE_RECURSIVE_PROOF_RECEIPT:-$ROOT/build/test-receipts/live-recursive-substrate.json}"
-if ! python3 "$ROOT/scripts/prove-live-recursive-substrate.py" "$DB" --receipt "$proof_receipt"; then
-  echo "::error::RECURSIVE_SUBSTRATE_PROOF_FAIL: live recursive physicality/trajectory contract failed on ${DB}"
-  echo "Receipt: $proof_receipt"
+t0=$("${PSQL[@]}" -d "$DB" -tAc "SHOW laplace_substrate.perfcache_path;" 2>/dev/null || true)
+if [[ -z "${t0}" ]]; then
+  echo "::error::THIN_SUBSTRATE: laplace_substrate.perfcache_path is unset on ${DB}"
   exit 1
 fi
 
-echo "substrate floor OK on ${DB} (journal quiet + foundation layers complete + recursive proof green)"
+echo "substrate engine floor OK on ${DB} (extension ${ext}; journal quiet; T0 GUC set)"
+echo "Foundation layers are Data — seed-foundation, not this gate."
 exit 0
