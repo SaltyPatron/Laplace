@@ -2,7 +2,7 @@
 
 These files describe binding behavioral/architectural parts of the invention. They are **not** evidence that a feature is implemented and they do not override a later explicit inventor correction or the canonical invention statement in `docs/INVENTION.md` / `INVENTIONS.md`.
 
-Read them under the authority order in `AGENTS.md` and `docs/README.md`. When a lower/current spec contradicts higher authority, repair the spec rather than narrowing the invention around the stale wording.
+Read `docs/INVENTION.md` first. `AGENTS.md` then governs how implementation work applies that invention. When a lower/current spec contradicts higher authority, repair the spec rather than narrowing the invention around stale wording.
 
 Historical annotated versions are preserved under [`docs/archive/specs-v1/`](../archive/specs-v1/README.md) and are non-authoritative historical evidence.
 

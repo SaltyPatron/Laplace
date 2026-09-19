@@ -4,9 +4,9 @@ This directory contains invention law, implementation architecture, binding desi
 
 ## Read order
 
-1. [`../AGENTS.md`](../AGENTS.md) — repository execution/authority rules for implementation agents.
-2. [`INVENTION.md`](INVENTION.md) — canonical intended invention, theorem, recursive representation, coupling model, evidence model, execution model, and proof obligations.
-3. [`INVENTIONS.md`](INVENTIONS.md) — mechanism/capability catalog. It summarizes the invention; it does not override `INVENTION.md`.
+1. [`INVENTION.md`](INVENTION.md) — canonical intended invention, theorem, recursive representation, coupling model, evidence model, execution model, and proof obligations.
+2. [`INVENTIONS.md`](INVENTIONS.md) — mechanism/capability catalog. It summarizes the invention; it does not override `INVENTION.md`.
+3. [`../AGENTS.md`](../AGENTS.md) — execution/authority rules for applying the invention during repository work.
 4. [`ARCHITECTURE.md`](ARCHITECTURE.md) — current source/as-built architecture. A mismatch with the invention is an implementation gap unless higher authority changes the invention.
 5. [`specs/README.md`](specs/README.md) — binding component contracts interpreted under the invention.
 6. GitHub issues — bounded implementation/acceptance ownership, interpreted under the authority above.
