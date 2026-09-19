@@ -68,6 +68,7 @@ public sealed record AgentDescriptor(
 /// </summary>
 public sealed class AgentCatalog
 {
+    public const string DefaultsSource = "embedded:Laplace.Agents.defaults.agents.json";
     private const string DefaultConfigResource = "Laplace.Agents.defaults.agents.json";
     private readonly Dictionary<string, AgentDefinition> _aliases;
     private readonly Dictionary<string, (string? BaseUrl, string? ApiKeyEnv)> _providerOverrides;

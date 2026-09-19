@@ -41,6 +41,7 @@ internal static class AdminEndpoints
                 {
                     ["object"] = "agent.routes",
                     ["config"] = catalog.ConfigPath,
+                    ["defaults"] = AgentCatalog.DefaultsSource,
                     ["searched"] = new JsonArray(AgentCatalog.ConfigCandidates()
                         .Select(p => (JsonNode)JsonValue.Create(p)!).ToArray()),
                     ["default"] = catalog.DefaultReference(),

@@ -22,6 +22,7 @@ on:
       - "scripts/test-parallel.sh"
       - "scripts/publish-applications.sh"
       - "scripts/verify-api-payload.py"
+      - "scripts/configure-laplace-environment.py"
       - "deploy/linux/deploy.sh"
       - "scripts/test-suites/**"
       - "scripts/test-*.py"
