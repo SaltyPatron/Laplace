@@ -4,7 +4,30 @@
 -- that no live ingest owns the run (no active backend, no Laplace.Cli you did
 -- not start) before closing. Refuses rows not currently 'running' and
 -- statuses outside the cut-off terminal vocabulary.
+--
+-- Closing the run also closes every non-terminal file row. A cancelled run
+-- with files left 'running'/'composed' is a false ledger: last night's
+-- PropBank cut-off left 331 such rows.
 DROP FUNCTION IF EXISTS laplace.ingest_run_close(uuid, text);
+
+CREATE OR REPLACE FUNCTION ops.ingest_run_close_open_files(p_run_id uuid)
+    RETURNS bigint
+    LANGUAGE sql
+    VOLATILE
+AS $$
+    WITH closed AS (
+        UPDATE laplace.ingest_file_journal f
+           SET status = 'cancelled',
+               ended_at = COALESCE(f.ended_at, clock_timestamp()),
+               error = COALESCE(f.error,
+                   'file did not reach completion: owning ingest run was cut off')
+         WHERE f.run_id = p_run_id
+           AND f.status IN ('inventoried', 'running', 'composed')
+        RETURNING f.file_label
+    )
+    SELECT count(*) FROM closed;
+$$;
+
 CREATE OR REPLACE FUNCTION ops.ingest_run_close(p_run_id uuid, p_status text DEFAULT 'cancelled')
     RETURNS laplace.ingest_run_journal
     LANGUAGE plpgsql VOLATILE
@@ -22,5 +45,6 @@ BEGIN
     IF r.run_id IS NULL THEN
         RAISE EXCEPTION 'ingest_run_close: run % has no row in status=running', p_run_id;
     END IF;
+    PERFORM ops.ingest_run_close_open_files(p_run_id);
     RETURN r;
 END $$;

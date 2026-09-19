@@ -272,26 +272,28 @@ SELECT ops.source_bootstrap_present(public.laplace_hash128_blake3('test/ops/sour
 SELECT count(*) = 4 AS probe_shape
 FROM generation.probe('x', ARRAY[1,2]::bigint[], 5);
 
--- ingest_run_close: drives a running row terminal, refuses non-running rows.
+-- ingest_run_close: drives a running row terminal, closes open files, refuses
+-- a second close. Finished files stay ok.
 INSERT INTO laplace.ingest_run_journal (run_id, source_name, layer)
 VALUES ('00000000-0000-0000-0000-000000000001', 'test/ops/run', 0);
-SELECT status = 'cancelled' AS closed_cancelled, ended_at IS NOT NULL AS closed_stamped
-FROM ops.ingest_run_close('00000000-0000-0000-0000-000000000001');
-
 INSERT INTO laplace.ingest_file_journal
     (run_id, file_label, source_name, status, ended_at, records)
 VALUES
     ('00000000-0000-0000-0000-000000000001', 'done.xml', 'test/ops/run', 'ok', now(), 10),
     ('00000000-0000-0000-0000-000000000001', 'composed.xml', 'test/ops/run', 'composed', NULL, 7),
     ('00000000-0000-0000-0000-000000000001', 'active.xml', 'test/ops/run', 'running', NULL, 3);
+SELECT status = 'cancelled' AS closed_cancelled, ended_at IS NOT NULL AS closed_stamped
+FROM ops.ingest_run_close('00000000-0000-0000-0000-000000000001');
+SELECT count(*) FILTER (WHERE status = 'ok') = 1
+       AND count(*) FILTER (WHERE status = 'cancelled') = 2
+       AS ingest_files_closed_with_run
+FROM laplace.ingest_file_journal
+WHERE run_id = '00000000-0000-0000-0000-000000000001';
 SELECT count(*) = 3 AS ingest_files_rows
 FROM ops.ingest_files('00000000-0000-0000-0000-000000000001', 10);
-SELECT status = 'running' AS ingest_files_active_first
+SELECT status = 'cancelled' AS ingest_files_cancelled_first
 FROM ops.ingest_files('00000000-0000-0000-0000-000000000001', 10)
 LIMIT 1;
-SELECT status = 'composed' AS ingest_files_composed_second
-FROM ops.ingest_files('00000000-0000-0000-0000-000000000001', 10)
-OFFSET 1 LIMIT 1;
 SELECT count(*) = 0 AS ingest_runs_zero_is_empty FROM ops.ingest_runs(0);
 SELECT count(*) = 0 AS ingest_files_zero_is_empty
 FROM ops.ingest_files('00000000-0000-0000-0000-000000000001', 0);

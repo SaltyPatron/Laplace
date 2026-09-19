@@ -21,8 +21,8 @@ The catalog is deliberately implementation-aware without making today's finite m
 13. **Carrier width is not composition width.** Packed ordinal/run fields are local carrier fields; logical positions and split runs allow compositions wider than the packed field itself.
 14. **Packed manifest versus realized curve.** Mantissa-packed vertices are exact constituent manifests, not semantic positions. Geometry resolves the child ids to their live physicality coordinates and orders those coordinates by logical ordinal before curve operations.
 15. **Dimension/payload trade.** The current 4D binary64 carrier fits the complete 212-bit vertex payload exactly. 3D still fits the current 128-bit id with less metadata; 2D does not fit that id in one current carrier vertex. This is a format trade, not a theorem that 2D composition is impossible.
-16. **Exact occurrence by indexed containment.** A canonical entity can reach trajectories/compositions containing it without rescanning source text or relying on ANN guesses.
-17. **Perfcache as derived ROM.** Deterministic mmap/read-mostly structures accelerate canonical state while remaining rebuildable derivatives rather than a second authority.
+16. **Exact occurrence by indexed containment.** A canonical entity can reach trajectories/compositions containing it without rescanning source text or relying on ANN guesses. Packed ordinals already are precedes; shared parent/run is co-occurrence; child-id membership is contains. Those are trajectory facts, not GPU kernels.
+17. **Perfcache as derived ROM.** Deterministic mmap/read-mostly structures accelerate canonical state while remaining rebuildable derivatives rather than a second authority. After T0 is seeded, codepoints are not re-recorded as ingest novelty.
 18. **Current finite machine windows are replaceable.** Hash width, binary64, Unicode generation, ordinal carrier fields, CPU address width and database capacity constrain one executable generation; they do not redefine the abstract invention.
 
 ## Evidence, relations and consensus
@@ -147,3 +147,5 @@ The catalog is deliberately implementation-aware without making today's finite m
 Laplace replaces opaque probabilistic runtime authority with exact reusable structure, bounded physicality, source-retaining testimony, uncertainty-bearing consensus, query-relative web response, sparse hop/fanout execution, coarse native operators and deterministic receipts.
 
 Models, corpora, conversations, code, games, tools and users are participants in one witnessed world rather than disconnected knowledge silos or separately trained intelligence products.
+
+Seeded corpora and checkpoints are witnessed and folded at ingest; their files are provenance, not an export authority. User content Laplace was asked to keep may require exact realization. Conventional model export is a filtered snapshot of current standing, geometry and selected operators — not a bit-perfect copy of an ingested GGUF, and not a GPU replay of retained weights.

@@ -500,7 +500,11 @@ The same substrate may therefore compare multiple checkpoints, corpora, tools an
 
 The live substrate is the primary state. Conventional model files are optional render targets/consumer artifacts.
 
-The foundry/synthesis side of Laplace explores constructing externally consumable model artifacts from explicit substrate state and recipes rather than treating a historical witness checkpoint as the authority to copy.
+Seeded corpora and checkpoints are admitted testimony. Unicode T0, WordNet, UD, a GGUF, a PGN dump: parse, compose, witness, fold. Consensus forms at ingest. The original file is provenance, not a second authority to round-trip. Bit-perfect reconstruction of an ingested checkpoint is not a goal; raw weight payloads are transient operands.
+
+User content is different. A conversation, an upload, a document the operator asked Laplace to keep may require exact realization (the Moby-class roundtrip). That is seeded-vs-user export law: source bytes you must be able to hand back vs world-state you can only snapshot.
+
+Export is therefore a filtered snapshot of current standing, geometry, and selected operators — “I know kung fu,” not `cp model.gguf`. A recipe names which planes (relation, angular, Fréchet, Hausdorff, trajectory, coord) fill which heads. No GPU is required for the native relations: a packed trajectory already is contains (child id in the LINESTRING), co-occurrence (same parent / overlapping runs), and precedes (ordinal). Metric heads compare realized curves in the same finite S³/ball; knowledge can occupy the same region and remain distinct by those typed distances.
 
 Any exported artifact must retain a reproducible recipe/scope and must not silently copy unknown witness weights simply because the target format expects a tensor. Behavioral validation of exported models is separate from proof of the native substrate architecture.
 
