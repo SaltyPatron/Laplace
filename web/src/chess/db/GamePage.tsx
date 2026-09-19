@@ -87,7 +87,9 @@ export function GamePage() {
           Generated from the recorded typed move trajectory used by the replay above.
           Source headers are shown separately and are not inferred from this rendering.
         </Muted>
-        {game.movetext ? (
+        {plies?.truncated ? (
+          <Muted>Movetext unavailable: {plies.truncated}</Muted>
+        ) : game.movetext ? (
           <pre className={styles.movetext}>{game.movetext}</pre>
         ) : (
           <Muted>This game carries no movetext.</Muted>

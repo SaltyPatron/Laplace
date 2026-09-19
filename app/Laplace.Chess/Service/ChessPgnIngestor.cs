@@ -636,6 +636,15 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                         measurement.ElapsedSeconds.Commit += Stopwatch.GetElapsedTime(commitStarted).TotalSeconds;
                 }
             }
+            if (measurement?.RequireNoWriterWork != true)
+            {
+                // Recording acceptance includes the durable line preimage, not only its
+                // PLAYING/header testimony. One batched typed-trajectory read covers the
+                // whole chunk and refuses a commit that lost start + ordered move ids.
+                string? persistedMismatch = await PersistedTrajectoryMismatchAsync(chunk, ct);
+                if (persistedMismatch is not null)
+                    throw new InvalidDataException(persistedMismatch);
+            }
             if (measurement?.RequireNoWriterWork != true
                 && (observedPositions.Count > 0 || observedMoves.Count > 0))
                 ChessTransitionObservations.MarkObserved(observedPositions, observedMoves);

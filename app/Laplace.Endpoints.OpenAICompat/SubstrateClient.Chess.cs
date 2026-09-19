@@ -360,14 +360,28 @@ internal sealed partial class SubstrateClient
             if (boards.TryGetValue(Laplace.Engine.Core.Hash128.FromBytes(setupId), out var board))
                 setup = board.ToFen();
         }
-        if (content.Length > 0)
+        var startFen = setup ?? Laplace.Modality.Chess.ChessModality.StartFen;
+        if (!Laplace.Chess.Service.ChessPositionRef.TryComposeId(startFen, out var expectedStart))
+            return Laplace.Chess.Service.ChessReplay.Replay(
+                Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
+                with { Truncated = "recorded replay setup does not resolve to a canonical start position" };
+
+        if (content.Length == 0)
         {
-            var startFen = setup ?? Laplace.Modality.Chess.ChessModality.StartFen;
-            if (!Laplace.Chess.Service.ChessPositionRef.TryComposeId(startFen, out var expectedStart)
-                || expectedStart != content[0])
+            // A true zero-ply playing has ordinary singleton identity: line == start.
+            // Any other line id proves that moves existed in the line preimage, so an
+            // absent Content carrier is missing durable structure, not an empty game.
+            var storedLine = Laplace.Engine.Core.Hash128.FromBytes(lineId);
+            if (storedLine != expectedStart)
                 return Laplace.Chess.Service.ChessReplay.Replay(
                     Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
-                    with { Truncated = "stored line start position does not match its replay setup" };
+                    with { Truncated = "stored line move trajectory is missing" };
+        }
+        else if (expectedStart != content[0])
+        {
+            return Laplace.Chess.Service.ChessReplay.Replay(
+                Array.Empty<Laplace.Engine.Core.Hash128>(), setup)
+                with { Truncated = "stored line start position does not match its replay setup" };
         }
 
         var replay = Laplace.Chess.Service.ChessReplay.Replay(moves, setup);

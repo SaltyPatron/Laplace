@@ -117,7 +117,11 @@ export function GameBoard({ data, white, black }: { data: ChessGamePliesResponse
   }, [step, plies.length]);
 
   if (plies.length === 0) {
-    return <Muted>This game carries no playable moves.</Muted>;
+    return data.truncated ? (
+      <Muted className={styles.note}>Replay unavailable: {data.truncated}</Muted>
+    ) : (
+      <Muted>This recorded game ended before its first move.</Muted>
+    );
   }
 
   // Clocks are per-side: show each player their own most recent reading.
