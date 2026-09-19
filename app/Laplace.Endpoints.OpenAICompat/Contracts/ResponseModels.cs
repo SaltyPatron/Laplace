@@ -45,6 +45,37 @@ public sealed record EvidenceSample(
     short Outcome,
     long ObservationCount);
 
+public sealed record MachineCostResourcePressure(
+    [property: JsonPropertyName("resource")] string Resource,
+    [property: JsonPropertyName("pressure_per_iteration")] double PressurePerIteration);
+
+public sealed record MachineCostResponse(
+    [property: JsonPropertyName("schema")] string Schema,
+    [property: JsonPropertyName("artifact_sha256")] string ArtifactSha256,
+    [property: JsonPropertyName("artifact_bytes")] long ArtifactBytes,
+    [property: JsonPropertyName("artifact_name")] string ArtifactName,
+    [property: JsonPropertyName("object_format")] string ObjectFormat,
+    [property: JsonPropertyName("target_triple")] string TargetTriple,
+    [property: JsonPropertyName("cpu")] string Cpu,
+    [property: JsonPropertyName("clock_hz")] double ClockHz,
+    [property: JsonPropertyName("iterations")] int Iterations,
+    [property: JsonPropertyName("static_instruction_count")] long StaticInstructionCount,
+    [property: JsonPropertyName("scheduled_instruction_instances")] long ScheduledInstructionInstances,
+    [property: JsonPropertyName("total_cycles")] long TotalCycles,
+    [property: JsonPropertyName("total_uops")] long? TotalUops,
+    [property: JsonPropertyName("dispatch_width")] int? DispatchWidth,
+    [property: JsonPropertyName("uops_per_cycle")] double? UopsPerCycle,
+    [property: JsonPropertyName("ipc")] double? Ipc,
+    [property: JsonPropertyName("block_rthroughput_cycles")] double? BlockRThroughputCycles,
+    [property: JsonPropertyName("calculated_seconds")] double CalculatedSeconds,
+    [property: JsonPropertyName("calculated_nanoseconds")] double CalculatedNanoseconds,
+    [property: JsonPropertyName("scope")] string Scope,
+    [property: JsonPropertyName("control_flow_weighted")] bool ControlFlowWeighted,
+    [property: JsonPropertyName("resource_pressure")] IReadOnlyList<MachineCostResourcePressure> ResourcePressure,
+    [property: JsonPropertyName("objdump_version")] string ObjdumpVersion,
+    [property: JsonPropertyName("mca_version")] string McaVersion,
+    [property: JsonPropertyName("assumptions")] IReadOnlyList<string> Assumptions);
+
 /// <summary>
 /// Receipt from one routing/election event of the canonical native forward pass.
 /// These fields are execution facts, not a reconstruction from a separate graph walk.

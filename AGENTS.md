@@ -136,7 +136,8 @@ Do not collapse distinct kinds of evidence into status prose.
 - Executable representation laws are proved by code-level/property/conformance tests.
 - Finite implementation windows such as the selected Unicode generation may be exhaustively tested.
 - Live substrate/data claims require live/query/readback evidence.
-- Performance claims require exact-revision, exact-artifact, host/provider-bound benchmark receipts.
+- Calculated computational-cost claims bind the exact artifact/program, declared input/control-flow counts, target ISA/microarchitecture/scheduling model, memory/initial-state assumptions and clock into a versioned derivation receipt. Unknown runtime quantities remain symbolic or conditional; do not replace calculable work with an empirical benchmark.
+- Observed wall-clock/throughput/resource claims require exact-revision, exact-artifact, host/provider-bound benchmark receipts. Measurements validate or calibrate incomplete physical/environment models and expose omitted state; they are not semantic authority for work already derivable from the artifact and target machine model.
 
 A passing toy fixture does not prove a live-world invariant. A live database witness does not replace a universal mathematical proof. Both may be valuable for different claims.
 

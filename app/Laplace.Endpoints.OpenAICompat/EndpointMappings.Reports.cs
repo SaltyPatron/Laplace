@@ -86,6 +86,56 @@ internal static class ReportEndpoints
         .Produces<PaymentRequiredResponse>(StatusCodes.Status402PaymentRequired)
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPost("/v1/analyze/machine-cost", async (HttpRequest request, CancellationToken ct) =>
+        {
+            string cpu = request.Query["cpu"].ToString().Trim();
+            if (string.IsNullOrWhiteSpace(cpu))
+                return EndpointJson.BadRequest("cpu_required", "Query parameter 'cpu' is required (for example cortex-a72, neoverse-n2, znver4).");
+
+            string clockText = request.Query["clock_hz"].ToString().Trim();
+            if (!double.TryParse(clockText, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double clockHz)
+                || !double.IsFinite(clockHz) || clockHz <= 0.0)
+                return EndpointJson.BadRequest("clock_hz_invalid", "Query parameter 'clock_hz' must be a finite positive number.");
+
+            int iterations = 1;
+            string iterationsText = request.Query["iterations"].ToString().Trim();
+            if (iterationsText.Length > 0
+                && (!int.TryParse(iterationsText, System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out iterations)
+                    || iterations < 1 || iterations > MachineCostAnalyzer.MaxIterations))
+                return EndpointJson.BadRequest("iterations_invalid",
+                    $"Query parameter 'iterations' must be between 1 and {MachineCostAnalyzer.MaxIterations}.");
+
+            if (request.ContentLength is 0)
+                return EndpointJson.BadRequest("artifact_required", "Request body must contain an executable/object artifact.");
+            if (request.ContentLength is > MachineCostAnalyzer.MaxArtifactBytes)
+                return EndpointJson.BadRequest("artifact_too_large",
+                    $"Artifact exceeds the {MachineCostAnalyzer.MaxArtifactBytes} byte analysis limit.");
+
+            string? triple = request.Query["triple"].ToString().Trim();
+            if (string.IsNullOrWhiteSpace(triple)) triple = null;
+            string artifactName = request.Query["filename"].ToString().Trim();
+            if (string.IsNullOrWhiteSpace(artifactName)) artifactName = "artifact.bin";
+
+            try
+            {
+                MachineCostResponse result = await MachineCostAnalyzer.AnalyzeAsync(
+                    request.Body, artifactName, cpu, clockHz, triple, iterations, ct);
+                return Results.Json(result);
+            }
+            catch (MachineCostAnalysisException ex)
+            {
+                return ex.ServiceUnavailable
+                    ? EndpointJson.ServiceUnavailable(ex.Code, ex.Message)
+                    : EndpointJson.BadRequest(ex.Code, ex.Message);
+            }
+        })
+        .WithTags("analysis")
+        .Produces<MachineCostResponse>()
+        .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         app.MapPost("/v1/explain/report", async (HttpRequest request, ISubstrateClient substrate, IBillingOrchestrator billing, CancellationToken ct) =>
         {
             var payload = await EndpointJson.ReadJsonAsync<ExplainReportRequest>(request, ct);

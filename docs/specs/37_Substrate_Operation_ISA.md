@@ -122,7 +122,9 @@ realization/output envelope
 reserved compute ceiling
 ```
 
-Execution reports actual work against the same dimensions so unused reserve can be reconciled and estimators calibrated from real receipts.
+Execution reports actual work against the same dimensions so unused reserve can be reconciled and physical/environment models can be validated against real receipts.
+
+Artifact/program analysis uses this same contract. Source ASTs, bytecode, object/container formats and decoded machine instructions may lower into control/data/dependency structure with explicit execution-count variables. Given a declared ISA, microarchitecture/scheduling model, memory/initial-state assumptions and clock, the analyzer calculates instruction instances, resource-constrained cycles and machine time. Counts not fixed by the artifact/input remain symbolic or conditional instead of being replaced by benchmark averages. A measured run is a validation/calibration witness over that calculated model, not the definition of the program's computational work.
 
 A lower resource tier changes this execution envelope over the same entitled substrate; it does not silently route to a deliberately knowledge-reduced Laplace model.
 

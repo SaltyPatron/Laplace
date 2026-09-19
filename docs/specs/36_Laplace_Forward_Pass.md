@@ -221,14 +221,15 @@ Where work is billable or capacity-controlled, the forward program should suppor
 
 ```text
 plan / EXPLAIN
--> estimate physical work and runtime from calibrated receipts
+-> derive semantic work and target-machine work from the compiled program/artifact
+-> resolve an exact/symbolic/conditional cycle expression against declared machine/clock/state
 -> reserve admitted compute ceiling
 -> execute with hard resource counters
 -> emit actual work receipt
 -> reconcile/refund unused reserve
 ```
 
-The declared work ceiling can be exact; predicted wall time is an estimate calibrated from machine history because cache state, scheduler contention, I/O and concurrent load affect elapsed time.
+For a fully specified artifact/program, executed path/counts, target ISA and microarchitecture, scheduling/memory model, initial machine state and clock, preflight may calculate elapsed cycles and corresponding machine time directly. If path counts, cache state, scheduler interference, I/O service time or concurrent load are not fixed, retain those terms as symbolic, conditional or distributional state rather than collapsing them into a benchmark average. Empirical measurements validate/calibrate incomplete physical or environmental models and compare calculated versus observed receipts; they do not define cost when the required machine semantics are already known.
 
 ## Native execution grain
 
