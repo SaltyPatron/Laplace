@@ -143,7 +143,7 @@ def native_sources(rows, native_build, native_installed=None, repo_root=ROOT):
     return native, native_build, native_installed, repo_root
 
 
-def seal(directory, native_build=None, native_installed=None, repo_root=ROOT):
+def seal(directory, native_build=None, repo_root=ROOT, *, native_installed=None):
     rows = files(directory)
     native, native_build, native_installed, repo_root = native_sources(
         rows, native_build, native_installed, repo_root)
@@ -348,7 +348,8 @@ def main():
     if args.seal_payload:
         if args.app_dir or args.receipt:
             parser.error("sealing and runtime verification are distinct operations")
-        save(args.manifest, seal(args.seal_payload, args.native_build, args.native_installed))
+        save(args.manifest, seal(
+            args.seal_payload, args.native_build, native_installed=args.native_installed))
         return 0
     if not args.app_dir or not args.receipt or args.native_build or args.native_installed:
         parser.error("runtime verification requires --app-dir and --receipt")
