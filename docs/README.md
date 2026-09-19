@@ -21,6 +21,7 @@ The latest prompt does not erase higher-level project scope. A status file, issu
 - [`INVENTIONS.md`](INVENTIONS.md) — concise mechanism catalog.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current implementation architecture and known divergences.
 - [`INVENTORY.md`](INVENTORY.md) — generated repository inventory/counts.
+- [`specs/33_Perfcache_Blob_Law.md`](specs/33_Perfcache_Blob_Law.md) — derived ROM law and the current blob roster (T0, highway, numbers, chess, factor/generation gaps).
 
 Important current distinctions include:
 

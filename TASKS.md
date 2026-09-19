@@ -8,21 +8,13 @@ Historical recovery diaries, database snapshots, old branch state, and cross-rep
 
 ## Current high-value obligations
 
-### Canonical invention / architecture alignment
+### Live host revision coherence (hart-server)
 
-Current branch: `docs/canonical-invention-contract-20260914`.
+Observed 2026-09-19. `origin/main` is `e7b4ec7f`. `/opt/laplace/current` still names a 2026-09-17 release. `/opt/laplace/lib` received a 2026-09-18 23:45 cmake install (T0 v4, `laplace_execution_526daf316a640d4b.so`) that aborted during `ALTER EXTENSION`. PostgreSQL functions still bind `laplace_execution_e080f3990ea9221a` (file absent). `/opt/laplace/app` still ships 2026-09-17 `liblaplace_core`, so the API rejects the v4 T0 blob and turn-witness stays offline.
 
-The documentation/issue sweep is correcting stale authority and architecture descriptions around:
+`Product — main delivery` often reports success while skipping install. Qualification is one self-hosted job with a 15-minute `managed-dev` test deadline (`LAPLACE_MANAGED_TEST_TIMEOUT`). `/build` is at capacity (~121G under `/build/laplace/build`).
 
-- recursive bounded-space composition and exact trajectories;
-- packed trajectory manifest versus realized geometry;
-- whole-observation `COUPLE` before unconstrained orientation/routing;
-- functional Q/K/V/O correspondence without transformer dependence;
-- one shared web across observation, physicality, evidence, calculation, source/context and geometry;
-- hop/fanout/provider work as explicit compute coordinates;
-- universal coarse native/set execution grain across ingest, cognition, analysis, reconstruction and export;
-- serviceable capacity versus explicit host saturation;
-- historical plans/status/recovery notes as evidence rather than invention or scheduling authority.
+Next actions: restore one deployed revision (application, prefix libs, SQL MODULE, T0), then make `/health/ready` and `check-deployed-revision.sh` fail closed on split state. Do not treat Laplace-Refactor as the live product.
 
 ### Forward-pass completion
 

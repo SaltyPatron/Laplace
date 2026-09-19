@@ -231,6 +231,12 @@ Do not use `blocker` as a generic status or explanation. Missing code, missing p
 
 A commit, branch, PR, issue update, document, test declaration, screenshot, log, or explanation is not delivery unless that artifact itself is the requested output.
 
+A green Actions workflow is not delivery when qualification or install was skipped, when `delivery_actions` was empty, or when cmake/prefix files were written and SQL/MODULE/application publish did not finish. `scripts/check-deployed-revision.sh` must pass against the live prefix: application receipt, API native libraries, prefix native libraries, PostgreSQL `laplace_execution_*` bindings, and T0 perfcache format must identify one build.
+
+`SaltyPatron/Laplace-Refactor` is a separate repository. It may hold comparative implementations. It does not own this host's invention, acceptance, or deployment, and a rewrite-from-first-principles branch is not a substitute for repairing the live original.
+
+Operator-visible health and capability surfaces must describe as-built state. They must not advertise a live native forward program, a loaded perfcache, or a scaffold stream name when the serving process cannot load T0 or record a witnessed turn.
+
 When a check fails, fix the cause and continue. Do not stop at a failure report.
 
 ## Architecture implementation law

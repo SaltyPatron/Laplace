@@ -30,7 +30,7 @@ public sealed class EndpointContractTests : IClassFixture<SignedWebhookFactory>
 
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("ok", json.RootElement.GetProperty("status").GetString());
-        Assert.Equal("F-scaffold", json.RootElement.GetProperty("stream").GetString());
+        Assert.Equal("laplace", json.RootElement.GetProperty("stream").GetString());
     }
 
     [Fact]

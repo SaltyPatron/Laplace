@@ -7,7 +7,7 @@ internal static class CoreEndpoints
     public static void MapCoreEndpoints(this WebApplication app)
     {
 
-        app.MapGet("/health", () => Results.Json(new HealthResponse("ok", "F-scaffold")))
+        app.MapGet("/health", () => Results.Json(new HealthResponse("ok", "laplace")))
             .WithTags("core").Produces<HealthResponse>();
 
 
@@ -64,7 +64,7 @@ internal static class CoreEndpoints
                 RecipeCompile: new CapabilityStatus("live", Backend: "laplace.recipe validation + RecipeDescriptor", Billing: "recipe.compile"),
                 SynthesisExport: new CapabilityStatus("live", Backend: "foundry CLI export (writes GGUF; never loaded on chat path)", Billing: "synthesis"),
                 Op: new CapabilityStatus("live", Backend: "ops.api catalog allow-list; named function call; no SQL text"));
-            return Results.Json(new CapabilitiesResponse("F-scaffold", endpoints));
+            return Results.Json(new CapabilitiesResponse("laplace", endpoints));
         })
         .WithTags("core").Produces<CapabilitiesResponse>();
     }

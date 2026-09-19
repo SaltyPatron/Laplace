@@ -1,5 +1,5 @@
 {
-  "stream": "F-scaffold",
+  "stream": "laplace",
   "endpoints": {
     "chat_completions": {
       "status": "live",

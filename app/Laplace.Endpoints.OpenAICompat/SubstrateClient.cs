@@ -518,26 +518,48 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
                 if (consensus == 0 && consensusExist) consensus = 1;
             }
 
-            bool perfcacheReady;
+            bool postgresPerfcacheReady;
             string? detail = null;
             try
             {
                 await NpgsqlSubstrateReads.PerfCacheProbeAsync(conn, ct);
-                perfcacheReady = true;
+                postgresPerfcacheReady = true;
             }
             catch (PostgresException pg) when (pg.SqlState == PostgresErrorCodes.ObjectNotInPrerequisiteState)
             {
-                perfcacheReady = false;
+                postgresPerfcacheReady = false;
                 detail = pg.MessageText;
             }
 
+            // PostgreSQL mapping T0 is not the same as this process loading T0.
+            // The API native library and the extension backend can disagree after
+            // a partial prefix install.
+            bool processPerfcacheReady = CodepointPerfcache.IsLoaded;
+            if (!processPerfcacheReady)
+            {
+                try
+                {
+                    CodepointPerfcache.LoadDefault();
+                    processPerfcacheReady = true;
+                }
+                catch (Exception ex)
+                {
+                    processPerfcacheReady = false;
+                    detail = string.IsNullOrEmpty(detail)
+                        ? ex.Message
+                        : detail + "; " + ex.Message;
+                }
+            }
+
+            bool perfcacheReady = postgresPerfcacheReady && processPerfcacheReady;
             var ready = entities > 0 && consensus > 0 && perfcacheReady;
             if (ready)
                 return new ReadinessResponse(true, true, entities, consensus, true, ChessPerfcache: chessPerfcache);
 
             detail ??= entities == 0 ? "substrate has no entities (unseeded)"
                 : consensus == 0 ? "substrate has no consensus relations (unseeded)"
-                : "T0 perfcache not loaded";
+                : !postgresPerfcacheReady ? "T0 perfcache not loaded in PostgreSQL"
+                : "T0 perfcache not loaded in this process";
             return new ReadinessResponse(false, true, entities, consensus, perfcacheReady, detail, chessPerfcache);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
