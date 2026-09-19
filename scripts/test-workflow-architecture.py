@@ -397,6 +397,23 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("deployed product carry-forward skipped", carry)
         self.assertIn("--base \"$deployed\" --head \"$target\"", carry)
         self.assertIn("strands those product changes forever", carry)
+        fallback = product.split("force_full_carry_forward_impact() {", 1)[1].split(
+            "\n}\n\ncarry_forward_undelivered_impact", 1)[0]
+        self.assertIn('LAPLACE_BUILD_COMPONENTS="native,managed,web"', fallback)
+        self.assertIn('LAPLACE_MANAGED_BUILD_PROJECTS="all"', fallback)
+        self.assertIn('LAPLACE_DB_SUITES="db-health,native-db,managed-db"', fallback)
+        self.assertIn(
+            'LAPLACE_LIVE_SUITES="live-floor,live-api,managed-live,generation-eval,chess-provider-live"',
+            fallback,
+        )
+        self.assertIn(
+            'LAPLACE_DELIVERY_ACTIONS="install,database,reconcile,publish,live"',
+            fallback,
+        )
+        self.assertIn('LAPLACE_PUBLISH_SCOPE="full"', fallback)
+        self.assertNotIn("LAPLACE_DEV_SUITES", fallback)
+        lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
+        self.assertNotIn('- "scripts/product-ci.sh"', lifecycle)
 
     def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")

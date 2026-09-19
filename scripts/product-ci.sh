@@ -277,11 +277,19 @@ csv_selected() {
 }
 
 force_full_carry_forward_impact() {
-  # Missing receipt means this SHA has not been published. It does not mean
-  # rebuild/test/publish every surface. Keep the planner's build, test, and
-  # delivery selections. Only ensure delivery still has a path to write a
-  # receipt (install), if the planner already asked for one.
-  :
+  # Without an authoritative installed application revision there is no safe
+  # base for a selective deployed->target diff. Build every publishable surface
+  # and execute the complete mutation/verification closure. Dev-suite selection
+  # stays untouched: this repairs deployed state rather than inventing unrelated
+  # source-test invalidations.
+  export LAPLACE_BUILD_COMPONENTS="native,managed,web"
+  export LAPLACE_MANAGED_BUILD_PROJECTS="all"
+  export LAPLACE_DB_SUITES="db-health,native-db,managed-db"
+  export LAPLACE_MANAGED_DB_TEST_PROJECTS="all"
+  export LAPLACE_LIVE_SUITES="live-floor,live-api,managed-live,generation-eval,chess-provider-live"
+  export LAPLACE_MANAGED_LIVE_TEST_PROJECTS="all"
+  export LAPLACE_DELIVERY_ACTIONS="install,database,reconcile,publish,live"
+  export LAPLACE_PUBLISH_SCOPE="full"
 }
 
 append_csv_env() {
