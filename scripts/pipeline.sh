@@ -153,6 +153,8 @@ restart_postgres() {
   # systemd owns the postmaster. SIGINT against the pid is a clean exit, so
   # systemd does not restart it — CI then waits 120s and dies. Every native
   # install that replaces a mapped .so must bounce the unit, not the process.
+  # Changing this file plans install + live-floor/live-api only. It does not
+  # rebuild or publish API, MCP, UCI, Lichess, UI, or chess lab.
   oldpid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)
   [[ "$oldpid" != 0 ]] || oldpid=""
   echo "restart_postgres ($reason): systemctl restart $unit (was pid ${oldpid:-none})"
