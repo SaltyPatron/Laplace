@@ -46,6 +46,25 @@ A record, CST/AST node, field, row, game, sentence, frame, tensor descriptor, co
 
 This is observed/source structure. It is **not automatically canonical content**. The declared recipe decides which recovered values/structures become content, occurrence, reference, provenance, testimony, deterministic calculation, packaging or unresolved obligation.
 
+### Universal syntax / AST boundary
+
+The parser/provider boundary must not become a collection of source-private semantic object models. A qualified provider recovers exact concrete syntax; a versioned recipe lowers that provider output into the common **universal typed AST**.
+
+```text
+artifact bytes
+-> Tree-sitter / native grammar / standards parser / codec / decoder
+-> exact concrete syntax (nodes, fields, spans, ordering, errors, ambiguity)
+-> versioned recipe
+-> universal typed AST
+-> generic Laplace lowering
+```
+
+The universal AST is not code-specific. It is the common structural algebra for text/documents, lexical resources, tabular data, code and executable formats, games, media, model/container formats and other digital sources. Tree-sitter is a major grammar estate because many formats/languages already have exact parsers, but sources that require XML/CSV/codec/standards parsers obey the same boundary.
+
+Provider nodes remain attributable to their grammar/provider generation. Recipes map provider kinds/fields into stable typed AST roles and explicitly retain or disposition every source field. Unknown provider structure remains unresolved; it must not be silently dropped or coerced into content.
+
+Once in the universal AST, the shared machine owns recursive composition, physicality/trajectory, occurrences, typed references, provenance, testimony, deterministic calculations, reconstruction and deposition. Source-specific emitters may not reimplement those semantics merely because their parser produced a different CLR/C++ record type.
+
 ### Canonical semantic boundary
 
 Common substrate state includes:

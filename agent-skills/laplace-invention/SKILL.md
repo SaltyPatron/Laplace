@@ -34,6 +34,14 @@ immediately; do not perform ceremonial re-onboarding.
   retaining different canonical ids and trajectories. Geometry is one response plane, not a
   uniqueness allocator; dense shared regions are usable state, not an identity failure.
 
+## Universal syntax and AST
+
+- AST is universal Laplace structure, not a programming-language feature. Qualified syntax providers — Tree-sitter grammars, Laplace-native grammars, standards parsers, codecs and decoders — recover exact concrete nodes/records, fields, spans, order, errors and ambiguity.
+- A versioned recipe lowers provider-specific concrete syntax into one universal typed AST. Documents, utterances, lexical resources, tables, code/binaries, games, media, model/container formats and future digital modalities use the same structural contract.
+- Provider output is not truth and is not canonical content by default. The recipe explicitly dispositions each field/role into canonical content/physicality, occurrence, typed reference, provenance, attributed testimony, deterministic calculation, packaging/reconstruction or unresolved state.
+- The same recovered value may participate in multiple classes: e.g. a definition sentence is canonical content with physicality while `sense HAS_DEFINITION sentence` is separately attributed testimony.
+- Prefer recipe + universal-AST lowering over source-named emitters and private semantic object models. Tree-sitter is here to supply reusable concrete syntax across a large grammar estate; non-Tree-sitter providers must still lower through the same AST/substrate law.
+
 ## Physicality, trajectory, and O(tiers)
 
 - Identity says what structure exists; typed physicality says how it is realized. A

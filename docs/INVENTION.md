@@ -126,6 +126,44 @@ Tier records compositional altitude within a selected recipe. It is not itself t
 
 The general law is recursive composition. The modality grammar determines which constituents are admitted and how they are grouped.
 
+### Universal typed AST: structure for all digital knowledge
+
+Laplace treats syntax and structure as a universal knowledge problem, not a programming-language-only feature.
+
+Every admitted digital artifact is recovered through a qualified **syntax provider** appropriate to its physical format: Tree-sitter grammars, Laplace-native grammars, standards parsers, container readers, codecs, protocol decoders or other exact structural providers. The provider exposes the concrete source structure — nodes/records, fields, ordering, spans, missing/error state, ambiguity and reconstruction information.
+
+That provider-specific concrete syntax is then lowered by a versioned recipe into a **universal typed AST**. The AST is the recursively composable structural form used across:
+
+- natural-language documents and utterances;
+- lexical/semantic standards and dictionaries;
+- tables, graphs and structured corpora;
+- source code, binaries and executable formats;
+- chess/game records and state transitions;
+- images, audio and video after codec/format decomposition;
+- model/checkpoint/container structure;
+- tool calls, programs, traces and future digital modalities.
+
+Tree-sitter is important because it provides a large, replaceable grammar estate for exact concrete syntax. It is one syntax-provider family, not a code-only side system and not the semantic authority. A CSV/XML/PGN/media/ELF/Unicode provider may not use Tree-sitter internally, but it participates in the same provider -> recipe -> universal-AST contract.
+
+The universal AST does not collapse epistemic classes. A recipe may lower one recovered source object into several substrate roles at once:
+
+```text
+typed AST node/value
+  -> canonical content/composition + physicality/trajectory
+  -> occurrence/span/order/provenance
+  -> typed external reference
+  -> attributed testimony about canonical endpoints
+  -> deterministic calculation/derived state
+  -> packaging/reconstruction state
+  -> explicit unresolved meaning
+```
+
+For example, a definition sentence is ordinary canonical content with its own physicality/trajectory, while a lexicon's statement that a particular sense `HAS_DEFINITION` that sentence is separate source-attributed testimony pointing at the same content entity.
+
+This is the sense in which Laplace unlocks AST for all knowledge: exact recursive structure becomes a common executable substrate rather than being discarded after parsing or confined to code tooling. AST structure can itself be indexed, compared, traversed, witnessed, transformed and reused by the same forward program as every other substrate plane.
+
+Where the recipe declares exact reconstruction, the persisted typed AST plus retained provider facts must be sufficient to reproduce the admitted source bytes/structure. Intentional transformations produce new content and an explicit structural edit/derivation receipt rather than silently mutating the observation.
+
 ### Content novelty and observation volume are different
 
 If the same word, AST subtree, chess line, sentence or other canonical composition is observed repeatedly, the structure should converge rather than be minted repeatedly.
