@@ -121,7 +121,12 @@ class ProductStageOwnershipContract(unittest.TestCase):
     def test_deploy_is_composed_from_release_modules_not_policy_work(self):
         deploy = function("run_deploy")
         self.assertNotIn("run_ci_contract_checks", deploy)
-        stages = ["run_release_qualification", "run_release_candidate", "run_release_activation"]
+        stages = [
+            "force_full_carry_forward_impact",
+            "run_release_qualification",
+            "run_release_candidate",
+            "run_release_activation",
+        ]
         positions = [deploy.index(token) for token in stages]
         self.assertEqual(positions, sorted(positions))
 
