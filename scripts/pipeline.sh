@@ -493,7 +493,7 @@ alter_extension_update() {
       -c "ALTER EXTENSION $ext UPDATE TO '$avail'" >"$log" 2>&1 || rc=$?
   if [[ "$rc" != 0 ]]; then
     cat "$log" >&2
-    if grep -q 'lock timeout\|canceling statement due to lock timeout' "$log"; then
+    if grep -q 'lock timeout\|canceling statement due to lock timeout\|deadlock detected' "$log"; then
       psql -d "$PGDATABASE" -U laplace_admin -P pager=off -c \
         "SELECT pid,state,wait_event_type,wait_event,now()-COALESCE(xact_start,query_start) AS held,left(query,120) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state<>'idle' ORDER BY COALESCE(xact_start,query_start)" >&2 || true
     fi
@@ -517,8 +517,25 @@ sync_one_extension() {
   alter_extension_update "$ext" "$avail"
 }
 
-phase_sync_extension() {
+phase_sync_extension() (
   echo "===== PHASE — SYNC EXTENSION SQL ====="
+  # Extension upgrades replace views/functions and require DDL locks. Do not
+  # restart the live API between native install and schema synchronization and
+  # then let request transactions deadlock the upgrade. Quiesce the API for the
+  # exact DDL window; PostgreSQL remains online for the migration itself.
+  local api_was_active=0 sync_rc=0
+  systemctl is-active --quiet laplace-api 2>/dev/null && api_was_active=1 || true
+  cleanup_extension_sync() {
+    sync_rc=$?
+    trap - EXIT
+    if [[ "$api_was_active" == 1 ]]; then
+      sudo -n systemctl start laplace-api || sync_rc=1
+    fi
+    exit "$sync_rc"
+  }
+  trap cleanup_extension_sync EXIT
+  [[ "$api_was_active" != 1 ]] || sudo -n systemctl stop laplace-api
+
   sync_one_extension laplace_geom
   local avail installed bridge log rc=0
   avail=$(psql -d "$PGDATABASE" -U laplace_admin -tAX -c "SELECT default_version FROM pg_available_extensions WHERE name='laplace_substrate'" | tr -d '[:space:]')
@@ -543,12 +560,26 @@ phase_sync_extension() {
         psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
           -c "ALTER EXTENSION laplace_substrate UPDATE TO '$avail'" || rc=$?
     fi
-    if [[ "$rc" != 0 ]]; then cat "$log" >&2; rm -f "$log"; return "$rc"; fi
+    if [[ "$rc" != 0 ]]; then
+      cat "$log" >&2
+      if grep -q 'lock timeout\|canceling statement due to lock timeout\|deadlock detected' "$log"; then
+        psql -d "$PGDATABASE" -U laplace_admin -P pager=off -c \
+          "SELECT pid,state,wait_event_type,wait_event,now()-COALESCE(xact_start,query_start) AS held,left(query,160) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state<>'idle' ORDER BY COALESCE(xact_start,query_start)" >&2 || true
+      fi
+      rm -f "$log"
+      return "$rc"
+    fi
     rm -f "$log"
     psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 -c \
       "CALL chess.repair_player_ratings(laplace.relation_type_id('OUTCOME'),laplace.relation_type_id('PLAYED_BY'),laplace.relation_type_id('HAS_RATING'))"
   fi
-}
+
+  if [[ "$api_was_active" == 1 ]]; then
+    sudo -n systemctl start laplace-api
+    api_was_active=0
+  fi
+  trap - EXIT
+)
 
 phase_tune_pg() {
   echo "===== PHASE — TUNE PG ====="
