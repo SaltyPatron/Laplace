@@ -124,8 +124,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
         stages = [
             "force_full_carry_forward_impact",
             "run_release_qualification",
-            "run_release_candidate",
-            "run_release_activation",
+            "run_release_delivery",
         ]
         positions = [deploy.index(token) for token in stages]
         self.assertEqual(positions, sorted(positions))

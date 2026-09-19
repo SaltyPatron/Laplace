@@ -920,16 +920,12 @@ run_proof_model() {
 }
 
 run_deploy() {
-  # Local convenience composition. GitHub Actions owns these as three separate
-  # jobs: read-only qualification, candidate mutation, then activation.
-  # The explicit maintenance workflow also enters here without an impact plan.
-  # Select the complete build/mutation/proof closure before qualification so
-  # deploy cannot manufacture only a revision marker and then attempt to install
-  # from a nonexistent native build tree.
+  # Explicit maintenance enters without an impact plan. Select the recovery
+  # closure, qualify it, then let the same action-aware delivery owner decide
+  # which install/database/publication/live operations are actually required.
   force_full_carry_forward_impact
   run_release_qualification
-  run_release_candidate
-  run_release_activation
+  run_release_delivery
 }
 
 run_proof() {
