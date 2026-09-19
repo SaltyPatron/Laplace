@@ -1,0 +1,50 @@
+-- Conflict-safe, set-sized canonical physicality admission. Presence probes are
+-- only an I/O avoidance hint; this statement remains correct if another writer
+-- admits the same content identity between probe and persistence.
+CREATE OR REPLACE FUNCTION laplace.physicalities_merge(
+    p_ids bytea[],
+    p_entity_ids bytea[],
+    p_types smallint[],
+    p_coords_ewkb bytea[],
+    p_hilbert_indices bytea[],
+    p_trajectories_ewkb bytea[],
+    p_n_constituents integer[],
+    p_alignment_residuals double precision[],
+    p_has_alignment_residual boolean[],
+    p_source_dims integer[],
+    p_has_source_dim boolean[],
+    p_observed_at timestamptz[])
+RETURNS bigint
+LANGUAGE SQL
+VOLATILE
+SET enable_material = off
+AS $$
+    WITH admitted AS (
+        INSERT INTO laplace.physicalities
+            (id, entity_id, type, coord, hilbert_index, trajectory,
+             n_constituents, alignment_residual, source_dim, observed_at)
+        SELECT b.id,
+               b.entity_id,
+               b.type,
+               ST_GeomFromEWKB(b.coord_ewkb),
+               b.hilbert_index,
+               CASE WHEN b.trajectory_ewkb IS NULL THEN NULL
+                    ELSE ST_GeomFromEWKB(b.trajectory_ewkb) END,
+               b.n_constituents,
+               CASE WHEN b.has_alignment_residual THEN b.alignment_residual END,
+               CASE WHEN b.has_source_dim THEN b.source_dim END,
+               b.observed_at
+        FROM unnest(
+            p_ids, p_entity_ids, p_types, p_coords_ewkb,
+            p_hilbert_indices, p_trajectories_ewkb, p_n_constituents,
+            p_alignment_residuals, p_has_alignment_residual,
+            p_source_dims, p_has_source_dim, p_observed_at)
+          AS b(id, entity_id, type, coord_ewkb, hilbert_index,
+               trajectory_ewkb, n_constituents, alignment_residual,
+               has_alignment_residual, source_dim, has_source_dim, observed_at)
+        ORDER BY b.id
+        ON CONFLICT (id) DO NOTHING
+        RETURNING 1
+    )
+    SELECT count(*)::bigint FROM admitted
+$$;

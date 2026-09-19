@@ -284,6 +284,7 @@ functions/ops/surface_sample.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in
 functions/ingest/physicality_descriptor_materialize.sql.in
+functions/ingest/physicalities_merge.sql.in
 functions/generation/relation_plane.sql.in
 functions/generation/entity_relation_plane.sql.in
 functions/generation/consensus_layer_plane.sql.in

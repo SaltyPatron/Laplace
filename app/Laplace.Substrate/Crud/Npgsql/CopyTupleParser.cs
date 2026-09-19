@@ -39,9 +39,17 @@ internal static class CopyTupleParser
     {
         public readonly List<Hash128> Ids = new();
         public readonly List<Hash128> EntityIds = new();
+        public readonly List<short> Types = new();
+        public readonly List<byte[]> CoordinatesEwkb = new();
         /// <summary>128-bit Hilbert curve index of the row's coord (wire packing
         /// is 16 octets; value is the index, not a hash).</summary>
         public readonly List<Hilbert128> HilbertKeys = new();
+        public readonly List<byte[]?> TrajectoriesEwkb = new();
+        public readonly List<int> ConstituentCounts = new();
+        public readonly List<double> AlignmentResiduals = new();
+        public readonly List<bool> HasAlignmentResidual = new();
+        public readonly List<int> SourceDimensions = new();
+        public readonly List<bool> HasSourceDimension = new();
         /// <summary>observed_at as stored on the wire (µs since PG epoch 2000-01-01).</summary>
         public readonly List<long> TimestampsPgUs = new();
         public readonly List<StagedRowRef> Rows = new();
@@ -170,7 +178,13 @@ internal static class CopyTupleParser
             {
                 long rowStart = off;
                 Hash128 id = default, entityId = default;
+                short type = 0;
+                byte[] coord = [];
                 Hilbert128 hilbert = default;
+                byte[]? trajectory = null;
+                int constituents = 0, sourceDim = 0;
+                double residual = 0;
+                bool hasResidual = false, hasSourceDim = false;
                 long observedAtPgUs = 0;
                 // This is the million-row document hot path. WalkRow's capturing
                 // callback allocated one closure/delegate for every physicality;
@@ -198,15 +212,41 @@ internal static class CopyTupleParser
                     if (field == 0) id = ReadHash(p, off, valLen, "physicalities.id");
                     else if (field == 1)
                         entityId = ReadHash(p, off, valLen, "physicalities.entity_id");
+                    else if (field == 2)
+                        type = ReadInt16(p, off, valLen, "physicalities.type");
+                    else if (field == 3)
+                        coord = ReadBytes(p, off, valLen, "physicalities.coord");
                     else if (field == 4)
                         hilbert = ReadHilbert(p, off, valLen, "physicalities.hilbert_index");
+                    else if (field == 5)
+                        trajectory = ReadBytes(p, off, valLen, "physicalities.trajectory");
+                    else if (field == 6)
+                        constituents = ReadInt32(p, off, valLen, "physicalities.n_constituents");
+                    else if (field == 7)
+                    {
+                        residual = ReadDouble(p, off, valLen, "physicalities.alignment_residual");
+                        hasResidual = true;
+                    }
+                    else if (field == 8)
+                    {
+                        sourceDim = ReadInt32(p, off, valLen, "physicalities.source_dim");
+                        hasSourceDim = true;
+                    }
                     else if (field == 9)
                         observedAtPgUs = ReadInt64(p, off, valLen, "physicalities.observed_at");
                     off += valLen;
                 }
                 result.Ids.Add(id);
                 result.EntityIds.Add(entityId);
+                result.Types.Add(type);
+                result.CoordinatesEwkb.Add(coord);
                 result.HilbertKeys.Add(hilbert);
+                result.TrajectoriesEwkb.Add(trajectory);
+                result.ConstituentCounts.Add(constituents);
+                result.AlignmentResiduals.Add(residual);
+                result.HasAlignmentResidual.Add(hasResidual);
+                result.SourceDimensions.Add(sourceDim);
+                result.HasSourceDimension.Add(hasSourceDim);
                 result.TimestampsPgUs.Add(observedAtPgUs);
                 result.Rows.Add(new StagedRowRef(b, rowStart, checked((int)(off - rowStart))));
             }
@@ -417,6 +457,26 @@ internal static class CopyTupleParser
         if (valLen != 2)
             throw new InvalidOperationException($"{what}: expected 2-byte value, got {valLen}");
         return BinaryPrimitives.ReadInt16BigEndian(new ReadOnlySpan<byte>(p + valOff, 2));
+    }
+
+    private static unsafe int ReadInt32(byte* p, long valOff, int valLen, string what)
+    {
+        if (valLen != 4)
+            throw new InvalidOperationException($"{what}: expected 4-byte value, got {valLen}");
+        return BinaryPrimitives.ReadInt32BigEndian(new ReadOnlySpan<byte>(p + valOff, 4));
+    }
+
+    private static unsafe double ReadDouble(byte* p, long valOff, int valLen, string what)
+    {
+        long bits = ReadInt64(p, valOff, valLen, what);
+        return BitConverter.Int64BitsToDouble(bits);
+    }
+
+    private static unsafe byte[] ReadBytes(byte* p, long valOff, int valLen, string what)
+    {
+        if (valLen < 0)
+            throw new InvalidOperationException($"{what}: value is NULL");
+        return new ReadOnlySpan<byte>(p + valOff, valLen).ToArray();
     }
 
     private static unsafe bool ReadBool(byte* p, long valOff, int valLen, string what)
