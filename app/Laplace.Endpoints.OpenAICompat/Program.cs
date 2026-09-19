@@ -90,6 +90,34 @@ forwardedHeaders.KnownProxies.Clear();
 forwardedHeaders.KnownProxies.Add(IPAddress.Loopback);
 forwardedHeaders.KnownProxies.Add(IPAddress.IPv6Loopback);
 app.UseForwardedHeaders(forwardedHeaders);
+
+// Published identity and billing links have one configured authority. Apply it
+// before authentication constructs an OIDC callback so a reverse proxy cannot
+// lose a non-default external port (for example :8443) from the redirect URI.
+var publicBaseUrl = Environment.GetEnvironmentVariable("LAPLACE_PUBLIC_BASE_URL")?.TrimEnd('/');
+if (!string.IsNullOrWhiteSpace(publicBaseUrl))
+{
+    if (!Uri.TryCreate(publicBaseUrl, UriKind.Absolute, out var publicOrigin)
+        || publicOrigin.Scheme != Uri.UriSchemeHttps
+        || publicOrigin.AbsolutePath != "/"
+        || !string.IsNullOrEmpty(publicOrigin.Query)
+        || !string.IsNullOrEmpty(publicOrigin.Fragment))
+        throw new InvalidOperationException(
+            "LAPLACE_PUBLIC_BASE_URL must be an HTTPS origin without a path, query, or fragment.");
+
+    var publicHost = publicOrigin.IsDefaultPort
+        ? new HostString(publicOrigin.Host)
+        : new HostString(publicOrigin.Host, publicOrigin.Port);
+    app.Use((context, next) =>
+    {
+        // ForwardedHeaders has already established whether the reverse proxy
+        // received HTTPS. Never promote a direct plaintext request merely
+        // because a public origin is configured.
+        if (context.Request.IsHttps)
+            context.Request.Host = publicHost;
+        return next(context);
+    });
+}
 app.UseMiddleware<RefactorProxyMiddleware>();
 
 app.UseDefaultFiles();
