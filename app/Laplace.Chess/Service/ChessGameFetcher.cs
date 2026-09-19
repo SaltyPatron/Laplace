@@ -9,7 +9,9 @@ namespace Laplace.Chess.Service;
 public static class ChessGameFetcher
 {
     private static readonly HttpClient Http = CreateClient();
-    private static readonly SemaphoreSlim ChessComRequests = new(1, 1);
+    private const int ChessComMaxConcurrency = 12;
+    private static readonly SemaphoreSlim ChessComRequests =
+        new(ChessComMaxConcurrency, ChessComMaxConcurrency);
     private static readonly SemaphoreSlim LichessRequests = new(1, 1);
     private const int ProviderMaxAttempts = 6;
 
@@ -64,23 +66,39 @@ public static class ChessGameFetcher
         var archives = ChronologicalArchiveUrls(
             doc.RootElement.GetProperty("archives").EnumerateArray()
                 .Select(e => e.GetString()!));
-        // The public provider is the scarce resource here, not local I/O. Older code sized
-        // concurrent monthly requests from host CPU/I/O topology, which can turn a large
-        // account into dozens of simultaneous Chess.com requests. Keep the parameter only
-        // for API compatibility and intentionally serialize provider traffic.
-        _ = concurrency;
-        log?.Invoke($"  {archives.Count} monthly archives (serialized downloads; each archive is applied before the next request)"
+        int workers = Math.Clamp(
+            concurrency ?? Math.Min(ChessComMaxConcurrency, IngestTopology.Current.IoWorkersAvailable),
+            1, Math.Max(1, archives.Count));
+        log?.Invoke($"  {archives.Count} monthly archives ({workers} parallel downloads; oldest-first apply)"
             + (minTcSeconds > 0 ? $", min base TC {minTcSeconds}s" : ""));
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         int kept = 0;
         await using (var w = new StreamWriter(outPath, append: false, new UTF8Encoding(false)))
         {
-            foreach (string archiveUrl in archives)
+            // Provider downloads are independent physical artifacts. Keep a bounded window
+            // in flight, then consume it oldest-first so network latency overlaps native
+            // parse/apply without changing deterministic record chronology.
+            var pending = new Queue<(string Url, Task<string> Download)>();
+            int nextArchive = 0;
+            while (nextArchive < archives.Count && pending.Count < workers)
+            {
+                string url = archives[nextArchive++];
+                pending.Enqueue((url, GetStringWithRetryAsync(
+                    $"{url}/pgn", ct, retryNotFound: true, log: log)));
+            }
+
+            while (pending.Count > 0)
             {
                 ct.ThrowIfCancellationRequested();
-                string pgn = await GetStringWithRetryAsync(
-                    $"{archiveUrl}/pgn", ct, retryNotFound: true, log: log);
+                var (archiveUrl, download) = pending.Dequeue();
+                string pgn = await download;
+                if (nextArchive < archives.Count)
+                {
+                    string url = archives[nextArchive++];
+                    pending.Enqueue((url, GetStringWithRetryAsync(
+                        $"{url}/pgn", ct, retryNotFound: true, log: log)));
+                }
                 if (string.IsNullOrWhiteSpace(pgn)) continue;
 
                 var ready = new List<string>();
@@ -94,9 +112,6 @@ public static class ChessGameFetcher
                 }
 
                 await w.FlushAsync(ct);
-                // Do not prefetch the next month while the current one is still being
-                // validated and committed. A successful provider request therefore maps
-                // to one bounded apply window before another request can consume quota.
                 if (ready.Count > 0 && onBatchReady is not null)
                     await onBatchReady(ready, ct);
                 log?.Invoke($"  {archiveUrl[^7..]}: {ready.Count} processed · {kept} total");

@@ -532,8 +532,7 @@ public static class ChessLabRunners
                         lab.UpdateSummary(slot, new ChessLabJobSummary(
                             appliedWhileFetching, 0, $"{appliedWhileFetching} new games recorded while downloading"));
                     }
-                    : null,
-                concurrency: 1);
+                    : null);
             lab.Publish(slot, new ChessLabMetricEvent("games_fetched", games));
 
             if (ingest)
