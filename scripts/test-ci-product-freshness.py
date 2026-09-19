@@ -61,7 +61,13 @@ class ProductFreshnessTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "laplace.yml").read_text(encoding="utf-8")
         for pattern in GITHUB_PATH_IGNORES:
             with self.subTest(pattern=pattern):
-                self.assertIn(f'- "{pattern}"', workflow)
+                if pattern == "scripts/product-ci.sh":
+                    # The executor remains product-equivalent for candidate
+                    # freshness, but its own repairs must enter the delivery
+                    # workflow so they can reconcile an incomplete installation.
+                    self.assertNotIn(f'- "{pattern}"', workflow)
+                else:
+                    self.assertIn(f'- "{pattern}"', workflow)
 
     def test_shared_scope_function_is_the_freshness_function(self):
         for path in ("scripts/test-ci-workspace.py", "scripts/product-ci.sh"):
