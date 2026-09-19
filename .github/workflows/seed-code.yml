@@ -1,33 +1,27 @@
 name: Data — code ingest
-run-name: "Code ingest — ${{ inputs.source }} / ${{ inputs.corpus }} → ${{ inputs.database }}"
+run-name: "Code ingest — ${{ inputs.preset }} → ${{ inputs.database }}"
 
 on:
   workflow_dispatch:
     inputs:
-      source:
-        description: "Ingest mode: repo for repositories; stack/tiny-codes are registered corpora; code/tabular/recipe use an explicit path"
+      preset:
+        description: "What code corpus to ingest"
         type: choice
         required: true
-        default: repo
-        options: [repo, stack, tiny-codes, code, tabular, recipe]
-      corpus:
-        description: "Named corpus preset; auto selects this Laplace checkout for repo"
-        type: choice
-        required: false
-        default: auto
-        options: [auto, laplace, cpython, postgres, dotnet-runtime, dotnet-docs, treesitter, custom-path]
+        default: laplace
+        options: [laplace, cpython, postgresql, dotnet-runtime, dotnet-docs, treesitter, stack, tiny-codes, custom-repository, custom-code, custom-tabular, custom-recipe]
       advanced_path_override:
-        description: "ADVANCED: local file/directory override; required for custom-path and custom code/tabular/recipe inputs"
+        description: "ADVANCED: override the selected preset path; required for custom-* presets"
         type: string
         required: false
         default: ""
       database:
-        description: "target database"
+        description: "Target database"
         type: choice
         options: [laplace]
         default: laplace
       run_idempotency:
-        description: "re-ingest and prove no double-count"
+        description: "Re-ingest the selected corpus and prove evidence does not double-count"
         type: boolean
         default: false
 
@@ -36,54 +30,110 @@ permissions:
 
 jobs:
   resolve:
+    name: Resolve code preset
     runs-on: [self-hosted, laplace]
     timeout-minutes: 2
     outputs:
+      source: ${{ steps.pick.outputs.source }}
       path: ${{ steps.pick.outputs.path }}
     steps:
       - id: pick
+        shell: bash
         env:
-          SOURCE_INPUT: ${{ inputs.source }}
-          CORPUS_INPUT: ${{ inputs.corpus }}
+          PRESET: ${{ inputs.preset }}
           PATH_INPUT: ${{ inputs.advanced_path_override }}
         run: |
           set -euo pipefail
           root="${LAPLACE_DATA_ROOT:-/vault/Data}"
-          if [[ -n "$PATH_INPUT" ]]; then
-            [[ -e "$PATH_INPUT" ]] || { echo "::error::$PATH_INPUT does not exist"; exit 1; }
-            echo "path=$PATH_INPUT" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          case "$SOURCE_INPUT" in
-            stack|tiny-codes) echo "path=" >> "$GITHUB_OUTPUT"; exit 0 ;;
-          esac
-          case "$CORPUS_INPUT" in
-            auto)
-              if [[ "$SOURCE_INPUT" == repo ]]; then
-                p="$GITHUB_WORKSPACE"
-              else
-                echo "::error::$SOURCE_INPUT needs a named corpus or advanced path override"
-                exit 2
-              fi
+          source=""
+          p=""
+
+          case "$PRESET" in
+            laplace)
+              source=repo
+              p="."
               ;;
-            laplace) p="$GITHUB_WORKSPACE" ;;
-            cpython) p="$root/code-authority/cpython" ;;
-            postgres) p="$root/code-authority/postgres" ;;
-            dotnet-runtime) p="$root/code-authority/runtime" ;;
-            dotnet-docs) p="$root/code-authority/docs" ;;
-            treesitter) p="$root/TreeSitter" ;;
-            custom-path) echo "::error::custom-path requires the advanced path override"; exit 2 ;;
-            *) echo "::error::unknown corpus $CORPUS_INPUT"; exit 1 ;;
+            cpython)
+              source=repo
+              p="$root/code-authority/cpython"
+              ;;
+            postgresql)
+              source=repo
+              p="$root/code-authority/postgres"
+              ;;
+            dotnet-runtime)
+              source=repo
+              p="$root/code-authority/runtime"
+              ;;
+            dotnet-docs)
+              source=repo
+              p="$root/code-authority/docs"
+              ;;
+            treesitter)
+              source=repo
+              p="$root/TreeSitter"
+              ;;
+            stack)
+              source=stack
+              ;;
+            tiny-codes)
+              source=tiny-codes
+              ;;
+            custom-repository)
+              source=repo
+              ;;
+            custom-code)
+              source=code
+              ;;
+            custom-tabular)
+              source=tabular
+              ;;
+            custom-recipe)
+              source=recipe
+              ;;
+            *)
+              echo "::error::unknown code preset: $PRESET"
+              exit 2
+              ;;
           esac
-          [[ -e "$p" ]] || { echo "::error::$p does not exist"; exit 1; }
+
+          if [[ -n "$PATH_INPUT" ]]; then
+            p="$PATH_INPUT"
+          fi
+
+          case "$PRESET" in
+            custom-*)
+              [[ -n "$p" ]] || {
+                echo "::error::$PRESET requires the advanced path override"
+                exit 2
+              }
+              ;;
+          esac
+
+          if [[ -n "$p" && "$p" != "." ]]; then
+            [[ -e "$p" ]] || {
+              echo "::error::resolved code input does not exist: $p"
+              exit 1
+            }
+          fi
+
+          echo "source=$source" >> "$GITHUB_OUTPUT"
           echo "path=$p" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Code ingest selection"
+            echo
+            echo "- Preset: $PRESET"
+            echo "- Source mode: $source"
+            echo "- Resolved input: ${p:-registered source default}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   seed:
     needs: resolve
     uses: ./.github/workflows/seed.yml
     with:
       mode: source
-      source: ${{ inputs.source }}
+      source: ${{ needs.resolve.outputs.source }}
       path: ${{ needs.resolve.outputs.path }}
       database: ${{ inputs.database }}
       run_gate: false

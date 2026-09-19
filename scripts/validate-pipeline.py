@@ -290,35 +290,33 @@ def expected_audit_layer_map(knowledge: list[str]) -> dict[str, int]:
 
 def _seed_workflow_sources() -> set[str]:
     """
-    Every source key a `.github/workflows/seed-*.yml` can hand to canonical `seed.yml`.
+    Every low-level source key a `.github/workflows/seed-*.yml` can hand to
+    canonical `seed.yml`.
 
-    Two forms reach it, and both count as dispatchable:
-      - a `source:` workflow_dispatch input whose `options:` the operator picks from
-      - a literal `source: <key>` in the `with:` block of a single-source workflow
+    Operator workflows may expose friendly presets rather than raw source keys, so
+    reachability comes from three explicit forms:
+      - a literal `source: <key>` in a reusable-workflow call
+      - a raw `source:` choice input, where one still exists
+      - a shell resolver assignment `source=<key>` used by preset workflows
 
-    Regex, not a YAML parse, because the rest of this validator carries no third-party
-    dependency and the runner's Python is not guaranteed to have one. The match is
-    anchored on the key's own indentation so it cannot drift into `description:` prose
-    or a sibling dropdown (`corpus:`, `player:`) — an earlier permissive cut pulled in
-    'magnus', 'twic' and whole description strings, which would have let a typo'd gate
-    key validate.
+    The last form is deliberately narrow: it matches only a shell assignment line,
+    not prose, YAML keys, corpus names, or dynamic values.
     """
     keys: set[str] = set()
     wf_dir = ROOT / ".github" / "workflows"
     if not wf_dir.is_dir():
         return keys
 
-    # `source:` with a scalar on the same line (a `with:` call site).
     inline = re.compile(r"^(\s+)source:[ \t]+(\S+)[ \t]*$", re.M)
-    # `source:` opening a block (the input definition); capture the block that follows.
     block = re.compile(r"^(\s+)source:[ \t]*\n((?:\1\s+\S.*\n|\s*\n)*)", re.M)
     option_line = re.compile(r"^\s*-\s*([A-Za-z0-9][\w.-]*)", re.M)
+    shell_source = re.compile(r"^\s+source=([A-Za-z0-9][\w.-]*)\s*$", re.M)
 
     for path in sorted(wf_dir.glob("seed-*.yml")):
         text = path.read_text(encoding="utf-8")
 
         for _indent, value in inline.findall(text):
-            if value.startswith("${{"):        # forwarded from an input; the options cover it
+            if value.startswith("${{"):
                 continue
             keys.add(value.strip("\"'"))
 
@@ -326,51 +324,93 @@ def _seed_workflow_sources() -> set[str]:
             m = re.search(r"^\s*options:[ \t]*(\[[^\]]*\])?[ \t]*$", body, re.M)
             if not m:
                 continue
-            if m.group(1):                      # inline list: options: [a, b, c]
-                keys.update(v.strip().strip("\"'") for v in m.group(1)[1:-1].split(",") if v.strip())
-            else:                               # block list under options:
+            if m.group(1):
+                keys.update(
+                    value.strip().strip("\"'")
+                    for value in m.group(1)[1:-1].split(",")
+                    if value.strip()
+                )
+            else:
                 keys.update(option_line.findall(body[m.end():]))
+
+        keys.update(shell_source.findall(text))
+
     return keys
 
 
-def validate_seed_chess_routes() -> list[str]:
-    """Every advertised chess source must be accepted by its resolver.
-
-    The workflow previously listed syzygy/trajectory/opening-match in the dispatch UI
-    while its first source case rejected all three as unknown. Because the generic
-    workflow-source collector only sees the choices, orphan-gate validation could not
-    detect that the advertised route was unreachable.
-    """
-    path = ROOT / ".github" / "workflows" / "seed-chess.yml"
-    if not path.is_file():
-        return ["missing workflow: .github/workflows/seed-chess.yml"]
-
-    text = read_text(path)
-    source_input = re.search(
-        r"^\s{6}source:\s*\n(?P<body>(?:^\s{8,}.*\n|^\s*\n)*)",
+def _workflow_choice_options(text: str, input_name: str) -> set[str]:
+    input_block = re.search(
+        rf"^\s{{6}}{re.escape(input_name)}:\s*\n"
+        rf"(?P<body>(?:^\s{{8,}}.*\n|^\s*\n)*)",
         text,
         re.M,
     )
-    if not source_input:
-        return ["seed-chess.yml: could not parse source input"]
-    options = re.search(r"options:\s*\[([^]]+)\]", source_input.group("body"))
+    if not input_block:
+        return set()
+    options = re.search(r"options:\s*\[([^]]+)\]", input_block.group("body"))
     if not options:
-        return ["seed-chess.yml: source input must use an explicit options list"]
-    advertised = {
-        value.strip().strip("\"'") for value in options.group(1).split(",") if value.strip()
+        return set()
+    return {
+        value.strip().strip("\"'")
+        for value in options.group(1).split(",")
+        if value.strip()
     }
 
-    source_cases = re.findall(r'case "\$src" in\s*\n(?P<body>.*?)^\s{10}esac$', text, re.M | re.S)
-    if not source_cases:
-        return ["seed-chess.yml: could not parse source legality resolver"]
+
+def _resolver_case_labels(text: str, shell_variable: str) -> set[str]:
+    blocks = re.findall(
+        rf'case "\\${re.escape(shell_variable)}" in\s*\n'
+        rf'(?P<body>.*?)^\s{{10}}esac$',
+        text,
+        re.M | re.S,
+    )
     accepted: set[str] = set()
-    for source_case in source_cases:
-        for label in re.findall(r"^\s{12}([^#\n][^\n)]*)\)", source_case, re.M):
-            accepted.update(part.strip() for part in label.split("|") if part.strip() != "*")
+    for block in blocks:
+        for label in re.findall(r"^\s{12}([^#\n][^\n)]*)\)", block, re.M):
+            accepted.update(
+                part.strip()
+                for part in label.split("|")
+                if part.strip() and part.strip() != "*"
+            )
+    return accepted
+
+
+def _validate_seed_preset_routes(
+    workflow_name: str, input_name: str, shell_variable: str
+) -> list[str]:
+    path = ROOT / ".github" / "workflows" / workflow_name
+    if not path.is_file():
+        return [f"missing workflow: .github/workflows/{workflow_name}"]
+
+    text = read_text(path)
+    advertised = _workflow_choice_options(text, input_name)
+    if not advertised:
+        return [
+            f"{workflow_name}: {input_name} input must use an explicit options list"
+        ]
+
+    accepted = _resolver_case_labels(text, shell_variable)
+    if not accepted:
+        return [
+            f"{workflow_name}: could not parse {input_name} legality resolver"
+        ]
 
     missing = sorted(advertised - accepted)
-    return ([f"seed-chess.yml: advertised sources rejected by resolver: {missing}"]
-            if missing else [])
+    return (
+        [f"{workflow_name}: advertised presets rejected by resolver: {missing}"]
+        if missing
+        else []
+    )
+
+
+def validate_seed_chess_routes() -> list[str]:
+    """Every advertised chess preset must reach an explicit resolver branch."""
+    return _validate_seed_preset_routes("seed-chess.yml", "preset", "PRESET")
+
+
+def validate_seed_code_routes() -> list[str]:
+    """Every advertised code preset must reach an explicit resolver branch."""
+    return _validate_seed_preset_routes("seed-code.yml", "preset", "PRESET")
 
 
 def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
@@ -378,6 +418,7 @@ def validate_decomposer_matrix(manifest: dict, gates: dict) -> list[str]:
     root = ROOT
 
     errs.extend(validate_seed_chess_routes())
+    errs.extend(validate_seed_code_routes())
 
     required_scripts = [
         root / "scripts" / "decomposer-gates.json",
