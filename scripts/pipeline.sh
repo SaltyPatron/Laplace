@@ -391,6 +391,17 @@ phase_install() (
   cmake --install "$LAPLACE_BUILD_DIRECTORY"
   [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]] || { echo "::error::core library not installed" >&2; exit 1; }
   git -C "$ROOT" rev-parse HEAD > "$LAPLACE_INSTALL_PREFIX/lib/.laplace-source-revision"
+  # Foundation ingest uses this runtime. Checkout worktrees do not carry
+  # app/bin; if it is not on the prefix, seed-foundation is not real.
+  local ingest_dir="$LAPLACE_INSTALL_PREFIX/ingest"
+  mkdir -p "$ingest_dir"
+  dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_dir" --no-self-contained -v q
+  cp -f "$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so* "$ingest_dir/"
+  git -C "$ROOT" rev-parse HEAD > "$ingest_dir/.laplace-source-revision"
+  [[ -f "$ingest_dir/Laplace.Cli.dll" && -f "$ingest_dir/liblaplace_core.so" ]] || {
+    echo "::error::ingest runtime missing after install: $ingest_dir" >&2
+    exit 1
+  }
   so_after=$(preloaded_so_digest)
   postgres_activation_required="$server_release_changed"
   if [[ "$so_before" != "$so_after" || "$library_path_changed" == 1 ]]; then

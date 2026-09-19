@@ -26,14 +26,27 @@ case "$LOGDIR" in
         echo "Ingest logs require permanent storage: $LOGDIR" >&2; exit 2 ;;
 esac
 mkdir -p -- "$LOGDIR"
-export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
 
-if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
-    DLL="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/Laplace.Cli.dll"
-    CLI_NATIVE="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/liblaplace_core.so"
+PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+INGEST_RUNTIME="${LAPLACE_INGEST_RUNTIME:-$PREFIX/ingest}"
+if [[ -f "$INGEST_RUNTIME/Laplace.Cli.dll" && -f "$INGEST_RUNTIME/liblaplace_core.so" ]]; then
+    DLL="$INGEST_RUNTIME/Laplace.Cli.dll"
+    CLI_NATIVE="$INGEST_RUNTIME/liblaplace_core.so"
+    ENGINE_NATIVE="$PREFIX/lib/liblaplace_core.so"
+    export LD_LIBRARY_PATH="$INGEST_RUNTIME:$PREFIX/lib:${LD_LIBRARY_PATH:-}"
+    INGEST_USES_PREFIX=1
 else
-    DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
-    CLI_NATIVE="$ROOT/app/Laplace.Cli/bin/Release/net10.0/liblaplace_core.so"
+    INGEST_USES_PREFIX=0
+    export LD_LIBRARY_PATH="$ROOT/build/engine/synthesis:$ROOT/build/engine/core:$ROOT/build/engine/dynamics:${LD_LIBRARY_PATH:-}"
+    if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
+        DLL="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/Laplace.Cli.dll"
+        CLI_NATIVE="$LAPLACE_BUILD_ROOT/app/bin/Laplace.Cli/Release/net10.0/liblaplace_core.so"
+        ENGINE_NATIVE="$ROOT/build/engine/core/liblaplace_core.so"
+    else
+        DLL="$ROOT/app/Laplace.Cli/bin/Release/net10.0/Laplace.Cli.dll"
+        CLI_NATIVE="$ROOT/app/Laplace.Cli/bin/Release/net10.0/liblaplace_core.so"
+        ENGINE_NATIVE="$ROOT/build/engine/core/liblaplace_core.so"
+    fi
 fi
 
 if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; then
@@ -42,18 +55,22 @@ fi
 
 require_cli() {
     [[ -f "$DLL" ]] || {
-        echo "::error::ingest runtime is not built: $DLL" >&2
-        echo "::error::build/deploy owns compilation; run the product build before ingest" >&2
+        echo "::error::ingest runtime is not installed: $DLL" >&2
+        echo "::error::product install must publish $PREFIX/ingest/Laplace.Cli.dll; ingest does not compile" >&2
         return 1
     }
-    [[ -f "$ROOT/build/engine/core/liblaplace_core.so" && -f "$CLI_NATIVE" ]] || {
-        echo "::error::ingest native runtime is incomplete" >&2
+    [[ -f "$ENGINE_NATIVE" && -f "$CLI_NATIVE" ]] || {
+        echo "::error::ingest native runtime is incomplete (engine=$ENGINE_NATIVE cli=$CLI_NATIVE)" >&2
         return 1
     }
-    cmp -s "$ROOT/build/engine/core/liblaplace_core.so" "$CLI_NATIVE" || {
-        echo "::error::ingest CLI native closure differs from the prepared engine build" >&2
-        echo "::error::rebuild the product; ingest never repairs or compiles runtime artifacts" >&2
+    cmp -s "$ENGINE_NATIVE" "$CLI_NATIVE" || {
+        echo "::error::ingest CLI native closure differs from the installed prefix" >&2
+        echo "::error::rebuild/install the product; ingest never repairs or compiles runtime artifacts" >&2
         return 1
+    }
+    [[ "${INGEST_USES_PREFIX:-0}" != 1 ]] || {
+        echo "::notice::ingest runtime $INGEST_RUNTIME (installed prefix)"
+        return 0
     }
 
     # The self-hosted runner keeps bin/ and build/ between checkouts. Existence and
