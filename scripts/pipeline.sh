@@ -401,13 +401,27 @@ phase_install() (
   local ingest_dir="$LAPLACE_INSTALL_PREFIX/ingest"
   mkdir -p "$ingest_dir" "$ingest_dir/logs"
   if getent group laplace-runner >/dev/null; then
-    chgrp laplace-runner "$ingest_dir" "$ingest_dir/logs" || {
-      echo "::error::cannot assign the installed ingest runtime to shared group laplace-runner" >&2
-      echo "::error::run scripts/bootstrap-laplace-runner.sh prefix from a privileged operator session" >&2
-      exit 1
-    }
+    local ingest_path ingest_owner ingest_group ingest_mode
+    for ingest_path in "$ingest_dir" "$ingest_dir/logs"; do
+      ingest_owner="$(stat -c '%U' "$ingest_path")"
+      ingest_group="$(stat -c '%G' "$ingest_path")"
+      ingest_mode="$(stat -c '%a' "$ingest_path")"
+      if [[ "$ingest_group" != laplace-runner ]]; then
+        echo "::error::$ingest_path permissions drifted: ${ingest_owner}:${ingest_group} mode ${ingest_mode}; expected shared group laplace-runner" >&2
+        echo "::error::run scripts/bootstrap-laplace-runner.sh prefix from a privileged operator session" >&2
+        exit 1
+      fi
+      if [[ "$ingest_mode" != 2775 ]]; then
+        if [[ -O "$ingest_path" ]]; then
+          chmod 2775 "$ingest_path"
+        else
+          echo "::error::$ingest_path mode drifted: ${ingest_owner}:${ingest_group} mode ${ingest_mode}; runner cannot reconcile a directory it does not own" >&2
+          echo "::error::run scripts/bootstrap-laplace-runner.sh prefix from a privileged operator session" >&2
+          exit 1
+        fi
+      fi
+    done
   fi
-  chmod 2775 "$ingest_dir" "$ingest_dir/logs"
   dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_dir" --no-self-contained -v q
   cp -f "$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so* "$ingest_dir/"
   git -C "$ROOT" rev-parse HEAD > "$ingest_dir/.laplace-source-revision"

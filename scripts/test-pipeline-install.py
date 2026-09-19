@@ -72,6 +72,15 @@ phase_chess_lab
         self.assertEqual(23, result.returncode, result.stdout + result.stderr)
         self.assertEqual(1, len(self.calls().splitlines()))
 
+    def test_install_reuses_bootstrap_owned_ingest_permissions_without_chgrp(self):
+        install = function("phase_install")
+        self.assertNotIn('chgrp laplace-runner "$ingest_dir"', install)
+        self.assertIn('ingest_group="$(stat -c \'%G\' "$ingest_path")"', install)
+        self.assertIn('ingest_mode="$(stat -c \'%a\' "$ingest_path")"', install)
+        self.assertIn('[[ "$ingest_group" != laplace-runner ]]', install)
+        self.assertIn('[[ "$ingest_mode" != 2775 ]]', install)
+        self.assertIn('[[ -O "$ingest_path" ]]', install)
+
     def test_install_manifest_detects_replacement_deletion_and_symlink_change(self):
         import runpy
         digest = runpy.run_path(str(ROOT / "scripts/installed-artifact-digest.py"))["installed_digest"]
