@@ -77,7 +77,7 @@ class ManagedProjectImpactTests(unittest.TestCase):
         self.assertEqual(["all"], value["build_projects"])
         self.assertEqual(["all"], value["test_projects"])
 
-    def test_solution_writer_emits_only_selected_projects(self):
+    def test_solution_writer_emits_selected_project_reference_closure(self):
         root = Path(os.environ.get("RUNNER_TEMP") or os.environ.get("TMPDIR") or ROOT / "build")
         root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="managed-impact-", dir=root) as tmp:
@@ -89,6 +89,7 @@ class ManagedProjectImpactTests(unittest.TestCase):
             )
             text = output.read_text(encoding="utf-8")
             self.assertIn("Laplace.Core.Tests.csproj", text)
+            self.assertIn("Laplace.Core.csproj", text)
             self.assertNotIn("Laplace.Chess.Tests.csproj", text)
 
 

@@ -188,9 +188,24 @@ def write_solution(root: Path, projects_csv: str, output: Path) -> Path:
     if unknown:
         raise ValueError("unknown managed project(s): " + ", ".join(unknown))
 
+    # A project omitted from a solution is built as an out-of-solution
+    # ProjectReference. MSBuild then removes the parent solution configuration
+    # and the referenced project falls back to its default (Debug), even when
+    # the selected leaf is built with `-c Release`. Include the complete forward
+    # reference closure so every dependency receives the selected configuration
+    # and publish never looks for Release assemblies that were emitted as Debug.
+    closure = set(selected)
+    pending = list(selected)
+    while pending:
+        current = pending.pop()
+        for referenced in projects[current].refs:
+            if referenced in projects and referenced not in closure:
+                closure.add(referenced)
+                pending.append(referenced)
+
     output.parent.mkdir(parents=True, exist_ok=True)
     lines = ["<Solution>"]
-    for path in sorted(set(selected)):
+    for path in sorted(closure):
         relative = os.path.relpath(root / path, output.parent).replace(os.sep, "/")
         lines.append(f'  <Project Path="{relative}" />')
     lines.append("</Solution>")
