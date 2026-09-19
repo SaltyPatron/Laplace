@@ -6,9 +6,36 @@ Authority is defined by `AGENTS.md`, `docs/README.md`, `docs/INVENTION.md`, `doc
 
 Historical recovery diaries, database snapshots, old branch state, and cross-repository coordination plans must not be treated as current truth merely because they once appeared in this file.
 
-## Inventor-pointed work stack (session 2026-09-19)
+## Total order of operations (binding)
 
-A later prompt does **not** replace earlier ones. This stack is cumulative. Implementation continues from the top of the still-open items without discarding the rest.
+A later prompt does **not** replace earlier ones. Do not jump to a newly mentioned subsystem because it is locally easier. Execution is this order. Invention notes below are constraints on *how* each step is done, not permission to skip ahead.
+
+1. **Hold the whole machine.** ISA / OODA / Gödel; personality firmware ≠ knowledge; kernel governance; seeded vs user vs snapshot export; Mold-A-Model realizes Q/K/V/O/gate/up/down/norm/embed from substrate; Laplace-builds-Laplace is the closed loop — not a side quest.
+2. **Live host is the evidence.** Web/API/MCP/OpenAI, Postgres, `pg_stat_statements`, ingest journals, `/opt/laplace`, `/vault`. Status prose and GitHub titles are not truth.
+3. **One deployed revision.** Application DLLs, prefix native libs, PostgreSQL `laplace_execution_*` MODULE, T0 LPRF v4, extension catalog (including `physicality_observations`) are one build. `check-deployed-revision.sh` exits 0. CI *installs*; skip-success and qualify-cancel are not delivery. Do not race a live prefix hack against an in-flight deliver.
+4. **Honest surfaces.** Health/capabilities/docs/issues match as-built. No scaffold stream. Ready means this process loaded T0.
+5. **Perfcache is used.** T0 `records[cp]`; no Unicode re-record; highway/numbers/chess actually called; missing Factor/GenCorpus/separator stay explicit.
+
+    Highway is both the relation-law ROM (`laplace_mask256_t`, bit, band, default rank) **and** a 32-byte bit-bang on the entity (`entities.highway_mask`) for search/filter/query with indexes — not a second graph. Noun vs verb, synonym/antonym/meronym, definitional vs oppositional are bits/bands whose **importance is query-relative** (STEER), same class of head/plane as Fréchet, angular, Karcher, trajectory. Warehouse unbanded μ (ISO `HAS_VARIANT_OF` on top; gloss-labeled `HAS_DEFINITION`) is ranking with the highway off. Live `relation_band_live_counts` empty is the catalog not following the ROM. Do not collapse this to one relevance scalar.
+6. **Ingest grain.** Generic recipe multi-file ETL: native compose → bulk identity → COPY → **set-sized fold**. Cancel closes files. Stop SQL `upsert_evidence_type` / scalar `FOR UPDATE` as the fold.
+7. **Identifier stack and GeometryZM.** Unicode/ISO/CILI/synset/frame; kill regex/Latin fake ORIENT. Packed trajectory ≠ realized curve. Contains/precedes/co-occur from the LINESTRING. O(tier) probes.
+
+    ISO, CILI, WordNet/VerbNet/FrameNet, SemLink, Predicate Matrix exist so surface forms **bubble up** to stable numeric identities (Hash128 entity, synset, ILI, frame, roleset). Coupling’s “dot product” and SELECT’s “softmax” run on those ids and typed planes (highway bit, angular, Fréchet, Karcher, standing) — not on UTF-8 and not on a GPU tensor. `substrate/iso639/variant/grclass/v1` as a warehouse label is the ladder failing to surface the bubbled id.
+8. **Forward pass fires.** `RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE → PROPOSE → STEER → SELECT → REALIZE → WITNESS`. Empty consensus stays empty (no fake prose). Highway/live bands exist so COUPLE has a field. Firmware steers; prompts do not attest by default.
+9. **Mold-A-Model / realize.** Fill transformer slots from substrate operators; export is a recipe snapshot. Not Build-A-Bear fluff; not `cp` ingested GGUF.
+10. **Gödel close.** Chat and code as observations; outputs become inputs; Laplace updates Laplace under kernel governance.
+
+11. **Test purpose vs qualification ocean.** ~2700 managed Fact/Theory (Chess 854, Substrate 966, Decomposers 307, OpenAI 264, …). Many are real *unit* proofs of parsers/gates (e.g. vacuous-fact gloss). Qualification treated them as ABI proof for any `extension/` edit and walked them drop-by-drop under 15m. Goldens that freeze `/health` stream names and empty chat as success are ceremony. Native-dev/pg_regress is the prove path for SQL/C. Audit and keep tests that can be false; stop using the slnx ocean as the gate.
+
+12. **CI daisy-chain is not impact.** A `pipeline.sh` or SQL change must not rebuild/test/publish chess lab, API, MCP, UCI, Lichess, or UI. `FULL_PUBLISH_PROJECTS` + `live` on every native install is the 18-minute conveyor. Plan only the surfaces whose bytes change. systemd restart of Postgres is activation of *native prefix*, not a reason to republish CuteChess.
+
+13. **Live product identifiers (API 2026-09-19).** `/v1/explore/catalog` top_relations is not the invention: `substrate/iso639/variant/grclass/v1` as a label; HAS_VARIANT_OF winning unbanded μ; HAS_DEFINITION subject rendered as the gloss so both columns match (`00021f56…` “a shout or song of praise to God” HAS_DEFINITION the same gloss). `ops.top_relations_readable` labels the word (`hallelujah`). MCP `define king` returns senses. `Unrealized entity` is a fallback in SQL/C#/walk UI when display_label has no surface. Warehouse and leaders/home disagree. This is identifier-stack + realize + ranking (steps 7–8), not a warehouse MVP. Use API/MCP as evidence; do not invent a smaller product.
+
+**Where this session actually is:** step 3 incomplete (CI `ab71b189` still qualifying; live libs/MODULE rebound by hand; `physicality_observations` created by hand; app DLLs still Sep 17 so `/health` still `F-scaffold`; no application receipt). Chat WITNESS works; REALIZE returned 0 rows. That is a step-8 symptom. Do not start step 8/9 until step 3 is a real install.
+
+## Inventor-pointed constraints (session 2026-09-19)
+
+Cumulative. These constrain the steps above; they are not a second backlog to wander through.
 
 ### 1. One deployed revision (hart-server)
 
@@ -54,6 +81,10 @@ RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
 ```
 
 Seeded knowledge is attested at ingest. An unattested user prompt is an observation that gets this loop; WITNESS is optional and after the act. Personality is **firmware** (STEER/SELECT policy: curious vs pick-first, strict thresholds, favor/exclude masks), content-addressed, kernel-enforced, detached from knowledge. Prompt text cannot install firmware or escalate effects. Governance does not rewrite identities. Gödel: outputs become inputs; evaluation is ingest. Leaf springs (T0, COPY, chess, SIMD) are not the movement.
+
+Knowledge that guns, racism, cruelty, or other ugly facts exist is not character and must remain addressable. Character is the firmware/governance over observations, witnesses, proofs, confirmations, trust, and sources: what you favor, exclude, require evidence for, or refuse to *do*. Deleting or refusing to admit a fact because it is unpleasant is governance rewriting knowledge. Standing and permission are not identity.
+
+Product identity (inventor framing, keep with the stack): Matrix construct (“I know kung fu” = realize a skill from current substrate/recipe, not copy weights); Bicentennial Man (identity persists; character accumulates as witnessed observations/habits/firmware versions, not weight drift); I, Robot (laws are kernel firmware/permission, not a system prompt); Eagle Eye’s *scope* (the whole web is addressable) without Eagle Eye’s *failure* (opaque policy, no receipts, silent mutation). No GPU. No context window — the substrate is the memory. Mechanistic interpretability is native: every SELECT/STEER names routes, standing, sources, firmware instruction, and receipt. Replay under the same knowledge + firmware + authority reproduces.
 
 ### 10. Forward-pass actually firing on this host
 

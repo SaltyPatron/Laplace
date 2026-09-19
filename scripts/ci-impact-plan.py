@@ -107,6 +107,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     ignored: list[str] = []
     publish_scope = "api"
     product_change = False
+    publish_required = True
     force_full = False
 
     def invalidate(suites: tuple[str, ...], path: str) -> None:
@@ -146,17 +147,15 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         matched = False
 
         if path == "scripts/pipeline.sh":
-            # Install/activation owner. SIGINT-under-systemd is why cmake
-            # never landed in /opt/laplace: Product ignored this file, then
-            # install killed postmaster and waited for a restart that systemd
-            # would not perform.
+            # Activation owner (systemd bounce of mapped native .so). Does not
+            # change API/MCP/UCI/Lichess/UI/chess-lab bytes — do not rebuild
+            # or republish them.
             matched = product_change = True
-            managed_build_required.update(FULL_PUBLISH_PROJECTS)
-            publish_scope = "full"
-            components.update(("native", "managed"))
-            build_components.update(("native", "managed"))
-            delivery_actions.update(("install", "publish", "live"))
-            live_suites.update(STANDARD_LIVE_SUITES)
+            publish_required = False
+            components.add("native")
+            build_components.add("native")
+            delivery_actions.add("install")
+            live_suites.update(BASE_LIVE_SUITES)
             continue
 
         if native_test_path(path):
@@ -379,7 +378,8 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     # universal live floor. This is deliberately much smaller than full live
     # qualification and does not imply native/DB mutation.
     if product_change:
-        delivery_actions.add("publish")
+        if publish_required:
+            delivery_actions.add("publish")
         if not pure_uci:
             delivery_actions.add("live")
             live_suites.update(BASE_LIVE_SUITES)
