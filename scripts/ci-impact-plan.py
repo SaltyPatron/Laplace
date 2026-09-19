@@ -152,15 +152,33 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             invalidate(("native-dev",), path)
             continue
 
+        if path.startswith("extension/"):
+            # Native/SQL is proved by native-dev and native-db. Forcing every
+            # managed test project here is the "ocean, one drop at a time"
+            # qualification that dies at the 15-minute packed deadline.
+            matched = product_change = True
+            publish_scope = "full"
+            components.update(("native", "database"))
+            build_components.add("native")
+            dev_suites.add("native-dev")
+            db_suites.update(("db-health", "native-db"))
+            delivery_actions.update(("install", "database", "reconcile", "publish", "live"))
+            invalidate(("native-dev",), path)
+            invalidate(("db-health", "native-db"), path)
+            continue
+
         if (
             path == "CMakeLists.txt"
             or path.startswith("cmake/")
             or path.startswith("engine/")
-            or path.startswith("extension/")
         ):
             matched = product_change = True
             managed_build_required.update(FULL_PUBLISH_PROJECTS)
-            managed_test_force_all = True
+            # Rebuild/publish native-bound binaries. Do not schedule Chess,
+            # Decomposers, Agents, … as managed-dev for a core .cpp edit.
+            managed_changed_paths.append(
+                "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"
+            )
             managed_db_force_all = True
             managed_live_force_all = True
             publish_scope = "full"

@@ -47,7 +47,11 @@ class ImpactPlanTests(unittest.TestCase):
             "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj",
         ):
             self.assertIn(project, value["managed_build_projects"])
-        self.assertEqual(value["managed_test_projects"], ["all"])
+        self.assertEqual(
+            value["managed_test_projects"],
+            ["app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"],
+        )
+        self.assertNotEqual(value["managed_test_projects"], ["all"])
         self.assertEqual(value["managed_db_test_projects"], ["all"])
         self.assertEqual(value["managed_live_test_projects"], ["all"])
         self.assertEqual(
@@ -217,6 +221,18 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["delivery_actions"], [])
         self.assertFalse(value["full_qualification"])
         self.assertEqual(value["ignored_paths"], ["scripts/test-parallel.sh"])
+
+    def test_extension_sql_does_not_schedule_the_managed_ocean(self):
+        value = plan(
+            "extension/laplace_substrate/sql/functions/ops/ingest_run_close.sql.in"
+        )
+        self.assertEqual(value["dev_suites"], ["native-dev"])
+        self.assertEqual(value["managed_test_projects"], [])
+        self.assertEqual(value["managed_test_filter"], "")
+        self.assertIn("native", value["build_components"])
+        self.assertNotIn("managed-dev", value["dev_suites"])
+        self.assertIn("install", value["delivery_actions"])
+        self.assertFalse(value["full_qualification"])
 
     def test_native_test_change_runs_native_qualification_without_delivery(self):
         for path in (
