@@ -147,7 +147,7 @@ BEGIN
        OR consensus_after IS DISTINCT FROM consensus_before THEN
         RAISE EXCEPTION 'native generated-stage replay changed retained rows or consensus';
     END IF;
-    RAISE NOTICE 'physicality readback: actual native stage deposition and replay preserve E/P/A and exact consensus';
+    RAISE NOTICE 'physicality readback: actual native stage deposition and replay preserve E/P with zero fabricated A and exact consensus';
 END
 $deposit$;
 
@@ -271,38 +271,48 @@ END
 $interpretations$;
 
 DO $rollback$
-DECLARE s record; fresh record; unit bytea; counts_before bigint[]; counts_after bigint[];
-    consensus_before jsonb; consensus_after jsonb; refused boolean:=false; message text;
+DECLARE a record; target bytea; receipt bigint[]; removed bigint;
+    counts_before bigint[]; counts_after bigint[];
+    consensus_before jsonb; consensus_after jsonb; rolled_back boolean:=false;
 BEGIN
-    SELECT * INTO STRICT s FROM physicality_readback_fixture.source;
-    unit:=public.laplace_hash128_blake3(convert_to('physicality-readback/rollback-unit','UTF8'));
-    SELECT * INTO STRICT fresh FROM pg_temp.descriptor_call(
-        (SELECT string_agg(tuples,decode('','hex') ORDER BY variant) FROM physicality_readback_fixture.frames),
-        (SELECT tuples FROM physicality_readback_fixture.frames WHERE variant=0),
-        ARRAY[s.source_id,s.source_id],ARRAY[unit,unit],ARRAY[0.8,0.8]);
+    SELECT * INTO STRICT a FROM physicality_readback_fixture.admitted;
+    IF EXISTS (SELECT FROM unnest(a.attestations) stage WHERE octet_length(stage)<>0) THEN
+        RAISE EXCEPTION 'generated descriptor stage fabricated semantic testimony';
+    END IF;
+    target:=a.descriptor_ids[1];
     counts_before:=ARRAY[(SELECT count(*) FROM laplace.entities),
         (SELECT count(*) FROM laplace.physicalities),(SELECT count(*) FROM laplace.attestations)];
     SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY c.id,c.type_id,c.subject_id),'[]'::jsonb)
       INTO consensus_before FROM laplace.consensus c;
-    -- All sink plans were warmed by the actual successful write above. The
-    -- warm path is lock, presence, epoch, E, interpretations, P, A, fold,
-    -- masks. Grant seven fails after A INSERT (or after fold if E was retained).
+    -- Structural provenance no longer creates an A/fold tail. Prove the real
+    -- transaction boundary instead: remove one retained descriptor P inside a
+    -- subtransaction, make the production sink reinsert it, then abort after
+    -- that INSERT. PostgreSQL must restore the exact pre-call E/P/A/consensus.
     BEGIN
-        PERFORM pg_temp.deposit_generated(fresh.entities,fresh.physicalities,fresh.attestations,
-            100000,268435456,10000000,7);
-    EXCEPTION WHEN program_limit_exceeded THEN
-        GET STACKED DIAGNOSTICS message=MESSAGE_TEXT;
-        IF message<>'generated stage sink: database operation grant exhausted' THEN RAISE; END IF;
-        refused:=true;
+        DELETE FROM laplace.physicalities WHERE entity_id=target AND type=9;
+        GET DIAGNOSTICS removed=ROW_COUNT;
+        IF removed<>1 THEN
+            RAISE EXCEPTION 'rollback fixture did not remove exactly one retained descriptor physicality';
+        END IF;
+        receipt:=pg_temp.deposit_generated(a.entities,a.physicalities,a.attestations,
+            100000,268435456,10000000,1024);
+        IF receipt[2]<>1 OR NOT EXISTS(
+            SELECT FROM laplace.physicalities WHERE entity_id=target AND type=9) THEN
+            RAISE EXCEPTION 'generated sink did not reinsert the removed descriptor physicality';
+        END IF;
+        RAISE SQLSTATE 'ZX002' USING MESSAGE='abort after generated physicality insert';
+    EXCEPTION WHEN SQLSTATE 'ZX002' THEN
+        rolled_back:=true;
     END;
     counts_after:=ARRAY[(SELECT count(*) FROM laplace.entities),
         (SELECT count(*) FROM laplace.physicalities),(SELECT count(*) FROM laplace.attestations)];
     SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY c.id,c.type_id,c.subject_id),'[]'::jsonb)
       INTO consensus_after FROM laplace.consensus c;
-    IF NOT refused OR counts_after<>counts_before OR consensus_after IS DISTINCT FROM consensus_before THEN
-        RAISE EXCEPTION 'post-insert operation refusal did not roll back the generated evidence and fold';
+    IF NOT rolled_back OR counts_after<>counts_before OR consensus_after IS DISTINCT FROM consensus_before
+       OR NOT EXISTS(SELECT FROM laplace.physicalities WHERE entity_id=target AND type=9) THEN
+        RAISE EXCEPTION 'post-insert transaction abort did not restore generated physicality state exactly';
     END IF;
-    RAISE NOTICE 'physicality readback: exhausted post-insert sink grant rolls back E/P/A and exact consensus';
+    RAISE NOTICE 'physicality readback: post-insert transaction abort restores E/P with zero fabricated A and exact consensus';
 END
 $rollback$;
 -- A declared typed observation may reference an opaque named anchor with no

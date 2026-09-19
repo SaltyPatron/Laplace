@@ -107,14 +107,14 @@ BEGIN
        OR result.database_operations<>2+2*result.provider_rounds
        OR result.reserved_peak_bytes>268435456 OR result.raw_logical_work<=4
        OR result.tuple_bytes<=0 OR cardinality(result.entities)<>3 OR cardinality(result.physicalities)<>3
-       OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])=0
+       OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])<>0
        OR cardinality(result.entity_interpretations)<>3
        OR result.entity_interpretations_complete IS DISTINCT FROM ARRAY[true,true,true]
        OR array_position(result.entity_interpretations,NULL) IS NOT NULL
        OR octet_length(result.entity_interpretations[3])=0
        OR result.tuple_bytes IS DISTINCT FROM (SELECT sum(octet_length(body)) FROM
            unnest(result.entities || result.physicalities || result.attestations || result.entity_interpretations) body) THEN
-        RAISE EXCEPTION 'physicality admission lost source forms, tuple output, source evidence or bounded provider receipts'
+        RAISE EXCEPTION 'physicality admission lost source forms, tuple output, structural provenance boundary or bounded provider receipts'
             USING DETAIL=pg_temp.descriptor_receipt(result)::text;
     END IF;
     SELECT * INTO STRICT single_result FROM pg_temp.descriptor_call(
@@ -165,7 +165,7 @@ BEGIN
        OR result.view_missing_count IS DISTINCT FROM ARRAY[1]::bigint[]
        OR result.view_missing_ids IS DISTINCT FROM ARRAY[s.entity_id]
        OR cardinality(result.physicalities)<>3 OR octet_length(result.physicalities[3])=0
-       OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])=0
+       OR cardinality(result.attestations)<>3 OR octet_length(result.attestations[3])<>0
        OR cardinality(result.entity_interpretations)<>3
        OR result.entity_interpretations_complete IS DISTINCT FROM ARRAY[true,true,true]
        OR array_position(result.entity_interpretations,NULL) IS NOT NULL
