@@ -298,7 +298,7 @@ bootstrap_build_environment() {
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build autoconf automake libtool pkg-config \
-        bison flex perl python3 python3-venv ca-certificates git \
+        bison flex perl python3 python3-venv ca-certificates git llvm \
         libgl-dev libegl-dev libopengl-dev libxkbcommon-dev \
         sqlite3 \
         shellcheck \
