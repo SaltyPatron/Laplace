@@ -28,7 +28,16 @@ esac
 mkdir -p -- "$LOGDIR"
 
 PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
-INGEST_RUNTIME="${LAPLACE_INGEST_RUNTIME:-$PREFIX/ingest}"
+INGEST_ROOT="$PREFIX/ingest"
+if [[ -n "${LAPLACE_INGEST_RUNTIME:-}" ]]; then
+    INGEST_RUNTIME="$LAPLACE_INGEST_RUNTIME"
+elif [[ -f "$INGEST_ROOT/current/Laplace.Cli.dll" && -f "$INGEST_ROOT/current/liblaplace_core.so" ]]; then
+    INGEST_RUNTIME="$INGEST_ROOT/current"
+else
+    # Compatibility only for a host that has not completed one versioned
+    # publication yet. New installs never overwrite this legacy flat payload.
+    INGEST_RUNTIME="$INGEST_ROOT"
+fi
 if [[ -f "$INGEST_RUNTIME/Laplace.Cli.dll" && -f "$INGEST_RUNTIME/liblaplace_core.so" ]]; then
     DLL="$INGEST_RUNTIME/Laplace.Cli.dll"
     CLI_NATIVE="$INGEST_RUNTIME/liblaplace_core.so"
@@ -51,7 +60,7 @@ fi
 
 if [[ -z "${LAPLACE_OPS_LOG_DIR:-}" ]]; then
     if [[ "$INGEST_USES_PREFIX" == 1 ]]; then
-        export LAPLACE_OPS_LOG_DIR="$INGEST_RUNTIME/logs"
+        export LAPLACE_OPS_LOG_DIR="$INGEST_ROOT/logs"
     else
         export LAPLACE_OPS_LOG_DIR="$LOGDIR/ops"
     fi
@@ -72,7 +81,7 @@ fi
 require_cli() {
     [[ -f "$DLL" ]] || {
         echo "::error::ingest runtime is not installed: $DLL" >&2
-        echo "::error::product install must publish $PREFIX/ingest/Laplace.Cli.dll; ingest does not compile" >&2
+        echo "::error::product install must publish $PREFIX/ingest/current/Laplace.Cli.dll; ingest does not compile" >&2
         return 1
     }
     [[ -f "$ENGINE_NATIVE" && -f "$CLI_NATIVE" ]] || {

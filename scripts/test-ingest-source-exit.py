@@ -30,10 +30,12 @@ class IngestExitTests(unittest.TestCase):
         native.write_bytes(b"fixture-native")
         (cli / "liblaplace_core.so").write_bytes(native.read_bytes())
         prefix = self.root / "prefix"
-        runtime = prefix / "ingest"
+        ingest_root = prefix / "ingest"
+        runtime = ingest_root / "runtimes/fixture"
         runtime.mkdir(parents=True)
         (runtime / "Laplace.Cli.dll").write_bytes(b"fixture-cli")
         (runtime / "liblaplace_core.so").write_bytes(native.read_bytes())
+        (ingest_root / "current").symlink_to("runtimes/fixture", target_is_directory=True)
         (prefix / "lib").mkdir()
         (prefix / "lib/liblaplace_core.so").write_bytes(native.read_bytes())
         bin_dir = self.root / "bin"
@@ -100,6 +102,7 @@ exit "$CLI_RC"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((scratch / "laplace-ingest/laplace-ingest-wordnet.log").is_file())
         self.assertTrue((self.root / "prefix/ingest/logs").is_dir())
+        self.assertTrue((self.root / "prefix/ingest/current").is_symlink())
 
     def test_os_temp_log_path_is_rejected_before_ingest(self):
         self.assertEqual(self.run_ingest(INGEST_LOGDIR="/tmp/laplace-forbidden").returncode, 2)

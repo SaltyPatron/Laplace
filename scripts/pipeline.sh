@@ -396,13 +396,20 @@ phase_install() (
   cmake --install "$LAPLACE_BUILD_DIRECTORY"
   [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]] || { echo "::error::core library not installed" >&2; exit 1; }
   git -C "$ROOT" rev-parse HEAD > "$LAPLACE_INSTALL_PREFIX/lib/.laplace-source-revision"
-  # Foundation ingest uses this runtime. Checkout worktrees do not carry
-  # app/bin; if it is not on the prefix, seed-foundation is not real.
+  # Foundation ingest uses an immutable revision-addressed runtime. The legacy
+  # flat directory may contain files from an operator-owned install and is never
+  # overwritten by the service runner. Build into a fresh owned directory, then
+  # atomically switch one symlink to make the exact revision active.
   local ingest_dir="$LAPLACE_INSTALL_PREFIX/ingest"
-  mkdir -p "$ingest_dir" "$ingest_dir/logs"
+  local ingest_runtime_root="$ingest_dir/runtimes"
+  local ingest_revision ingest_runtime ingest_stage ingest_link_tmp
+  ingest_revision="$(git -C "$ROOT" rev-parse HEAD)"
+  ingest_runtime="$ingest_runtime_root/$ingest_revision"
+  ingest_stage="$ingest_runtime_root/.stage-$ingest_revision-${GITHUB_RUN_ID:-$$}"
+  mkdir -p "$ingest_dir" "$ingest_dir/logs" "$ingest_runtime_root"
   if getent group laplace-runner >/dev/null; then
     local ingest_path ingest_owner ingest_group ingest_mode
-    for ingest_path in "$ingest_dir" "$ingest_dir/logs"; do
+    for ingest_path in "$ingest_dir" "$ingest_dir/logs" "$ingest_runtime_root"; do
       ingest_owner="$(stat -c '%U' "$ingest_path")"
       ingest_group="$(stat -c '%G' "$ingest_path")"
       ingest_mode="$(stat -c '%a' "$ingest_path")"
@@ -422,13 +429,28 @@ phase_install() (
       fi
     done
   fi
-  dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_dir" --no-self-contained -v q
-  cp -f "$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so* "$ingest_dir/"
-  git -C "$ROOT" rev-parse HEAD > "$ingest_dir/.laplace-source-revision"
-  [[ -f "$ingest_dir/Laplace.Cli.dll" && -f "$ingest_dir/liblaplace_core.so" ]] || {
-    echo "::error::ingest runtime missing after install: $ingest_dir" >&2
+  if [[ ! -d "$ingest_runtime" ]]; then
+    rm -rf "$ingest_stage"
+    mkdir -p "$ingest_stage"
+    dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_stage" --no-self-contained -v q
+    cp -f "$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so* "$ingest_stage/"
+    printf '%s\n' "$ingest_revision" > "$ingest_stage/.laplace-source-revision"
+    [[ -f "$ingest_stage/Laplace.Cli.dll" && -f "$ingest_stage/liblaplace_core.so" ]] || {
+      echo "::error::ingest runtime missing after staged install: $ingest_stage" >&2
+      exit 1
+    }
+    mv "$ingest_stage" "$ingest_runtime"
+  fi
+  [[ "$(cat "$ingest_runtime/.laplace-source-revision" 2>/dev/null || true)" == "$ingest_revision" &&
+     -f "$ingest_runtime/Laplace.Cli.dll" && -f "$ingest_runtime/liblaplace_core.so" ]] || {
+    echo "::error::immutable ingest runtime is incomplete: $ingest_runtime" >&2
     exit 1
   }
+  ingest_link_tmp="$ingest_dir/.current-$ingest_revision-$$"
+  rm -f "$ingest_link_tmp"
+  ln -s "runtimes/$ingest_revision" "$ingest_link_tmp"
+  mv -Tf "$ingest_link_tmp" "$ingest_dir/current"
+  echo "::notice::installed ingest runtime $ingest_runtime; active=$ingest_dir/current"
   so_after=$(preloaded_so_digest)
   postgres_activation_required="$server_release_changed"
   if [[ "$so_before" != "$so_after" || "$library_path_changed" == 1 ]]; then
