@@ -70,6 +70,7 @@ require_cli() {
     }
     [[ "${INGEST_USES_PREFIX:-0}" != 1 ]] || {
         echo "::notice::ingest runtime $INGEST_RUNTIME (installed prefix)"
+        # Changing this file is install+live, not ninja ALL / web / Chess.Tests.
         return 0
     }
 

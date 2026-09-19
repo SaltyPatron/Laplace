@@ -226,6 +226,9 @@ class ImpactPlanTests(unittest.TestCase):
         for path in (
             "scripts/pipeline.sh",
             "scripts/check-deployed-revision.sh",
+            "scripts/ingest-source.sh",
+            "scripts/check-substrate-floor.sh",
+            "scripts/ensure-foundation.sh",
         ):
             with self.subTest(path=path):
                 value = plan(path)

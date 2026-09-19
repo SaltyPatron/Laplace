@@ -151,6 +151,9 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             "scripts/pipeline.sh",
             "scripts/check-deployed-revision.sh",
             "scripts/product-ci.sh",
+            "scripts/ingest-source.sh",
+            "scripts/check-substrate-floor.sh",
+            "scripts/ensure-foundation.sh",
         ):
             # Activation owner (systemd bounce of mapped native .so). Does not
             # change API/MCP/UCI/Lichess/UI/chess-lab bytes — do not rebuild
