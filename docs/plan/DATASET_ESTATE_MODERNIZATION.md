@@ -20,8 +20,9 @@ starting with no session history must be able to tell:
 6. which old path may be removed and what verified replacement permits removal; and
 7. which GitHub issue owns the remaining work.
 
-This pass establishes the data authority. It deliberately does not repair decomposers.
-Decomposer fidelity is evaluated afterward against the immutable artifact hashes.
+This pass establishes the data authority **and supplies the exact release boundary that the semantic recipe must target**. Dataset modernization, recipe qualification and decomposer normalization are coupled work: recipe/provider changes should be developed against the staged immutable artifacts before activation, and activation binds the selected release to a compatible qualified recipe.
+
+Do not keep extending source-specific decomposers against superseded active trees while newer selected releases sit in `.refresh-*`, and do not activate a new release whose recipe cannot account for its native fields. Decomposer/source fidelity is measured against the exact artifact hashes throughout this process, not postponed until every estate-cleanup task is finished.
 
 The machine-readable companion is
 [`docs/source-estate.tsv`](../source-estate.tsv).
@@ -63,7 +64,19 @@ identities.
 
 ## Order of work
 
-Follow this order for every source. A later step does not excuse skipping an earlier one.
+Follow this dependency order for every source. Physical download/verification and semantic recipe work overlap; the release is activated only when both converge.
+
+```text
+discover/pin release
+-> stage exact artifact graph
+-> qualify parser/provider against staged bytes
+-> declare/update semantic recipe and complete field dispositions
+-> prove reconstruction/loss + invariance
+-> activate release + recipe together
+-> generic admission/reseed/readback
+```
+
+A later step does not excuse skipping an earlier one.
 
 1. Read the upstream release page, directory listing, dataset card, license, and citation.
 2. Enumerate the entire upstream artifact family, including sidecars and alternate
@@ -80,12 +93,13 @@ Follow this order for every source. A later step does not excuse skipping an ear
    `equivalent-packaging`.
 8. Generate a sorted file manifest for the extracted tree and reconcile it to the archive
    member list.
-9. Rename the old active directory into the refresh area's `superseded/` holding area,
-   install the validated new tree, and rerun the checks through the final path.
-10. Write a removal receipt containing old path, file count, byte count, reason,
-    replacement artifact hashes, and verification result.
-11. Delete only the exact superseded target named by the receipt.
-12. Update `source-estate.tsv`, the owning issue, and the global installed manifest.
+9. Qualify the source's semantic recipe/profile against the staged release: every native field/role has an explicit disposition (`content`, `occurrence`, `reference`, `provenance`, `testimony`, `calculation`, `packaging`, or `unresolved`), and the provider/recipe generation is fingerprinted.
+10. Rename the old active directory into the refresh area's `superseded/` holding area,
+   install the validated new tree **together with the selected recipe/profile**, and rerun the checks through the final path.
+11. Write a removal receipt containing old path, file count, byte count, reason,
+    replacement artifact hashes, recipe/profile fingerprint, and verification result.
+12. Delete only the exact superseded target named by the receipt.
+13. Update `source-estate.tsv`, the owning issue, the source-profile/capability manifest, and the global installed manifest.
 
 ## Required installed layout
 
@@ -326,4 +340,4 @@ and explicit equivalent/excluded packaging in the global manifest.
 - [ ] Every deletion has a removal receipt naming its validated replacement.
 - [ ] Every known upstream sidecar has an explicit disposition.
 - [ ] GitHub issue bodies and this table agree on versions, hashes, paths, and ownership.
-- [ ] Only after this gate passes does #1153 evaluate decomposer fidelity.
+- [ ] #1153/#1045 recipe and decomposer-fidelity work is developed against the staged selected artifacts while this gate is being closed; the final `current/admitted` claim requires both the estate gate and matching recipe/admission evidence.
