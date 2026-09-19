@@ -1,0 +1,6308 @@
+.
+├── Atomic2020
+├── CILI
+│   └── older-wn-mappings
+├── code-authority
+│   ├── cpython
+│   │   ├── Doc
+│   │   │   ├── c-api
+│   │   │   ├── data
+│   │   │   ├── deprecations
+│   │   │   ├── distributing
+│   │   │   ├── extending
+│   │   │   ├── faq
+│   │   │   ├── howto
+│   │   │   ├── includes
+│   │   │   ├── installing
+│   │   │   ├── library
+│   │   │   ├── reference
+│   │   │   ├── _static
+│   │   │   ├── tools
+│   │   │   ├── tutorial
+│   │   │   ├── using
+│   │   │   └── whatsnew
+│   │   ├── Grammar
+│   │   ├── Include
+│   │   │   ├── cpython
+│   │   │   └── internal
+│   │   ├── InternalDocs
+│   │   │   └── images
+│   │   ├── Lib
+│   │   │   ├── asyncio
+│   │   │   ├── collections
+│   │   │   ├── compression
+│   │   │   ├── concurrent
+│   │   │   ├── ctypes
+│   │   │   ├── curses
+│   │   │   ├── dbm
+│   │   │   ├── email
+│   │   │   ├── encodings
+│   │   │   ├── ensurepip
+│   │   │   ├── html
+│   │   │   ├── http
+│   │   │   ├── idlelib
+│   │   │   ├── importlib
+│   │   │   ├── json
+│   │   │   ├── logging
+│   │   │   ├── multiprocessing
+│   │   │   ├── pathlib
+│   │   │   ├── __phello__
+│   │   │   ├── profiling
+│   │   │   ├── pydoc_data
+│   │   │   ├── _pyrepl
+│   │   │   ├── re
+│   │   │   ├── site-packages
+│   │   │   ├── sqlite3
+│   │   │   ├── string
+│   │   │   ├── sysconfig
+│   │   │   ├── test
+│   │   │   ├── tkinter
+│   │   │   ├── tomllib
+│   │   │   ├── turtledemo
+│   │   │   ├── unittest
+│   │   │   ├── urllib
+│   │   │   ├── venv
+│   │   │   ├── wsgiref
+│   │   │   ├── xml
+│   │   │   ├── xmlrpc
+│   │   │   ├── zipfile
+│   │   │   └── zoneinfo
+│   │   ├── Mac
+│   │   │   ├── BuildScript
+│   │   │   ├── Icons
+│   │   │   ├── IDLE
+│   │   │   ├── PythonLauncher
+│   │   │   ├── Resources
+│   │   │   └── Tools
+│   │   ├── Misc
+│   │   │   ├── mypy
+│   │   │   ├── NEWS.d
+│   │   │   └── rhel7
+│   │   ├── Modules
+│   │   │   ├── cjkcodecs
+│   │   │   ├── clinic
+│   │   │   ├── _ctypes
+│   │   │   ├── _decimal
+│   │   │   ├── expat
+│   │   │   ├── _hacl
+│   │   │   ├── _io
+│   │   │   ├── _multiprocessing
+│   │   │   ├── _remote_debugging
+│   │   │   ├── _sqlite
+│   │   │   ├── _sre
+│   │   │   ├── _ssl
+│   │   │   ├── _testcapi
+│   │   │   ├── _testinternalcapi
+│   │   │   ├── _testlimitedcapi
+│   │   │   ├── _xxtestfuzz
+│   │   │   └── _zstd
+│   │   ├── Objects
+│   │   │   ├── clinic
+│   │   │   ├── mimalloc
+│   │   │   └── stringlib
+│   │   ├── Parser
+│   │   │   ├── lexer
+│   │   │   └── tokenizer
+│   │   ├── PC
+│   │   │   ├── clinic
+│   │   │   ├── icons
+│   │   │   └── layout
+│   │   ├── PCbuild
+│   │   ├── Platforms
+│   │   │   ├── Android
+│   │   │   ├── Apple
+│   │   │   ├── emscripten
+│   │   │   └── WASI
+│   │   ├── Programs
+│   │   ├── Python
+│   │   │   ├── clinic
+│   │   │   └── frozen_modules
+│   │   └── Tools
+│   │       ├── build
+│   │       ├── buildbot
+│   │       ├── c-analyzer
+│   │       ├── cases_generator
+│   │       ├── check-c-api-docs
+│   │       ├── clinic
+│   │       ├── freeze
+│   │       ├── ftscalingbench
+│   │       ├── gdb
+│   │       ├── i18n
+│   │       ├── importbench
+│   │       ├── inspection
+│   │       ├── jit
+│   │       ├── lockbench
+│   │       ├── msi
+│   │       ├── nuget
+│   │       ├── patchcheck
+│   │       ├── peg_generator
+│   │       ├── picklebench
+│   │       ├── pixi-packages
+│   │       ├── scripts
+│   │       ├── ssl
+│   │       ├── tsan
+│   │       ├── ubsan
+│   │       ├── unicode
+│   │       ├── unittestgui
+│   │       └── wasm
+│   ├── docs
+│   │   ├── admin
+│   │   ├── api
+│   │   ├── docs
+│   │   │   ├── ai
+│   │   │   ├── architecture
+│   │   │   ├── azure
+│   │   │   ├── breadcrumb
+│   │   │   ├── core
+│   │   │   ├── csharp
+│   │   │   ├── devops
+│   │   │   ├── framework
+│   │   │   ├── fsharp
+│   │   │   ├── fundamentals
+│   │   │   ├── images
+│   │   │   ├── includes
+│   │   │   ├── iot
+│   │   │   ├── machine-learning
+│   │   │   ├── media
+│   │   │   ├── navigate
+│   │   │   ├── orleans
+│   │   │   ├── samples-and-tutorials
+│   │   │   ├── standard
+│   │   │   └── visual-basic
+│   │   ├── includes
+│   │   │   ├── core-changes
+│   │   │   └── migration-guide
+│   │   ├── samples
+│   │   │   └── snippets
+│   │   └── _zip
+│   ├── postgres
+│   │   ├── config
+│   │   ├── contrib
+│   │   │   ├── amcheck
+│   │   │   ├── auth_delay
+│   │   │   ├── auto_explain
+│   │   │   ├── basebackup_to_shell
+│   │   │   ├── basic_archive
+│   │   │   ├── bloom
+│   │   │   ├── bool_plperl
+│   │   │   ├── btree_gin
+│   │   │   ├── btree_gist
+│   │   │   ├── citext
+│   │   │   ├── cube
+│   │   │   ├── dblink
+│   │   │   ├── dict_int
+│   │   │   ├── dict_xsyn
+│   │   │   ├── earthdistance
+│   │   │   ├── file_fdw
+│   │   │   ├── fuzzystrmatch
+│   │   │   ├── hstore
+│   │   │   ├── hstore_plperl
+│   │   │   ├── hstore_plpython
+│   │   │   ├── intagg
+│   │   │   ├── intarray
+│   │   │   ├── isn
+│   │   │   ├── jsonb_plperl
+│   │   │   ├── jsonb_plpython
+│   │   │   ├── lo
+│   │   │   ├── ltree
+│   │   │   ├── ltree_plpython
+│   │   │   ├── oid2name
+│   │   │   ├── pageinspect
+│   │   │   ├── passwordcheck
+│   │   │   ├── pg_buffercache
+│   │   │   ├── pgcrypto
+│   │   │   ├── pg_freespacemap
+│   │   │   ├── pg_logicalinspect
+│   │   │   ├── pg_overexplain
+│   │   │   ├── pg_plan_advice
+│   │   │   ├── pg_prewarm
+│   │   │   ├── pgrowlocks
+│   │   │   ├── pg_stash_advice
+│   │   │   ├── pg_stat_statements
+│   │   │   ├── pgstattuple
+│   │   │   ├── pg_surgery
+│   │   │   ├── pg_trgm
+│   │   │   ├── pg_visibility
+│   │   │   ├── pg_walinspect
+│   │   │   ├── postgres_fdw
+│   │   │   ├── seg
+│   │   │   ├── sepgsql
+│   │   │   ├── spi
+│   │   │   ├── sslinfo
+│   │   │   ├── start-scripts
+│   │   │   ├── tablefunc
+│   │   │   ├── tcn
+│   │   │   ├── test_decoding
+│   │   │   ├── tsm_system_rows
+│   │   │   ├── tsm_system_time
+│   │   │   ├── unaccent
+│   │   │   ├── uuid-ossp
+│   │   │   ├── vacuumlo
+│   │   │   └── xml2
+│   │   ├── doc
+│   │   │   └── src
+│   │   └── src
+│   │       ├── backend
+│   │       ├── bin
+│   │       ├── common
+│   │       ├── fe_utils
+│   │       ├── include
+│   │       ├── interfaces
+│   │       ├── makefiles
+│   │       ├── pl
+│   │       ├── port
+│   │       ├── template
+│   │       ├── test
+│   │       ├── timezone
+│   │       ├── tools
+│   │       └── tutorial
+│   └── runtime
+│       ├── docs
+│       │   ├── coding-guidelines
+│       │   ├── design
+│       │   ├── infra
+│       │   ├── issue-mappings
+│       │   ├── project
+│       │   ├── tools
+│       │   └── workflow
+│       ├── eng
+│       │   ├── analyzers
+│       │   ├── common
+│       │   ├── docker
+│       │   ├── formatting
+│       │   ├── native
+│       │   ├── pipelines
+│       │   ├── restore
+│       │   └── testing
+│       └── src
+│           ├── coreclr
+│           ├── installer
+│           ├── libraries
+│           ├── mono
+│           ├── native
+│           ├── samples
+│           ├── tasks
+│           ├── tests
+│           ├── tools
+│           └── workloads
+├── ConceptNet
+├── FrameNet
+│   └── framenet_v17
+│       ├── docs
+│       ├── frame
+│       ├── fulltext
+│       ├── lu
+│       ├── miscXML
+│       └── schema
+├── Games
+│   └── Chess
+│       ├── fide
+│       ├── Lumbras
+│       │   ├── online
+│       │   ├── otb
+│       │   └── pgn
+│       ├── openings
+│       ├── syzygy
+│       │   └── 3-4-5
+│       └── twic
+├── ISO639
+│   ├── cldr
+│   │   └── bcp47
+│   ├── glottolog
+│   ├── iana
+│   ├── iso-639-3_Code_Tables_20260415
+│   │   └── iso-639-3_Code_Tables_20260415
+│   ├── loc
+│   └── sil
+│       └── change_requests
+├── LaplaceAssets
+├── MapNet-0.1
+├── omw
+│   ├── etc
+│   ├── scripts
+│   ├── tests
+│   │   └── data
+│   └── wns
+│       ├── als
+│       ├── arb
+│       ├── bul
+│       ├── cldr
+│       ├── cow
+│       ├── cwn
+│       ├── dan
+│       ├── ell
+│       ├── en
+│       ├── eng
+│       ├── fas
+│       ├── fin
+│       ├── fra
+│       ├── heb
+│       ├── hrv
+│       ├── isl
+│       ├── ita
+│       ├── iwn
+│       ├── jpn
+│       ├── mcr
+│       ├── msa
+│       ├── nld
+│       ├── nor
+│       ├── pol
+│       ├── por
+│       ├── ron
+│       ├── slk
+│       ├── slv
+│       ├── swe
+│       ├── tha
+│       └── wikt
+├── OMW
+│   ├── etc
+│   ├── scripts
+│   ├── tests
+│   │   └── data
+│   └── wns
+│       ├── als
+│       ├── arb
+│       ├── bul
+│       ├── cldr
+│       ├── cow
+│       ├── cwn
+│       ├── dan
+│       ├── ell
+│       ├── en
+│       ├── eng
+│       ├── fas
+│       ├── fin
+│       ├── fra
+│       ├── heb
+│       ├── hrv
+│       ├── isl
+│       ├── ita
+│       ├── iwn
+│       ├── jpn
+│       ├── mcr
+│       ├── msa
+│       ├── nld
+│       ├── nor
+│       ├── pol
+│       ├── por
+│       ├── ron
+│       ├── slk
+│       ├── slv
+│       ├── swe
+│       ├── tha
+│       └── wikt
+├── OpenSubtitles
+├── PredicateMatrix.v1.3
+├── ProjectGutenberg
+│   ├── Pierre-Simon-Laplace
+│   │   ├── gutenberg.beic.it
+│   │   │   └── metadata
+│   │   ├── gutenberg.org
+│   │   │   └── 58881
+│   │   └── projekt-gutenberg.org
+│   └── text
+├── PropBank
+│   └── propbank-frames-main
+│       ├── dtds
+│       │   └── v3.4
+│       ├── frames
+│       └── scripts
+├── SemLink
+│   └── semlink-master
+│       ├── instances
+│       ├── other_resources
+│       └── tools
+├── Tatoeba
+│   └── audio
+├── test-data
+│   ├── audio
+│   ├── electronics
+│   ├── images
+│   ├── mixed
+│   ├── neural
+│   └── text
+├── TreeSitter
+│   ├── ebnf
+│   │   └── crates
+│   │       ├── dprint-plugin-ebnf
+│   │       ├── ebnf-fmt
+│   │       ├── ebnf-parser
+│   │       └── tree-sitter-ebnf
+│   ├── superhtml
+│   │   ├── editors
+│   │   │   ├── bbedit
+│   │   │   ├── emacs
+│   │   │   └── vscode
+│   │   ├── src
+│   │   │   ├── cli
+│   │   │   ├── css
+│   │   │   └── html
+│   │   └── tree-sitter-superhtml
+│   │       ├── bindings
+│   │       ├── examples
+│   │       ├── queries
+│   │       ├── src
+│   │       └── test
+│   ├── tree-sitter-ada
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-agda
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── todo
+│   ├── tree-sitter-angular
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-arduino
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-asm
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   │   └── asm
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-astro
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── queries
+│   │   ├── script
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-authzed
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── docs
+│   │   │   └── images
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-awk
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-bash
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-bass
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── gen
+│   │   ├── queries
+│   │   │   ├── helix
+│   │   │   └── nvim
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-beancount
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-bibtex
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-bicep
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-bitbake
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-blade
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── main
+│   │   │   └── tests
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── tree-sitter-html
+│   ├── tree-sitter-blueprint
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-bp
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── scripts
+│   │   │   └── dummy_plugin
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── indent
+│   ├── tree-sitter-brightscript
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-c
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   ├── swift
+│   │   │   └── zig
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-caddy
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── build
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-cairo
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   │   └── cairo-snippets
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-capnp
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-chatito
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── extensions
+│   │   │   └── chatl
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-circom
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-clojure
+│   │   ├── doc
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-cmake
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   └── highlight
+│   │   └── tools
+│   ├── tree-sitter-comment
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   │   └── js
+│   │   ├── src
+│   │   │   ├── tree_sitter
+│   │   │   └── tree_sitter_comment
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-commonlisp
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── Petalisp
+│   │       ├── sly
+│   │       └── tags
+│   ├── tree-sitter-cooklang
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── corpus
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-corn
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-cpon
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-cpp
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-c-sharp
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   ├── highlight
+│   │   │   └── queries
+│   │   └── tools
+│   │       └── highlight-test-generator
+│   ├── tree-sitter-css
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-csv
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── common
+│   │   ├── csv
+│   │   │   ├── queries
+│   │   │   └── src
+│   │   ├── psv
+│   │   │   ├── queries
+│   │   │   └── src
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── tsv
+│   │       ├── queries
+│   │       └── src
+│   ├── tree-sitter-cuda
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-cue
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-cylc
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   │   └── rtmet
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-d
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-dart
+│   │   ├── assets
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   ├── highlight
+│   │   │   └── tags
+│   │   ├── tester
+│   │   └── tree_sitter
+│   │       ├── bin
+│   │       ├── example
+│   │       ├── lib
+│   │       ├── test
+│   │       └── tree-sitter
+│   ├── tree-sitter-desktop
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── examples
+│   │   ├── queries
+│   │   │   └── desktop
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-devicetree
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   ├── swift
+│   │   │   └── zig
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-dhall
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-diff
+│   │   ├── assets
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-disassembly
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-djot
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-dockerfile
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-dot
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-doxygen
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-earthfile
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   └── earthly
+│   │   └── xtask
+│   │       └── src
+│   ├── tree-sitter-editorconfig
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── examples
+│   │   ├── queries
+│   │   │   └── editorconfig
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-eds
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-eex
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-elixir
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-elm
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   │   └── js
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-elsa
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-elvish
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-embedded-template
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-enforce
+│   │   ├── bindings
+│   │   │   └── go
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-erlang
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-facility
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-faust
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-fennel
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── documentation
+│   │   ├── extensions
+│   │   │   └── builtin-forms
+│   │   ├── grammar-lib
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-fidl
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── docs
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-firrtl
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-fish
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── examples
+│   │   │   └── fish
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-foam
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── corpus_windows
+│   │       └── highlight
+│   ├── tree-sitter-forth
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-fortran
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-fsh
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── example
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-fsharp
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── common
+│   │   ├── examples
+│   │   │   ├── FSharp.Compiler
+│   │   │   ├── FSharp.Data
+│   │   │   └── Giraffe
+│   │   ├── fsharp
+│   │   │   └── src
+│   │   ├── fsharp_signature
+│   │   │   └── src
+│   │   ├── queries
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-func
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── grammar
+│   │   ├── queries
+│   │   ├── script
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-fusion
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-gap
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── etc
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-gaptst
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── etc
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-gdscript
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── nim
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   │   └── gdscript2
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-gdshader
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── node_modules
+│   │   │   ├── nan
+│   │   │   └── tree-sitter-cli
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── target
+│   │   │   └── debug
+│   │   └── test
+│   │       └── highlight
+│   ├── tree-sitter-gitattributes
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── templates
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-gitcommit
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-git-config
+│   │   ├── docs
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-gitignore
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── gitignore
+│   ├── tree-sitter-git-rebase
+│   │   ├── assets
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-gleam
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       ├── integration
+│   │       └── tags
+│   ├── tree-sitter-glimmer
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   ├── parser
+│   │   ├── queries
+│   │   │   └── glimmer
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-glimmer-javascript
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── parser
+│   │   ├── queries
+│   │   │   └── glimmer_javascript
+│   │   ├── src
+│   │   │   ├── tree_sitter
+│   │   │   └── tree-sitter-javascript
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-glimmer-typescript
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   │   └── glimmer_typescript
+│   │   ├── src
+│   │   │   ├── tree_sitter
+│   │   │   └── tree-sitter-typescript
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-glsl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── glsl-shaders
+│   │       └── vk_raytrace
+│   ├── tree-sitter-gn
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-gnuplot
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-go
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-goctl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   ├── tree-sitter-godot-resource
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── nim
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-go-mod
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-go-sum
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-go-template
+│   │   ├── bindings
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── dialects
+│   │   │   └── helm
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-go-work
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-gpg-config
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-graphql
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── examples
+│   │   ├── lua
+│   │   │   └── gql
+│   │   ├── plugin
+│   │   ├── queries
+│   │   │   └── graphql
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-gren
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── editors
+│   │   │   ├── helix
+│   │   │   ├── nvim
+│   │   │   └── zed
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-groovy
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── treesexpy
+│   │       └── build
+│   ├── tree-sitter-gstlaunch
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-hack
+│   │   ├── bin
+│   │   │   └── docker
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── cases
+│   │       └── corpus
+│   ├── tree-sitter-hare
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-haskell
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── grammar
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-haskell-persistent
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── grammar
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-hcl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── dialects
+│   │   │   └── terraform
+│   │   ├── docs
+│   │   │   └── vendor
+│   │   ├── example
+│   │   │   └── real_world_stuff
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-heex
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-hjson
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-hlsl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── kajiya
+│   ├── tree-sitter-hlsplaylist
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-hocon
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-hoon
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-html
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-htmldjango
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-http
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-hurl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   │   └── front_page
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-hyprlang
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   │   └── hyprlang
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-idl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── common
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight_bak
+│   ├── tree-sitter-idris
+│   │   ├── bin
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── grammar
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-ini
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-inko
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-ispc
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── examples
+│   │   │   └── html
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── tools
+│   ├── tree-sitter-janet-simple
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-java
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-javadoc
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── injection_tests
+│   │   │   ├── data
+│   │   │   └── src
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-javascript
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-jinja
+│   │   ├── common
+│   │   ├── scripts
+│   │   ├── tree-sitter-jinja
+│   │   │   ├── bindings
+│   │   │   ├── queries
+│   │   │   ├── src
+│   │   │   └── test
+│   │   └── tree-sitter-jinja_inline
+│   │       ├── bindings
+│   │       ├── queries
+│   │       ├── src
+│   │       └── test
+│   ├── tree-sitter-jq
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── build
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-jsdoc
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-json
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-json5
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-jsonc
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-jsonnet
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-julia
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-just
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── ftdetect
+│   │   ├── fuzzer
+│   │   ├── lua
+│   │   │   └── tree-sitter-just
+│   │   ├── queries
+│   │   │   └── just
+│   │   ├── queries-flavored
+│   │   │   ├── helix
+│   │   │   ├── lapce
+│   │   │   └── zed
+│   │   ├── queries-src
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-kcl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-kconfig
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-kdl
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   │   └── spec
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-kotlin
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── tools
+│   │       └── cross-validation
+│   ├── tree-sitter-koto
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-kusto
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-lalrpop
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-latex
+│   │   ├── benches
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── src
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-ledger
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-leo
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── contrib
+│   │   ├── doc
+│   │   ├── lua
+│   │   │   └── nvim-treesitter
+│   │   ├── plugin
+│   │   ├── queries
+│   │   ├── runtime
+│   │   │   └── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── tests
+│   │       ├── indent
+│   │       └── query
+│   ├── tree-sitter-linkerscript
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-liquid
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── prebuilds
+│   │   │   └── darwin-arm64
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-liquidsoap
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── tests
+│   ├── tree-sitter-llvm
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── example
+│   │   │   └── corpus
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-lua
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-luadoc
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-luap
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-luau
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-m68k
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-make
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-markdown
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── common
+│   │   ├── scripts
+│   │   ├── tree-sitter-markdown
+│   │   │   ├── bindings
+│   │   │   ├── queries
+│   │   │   ├── src
+│   │   │   └── test
+│   │   └── tree-sitter-markdown-inline
+│   │       ├── bindings
+│   │       ├── queries
+│   │       ├── src
+│   │       └── test
+│   ├── tree-sitter-matlab
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   ├── swift
+│   │   │   └── zig
+│   │   ├── queries
+│   │   │   ├── emacs
+│   │   │   ├── helix
+│   │   │   └── neovim
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-menhir
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── script
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-mermaid
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-meson
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── grammar
+│   │   ├── images
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-mlir
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── dialect
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-muttrc
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-nasm
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-nginx
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-nickel
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-nim
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── LICENSES
+│   │   ├── queries
+│   │   ├── samples
+│   │   │   ├── cps
+│   │   │   └── nim
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-nim-format-string
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-ninja
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-nix
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── highlight
+│   ├── tree-sitter-norg
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── nix
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-nqc
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   │   └── nqc
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-nu
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── installation
+│   │   ├── plugin
+│   │   ├── queries
+│   │   │   └── nu
+│   │   ├── resources
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-objc
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-objdump
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-ocaml
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── common
+│   │   ├── examples
+│   │   │   ├── 0install
+│   │   │   ├── bap
+│   │   │   ├── base
+│   │   │   ├── cmdliner
+│   │   │   ├── dune
+│   │   │   ├── eio
+│   │   │   ├── js_of_ocaml
+│   │   │   ├── lablgtk
+│   │   │   ├── lwt
+│   │   │   ├── melange
+│   │   │   ├── merlin
+│   │   │   ├── ocaml
+│   │   │   ├── ocaml-cohttp
+│   │   │   ├── ocamlformat
+│   │   │   ├── ocaml-lsp
+│   │   │   ├── opam
+│   │   │   ├── owl
+│   │   │   ├── ppxlib
+│   │   │   └── pyre-check
+│   │   ├── grammars
+│   │   │   ├── interface
+│   │   │   ├── ocaml
+│   │   │   └── type
+│   │   ├── queries
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-ocamllex
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-odin
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-pascal
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-passwd
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-pem
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-perl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── lib
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-php
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── common
+│   │   ├── php
+│   │   │   └── src
+│   │   ├── php_only
+│   │   │   └── src
+│   │   ├── queries
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-phpdoc
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-pioasm
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-po
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-pod
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-poe-filter
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   │   └── NeverSink-Filter
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-pony
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-powershell
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-printf
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-prisma
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-prolog
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── grammars
+│   │   │   ├── problog
+│   │   │   └── prolog
+│   │   ├── queries
+│   │   └── test
+│   │       └── highlight
+│   ├── tree-sitter-promql
+│   │   ├── example
+│   │   │   └── real_world
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-properties
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-proto
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-prql
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-pug
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-puppet
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-purescript
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── grammar
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   ├── types
+│   │   └── vim_queries
+│   ├── tree-sitter-pymanifest
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-python
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-ql
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-qmldir
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── java
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   ├── swift
+│   │   │   └── zig
+│   │   ├── example
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-qmljs
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-query
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   │   └── query
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-r
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── r
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-racket
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── fuzztest
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-ralph
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-rasi
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-razor
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-rbs
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-re2c
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-readline
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-regex
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-rego
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-requirements
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-rescript
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── manual
+│   ├── tree-sitter-rnoweb
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── example
+│   │   ├── node_modules
+│   │   │   ├── nan
+│   │   │   └── tree-sitter-cli
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-robot
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-robots-txt
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-roc
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   ├── neovim
+│   │   ├── queries
+│   │   ├── queries-generated
+│   │   │   ├── helix
+│   │   │   ├── neovim
+│   │   │   └── zed
+│   │   ├── query-maps
+│   │   ├── samples
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── tools
+│   ├── tree-sitter-ron
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-rst
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   │   └── js
+│   │   ├── src
+│   │   │   ├── tree_sitter
+│   │   │   └── tree_sitter_rst
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   └── examples
+│   │   └── utils
+│   ├── tree-sitter-ruby
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-runescript
+│   │   ├── assets
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-rust
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-scala
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-scfg
+│   │   ├── corpus
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-scheme
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-scss
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── examples
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-sfapex
+│   │   ├── apex
+│   │   │   ├── queries
+│   │   │   ├── src
+│   │   │   └── test
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── web
+│   │   ├── common
+│   │   ├── docs
+│   │   │   └── playground
+│   │   ├── scripts
+│   │   ├── sflog
+│   │   │   ├── queries
+│   │   │   ├── src
+│   │   │   └── test
+│   │   ├── soql
+│   │   │   ├── queries
+│   │   │   ├── src
+│   │   │   └── test
+│   │   └── sosl
+│   │       ├── queries
+│   │       ├── src
+│   │       └── test
+│   ├── tree-sitter-slang
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-slim
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-slint
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── LICENSES
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-smali
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-smithy
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-snakemake
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   │   └── snakemake
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-solidity
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   ├── highlight
+│   │   │   └── sample
+│   │   └── typed-libraries
+│   │       └── python
+│   ├── tree-sitter-sourcepawn
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-sparql
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-sql
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   │   └── _layouts
+│   │   ├── grammar
+│   │   │   └── statements
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   ├── target
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-squirrel
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-ssh-config
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-starlark
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-strace
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-styled
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── examples
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── tree-sitter-css
+│   ├── tree-sitter-supercollider
+│   │   ├── assets
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── testfiles
+│   ├── tree-sitter-surface
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-svelte
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-sway
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── corpus
+│   │   ├── queries
+│   │   ├── scripts
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-swift
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script-data
+│   │   ├── scripts
+│   │   ├── src
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   ├── highlight
+│   │   │   └── outline
+│   │   └── test-npm-package
+│   ├── tree-sitter-sxhkdrc
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-systemtap
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-systemverilog
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   ├── tree-sitter-t32
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   ├── swift
+│   │   │   └── zig
+│   │   ├── LICENSES
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       └── tags
+│   ├── tree-sitter-tablegen
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-tact
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── editor_queries
+│   │   │   ├── helix
+│   │   │   └── neovim
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       ├── sample
+│   │       └── tags
+│   ├── tree-sitter-tcl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── ftplugin
+│   │   ├── queries
+│   │   │   └── tcl
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-teal
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   ├── swift
+│   │   │   └── zig
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-templ
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── ftdetect
+│   │   ├── lua
+│   │   │   └── tree-sitter-templ
+│   │   ├── queries
+│   │   │   └── templ
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   ├── templ
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-tera
+│   │   ├── assets
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-textproto
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-thrift
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-tiger
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       ├── highlight
+│   │       ├── indent
+│   │       └── tags
+│   ├── tree-sitter-tlaplus
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── integrations
+│   │   │   └── nvim
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── consumers
+│   │       ├── corpus
+│   │       ├── crash_regressions
+│   │       ├── dependencies
+│   │       ├── examples
+│   │       ├── fuzzing
+│   │       └── sanitize
+│   ├── tree-sitter-tmux
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-todotxt
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── corpus
+│   │   ├── examples
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-toml
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-turtle
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-twig
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-typescript
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── common
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── test
+│   │   │   └── corpus
+│   │   ├── tsx
+│   │   │   └── src
+│   │   └── typescript
+│   │       └── src
+│   ├── tree-sitter-typespec
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-typoscript
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── grammar
+│   │   ├── queries
+│   │   │   └── neovim
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-typst
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── editors
+│   │   │   ├── helix
+│   │   │   └── neovim
+│   │   ├── queries
+│   │   │   └── typst
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-udev
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-ungrammar
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-unison
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── grammar
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-usd
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-uxntal
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-vala
+│   │   ├── queries
+│   │   │   └── nvim
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-vento
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-vhdl
+│   │   ├── autogen
+│   │   │   ├── ieee
+│   │   │   └── std
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   ├── queries
+│   │   │   ├── Helix
+│   │   │   └── Neovim
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-vhs
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-vim
+│   │   ├── queries
+│   │   │   └── vim
+│   │   ├── rules
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-vimdoc
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   │   └── vimdoc
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-vrl
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-vue
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── python
+│   │   │   └── rust
+│   │   ├── queries
+│   │   │   ├── html_tags
+│   │   │   └── vue
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-wgsl
+│   │   ├── assets
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── tree-sitter-wgsl-bevy
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-wing
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-wit
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── docs
+│   │   │   └── images
+│   │   ├── examples
+│   │   ├── ftdetect
+│   │   ├── queries
+│   │   ├── reference_files
+│   │   ├── scripts
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-xcompose
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-xml
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── common
+│   │   ├── dtd
+│   │   │   └── src
+│   │   ├── queries
+│   │   │   ├── dtd
+│   │   │   └── xml
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   └── highlight
+│   │   └── xml
+│   │       └── src
+│   ├── tree-sitter-xresources
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── node
+│   │   │   └── rust
+│   │   ├── examples
+│   │   ├── queries
+│   │   │   └── xresources
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-yaml
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── examples
+│   │   │   └── yaml-test-suite
+│   │   ├── queries
+│   │   ├── schema
+│   │   │   ├── core
+│   │   │   ├── json
+│   │   │   └── legacy
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       ├── corpus
+│   │       └── highlight
+│   ├── tree-sitter-yang
+│   │   ├── corpus
+│   │   ├── queries
+│   │   ├── scripts
+│   │   ├── spec
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── yang-models
+│   ├── tree-sitter-yuck
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── queries
+│   │   ├── script
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-zathurarc
+│   │   ├── bindings
+│   │   │   ├── c
+│   │   │   ├── go
+│   │   │   ├── node
+│   │   │   ├── python
+│   │   │   ├── rust
+│   │   │   └── swift
+│   │   ├── src
+│   │   │   └── tree_sitter
+│   │   └── test
+│   │       └── corpus
+│   ├── tree-sitter-zig
+│   │   ├── bindings
+│   │   │   ├── node
+│   │   │   ├── rust
+│   │   │   └── zig
+│   │   ├── queries
+│   │   └── src
+│   │       └── tree_sitter
+│   ├── v-analyzer
+│   │   ├── editors
+│   │   │   └── code
+│   │   ├── src
+│   │   │   ├── analyzer
+│   │   │   ├── bytes
+│   │   │   ├── config
+│   │   │   ├── jsonrpc
+│   │   │   ├── loglib
+│   │   │   ├── lsp
+│   │   │   ├── metadata
+│   │   │   ├── project
+│   │   │   ├── server
+│   │   │   ├── streams
+│   │   │   ├── testing
+│   │   │   ├── tests
+│   │   │   ├── tools
+│   │   │   └── utils
+│   │   └── tree_sitter_v
+│   │       ├── bindings
+│   │       ├── examples
+│   │       ├── queries
+│   │       ├── src
+│   │       └── test
+│   └── ziggy
+│       ├── editors
+│       │   ├── helix
+│       │   ├── nvim
+│       │   ├── vscode
+│       │   └── zed
+│       ├── src
+│       │   ├── cli
+│       │   └── schema
+│       ├── tests
+│       │   ├── schema
+│       │   └── ziggy
+│       ├── tree-sitter-ziggy
+│       │   ├── bindings
+│       │   ├── build
+│       │   ├── queries
+│       │   └── src
+│       └── tree-sitter-ziggy-schema
+│           ├── bindings
+│           ├── build
+│           ├── queries
+│           └── src
+├── UCD
+│   └── Public
+│       └── UCD
+│           └── latest
+├── UD-Treebanks
+│   └── ud-treebanks-v2.17
+│       ├── UD_Abaza-ATB
+│       ├── UD_Abkhaz-AbNC
+│       ├── UD_Afrikaans-AfriBooms
+│       ├── UD_Akkadian-PISANDUB
+│       ├── UD_Akkadian-RIAO
+│       ├── UD_Akuntsu-TuDeT
+│       ├── UD_Albanian-STAF
+│       ├── UD_Albanian-TSA
+│       ├── UD_Alemannic-DIVITAL
+│       ├── UD_Alemannic-UZH
+│       ├── UD_Amharic-ATT
+│       ├── UD_Ancient_Greek-Perseus
+│       ├── UD_Ancient_Greek-PROIEL
+│       ├── UD_Ancient_Greek-PTNK
+│       ├── UD_Ancient_Hebrew-PTNK
+│       ├── UD_Apurina-UFPA
+│       ├── UD_Arabic-NYUAD
+│       ├── UD_Arabic-PADT
+│       ├── UD_Arabic-PUD
+│       ├── UD_Armenian-ArmTDP
+│       ├── UD_Armenian-BSUT
+│       ├── UD_Assyrian-AS
+│       ├── UD_Azerbaijani-TueCL
+│       ├── UD_Bambara-CRB
+│       ├── UD_Basque-BDT
+│       ├── UD_Bavarian-MaiBaam
+│       ├── UD_Beja-Autogramm
+│       ├── UD_Belarusian-HSE
+│       ├── UD_Bengali-BRU
+│       ├── UD_Bhojpuri-BHTB
+│       ├── UD_Bokota-ChibErgIS
+│       ├── UD_Bororo-BDT
+│       ├── UD_Breton-KEB
+│       ├── UD_Bulgarian-BTB
+│       ├── UD_Buryat-BDT
+│       ├── UD_Cantonese-HK
+│       ├── UD_Cappadocian-AMGiC
+│       ├── UD_Cappadocian-TueCL
+│       ├── UD_Catalan-AnCora
+│       ├── UD_Cebuano-GJA
+│       ├── UD_Central_Kurdish-Mukri
+│       ├── UD_Chinese-Beginner
+│       ├── UD_Chinese-CFL
+│       ├── UD_Chinese-GSD
+│       ├── UD_Chinese-GSDSimp
+│       ├── UD_Chinese-HK
+│       ├── UD_Chinese-PatentChar
+│       ├── UD_Chinese-PUD
+│       ├── UD_Chintang-CTNTB
+│       ├── UD_Chukchi-HSE
+│       ├── UD_Classical_Armenian-CAVaL
+│       ├── UD_Classical_Chinese-Kyoto
+│       ├── UD_Classical_Chinese-TueCL
+│       ├── UD_Coptic-Bohairic
+│       ├── UD_Coptic-Scriptorium
+│       ├── UD_Croatian-SET
+│       ├── UD_Czech-CAC
+│       ├── UD_Czech-CLTT
+│       ├── UD_Czech-FicTree
+│       ├── UD_Czech-PDTC
+│       ├── UD_Czech-Poetry
+│       ├── UD_Czech-PUD
+│       ├── UD_Danish-DDT
+│       ├── UD_Dutch-Alpino
+│       ├── UD_Dutch-LassySmall
+│       ├── UD_Egyptian-UJaen
+│       ├── UD_English-Atis
+│       ├── UD_English-CHILDES
+│       ├── UD_English-CTeTex
+│       ├── UD_English-ESLSpok
+│       ├── UD_English-EWT
+│       ├── UD_English-GENTLE
+│       ├── UD_English-GUM
+│       ├── UD_English-GUMReddit
+│       ├── UD_English-LinES
+│       ├── UD_English-LittlePrince
+│       ├── UD_English-ParTUT
+│       ├── UD_English-Pronouns
+│       ├── UD_English-PUD
+│       ├── UD_Erzya-JR
+│       ├── UD_Esperanto-Cairo
+│       ├── UD_Esperanto-Prago
+│       ├── UD_Estonian-EDT
+│       ├── UD_Estonian-EWT
+│       ├── UD_Faroese-FarPaHC
+│       ├── UD_Faroese-OFT
+│       ├── UD_Finnish-FTB
+│       ├── UD_Finnish-OOD
+│       ├── UD_Finnish-PUD
+│       ├── UD_Finnish-TDT
+│       ├── UD_French-ALTS
+│       ├── UD_French-FQB
+│       ├── UD_French-GSD
+│       ├── UD_French-ParisStories
+│       ├── UD_French-ParTUT
+│       ├── UD_French-PoitevinDIVITAL
+│       ├── UD_French-PUD
+│       ├── UD_French-Rhapsodie
+│       ├── UD_French-Sequoia
+│       ├── UD_Frisian_Dutch-Fame
+│       ├── UD_Galician-CTG
+│       ├── UD_Galician-PUD
+│       ├── UD_Galician-TreeGal
+│       ├── UD_Georgian-GLC
+│       ├── UD_Georgian-GNC
+│       ├── UD_German-GSD
+│       ├── UD_German-HDT
+│       ├── UD_German-LIT
+│       ├── UD_German-PUD
+│       ├── UD_Gheg-GPS
+│       ├── UD_Gothic-PROIEL
+│       ├── UD_Greek-Cretan
+│       ├── UD_Greek-GDT
+│       ├── UD_Greek-GUD
+│       ├── UD_Greek-Lesbian
+│       ├── UD_Greek-Messinian
+│       ├── UD_Guajajara-TuDeT
+│       ├── UD_Guarani-OldTuDeT
+│       ├── UD_Gujarati-GujTB
+│       ├── UD_Gwichin-TueCL
+│       ├── UD_Haitian_Creole-Adolphe
+│       ├── UD_Haitian_Creole-Autogramm
+│       ├── UD_Hausa-NorthernAutogramm
+│       ├── UD_Hausa-SouthernAutogramm
+│       ├── UD_Hausa-WesternAutogramm
+│       ├── UD_Hebrew-HTB
+│       ├── UD_Hebrew-IAHLTknesset
+│       ├── UD_Hebrew-IAHLTwiki
+│       ├── UD_Highland_Puebla_Nahuatl-ITML
+│       ├── UD_Hindi-HDTB
+│       ├── UD_Hindi-PUD
+│       ├── UD_Hittite-HitTB
+│       ├── UD_Hungarian-Szeged
+│       ├── UD_Icelandic-GC
+│       ├── UD_Icelandic-IcePaHC
+│       ├── UD_Icelandic-Modern
+│       ├── UD_Icelandic-PUD
+│       ├── UD_Ika-ChibErgIS
+│       ├── UD_Indonesian-CSUI
+│       ├── UD_Indonesian-GSD
+│       ├── UD_Indonesian-PUD
+│       ├── UD_Irish-Cadhan
+│       ├── UD_Irish-IDT
+│       ├── UD_Irish-TwittIrish
+│       ├── UD_Italian-ISDT
+│       ├── UD_Italian-KIParlaForest
+│       ├── UD_Italian-MarkIT
+│       ├── UD_Italian-Old
+│       ├── UD_Italian-ParlaMint
+│       ├── UD_Italian-ParTUT
+│       ├── UD_Italian-PoSTWITA
+│       ├── UD_Italian-PUD
+│       ├── UD_Italian-TWITTIRO
+│       ├── UD_Italian-Valico
+│       ├── UD_Italian-VIT
+│       ├── UD_Japanese-BCCWJ
+│       │   └── merge
+│       ├── UD_Japanese-BCCWJLUW
+│       │   └── merge
+│       ├── UD_Japanese-GSD
+│       ├── UD_Japanese-GSDLUW
+│       ├── UD_Japanese-PUD
+│       ├── UD_Japanese-PUDLUW
+│       ├── UD_Javanese-CSUI
+│       ├── UD_Kaapor-TuDeT
+│       ├── UD_Kangri-KDTB
+│       ├── UD_Karelian-KKPP
+│       ├── UD_Karo-TuDeT
+│       ├── UD_Kazakh-KTB
+│       ├── UD_Khoekhoe-KDT
+│       ├── UD_Khunsari-AHA
+│       ├── UD_Kiche-IU
+│       ├── UD_Komi_Permyak-UH
+│       ├── UD_Komi_Zyrian-IKDP
+│       ├── UD_Komi_Zyrian-Lattice
+│       ├── UD_Korean-GSD
+│       ├── UD_Korean-Kaist
+│       ├── UD_Korean-KSL
+│       ├── UD_Korean-LittlePrince
+│       ├── UD_Korean-PUD
+│       ├── UD_Kyrgyz-KTMU
+│       ├── UD_Kyrgyz-TueCL
+│       ├── UD_Latgalian-Cairo
+│       ├── UD_Latin-CIRCSE
+│       ├── UD_Latin-ITTB
+│       ├── UD_Latin-LLCT
+│       ├── UD_Latin-Perseus
+│       ├── UD_Latin-PROIEL
+│       ├── UD_Latin-UDante
+│       ├── UD_Latvian-Cairo
+│       ├── UD_Latvian-LVTB
+│       ├── UD_Ligurian-GLT
+│       ├── UD_Lithuanian-ALKSNIS
+│       ├── UD_Lithuanian-HSE
+│       ├── UD_Livvi-KKPP
+│       ├── UD_Low_Saxon-LSDC
+│       ├── UD_Luxembourgish-LuxBank
+│       ├── UD_Macedonian-MTB
+│       ├── UD_Madi-Jarawara
+│       ├── UD_Maghrebi_Arabic_French-Arabizi
+│       ├── UD_Makurap-TuDeT
+│       ├── UD_Malayalam-UFAL
+│       ├── UD_Maltese-MUDT
+│       ├── UD_Manx-Cadhan
+│       ├── UD_Marathi-UFAL
+│       ├── UD_Mbya_Guarani-Dooley
+│       ├── UD_Mbya_Guarani-Thomas
+│       ├── UD_Middle_French-ALTM
+│       ├── UD_Middle_French-PROFITEROLE
+│       ├── UD_Moksha-JR
+│       ├── UD_Munduruku-TuDeT
+│       ├── UD_Naga-Suansu
+│       ├── UD_Naija-NSC
+│       ├── UD_Nayini-AHA
+│       ├── UD_Neapolitan-RB
+│       ├── UD_Nenets-Tundra
+│       ├── UD_Nheengatu-CompLin
+│       ├── UD_Northern_Kurdish-Kurmanji
+│       ├── UD_North_Sami-Giella
+│       ├── UD_Northwest_Gbaya-Autogramm
+│       ├── UD_Norwegian-Bokmaal
+│       ├── UD_Norwegian-Nynorsk
+│       ├── UD_Occitan-TTB
+│       ├── UD_Odia-ODTB
+│       ├── UD_Old_Church_Slavonic-PROIEL
+│       ├── UD_Old_East_Slavic-Birchbark
+│       ├── UD_Old_East_Slavic-RNC
+│       ├── UD_Old_East_Slavic-Ruthenian
+│       ├── UD_Old_East_Slavic-TOROT
+│       ├── UD_Old_English-Cairo
+│       ├── UD_Old_French-ALTM
+│       ├── UD_Old_French-PROFITEROLE
+│       ├── UD_Old_Irish-DipSGG
+│       ├── UD_Old_Irish-DipWBG
+│       ├── UD_Old_Occitan-CorAG
+│       ├── UD_Old_Turkish-Clausal
+│       ├── UD_Ottoman_Turkish-BOUN
+│       ├── UD_Ottoman_Turkish-DUDU
+│       ├── UD_Pashto-Sikaram
+│       ├── UD_Paumari-TueCL
+│       ├── UD_Persian-PerDT
+│       ├── UD_Persian-Seraji
+│       ├── UD_Pesh-ChibErgIS
+│       ├── UD_Phrygian-KUL
+│       ├── UD_Polish-LFG
+│       ├── UD_Polish-MPDT
+│       ├── UD_Polish-PDB
+│       ├── UD_Polish-PUD
+│       ├── UD_Pomak-Philotis
+│       ├── UD_Portuguese-Bosque
+│       ├── UD_Portuguese-CINTIL
+│       ├── UD_Portuguese-DANTEStocks
+│       ├── UD_Portuguese-GSD
+│       ├── UD_Portuguese-PetroGold
+│       ├── UD_Portuguese-Porttinari
+│       ├── UD_Portuguese-PUD
+│       ├── UD_Romanian-ArT
+│       ├── UD_Romanian-MolDoRo
+│       ├── UD_Romanian-Nonstandard
+│       ├── UD_Romanian-RRT
+│       ├── UD_Romanian-SiMoNERo
+│       ├── UD_Romanian-TueCL
+│       ├── UD_Russian-GSD
+│       ├── UD_Russian-Poetry
+│       ├── UD_Russian-PUD
+│       ├── UD_Russian-SynTagRus
+│       ├── UD_Russian-Taiga
+│       ├── UD_Sanskrit-UFAL
+│       ├── UD_Sanskrit-Vedic
+│       ├── UD_Scottish_Gaelic-ARCOSG
+│       ├── UD_Serbian-SET
+│       ├── UD_Shanghainese-ShUD
+│       ├── UD_Sicilian-STB
+│       ├── UD_Sindhi-Isra
+│       ├── UD_Sinhala-STB
+│       ├── UD_Skolt_Sami-Giellagas
+│       ├── UD_Slovak-SNK
+│       ├── UD_Slovenian-SSJ
+│       ├── UD_Slovenian-SST
+│       ├── UD_Soi-AHA
+│       ├── UD_Southern_Kurdish-Garrusi
+│       ├── UD_South_Levantine_Arabic-MADAR
+│       ├── UD_Spanish-AnCora
+│       ├── UD_Spanish-COSER
+│       ├── UD_Spanish-GSD
+│       ├── UD_Spanish-PUD
+│       ├── UD_Spanish_Sign_Language-LSE
+│       ├── UD_Swedish-LinES
+│       ├── UD_Swedish-Old
+│       ├── UD_Swedish-PUD
+│       ├── UD_Swedish_Sign_Language-SSLC
+│       ├── UD_Swedish-SweLL
+│       ├── UD_Swedish-Talbanken
+│       ├── UD_Tagalog-TRG
+│       ├── UD_Tagalog-Ugnayan
+│       ├── UD_Tamil-MWTT
+│       ├── UD_Tamil-TTB
+│       ├── UD_Tatar-NMCTT
+│       ├── UD_Teko-TuDeT
+│       ├── UD_Telugu_English-TECT
+│       ├── UD_Telugu-MTG
+│       ├── UD_Thai-PUD
+│       ├── UD_Thai-TUD
+│       ├── UD_Tswana-Popapolelo
+│       ├── UD_Tupinamba-TuDeT
+│       ├── UD_Turkish-Atis
+│       ├── UD_Turkish-BOUN
+│       ├── UD_Turkish_English-BUTR
+│       ├── UD_Turkish-FrameNet
+│       ├── UD_Turkish-GB
+│       ├── UD_Turkish_German-SAGT
+│       ├── UD_Turkish-IMST
+│       ├── UD_Turkish-Kenet
+│       ├── UD_Turkish-Penn
+│       ├── UD_Turkish-PUD
+│       ├── UD_Turkish-Tourism
+│       ├── UD_Turkish-TueCL
+│       ├── UD_Ukrainian-IU
+│       ├── UD_Ukrainian-ParlaMint
+│       ├── UD_Umbrian-IKUVINA
+│       ├── UD_Upper_Sorbian-UFAL
+│       ├── UD_Urdu-UDTB
+│       ├── UD_Uyghur-UDT
+│       ├── UD_Uzbek-TueCL
+│       ├── UD_Uzbek-UT
+│       ├── UD_Uzbek-UzUDT
+│       ├── UD_Veps-VWT
+│       ├── UD_Vietnamese-TueCL
+│       ├── UD_Vietnamese-VTB
+│       ├── UD_Warlpiri-UFAL
+│       ├── UD_Welsh-CCG
+│       ├── UD_Western_Armenian-ArmTDP
+│       ├── UD_Western_Sierra_Puebla_Nahuatl-ITML
+│       ├── UD_Wolof-WTB
+│       ├── UD_Xavante-XDT
+│       ├── UD_Xibe-XDT
+│       ├── UD_Yakut-YKTDT
+│       ├── UD_Yiddish-YiTB
+│       ├── UD_Yoruba-YTB
+│       ├── UD_Yupik-SLI
+│       └── UD_Zaar-Autogramm
+├── Unicode.BAD-DONOTUSE
+│   ├── acknowledgements
+│   │   └── Unicode6.0.0
+│   ├── alloc
+│   ├── announcements
+│   ├── book
+│   ├── casestudy
+│   │   └── cases
+│   ├── charts
+│   │   ├── case
+│   │   ├── collation
+│   │   ├── fr
+│   │   │   └── PDF
+│   │   ├── img
+│   │   ├── nameslist
+│   │   ├── normalization
+│   │   ├── PDF
+│   │   │   ├── Unicode-10.0
+│   │   │   ├── Unicode-11.0
+│   │   │   ├── Unicode-12.0
+│   │   │   ├── Unicode-12.1
+│   │   │   ├── Unicode-13.0
+│   │   │   ├── Unicode-14.0
+│   │   │   ├── Unicode-15.0
+│   │   │   ├── Unicode-15.1
+│   │   │   ├── Unicode-16.0
+│   │   │   ├── Unicode-17.0
+│   │   │   ├── Unicode-18.0
+│   │   │   ├── Unicode-3.1
+│   │   │   ├── Unicode-3.2
+│   │   │   ├── Unicode-4.0
+│   │   │   ├── Unicode-4.1
+│   │   │   ├── Unicode-5.0
+│   │   │   ├── Unicode-5.1
+│   │   │   ├── Unicode-5.2
+│   │   │   ├── Unicode-6.0
+│   │   │   ├── Unicode-6.1
+│   │   │   ├── Unicode-6.2
+│   │   │   ├── Unicode-6.3
+│   │   │   ├── Unicode-7.0
+│   │   │   ├── Unicode-8.0
+│   │   │   └── Unicode-9.0
+│   │   └── script
+│   ├── cldr
+│   │   ├── charts
+│   │   │   ├── 44
+│   │   │   ├── 48
+│   │   │   └── latest
+│   │   └── dtd
+│   │       ├── 1.0
+│   │       ├── 1.1
+│   │       └── 48
+│   ├── collation
+│   ├── conference
+│   ├── consortium
+│   │   ├── images
+│   │   └── img
+│   ├── education
+│   ├── emoji
+│   │   ├── charts
+│   │   ├── charts-11.0
+│   │   ├── charts-12.0
+│   │   ├── charts-13.0
+│   │   ├── charts-14.0
+│   │   ├── charts-15.0
+│   │   ├── charts-15.1
+│   │   ├── charts-16.0
+│   │   ├── charts-17.0
+│   │   └── images
+│   ├── errata
+│   ├── events
+│   │   └── utw
+│   │       ├── 2023
+│   │       ├── 2024
+│   │       ├── 2025
+│   │       └── 2026
+│   ├── faq
+│   │   └── images
+│   ├── glossary
+│   ├── help
+│   ├── history
+│   │   ├── 20thceleb
+│   │   ├── movie
+│   │   └── photoalbum
+│   ├── icons
+│   ├── img
+│   │   └── CJKtr8
+│   ├── irg
+│   │   ├── docs
+│   │   ├── fonts
+│   │   ├── gif
+│   │   ├── jtc1
+│   │   ├── photos
+│   │   ├── png
+│   │   ├── pp
+│   │   ├── sc2
+│   │   └── wg2
+│   ├── iso15924
+│   │   └── standard
+│   ├── iuc
+│   │   ├── img
+│   │   │   ├── buttons
+│   │   │   └── unicode-logo
+│   │   ├── iuc10
+│   │   ├── iuc11
+│   │   ├── iuc12
+│   │   ├── iuc13
+│   │   ├── iuc14
+│   │   ├── iuc15
+│   │   ├── iuc16
+│   │   ├── iuc17
+│   │   ├── iuc18
+│   │   ├── iuc19
+│   │   ├── iuc20
+│   │   ├── iuc21
+│   │   ├── iuc22
+│   │   ├── iuc23
+│   │   ├── iuc24
+│   │   ├── iuc25
+│   │   ├── iuc26
+│   │   ├── iuc27
+│   │   ├── iuc28
+│   │   └── iuc9
+│   ├── ivd
+│   │   ├── adobe-japan1
+│   │   ├── caaph
+│   │   ├── data
+│   │   │   ├── 2007-12-14
+│   │   │   ├── 2010-11-14
+│   │   │   ├── 2012-03-02
+│   │   │   ├── 2014-05-16
+│   │   │   ├── 2016-08-15
+│   │   │   ├── 2017-12-12
+│   │   │   ├── 2020-11-06
+│   │   │   ├── 2022-09-13
+│   │   │   └── 2025-07-14
+│   │   ├── gif
+│   │   ├── hanyo-denshi
+│   │   ├── krname
+│   │   ├── moji_joho
+│   │   ├── msarg
+│   │   ├── png
+│   │   └── pri
+│   │       ├── pri108
+│   │       ├── pri167
+│   │       ├── pri183
+│   │       ├── pri187
+│   │       ├── pri259
+│   │       ├── pri326
+│   │       ├── pri349
+│   │       ├── pri351
+│   │       ├── pri354
+│   │       ├── pri418
+│   │       ├── pri456
+│   │       ├── pri521
+│   │       ├── pri546
+│   │       └── pri98
+│   ├── L2
+│   │   ├── Historical
+│   │   │   ├── EdHart-X3L2-Arch-2004-02-12
+│   │   │   ├── Ethiopic
+│   │   │   ├── FrankDaCruz-Archive-UCS-Terminal-Info
+│   │   │   └── UTCdocs-Joan-2005-09-07
+│   │   ├── L1990
+│   │   ├── L1991
+│   │   ├── L1991-UTC
+│   │   ├── L1992
+│   │   ├── L1992-UTC
+│   │   ├── L1993
+│   │   ├── L1993-UTC
+│   │   ├── L1994
+│   │   ├── L1994-UTC
+│   │   ├── L1995
+│   │   ├── L1995-UTC
+│   │   ├── L1996
+│   │   ├── L1996-UTC
+│   │   ├── L1997
+│   │   ├── L1997-UTC
+│   │   ├── L1998
+│   │   ├── L1998-UTC
+│   │   ├── L1999
+│   │   │   └── N3393
+│   │   ├── L1999-UTC
+│   │   ├── L2000
+│   │   │   └── n3442
+│   │   ├── L2000-UTC
+│   │   ├── L2001
+│   │   ├── L2002
+│   │   │   ├── 02066dir
+│   │   │   └── AMD1-10646-1-2000
+│   │   ├── L2003
+│   │   │   └── 03101-indic-dir
+│   │   ├── L2004
+│   │   │   ├── 04018-tr22-draft
+│   │   │   ├── 04021-10646-2003-files
+│   │   │   ├── 04341-fpdam1-files
+│   │   │   └── 04342-pdam2-files
+│   │   ├── L2005
+│   │   │   ├── 05110-tr36-draft3
+│   │   │   ├── 05145-attachments
+│   │   │   ├── 05365-fdam2-files
+│   │   │   └── 05366-pdam3-files
+│   │   ├── L2006
+│   │   │   ├── 06059-dir
+│   │   │   ├── 06196-14651-fdam3-tables
+│   │   │   ├── 06284-n3091-tables
+│   │   │   ├── 06385-fcd14651-files
+│   │   │   ├── 06390-files
+│   │   │   ├── 06406-10646-fpdam3-files
+│   │   │   └── 06407-10646-pdam4-files
+│   │   ├── L2007
+│   │   │   ├── 07179-02n3940-pdam5-files
+│   │   │   ├── 07183-02n3939-fds14651-files
+│   │   │   └── 07409-02n3946-fdam3-files
+│   │   ├── L2008
+│   │   │   ├── 08008-02n3989-files
+│   │   │   ├── 08010-02n3982-files
+│   │   │   ├── 08070-fdam4-files
+│   │   │   ├── 08261-fdam5-files
+│   │   │   ├── 08284-utr45-files
+│   │   │   └── 08321-02n4031-files
+│   │   ├── L2009
+│   │   │   ├── 09013-02n4045-files
+│   │   │   ├── 09014-02n4049-files
+│   │   │   ├── 09015-02n4052-files
+│   │   │   ├── 09218-02n4071-files
+│   │   │   ├── 09287-02n4078-files
+│   │   │   ├── 09288-02n4075-files
+│   │   │   └── 09289-02n4077-files
+│   │   ├── L2010
+│   │   │   ├── 10039-02n4116-files
+│   │   │   ├── 10040-02n4121-files
+│   │   │   ├── 10046-02n4123-files
+│   │   │   └── 10375-02n4153-files
+│   │   ├── L2011
+│   │   │   ├── 11358-ucd-parsing
+│   │   │   └── 11425-pri185-feedback
+│   │   ├── L2012
+│   │   ├── L2013
+│   │   ├── L2014
+│   │   │   ├── 14126-files
+│   │   │   └── 14248-n4580-files
+│   │   ├── L2015
+│   │   ├── L2016
+│   │   ├── L2017
+│   │   ├── L2018
+│   │   ├── L2019
+│   │   ├── L2020
+│   │   ├── L2021
+│   │   ├── L2022
+│   │   ├── L2023
+│   │   ├── L2024
+│   │   ├── L2025
+│   │   │   └── 25220-images
+│   │   ├── L2026
+│   │   ├── meetings
+│   │   ├── OldDocRegisters
+│   │   └── topical
+│   │       ├── bookpahlavi
+│   │       ├── cjkunihan
+│   │       ├── egyptian
+│   │       ├── khitan
+│   │       ├── mongolian
+│   │       ├── pag
+│   │       ├── quranic
+│   │       ├── scriptadhoc
+│   │       ├── seal
+│   │       └── taitham
+│   ├── mail-arch
+│   │   └── unicode-ml
+│   │       ├── Archives-Old
+│   │       ├── y2001-m03
+│   │       ├── y2001-m04
+│   │       ├── y2001-m05
+│   │       ├── y2001-m06
+│   │       ├── y2001-m07
+│   │       ├── y2001-m08
+│   │       ├── y2001-m09
+│   │       ├── y2001-m10
+│   │       ├── y2001-m11
+│   │       ├── y2001-m12
+│   │       ├── y2002-m01
+│   │       ├── y2002-m02
+│   │       ├── y2002-m03
+│   │       ├── y2002-m04
+│   │       ├── y2002-m05
+│   │       ├── y2002-m06
+│   │       ├── y2002-m07
+│   │       ├── y2002-m08
+│   │       ├── y2002-m09
+│   │       ├── y2002-m10
+│   │       ├── y2002-m11
+│   │       ├── y2002-m12
+│   │       ├── y2003-m01
+│   │       ├── y2003-m02
+│   │       ├── y2003-m03
+│   │       ├── y2003-m04
+│   │       ├── y2003-m05
+│   │       ├── y2003-m06
+│   │       ├── y2003-m07
+│   │       ├── y2003-m08
+│   │       ├── y2003-m09
+│   │       ├── y2003-m10
+│   │       ├── y2003-m11
+│   │       ├── y2003-m12
+│   │       ├── y2004-m01
+│   │       ├── y2004-m02
+│   │       ├── y2004-m03
+│   │       ├── y2004-m04
+│   │       ├── y2004-m05
+│   │       ├── y2004-m06
+│   │       ├── y2004-m07
+│   │       ├── y2004-m08
+│   │       ├── y2004-m09
+│   │       ├── y2004-m10
+│   │       ├── y2004-m11
+│   │       ├── y2004-m12
+│   │       ├── y2005-m01
+│   │       ├── y2005-m02
+│   │       ├── y2005-m03
+│   │       ├── y2005-m04
+│   │       ├── y2005-m05
+│   │       ├── y2005-m06
+│   │       ├── y2005-m07
+│   │       ├── y2005-m08
+│   │       ├── y2005-m09
+│   │       ├── y2005-m10
+│   │       ├── y2005-m11
+│   │       ├── y2005-m12
+│   │       ├── y2006-m01
+│   │       ├── y2006-m02
+│   │       ├── y2006-m03
+│   │       ├── y2006-m04
+│   │       ├── y2006-m05
+│   │       ├── y2006-m06
+│   │       ├── y2006-m07
+│   │       ├── y2006-m08
+│   │       ├── y2006-m09
+│   │       ├── y2006-m10
+│   │       ├── y2006-m11
+│   │       ├── y2006-m12
+│   │       ├── y2007-m01
+│   │       ├── y2007-m02
+│   │       ├── y2007-m03
+│   │       ├── y2007-m04
+│   │       ├── y2007-m05
+│   │       ├── y2007-m06
+│   │       ├── y2007-m07
+│   │       ├── y2007-m08
+│   │       ├── y2007-m09
+│   │       ├── y2007-m10
+│   │       ├── y2007-m11
+│   │       ├── y2007-m12
+│   │       ├── y2008-m01
+│   │       ├── y2008-m02
+│   │       ├── y2008-m03
+│   │       ├── y2008-m04
+│   │       ├── y2008-m05
+│   │       ├── y2008-m06
+│   │       ├── y2008-m07
+│   │       ├── y2008-m08
+│   │       ├── y2008-m09
+│   │       ├── y2008-m10
+│   │       ├── y2008-m11
+│   │       ├── y2008-m12
+│   │       ├── y2009-m01
+│   │       ├── y2009-m02
+│   │       ├── y2009-m03
+│   │       ├── y2009-m04
+│   │       ├── y2009-m05
+│   │       ├── y2009-m06
+│   │       ├── y2009-m07
+│   │       ├── y2009-m08
+│   │       ├── y2009-m09
+│   │       ├── y2009-m10
+│   │       ├── y2009-m11
+│   │       ├── y2009-m12
+│   │       ├── y2010-m01
+│   │       ├── y2010-m02
+│   │       ├── y2010-m03
+│   │       ├── y2010-m04
+│   │       ├── y2010-m05
+│   │       ├── y2010-m06
+│   │       ├── y2010-m07
+│   │       ├── y2010-m08
+│   │       ├── y2010-m09
+│   │       ├── y2010-m10
+│   │       ├── y2010-m11
+│   │       ├── y2010-m12
+│   │       ├── y2011-m01
+│   │       ├── y2011-m02
+│   │       ├── y2011-m03
+│   │       ├── y2011-m04
+│   │       ├── y2011-m05
+│   │       ├── y2011-m06
+│   │       ├── y2011-m07
+│   │       ├── y2011-m08
+│   │       ├── y2011-m09
+│   │       ├── y2011-m10
+│   │       ├── y2011-m11
+│   │       ├── y2011-m12
+│   │       ├── y2012-m01
+│   │       ├── y2012-m02
+│   │       ├── y2012-m03
+│   │       ├── y2012-m04
+│   │       ├── y2012-m05
+│   │       ├── y2012-m06
+│   │       ├── y2012-m07
+│   │       ├── y2012-m08
+│   │       ├── y2012-m09
+│   │       ├── y2012-m10
+│   │       ├── y2012-m11
+│   │       ├── y2012-m12
+│   │       ├── y2013-m01
+│   │       ├── y2013-m02
+│   │       ├── y2013-m03
+│   │       ├── y2013-m04
+│   │       ├── y2013-m05
+│   │       ├── y2013-m06
+│   │       ├── y2013-m07
+│   │       ├── y2013-m08
+│   │       ├── y2013-m09
+│   │       ├── y2013-m10
+│   │       ├── y2013-m11
+│   │       ├── y2013-m12
+│   │       ├── y2014-m01
+│   │       ├── y2014-m02
+│   │       ├── y2014-m03
+│   │       ├── y2014-m04
+│   │       ├── y2014-m05
+│   │       ├── y2014-m06
+│   │       ├── y2014-m07
+│   │       ├── y2014-m08
+│   │       ├── y2014-m09
+│   │       ├── y2014-m10
+│   │       ├── y2014-m11
+│   │       ├── y2014-m12
+│   │       ├── y2015-m01
+│   │       ├── y2015-m02
+│   │       ├── y2015-m03
+│   │       ├── y2015-m04
+│   │       ├── y2015-m05
+│   │       ├── y2015-m06
+│   │       ├── y2015-m07
+│   │       ├── y2015-m08
+│   │       ├── y2015-m09
+│   │       ├── y2015-m10
+│   │       ├── y2015-m11
+│   │       ├── y2015-m12
+│   │       ├── y2016-m01
+│   │       ├── y2016-m02
+│   │       ├── y2016-m03
+│   │       ├── y2016-m04
+│   │       ├── y2016-m05
+│   │       ├── y2016-m06
+│   │       ├── y2016-m07
+│   │       ├── y2016-m08
+│   │       ├── y2016-m09
+│   │       ├── y2016-m10
+│   │       ├── y2016-m11
+│   │       ├── y2016-m12
+│   │       ├── y2017-m01
+│   │       ├── y2017-m02
+│   │       ├── y2017-m03
+│   │       ├── y2017-m04
+│   │       ├── y2017-m05
+│   │       ├── y2017-m06
+│   │       ├── y2017-m07
+│   │       ├── y2017-m08
+│   │       ├── y2017-m09
+│   │       ├── y2017-m10
+│   │       ├── y2017-m11
+│   │       ├── y2017-m12
+│   │       ├── y2018-m01
+│   │       ├── y2018-m02
+│   │       ├── y2018-m03
+│   │       ├── y2018-m04
+│   │       ├── y2018-m05
+│   │       ├── y2018-m06
+│   │       ├── y2018-m07
+│   │       ├── y2018-m08
+│   │       ├── y2018-m09
+│   │       ├── y2018-m10
+│   │       ├── y2018-m11
+│   │       ├── y2018-m12
+│   │       ├── y2019-m01
+│   │       ├── y2019-m02
+│   │       ├── y2019-m03
+│   │       ├── y2019-m04
+│   │       ├── y2019-m05
+│   │       ├── y2019-m06
+│   │       ├── y2019-m07
+│   │       ├── y2019-m08
+│   │       ├── y2019-m09
+│   │       ├── y2019-m10
+│   │       ├── y2019-m11
+│   │       ├── y2019-m12
+│   │       ├── y2020-m01
+│   │       ├── y2020-m02
+│   │       ├── y2020-m03
+│   │       └── y2020-m04
+│   ├── media
+│   ├── notes
+│   │   ├── tn1
+│   │   ├── tn10
+│   │   ├── tn11
+│   │   ├── tn12
+│   │   ├── tn13
+│   │   ├── tn14
+│   │   ├── tn15
+│   │   ├── tn17
+│   │   ├── tn18
+│   │   ├── tn19
+│   │   ├── tn2
+│   │   ├── tn20
+│   │   ├── tn21
+│   │   ├── tn22
+│   │   ├── tn23
+│   │   ├── tn24
+│   │   ├── tn25
+│   │   ├── tn26
+│   │   ├── tn27
+│   │   ├── tn28
+│   │   ├── tn29
+│   │   ├── tn3
+│   │   ├── tn30
+│   │   ├── tn31
+│   │   ├── tn32
+│   │   ├── tn33
+│   │   ├── tn34
+│   │   ├── tn35
+│   │   ├── tn36
+│   │   ├── tn37
+│   │   │   └── pics
+│   │   ├── tn39
+│   │   ├── tn4
+│   │   ├── tn40
+│   │   ├── tn41
+│   │   ├── tn42
+│   │   ├── tn43
+│   │   ├── tn44
+│   │   ├── tn45
+│   │   ├── tn46
+│   │   ├── tn47
+│   │   ├── tn48
+│   │   ├── tn49
+│   │   ├── tn5
+│   │   ├── tn50
+│   │   ├── tn51
+│   │   ├── tn52
+│   │   ├── tn53
+│   │   ├── tn54
+│   │   ├── tn55
+│   │   ├── tn56
+│   │   ├── tn57
+│   │   ├── tn58
+│   │   ├── tn59
+│   │   ├── tn6
+│   │   ├── tn60
+│   │   ├── tn61
+│   │   ├── tn62
+│   │   ├── tn7
+│   │   ├── tn8
+│   │   └── tn9
+│   ├── onlinedat
+│   ├── pending
+│   ├── policies
+│   ├── press
+│   ├── Public
+│   │   ├── 10.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 11.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 1.1-Update
+│   │   ├── 12.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 12.1.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 13.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 14.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 15.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 15.1.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 16.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 17.0.0
+│   │   │   ├── charts
+│   │   │   ├── emoji
+│   │   │   ├── idna
+│   │   │   ├── linkification
+│   │   │   ├── security
+│   │   │   ├── uca
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 18.0.0
+│   │   │   ├── charts
+│   │   │   ├── emoji
+│   │   │   ├── idna
+│   │   │   └── ucd
+│   │   ├── 2.0-Update
+│   │   ├── 2.1-Update
+│   │   ├── 2.1-Update2
+│   │   ├── 2.1-Update3
+│   │   ├── 2.1-Update4
+│   │   ├── 3.0-Update
+│   │   ├── 3.0-Update1
+│   │   ├── 3.1-Update
+│   │   ├── 3.1-Update1
+│   │   ├── 3.2-Update
+│   │   │   ├── extracted
+│   │   │   └── images
+│   │   ├── 4.0-Update
+│   │   │   └── extracted
+│   │   ├── 4.0-Update1
+│   │   │   └── extracted
+│   │   ├── 4.1.0
+│   │   │   ├── charts
+│   │   │   └── ucd
+│   │   ├── 5.0.0
+│   │   │   ├── charts
+│   │   │   └── ucd
+│   │   ├── 5.1.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 5.2.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 6.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 6.1.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 6.2.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 6.3.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 7.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 8.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── 9.0.0
+│   │   │   ├── charts
+│   │   │   ├── ucd
+│   │   │   └── ucdxml
+│   │   ├── cldr
+│   │   │   ├── 1.1.0
+│   │   │   ├── 1.1.1
+│   │   │   ├── 1.2.0
+│   │   │   ├── 1.3.0
+│   │   │   ├── 1.4
+│   │   │   ├── 1.4.0
+│   │   │   ├── 1.4.1
+│   │   │   ├── 1.5.0
+│   │   │   ├── 1.5.1
+│   │   │   ├── 1.6.0
+│   │   │   ├── 1.6.1
+│   │   │   ├── 1.7.0
+│   │   │   ├── 1.7.1
+│   │   │   ├── 1.7.2
+│   │   │   ├── 1.8.0
+│   │   │   ├── 1.8.1
+│   │   │   ├── 1.9.0
+│   │   │   ├── 1.9.1
+│   │   │   ├── 2.0.0
+│   │   │   ├── 2.0.1
+│   │   │   ├── 21
+│   │   │   ├── 22
+│   │   │   ├── 22.1
+│   │   │   ├── 23
+│   │   │   ├── 23.1
+│   │   │   ├── 24
+│   │   │   ├── 25
+│   │   │   ├── 26
+│   │   │   ├── 26.0.1
+│   │   │   ├── 27
+│   │   │   ├── 27.0.1
+│   │   │   ├── 28
+│   │   │   ├── 29
+│   │   │   ├── 30
+│   │   │   ├── 30.0.1
+│   │   │   ├── 30.0.2
+│   │   │   ├── 30.0.3
+│   │   │   ├── 31
+│   │   │   ├── 31.0.1
+│   │   │   ├── 32
+│   │   │   ├── 32.0.1
+│   │   │   ├── 33
+│   │   │   ├── 33.1
+│   │   │   ├── 34
+│   │   │   ├── 35
+│   │   │   ├── 35.1
+│   │   │   ├── 36
+│   │   │   ├── 36.1
+│   │   │   ├── 37
+│   │   │   ├── 38
+│   │   │   ├── 38.1
+│   │   │   ├── 39
+│   │   │   ├── 40
+│   │   │   ├── 41
+│   │   │   ├── 42
+│   │   │   ├── 43
+│   │   │   ├── 43.1
+│   │   │   ├── 44
+│   │   │   ├── 45
+│   │   │   ├── 46
+│   │   │   ├── 46.1
+│   │   │   ├── 47
+│   │   │   ├── 48
+│   │   │   ├── 48.1
+│   │   │   ├── 48.2
+│   │   │   └── 49
+│   │   ├── CTT
+│   │   │   └── 16.0.0
+│   │   ├── draft
+│   │   │   ├── charts
+│   │   │   ├── emoji
+│   │   │   ├── idna
+│   │   │   └── ucd
+│   │   ├── emoji
+│   │   │   ├── 1.0
+│   │   │   ├── 11.0
+│   │   │   ├── 12.0
+│   │   │   ├── 12.1
+│   │   │   ├── 13.0
+│   │   │   ├── 13.1
+│   │   │   ├── 14.0
+│   │   │   ├── 15.0
+│   │   │   ├── 15.1
+│   │   │   ├── 16.0
+│   │   │   ├── 2.0
+│   │   │   ├── 3.0
+│   │   │   ├── 4.0
+│   │   │   ├── 5.0
+│   │   │   └── latest
+│   │   ├── idna
+│   │   │   ├── 10.0.0
+│   │   │   ├── 11.0.0
+│   │   │   ├── 12.0.0
+│   │   │   ├── 12.1.0
+│   │   │   ├── 13.0.0
+│   │   │   ├── 14.0.0
+│   │   │   ├── 15.0.0
+│   │   │   ├── 15.1.0
+│   │   │   ├── 16.0.0
+│   │   │   ├── 5.2.0
+│   │   │   ├── 6.0.0
+│   │   │   ├── 6.1.0
+│   │   │   ├── 6.2.0
+│   │   │   ├── 6.3.0
+│   │   │   ├── 7.0.0
+│   │   │   ├── 8.0.0
+│   │   │   ├── 9.0.0
+│   │   │   ├── idna2008derived
+│   │   │   └── latest
+│   │   ├── latest
+│   │   │   ├── emoji
+│   │   │   └── uca
+│   │   ├── MAPPINGS
+│   │   │   ├── EASTASIA
+│   │   │   ├── ETSI
+│   │   │   ├── ISO8859
+│   │   │   ├── OBSOLETE
+│   │   │   └── VENDORS
+│   │   ├── math
+│   │   │   ├── latest
+│   │   │   ├── revision-09
+│   │   │   ├── revision-11
+│   │   │   ├── revision-12
+│   │   │   ├── revision-13
+│   │   │   ├── revision-14
+│   │   │   └── revision-15
+│   │   ├── PROGRAMS
+│   │   │   ├── BidiReferenceC
+│   │   │   ├── BidiReferenceCpp
+│   │   │   ├── BidiReferenceJava
+│   │   │   ├── KANJIMAP
+│   │   │   ├── LineBreakSampleCpp
+│   │   │   ├── SCSU
+│   │   │   └── SCSUMini
+│   │   ├── reconstructed
+│   │   │   ├── 1.0.0
+│   │   │   └── 1.0.1
+│   │   ├── security
+│   │   │   ├── 10.0.0
+│   │   │   ├── 11.0.0
+│   │   │   ├── 12.0.0
+│   │   │   ├── 12.1.0
+│   │   │   ├── 13.0.0
+│   │   │   ├── 14.0.0
+│   │   │   ├── 15.0.0
+│   │   │   ├── 15.1.0
+│   │   │   ├── 16.0.0
+│   │   │   ├── 6.3.0
+│   │   │   ├── 7.0.0
+│   │   │   ├── 8.0.0
+│   │   │   ├── 9.0.0
+│   │   │   ├── latest
+│   │   │   ├── revision-02
+│   │   │   ├── revision-03
+│   │   │   ├── revision-04
+│   │   │   ├── revision-05
+│   │   │   └── revision-06
+│   │   ├── UCA
+│   │   │   ├── 10.0.0
+│   │   │   ├── 11.0.0
+│   │   │   ├── 12.0.0
+│   │   │   ├── 12.1.0
+│   │   │   ├── 13.0.0
+│   │   │   ├── 14.0.0
+│   │   │   ├── 15.0.0
+│   │   │   ├── 15.1.0
+│   │   │   ├── 16.0.0
+│   │   │   ├── 2.1.9
+│   │   │   ├── 3.0.1
+│   │   │   ├── 3.1.1
+│   │   │   ├── 4.0.0
+│   │   │   ├── 4.1.0
+│   │   │   ├── 5.0.0
+│   │   │   ├── 5.1.0
+│   │   │   ├── 5.2.0
+│   │   │   ├── 6.0.0
+│   │   │   ├── 6.1.0
+│   │   │   ├── 6.2.0
+│   │   │   ├── 6.3.0
+│   │   │   ├── 7.0.0
+│   │   │   ├── 8.0.0
+│   │   │   ├── 9.0.0
+│   │   │   └── latest
+│   │   ├── UCD
+│   │   │   └── latest
+│   │   ├── UNIDATA
+│   │   │   ├── auxiliary
+│   │   │   ├── emoji
+│   │   │   └── extracted
+│   │   ├── vertical
+│   │   │   ├── revision-09
+│   │   │   ├── revision-10
+│   │   │   ├── revision-11
+│   │   │   ├── revision-12
+│   │   │   ├── revision-13
+│   │   │   ├── revision-14
+│   │   │   ├── revision-15
+│   │   │   ├── revision-16
+│   │   │   └── revision-17
+│   │   └── zipped
+│   │       ├── 10.0.0
+│   │       ├── 11.0.0
+│   │       ├── 12.0.0
+│   │       ├── 12.1.0
+│   │       ├── 13.0.0
+│   │       ├── 14.0.0
+│   │       ├── 15.0.0
+│   │       ├── 15.1.0
+│   │       ├── 16.0.0
+│   │       ├── 4.1.0
+│   │       ├── 5.0.0
+│   │       ├── 5.1.0
+│   │       ├── 5.2.0
+│   │       ├── 6.0.0
+│   │       ├── 6.1.0
+│   │       ├── 6.2.0
+│   │       ├── 6.3.0
+│   │       ├── 7.0.0
+│   │       ├── 8.0.0
+│   │       ├── 9.0.0
+│   │       └── latest
+│   ├── publications
+│   ├── references
+│   ├── releases
+│   ├── reports
+│   │   ├── tr1
+│   │   ├── tr10
+│   │   │   └── Sample
+│   │   ├── tr11
+│   │   │   ├── images
+│   │   │   └── print-images
+│   │   ├── tr12
+│   │   ├── tr13
+│   │   ├── tr14
+│   │   ├── tr15
+│   │   │   ├── charts
+│   │   │   ├── images
+│   │   │   └── print-images
+│   │   ├── tr16
+│   │   ├── tr17
+│   │   ├── tr18
+│   │   ├── tr19
+│   │   ├── tr2
+│   │   ├── tr20
+│   │   ├── tr21
+│   │   │   └── charts
+│   │   ├── tr22
+│   │   ├── tr23
+│   │   ├── tr24
+│   │   ├── tr25
+│   │   │   ├── images
+│   │   │   ├── tr25-8-glyphs
+│   │   │   ├── tr25-glyphs
+│   │   │   └── tr25-images
+│   │   ├── tr26
+│   │   ├── tr27
+│   │   ├── tr28
+│   │   │   └── images
+│   │   ├── tr29
+│   │   │   ├── images
+│   │   │   └── print-images
+│   │   ├── tr3
+│   │   ├── tr30
+│   │   │   └── datafiles
+│   │   ├── tr31
+│   │   │   ├── images
+│   │   │   └── print-images
+│   │   ├── tr32
+│   │   ├── tr33
+│   │   ├── tr34
+│   │   │   ├── images
+│   │   │   └── print-images
+│   │   ├── tr35
+│   │   │   ├── 48
+│   │   │   ├── dev
+│   │   │   ├── images
+│   │   │   ├── js
+│   │   │   ├── tr35-69
+│   │   │   ├── tr35-75
+│   │   │   ├── tr35-76
+│   │   │   ├── tr35-77
+│   │   │   ├── tr35-78
+│   │   │   └── tr35-79
+│   │   ├── tr36
+│   │   │   ├── data
+│   │   │   └── images
+│   │   ├── tr37
+│   │   │   └── fonts
+│   │   ├── tr38
+│   │   ├── tr39
+│   │   │   ├── data
+│   │   │   └── images
+│   │   ├── tr40
+│   │   ├── tr41
+│   │   ├── tr42
+│   │   ├── tr44
+│   │   ├── tr45
+│   │   ├── tr46
+│   │   ├── tr49
+│   │   ├── tr50
+│   │   ├── tr51
+│   │   │   └── images
+│   │   ├── tr52
+│   │   │   └── images
+│   │   ├── tr53
+│   │   │   └── images
+│   │   ├── tr54
+│   │   ├── tr55
+│   │   │   └── images
+│   │   ├── tr56
+│   │   │   ├── fonts
+│   │   │   └── images
+│   │   ├── tr57
+│   │   │   └── images
+│   │   ├── tr58
+│   │   ├── tr59
+│   │   ├── tr6
+│   │   ├── tr60
+│   │   ├── tr61
+│   │   ├── tr7
+│   │   ├── tr8
+│   │   └── tr9
+│   │       ├── BidiReferenceCpp
+│   │       └── BidiReferenceJava
+│   ├── repos
+│   │   └── cldr
+│   │       └── tags
+│   ├── resources
+│   ├── review
+│   │   ├── pr-175
+│   │   ├── pri177
+│   │   ├── pri178
+│   │   ├── pri179
+│   │   ├── pri180
+│   │   ├── pri181
+│   │   ├── pri182
+│   │   ├── pri184
+│   │   ├── pri185
+│   │   ├── pri186
+│   │   ├── pri188
+│   │   ├── pri189
+│   │   ├── pri190
+│   │   ├── pri191
+│   │   ├── pri192
+│   │   ├── pri193
+│   │   ├── pri194
+│   │   ├── pri195
+│   │   ├── pri196
+│   │   ├── pri197
+│   │   ├── pri198
+│   │   ├── pri199
+│   │   ├── pri200
+│   │   ├── pri201
+│   │   ├── pri202
+│   │   ├── pri203
+│   │   ├── pri204
+│   │   ├── pri205
+│   │   ├── pri206
+│   │   ├── pri207
+│   │   ├── pri208
+│   │   ├── pri209
+│   │   ├── pri210
+│   │   ├── pri211
+│   │   ├── pri212
+│   │   ├── pri213
+│   │   ├── pri214
+│   │   ├── pri215
+│   │   ├── pri216
+│   │   ├── pri217
+│   │   ├── pri218
+│   │   ├── pri219
+│   │   ├── pri220
+│   │   ├── pri221
+│   │   ├── pri222
+│   │   ├── pri223
+│   │   ├── pri224
+│   │   ├── pri225
+│   │   ├── pri226
+│   │   ├── pri227
+│   │   ├── pri228
+│   │   ├── pri229
+│   │   ├── pri230
+│   │   ├── pri231
+│   │   ├── pri232
+│   │   ├── pri233
+│   │   ├── pri235
+│   │   ├── pri236
+│   │   ├── pri237
+│   │   ├── pri238
+│   │   ├── pri239
+│   │   ├── pri240
+│   │   ├── pri241
+│   │   ├── pri242
+│   │   ├── pri243
+│   │   ├── pri244
+│   │   ├── pri245
+│   │   ├── pri246
+│   │   ├── pri247
+│   │   ├── pri248
+│   │   ├── pri249
+│   │   ├── pri250
+│   │   ├── pri251
+│   │   ├── pri252
+│   │   ├── pri253
+│   │   ├── pri254
+│   │   ├── pri255
+│   │   ├── pri256
+│   │   ├── pri257
+│   │   ├── pri258
+│   │   ├── pri260
+│   │   ├── pri261
+│   │   ├── pri262
+│   │   ├── pri263
+│   │   ├── pri264
+│   │   ├── pri265
+│   │   ├── pri266
+│   │   ├── pri267
+│   │   ├── pri268
+│   │   ├── pri269
+│   │   ├── pri270
+│   │   ├── pri271
+│   │   ├── pri272
+│   │   ├── pri273
+│   │   ├── pri274
+│   │   ├── pri275
+│   │   ├── pri276
+│   │   ├── pri277
+│   │   ├── pri278
+│   │   ├── pri279
+│   │   ├── pri280
+│   │   ├── pri281
+│   │   ├── pri282
+│   │   ├── pri283
+│   │   ├── pri284
+│   │   ├── pri285
+│   │   ├── pri286
+│   │   ├── pri287
+│   │   ├── pri288
+│   │   ├── pri289
+│   │   ├── pri290
+│   │   ├── pri291
+│   │   ├── pri292
+│   │   ├── pri293
+│   │   ├── pri294
+│   │   ├── pri295
+│   │   ├── pri296
+│   │   ├── pri297
+│   │   ├── pri298
+│   │   ├── pri299
+│   │   ├── pri300
+│   │   ├── pri301
+│   │   ├── pri302
+│   │   ├── pri303
+│   │   ├── pri304
+│   │   ├── pri305
+│   │   ├── pri306
+│   │   ├── pri307
+│   │   ├── pri308
+│   │   ├── pri309
+│   │   ├── pri310
+│   │   ├── pri311
+│   │   ├── pri312
+│   │   ├── pri313
+│   │   ├── pri314
+│   │   ├── pri315
+│   │   ├── pri316
+│   │   ├── pri317
+│   │   ├── pri318
+│   │   ├── pri319
+│   │   ├── pri320
+│   │   ├── pri321
+│   │   ├── pri322
+│   │   ├── pri323
+│   │   ├── pri324
+│   │   ├── pri325
+│   │   ├── pri327
+│   │   ├── pri328
+│   │   ├── pri329
+│   │   ├── pri330
+│   │   ├── pri331
+│   │   ├── pri332
+│   │   ├── pri333
+│   │   ├── pri334
+│   │   ├── pri335
+│   │   ├── pri336
+│   │   ├── pri337
+│   │   ├── pri338
+│   │   ├── pri339
+│   │   ├── pri340
+│   │   ├── pri341
+│   │   ├── pri342
+│   │   ├── pri343
+│   │   ├── pri344
+│   │   ├── pri345
+│   │   ├── pri346
+│   │   ├── pri347
+│   │   ├── pri348
+│   │   ├── pri350
+│   │   ├── pri352
+│   │   ├── pri353
+│   │   ├── pri355
+│   │   ├── pri356
+│   │   ├── pri357
+│   │   ├── pri358
+│   │   ├── pri359
+│   │   ├── pri360
+│   │   ├── pri361
+│   │   ├── pri362
+│   │   ├── pri363
+│   │   ├── pri364
+│   │   ├── pri365
+│   │   ├── pri366
+│   │   ├── pri367
+│   │   ├── pri368
+│   │   ├── pri369
+│   │   ├── pri370
+│   │   ├── pri371
+│   │   ├── pri372
+│   │   ├── pri373
+│   │   ├── pri374
+│   │   ├── pri375
+│   │   ├── pri376
+│   │   ├── pri377
+│   │   ├── pri378
+│   │   ├── pri379
+│   │   ├── pri380
+│   │   ├── pri381
+│   │   ├── pri382
+│   │   ├── pri383
+│   │   ├── pri384
+│   │   ├── pri385
+│   │   ├── pri386
+│   │   ├── pri387
+│   │   ├── pri388
+│   │   ├── pri389
+│   │   ├── pri390
+│   │   ├── pri391
+│   │   ├── pri392
+│   │   ├── pri393
+│   │   ├── pri394
+│   │   ├── pri395
+│   │   ├── pri396
+│   │   ├── pri397
+│   │   ├── pri398
+│   │   ├── pri399
+│   │   ├── pri400
+│   │   ├── pri401
+│   │   ├── pri402
+│   │   ├── pri403
+│   │   ├── pri404
+│   │   ├── pri405
+│   │   ├── pri406
+│   │   ├── pri407
+│   │   ├── pri408
+│   │   ├── pri409
+│   │   ├── pri410
+│   │   ├── pri411
+│   │   ├── pri412
+│   │   ├── pri413
+│   │   ├── pri414
+│   │   ├── pri415
+│   │   ├── pri416
+│   │   ├── pri417
+│   │   ├── pri419
+│   │   ├── pri420
+│   │   ├── pri421
+│   │   ├── pri422
+│   │   ├── pri423
+│   │   ├── pri424
+│   │   ├── pri425
+│   │   ├── pri426
+│   │   ├── pri427
+│   │   ├── pri428
+│   │   ├── pri429
+│   │   ├── pri430
+│   │   ├── pri431
+│   │   ├── pri432
+│   │   ├── pri433
+│   │   ├── pri434
+│   │   ├── pri435
+│   │   ├── pri436
+│   │   ├── pri437
+│   │   ├── pri438
+│   │   ├── pri439
+│   │   ├── pri440
+│   │   ├── pri441
+│   │   ├── pri442
+│   │   ├── pri443
+│   │   ├── pri444
+│   │   ├── pri445
+│   │   ├── pri446
+│   │   ├── pri447
+│   │   ├── pri448
+│   │   ├── pri449
+│   │   ├── pri450
+│   │   ├── pri451
+│   │   ├── pri452
+│   │   ├── pri453
+│   │   ├── pri454
+│   │   ├── pri455
+│   │   ├── pri457
+│   │   ├── pri458
+│   │   ├── pri459
+│   │   ├── pri460
+│   │   ├── pri461
+│   │   ├── pri462
+│   │   ├── pri463
+│   │   ├── pri464
+│   │   ├── pri465
+│   │   ├── pri466
+│   │   ├── pri467
+│   │   ├── pri468
+│   │   ├── pri469
+│   │   ├── pri470
+│   │   ├── pri471
+│   │   ├── pri472
+│   │   ├── pri473
+│   │   ├── pri474
+│   │   ├── pri475
+│   │   ├── pri476
+│   │   ├── pri477
+│   │   ├── pri478
+│   │   ├── pri479
+│   │   ├── pri480
+│   │   ├── pri481
+│   │   ├── pri482
+│   │   ├── pri483
+│   │   ├── pri484
+│   │   ├── pri485
+│   │   ├── pri486
+│   │   ├── pri487
+│   │   ├── pri488
+│   │   ├── pri489
+│   │   ├── pri490
+│   │   ├── pri491
+│   │   ├── pri492
+│   │   ├── pri493
+│   │   ├── pri494
+│   │   ├── pri495
+│   │   ├── pri496
+│   │   ├── pri497
+│   │   ├── pri498
+│   │   ├── pri499
+│   │   ├── pri500
+│   │   ├── pri501
+│   │   ├── pri502
+│   │   ├── pri503
+│   │   ├── pri504
+│   │   ├── pri505
+│   │   ├── pri506
+│   │   ├── pri507
+│   │   ├── pri508
+│   │   ├── pri509
+│   │   │   └── draft7
+│   │   ├── pri510
+│   │   ├── pri511
+│   │   ├── pri512
+│   │   ├── pri513
+│   │   ├── pri514
+│   │   ├── pri515
+│   │   ├── pri516
+│   │   ├── pri517
+│   │   ├── pri518
+│   │   ├── pri519
+│   │   ├── pri520
+│   │   ├── pri522
+│   │   ├── pri523
+│   │   ├── pri524
+│   │   ├── pri525
+│   │   ├── pri526
+│   │   ├── pri527
+│   │   ├── pri528
+│   │   ├── pri529
+│   │   ├── pri530
+│   │   ├── pri531
+│   │   ├── pri532
+│   │   ├── pri533
+│   │   ├── pri534
+│   │   ├── pri535
+│   │   ├── pri536
+│   │   ├── pri537
+│   │   ├── pri538
+│   │   ├── pri539
+│   │   ├── pri540
+│   │   ├── pri541
+│   │   ├── pri542
+│   │   ├── pri543
+│   │   ├── pri544
+│   │   ├── pri545
+│   │   └── pri547
+│   ├── roadmaps
+│   │   ├── bmp
+│   │   ├── sip
+│   │   ├── smp
+│   │   ├── ssp
+│   │   └── tip
+│   ├── search
+│   ├── sitemap
+│   ├── standard
+│   │   ├── transcriptions
+│   │   ├── translations
+│   │   │   └── hebrew_files
+│   │   ├── versions
+│   │   └── where
+│   ├── terminology
+│   ├── timesens
+│   ├── ucd
+│   ├── udhr
+│   ├── uli
+│   │   ├── meeting-minutes
+│   │   └── pas
+│   │       ├── gmx-v
+│   │       └── srx
+│   ├── uni2book
+│   ├── uni2errata
+│   │   └── 851
+│   ├── unibook
+│   │   ├── help
+│   │   ├── help-5.1.0
+│   │   ├── help-5.2.0
+│   │   └── oldversions
+│   ├── unicode
+│   │   ├── alloc
+│   │   ├── conference
+│   │   ├── consortium
+│   │   ├── faq
+│   │   ├── reports
+│   │   │   ├── tr10
+│   │   │   ├── tr11
+│   │   │   ├── tr13
+│   │   │   ├── tr14
+│   │   │   ├── tr14-4
+│   │   │   ├── tr15
+│   │   │   ├── tr16
+│   │   │   ├── tr17
+│   │   │   ├── tr18
+│   │   │   ├── tr19
+│   │   │   ├── tr20
+│   │   │   ├── tr21
+│   │   │   ├── tr22
+│   │   │   ├── tr23
+│   │   │   ├── tr24
+│   │   │   ├── tr25
+│   │   │   ├── tr27
+│   │   │   ├── tr28
+│   │   │   ├── tr29
+│   │   │   ├── tr30
+│   │   │   ├── tr52
+│   │   │   ├── tr6
+│   │   │   ├── tr7
+│   │   │   ├── tr8
+│   │   │   └── tr9
+│   │   ├── standard
+│   │   │   └── versions
+│   │   ├── timesens
+│   │   ├── uni2book
+│   │   ├── uni2errata
+│   │   └── versions
+│   │       └── Unicode4.0.0
+│   ├── versions
+│   │   ├── corrigendum6data
+│   │   ├── latest
+│   │   │   └── core-spec
+│   │   ├── stats
+│   │   ├── Unicode1.0.0
+│   │   ├── Unicode10.0.0
+│   │   ├── Unicode1.1.0
+│   │   ├── Unicode11.0.0
+│   │   ├── Unicode12.0.0
+│   │   ├── Unicode12.1.0
+│   │   ├── Unicode13.0.0
+│   │   ├── Unicode14.0.0
+│   │   ├── Unicode15.0.0
+│   │   ├── Unicode15.1.0
+│   │   ├── Unicode16.0.0
+│   │   │   └── core-spec
+│   │   ├── Unicode17.0.0
+│   │   │   └── core-spec
+│   │   ├── Unicode18.0.0
+│   │   │   └── core-spec
+│   │   ├── Unicode2.0.0
+│   │   ├── Unicode2.1.0
+│   │   ├── Unicode3.0.0
+│   │   ├── Unicode3.0.1
+│   │   ├── Unicode3.1.0
+│   │   ├── Unicode3.1.1
+│   │   ├── Unicode3.2.0
+│   │   ├── Unicode4.0.0
+│   │   ├── Unicode4.0.1
+│   │   ├── Unicode4.1.0
+│   │   ├── Unicode5.0.0
+│   │   ├── Unicode5.1.0
+│   │   │   └── images
+│   │   ├── Unicode5.2.0
+│   │   ├── Unicode6.0.0
+│   │   ├── Unicode6.1.0
+│   │   ├── Unicode6.2.0
+│   │   ├── Unicode6.3.0
+│   │   ├── Unicode7.0.0
+│   │   ├── Unicode8.0.0
+│   │   └── Unicode9.0.0
+│   ├── webscripts
+│   └── wg2
+│       ├── docs
+│       └── iso10646
+│           └── edition5
+├── VerbNet
+│   └── verbnet-master
+│       ├── api
+│       │   ├── scripts
+│       │   └── tests
+│       ├── verbnet3.4
+│       ├── verbnet-test
+│       └── vn-gl
+├── Wiktionary
+│   └── en
+├── WordFrameNet
+│   ├── WFN
+│   └── XWFN
+└── Wordnet
+    └── WordNet-3.0
+        ├── dict
+        ├── doc
+        │   ├── html
+        │   ├── man
+        │   ├── pdf
+        │   └── ps
+        ├── include
+        │   └── tk
+        ├── lib
+        │   └── wnres
+        └── src
+
+6305 directories
