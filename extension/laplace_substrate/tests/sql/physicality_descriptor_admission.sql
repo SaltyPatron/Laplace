@@ -84,7 +84,7 @@ BEGIN
 END
 $timeout_adapter$;
 CREATE FUNCTION pg_temp.descriptor_receipt(r pg_temp.descriptor_result) RETURNS jsonb
-LANGUAGE SQL IMMUTABLE AS $
+LANGUAGE SQL IMMUTABLE AS $$
 SELECT jsonb_build_object('source_forms',(r).source_form_count,'D_count',cardinality((r).descriptor_ids),
     'V_count',cardinality((r).view_ids),'D_first',encode((r).descriptor_ids[1],'hex'),
     'D_second',encode((r).descriptor_ids[2],'hex'),'V_first',encode((r).view_ids[1],'hex'),

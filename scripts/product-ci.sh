@@ -800,7 +800,18 @@ run_release_mutation_window() (
   trap cleanup_release_mutation_window EXIT
   [[ "$api_was_active" != 1 ]] || sudo -n systemctl stop laplace-api
 
-  run_release_mutation_window "$actions"
+  if csv_selected "$actions" install; then
+    run_install
+  else
+    echo "::notice::native installation remains valid; install skipped"
+  fi
+
+  if csv_selected "$actions" database; then
+    run_database_maintenance --prepare
+    run_db_tests
+  else
+    echo "::notice::database preparation/regression remains valid; database mutation skipped"
+  fi
 
   if [[ "$api_was_active" == 1 ]]; then
     sudo -n systemctl start laplace-api
@@ -860,18 +871,7 @@ run_release_delivery() {
   local publish_scope="${LAPLACE_PUBLISH_SCOPE:-full}"
   echo "::notice::delivery actions=$actions publish_scope=$publish_scope db_suites=${LAPLACE_DB_SUITES:-} live_suites=${LAPLACE_LIVE_SUITES:-}"
 
-  if csv_selected "$actions" install; then
-    run_install
-  else
-    echo "::notice::native installation remains valid; install skipped"
-  fi
-
-  if csv_selected "$actions" database; then
-    run_database_maintenance --prepare
-    run_db_tests
-  else
-    echo "::notice::database preparation/regression remains valid; database mutation skipped"
-  fi
+  run_release_mutation_window "$actions"
 
   # Publication is a planner action, not a tax on native-only SHAs. pipeline.sh
   # install + postgres bounce does not republish API/MCP/UI.

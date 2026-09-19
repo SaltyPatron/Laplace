@@ -21,6 +21,13 @@ def function(name: str) -> str:
     return source[start:finish]
 
 
+def subshell_function(name: str, next_name: str) -> str:
+    source = PRODUCT.read_text(encoding="utf-8")
+    start = source.index(f"{name}() (\n")
+    finish = source.index(f"\n)\n\n{next_name}() {{\n", start) + 3
+    return source[start:finish]
+
+
 def publish_function(name: str) -> str:
     source = PUBLISH.read_text(encoding="utf-8")
     start = source.index(f"{name}() {{\n")
@@ -130,15 +137,26 @@ class ProductStageOwnershipContract(unittest.TestCase):
             "check_deps",
             "require_built_revision",
             "release_candidate_current_before_mutation",
-            "run_install",
-            "run_database_maintenance --prepare",
-            "run_db_tests",
+            'run_release_mutation_window "install,database"',
             "run_publish",
         ]
         positions = [candidate.index(token) for token in mutation]
         self.assertEqual(positions, sorted(positions))
         self.assertNotIn("run_build", candidate)
         self.assertNotIn("run_dev_tests", candidate)
+
+        mutation_window = subshell_function(
+            "run_release_mutation_window", "run_release_candidate")
+        mutation = [
+            'csv_selected "$actions" install',
+            "run_install",
+            'csv_selected "$actions" database',
+            "run_database_maintenance --prepare",
+            "run_db_tests",
+        ]
+        positions = [mutation_window.index(token) for token in mutation]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn('run_release_mutation_window "$actions"', mutation_window)
 
         activation = function("run_release_activation")
         self.assertNotIn("run_publish", activation)
@@ -156,14 +174,13 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn('local actions="${LAPLACE_DELIVERY_ACTIONS:-}"', delivery)
         self.assertIn('[[ -z "$actions" ]]', delivery)
         self.assertNotIn('LAPLACE_DELIVERY_ACTIONS:-all', delivery)
-        self.assertIn('csv_selected "$actions" install', delivery)
-        self.assertIn('csv_selected "$actions" database', delivery)
+        self.assertIn('run_release_mutation_window "$actions"', delivery)
         self.assertIn('csv_selected "$actions" reconcile', delivery)
         self.assertIn('csv_selected "$actions" publish', delivery)
         self.assertIn('csv_selected "$actions" live', delivery)
-        self.assertIn("run_install", delivery)
-        self.assertIn("run_database_maintenance --prepare", delivery)
-        self.assertIn("run_db_tests", delivery)
+        self.assertNotIn("run_install", delivery)
+        self.assertNotIn("run_database_maintenance --prepare", delivery)
+        self.assertNotIn("run_db_tests", delivery)
         self.assertIn("run_publish", delivery)
         self.assertIn("verify_installed_product", delivery)
         self.assertIn("reconcile_installed_product", delivery)
