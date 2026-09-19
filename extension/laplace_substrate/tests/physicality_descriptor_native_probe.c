@@ -396,15 +396,14 @@ int main(void) {
         CHECK(sources[0].source_trust == 0.0 && sources[1].source_trust == 0.0);
         REFUSES((void)admission_sources(s, source_arrays, 1), "must align");
         /* Trust remains in the SQL compatibility signature but is deliberately
-         * inert for physical-form provenance. Every value normalizes to zero;
+         * inert for physical-form provenance. The transport still refuses
+         * malformed declared priors; valid values normalize to zero because
          * semantic source policy belongs to ordinary attestation ingestion. */
         const double compatibility_values[] = {NAN, INFINITY, -.1, 1.1};
         for (size_t i = 0; i < sizeof(compatibility_values) / sizeof(compatibility_values[0]); ++i) {
             trusts[1] = Float8GetDatum(compatibility_values[i]);
-            sources = admission_sources(s, source_arrays, 2);
-            CHECK(sources[0].source_trust == 0.0 && sources[1].source_trust == 0.0);
-            CHECK(memcmp(&sources[1].source_id, &entity, 16) == 0);
-            CHECK(memcmp(&sources[1].source_unit_id, &placement, 16) == 0);
+            REFUSES((void)admission_sources(s, source_arrays, 2),
+                "explicit finite registered prior");
         }
     }
     {
