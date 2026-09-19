@@ -72,7 +72,13 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
 
         await dec.InitializeAsync(ctx);
         long applied = 0;
-        await foreach (var change in dec.DecomposeAsync(ctx, DecomposerOptions.Default))
+        // This acceptance owns the complete Tier-0 floor.  A positive cap is the
+        // decomposer's declared floor-only scope: after the persistence barrier it
+        // prevents the independent UCD property-artifact estate from turning this
+        // codepoint proof into a second full Unicode-source ingest.  Those artifacts
+        // have their own inventory/admission coverage.
+        var floorOnly = DecomposerOptions.Default with { MaxInputUnits = TotalCodepoints };
+        await foreach (var change in dec.DecomposeAsync(ctx, floorOnly))
         {
             await writer.ApplyAsync(change);
             applied += change.Entities.Length;
