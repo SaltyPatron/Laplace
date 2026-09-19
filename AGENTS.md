@@ -40,6 +40,24 @@ Repository work must advance the invention rather than narrate its incompletenes
 - Verification is proportional evidence, not a product substitute. Tests and gates should prove the behavior being changed; they must not become an ever-expanding prerequisite maze that prevents the requested feature, ingest, deployment or repair from being implemented and exercised.
 - Treat AST as universal knowledge structure, not a code-only subsystem. Before writing a source-private semantic parser/emitter, identify the exact syntax provider (Tree-sitter grammar, standards parser, codec, decoder, etc.), preserve its concrete nodes/fields/spans/errors, and express the semantic lowering as a versioned recipe into the universal typed AST. The shared machine then owns content/physicality, occurrence, reference, testimony, provenance, calculation and reconstruction lowering. Reuse the existing Tree-sitter grammar estate and generic AST/decomposition machinery wherever they fit; do not invent parallel modality-specific AST worlds.
 
+## Source-generation priority law
+
+When dataset estate, parser/provider, recipe/profile and decomposer work touch the same source, treat them as one dependency graph rather than isolated tasks.
+
+One selectable source generation is the bound tuple:
+
+```text
+authority + release/version + exact artifact graph
++ syntax provider / grammar / codec generation
++ semantic recipe/profile + universal-AST mapping generation
+```
+
+- A newer selected release already staged under `/vault/Data/.refresh-*` is an implementation input immediately. Develop and qualify the provider/recipe against those exact staged bytes instead of deepening a bespoke decomposer against a superseded active tree.
+- Do not activate a staged release until its provider/recipe accounts for the selected native schema and every field/role has a disposition. Release activation and recipe activation are one source-generation boundary.
+- Source-specific code owns irreducible recovery of concrete syntax and source-specific academic interpretation. The shared recipe/AST/admission machinery owns canonical content/physicality, trajectories/occurrences, typed references, provenance, testimony, calculations, reconstruction and persistence.
+- One recovered value may legitimately participate in several state classes. A definition/example sentence is ordinary canonical content with physicality; `sense HAS_DEFINITION sentence` or `frame HAS_EXAMPLE sentence` is separate attributed testimony pointing at that same content.
+- Before adding another source-named emitter, parser object model or attestation policy, check whether the rule belongs in the shared recipe interpreter/universal AST. Reuse/port the existing `Laplace-Refactor` source-profile/source-decomposition machinery where it matches the invention instead of inventing a third admission model.
+
 An agent working on Laplace must hold the whole machine in view rather than reducing it to whichever subsystem is currently open in an editor.
 
 ### Recursive bounded representation

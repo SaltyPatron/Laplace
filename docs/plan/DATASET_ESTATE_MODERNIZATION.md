@@ -43,6 +43,23 @@ This snapshot proves local byte identity only. It does not promote partial downl
 unresolved licenses, unenumerated upstream families, or unvalidated extracted trees to
 `admitted`.
 
+## Observed full-file inventory — 2026-09-19
+
+`vault-data-inventory.tsv` (commit `c19f5021`) was generated from `/vault/Data` with `find`, so hidden staging paths and actual files are included. It supersedes directory-only inference for source-shape questions.
+
+| Source | Active evidence | Staged selected/newer evidence | Recipe/admission consequence |
+| --- | --- | --- | --- |
+| OMW | two duplicate legacy trees, each 1,455 files / 1,259 `.tab` files | OMW 2.0: 32 WN-LMF XML lexicons plus license/citation/readme sidecars | use one generic WN-LMF recipe/provider; stop extending legacy tab semantics |
+| OEWN | PWN 3.0 compatibility estate remains active separately | OEWN 2025+ WN-LMF gzip staged | share WN-LMF lowering; retain release/source testimony separately |
+| CILI | mutable Git checkout | current immutable archives + extracted ILI/mapping graph | qualify current snapshot recipe, then activate it |
+| UD | v2.17, 686 `.conllu` | v2.18, 712 `.conllu` among 2,502 files | develop/measure recipe against v2.18 now |
+| Tatoeba | smaller active subset | 15 selected 2026-08-29 core/sidecar artifacts | one source recipe must disposition every selected sidecar |
+| Wiktionary | older raw/extracted + English-specific material | 2026-08-28 raw Wiktextract gzip | bind schema/recipe to selected raw generation |
+| semantic mappings | active SemLink/VerbNet/PropBank plus legacy MapNet/WFN/PredicateMatrix | FrameBase 2.0, VerbAtlas 1.1, pinned SemLink/VerbNet/PropBank snapshots | coverage replacement and recipe qualification proceed together |
+| Tree-sitter | large grammar estate present | same estate is structural authority input, not a code-only tool | qualify provider set and lower concrete syntax through universal typed AST recipes |
+
+The staging estate is therefore part of implementation work immediately. Final activation still requires the selected artifact graph and matching provider/recipe generation to agree.
+
 ## Disposition vocabulary
 
 Use only these states. Do not invent softer synonyms.

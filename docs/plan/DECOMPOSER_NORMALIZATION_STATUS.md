@@ -20,9 +20,15 @@ artifact graph; [#1471](https://github.com/SaltyPatron/Laplace/issues/1471),
 [#1473](https://github.com/SaltyPatron/Laplace/issues/1473) own the release-specific
 replacement and acquisition work.
 
-The handoff into this campaign is a list of admitted immutable artifact hashes, not a
-legacy directory name. Decomposer fidelity and coverage receipts are measured only after
-the dataset estate's global completion gate passes.
+The input to this campaign is a selected source generation: exact staged/admitted artifact
+identity plus its provider/grammar/codec generation and semantic recipe/profile. Recipe and
+decomposer fidelity work begins against the staged selected artifacts as soon as that
+release boundary is known; it does not wait for unrelated estate cleanup to finish.
+
+Final activation/current-source claims still require the source-estate verification and
+the matching provider/recipe qualification to converge. `vault-data-inventory.tsv` at
+`c19f5021` is the current host file inventory used to reconcile active versus staged
+source generations.
 
 ## Tracking authority
 
