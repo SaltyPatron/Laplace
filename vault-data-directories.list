@@ -1,9 +1,111 @@
 .
 ├── Atomic2020
 ├── CILI
+│   ├── .git
+│   │   ├── hooks
+│   │   ├── info
+│   │   ├── logs
+│   │   │   └── refs
+│   │   ├── objects
+│   │   │   ├── 06
+│   │   │   ├── 08
+│   │   │   ├── 0c
+│   │   │   ├── 0d
+│   │   │   ├── 11
+│   │   │   ├── 12
+│   │   │   ├── 13
+│   │   │   ├── 17
+│   │   │   ├── 18
+│   │   │   ├── 19
+│   │   │   ├── 1c
+│   │   │   ├── 1f
+│   │   │   ├── 21
+│   │   │   ├── 24
+│   │   │   ├── 25
+│   │   │   ├── 2c
+│   │   │   ├── 33
+│   │   │   ├── 34
+│   │   │   ├── 39
+│   │   │   ├── 3b
+│   │   │   ├── 3d
+│   │   │   ├── 40
+│   │   │   ├── 41
+│   │   │   ├── 45
+│   │   │   ├── 46
+│   │   │   ├── 49
+│   │   │   ├── 4e
+│   │   │   ├── 50
+│   │   │   ├── 51
+│   │   │   ├── 53
+│   │   │   ├── 56
+│   │   │   ├── 57
+│   │   │   ├── 5d
+│   │   │   ├── 5e
+│   │   │   ├── 61
+│   │   │   ├── 64
+│   │   │   ├── 66
+│   │   │   ├── 67
+│   │   │   ├── 6d
+│   │   │   ├── 6e
+│   │   │   ├── 71
+│   │   │   ├── 74
+│   │   │   ├── 76
+│   │   │   ├── 77
+│   │   │   ├── 78
+│   │   │   ├── 7b
+│   │   │   ├── 7d
+│   │   │   ├── 80
+│   │   │   ├── 86
+│   │   │   ├── 87
+│   │   │   ├── 8b
+│   │   │   ├── 8d
+│   │   │   ├── 90
+│   │   │   ├── 93
+│   │   │   ├── 95
+│   │   │   ├── 96
+│   │   │   ├── 97
+│   │   │   ├── 98
+│   │   │   ├── a1
+│   │   │   ├── a5
+│   │   │   ├── aa
+│   │   │   ├── ab
+│   │   │   ├── af
+│   │   │   ├── b0
+│   │   │   ├── b3
+│   │   │   ├── b4
+│   │   │   ├── b5
+│   │   │   ├── bb
+│   │   │   ├── bc
+│   │   │   ├── be
+│   │   │   ├── c0
+│   │   │   ├── c4
+│   │   │   ├── c5
+│   │   │   ├── c6
+│   │   │   ├── cb
+│   │   │   ├── d6
+│   │   │   ├── df
+│   │   │   ├── e1
+│   │   │   ├── e3
+│   │   │   ├── e5
+│   │   │   ├── ea
+│   │   │   ├── ee
+│   │   │   ├── f5
+│   │   │   ├── fa
+│   │   │   ├── fd
+│   │   │   ├── info
+│   │   │   └── pack
+│   │   └── refs
+│   │       ├── heads
+│   │       ├── remotes
+│   │       └── tags
+│   ├── .github
+│   │   └── workflows
 │   └── older-wn-mappings
 ├── code-authority
 │   ├── cpython
+│   │   ├── .azure-pipelines
+│   │   ├── .devcontainer
+│   │   │   └── wasi
 │   │   ├── Doc
 │   │   │   ├── c-api
 │   │   │   ├── data
@@ -21,6 +123,16 @@
 │   │   │   ├── tutorial
 │   │   │   ├── using
 │   │   │   └── whatsnew
+│   │   ├── .git
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   ├── problem-matchers
+│   │   │   └── workflows
 │   │   ├── Grammar
 │   │   ├── Include
 │   │   │   ├── cpython
@@ -117,37 +229,39 @@
 │   │   ├── Python
 │   │   │   ├── clinic
 │   │   │   └── frozen_modules
-│   │   └── Tools
-│   │       ├── build
-│   │       ├── buildbot
-│   │       ├── c-analyzer
-│   │       ├── cases_generator
-│   │       ├── check-c-api-docs
-│   │       ├── clinic
-│   │       ├── freeze
-│   │       ├── ftscalingbench
-│   │       ├── gdb
-│   │       ├── i18n
-│   │       ├── importbench
-│   │       ├── inspection
-│   │       ├── jit
-│   │       ├── lockbench
-│   │       ├── msi
-│   │       ├── nuget
-│   │       ├── patchcheck
-│   │       ├── peg_generator
-│   │       ├── picklebench
-│   │       ├── pixi-packages
-│   │       ├── scripts
-│   │       ├── ssl
-│   │       ├── tsan
-│   │       ├── ubsan
-│   │       ├── unicode
-│   │       ├── unittestgui
-│   │       └── wasm
+│   │   ├── Tools
+│   │   │   ├── build
+│   │   │   ├── buildbot
+│   │   │   ├── c-analyzer
+│   │   │   ├── cases_generator
+│   │   │   ├── check-c-api-docs
+│   │   │   ├── clinic
+│   │   │   ├── freeze
+│   │   │   ├── ftscalingbench
+│   │   │   ├── gdb
+│   │   │   ├── i18n
+│   │   │   ├── importbench
+│   │   │   ├── inspection
+│   │   │   ├── jit
+│   │   │   ├── lockbench
+│   │   │   ├── msi
+│   │   │   ├── nuget
+│   │   │   ├── patchcheck
+│   │   │   ├── peg_generator
+│   │   │   ├── picklebench
+│   │   │   ├── pixi-packages
+│   │   │   ├── scripts
+│   │   │   ├── ssl
+│   │   │   ├── tsan
+│   │   │   ├── ubsan
+│   │   │   ├── unicode
+│   │   │   ├── unittestgui
+│   │   │   └── wasm
+│   │   └── .well-known
 │   ├── docs
 │   │   ├── admin
 │   │   ├── api
+│   │   ├── .devcontainer
 │   │   ├── docs
 │   │   │   ├── ai
 │   │   │   ├── architecture
@@ -169,11 +283,26 @@
 │   │   │   ├── samples-and-tutorials
 │   │   │   ├── standard
 │   │   │   └── visual-basic
+│   │   ├── .git
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── agents
+│   │   │   ├── instructions
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   ├── policies
+│   │   │   ├── prompts
+│   │   │   ├── skills
+│   │   │   └── workflows
 │   │   ├── includes
 │   │   │   ├── core-changes
 │   │   │   └── migration-guide
 │   │   ├── samples
 │   │   │   └── snippets
+│   │   ├── .vscode
 │   │   └── _zip
 │   ├── postgres
 │   │   ├── config
@@ -241,6 +370,14 @@
 │   │   │   └── xml2
 │   │   ├── doc
 │   │   │   └── src
+│   │   ├── .git
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   └── src
 │   │       ├── backend
 │   │       ├── bin
@@ -257,6 +394,16 @@
 │   │       ├── tools
 │   │       └── tutorial
 │   └── runtime
+│       ├── .azuredevops
+│       ├── .claude
+│       ├── .config
+│       │   └── 1espt
+│       ├── .devcontainer
+│       │   ├── android
+│       │   ├── libraries
+│       │   ├── scripts
+│       │   ├── wasm
+│       │   └── wasm-multiThreaded
 │       ├── docs
 │       │   ├── coding-guidelines
 │       │   ├── design
@@ -274,6 +421,23 @@
 │       │   ├── pipelines
 │       │   ├── restore
 │       │   └── testing
+│       ├── .git
+│       │   ├── hooks
+│       │   ├── info
+│       │   ├── logs
+│       │   ├── objects
+│       │   └── refs
+│       ├── .github
+│       │   ├── agents
+│       │   ├── aw
+│       │   ├── copilot
+│       │   ├── instructions
+│       │   ├── ISSUE_TEMPLATE
+│       │   ├── policies
+│       │   ├── prompts
+│       │   ├── PULL_REQUEST_TEMPLATE
+│       │   ├── skills
+│       │   └── workflows
 │       └── src
 │           ├── coreclr
 │           ├── installer
@@ -319,6 +483,20 @@
 ├── MapNet-0.1
 ├── omw
 │   ├── etc
+│   ├── .git
+│   │   ├── hooks
+│   │   ├── info
+│   │   ├── logs
+│   │   │   └── refs
+│   │   ├── objects
+│   │   │   ├── info
+│   │   │   └── pack
+│   │   └── refs
+│   │       ├── heads
+│   │       ├── remotes
+│   │       └── tags
+│   ├── .github
+│   │   └── workflows
 │   ├── scripts
 │   ├── tests
 │   │   └── data
@@ -356,6 +534,20 @@
 │       └── wikt
 ├── OMW
 │   ├── etc
+│   ├── .git
+│   │   ├── hooks
+│   │   ├── info
+│   │   ├── logs
+│   │   │   └── refs
+│   │   ├── objects
+│   │   │   ├── info
+│   │   │   └── pack
+│   │   └── refs
+│   │       ├── heads
+│   │       ├── remotes
+│   │       └── tags
+│   ├── .github
+│   │   └── workflows
 │   ├── scripts
 │   ├── tests
 │   │   └── data
@@ -407,8 +599,107 @@
 │       │   └── v3.4
 │       ├── frames
 │       └── scripts
+├── .refresh-20260903
+│   ├── Atomic
+│   ├── CILI
+│   │   └── extracted
+│   │       ├── .github
+│   │       ├── older-wn-mappings
+│   │       └── sense-mappings
+│   ├── FrameBase-2.0
+│   ├── Games
+│   │   └── Chess
+│   │       ├── openings
+│   │       └── twic
+│   ├── GeoNames
+│   │   └── extracted
+│   ├── .git-cache
+│   │   ├── cili-current.git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── hatecheck.git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── lichess-openings.git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── propbank-current.git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── semlink-current.git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── sghatecheck.git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── verbnet-current.git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   └── xstest.git
+│   │       ├── branches
+│   │       ├── hooks
+│   │       ├── info
+│   │       ├── objects
+│   │       └── refs
+│   ├── .jobs
+│   ├── LichessOpenings
+│   ├── NaturalEarth
+│   ├── OMW-2.0
+│   │   └── extracted
+│   │       └── omw-2.0
+│   ├── OpenEnglishWordNet-2025-plus
+│   ├── PropBank
+│   ├── Safety
+│   │   ├── CivilComments
+│   │   │   ├── civil-comments-f2970eb3a55777454c94069077cc8d9b5866312d
+│   │   │   └── data
+│   │   ├── HateCheck
+│   │   ├── MeasuringHateSpeech
+│   │   │   └── measuring-hate-speech-5468f6e118396646b02a2f691e771f6b6d9502ea
+│   │   ├── ProsocialDialog
+│   │   │   └── prosocial-dialog-d77d7ad3c624c51030f2f32c83e892b3d620b3d4
+│   │   ├── RealToxicityPrompts
+│   │   │   └── real-toxicity-prompts-f21629712ffd6a3d13a54fd2807ccd521c55ef74
+│   │   ├── SGHateCheck
+│   │   ├── SocialBiasFrames
+│   │   ├── SocialChemistry101
+│   │   ├── ToxiGen
+│   │   │   └── toxigen-ea082a8973a287097b17973343576e0c8da8eb3b
+│   │   └── XSTest
+│   ├── SemLink
+│   ├── Tatoeba
+│   │   └── extracted
+│   ├── TWIC
+│   ├── UD-Treebanks
+│   │   └── extracted
+│   │       └── ud-treebanks-v2.18
+│   ├── VerbAtlas-1.1
+│   ├── VerbNet
+│   └── Wiktionary
 ├── SemLink
 │   └── semlink-master
+│       ├── .idea
 │       ├── instances
 │       ├── other_resources
 │       └── tools
@@ -423,16 +714,34 @@
 │   └── text
 ├── TreeSitter
 │   ├── ebnf
-│   │   └── crates
-│   │       ├── dprint-plugin-ebnf
-│   │       ├── ebnf-fmt
-│   │       ├── ebnf-parser
-│   │       └── tree-sitter-ebnf
+│   │   ├── crates
+│   │   │   ├── dprint-plugin-ebnf
+│   │   │   ├── ebnf-fmt
+│   │   │   ├── ebnf-parser
+│   │   │   └── tree-sitter-ebnf
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   └── .github
 │   ├── superhtml
 │   │   ├── editors
 │   │   │   ├── bbedit
 │   │   │   ├── emacs
 │   │   │   └── vscode
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   ├── cli
 │   │   │   ├── css
@@ -451,6 +760,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -465,6 +783,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -480,6 +807,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── src
@@ -495,6 +831,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -510,6 +855,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── asm
 │   │   ├── src
@@ -521,6 +875,15 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   └── src
@@ -532,6 +895,15 @@
 │   │   │   └── rust
 │   │   ├── docs
 │   │   │   └── images
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -546,12 +918,22 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       └── corpus
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── .vscode
 │   ├── tree-sitter-bash
 │   │   ├── bindings
 │   │   │   ├── c
@@ -561,6 +943,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -573,6 +964,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── gen
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   ├── helix
 │   │   │   └── nvim
@@ -590,6 +990,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── src
@@ -605,6 +1014,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -616,6 +1034,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -627,6 +1054,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   └── src
@@ -639,6 +1075,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── main
 │   │   │   └── tests
 │   │   ├── queries
@@ -652,6 +1097,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -666,15 +1118,23 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── scripts
 │   │   │   └── dummy_plugin
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       ├── corpus
-│   │       ├── highlight
-│   │       └── indent
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   ├── highlight
+│   │   │   └── indent
+│   │   └── .woodpecker
 │   ├── tree-sitter-brightscript
 │   │   ├── bindings
 │   │   │   ├── c
@@ -683,6 +1143,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -698,6 +1165,16 @@
 │   │   │   ├── swift
 │   │   │   └── zig
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -713,6 +1190,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── build
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -725,6 +1211,15 @@
 │   │   │   └── swift
 │   │   ├── examples
 │   │   │   └── cairo-snippets
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -737,6 +1232,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -754,6 +1258,15 @@
 │   │   ├── examples
 │   │   ├── extensions
 │   │   │   └── chatl
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -769,6 +1282,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -776,6 +1298,13 @@
 │   │       └── corpus
 │   ├── tree-sitter-clojure
 │   │   ├── doc
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -789,6 +1318,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -806,6 +1344,15 @@
 │   │   │   └── swift
 │   │   ├── docs
 │   │   │   └── js
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   ├── tree_sitter
 │   │   │   └── tree_sitter_comment
@@ -819,6 +1366,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -836,6 +1392,13 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   └── src
 │   │       └── tree_sitter
 │   ├── tree-sitter-corn
@@ -846,6 +1409,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -854,6 +1424,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -870,6 +1449,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -884,6 +1473,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -902,6 +1500,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -920,6 +1528,15 @@
 │   │   ├── csv
 │   │   │   ├── queries
 │   │   │   └── src
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── psv
 │   │   │   ├── queries
 │   │   │   └── src
@@ -937,6 +1554,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -947,6 +1573,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -963,6 +1598,16 @@
 │   │   │   └── swift
 │   │   ├── examples
 │   │   │   └── rtmet
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -976,6 +1621,16 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -991,6 +1646,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1011,6 +1675,16 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── desktop
 │   │   ├── src
@@ -1026,11 +1700,21 @@
 │   │   │   ├── rust
 │   │   │   ├── swift
 │   │   │   └── zig
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       └── corpus
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── .vscode
 │   ├── tree-sitter-dhall
 │   │   ├── bindings
 │   │   │   ├── c
@@ -1039,6 +1723,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1054,6 +1747,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── docs
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1063,6 +1765,16 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1077,6 +1789,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1091,6 +1810,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1100,6 +1828,15 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1110,6 +1847,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1123,12 +1869,24 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .cargo
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
+│   │   ├── .helix
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   ├── test
 │   │   │   ├── corpus
 │   │   │   └── earthly
+│   │   ├── .vscode
 │   │   └── xtask
 │   │       └── src
 │   ├── tree-sitter-editorconfig
@@ -1137,6 +1895,16 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── editorconfig
 │   │   ├── src
@@ -1151,6 +1919,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -1159,6 +1934,15 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1174,6 +1958,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── docs
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── src
@@ -1193,18 +1986,37 @@
 │   │   ├── docs
 │   │   │   └── js
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       ├── corpus
-│   │       └── highlight
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   └── highlight
+│   │   └── .vscode
 │   ├── tree-sitter-elsa
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -1215,6 +2027,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1228,6 +2047,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1236,6 +2064,15 @@
 │   ├── tree-sitter-enforce
 │   │   ├── bindings
 │   │   │   └── go
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1249,6 +2086,16 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1259,6 +2106,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1271,6 +2125,15 @@
 │   │   │   ├── node
 │   │   │   ├── python
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1287,6 +2150,15 @@
 │   │   ├── documentation
 │   │   ├── extensions
 │   │   │   └── builtin-forms
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── grammar-lib
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1298,6 +2170,15 @@
 │   │   │   └── rust
 │   │   ├── corpus
 │   │   ├── docs
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -1307,6 +2188,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── docs
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -1319,6 +2209,15 @@
 │   │   │   └── rust
 │   │   ├── examples
 │   │   │   └── fish
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── src
@@ -1334,6 +2233,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1345,6 +2253,15 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1360,6 +2277,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1372,6 +2298,13 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── example
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1391,6 +2324,18 @@
 │   │   │   └── src
 │   │   ├── fsharp_signature
 │   │   │   └── src
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
+│   │   ├── .opencode
+│   │   │   └── skills
 │   │   ├── queries
 │   │   └── test
 │   │       ├── corpus
@@ -1402,6 +2347,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── grammar
 │   │   ├── queries
 │   │   ├── script
@@ -1411,6 +2365,15 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .gitlab
+│   │   │   └── issue_templates
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1427,6 +2390,15 @@
 │   │   │   └── swift
 │   │   ├── etc
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1444,6 +2416,15 @@
 │   │   │   └── swift
 │   │   ├── etc
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1461,6 +2442,15 @@
 │   │   │   └── swift
 │   │   ├── examples
 │   │   │   └── gdscript2
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -1469,7 +2459,15 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── node_modules
+│   │   │   ├── .bin
 │   │   │   ├── nan
 │   │   │   └── tree-sitter-cli
 │   │   ├── queries
@@ -1487,6 +2485,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1502,6 +2509,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1509,6 +2525,15 @@
 │   │       └── corpus
 │   ├── tree-sitter-git-config
 │   │   ├── docs
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1519,6 +2544,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -1533,6 +2565,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1547,6 +2588,16 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── src
@@ -1565,6 +2616,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── docs
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── parser
 │   │   ├── queries
 │   │   │   └── glimmer
@@ -1583,14 +2643,24 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── parser
 │   │   ├── queries
 │   │   │   └── glimmer_javascript
 │   │   ├── src
 │   │   │   ├── tree_sitter
 │   │   │   └── tree-sitter-javascript
-│   │   └── test
-│   │       └── corpus
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── .vscode
 │   ├── tree-sitter-glimmer-typescript
 │   │   ├── bindings
 │   │   │   ├── c
@@ -1600,13 +2670,23 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── glimmer_typescript
 │   │   ├── src
 │   │   │   ├── tree_sitter
 │   │   │   └── tree-sitter-typescript
-│   │   └── test
-│   │       └── corpus
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── .vscode
 │   ├── tree-sitter-glsl
 │   │   ├── bindings
 │   │   │   ├── c
@@ -1615,6 +2695,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1627,6 +2716,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   └── src
@@ -1639,6 +2737,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1653,6 +2758,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1666,6 +2780,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -1679,6 +2800,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -1691,6 +2821,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1705,6 +2842,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   └── src
@@ -1716,6 +2862,15 @@
 │   │   │   └── rust
 │   │   ├── dialects
 │   │   │   └── helm
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1727,6 +2882,13 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -1738,6 +2900,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1750,6 +2921,13 @@
 │   │   │   └── rust
 │   │   ├── corpus
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── lua
 │   │   │   └── gql
 │   │   ├── plugin
@@ -1766,13 +2944,23 @@
 │   │   │   ├── helix
 │   │   │   ├── nvim
 │   │   │   └── zed
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       ├── corpus
-│   │       └── highlight
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   └── highlight
+│   │   └── .vscode
 │   ├── tree-sitter-groovy
 │   │   ├── bindings
 │   │   │   ├── c
@@ -1781,6 +2969,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1796,6 +2993,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -1806,17 +3012,37 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       ├── cases
-│   │       └── corpus
+│   │   ├── test
+│   │   │   ├── cases
+│   │   │   └── corpus
+│   │   └── .vscode
 │   ├── tree-sitter-hare
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   └── src
@@ -1830,6 +3056,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── grammar
 │   │   ├── queries
 │   │   ├── src
@@ -1840,6 +3075,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── grammar
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1859,6 +3101,16 @@
 │   │   │   └── vendor
 │   │   ├── example
 │   │   │   └── real_world_stuff
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -1871,6 +3123,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1882,6 +3143,13 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -1893,6 +3161,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -1906,6 +3183,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -1914,6 +3200,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1923,6 +3216,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1937,6 +3237,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1951,12 +3260,28 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
 │   │       └── corpus
 │   ├── tree-sitter-http
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -1972,6 +3297,13 @@
 │   │   │   └── swift
 │   │   ├── examples
 │   │   │   └── front_page
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -1983,6 +3315,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── hyprlang
 │   │   ├── src
@@ -1999,6 +3340,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── common
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── src
@@ -2015,6 +3365,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── grammar
 │   │   ├── queries
 │   │   ├── src
@@ -2029,6 +3388,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2042,6 +3408,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -2052,6 +3427,15 @@
 │   │   │   └── rust
 │   │   ├── examples
 │   │   │   └── html
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2059,6 +3443,13 @@
 │   │   │   └── corpus
 │   │   └── tools
 │   ├── tree-sitter-janet-simple
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2072,6 +3463,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2086,6 +3486,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── injection_tests
 │   │   │   ├── data
 │   │   │   └── src
@@ -2103,6 +3512,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2112,6 +3531,15 @@
 │   │       └── tags
 │   ├── tree-sitter-jinja
 │   │   ├── common
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── scripts
 │   │   ├── tree-sitter-jinja
 │   │   │   ├── bindings
@@ -2128,6 +3556,13 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── build
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   └── src
 │   │       └── tree_sitter
 │   ├── tree-sitter-jsdoc
@@ -2138,6 +3573,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2151,6 +3595,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2164,6 +3617,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2174,6 +3634,13 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   └── src
 │   │       └── tree_sitter
 │   ├── tree-sitter-jsonnet
@@ -2185,6 +3652,13 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2199,6 +3673,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -2215,6 +3699,15 @@
 │   │   │   └── swift
 │   │   ├── ftdetect
 │   │   ├── fuzzer
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── lua
 │   │   │   └── tree-sitter-just
 │   │   ├── queries
@@ -2237,6 +3730,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2251,6 +3753,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -2261,6 +3772,15 @@
 │   │   │   └── swift
 │   │   ├── examples
 │   │   │   └── spec
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -2276,6 +3796,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2291,6 +3820,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2300,6 +3836,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2313,6 +3856,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -2326,6 +3876,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   └── test
 │   │       └── corpus
@@ -2333,6 +3892,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -2347,6 +3913,16 @@
 │   │   │   └── swift
 │   │   ├── contrib
 │   │   ├── doc
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── lua
 │   │   │   └── nvim-treesitter
 │   │   ├── plugin
@@ -2366,6 +3942,16 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -2377,6 +3963,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── prebuilds
 │   │   │   └── darwin-arm64
 │   │   ├── queries
@@ -2392,6 +3987,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2406,6 +4010,15 @@
 │   │   │   └── swift
 │   │   ├── example
 │   │   │   └── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2419,6 +4032,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2431,6 +4053,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2441,6 +4072,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -2452,6 +4092,16 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2462,10 +4112,26 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
 │   ├── tree-sitter-make
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2478,6 +4144,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── common
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── scripts
 │   │   ├── tree-sitter-markdown
 │   │   │   ├── bindings
@@ -2498,6 +4173,15 @@
 │   │   │   ├── rust
 │   │   │   ├── swift
 │   │   │   └── zig
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   ├── emacs
 │   │   │   ├── helix
@@ -2511,6 +4195,13 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── script
 │   │   └── src
 │   │       └── tree_sitter
@@ -2523,6 +4214,13 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2537,6 +4235,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── grammar
 │   │   ├── images
 │   │   ├── queries
@@ -2553,12 +4260,22 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── dialect
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       ├── corpus
-│   │       └── highlight
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   └── highlight
+│   │   └── .vscode
 │   ├── tree-sitter-muttrc
 │   │   ├── bindings
 │   │   │   ├── c
@@ -2567,6 +4284,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -2575,6 +4301,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2589,6 +4322,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── docs
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2602,6 +4344,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2616,6 +4367,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── LICENSES
 │   │   ├── queries
 │   │   ├── samples
@@ -2631,12 +4391,26 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   └── src
 │   │       └── tree_sitter
 │   ├── tree-sitter-ninja
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -2645,6 +4419,15 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2655,6 +4438,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── nix
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2667,6 +4459,15 @@
 │   │   │   └── swift
 │   │   ├── examples
 │   │   │   └── nqc
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2680,6 +4481,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── installation
 │   │   ├── plugin
 │   │   ├── queries
@@ -2699,6 +4509,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2708,6 +4527,16 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2743,6 +4572,15 @@
 │   │   │   ├── owl
 │   │   │   ├── ppxlib
 │   │   │   └── pyre-check
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── grammars
 │   │   │   ├── interface
 │   │   │   ├── ocaml
@@ -2760,6 +4598,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2773,6 +4620,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2786,7 +4642,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .doc
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2796,6 +4660,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   └── src
 │   │       └── tree_sitter
 │   ├── tree-sitter-pem
@@ -2807,6 +4678,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2821,6 +4701,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── lib
 │   │   ├── queries
 │   │   ├── script
@@ -2838,6 +4727,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── common
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── php
 │   │   │   └── src
 │   │   ├── php_only
@@ -2855,6 +4754,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -2867,6 +4775,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   └── src
 │   │       └── tree_sitter
 │   ├── tree-sitter-po
@@ -2875,6 +4790,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   └── src
@@ -2887,6 +4811,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -2902,6 +4835,15 @@
 │   │   │   └── swift
 │   │   ├── examples
 │   │   │   └── NeverSink-Filter
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2913,6 +4855,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -2927,11 +4878,21 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       └── corpus
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── .zed
 │   ├── tree-sitter-printf
 │   │   ├── bindings
 │   │   │   ├── c
@@ -2940,6 +4901,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -2953,11 +4923,21 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       └── corpus
+│   │   ├── test
+│   │   │   └── corpus
+│   │   └── .vscode
 │   ├── tree-sitter-prolog
 │   │   ├── bindings
 │   │   │   ├── c
@@ -2966,6 +4946,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── grammars
 │   │   │   ├── problog
 │   │   │   └── prolog
@@ -2975,6 +4962,16 @@
 │   ├── tree-sitter-promql
 │   │   ├── example
 │   │   │   └── real_world
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -2988,6 +4985,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3000,6 +5006,15 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -3007,6 +5022,15 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3016,6 +5040,15 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3029,6 +5062,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -3043,6 +5085,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── grammar
 │   │   ├── queries
 │   │   ├── scripts
@@ -3060,6 +5109,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3075,6 +5133,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3090,6 +5158,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3106,6 +5183,15 @@
 │   │   │   ├── swift
 │   │   │   └── zig
 │   │   ├── example
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3120,6 +5206,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3134,6 +5229,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── query
 │   │   ├── src
@@ -3150,13 +5254,23 @@
 │   │   │   ├── r
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       ├── corpus
-│   │       ├── highlight
-│   │       └── tags
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   ├── highlight
+│   │   │   └── tags
+│   │   └── .vscode
 │   ├── tree-sitter-racket
 │   │   ├── bindings
 │   │   │   ├── c
@@ -3166,6 +5280,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── fuzztest
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3180,6 +5303,13 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3194,6 +5324,13 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3208,6 +5345,16 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3222,6 +5369,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3232,6 +5388,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3245,6 +5408,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3259,6 +5429,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3272,6 +5451,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3285,6 +5473,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3299,6 +5496,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3311,7 +5517,15 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── example
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── node_modules
+│   │   │   ├── .bin
 │   │   │   ├── nan
 │   │   │   └── tree-sitter-cli
 │   │   ├── queries
@@ -3327,6 +5541,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3340,6 +5563,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3354,6 +5586,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── docs
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
+│   │   ├── .helix
 │   │   ├── neovim
 │   │   ├── queries
 │   │   ├── queries-generated
@@ -3373,6 +5615,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -3389,6 +5640,15 @@
 │   │   │   └── swift
 │   │   ├── docs
 │   │   │   └── js
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   ├── tree_sitter
 │   │   │   └── tree_sitter_rst
@@ -3404,6 +5664,16 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3419,6 +5689,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -3431,6 +5708,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3445,6 +5732,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -3455,6 +5752,13 @@
 │   │       └── tags
 │   ├── tree-sitter-scfg
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -3466,6 +5770,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3477,6 +5790,13 @@
 │   │   │   └── rust
 │   │   ├── corpus
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -3492,6 +5812,15 @@
 │   │   ├── common
 │   │   ├── docs
 │   │   │   └── playground
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── scripts
 │   │   ├── sflog
 │   │   │   ├── queries
@@ -3513,6 +5842,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -3525,6 +5863,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3539,6 +5884,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── LICENSES
 │   │   └── src
 │   │       └── tree_sitter
@@ -3547,6 +5901,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -3562,6 +5925,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -3576,6 +5948,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── snakemake
 │   │   ├── src
@@ -3591,6 +5972,19 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .claude
+│   │   │   ├── agents
+│   │   │   ├── commands
+│   │   │   └── scripts
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3598,12 +5992,22 @@
 │   │   │   ├── corpus
 │   │   │   ├── highlight
 │   │   │   └── sample
-│   │   └── typed-libraries
-│   │       └── python
+│   │   ├── typed-libraries
+│   │   │   └── python
+│   │   └── .vscode
 │   ├── tree-sitter-sourcepawn
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3617,6 +6021,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -3631,6 +6042,15 @@
 │   │   │   └── swift
 │   │   ├── docs
 │   │   │   └── _layouts
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── grammar
 │   │   │   └── statements
 │   │   ├── queries
@@ -3645,6 +6065,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   └── src
@@ -3657,6 +6086,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3672,6 +6110,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3683,6 +6130,16 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
+│   │   ├── .helix
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3693,6 +6150,15 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── scripts
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3705,6 +6171,15 @@
 │   │   │   ├── c
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3715,6 +6190,15 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -3728,6 +6212,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3742,6 +6235,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── scripts
 │   │   └── src
@@ -3754,6 +6256,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script-data
 │   │   ├── scripts
@@ -3767,6 +6278,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   └── src
 │   │       └── tree_sitter
 │   ├── tree-sitter-systemtap
@@ -3777,6 +6295,17 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
+│   │   ├── .husky
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3790,6 +6319,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3803,20 +6341,40 @@
 │   │   │   ├── rust
 │   │   │   ├── swift
 │   │   │   └── zig
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── LICENSES
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       ├── corpus
-│   │       ├── highlight
-│   │       └── tags
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   ├── highlight
+│   │   │   └── tags
+│   │   └── .yarn
+│   │       └── releases
 │   ├── tree-sitter-tablegen
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -3834,6 +6392,15 @@
 │   │   ├── editor_queries
 │   │   │   ├── helix
 │   │   │   └── neovim
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3851,6 +6418,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── ftplugin
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── tcl
 │   │   ├── src
@@ -3867,6 +6443,15 @@
 │   │   │   ├── rust
 │   │   │   ├── swift
 │   │   │   └── zig
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3881,6 +6466,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── ftdetect
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── lua
 │   │   │   └── tree-sitter-templ
 │   │   ├── queries
@@ -3897,6 +6491,15 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3906,6 +6509,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -3915,6 +6525,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -3925,15 +6544,23 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── src
 │   │   │   └── tree_sitter
-│   │   └── test
-│   │       ├── corpus
-│   │       ├── highlight
-│   │       ├── indent
-│   │       └── tags
+│   │   ├── test
+│   │   │   ├── corpus
+│   │   │   ├── highlight
+│   │   │   ├── indent
+│   │   │   └── tags
+│   │   └── .woodpecker
 │   ├── tree-sitter-tlaplus
 │   │   ├── bindings
 │   │   │   ├── c
@@ -3942,6 +6569,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── integrations
 │   │   │   └── nvim
 │   │   ├── queries
@@ -3963,6 +6599,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -3973,6 +6618,13 @@
 │   │   │   └── rust
 │   │   ├── corpus
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -3984,6 +6636,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -3998,6 +6659,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -4010,6 +6678,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -4025,6 +6702,16 @@
 │   │   │   └── swift
 │   │   ├── common
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── test
 │   │   │   └── corpus
@@ -4040,6 +6727,13 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -4054,6 +6748,13 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── grammar
 │   │   ├── queries
 │   │   │   └── neovim
@@ -4072,6 +6773,13 @@
 │   │   ├── editors
 │   │   │   ├── helix
 │   │   │   └── neovim
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   │   └── typst
 │   │   ├── src
@@ -4087,6 +6795,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -4099,6 +6816,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -4109,6 +6835,15 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── grammar
 │   │   ├── queries
 │   │   ├── script
@@ -4121,6 +6856,16 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -4133,6 +6878,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -4140,6 +6894,13 @@
 │   │   └── test
 │   │       └── corpus
 │   ├── tree-sitter-vala
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   │   └── nvim
 │   │   ├── src
@@ -4155,6 +6916,15 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -4172,6 +6942,16 @@
 │   │   │   ├── rust
 │   │   │   └── swift
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   ├── Helix
 │   │   │   └── Neovim
@@ -4188,12 +6968,31 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
 │   │       └── corpus
 │   ├── tree-sitter-vim
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── vim
 │   │   ├── rules
@@ -4210,6 +7009,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── vimdoc
 │   │   ├── src
@@ -4224,6 +7032,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -4234,6 +7051,15 @@
 │   │   │   ├── c
 │   │   │   ├── python
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   ├── html_tags
 │   │   │   └── vue
@@ -4247,6 +7073,13 @@
 │   │   ├── bindings
 │   │   │   ├── node
 │   │   │   └── rust
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
@@ -4258,6 +7091,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -4270,6 +7112,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -4284,10 +7135,21 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .config
+│   │   │   └── nvim
 │   │   ├── docs
 │   │   │   └── images
 │   │   ├── examples
 │   │   ├── ftdetect
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── reference_files
 │   │   ├── scripts
@@ -4304,6 +7166,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── src
 │   │   │   └── tree_sitter
@@ -4321,6 +7192,15 @@
 │   │   ├── common
 │   │   ├── dtd
 │   │   │   └── src
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   ├── dtd
 │   │   │   └── xml
@@ -4335,6 +7215,16 @@
 │   │   │   ├── node
 │   │   │   └── rust
 │   │   ├── examples
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   │   └── xresources
 │   │   ├── src
@@ -4351,6 +7241,15 @@
 │   │   │   └── swift
 │   │   ├── examples
 │   │   │   └── yaml-test-suite
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── schema
 │   │   │   ├── core
@@ -4363,6 +7262,13 @@
 │   │       └── highlight
 │   ├── tree-sitter-yang
 │   │   ├── corpus
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
 │   │   ├── queries
 │   │   ├── scripts
 │   │   ├── spec
@@ -4374,6 +7280,15 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   ├── script
 │   │   ├── src
@@ -4388,6 +7303,15 @@
 │   │   │   ├── python
 │   │   │   ├── rust
 │   │   │   └── swift
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   └── tree_sitter
 │   │   └── test
@@ -4397,12 +7321,31 @@
 │   │   │   ├── node
 │   │   │   ├── rust
 │   │   │   └── zig
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   └── workflows
 │   │   ├── queries
 │   │   └── src
 │   │       └── tree_sitter
 │   ├── v-analyzer
 │   │   ├── editors
 │   │   │   └── code
+│   │   ├── .git
+│   │   │   ├── branches
+│   │   │   ├── hooks
+│   │   │   ├── info
+│   │   │   ├── logs
+│   │   │   ├── objects
+│   │   │   └── refs
+│   │   ├── .github
+│   │   │   ├── ISSUE_TEMPLATE
+│   │   │   └── workflows
 │   │   ├── src
 │   │   │   ├── analyzer
 │   │   │   ├── bytes
@@ -4418,18 +7361,28 @@
 │   │   │   ├── tests
 │   │   │   ├── tools
 │   │   │   └── utils
-│   │   └── tree_sitter_v
-│   │       ├── bindings
-│   │       ├── examples
-│   │       ├── queries
-│   │       ├── src
-│   │       └── test
+│   │   ├── tree_sitter_v
+│   │   │   ├── bindings
+│   │   │   ├── examples
+│   │   │   ├── queries
+│   │   │   ├── src
+│   │   │   └── test
+│   │   └── .v-analyzer
 │   └── ziggy
 │       ├── editors
 │       │   ├── helix
 │       │   ├── nvim
 │       │   ├── vscode
 │       │   └── zed
+│       ├── .git
+│       │   ├── branches
+│       │   ├── hooks
+│       │   ├── info
+│       │   ├── logs
+│       │   ├── objects
+│       │   └── refs
+│       ├── .github
+│       │   └── workflows
 │       ├── src
 │       │   ├── cli
 │       │   └── schema
@@ -6305,4 +9258,4 @@
         │   └── wnres
         └── src
 
-6305 directories
+9258 directories
