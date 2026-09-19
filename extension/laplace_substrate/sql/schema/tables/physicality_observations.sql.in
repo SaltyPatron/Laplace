@@ -1,7 +1,7 @@
 -- Exact source provenance for an already canonical typed physicality. The
 -- trajectory remains in laplace.physicalities; provenance never serializes it
 -- into a parallel ordinary-content descriptor tree.
-DO $
+DO $$
 DECLARE
     observation_table regclass;
     legacy_table regclass;
@@ -40,7 +40,7 @@ BEGIN
                 TO physicality_descriptor_observations_legacy_pkey;
         END IF;
     END IF;
-END $;
+END $$;
 
 CREATE TABLE IF NOT EXISTS physicality_observations (
     entity_id bytea NOT NULL CHECK (octet_length(entity_id)=16),
