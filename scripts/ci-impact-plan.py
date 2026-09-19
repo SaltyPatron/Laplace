@@ -108,6 +108,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     publish_scope = "api"
     product_change = False
     publish_required = True
+    skip_default_live_floor = False
     force_full = False
 
     def invalidate(suites: tuple[str, ...], path: str) -> None:
@@ -160,6 +161,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             build_components.add("native")
             delivery_actions.add("install")
             live_suites.add("live-api")
+            skip_default_live_floor = True
             continue
 
         if native_test_path(path):
@@ -386,7 +388,8 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             delivery_actions.add("publish")
         if not pure_uci:
             delivery_actions.add("live")
-            live_suites.update(BASE_LIVE_SUITES)
+            if not skip_default_live_floor:
+                live_suites.update(BASE_LIVE_SUITES)
 
     return {
         "components": sorted(components),
