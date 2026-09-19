@@ -216,6 +216,15 @@ jobs:
       LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_MICROSOFT_CLIENT_SECRET }}
       LAPLACE_AUTH_GOOGLE_CLIENT_ID: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_ID }}
       LAPLACE_AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.LAPLACE_AUTH_GOOGLE_CLIENT_SECRET }}
+      LAPLACE_PUBLIC_BASE_URL: ${{ vars.LAPLACE_PUBLIC_BASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
     steps:
       - name: Select exact source, reserve only required resources, execute stage
         shell: bash

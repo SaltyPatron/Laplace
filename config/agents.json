@@ -1,0 +1,29 @@
+{
+  "default": "gemini",
+  "agents": {
+    "gemini": {
+      "provider": "google",
+      "model": "gemini-3.8-flash",
+      "max_tokens": 8192
+    },
+    "openai": {
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "max_tokens": 8192
+    },
+    "codex": {
+      "provider": "openai-responses",
+      "model": "gpt-5.3-codex",
+      "max_tokens": 16384
+    },
+    "grok": {
+      "provider": "xai",
+      "model": "grok-4.6",
+      "max_tokens": 8192
+    },
+    "self": {
+      "provider": "laplace",
+      "model": "laplace-substrate"
+    }
+  }
+}

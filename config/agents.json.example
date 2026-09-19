@@ -6,28 +6,31 @@
   "//secrets2": "directory. Name the variable with api_key_env; put the value in the",
   "//secrets3": "process environment or /opt/laplace/secrets/agents.env.",
 
-  "default": "house",
+  "default": "gemini",
 
   "agents": {
-    "house": {
-      "provider": "anthropic",
-      "model": "claude-opus-5",
-      "max_tokens": 16000
+    "gemini": {
+      "provider": "google",
+      "model": "gemini-3.8-flash",
+      "max_tokens": 8192
     },
 
-    "flagship": {
+    "openai": {
       "provider": "openai",
-      "model": "REPLACE-WITH-A-CURRENT-OPENAI-MODEL-ID"
+      "model": "gpt-5.4",
+      "max_tokens": 8192
+    },
+
+    "codex": {
+      "provider": "openai-responses",
+      "model": "gpt-5.3-codex",
+      "max_tokens": 16384
     },
 
     "grok": {
       "provider": "xai",
-      "model": "REPLACE-WITH-A-CURRENT-XAI-MODEL-ID"
-    },
-
-    "gemini": {
-      "provider": "google",
-      "model": "REPLACE-WITH-A-CURRENT-GOOGLE-MODEL-ID"
+      "model": "grok-4.6",
+      "max_tokens": 8192
     },
 
     "reviewer": {

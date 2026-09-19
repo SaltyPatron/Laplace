@@ -128,6 +128,12 @@ class DeploymentTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_nginx_preserves_external_tls_port_for_auth_callbacks(self):
+        configuration = self.deploy.nginx_config(
+            "192.168.1.2", "192.168.1.0/24", "hart-server")
+        self.assertEqual(2, configuration.count("proxy_set_header Host $host:$server_port;"))
+        self.assertNotIn("proxy_set_header Host $host;", configuration)
+
     def test_units_are_installed_and_enabled_but_reconcile_never_starts_them(self):
         self.deploy.reconcile()
         for name in self.deploy.UNITS:

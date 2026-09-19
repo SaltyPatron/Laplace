@@ -648,6 +648,14 @@ phase_perfcache_guc() {
 phase_api_env() {
   echo "===== PHASE — API ENV ====="
   local env_file="$LAPLACE_INSTALL_PREFIX/app/laplace-api.env" bin example ops_log_dir
+  set_api_env() {
+    local key="$1" value="$2"
+    if grep -q "^${key}=" "$env_file"; then
+      sed -i "s|^${key}=.*|${key}=${value}|" "$env_file"
+    else
+      printf '\n%s=%s\n' "$key" "$value" >>"$env_file"
+    fi
+  }
   bin=$(find "$LAPLACE_INSTALL_PREFIX/share/laplace" -name 'laplace_t0_perfcache*.bin' | sort -V | tail -1)
   [[ -n "$bin" ]] || { echo "::error::installed t0 perfcache missing" >&2; return 1; }
   example="$ROOT/deploy/linux/laplace-api.env.example"
@@ -661,6 +669,17 @@ phase_api_env() {
   mkdir -p "$ops_log_dir"; chmod 2775 "$ops_log_dir" 2>/dev/null || true
   if grep -q '^LAPLACE_OPS_LOG_DIR=' "$env_file"; then sed -i "s|^LAPLACE_OPS_LOG_DIR=.*|LAPLACE_OPS_LOG_DIR=$ops_log_dir|" "$env_file"; else printf '\nLAPLACE_OPS_LOG_DIR=%s\n' "$ops_log_dir" >>"$env_file"; fi
   sed -i '/^LAPLACE_LOG_DIR=/d' "$env_file"
+  if [[ -n "${LAPLACE_PUBLIC_BASE_URL:-}" ]]; then
+    [[ "$LAPLACE_PUBLIC_BASE_URL" =~ ^https://[^/?#]+(:[0-9]+)?$ ]] || {
+      echo "::error::LAPLACE_PUBLIC_BASE_URL must be an HTTPS origin without a path" >&2
+      return 1
+    }
+    set_api_env LAPLACE_AUTH_MODE identity
+    set_api_env LAPLACE_BILLING_STORE postgres
+    set_api_env LAPLACE_BILLING_BYPASS false
+    set_api_env LAPLACE_PUBLIC_BASE_URL "${LAPLACE_PUBLIC_BASE_URL%/}"
+    set_api_env LAPLACE_DATA_PROTECTION_KEYS "$LAPLACE_INSTALL_PREFIX/secrets/data-protection"
+  fi
   psql -d "$PGDATABASE" -U laplace_admin -v ON_ERROR_STOP=1 \
     -c "SELECT ops.repoint_app_log('$ops_log_dir'); SELECT ops.repoint_chess_drops('$ops_log_dir');"
 }
@@ -704,6 +723,17 @@ phase_runtime_secrets() {
 
   # Absent workflow inputs retain each installed OAuth provider.
   python3 "$ROOT/scripts/update-identity-secrets.py" "$dir/identity.env" || missing=1
+
+  # Agent credentials are optional and independently retained. A provider becomes
+  # callable when its key appears; missing providers remain visible as uncredentialed.
+  python3 "$ROOT/scripts/update-agent-secrets.py" "$dir/agents.env" || missing=1
+
+  # The live operator may edit agents.json through the admin surface. Seed a
+  # missing/empty install from the checked-in routing contract, then preserve it.
+  local agent_config="$LAPLACE_INSTALL_PREFIX/app/agents.json"
+  if [[ ! -s "$agent_config" ]]; then
+    install -m 0644 "$ROOT/config/agents.json" "$agent_config" || missing=1
+  fi
   [[ "$missing" == 0 ]]
 }
 

@@ -1,7 +1,7 @@
 namespace Laplace.Agents;
 
 /// <summary>
-/// The three request/response shapes every hosted chat model speaks today. A
+/// The request/response shapes used by installed hosted models. A
 /// provider is not a protocol: xAI, Groq, DeepSeek, Mistral, OpenRouter and
 /// Ollama all speak <see cref="OpenAiChat"/>, so they cost one table row each
 /// rather than one client each.
@@ -10,6 +10,9 @@ public enum AgentWire
 {
     /// <summary>POST {base}/chat/completions — OpenAI and every clone of it.</summary>
     OpenAiChat,
+
+    /// <summary>POST {base}/responses — OpenAI Codex and other Responses-only models.</summary>
+    OpenAiResponses,
 
     /// <summary>POST {base}/messages — Anthropic's Messages API.</summary>
     AnthropicMessages,
@@ -73,6 +76,8 @@ public static class AgentProviders
     [
         new("openai", AgentWire.OpenAiChat, "https://api.openai.com/v1",
             ["OPENAI_API_KEY"], MaxTokensField: "max_completion_tokens"),
+        new("openai-responses", AgentWire.OpenAiResponses, "https://api.openai.com/v1",
+            ["OPENAI_API_KEY"], MaxTokensField: "max_output_tokens"),
         // x-api-key by default. An OAuth profile token instead rides
         // Authorization: Bearer with the oauth beta header — set auth "bearer" and
         // a token_command on the agent; see AgentCatalog.

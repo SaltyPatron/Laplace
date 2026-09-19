@@ -150,7 +150,7 @@ case "${1:-}" in
     snapshot_application_payload "$APP_DIR" "$backup/app" \
       --exclude 'laplace-api.env' --exclude 'agents.json' --exclude 'logs/' --exclude 'chess-lab-work/' \
       --exclude 'mcp-runtime/' --exclude 'mcp/' --exclude 'releases/'
-    for name in mcp operator lichess stripe; do
+    for name in mcp operator lichess stripe identity agents; do
       if [[ -f "/opt/laplace/secrets/$name.env" ]]; then
         cp -p "/opt/laplace/secrets/$name.env" "$backup/secrets/$name.env"
       fi
@@ -201,7 +201,7 @@ case "${1:-}" in
       if [[ -f "$backup/stockfish.json" ]]; then
         python3 "$ROOT/scripts/install-stockfish.py" --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --restore "$backup/stockfish.json"
       fi
-      for name in mcp operator lichess stripe; do
+      for name in mcp operator lichess stripe identity agents; do
         if [[ -f "$backup/secrets/$name.env" ]]; then
           cp -p "$backup/secrets/$name.env" "/opt/laplace/secrets/$name.env.restore"
           mv "/opt/laplace/secrets/$name.env.restore" "/opt/laplace/secrets/$name.env"

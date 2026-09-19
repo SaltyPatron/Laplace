@@ -26,7 +26,7 @@ public sealed record AgentReply(
     string? Note);
 
 /// <summary>
-/// Request shaping and response reading for the three wires. Pure and static so
+/// Request shaping and response reading for the installed wires. Pure and static so
 /// the shapes are testable without a socket — every past LLM-client bug in this
 /// class of code is a body field or a response path, not the transport.
 /// </summary>
@@ -44,6 +44,7 @@ public static class AgentWireFormat
     public static Uri BuildUri(AgentTarget target) => target.Provider.Wire switch
     {
         AgentWire.OpenAiChat => new Uri($"{target.BaseUrl}/chat/completions"),
+        AgentWire.OpenAiResponses => new Uri($"{target.BaseUrl}/responses"),
         AgentWire.AnthropicMessages => new Uri($"{target.BaseUrl}/messages"),
         AgentWire.GoogleGenerative => new Uri(
             $"{target.BaseUrl}/models/{Uri.EscapeDataString(target.Model)}:generateContent"),
@@ -69,6 +70,19 @@ public static class AgentWireFormat
                 // OpenAI renamed the cap to max_completion_tokens and rejects the old
                 // name on its reasoning models; every clone kept max_tokens. The field
                 // name is provider data, not a branch here.
+                if (maxTokens is { } mt) body[target.Provider.MaxTokensField] = mt;
+                if (temperature is { } t) body["temperature"] = t;
+                return body;
+            }
+
+            case AgentWire.OpenAiResponses:
+            {
+                var body = new JsonObject
+                {
+                    ["model"] = target.Model,
+                    ["input"] = request.Prompt,
+                };
+                if (!string.IsNullOrWhiteSpace(system)) body["instructions"] = system;
                 if (maxTokens is { } mt) body[target.Provider.MaxTokensField] = mt;
                 if (temperature is { } t) body["temperature"] = t;
                 return body;
@@ -169,6 +183,7 @@ public static class AgentWireFormat
         return target.Provider.Wire switch
         {
             AgentWire.OpenAiChat => ParseOpenAi(target, root),
+            AgentWire.OpenAiResponses => ParseOpenAiResponse(target, root),
             AgentWire.AnthropicMessages => ParseAnthropic(target, root),
             AgentWire.GoogleGenerative => ParseGoogle(target, root),
             _ => throw new AgentException($"unhandled wire {target.Provider.Wire}"),
@@ -211,6 +226,33 @@ public static class AgentWireFormat
             : null;
 
         return (text, finish, AsLong(usage?["prompt_tokens"]), AsLong(usage?["completion_tokens"]), note);
+    }
+
+    private static (string, string?, long?, long?, string?) ParseOpenAiResponse(
+        AgentTarget target, JsonNode root)
+    {
+        var status = AsString(root["status"]);
+        var text = AsString(root["output_text"]) ?? "";
+        if (text.Length == 0 && root["output"] is JsonArray output)
+        {
+            text = string.Concat(output
+                .Where(item => AsString(item?["type"]) == "message")
+                .SelectMany(item => item?["content"] is JsonArray content
+                    ? content
+                    : new JsonArray())
+                .Where(part => AsString(part?["type"]) == "output_text")
+                .Select(part => AsString(part?["text"]) ?? ""));
+        }
+
+        var incomplete = AsString(root["incomplete_details"]?["reason"]);
+        var finish = incomplete ?? status;
+        var usage = root["usage"];
+        var note = text.Length == 0
+            ? incomplete is null
+                ? $"empty reply: the Responses API emitted no output text (status: {status ?? "unknown"})"
+                : $"empty reply: the Responses API stopped incomplete ({incomplete})"
+            : null;
+        return (text, finish, AsLong(usage?["input_tokens"]), AsLong(usage?["output_tokens"]), note);
     }
 
     private static (string, string?, long?, long?, string?) ParseAnthropic(AgentTarget target, JsonNode root)

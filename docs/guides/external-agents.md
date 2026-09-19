@@ -11,9 +11,11 @@ direction — other clients calling Laplace as an OpenAI-compatible server — i
 `Laplace.Agents` is a provider-neutral client for hosted chat models. One tool
 call goes out to OpenAI, Anthropic, xAI, Google, OpenRouter, Groq, DeepSeek,
 Mistral, an Ollama or vLLM box, or Laplace's own endpoint, and comes back as one
-row. Three request/response shapes cover all of them — `chat/completions`,
-Anthropic Messages, Google `generateContent` — so a provider costs a table row in
-`AgentProviders`, not a client.
+row. Four request/response shapes cover them — OpenAI `responses`, OpenAI-compatible
+`chat/completions`, Anthropic Messages, and Google `generateContent` — so a
+provider costs a table row in `AgentProviders`, not a client. OpenAI's Responses
+wire is separate because Codex models are Responses-only rather than chat-completion
+models.
 
 The library is referenced by the MCP server today and is deliberately free of MCP
 types, so the CLI and the HTTP surface can reach the same table instead of each
@@ -63,7 +65,9 @@ load-bearing: `laplace-mcp` is not a systemd unit, it is a stdio child of
 whatever agent client launched it, and such clients usually cannot inject
 environment variables into it.
 
-The catalog is re-read **per call**. Nothing owns a restart of a stdio child
+The checked-in `config/agents.json` is the first-install default. Deployment seeds
+it only when the installed file is missing or empty; operator edits survive later
+publishes. The catalog is re-read **per call**. Nothing owns a restart of a stdio child
 (GH #809), so an edited `agents.json` has to take effect without one.
 
 ## OAuth and SSO
@@ -134,6 +138,8 @@ safe to read into a model's context.
   would break every current Anthropic model on this lane.
 - **OpenAI** gets `max_completion_tokens`; its clones get `max_tokens`. The field
   name is provider data, not a branch.
+- **OpenAI Responses** gets `input`, optional `instructions`, and
+  `max_output_tokens`; this is the route used by the `codex` alias.
 - **Google** gets `contents` / `systemInstruction` / `generationConfig`, and its
   key rides `x-goog-api-key`.
 - A **refusal** (Anthropic `stop_reason: "refusal"`) or an upstream block

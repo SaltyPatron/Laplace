@@ -28,6 +28,8 @@ public sealed class AgentWireFormatTests
     {
         Assert.Equal("https://api.openai.com/v1/chat/completions",
             AgentWireFormat.BuildUri(Target("openai")).ToString());
+        Assert.Equal("https://api.openai.com/v1/responses",
+            AgentWireFormat.BuildUri(Target("openai-responses")).ToString());
         Assert.Equal("https://api.anthropic.com/v1/messages",
             AgentWireFormat.BuildUri(Target("anthropic")).ToString());
         Assert.Equal(
@@ -64,6 +66,20 @@ public sealed class AgentWireFormatTests
         Assert.Equal("s", (string)messages[0]!["content"]!);
         Assert.Equal("user", (string)messages[1]!["role"]!);
         Assert.Equal("q", (string)messages[1]!["content"]!);
+    }
+
+    [Fact]
+    public void Openai_responses_body_uses_input_instructions_and_max_output_tokens()
+    {
+        var body = AgentWireFormat.BuildBody(
+            Target("openai-responses", "gpt-5.3-codex", maxTokens: 4096),
+            new AgentRequest("q", System: "s"));
+
+        Assert.Equal("gpt-5.3-codex", (string)body["model"]!);
+        Assert.Equal("q", (string)body["input"]!);
+        Assert.Equal("s", (string)body["instructions"]!);
+        Assert.Equal(4096, (int)body["max_output_tokens"]!);
+        Assert.Null(body["messages"]);
     }
 
     [Fact]
@@ -184,6 +200,26 @@ public sealed class AgentWireFormatTests
         Assert.Equal("stop", finish);
         Assert.Equal(11, input);
         Assert.Equal(3, output);
+        Assert.Null(note);
+    }
+
+    [Fact]
+    public void Openai_responses_reply_reads_output_blocks_status_and_usage()
+    {
+        var (text, finish, input, output, note) = AgentWireFormat.ParseResponse(
+            Target("openai-responses", "gpt-5.3-codex"), JsonNode.Parse("""
+            { "status": "completed", "output": [
+                { "type": "reasoning", "summary": [] },
+                { "type": "message", "content": [
+                    { "type": "output_text", "text": "hello " },
+                    { "type": "output_text", "text": "codex" } ] } ],
+              "usage": { "input_tokens": 12, "output_tokens": 4 } }
+            """));
+
+        Assert.Equal("hello codex", text);
+        Assert.Equal("completed", finish);
+        Assert.Equal(12, input);
+        Assert.Equal(4, output);
         Assert.Null(note);
     }
 

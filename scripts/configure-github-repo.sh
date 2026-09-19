@@ -22,6 +22,8 @@ declare -A vars=(
     [LAPLACE_EXTERNAL]="/build/external"
     [LAPLACE_INSTALL_PREFIX]="/opt/laplace"
     [LAPLACE_PG_PREFIX]="/opt/laplace/pgsql-18"
+    # One canonical HTTPS origin drives identity callbacks and Stripe returns.
+    [LAPLACE_PUBLIC_BASE_URL]="${LAPLACE_PUBLIC_BASE_URL:-https://hart-server:8443}"
 )
 
 for name in "${!vars[@]}"; do

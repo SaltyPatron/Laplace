@@ -73,13 +73,13 @@ with organizational and personal accounts as the supported audience. The default
 authority is `https://login.microsoftonline.com/common/v2.0`. Register:
 
 ```text
-https://YOUR_HOST/signin-microsoft
+https://YOUR_HOST[:PORT]/signin-microsoft
 ```
 
 For a Google Web application OAuth client, register:
 
 ```text
-https://YOUR_HOST/signin-google
+https://YOUR_HOST[:PORT]/signin-google
 ```
 
 Registration references:
@@ -107,7 +107,7 @@ Public authenticated deployments use the existing host configuration names:
 LAPLACE_AUTH_MODE=identity
 LAPLACE_BILLING_STORE=postgres
 LAPLACE_BILLING_BYPASS=false
-LAPLACE_PUBLIC_BASE_URL=https://YOUR_HOST
+LAPLACE_PUBLIC_BASE_URL=https://YOUR_HOST[:PORT]
 LAPLACE_DATA_PROTECTION_KEYS=/opt/laplace/secrets/data-protection
 ```
 

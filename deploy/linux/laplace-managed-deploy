@@ -770,7 +770,9 @@ server {{
     location = /mcp {{
         proxy_pass http://127.0.0.1:5188/mcp;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        # Preserve the external non-default TLS port. OIDC derives its callback
+        # URI from this host, and dropping :8443 produces an unregistered URI.
+        proxy_set_header Host $host:$server_port;
         proxy_set_header Connection "";
         proxy_buffering off;
         proxy_read_timeout 3600s;
@@ -778,7 +780,7 @@ server {{
     location / {{
         proxy_pass http://127.0.0.1:5187;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host $host:$server_port;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header Connection "";
