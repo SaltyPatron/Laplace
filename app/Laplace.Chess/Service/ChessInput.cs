@@ -218,8 +218,14 @@ internal static class ChessInput
                     || windowLogMax is < 10 or > 31 || (IntPtr.Size == 4 && windowLogMax > 30)))
                 throw new ChessInputException("LAPLACE_ZSTD_WINDOW_LOG_MAX must be 10 through 31 (30 on 32-bit hosts).");
             using var fs = File.OpenRead(path);
+            var configuredLibrary = ChessRuntimeConfiguration.Read("LAPLACE_ZSTD_LIBRARY");
+            // Runner/service environments can outlive a content-addressed build
+            // generation. A vanished generated path is not a usable override;
+            // let the native loader resolve the installed system ABI instead.
+            if (configuredLibrary is not null && !File.Exists(configuredLibrary))
+                configuredLibrary = null;
             using var zstd = new ZstdDecompressionStream(fs,
-                ChessRuntimeConfiguration.Read("LAPLACE_ZSTD_LIBRARY"), windowLogMax);
+                configuredLibrary, windowLogMax);
             using var reader = new StreamReader(zstd, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             yield return (name, reader);
             yield break;
