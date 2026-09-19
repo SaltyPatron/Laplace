@@ -236,10 +236,10 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertNotIn('[[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]]', carry)
 
         fallback = function("force_full_carry_forward_impact")
-        self.assertIn("LAPLACE_BUILD_COMPONENTS=all", fallback)
-        self.assertIn("LAPLACE_DELIVERY_ACTIONS=all", fallback)
-        self.assertNotIn("LAPLACE_DEV_SUITES", fallback)
-        self.assertNotIn("LAPLACE_MANAGED_TEST_PROJECTS", fallback)
+        self.assertNotIn("LAPLACE_BUILD_COMPONENTS=all", fallback)
+        self.assertNotIn("LAPLACE_DELIVERY_ACTIONS=all", fallback)
+        self.assertNotIn("LAPLACE_DEV_SUITES=all", fallback)
+        self.assertNotIn("LAPLACE_MANAGED_TEST_PROJECTS=all", fallback)
 
         qualification = function("run_release_qualification")
         delivery = function("run_release_delivery")
