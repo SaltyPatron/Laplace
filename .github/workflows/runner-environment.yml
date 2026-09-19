@@ -1,0 +1,45 @@
+name: Host — runner environment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/configure-laplace-environment.py"
+      - ".github/workflows/runner-environment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laplace-host-runner-environment
+  cancel-in-progress: true
+
+jobs:
+  configure:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Configure every Laplace runner process environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          for runner_env in \
+            /var/lib/agents/laplace-runner/actions-runner/.env \
+            /var/lib/agents/laplace-runner/actions-runner-refactor/.env \
+            /var/lib/agents/laplace-runner/actions-runner-conventional/.env
+          do
+            [[ -f "$runner_env" ]] || continue
+            python3 scripts/configure-laplace-environment.py \
+              --skip-operator \
+              --laplace-root /home/ahart/Projects/Laplace-Legacy \
+              --refactor-root /home/ahart/Projects/Laplace-Refactor \
+              --runner-env "$runner_env" \
+              --public-base-url https://hart-server:8443 \
+              --default-agent gemini
+          done

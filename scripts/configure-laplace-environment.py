@@ -46,7 +46,9 @@ def atomic_write(
     # Runner homes deliberately deny directory writes to operator group members,
     # while their existing .env is group-writable. In that one case, update the
     # owned regular file under an exclusive lock instead of weakening the directory.
-    if prior is not None and allow_owned_file_update and not os.access(path.parent, os.W_OK):
+    if prior is not None and allow_owned_file_update and (
+        prior.st_uid != os.geteuid() or not os.access(path.parent, os.W_OK)
+    ):
         descriptor = os.open(path, os.O_WRONLY | os.O_NOFOLLOW)
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX)
