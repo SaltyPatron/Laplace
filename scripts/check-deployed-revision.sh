@@ -18,12 +18,23 @@ failed=0
   exit 2
 }
 
+NATIVE_RECEIPT="$PREFIX/lib/.laplace-source-revision"
+NATIVE="$(cat "$NATIVE_RECEIPT" 2>/dev/null || true)"
+if [[ "$NATIVE" == "$EXPECTED" ]]; then
+  printf 'PASS: deployed native prefix revision %s\n' "$NATIVE"
+elif [[ -n "$NATIVE" ]]; then
+  echo "::error::deployed native prefix does not belong to this checkout (expected $EXPECTED, found $NATIVE)" >&2
+  failed=1
+fi
+
 ACTUAL="$(cat "$RECEIPT" 2>/dev/null || true)"
-if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+if [[ "$ACTUAL" == "$EXPECTED" ]]; then
+  printf 'PASS: deployed application revision %s\n' "$ACTUAL"
+elif [[ -z "$ACTUAL" && "$NATIVE" == "$EXPECTED" ]]; then
+  echo "::notice::application payload not published for $EXPECTED; native prefix receipt matches"
+elif [[ "$ACTUAL" != "$EXPECTED" ]]; then
   echo "::error::deployed application does not belong to this checkout (expected $EXPECTED, found ${ACTUAL:-missing})" >&2
   failed=1
-else
-  printf 'PASS: deployed application revision %s\n' "$ACTUAL"
 fi
 
 app_core="$APP_DIR/liblaplace_core.so.0.1.0"

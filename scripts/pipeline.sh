@@ -389,6 +389,7 @@ phase_install() (
   so_before=$(preloaded_so_digest)
   cmake --install "$LAPLACE_BUILD_DIRECTORY"
   [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]] || { echo "::error::core library not installed" >&2; exit 1; }
+  git -C "$ROOT" rev-parse HEAD > "$LAPLACE_INSTALL_PREFIX/lib/.laplace-source-revision"
   so_after=$(preloaded_so_digest)
   postgres_activation_required="$server_release_changed"
   if [[ "$so_before" != "$so_after" || "$library_path_changed" == 1 ]]; then
