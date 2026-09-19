@@ -217,7 +217,27 @@ layer1_build_install_extensions() {
         sudo find -H "$REPO_DIR/build" -xdev -type d -exec chmod g+rws {} +
         sudo find -H "$REPO_DIR/build" -xdev -type f -exec chmod g+rwX {} +
     fi
-    sudo python3 "$REPO_DIR/scripts/place-build-directory.py" "$REPO_DIR" >/dev/null
+    # The physical CMake tree is generated state, not source authority. It is
+    # exclusively mutated by laplace-runner during host bring-up/CI. Group-only
+    # repair left root/operator-created CTest files behind and CMake failed with
+    # configure_file(…): Operation not permitted. Hand the generated tree to its
+    # actual writer after placement; the checkout and source files are untouched.
+    local physical_build
+    physical_build="$(sudo python3 "$REPO_DIR/scripts/place-build-directory.py" "$REPO_DIR")"
+    case "$physical_build" in
+        /build/laplace/build/laplace-*) ;;
+        *)
+            red "refusing unexpected build-tree ownership handoff: $physical_build"
+            return 1
+            ;;
+    esac
+    sudo chown -R "$RUNNER_USER:$RUNNER_USER" "$physical_build"
+    sudo find "$physical_build" -xdev -type d -exec chmod u+rwx,g+rws {} +
+    sudo find "$physical_build" -xdev -type f -exec chmod u+rw,g+rw {} +
+    sudo -u "$RUNNER_USER" test -w "$physical_build" || {
+        red "runner cannot write physical build tree: $physical_build"
+        return 1
+    }
     sudo -u "$RUNNER_USER" -H env \
         GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$REPO_DIR" \
         TMPDIR=/build/laplace/work/scratch TMP=/build/laplace/work/scratch TEMP=/build/laplace/work/scratch \

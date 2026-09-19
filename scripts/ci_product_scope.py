@@ -36,6 +36,7 @@ PRODUCT_IGNORED_EXACT = frozenset({
     "scripts/test-product-ci-artifact-ownership.py",
     "scripts/test-benchmark-suite.py",
     "scripts/validate-pipeline.py",
+    "scripts/setup-host.sh",
 })
 
 PRODUCT_IGNORED_GLOBS = (
@@ -75,6 +76,7 @@ GITHUB_PATH_IGNORES = (
     "scripts/test-product-ci-artifact-ownership.py",
     "scripts/test-benchmark-suite.py",
     "scripts/validate-pipeline.py",
+    "scripts/setup-host.sh",
 )
 
 

@@ -30,6 +30,7 @@ on:
       - "scripts/test-product-ci-artifact-ownership.py"
       - "scripts/test-benchmark-suite.py"
       - "scripts/validate-pipeline.py"
+      - "scripts/setup-host.sh"
 
 permissions:
   contents: read
