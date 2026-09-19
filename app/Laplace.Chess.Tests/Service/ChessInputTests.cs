@@ -280,6 +280,17 @@ public sealed class ChessInputTests : IDisposable
     }
 
     [Fact]
+    public void Zstd_RuntimeConfigurationUsesOnlyAnExistingGeneration()
+    {
+        string missing = Path.Combine(_root, "retired-generation", "libzstd.so");
+        Assert.Null(ChessInput.ResolveZstdLibrary(missing));
+
+        string current = Path.Combine(_root, "libzstd.so");
+        File.WriteAllBytes(current, [1]);
+        Assert.Equal(current, ChessInput.ResolveZstdLibrary(current));
+    }
+
+    [Fact]
     public void Zstd_DisposeHonorsSourceOwnership()
     {
         using var retained = new MemoryStream(TwoGamesZstd);
