@@ -226,8 +226,12 @@ add_custom_command(
     VERBATIM
 )
 
-add_custom_target(laplace_t0_perfcache       ALL DEPENDS ${LAPLACE_PERFCACHE_BIN})
-add_custom_target(laplace_highway_perfcache  ALL DEPENDS ${LAPLACE_HIGHWAY_BIN})
+# Emit is generate-then-install, not every default ninja. Isolated:
+#   ninja laplace_t0_perfcache laplace_highway_perfcache
+# then cmake --install. T0 rows in Postgres are a later execute (UnicodeDecomposer),
+# not this blob and not ALL-on-every-SHA.
+add_custom_target(laplace_t0_perfcache       DEPENDS ${LAPLACE_PERFCACHE_BIN})
+add_custom_target(laplace_highway_perfcache  DEPENDS ${LAPLACE_HIGHWAY_BIN})
 
 # Chess compose floor (typed state/move atoms + bounded moves + catalog positions).
 # Catalog text is generator interchange only; the emitter parses it into binary state atoms
@@ -398,7 +402,7 @@ if(UNIX AND LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
         COMMENT "Authenticating the complete chess floor generation"
         VERBATIM
     )
-    add_custom_target(laplace_chess_position_perfcache ALL DEPENDS "${LAPLACE_CHESS_PAIR_RECEIPT}")
+    add_custom_target(laplace_chess_position_perfcache DEPENDS "${LAPLACE_CHESS_PAIR_RECEIPT}")
     install(CODE "
         execute_process(
             COMMAND \"${LAPLACE_CODEGEN_PYTHON}\" \"${_chess_artifact_script}\" install-pair
@@ -419,12 +423,12 @@ if(UNIX AND LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
 else()
     # Preserve native-only and Windows seed installation until their pair activation
     # mechanism is explicitly verified; recorded-corpus activation above is UNIX-only.
-    add_custom_target(laplace_chess_position_perfcache ALL DEPENDS ${LAPLACE_CHESS_PERFCACHE_BIN})
+    add_custom_target(laplace_chess_position_perfcache DEPENDS ${LAPLACE_CHESS_PERFCACHE_BIN})
     install(FILES ${LAPLACE_CHESS_PERFCACHE_BIN}
         DESTINATION share/laplace RENAME "laplace_chess_position_perfcache.bin"
         PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS})
     if(LAPLACE_DOTNET AND EXISTS "${LAPLACE_CHESS_SURFACES_PROJ}")
-        add_custom_target(laplace_chess_transition_perfcache ALL DEPENDS ${LAPLACE_CHESS_TRANSITION_BIN})
+        add_custom_target(laplace_chess_transition_perfcache DEPENDS ${LAPLACE_CHESS_TRANSITION_BIN})
         install(FILES ${LAPLACE_CHESS_TRANSITION_BIN}
             DESTINATION share/laplace RENAME "laplace_chess_transition_perfcache.bin"
             PERMISSIONS ${LAPLACE_INSTALL_FILE_PERMS})
@@ -449,7 +453,7 @@ add_custom_command(
     COMMENT "Emitting modality number compose-floor blob (0..255 channel bytes)"
     VERBATIM
 )
-add_custom_target(laplace_modality_number_perfcache ALL
+add_custom_target(laplace_modality_number_perfcache
     DEPENDS ${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN})
 install(FILES ${LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN}
     DESTINATION share/laplace
