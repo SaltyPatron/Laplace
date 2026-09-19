@@ -115,13 +115,15 @@ internal static class ReportEndpoints
 
             string? triple = request.Query["triple"].ToString().Trim();
             if (string.IsNullOrWhiteSpace(triple)) triple = null;
+            string? symbol = request.Query["symbol"].ToString().Trim();
+            if (string.IsNullOrWhiteSpace(symbol)) symbol = null;
             string artifactName = request.Query["filename"].ToString().Trim();
             if (string.IsNullOrWhiteSpace(artifactName)) artifactName = "artifact.bin";
 
             try
             {
                 MachineCostResponse result = await MachineCostAnalyzer.AnalyzeAsync(
-                    request.Body, artifactName, cpu, clockHz, triple, iterations, ct);
+                    request.Body, artifactName, cpu, clockHz, triple, symbol, iterations, ct);
                 return Results.Json(result);
             }
             catch (MachineCostAnalysisException ex)

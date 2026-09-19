@@ -43,6 +43,7 @@ internal static partial class MachineCostAnalyzer
         string cpu,
         double clockHz,
         string? targetTriple,
+        string? symbol,
         int iterations,
         CancellationToken ct)
     {
@@ -72,9 +73,16 @@ internal static partial class MachineCostAnalyzer
                 "LAPLACE_LLVM_MCA", "llvm-mca", job, ct);
 
             string disassemblyPath = Path.Combine(job, "disassembly.txt");
+            var objdumpArguments = new List<string>
+            {
+                "--no-show-raw-insn",
+                $"--mcpu={cpu.Trim()}",
+                string.IsNullOrWhiteSpace(symbol) ? "--disassemble" : $"--disassemble={symbol.Trim()}",
+                imagePath
+            };
             ProcessReceipt disassembly = await RunToFileAsync(
                 objdump.Command,
-                ["--disassemble", "--no-show-raw-insn", imagePath],
+                objdumpArguments,
                 job, disassemblyPath, ToolTimeout, ct);
             if (!disassembly.ToolAvailable)
                 throw ToolUnavailable(objdump.Command);
@@ -145,6 +153,7 @@ internal static partial class MachineCostAnalyzer
                 ArtifactSha256: sha256,
                 ArtifactBytes: bytes,
                 ArtifactName: safeName,
+                Symbol: string.IsNullOrWhiteSpace(symbol) ? null : symbol.Trim(),
                 ObjectFormat: extracted.ObjectFormat,
                 TargetTriple: triple,
                 Cpu: cpu.Trim(),
@@ -160,7 +169,9 @@ internal static partial class MachineCostAnalyzer
                 BlockRThroughputCycles: summary.BlockRThroughput,
                 CalculatedSeconds: seconds,
                 CalculatedNanoseconds: seconds * 1_000_000_000.0,
-                Scope: "linearized executable-section machine schedule",
+                Scope: string.IsNullOrWhiteSpace(symbol)
+                    ? "linearized executable-section machine schedule"
+                    : "linearized named-symbol machine schedule",
                 ControlFlowWeighted: false,
                 ResourcePressure: summary.ResourcePressure,
                 ObjdumpVersion: objdump.Version,
@@ -529,9 +540,15 @@ internal static partial class MachineCostAnalyzer
         if (!string.IsNullOrWhiteSpace(configured))
             return Path.GetFullPath(Path.Combine(configured.Trim(), "machine-cost"));
 
+        string? processScratch = Environment.GetEnvironmentVariable("TMPDIR");
+        if (!OperatingSystem.IsWindows()
+            && !string.IsNullOrWhiteSpace(processScratch)
+            && Path.IsPathRooted(processScratch))
+            return Path.GetFullPath(Path.Combine(processScratch.Trim(), "machine-cost"));
+
         return OperatingSystem.IsWindows()
             ? Path.Combine(LaplaceInstall.DefaultBuildRoot, "work", "machine-cost")
-            : "/build/laplace/work/machine-cost";
+            : "/build/laplace/work/api/machine-cost";
     }
 
     private static MachineCostAnalysisException ToolUnavailable(string tool) =>

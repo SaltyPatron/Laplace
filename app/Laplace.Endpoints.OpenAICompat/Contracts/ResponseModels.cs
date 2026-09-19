@@ -54,6 +54,7 @@ public sealed record MachineCostResponse(
     [property: JsonPropertyName("artifact_sha256")] string ArtifactSha256,
     [property: JsonPropertyName("artifact_bytes")] long ArtifactBytes,
     [property: JsonPropertyName("artifact_name")] string ArtifactName,
+    [property: JsonPropertyName("symbol"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Symbol,
     [property: JsonPropertyName("object_format")] string ObjectFormat,
     [property: JsonPropertyName("target_triple")] string TargetTriple,
     [property: JsonPropertyName("cpu")] string Cpu,
