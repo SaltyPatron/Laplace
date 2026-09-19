@@ -29,6 +29,13 @@ class IngestExitTests(unittest.TestCase):
         native.parent.mkdir(parents=True)
         native.write_bytes(b"fixture-native")
         (cli / "liblaplace_core.so").write_bytes(native.read_bytes())
+        prefix = self.root / "prefix"
+        runtime = prefix / "ingest"
+        runtime.mkdir(parents=True)
+        (runtime / "Laplace.Cli.dll").write_bytes(b"fixture-cli")
+        (runtime / "liblaplace_core.so").write_bytes(native.read_bytes())
+        (prefix / "lib").mkdir()
+        (prefix / "lib/liblaplace_core.so").write_bytes(native.read_bytes())
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
         (bin_dir / "dotnet").write_text('''#!/bin/bash
@@ -46,6 +53,7 @@ exit "$CLI_RC"
         self.env = dict(os.environ, PATH=str(bin_dir) + ":" + os.environ["PATH"],
                         GITHUB_ACTIONS="true", GITHUB_OUTPUT=str(self.root / "outputs"),
                         INGEST_LOGDIR=str(self.root / "logs"), PROOF=str(self.root / "proof"),
+                        LAPLACE_INSTALL_PREFIX=str(self.root / "prefix"),
                         LAPLACE_BUILD_ROOT="",
                         LAPLACE_INGEST_RUNTIME_PREPARED="1",
                         CLI_RC="0", CLI_MESSAGE="completed")
@@ -91,6 +99,7 @@ exit "$CLI_RC"
                                 env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((scratch / "laplace-ingest/laplace-ingest-wordnet.log").is_file())
+        self.assertTrue((self.root / "prefix/ingest/logs").is_dir())
 
     def test_os_temp_log_path_is_rejected_before_ingest(self):
         self.assertEqual(self.run_ingest(INGEST_LOGDIR="/tmp/laplace-forbidden").returncode, 2)

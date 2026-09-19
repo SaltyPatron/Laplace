@@ -391,7 +391,13 @@ class DeployedRevisionProofExecution(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="laplace-deployed-revision-")
         self.addCleanup(self.temp.cleanup)
         self.app = Path(self.temp.name)
-        self.env = dict(os.environ, LAPLACE_APP_DIR=str(self.app))
+        self.prefix = self.app / "prefix"
+        self.prefix.mkdir()
+        self.env = dict(
+            os.environ,
+            LAPLACE_APP_DIR=str(self.app),
+            LAPLACE_INSTALL_PREFIX=str(self.prefix),
+        )
 
     def prove(self) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

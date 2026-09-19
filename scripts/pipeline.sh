@@ -337,7 +337,12 @@ phase_build_native() {
     -DLAPLACE_CHESS_OPENINGS="$chess_openings" \
     -DLAPLACE_CHESS_CORPUS_EXPORT="$chess_corpus_export"
   LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
-    cmake --build "$LAPLACE_BUILD_DIRECTORY" "${build_flags[@]}"
+    cmake --build "$LAPLACE_BUILD_DIRECTORY" "${build_flags[@]}" --target \
+      all \
+      laplace_t0_perfcache \
+      laplace_highway_perfcache \
+      laplace_chess_position_perfcache \
+      laplace_modality_number_perfcache
 
   local t0 hw
   t0=$(find -H "$ROOT/build" -name 'laplace_t0_perfcache*.bin' 2>/dev/null | head -1 || true)
@@ -394,7 +399,15 @@ phase_install() (
   # Foundation ingest uses this runtime. Checkout worktrees do not carry
   # app/bin; if it is not on the prefix, seed-foundation is not real.
   local ingest_dir="$LAPLACE_INSTALL_PREFIX/ingest"
-  mkdir -p "$ingest_dir"
+  mkdir -p "$ingest_dir" "$ingest_dir/logs"
+  if getent group laplace-runner >/dev/null; then
+    chgrp laplace-runner "$ingest_dir" "$ingest_dir/logs" || {
+      echo "::error::cannot assign the installed ingest runtime to shared group laplace-runner" >&2
+      echo "::error::run scripts/bootstrap-laplace-runner.sh prefix from a privileged operator session" >&2
+      exit 1
+    }
+  fi
+  chmod 2775 "$ingest_dir" "$ingest_dir/logs"
   dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_dir" --no-self-contained -v q
   cp -f "$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so* "$ingest_dir/"
   git -C "$ROOT" rev-parse HEAD > "$ingest_dir/.laplace-source-revision"

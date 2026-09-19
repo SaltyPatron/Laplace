@@ -49,6 +49,22 @@ else
     fi
 fi
 
+if [[ -z "${LAPLACE_OPS_LOG_DIR:-}" ]]; then
+    if [[ "$INGEST_USES_PREFIX" == 1 ]]; then
+        export LAPLACE_OPS_LOG_DIR="$INGEST_RUNTIME/logs"
+    else
+        export LAPLACE_OPS_LOG_DIR="$LOGDIR/ops"
+    fi
+fi
+mkdir -p -- "$LAPLACE_OPS_LOG_DIR" || {
+    echo "::error::cannot create ingest operations log directory: $LAPLACE_OPS_LOG_DIR" >&2
+    exit 1
+}
+[[ -w "$LAPLACE_OPS_LOG_DIR" ]] || {
+    echo "::error::ingest operations log directory is not writable: $LAPLACE_OPS_LOG_DIR" >&2
+    exit 1
+}
+
 if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" && -z "${LAPLACE_INGEST_CONSOLE:-}" ]]; then
     export LAPLACE_INGEST_CONSOLE=ci
 fi

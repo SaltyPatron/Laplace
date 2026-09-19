@@ -29,7 +29,7 @@ class ConfigureGeneration(unittest.TestCase):
         # Execute the actual configure owner; the fixture omits unrelated native
         # compilation dependencies and retains the real generator and manifests.
         (self.root / "engine/core/CMakeLists.txt").write_text(
-            real[start:end] + '\nadd_custom_target(law_fixture ALL DEPENDS ${LAPLACE_CODEGEN_OUTPUTS})\n')
+            real[start:end] + '\nadd_custom_target(law_fixture ALL DEPENDS laplace_attestation_codegen)\n')
         extension = (ROOT / "extension/laplace_substrate/CMakeLists.txt").read_text()
         ext_start = extension.index('set(_ext_codegen_script ')
         ext_end = extension.index('\n', extension.index('string(SUBSTRING ${_ext_sql_hash}', ext_start))

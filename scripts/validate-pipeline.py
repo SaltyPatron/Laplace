@@ -359,7 +359,7 @@ def _workflow_choice_options(text: str, input_name: str) -> set[str]:
 
 def _resolver_case_labels(text: str, shell_variable: str) -> set[str]:
     blocks = re.findall(
-        rf'case "\\${re.escape(shell_variable)}" in\s*\n'
+        rf'case "\${re.escape(shell_variable)}" in\s*\n'
         rf'(?P<body>.*?)^\s{{10}}esac$',
         text,
         re.M | re.S,
@@ -598,8 +598,21 @@ def main() -> int:
 
     if not pipeline_sh.is_file():
         errs.append("missing canonical orchestrator: scripts/pipeline.sh")
-    elif "ensure-foundation.sh" not in read_text(pipeline_sh):
-        errs.append("pipeline.sh: must invoke scripts/ensure-foundation.sh")
+    else:
+        pipeline_text = read_text(pipeline_sh)
+        if "ensure-foundation.sh" not in pipeline_text:
+            errs.append("pipeline.sh: must invoke scripts/ensure-foundation.sh")
+        for target in (
+            "laplace_t0_perfcache",
+            "laplace_highway_perfcache",
+            "laplace_chess_position_perfcache",
+            "laplace_modality_number_perfcache",
+        ):
+            if not re.search(
+                rf'cmake --build[^\n]*(?:\\\n[^\n]*)*\b{re.escape(target)}\b',
+                pipeline_text,
+            ):
+                errs.append(f"pipeline.sh: product build must request target {target}")
 
     if not ensure_foundation.is_file():
         errs.append("missing foundation helper: scripts/ensure-foundation.sh")

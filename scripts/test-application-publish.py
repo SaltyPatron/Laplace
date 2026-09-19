@@ -80,12 +80,16 @@ class ApplicationTransactionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.revision = prepare_revision_fixture(self.root)
+        self.prefix = self.root / "prefix"
+        self.prefix.mkdir()
 
     def run_release(self, mode="deploy", fail="", ready="true", script=SCRIPT, extra=(), adapter=ADAPTERS):
         (self.root / "events").unlink(missing_ok=True)
         return subprocess.run(
             ["bash", "-c", adapter, "test", str(script), str(self.root), mode, *extra],
-            env=dict(os.environ, FAIL_AT=fail, READY=ready, LAPLACE_APP_DIR=str(self.root / "app")),
+            env=dict(os.environ, FAIL_AT=fail, READY=ready,
+                     LAPLACE_APP_DIR=str(self.root / "app"),
+                     LAPLACE_INSTALL_PREFIX=str(self.prefix)),
             capture_output=True, text=True, timeout=10)
 
     def events(self):
@@ -467,8 +471,9 @@ class ApiOnlyTransactionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.app = self.root / "app"
+        self.prefix = self.root / "prefix"
         self.backups = self.root / "backups"
-        for name in ("app", "newapp", "backups", "build", "deploy/linux"):
+        for name in ("app", "prefix", "newapp", "backups", "build", "deploy/linux"):
             (self.root / name).mkdir(parents=True, exist_ok=True)
         self.revision = prepare_revision_fixture(self.root)
         (self.app / ".laplace-source-revision").write_text("0" * 40 + "\n")
@@ -504,7 +509,7 @@ class ApiOnlyTransactionTests(unittest.TestCase):
         return subprocess.run(
             ["bash", "-c", API_ADAPTERS, "test", str(self.script), str(self.root), mode],
             env=dict(os.environ, GITHUB_RUN_ID=run, LAPLACE_APP_DIR=str(self.app),
-                     FAIL_AT=fail, WAS_ACTIVE=active),
+                     LAPLACE_INSTALL_PREFIX=str(self.prefix), FAIL_AT=fail, WAS_ACTIVE=active),
             capture_output=True, text=True, timeout=15)
 
     def events(self):
@@ -556,7 +561,8 @@ class ApiOnlyTransactionTests(unittest.TestCase):
             'event "verify ${1##*/}" || return 9; [[ -f "$ROOT/allow-verify" ]] || return 9')
         result = subprocess.run(
             ["bash", "-c", adapter, "test", str(self.script), str(self.root), "api-deploy"],
-            env=dict(os.environ, GITHUB_RUN_ID="fixture-api", LAPLACE_APP_DIR=str(self.app)),
+            env=dict(os.environ, GITHUB_RUN_ID="fixture-api", LAPLACE_APP_DIR=str(self.app),
+                     LAPLACE_INSTALL_PREFIX=str(self.prefix)),
             capture_output=True, text=True, timeout=15)
         self.assertNotEqual(0, result.returncode)
         receipt = self.root / "build/.api-publish-backup"
@@ -594,7 +600,8 @@ class ApiOnlyTransactionTests(unittest.TestCase):
         adapter = API_ADAPTERS.replace("  event replaced", '  kill -TERM "$BASHPID"')
         result = subprocess.run(
             ["bash", "-c", adapter, "test", str(self.script), str(self.root), "api-deploy"],
-            env=dict(os.environ, GITHUB_RUN_ID="fixture-api", LAPLACE_APP_DIR=str(self.app)),
+            env=dict(os.environ, GITHUB_RUN_ID="fixture-api", LAPLACE_APP_DIR=str(self.app),
+                     LAPLACE_INSTALL_PREFIX=str(self.prefix)),
             capture_output=True, text=True, timeout=15)
         self.assertEqual(143, result.returncode, result.stderr)
         self.assertEqual("old", (self.app / "Api.dll").read_text())
@@ -620,7 +627,8 @@ class ApiOnlyTransactionTests(unittest.TestCase):
             '  event "verify ${1##*/}" || return 9; return 20')
         result = subprocess.run(
             ["bash", "-c", adapter, "test", str(self.script), str(self.root), "api-deploy"],
-            env=dict(os.environ, GITHUB_RUN_ID="fixture-api", LAPLACE_APP_DIR=str(self.app)),
+            env=dict(os.environ, GITHUB_RUN_ID="fixture-api", LAPLACE_APP_DIR=str(self.app),
+                     LAPLACE_INSTALL_PREFIX=str(self.prefix)),
             capture_output=True, text=True, timeout=15)
         self.assertNotEqual(0, result.returncode)
         self.assertEqual("new", (self.root / "copied-new").read_text())
@@ -658,7 +666,8 @@ class ApiOnlyTransactionTests(unittest.TestCase):
             '  event replaced', '  event replaced; return 19').replace(
             '  printf \'{"status":"passed"}\' > "$2"',
             '  if [[ "$1" == */previous.json ]]; then return 20; fi; printf \'{"status":"passed"}\' > "$2"')
-        env = dict(os.environ, LAPLACE_APP_DIR=str(self.app))
+        env = dict(os.environ, LAPLACE_APP_DIR=str(self.app),
+                   LAPLACE_INSTALL_PREFIX=str(self.prefix))
         env.pop("GITHUB_RUN_ID", None)
         result = subprocess.run(
             ["bash", "-c", adapter, "test", str(self.script), str(self.root), "api-deploy"],

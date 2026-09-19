@@ -623,7 +623,7 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
                     : (ChessRecordingMeasurement.ConsensusBackendSnapshot?)null;
                 try
                 {
-                    var result = await _writer.ApplyManyAsync(changes, ct);
+                    var result = await ApplyWithContentCollisionRetryAsync(changes, ct);
                     measurement?.ObserveCommit(result);
                     measurement?.Checkpoint("WriterApply", "writer-acknowledged");
                 }
@@ -667,6 +667,35 @@ public sealed class ChessPgnIngestor : IAsyncDisposable
             foreach (var change in ownedChanges)
                 foreach (var stage in change.IntentStages) stage.Dispose();
         }
+    }
+
+    private async Task<ApplyResult> ApplyWithContentCollisionRetryAsync(
+        IReadOnlyList<SubstrateChange> changes, CancellationToken ct)
+    {
+        try
+        {
+            return await _writer.ApplyManyAsync(changes, ct);
+        }
+        catch (PostgresException error) when (IsCanonicalContentCollision(error))
+        {
+            // Parallel COPY lanes may commit canonical content before another
+            // producer (or an interrupted earlier attempt) exposes the same id.
+            // The failed control transaction has no replay receipt, and the
+            // writer deliberately retains caller-owned stages on failure. One
+            // complete retry therefore re-runs the authoritative presence
+            // probes, subtracts every now-present id, and admits only survivors.
+            return await _writer.ApplyManyAsync(changes, ct);
+        }
+    }
+
+    private static bool IsCanonicalContentCollision(PostgresException error)
+    {
+        if (error.SqlState != PostgresErrorCodes.UniqueViolation || error.TableName is not { } table)
+            return false;
+        return table is "entities" or "physicalities" or "attestations"
+            || table.StartsWith("entities_", StringComparison.Ordinal)
+            || table.StartsWith("physicalities_", StringComparison.Ordinal)
+            || table.StartsWith("attestations_", StringComparison.Ordinal);
     }
 
     internal static void RequireWritableAdmission(bool requireNoWriterWork, int changes)

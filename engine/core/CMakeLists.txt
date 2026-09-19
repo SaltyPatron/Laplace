@@ -133,6 +133,13 @@ set(LAPLACE_CODEGEN_OUTPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../extension/laplace_substrate/sql/generated/seed_pos.sql.in
     ${LAPLACE_HIGHWAY_BIN}
 )
+# The generated source/SQL files are also configure inputs. Making one of those
+# files the custom-command timestamp creates a Ninja regeneration cycle when
+# stable codegen correctly leaves an older, unchanged file untouched. The
+# build-tree stamp owns freshness; configure-time codegen still guarantees the
+# SQL inputs exist before their manifest hash is calculated.
+set(LAPLACE_CODEGEN_STAMP
+    "${CMAKE_CURRENT_BINARY_DIR}/perfcache/attestation-law.stamp")
 # SQL manifests consume these generated seeds during configuration to derive
 # the extension version. Generate them before extension/ is configured, including
 # on a fresh checkout; a build-time custom command runs too late for that hash.
@@ -151,16 +158,18 @@ if(NOT "${_laplace_codegen_result}" STREQUAL "0")
 endif()
 
 add_custom_command(
-    OUTPUT  ${LAPLACE_CODEGEN_OUTPUTS}
+    OUTPUT  "${LAPLACE_CODEGEN_STAMP}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${LAPLACE_PERFCACHE_DIR}"
     COMMAND ${LAPLACE_CODEGEN_PYTHON} ${LAPLACE_CODEGEN_SCRIPT}
             "--bin-out-dir=${LAPLACE_PERFCACHE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${LAPLACE_CODEGEN_STAMP}"
     DEPENDS ${LAPLACE_CODEGEN_SCRIPT}
             ${_laplace_codegen_root}/engine/manifest/relation_types.toml
             ${_laplace_codegen_root}/engine/manifest/pos_tags.toml
     COMMENT "Codegen attestation law + highway perfcache from manifest TOML"
     VERBATIM
 )
+add_custom_target(laplace_attestation_codegen DEPENDS "${LAPLACE_CODEGEN_STAMP}")
 
 # zlib for in-process ZIP inflate (unicode_seed reads the UCD .zip without a
 # tar/unzip shell-out). Inflate is deterministic, so the system/PG zlib is
@@ -175,11 +184,13 @@ find_package(LibXml2 REQUIRED)
 find_package(ICU COMPONENTS uc REQUIRED)
 
 add_library(laplace_core SHARED ${LAPLACE_CORE_SOURCES})
+add_dependencies(laplace_core laplace_attestation_codegen)
 target_compile_definitions(laplace_core PRIVATE
     LAPLACE_EXPECTED_UCD_VERSION="${LAPLACE_UNICODE_VERSION}")
 
 if(WIN32)
     add_library(laplace_core_static STATIC ${LAPLACE_CORE_SOURCES})
+    add_dependencies(laplace_core_static laplace_attestation_codegen)
     target_compile_definitions(laplace_core_static PRIVATE
         LAPLACE_EXPECTED_UCD_VERSION="${LAPLACE_UNICODE_VERSION}")
     target_include_directories(laplace_core_static PUBLIC
@@ -231,7 +242,7 @@ add_custom_command(
 # then cmake --install. T0 rows in Postgres are a later execute (UnicodeDecomposer),
 # not this blob and not ALL-on-every-SHA.
 add_custom_target(laplace_t0_perfcache       DEPENDS ${LAPLACE_PERFCACHE_BIN})
-add_custom_target(laplace_highway_perfcache  DEPENDS ${LAPLACE_HIGHWAY_BIN})
+add_custom_target(laplace_highway_perfcache  DEPENDS laplace_attestation_codegen)
 
 # Chess compose floor (typed state/move atoms + bounded moves + catalog positions).
 # Catalog text is generator interchange only; the emitter parses it into binary state atoms
