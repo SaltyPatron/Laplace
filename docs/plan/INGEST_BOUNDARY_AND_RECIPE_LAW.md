@@ -95,6 +95,53 @@ A source/provider must not own:
 
 Source-specific semantic knowledge should be declarative profile/recipe data plus the irreducible parser/codec/academic kernel needed to recover that source faithfully.
 
+## Source-generation dependency law
+
+A usable source is not just a directory and not just a parser. One selected source generation is the bound tuple:
+
+```text
+authority + release/version + exact artifact graph
++ provider/grammar/codec generation
++ semantic recipe/profile generation
+```
+
+The source-estate refresh and the recipe/admission work are therefore one dependency chain, not sequential projects where decomposers keep targeting an obsolete active tree until dataset cleanup is declared finished.
+
+1. Stage and verify the selected release/artifact graph.
+2. Recover its native schema with the qualified provider/parser.
+3. Declare or update the semantic recipe against that exact staged release.
+4. Qualify complete field/role disposition, reconstruction/loss, and physical-plan invariance.
+5. Activate the release and recipe together as the selected source generation.
+6. Run the common admission machine; source-specific code remains only the irreducible recovery kernel.
+
+A staged newer release should be used to develop and validate its recipe before activation. Do not extend a bespoke decomposer against a superseded source merely because that directory is still the active path. Conversely, do not switch the active source path to a new release whose provider/recipe cannot yet account for its native fields.
+
+Release/version participates in source/provenance/profile identity, not canonical content identity. The same literal sentence, definition, source-code fragment or other canonical content seen in two releases converges on the same content identity while the source occurrences and source claims remain release-attributable.
+
+## Recipe lowering: one recovered object may contribute several state classes
+
+The recipe does not choose exactly one bucket for a parser record. It declares how each recovered field/role contributes to the shared substrate. A single source object can produce canonical content **and** source-attributed testimony about that content.
+
+| Recovered source value/role | Generic lowering | What it must not become |
+| --- | --- | --- |
+| sentence, definition text, example text, prose, literal source-code/media content | canonical content entity/composition with its normal physicality/trajectory; separately retain artifact/span occurrence | a high-trust semantic fact merely because the source contains the bytes |
+| source says `frame X HAS_DEFINITION text Y` or `sense X HAS_EXAMPLE sentence Y` | ensure X/Y endpoints exist under their declared identity/realization laws, then emit attributed testimony `(X, relation, Y, source, context)` | a private decomposer-only edge or duplicated text identity |
+| sense key, synset id, frame id, roleset id, external record key | typed reference/governed identity; attach declared realization/physicality only when that state class participates geometrically | ordinary text content just because the identifier is UTF-8 |
+| row/file/span/annotation occurrence, token ordinal, gap, containment | occurrence/trajectory/provenance state over canonical identities | independent consensus witness count |
+| release, license, file path, archive member, parser version | source/provenance/packaging coordinates | semantic content or truth unless explicitly declared by the recipe |
+| deterministic parser/normalizer/geometry consequence | versioned calculation/structural state with its recipe/provider identity | empirical source testimony |
+| field whose semantics are not mapped | explicit unresolved disposition | silent fallback to content, string label, or dropped field |
+
+An endpoint being an entity with a physicality does not prevent it from being the subject/object of attestations. That is the intended pattern. For example, a FrameNet definition sentence is ordinary canonical text with a content physicality; FrameNet's assertion that a particular frame has that definition is a separate attributed attestation pointing at the same sentence entity.
+
+This distinction is the generic replacement for source-local `ContentEmitter`/`AddAttestation` policy. Parsers recover native values and source roles; recipes declare their disposition; the common machine performs canonical composition, physicality/trajectory creation, reference admission, occurrence/provenance lowering, testimony creation and persistence.
+
+## Current implementation gap and existing Refactor evidence
+
+Current `Laplace` has a generic driver/scheduler/apply spine, but its `IngestSourceProfile` is a resource-sizing record, not this semantic source profile. `ISourceManifest` declares source identity/trust, relation/type rosters, license and sizing; source-named decomposers still hand-code many field dispositions and attestation decisions. That is the exact non-success case this law is intended to remove.
+
+`Laplace-Refactor` contains implementation evidence closer to this contract: `laplace_source_profile_manifest` binds authority/release, artifact graph, recipe-program, witnessing, denominator, conformance and reconstruction fingerprints/counts; `tools/admit_source.py` compiles a selected source profile and drives shared native `source_admit_*` entry points. That repository is not semantic authority, but this machinery should be reused/ported where it satisfies the invention rather than inventing a third source-admission model.
+
 ## Whole working set versus streaming
 
 Laplace does not impose a doctrinal “stream everything in tiny chunks” rule.
@@ -210,7 +257,7 @@ On a managed host, “all logical CPUs exist” does not mean an ingest/benchmar
 
 ## Required source-profile fields
 
-Every activated source profile should eventually declare at least:
+Every selected source generation must declare, before activation, at least:
 
 ```text
 artifact/release authority
