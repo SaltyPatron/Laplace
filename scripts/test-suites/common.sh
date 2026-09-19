@@ -19,6 +19,15 @@ sync_managed_native() {
 
 set_dev_perfcache() {
   local build_dir candidate
+  if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
+    set_installed_perfcache
+    [[ -n "${LAPLACE_PERFCACHE_BIN:-}" && -f "$LAPLACE_PERFCACHE_BIN" ]] || {
+      echo "::error::installed T0 perfcache missing — managed-only qualification requires the installed native closure" >&2
+      return 1
+    }
+    echo "::notice::managed dev qualification installed T0 ROM: $LAPLACE_PERFCACHE_BIN"
+    return 0
+  fi
   # Pre-install qualification must execute the exact candidate ROM, never the
   # currently installed floor. The physical CMake tree lives on /build and the
   # checkout-local build symlink is not an authority for artifact selection.

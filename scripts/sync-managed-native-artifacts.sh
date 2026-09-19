@@ -15,16 +15,29 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-if [[ ! -f build/engine/core/liblaplace_core.so ]]; then
-  echo "::error::native core build missing — run pipeline.sh build before managed tests" >&2
+if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
+  native_root="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}/lib"
+  native=(
+    "$native_root/liblaplace_core.so"
+    "$native_root/liblaplace_dynamics.so"
+    "$native_root/liblaplace_synthesis.so"
+    "$native_root/liblaplace_syzygy.so"
+  )
+  native_label="installed"
+else
+  native=(
+    "build/engine/core/liblaplace_core.so"
+    "build/engine/dynamics/liblaplace_dynamics.so"
+    "build/engine/synthesis/liblaplace_synthesis.so"
+    "build/engine/core/liblaplace_syzygy.so"
+  )
+  native_label="candidate"
+fi
+core_source="${native[0]}"
+if [[ ! -f "$core_source" ]]; then
+  echo "::error::$native_label native core missing — build native or install the selected closure before managed tests" >&2
   exit 1
 fi
-
-native=(
-  "build/engine/core/liblaplace_core.so"
-  "build/engine/dynamics/liblaplace_dynamics.so"
-  "build/engine/synthesis/liblaplace_synthesis.so"
-)
 
 mapfile -t outputs < <(
   for dir in "$ROOT"/app/*/bin/Release/*; do
@@ -62,10 +75,10 @@ if [[ -d "$(dirname "$core_test")" ]]; then
     echo "::error::managed core test output has no app-local liblaplace_core.so after sync" >&2
     exit 1
   }
-  cmp -s build/engine/core/liblaplace_core.so "$core_test" || {
-    echo "::error::managed core test native image still differs from exact build" >&2
+  cmp -s "$core_source" "$core_test" || {
+    echo "::error::managed core test native image still differs from exact $native_label source" >&2
     exit 1
   }
 fi
 
-echo "managed native artifact sync: ${#outputs[@]} output roots, $copied copies"
+echo "managed native artifact sync: source=$native_label ${#outputs[@]} output roots, $copied copies"

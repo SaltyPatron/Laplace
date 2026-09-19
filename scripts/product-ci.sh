@@ -142,6 +142,11 @@ run_build() {
   # selected later by publication: a native-invalidating plan supplies the
   # candidate build, while a managed-only plan preserves the installed native
   # closure byte-for-byte. Never turn a managed edit into a C++ rebuild here.
+  if (( need_managed == 1 && need_native == 0 )); then
+    export LAPLACE_REUSE_INSTALLED_NATIVE=1
+  else
+    unset LAPLACE_REUSE_INSTALLED_NATIVE || true
+  fi
 
   local phases=()
   if (( need_native == 1 )); then

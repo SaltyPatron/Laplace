@@ -284,6 +284,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("build-app", build)
         self.assertNotIn("reuse_qualified_native_build", build)
         self.assertIn("Never turn a managed edit into a C++ rebuild", build)
+        self.assertIn("LAPLACE_REUSE_INSTALLED_NATIVE=1", build)
 
         # Retain the explicit native-qualified reuse primitive for native-owned
         # callers; managed build selection must not invoke it implicitly.
