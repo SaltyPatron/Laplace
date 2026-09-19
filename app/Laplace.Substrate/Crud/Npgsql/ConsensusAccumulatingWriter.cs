@@ -116,7 +116,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
     private readonly SemaphoreSlim _foldDepth =
         new(FoldSizing.PipelineDepth, FoldSizing.PipelineDepth);
     private readonly object _foldChainLock = new();
-    private readonly SemaphoreSlim _atomicWorkingSetGate = new(1, 1);
     private volatile bool _bulkRun;
 
     private long _observations;
@@ -380,40 +379,38 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             ApplyResult result;
             if (atomicWorkingSet)
             {
-                await _atomicWorkingSetGate.WaitAsync(ct).ConfigureAwait(false);
-                try
-                {
-                    result = await ((NpgsqlSubstrateWriter)_inner).ApplyWorkingSetAtomicAsync(
-                        forwarded,
-                        async (connection, transaction, acceptance, token) =>
+                // Artifact workers retain independent atomic transactions. The
+                // native evidence merge acquires every canonical target in the
+                // same (type, id, subject) order and reconstructs replayable state
+                // from the fresh durable evidence snapshot after that lock. A
+                // process-wide gate here only converted parallel parsing/apply
+                // into one serial queue.
+                result = await ((NpgsqlSubstrateWriter)_inner).ApplyWorkingSetAtomicAsync(
+                    forwarded,
+                    async (connection, transaction, acceptance, token) =>
+                    {
+                        if (_bulkRun)
                         {
-                            if (_bulkRun)
-                            {
-                                Interlocked.CompareExchange(
-                                    ref _foldSpanStarted,
-                                    System.Diagnostics.Stopwatch.GetTimestamp(),
-                                    comparand: 0);
-                            }
-                            var acceptedDelta = BuildDelta(
-                                acceptance.OriginalReplay ? [] : changes,
-                                acceptance.AttestationIds);
-                            if (acceptedDelta is { Count: > 0 })
-                                atomicStats = await UpsertDeltaInTransactionAsync(
-                                    acceptedDelta, connection, transaction, token).ConfigureAwait(false);
-                            if (!acceptance.OriginalReplay && appendConversation is not null)
-                                await appendConversation(connection, transaction, token).ConfigureAwait(false);
-                            // A descriptor backfill is a new commit and must still
-                            // verify its captured source before accepting evidence.
-                            if (precommitVerifier is not null)
-                                await precommitVerifier(token).ConfigureAwait(false);
-                        },
-                        reconciliation,
-                        ct).ConfigureAwait(false);
-                }
-                finally
-                {
-                    _atomicWorkingSetGate.Release();
-                }
+                            Interlocked.CompareExchange(
+                                ref _foldSpanStarted,
+                                System.Diagnostics.Stopwatch.GetTimestamp(),
+                                comparand: 0);
+                        }
+                        var acceptedDelta = BuildDelta(
+                            acceptance.OriginalReplay ? [] : changes,
+                            acceptance.AttestationIds);
+                        if (acceptedDelta is { Count: > 0 })
+                            atomicStats = await UpsertDeltaInTransactionAsync(
+                                acceptedDelta, connection, transaction, token).ConfigureAwait(false);
+                        if (!acceptance.OriginalReplay && appendConversation is not null)
+                            await appendConversation(connection, transaction, token).ConfigureAwait(false);
+                        // A descriptor backfill is a new commit and must still
+                        // verify its captured source before accepting evidence.
+                        if (precommitVerifier is not null)
+                            await precommitVerifier(token).ConfigureAwait(false);
+                    },
+                    reconciliation,
+                    ct).ConfigureAwait(false);
 
                 if (!result.JournalReplayHit)
                 {
