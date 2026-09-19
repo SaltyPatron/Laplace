@@ -1,1 +1,0 @@
-CREATE INDEX IF NOT EXISTS entities_tier_type_btree ON entities USING btree (tier, type_id);
