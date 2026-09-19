@@ -65,7 +65,10 @@ public sealed class WorkingSetQueryShapeTests
 
         Assert.DoesNotContain("consensus.attestation_merge",
             apply, StringComparison.Ordinal);
-        Assert.DoesNotContain("types[i] =", apply, StringComparison.Ordinal);
+        // NpgsqlWorkingSetApply may legitimately build type arrays for unrelated
+        // set-sized persistence paths (for example physicality admission). Keep
+        // this invariant scoped to the consensus fold methods below instead of
+        // banning the syntax repository-wide.
         string atomicFold = MethodSource(fold, "UpsertDeltaInTransactionAsync")
             .Split("var maskPairs", StringSplitOptions.None)[0];
         string laneFold = MethodSource(fold, "DispatchDeltaAsync")
