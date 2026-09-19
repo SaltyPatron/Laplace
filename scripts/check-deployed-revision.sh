@@ -4,6 +4,7 @@ set -euo pipefail
 # One deployed revision: application payload, prefix native libraries,
 # PostgreSQL C MODULE bindings, and the T0 perfcache must agree.
 # A matching application receipt alone is not delivery.
+# Changing this file is install+live, not managed-dev / Chess.Tests.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="${LAPLACE_APP_DIR:-/opt/laplace/app}"

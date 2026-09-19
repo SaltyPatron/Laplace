@@ -146,7 +146,11 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
         matched = False
 
-        if path == "scripts/pipeline.sh":
+        if path in (
+            "scripts/pipeline.sh",
+            "scripts/check-deployed-revision.sh",
+            "scripts/product-ci.sh",
+        ):
             # Activation owner (systemd bounce of mapped native .so). Does not
             # change API/MCP/UCI/Lichess/UI/chess-lab bytes — do not rebuild
             # or republish them.
