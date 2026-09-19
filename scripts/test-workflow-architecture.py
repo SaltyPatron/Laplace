@@ -147,7 +147,7 @@ class WorkflowArchitecture(unittest.TestCase):
         preflight = reusable.split("  preflight:\n", 1)[1].split("\n  stage:\n", 1)[0]
         stage = reusable.split("  stage:\n", 1)[1]
 
-        self.assertIn("runs-on: ubuntu-24.04", preflight)
+        self.assertIn("runs-on: [self-hosted, laplace]", preflight)
         self.assertIn("git ls-remote --heads", preflight)
         self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$TARGET_SHA"', preflight)
         self.assertIn('git -C "$probe_repo" fetch --no-tags --depth=1 origin "$latest_main"', preflight)
@@ -157,7 +157,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("product-equivalent", preflight)
         self.assertIn("product-relevant content changed", preflight)
         self.assertIn("execute=false", preflight)
-        self.assertNotIn("runs-on: [self-hosted, laplace]", preflight)
+        self.assertNotIn("runs-on: ubuntu-24.04", preflight)
         self.assertNotIn("host-resource.lock", preflight)
         self.assertIn("needs: preflight", stage)
         self.assertIn("if: needs.preflight.outputs.execute == 'true'", stage)
@@ -495,11 +495,11 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("scripts/laplace --help", text)
         self.assertIn('exec bash scripts/ensure-foundation.sh', text)
 
-    def test_product_execution_has_hosted_preflight_and_one_self_hosted_stage_owner(self):
+    def test_product_execution_keeps_preflight_and_stage_on_the_product_runner(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_call:", reusable)
-        self.assertEqual(1, reusable.count("runs-on: ubuntu-24.04"))
-        self.assertEqual(1, reusable.count("runs-on: [self-hosted, laplace]"))
+        self.assertNotIn("runs-on: ubuntu-24.04", reusable)
+        self.assertEqual(2, reusable.count("runs-on: [self-hosted, laplace]"))
         self.assertIn("needs: preflight", reusable)
         self.assertIn("product-worktrees", reusable)
         self.assertIn('product-$TARGET_SHA.lock', reusable)
