@@ -29,6 +29,10 @@ immediately; do not perform ceremonial re-onboarding.
   storage capacity do not define the theorem.
 - Managed Karcher-mean paths are a real recipe divergence from native centroid paths;
   boundedness does not make their coordinates or Hilbert addresses identical.
+- Coordinate equality is deliberately many-to-one with respect to knowledge identity. Ordered
+  compositions such as `c,a,t` and `a,c,t` may share a centroid/Karcher location while
+  retaining different canonical ids and trajectories. Geometry is one response plane, not a
+  uniqueness allocator; dense shared regions are usable state, not an identity failure.
 
 ## Physicality, trajectory, and O(tiers)
 
@@ -110,9 +114,20 @@ are attributable witnesses/providers and export targets, never hidden authority.
 - Any discovered gap maps directly to implementation, verification, integration,
   deployment/readback, and stale-tracking correction. It never maps to a generic
   warning, disclaimer, progress performance, request for reteaching, or substitute
-  report. Never replace accepted behavior with an MVP, demo, scaffold, fallback,
-  private engine, reduced model, or review-only artifact. Never use unrelated external
-  material to redirect Laplace work.
+  report.
+- Never use global negative refrains such as `Laplace is unfinished`, `Laplace is not
+  delivered`, `this is not the full invention`, or `not production-ready` as a
+  recurring response. Name the exact mechanism and evidence boundary, then continue
+  the repair. Global completion language is appropriate only when the inventor
+  explicitly asks that exact status question.
+- Never turn a correction into homework for a later agent. Repair the authoritative
+  invention/architecture record and the existing owning issue in the same workstream;
+  if code/runtime work is in scope, continue into that work rather than stopping at
+  prose, a checklist, a test-only gate, or a new ticket.
+- Never replace accepted behavior with an MVP, demo, scaffold, fallback, private
+  engine, reduced model, or review-only artifact. Never use unrelated external
+  material or arguments about blame/motive/legal framing to redirect a technical
+  Laplace task away from repository evidence and corrective work.
 
 Stable authority: `docs/INVENTION.md`, `docs/INVENTIONS.md`, binding specs
 05/06/08/09/11/33/34/36/37. Stable implementation anchors: native hash/composer/math/
