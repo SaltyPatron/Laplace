@@ -417,6 +417,8 @@ class WorkflowArchitecture(unittest.TestCase):
     def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
         qualification = product.split("run_release_qualification() {", 1)[1].split("\n}", 1)[0]
+        mutation = product.split("run_release_mutation_window() (", 1)[1].split(
+            "\n)\n\nrun_release_candidate() {", 1)[0]
         automatic = product.split("run_release_delivery() {", 1)[1].split("\n}", 1)[0]
 
         self.assertIn("run_build", qualification)
@@ -425,11 +427,15 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("release_candidate_current_before_mutation", automatic)
         self.assertIn("export LAPLACE_SKIP_IF_SUPERSEDED=0", automatic)
         self.assertIn("LAPLACE_DELIVERY_ACTIONS", automatic)
-        for selector in ("install", "database", "reconcile", "publish", "live"):
+        self.assertIn('run_release_mutation_window "$actions"', automatic)
+        for selector in ("install", "database"):
+            self.assertIn(f'csv_selected "$actions" {selector}', mutation)
+        for selector in ("reconcile", "publish", "live"):
             self.assertIn(f'csv_selected "$actions" {selector}', automatic)
-        self.assertIn("run_install", automatic)
-        self.assertIn("run_database_maintenance --prepare", automatic)
-        self.assertIn("run_db_tests", automatic)
+        self.assertIn("run_install", mutation)
+        self.assertIn("run_database_maintenance --prepare", mutation)
+        self.assertIn("run_db_tests", mutation)
+        self.assertNotIn('run_release_mutation_window "$actions"', mutation)
         self.assertIn("run_publish", automatic)
         self.assertIn("verify_installed_product", automatic)
         self.assertIn("run_live_tests", automatic)
