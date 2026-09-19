@@ -258,8 +258,10 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertNotIn('[[ -n "${LAPLACE_DELIVERY_ACTIONS:-}" ]]', carry)
 
         fallback = function("force_full_carry_forward_impact")
-        self.assertNotIn("LAPLACE_BUILD_COMPONENTS=all", fallback)
-        self.assertNotIn("LAPLACE_DELIVERY_ACTIONS=all", fallback)
+        self.assertIn('LAPLACE_BUILD_COMPONENTS="managed"', fallback)
+        self.assertIn('LAPLACE_DELIVERY_ACTIONS="publish,live"', fallback)
+        self.assertNotIn('LAPLACE_BUILD_COMPONENTS="native', fallback)
+        self.assertNotIn('LAPLACE_DB_SUITES="db-', fallback)
         self.assertNotIn("LAPLACE_DEV_SUITES=all", fallback)
         self.assertNotIn("LAPLACE_MANAGED_TEST_PROJECTS=all", fallback)
 
@@ -274,19 +276,24 @@ class ProductStageOwnershipContract(unittest.TestCase):
             delivery.index("require_built_revision"),
         )
 
-    def test_build_plan_reuses_matching_qualified_native_artifact(self):
+    def test_managed_build_never_manufactures_native_work(self):
         build = function("run_build")
         reuse = function("reuse_qualified_native_build")
         self.assertIn("LAPLACE_BUILD_COMPONENTS", build)
         self.assertIn("build-native", build)
         self.assertIn("build-app", build)
-        self.assertIn("reuse_qualified_native_build", build)
+        self.assertNotIn("reuse_qualified_native_build", build)
+        self.assertIn("Never turn a managed edit into a C++ rebuild", build)
+
+        # Retain the explicit native-qualified reuse primitive for native-owned
+        # callers; managed build selection must not invoke it implicitly.
         self.assertIn("ci-qualification-cache.py latest-source --suite native-dev", reuse)
         self.assertIn("git diff --quiet", reuse)
         self.assertIn("':(exclude)engine/**/tests/**'", reuse)
         self.assertIn("':(exclude)extension/**/tests/**'", reuse)
         self.assertIn("product-worktrees", reuse)
         self.assertIn('ln -s "$source_root/build/engine" build/engine', reuse)
+
 
     def test_dev_qualification_summary_exposes_reuse_and_execution_decisions(self):
         matrix = function("run_dev_test_matrix")
@@ -434,7 +441,7 @@ class DeployedRevisionProofExecution(unittest.TestCase):
     def test_missing_deployed_revision_is_rejected(self):
         result = self.prove()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("found missing", result.stderr)
+        self.assertIn("application missing, native missing", result.stderr)
 
     def test_stale_deployed_revision_is_rejected(self):
         (self.app / ".laplace-source-revision").write_text(self.STALE + "\n", encoding="utf-8")
@@ -448,6 +455,15 @@ class DeployedRevisionProofExecution(unittest.TestCase):
         result = self.prove()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(self.EXPECTED, result.stdout)
+
+    def test_application_and_native_may_have_independent_revisions(self):
+        (self.app / ".laplace-source-revision").write_text(self.EXPECTED + "\n", encoding="utf-8")
+        native = self.prefix / "lib"
+        native.mkdir()
+        (native / ".laplace-source-revision").write_text(self.STALE + "\n", encoding="utf-8")
+        result = self.prove()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("independent revision", result.stdout)
 
 
 if __name__ == "__main__":

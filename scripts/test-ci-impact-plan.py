@@ -225,7 +225,6 @@ class ImpactPlanTests(unittest.TestCase):
     def test_pipeline_sh_schedules_install_not_the_managed_ocean(self):
         for path in (
             "scripts/pipeline.sh",
-            "scripts/check-deployed-revision.sh",
             "scripts/ingest-source.sh",
             "scripts/check-substrate-floor.sh",
             "scripts/ensure-foundation.sh",
@@ -239,6 +238,11 @@ class ImpactPlanTests(unittest.TestCase):
                 self.assertNotIn("managed-dev", value["dev_suites"])
                 self.assertEqual(value["live_suites"], ["live-api"])
                 self.assertFalse(value["full_qualification"])
+
+        value = plan("scripts/check-deployed-revision.sh")
+        self.assertEqual(value["delivery_actions"], [])
+        self.assertEqual(value["build_components"], [])
+        self.assertIn("scripts/check-deployed-revision.sh", value["ignored_paths"])
 
     def test_extension_sql_does_not_schedule_the_managed_ocean(self):
         value = plan(

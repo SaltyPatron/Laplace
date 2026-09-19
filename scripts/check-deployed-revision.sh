@@ -21,20 +21,27 @@ failed=0
 
 NATIVE_RECEIPT="$PREFIX/lib/.laplace-source-revision"
 NATIVE="$(cat "$NATIVE_RECEIPT" 2>/dev/null || true)"
+native_matches=0
 if [[ "$NATIVE" == "$EXPECTED" ]]; then
+  native_matches=1
   printf 'PASS: deployed native prefix revision %s\n' "$NATIVE"
 elif [[ -n "$NATIVE" ]]; then
-  echo "::error::deployed native prefix does not belong to this checkout (expected $EXPECTED, found $NATIVE)" >&2
-  failed=1
+  echo "::notice::native prefix remains at independent revision $NATIVE"
 fi
 
 ACTUAL="$(cat "$RECEIPT" 2>/dev/null || true)"
+application_matches=0
 if [[ "$ACTUAL" == "$EXPECTED" ]]; then
+  application_matches=1
   printf 'PASS: deployed application revision %s\n' "$ACTUAL"
 elif [[ -z "$ACTUAL" && "$NATIVE" == "$EXPECTED" ]]; then
   echo "::notice::application payload not published for $EXPECTED; native prefix receipt matches"
-elif [[ "$ACTUAL" != "$EXPECTED" ]]; then
-  echo "::error::deployed application does not belong to this checkout (expected $EXPECTED, found ${ACTUAL:-missing})" >&2
+elif [[ -n "$ACTUAL" ]]; then
+  echo "::notice::application payload remains at independent revision $ACTUAL"
+fi
+
+if (( native_matches == 0 && application_matches == 0 )); then
+  echo "::error::no deployed component belongs to this checkout (expected $EXPECTED, application ${ACTUAL:-missing}, native ${NATIVE:-missing})" >&2
   failed=1
 fi
 

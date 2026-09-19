@@ -355,6 +355,15 @@ publish_api() {
 
 if [[ "$API_ONLY" -eq 1 ]]; then
   publish_api
+  native_args=(--native-build "$LAPLACE_ENGINE_BUILD")
+  if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
+    rm -f "$STAGE"/liblaplace_core.so* "$STAGE"/liblaplace_dynamics.so* \
+      "$STAGE"/liblaplace_synthesis.so* "$STAGE"/liblaplace_syzygy.so*
+    cp -a "$APP_DIR"/liblaplace_core.so* "$APP_DIR"/liblaplace_dynamics.so* \
+      "$APP_DIR"/liblaplace_synthesis.so* "$APP_DIR"/liblaplace_syzygy.so* "$STAGE/"
+    native_args=(--native-installed "$APP_DIR")
+    echo "==> preserve installed native closure for managed-only publication"
+  fi
   rm -rf "$STAGE/wwwroot"
   mkdir -p "$STAGE/wwwroot"
   if [[ "$web_source" == installed ]]; then
@@ -364,7 +373,7 @@ if [[ "$API_ONLY" -eq 1 ]]; then
     git -C "$REPO_ROOT" rev-parse HEAD > "$STAGE/wwwroot/.laplace-web-source-revision"
   fi
   python3 "$REPO_ROOT/scripts/verify-api-payload.py" \
-    --seal-payload "$STAGE" --native-build "$LAPLACE_ENGINE_BUILD" \
+    --seal-payload "$STAGE" "${native_args[@]}" \
     --manifest "$LAPLACE_API_PAYLOAD_MANIFEST"
   # All build/closure checks complete before the serving API is stopped.
   sudo -n systemctl stop laplace-api
@@ -425,6 +434,16 @@ else
     echo "::error::publish failed (api=$api_rc uci=$uci_rc mcp=$mcp_rc lichess=$lichess_rc)"
     exit 1
   fi
+fi
+
+if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
+  for managed_stage in "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE"; do
+    rm -f "$managed_stage"/liblaplace_core.so* "$managed_stage"/liblaplace_dynamics.so* \
+      "$managed_stage"/liblaplace_synthesis.so* "$managed_stage"/liblaplace_syzygy.so*
+    cp -a "$APP_DIR"/liblaplace_core.so* "$APP_DIR"/liblaplace_dynamics.so* \
+      "$APP_DIR"/liblaplace_synthesis.so* "$APP_DIR"/liblaplace_syzygy.so* "$managed_stage/"
+  done
+  echo "==> preserve installed native closure across managed application publication"
 fi
 
 echo "==> [3/4] overlay SPA; prepare isolated UCI/MCP/Lichess runtimes"

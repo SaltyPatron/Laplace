@@ -20,6 +20,43 @@ def assembly(project):
     path = ROOT / "app" / project / (project + ".csproj")
     return ET.parse(path).getroot().findtext(".//AssemblyName") or project
 
+
+class ApiPayloadTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="api-payload-")
+        self.addCleanup(self.temporary.cleanup)
+        root = Path(self.temporary.name)
+        self.stage = root / "stage"
+        self.installed = root / "installed"
+        (self.stage / "wwwroot").mkdir(parents=True)
+        self.installed.mkdir()
+        names = (
+            "Laplace.Endpoints.OpenAICompat.dll", "Laplace.Core.dll", "Laplace.Chess.dll",
+            "liblaplace_core.so", "liblaplace_dynamics.so",
+            "liblaplace_synthesis.so", "liblaplace_syzygy.so",
+        )
+        for name in names:
+            body = ("api publication fixture: " + name).encode()
+            (self.stage / name).write_bytes(body)
+            if name.startswith("liblaplace_"):
+                (self.installed / name).write_bytes(body)
+        (self.stage / "wwwroot/index.html").write_text("<html></html>", encoding="utf-8")
+
+    def test_managed_only_payload_preserves_installed_native_closure(self):
+        manifest = payload.seal(self.stage, native_installed=self.installed)
+        self.assertEqual(manifest["provenance"], "preserved-installed-native")
+        self.assertEqual(manifest["native_installed"], str(self.installed.resolve()))
+        self.assertEqual(
+            set(manifest["native_sources"]),
+            {"liblaplace_core.so", "liblaplace_dynamics.so",
+             "liblaplace_synthesis.so", "liblaplace_syzygy.so"},
+        )
+
+    def test_managed_only_payload_rejects_native_byte_drift(self):
+        (self.stage / "liblaplace_core.so").write_bytes(b"different")
+        with self.assertRaisesRegex(ValueError, "differ from installed closure"):
+            payload.seal(self.stage, native_installed=self.installed)
+
 class UciPayloadTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="uci-payload-")

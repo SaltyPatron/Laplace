@@ -138,15 +138,10 @@ run_build() {
   # four managed publish roots because deploy uses --no-build for those payloads,
   # while keeping managed test suites unscheduled when managed source is unchanged.
 
-  # Managed applications execute the native core from the candidate build tree.
-  # When native inputs are unchanged, reference the immutable build belonging to
-  # the matching native qualification receipt instead of rebuilding it.
-  if (( need_native == 0 && need_managed == 1 )); then
-    if ! reuse_qualified_native_build; then
-      echo "::notice::no reusable qualified native build found; native build required"
-      need_native=1
-    fi
-  fi
+  # Managed compilation has no native link step. Native payload provenance is
+  # selected later by publication: a native-invalidating plan supplies the
+  # candidate build, while a managed-only plan preserves the installed native
+  # closure byte-for-byte. Never turn a managed edit into a C++ rebuild here.
 
   local phases=()
   if (( need_native == 1 )); then
@@ -277,18 +272,16 @@ csv_selected() {
 }
 
 force_full_carry_forward_impact() {
-  # Without an authoritative installed application revision there is no safe
-  # base for a selective deployed->target diff. Build every publishable surface
-  # and execute the complete mutation/verification closure. Dev-suite selection
-  # stays untouched: this repairs deployed state rather than inventing unrelated
-  # source-test invalidations.
-  export LAPLACE_BUILD_COMPONENTS="native,managed,web"
-  export LAPLACE_MANAGED_BUILD_PROJECTS="all"
-  export LAPLACE_DB_SUITES="db-health,native-db,managed-db"
-  export LAPLACE_MANAGED_DB_TEST_PROJECTS="all"
+  # A missing application receipt says nothing about the independently receipted
+  # native prefix, database, or SPA. Recover only the managed application
+  # surface and preserve those independent components byte-for-byte.
+  export LAPLACE_BUILD_COMPONENTS="managed"
+  export LAPLACE_MANAGED_BUILD_PROJECTS="app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj,app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj,app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj,app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj"
+  export LAPLACE_DB_SUITES=""
+  export LAPLACE_MANAGED_DB_TEST_PROJECTS=""
   export LAPLACE_LIVE_SUITES="live-floor,live-api,managed-live,generation-eval,chess-provider-live"
   export LAPLACE_MANAGED_LIVE_TEST_PROJECTS="all"
-  export LAPLACE_DELIVERY_ACTIONS="install,database,reconcile,publish,live"
+  export LAPLACE_DELIVERY_ACTIONS="publish,live"
   export LAPLACE_PUBLISH_SCOPE="full"
 }
 
@@ -377,7 +370,7 @@ carry_forward_undelivered_impact() {
   deployed="$(cat "$receipt" 2>/dev/null || true)"
 
   if [[ ! "$deployed" =~ ^[0-9a-fA-F]{40}$ ]]; then
-    echo "::warning::installed application revision receipt is unavailable; carrying full build/delivery closure forward without widening dev tests"
+    echo "::warning::installed application revision receipt is unavailable; carrying the managed application closure forward without rebuilding native, database, or web components"
     force_full_carry_forward_impact
     return 0
   fi
@@ -882,6 +875,11 @@ run_release_delivery() {
     else
       export LAPLACE_REUSE_INSTALLED_WEB=1
       unset LAPLACE_REQUIRE_QUALIFIED_WEB || true
+    fi
+    if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" native; then
+      unset LAPLACE_REUSE_INSTALLED_NATIVE || true
+    else
+      export LAPLACE_REUSE_INSTALLED_NATIVE=1
     fi
     run_publish
   else

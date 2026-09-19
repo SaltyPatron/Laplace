@@ -87,8 +87,10 @@ def files(directory, required=REQUIRED, spa=True, wrapped_uci=False):
     return result
 
 
-def native_sources(rows, native_build, repo_root=ROOT):
+def native_sources(rows, native_build, native_installed=None, repo_root=ROOT):
     native = {}
+    if native_build is not None and native_installed is not None:
+        raise ValueError("select a build or installed native source, not both")
     if native_build is not None:
         repo_root = Path(repo_root).resolve(strict=True)
         build = (repo_root / "build").resolve(strict=True)
@@ -119,15 +121,38 @@ def native_sources(rows, native_build, repo_root=ROOT):
         expected_engine = {name for name in native if engine_name.fullmatch(name)}
         if published != expected_engine:
             raise ValueError("API native publication set differs from build")
-    return native, native_build, repo_root
+    elif native_installed is not None:
+        native_installed = Path(native_installed).resolve(strict=True)
+        for path in sorted(native_installed.glob("liblaplace_*.so*")):
+            if path.name in native:
+                raise ValueError("duplicate installed native publication filename")
+            expected = floor.fact(path)
+            actual = rows.get(path.name)
+            if actual is None or (actual["sha256"], actual["bytes"]) != (
+                    expected["sha256"], expected["bytes"]):
+                raise ValueError("published native bytes differ from installed closure: " + path.name)
+            native[path.name] = expected
+        for name in REQUIRED[3:]:
+            if name not in native:
+                raise ValueError("installed native closure omitted " + name)
+        engine_name = re.compile(r"liblaplace_(?:core|dynamics|synthesis|syzygy)\.so(?:\..+)?$")
+        published = {name for name in rows if engine_name.fullmatch(name)}
+        expected_engine = {name for name in native if engine_name.fullmatch(name)}
+        if published != expected_engine:
+            raise ValueError("API native publication set differs from installed closure")
+    return native, native_build, native_installed, repo_root
 
 
-def seal(directory, native_build=None, repo_root=ROOT):
+def seal(directory, native_build=None, native_installed=None, repo_root=ROOT):
     rows = files(directory)
-    native, native_build, repo_root = native_sources(rows, native_build, repo_root)
+    native, native_build, native_installed, repo_root = native_sources(
+        rows, native_build, native_installed, repo_root)
+    provenance = "selected-build" if native_build is not None else (
+        "preserved-installed-native" if native_installed is not None else "rollback-snapshot")
     return {"schema": "laplace.api-payload/v1",
-            "provenance": "selected-build" if native_build is not None else "rollback-snapshot",
+            "provenance": provenance,
             "native_build": str(native_build) if native_build is not None else None,
+            "native_installed": str(native_installed) if native_installed is not None else None,
             "source_checkout": str(repo_root) if native_build is not None else None,
             "native_sources": native,
             "files": {name: {"sha256": item["sha256"], "bytes": item["bytes"]}
@@ -138,7 +163,7 @@ def seal_uci(directory, native_build=None, repo_root=ROOT, wrapped=False):
     rows = files(directory, UCI_REQUIRED, spa=False, wrapped_uci=wrapped)
     if wrapped and "laplace-uci.native" not in rows:
         raise ValueError("installed UCI lease wrapper omitted its native apphost")
-    native, native_build, repo_root = native_sources(rows, native_build, repo_root)
+    native, native_build, _, repo_root = native_sources(rows, native_build, None, repo_root)
     return {"schema": "laplace.uci-payload/v1", "wrapped": wrapped,
             "provenance": "selected-build" if native_build is not None else "rollback-snapshot",
             "native_build": str(native_build) if native_build is not None else None,
@@ -287,6 +312,7 @@ def main():
     parser.add_argument("--wrapped-uci", action="store_true")
     parser.add_argument("--verify-uci", type=Path)
     parser.add_argument("--native-build", type=Path)
+    parser.add_argument("--native-installed", type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--app-dir", type=Path)
     parser.add_argument("--receipt", type=Path)
@@ -301,7 +327,7 @@ def main():
                 parser.error("UCI sealing requires a manifest, not a runtime receipt")
             save(args.manifest, seal_uci(args.seal_uci, args.native_build, wrapped=args.wrapped_uci))
             return 0
-        if args.native_build or args.wrapped_uci or not args.receipt:
+        if args.native_build or args.native_installed or args.wrapped_uci or not args.receipt:
             parser.error("UCI runtime verification requires only --manifest and --receipt")
         started = time.monotonic()
         receipt = {"schema": "laplace.uci-payload-verification/v1", "status": "failed"}
@@ -322,9 +348,9 @@ def main():
     if args.seal_payload:
         if args.app_dir or args.receipt:
             parser.error("sealing and runtime verification are distinct operations")
-        save(args.manifest, seal(args.seal_payload, args.native_build))
+        save(args.manifest, seal(args.seal_payload, args.native_build, args.native_installed))
         return 0
-    if not args.app_dir or not args.receipt or args.native_build:
+    if not args.app_dir or not args.receipt or args.native_build or args.native_installed:
         parser.error("runtime verification requires --app-dir and --receipt")
     started = time.monotonic()
     receipt = {"schema": "laplace.api-payload-verification/v1", "status": "failed"}

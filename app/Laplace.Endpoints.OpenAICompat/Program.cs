@@ -113,7 +113,7 @@ if (!string.IsNullOrWhiteSpace(publicBaseUrl))
         // ForwardedHeaders has already established whether the reverse proxy
         // received HTTPS. Never promote a direct plaintext request merely
         // because a public origin is configured.
-        if (context.Request.IsHttps)
+        if (context.Request.IsHttps && context.Request.Host != publicHost)
             context.Request.Host = publicHost;
         return next(context);
     });
