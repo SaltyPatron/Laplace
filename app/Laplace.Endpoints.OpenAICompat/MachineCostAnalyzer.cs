@@ -521,20 +521,29 @@ internal static partial class MachineCostAnalyzer
             instructions, cycles, uops, dispatch, uopsPerCycle, ipc, throughput, pressure);
     }
 
-    private static bool TryLong(string line, string label, out long value) =>
-        line.StartsWith(label, StringComparison.Ordinal)
-        && long.TryParse(line[label.Length..].Trim(), NumberStyles.Integer,
-            CultureInfo.InvariantCulture, out value);
+    private static bool TryLong(string line, string label, out long value)
+    {
+        value = default;
+        return line.StartsWith(label, StringComparison.Ordinal)
+            && long.TryParse(line[label.Length..].Trim(), NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out value);
+    }
 
-    private static bool TryInt(string line, string label, out int value) =>
-        line.StartsWith(label, StringComparison.Ordinal)
-        && int.TryParse(line[label.Length..].Trim(), NumberStyles.Integer,
-            CultureInfo.InvariantCulture, out value);
+    private static bool TryInt(string line, string label, out int value)
+    {
+        value = default;
+        return line.StartsWith(label, StringComparison.Ordinal)
+            && int.TryParse(line[label.Length..].Trim(), NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out value);
+    }
 
-    private static bool TryDouble(string line, string label, out double value) =>
-        line.StartsWith(label, StringComparison.Ordinal)
-        && double.TryParse(line[label.Length..].Trim(), NumberStyles.Float,
-            CultureInfo.InvariantCulture, out value);
+    private static bool TryDouble(string line, string label, out double value)
+    {
+        value = default;
+        return line.StartsWith(label, StringComparison.Ordinal)
+            && double.TryParse(line[label.Length..].Trim(), NumberStyles.Float,
+                CultureInfo.InvariantCulture, out value);
+    }
 
     private static string ResolveWorkRoot()
     {
