@@ -272,8 +272,8 @@ run_database_maintenance() {
 }
 
 csv_selected() {
-  local selected="${1:-all}" wanted="$2"
-  [[ "$selected" == all ]] || [[ ",$selected," == *",$wanted,"* ]]
+  local selected="$1" wanted="$2"
+  [[ "$selected" == all ]] || [[ -n "$selected" && ",$selected," == *",$wanted,"* ]]
 }
 
 force_full_carry_forward_impact() {
@@ -311,6 +311,11 @@ carry_forward_installed_web_impact() {
   local target="$1" app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
   local receipt="$app_dir/wwwroot/.laplace-web-source-revision"
   local deployed plan needs_web
+
+  if ! csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" web \
+     && ! csv_selected "${LAPLACE_DELIVERY_ACTIONS:-}" publish; then
+    return 0
+  fi
 
   deployed="$(cat "$receipt" 2>/dev/null || true)"
   if [[ ! "$deployed" =~ ^[0-9a-fA-F]{40}$ ]]; then

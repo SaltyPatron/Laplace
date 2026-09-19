@@ -157,6 +157,7 @@ restart_postgres() {
   # rebuild or publish API, MCP, UCI, Lichess, UI, or chess lab.
   # Empty planner suite lists must not default back to the managed-dev ocean.
   # A missing /opt/laplace/app receipt must not force BUILD_COMPONENTS=all.
+  # A missing SPA receipt must not force build-web on a native-only SHA.
   oldpid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)
   [[ "$oldpid" != 0 ]] || oldpid=""
   echo "restart_postgres ($reason): systemctl restart $unit (was pid ${oldpid:-none})"
