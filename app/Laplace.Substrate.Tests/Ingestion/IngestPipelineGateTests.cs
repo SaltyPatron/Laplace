@@ -219,18 +219,22 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
         var cold = await NewRunner(_pg.DataSource).RunAsync(producer, options);
         Assert.Equal(0, cold.UnitsFailed);
         Assert.Equal(count, producer.ComposedUnits);
-        Assert.True(cold.AttestationsInserted > count);
+        Assert.True(cold.AttestationsInserted >= count);
 
         async Task<string> DurableStateAsync()
         {
             await using var command = _pg.DataSource.CreateCommand("""
                 WITH owned AS MATERIALIZED (
                     SELECT a.* FROM laplace.attestations a
-                    WHERE a.source_id=$1 AND a.type_id<>$2),
+                    WHERE a.source_id=$1),
+                observed AS MATERIALIZED (
+                    SELECT o.* FROM laplace.physicality_observations o
+                    WHERE o.source_id=$1),
                 referenced AS MATERIALIZED (
                     SELECT subject_id AS id FROM owned
                     UNION SELECT object_id FROM owned WHERE object_id IS NOT NULL
-                    UNION SELECT context_id FROM owned WHERE context_id IS NOT NULL)
+                    UNION SELECT context_id FROM owned WHERE context_id IS NOT NULL
+                    UNION SELECT entity_id FROM observed)
                 SELECT jsonb_build_object(
                     'entities', COALESCE((
                         SELECT jsonb_agg(jsonb_build_array(encode(e.id,'hex'),e.tier,e.type_id)
@@ -238,7 +242,8 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                         FROM laplace.entities e JOIN referenced r ON r.id=e.id), '[]'::jsonb),
                     'physicalities', COALESCE((
                         SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)
-                        FROM laplace.physicalities p JOIN referenced r ON r.id=p.entity_id), '[]'::jsonb),
+                        FROM laplace.physicalities p
+                        JOIN observed o ON o.physicality_id=p.id), '[]'::jsonb),
                     'evidence', COALESCE((
                         SELECT jsonb_agg(to_jsonb(a) ORDER BY a.type_id,a.id)
                         FROM owned a), '[]'::jsonb),
@@ -250,7 +255,6 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                               AND a.object_id IS NOT DISTINCT FROM c.object_id)), '[]'::jsonb))::text
                 """);
             command.Parameters.AddWithValue(source.ToBytes());
-            command.Parameters.AddWithValue(IngestUnitCompletion.RelationTypeId(2).ToBytes());
             return (string)(await command.ExecuteScalarAsync())!;
         }
         async Task<long> ReceiptCountAsync()

@@ -90,7 +90,11 @@ run_managed_dotnet_tests() {
     dotnet test "$solution" -c Release --no-build --nologo --verbosity minimal \
       "$@" --filter "$filter" 2>&1 | tee "$test_log" || rc=$?
 
-  if (( rc == 0 )) && grep -Fq "No test matches" "$test_log"; then
+  # A solution run reports "No test matches" once for every project without
+  # the selected trait.  Reject only when the complete solution produced no
+  # positive test total; otherwise those per-project notices are expected.
+  if (( rc == 0 )) && grep -Fq "No test matches" "$test_log" \
+      && ! grep -Eq 'Total:[[:space:]]*[1-9][0-9]*' "$test_log"; then
     echo "::error::$label filter matched zero tests: $filter" >&2
     rc=4
   fi

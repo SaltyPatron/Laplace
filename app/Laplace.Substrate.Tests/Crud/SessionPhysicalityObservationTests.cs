@@ -392,7 +392,7 @@ public sealed class SessionPhysicalityObservationTests(LocalPgFixture pg)
         {
             await using var probe = pg.DataSource.CreateCommand(
                 "SELECT wait_event_type='Lock' "
-                + "AND wait_event='advisory' "
+                + "AND wait_event='transactionid' "
                 + "FROM pg_stat_activity WHERE pid=$1");
             probe.Parameters.AddWithValue(second.ProcessID);
             sawLockWait =
@@ -404,7 +404,7 @@ public sealed class SessionPhysicalityObservationTests(LocalPgFixture pg)
 
         Assert.True(
             sawLockWait,
-            "The second real backend must wait on the shared apply advisory lock.");
+            "The second real backend must wait on the first session row transaction.");
         Assert.False(waiting.IsCompleted);
 
         await firstTx.CommitAsync();

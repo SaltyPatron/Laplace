@@ -868,8 +868,8 @@ void laplace_generated_stage_sink(const intent_stage_t *const *stages,
         sink_invalid("missing sink argument");
     if (stage_count > LAPLACE_GENERATED_STAGE_SINK_MAX_STAGES)
         sink_invalid("generated sink accepts at most four source declaration, vocabulary and generated stages");
-    /* Reentrant: session callers acquire this same lock before their row lock.
-     * Other callers still get the common writer ordering and isolation guard. */
+    /* Session callers perform this same isolation check before their row lock.
+     * Exact-row conflicts provide writer ordering without a global lock. */
     sink_require_isolation();
     MemoryContext caller=CurrentMemoryContext;
     MemoryContext owner=AllocSetContextCreate(caller,"Generated stage sink",ALLOCSET_DEFAULT_SIZES);

@@ -79,7 +79,9 @@ public sealed class EntityInterpretationNativeReadTests(LocalPgFixture pg)
                 IF NOT COALESCE(peer=ANY(before_ids),false) THEN
                     RAISE EXCEPTION 'fixture must initially return the shared-type peer';
                 END IF;
-                INSERT INTO laplace.entities(id,tier,type_id) VALUES (peer,1,smaller);
+                PERFORM laplace.entity_interpretations_publish(
+                    ARRAY[peer],ARRAY[1::smallint],ARRAY[smaller],
+                    ARRAY[decode(repeat('00',16),'hex')],ARRAY[true]);
                 IF (SELECT type_id FROM laplace.entities WHERE id=peer) <> smaller THEN
                     RAISE EXCEPTION 'fixture did not change the compatibility summary';
                 END IF;
@@ -133,7 +135,9 @@ public sealed class EntityInterpretationNativeReadTests(LocalPgFixture pg)
                 IF before_ids IS DISTINCT FROM ARRAY[ordinary] THEN
                     RAISE EXCEPTION 'fixture must walk only the ordinary neighbour initially';
                 END IF;
-                INSERT INTO laplace.entities(id,tier,type_id) VALUES (metadata,1,smaller);
+                PERFORM laplace.entity_interpretations_publish(
+                    ARRAY[metadata],ARRAY[1::smallint],ARRAY[smaller],
+                    ARRAY[decode(repeat('00',16),'hex')],ARRAY[true]);
                 IF (SELECT type_id FROM laplace.entities WHERE id=metadata) <> smaller THEN
                     RAISE EXCEPTION 'fixture did not replace the metadata summary type';
                 END IF;

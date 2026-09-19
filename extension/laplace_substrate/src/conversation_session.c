@@ -312,8 +312,9 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
     laplace_physicality_id_compute(session_id, SESSION_MANIFEST_TYPE, &physicality_id);
     laplace_physicality_id_compute(session_id, 1, &legacy_id);
 
-    /* Shared apply lock comes before the session row lock. A statement that
-     * waited for either lock must not retain its pre-wait provider snapshot. */
+    /* Validate the common writer isolation contract before taking the session
+     * row lock. A statement that waited for that row must not retain its
+     * pre-wait provider snapshot. */
     laplace_generated_stage_sink_lock();
     admission = palloc0(sizeof(*admission));
     admission->context = CurrentMemoryContext;

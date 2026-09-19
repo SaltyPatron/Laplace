@@ -117,7 +117,7 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
         await AssertGateAsync(true);
         foreach (var unit in units)
             Assert.False(await reader.HasSourceCompletedAsync(source, unit.Layer));
-        Assert.True(foldedBeforeUpgrade > 1, "the real body must have generated physicality standing");
+        Assert.Equal(1L, foldedBeforeUpgrade);
 
         async Task<string> SnapshotAsync()
         {

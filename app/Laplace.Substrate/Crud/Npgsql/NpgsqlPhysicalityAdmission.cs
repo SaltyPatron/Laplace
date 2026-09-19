@@ -106,6 +106,7 @@ public sealed partial class NpgsqlSubstrateWriter
                             int covered = 0;
                             foreach (var range in stage.PhysicalitySourceRanges)
                             {
+                                change.RequireSourcePrior(range.SourceId);
                                 if (range.FirstRow != covered || range.RowCount <= 0
                                     || range.RowCount > stage.PhysicalityCount - covered)
                                     throw new InvalidOperationException("native physicality source ranges are incomplete or overlap");
@@ -129,6 +130,7 @@ public sealed partial class NpgsqlSubstrateWriter
                     foreach (var physicality in observations)
                     {
                         ct.ThrowIfCancellationRequested();
+                        change.RequireSourcePrior(physicality.SourceId);
                         ValidateManagedPhysicality(physicality);
                         result.AddObservation(physicality.Id, physicality.EntityId, physicality.SourceId,
                             change.Metadata.IntentId, physicality.ObservedAtUnixUs);
@@ -179,7 +181,8 @@ public sealed partial class NpgsqlSubstrateWriter
                 return;
             }
             if (trajectory.Length % 4 != 0)
-                throw new InvalidOperationException("physicality trajectory is not an XYZM vertex sequence");
+                throw new InvalidOperationException(
+                    "physicality observation contains a partial trajectory vertex");
 
             Hash128 manifest = Trajectory.ContentIdentity(trajectory, out int logicalCount);
             if (logicalCount != row.NConstituents)

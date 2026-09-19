@@ -351,6 +351,20 @@ public sealed class EntityInterpretationTransactionTests(LocalPgFixture pg, ITes
                     Value = source.HasValue ? source.Value.ToBytes() : DBNull.Value
                 });
                 await command.ExecuteNonQueryAsync(stop.Token);
+                await using var publish = pg.DataSource.CreateCommand("""
+                    SELECT laplace.entity_interpretations_publish(
+                        ARRAY[$1]::bytea[],ARRAY[3::smallint],ARRAY[$2]::bytea[],
+                        ARRAY[COALESCE($3,decode(repeat('00',16),'hex'))]::bytea[],
+                        ARRAY[$3 IS NULL]::boolean[])
+                    """);
+                publish.Parameters.AddWithValue(id.ToBytes());
+                publish.Parameters.AddWithValue(type.ToBytes());
+                publish.Parameters.Add(new NpgsqlParameter
+                {
+                    NpgsqlDbType = NpgsqlDbType.Bytea,
+                    Value = source.HasValue ? source.Value.ToBytes() : DBNull.Value
+                });
+                Assert.False((bool)(await publish.ExecuteScalarAsync(stop.Token))!);
             }
             else
             {

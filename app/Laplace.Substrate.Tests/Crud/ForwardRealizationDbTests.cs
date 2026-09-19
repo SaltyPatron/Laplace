@@ -58,7 +58,7 @@ public sealed class ForwardRealizationDbTests(LocalPgFixture pg)
             "SELECT (realize.batch(ARRAY[$1]::bytea[]))[1]"))
         {
             direct.Parameters.AddWithValue(NpgsqlDbType.Bytea, concept.ToBytes());
-            Assert.Null(await direct.ExecuteScalarAsync());
+            Assert.Equal(DBNull.Value, await direct.ExecuteScalarAsync());
         }
 
         await using (var down = pg.DataSource.CreateCommand(

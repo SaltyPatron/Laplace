@@ -294,23 +294,22 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
             [new(0,1,long.MaxValue,Replayable:false), new(1,2,long.MaxValue,Replayable:false)]);
         await InsertAsync(connection, unary, [new(0,3,Scale), new(1,7,5*Scale)]);
         var goodExpected = await CanonicalAsync(connection, good);
-        var unaryExpected = await CanonicalAsync(connection, unary);
         Assert.Equal(11L, goodExpected.Witnesses);
         Assert.Equal(Epoch, goodExpected.Time);
-        Assert.Equal(10L, unaryExpected.Witnesses);
         Cell[] requested = [good, mixed, transient, unary, missing, good];
 
         string source = File.ReadAllText(Path.Combine(TypeIdLawTests.FindRepoRootPublic(),
-            "extension", "laplace_substrate", "src", "fold_route.c"));
-        const string marker = "static const char *EVIDENCE_FOLD_SQL =";
+            "engine", "core", "src", "sql_catalog.def"));
+        const string marker = "SQL_QUERY(\"consensus.evidence_rows_typed\"";
         int start = source.IndexOf(marker, StringComparison.Ordinal);
         Assert.True(start >= 0, "the native evidence query owner must exist");
-        start += marker.Length;
-        int end = source.IndexOf(";\n", start, StringComparison.Ordinal);
+        start = source.IndexOf('\n', start) + 1;
+        int end = source.IndexOf("\nSQL_QUERY(", start, StringComparison.Ordinal);
+        if (end < 0) end = source.Length;
         Assert.True(end > start, "the native query must have a complete literal");
         string query = string.Concat(source[start..end]
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => JsonSerializer.Deserialize<string>(line.Trim())
+            .Select(line => JsonSerializer.Deserialize<string>(line.Trim().TrimEnd(')'))
                 ?? throw new InvalidDataException("null native SQL fragment")));
         query = query.Replace("'\\x%s'::bytea", "@type", StringComparison.Ordinal)
             .Replace("$1", "@subjects", StringComparison.Ordinal)
@@ -321,13 +320,21 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
         {
             await ExecuteAsync(connection, $"SET LOCAL plan_cache_mode={mode}");
             var actual = await ReadQueryAsync(requested);
-            Assert.Equal(6, actual.Length);
-            Assert.Equal(new EvidenceResult(1,true,4,goodExpected), actual[0]);
-            Assert.Equal(new EvidenceResult(2,false,2,null), actual[1]);
-            Assert.Equal(new EvidenceResult(3,false,2,null), actual[2]);
-            Assert.Equal(new EvidenceResult(4,true,2,unaryExpected), actual[3]);
-            Assert.Equal(new EvidenceResult(5,null,null,null), actual[4]);
-            Assert.Equal(actual[0] with { Ordinal = 6 }, actual[5]);
+            Assert.Equal(14, actual.Length);
+            Assert.Equal([1L,2L,3L,4L,6L], actual.Select(row => row.Ordinal).Distinct());
+            Assert.Equal(4, actual.Count(row => row.Ordinal == 1));
+            Assert.Equal(2, actual.Count(row => row.Ordinal == 2));
+            Assert.Equal(2, actual.Count(row => row.Ordinal == 3));
+            Assert.Equal(2, actual.Count(row => row.Ordinal == 4));
+            Assert.Equal(4, actual.Count(row => row.Ordinal == 6));
+            Assert.All(actual.Where(row => row.Ordinal is 1 or 4 or 6), row => Assert.True(row.Replayable));
+            Assert.Equal([false,true], actual.Where(row => row.Ordinal == 2)
+                .Select(row => row.Replayable).Order().ToArray());
+            Assert.All(actual.Where(row => row.Ordinal == 3), row => Assert.False(row.Replayable));
+            Assert.Equal(actual.Where(row => row.Ordinal == 1).Select(row => row with { Ordinal = 6 }),
+                actual.Where(row => row.Ordinal == 6));
+            Assert.Equal(11L, actual.Where(row => row.Ordinal == 1).Sum(row => row.ObservationCount));
+            Assert.Equal(10L, actual.Where(row => row.Ordinal == 4).Sum(row => row.ObservationCount));
             Assert.Empty(await ReadQueryAsync([]));
         }
 
@@ -347,7 +354,7 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
         Assert.Equal(4L, await EvidenceCountAsync(connection, good));
         await transaction.RollbackAsync();
 
-        async Task<EvidenceResult[]> ReadQueryAsync(Cell[] cells)
+        async Task<EvidenceRow[]> ReadQueryAsync(Cell[] cells)
         {
             await using var command = connection.CreateCommand();
             command.CommandText = $"SELECT * FROM ({query}) result ORDER BY ord";
@@ -358,29 +365,21 @@ public sealed class ConsensusEvidencePeriodTests(LocalPgFixture pg)
             command.Parameters.AddWithValue("objects", NpgsqlDbType.Array | NpgsqlDbType.Bytea,
                 cells.Select(cell => cell.Object?.ToBytes()).ToArray());
             await command.PrepareAsync();
-            var results = new List<EvidenceResult>();
+            var results = new List<EvidenceRow>();
             await using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                bool? replayable = reader.IsDBNull(1) ? null : reader.GetBoolean(1);
-                long? count = reader.IsDBNull(2) ? null : reader.GetInt64(2);
-                Standing? standing = null;
-                if (replayable == true)
-                {
-                    standing = new Standing(reader.GetInt64(3),reader.GetInt64(4),
-                        reader.GetInt64(5),reader.GetInt64(6),reader.GetDateTime(7).ToUniversalTime());
-                }
-                else
-                {
-                    for (int field=3;field<8;field++) Assert.True(reader.IsDBNull(field));
-                }
-                results.Add(new EvidenceResult(reader.GetInt64(0),replayable,count,standing));
+                results.Add(new EvidenceRow(reader.GetInt64(0),
+                    Convert.ToHexString(reader.GetFieldValue<byte[]>(1)),
+                    reader.GetDateTime(2).ToUniversalTime(),reader.GetInt64(3),reader.GetInt64(4),
+                    reader.GetInt64(5),reader.GetInt64(6),reader.GetBoolean(7)));
             }
             return results.ToArray();
         }
     }
 
-    private sealed record EvidenceResult(long Ordinal, bool? Replayable, long? Rows, Standing? Value);
+    private sealed record EvidenceRow(long Ordinal, string Id, DateTime ObservedAt,
+        long ObservationCount, long SumScore, long OpponentRating, long OpponentRd, bool Replayable);
 
     private async Task<NpgsqlConnection> OpenAsync()
     {

@@ -168,7 +168,7 @@ public class ConsensusAccumulatingWriterTests
         var repo = Laplace.Decomposers.Abstractions.Tests.TypeIdLawTests.FindRepoRootPublic();
         var source = File.ReadAllText(Path.Combine(
             repo, "app", "Laplace.Substrate", "Crud", "Npgsql", "ConsensusAccumulatingWriter.cs"));
-        Assert.Contains("if (_bulkRun) await EnqueueFoldAsync(delta, CancellationToken.None);", source);
+        Assert.Contains("if (_bulkRun) await EnqueueFoldAsync(delta, changes, CancellationToken.None);", source);
         Assert.Contains("await DrainFoldsAsync();", source);
         Assert.Contains("BulkRunCompletionPhase.ConsensusDrain", source);
         Assert.DoesNotContain(

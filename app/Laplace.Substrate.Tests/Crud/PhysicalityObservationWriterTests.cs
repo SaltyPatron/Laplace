@@ -440,7 +440,7 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         var oldToken = (Hash128)workingSet.Invoke(
             null, new object[] { new[] { change } })!;
         var token = (Hash128)replay.Invoke(
-            null, new object[] { oldToken, new[] { stage } })!;
+            null, new object?[] { oldToken, new[] { stage }, null })!;
 
         await using var connection =
             await pg.DataSource.OpenConnectionAsync();

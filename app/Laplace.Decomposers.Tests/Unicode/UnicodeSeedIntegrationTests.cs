@@ -80,8 +80,12 @@ public sealed class UnicodeSeedIntegrationTests : IAsyncLifetime
         var floorOnly = DecomposerOptions.Default with { MaxInputUnits = TotalCodepoints };
         await foreach (var change in dec.DecomposeAsync(ctx, floorOnly))
         {
-            await writer.ApplyAsync(change);
             applied += change.Entities.Length;
+            if (!change.IntentStages.IsDefaultOrEmpty)
+                foreach (var stage in change.IntentStages)
+                    if (!stage.IsInvalid)
+                        applied += stage.EntityCount;
+            await writer.ApplyAsync(change);
         }
         Assert.True(applied >= TotalCodepoints,
             $"presented {applied:N0} entities, expected at least {TotalCodepoints:N0}");
