@@ -781,6 +781,34 @@ release_candidate_current_before_mutation() {
   return 3
 }
 
+run_release_mutation_window() (
+  local actions="$1"
+  local api_was_active=0 mutation_rc=0
+
+  # Install and extension/database mutation are one maintenance window. pipeline.sh
+  # also protects standalone phases, but release delivery owns the larger sequence:
+  # do not start the old API after install only to stop it again for ALTER EXTENSION.
+  systemctl is-active --quiet laplace-api 2>/dev/null && api_was_active=1 || true
+  cleanup_release_mutation_window() {
+    mutation_rc=$?
+    trap - EXIT
+    if [[ "$api_was_active" == 1 ]]; then
+      sudo -n systemctl start laplace-api || mutation_rc=1
+    fi
+    exit "$mutation_rc"
+  }
+  trap cleanup_release_mutation_window EXIT
+  [[ "$api_was_active" != 1 ]] || sudo -n systemctl stop laplace-api
+
+  run_release_mutation_window "$actions"
+
+  if [[ "$api_was_active" == 1 ]]; then
+    sudo -n systemctl start laplace-api
+    api_was_active=0
+  fi
+  trap - EXIT
+)
+
 run_release_candidate() {
   check_deps
   require_built_revision
@@ -794,9 +822,7 @@ run_release_candidate() {
   fi
   (( current_rc == 0 )) || return "$current_rc"
 
-  run_install
-  run_database_maintenance --prepare
-  run_db_tests
+  run_release_mutation_window "install,database"
   run_publish
 }
 

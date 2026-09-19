@@ -20,6 +20,7 @@ PRODUCT_IGNORED_SUFFIXES = (
 )
 
 PRODUCT_IGNORED_EXACT = frozenset({
+    "vault-data-inventory.tsv",
     "vault-data-directories.list",
     "scripts/api-diagnostics.py",
     "web/scripts/capture-ui-diagnostics.mjs",
@@ -27,7 +28,6 @@ PRODUCT_IGNORED_EXACT = frozenset({
     "scripts/ci-qualification-cache.py",
     "scripts/ci-product-freshness.py",
     "scripts/ci_product_scope.py",
-    "scripts/product-ci.sh",
     "scripts/ci_managed_projects.py",
     "scripts/test-parallel.sh",
     "deploy/linux/deploy.sh",
@@ -52,6 +52,7 @@ PRODUCT_IGNORED_GLOBS = (
 # These are the equivalent GitHub Actions paths-ignore entries. A contract test
 # keeps the workflow trigger synchronized with ignored().
 GITHUB_PATH_IGNORES = (
+    "vault-data-inventory.tsv",
     "vault-data-directories.list",
     "docs/**",
     "**/*.md",
@@ -62,7 +63,6 @@ GITHUB_PATH_IGNORES = (
     "scripts/ci-qualification-cache.py",
     "scripts/ci-product-freshness.py",
     "scripts/ci_product_scope.py",
-    "scripts/product-ci.sh",
     "scripts/ci_managed_projects.py",
     "scripts/test-parallel.sh",
     "scripts/publish-applications.sh",

@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
     paths-ignore:
+      - "vault-data-inventory.tsv"
+      - "vault-data-directories.list"
       - "docs/**"
       - "**/*.md"
       - ".github/**"
