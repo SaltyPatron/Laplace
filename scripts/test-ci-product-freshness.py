@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 
 from ci_product_scope import GITHUB_PATH_IGNORES, candidate_equivalent, ignored
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "ci-product-freshness.py"
 SPEC = importlib.util.spec_from_file_location("ci_product_freshness", SCRIPT)
@@ -88,7 +87,6 @@ class ProductFreshnessTests(unittest.TestCase):
         value = MODULE.product_delta([path])
         self.assertTrue(value["product_equivalent"])
         self.assertEqual(value["product_paths"], [])
-
     def test_only_nonproduct_changes_are_product_equivalent(self):
         value = MODULE.product_delta(
             [".github/workflows/a.yml", "docs/x.md", "README.md"]
