@@ -175,8 +175,8 @@ internal static class CpuTopologyCommands
         // The WAL volume is a dedicated 128GB NVMe LV (/var/lib/pgwal); 96GB
         // leaves 25% headroom. Mirrored in scripts/pg-machine-tuning.sh;
         // PgTuningParityTests pins the pair.
-        w.WriteLine("ALTER SYSTEM SET max_wal_size = '96GB';");
-        w.WriteLine("ALTER SYSTEM SET min_wal_size = '4GB';");
+        w.WriteLine("ALTER SYSTEM SET max_wal_size = '16GB';");
+        w.WriteLine("ALTER SYSTEM SET min_wal_size = '1GB';");
         // Every Windows backend is a full process plus a per-connection
         // perfcache map; connections are budgeted, not free. Memory ceiling
         // arithmetic and the 2026-07-15 incident live in doc 28.

@@ -48,7 +48,7 @@ LAPLACE_PG_WAL="${LAPLACE_PG_WAL:-/var/lib/pgwal}"
 # max_wal_size is a soft checkpoint/recycling target, not a directory quota, so
 # the dedicated volume also carries a real reserve for checkpoint overshoot and
 # crash recovery. 96 + 32 = the provisioned 128 GiB LV.
-LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-96}"
+LAPLACE_PG_MAX_WAL_GB="${LAPLACE_PG_MAX_WAL_GB:-16}"
 LAPLACE_PG_WAL_RESERVE_GB="${LAPLACE_PG_WAL_RESERVE_GB:-32}"
 # THE THIRD I/O STREAM. Without a temp tablespace, sort/hash spill lands in
 # $PGDATA/base/pgsql_tmp — the heap device, competing with the reads of the very

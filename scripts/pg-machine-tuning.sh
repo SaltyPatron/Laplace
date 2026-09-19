@@ -120,8 +120,8 @@ pg_compute_machine_tuning() {
   # full-page images (42.3M), i.e. the cap itself was the write amplifier. Raised to 96GB
   # (the WAL volume is a dedicated 128GB NVMe LV; 25% headroom). MUST match
   # CpuTopologyCommands.EmitPgTuning; PgTuningParityTests pins the pair.
-  PG_TUNE_MAX_WAL=96GB
-  PG_TUNE_MIN_WAL=4GB
+  PG_TUNE_MAX_WAL=16GB
+  PG_TUNE_MIN_WAL=1GB
   # MEASURED 2026-08-16 ON THIS CLUSTER, replacing a hardcoded 256 that was never true.
   #
   # THE CEILING MOVED WHEN io_method DID. effective_io_concurrency is a REQUEST for queue
