@@ -125,6 +125,29 @@ CREATE OR REPLACE FUNCTION consensus.upsert_type(
     SET enable_seqscan = on;
 
 
+-- Primary evidence admission boundary. The complete mixed-type working-set
+-- chunk crosses the client/database boundary once. Native routing retains
+-- literal type partition pruning while locking, reducing, and merging each
+-- physical type run inside that single operation.
+CREATE OR REPLACE FUNCTION consensus.merge_evidence(
+    p_subjects bytea[], p_types bytea[], p_objects bytea[],
+    p_phis bigint[], p_games bigint[], p_sums bigint[], p_ts timestamptz[],
+    p_opp_ratings bigint[] DEFAULT NULL,
+    p_period_offsets bigint[] DEFAULT NULL,
+    p_period_opp_ratings bigint[] DEFAULT NULL,
+    p_period_phis bigint[] DEFAULT NULL,
+    p_period_games bigint[] DEFAULT NULL,
+    p_period_sums bigint[] DEFAULT NULL)
+    RETURNS bigint
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_merge_evidence'
+    LANGUAGE C VOLATILE
+    SET plan_cache_mode = force_custom_plan
+    SET enable_material = off
+    SET enable_hashjoin = on
+    SET enable_mergejoin = on
+    SET enable_seqscan = on;
+
+
 -- Atomic evidence-backed route. Every requested cell must already have durable
 -- accepted testimony in the caller's transaction. The native owner locks the
 -- complete canonical target set, then reads a fresh READ COMMITTED snapshot.

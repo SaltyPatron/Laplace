@@ -800,79 +800,67 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         long folded = 0;
         long foldCalls = 0;
         long foldStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-        for (int runStart = 0; runStart < cells.Length;)
+        for (int off = 0; off < cells.Length; off += AtomicFoldChunkCells)
         {
-            int runEnd = runStart + 1;
-            while (runEnd < cells.Length && cells[runEnd].Key.T == cells[runStart].Key.T)
-                runEnd++;
-            Hash128 type = cells[runStart].Key.T;
-            for (int off = runStart; off < runEnd; off += AtomicFoldChunkCells)
+            int count = Math.Min(AtomicFoldChunkCells, cells.Length - off);
+            var subjects = new byte[count][];
+            var types = new byte[count][];
+            var objects = new byte[count][];
+            var phis = new long[count];
+            var opponents = new long[count];
+            var games = new long[count];
+            var sums = new long[count];
+            var timestamps = new DateTime[count];
+            int periodCount = 0;
+            for (int i = 0; i < count; i++)
+                periodCount = checked(periodCount + PeriodCount(in cells[off + i].D));
+            var periodOffsets = new long[count + 1];
+            var periodOpponents = new long[periodCount];
+            var periodPhis = new long[periodCount];
+            var periodGames = new long[periodCount];
+            var periodSums = new long[periodCount];
+            int periodAt = 0;
+            for (int i = 0; i < count; i++)
             {
-                int count = Math.Min(AtomicFoldChunkCells, runEnd - off);
-                var subjects = new byte[count][];
-                var objects = new byte[count][];
-                var phis = new long[count];
-                var opponents = new long[count];
-                var games = new long[count];
-                var sums = new long[count];
-                var timestamps = new DateTime[count];
-                int periodCount = 0;
-                for (int i = 0; i < count; i++)
-                    periodCount = checked(periodCount + PeriodCount(in cells[off + i].D));
-                var periodOffsets = new long[count + 1];
-                var periodOpponents = new long[periodCount];
-                var periodPhis = new long[periodCount];
-                var periodGames = new long[periodCount];
-                var periodSums = new long[periodCount];
-                int periodAt = 0;
-                for (int i = 0; i < count; i++)
-                {
-                    var cell = cells[off + i];
-                    subjects[i] = cell.Key.S.ToBytes();
-                    objects[i] = cell.Key.O?.ToBytes()!;
-                    phis[i] = cell.D.FirstPeriod.PhiFp1e9;
-                    opponents[i] = cell.D.FirstPeriod.OpponentRatingFp1e9;
-                    games[i] = cell.D.Games;
-                    sums[i] = cell.D.SumScoreFp1e9;
-                    timestamps[i] = TsFromUnixUs(cell.D.MaxTsUnixUs);
-                    periodOffsets[i] = periodAt;
-                    WritePeriods(
-                        in cell.D, periodOpponents, periodPhis,
-                        periodGames, periodSums, ref periodAt);
-                }
-                periodOffsets[count] = periodAt;
-
-                await using var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandTimeout = 0;
-                // Accepted A is already visible in this transaction. The native
-                // route locks each complete cell before reading its durable
-                // testimony; mixed transient cells keep these exact delta scores.
-                command.CommandText =
-                    "SELECT consensus.upsert_evidence_type($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)";
-                command.Parameters.Add(new NpgsqlParameter
-                {
-                    Value = type.ToBytes(),
-                    NpgsqlDbType = NpgsqlDbType.Bytea,
-                });
-                command.Parameters.AddWithValue(
-                    NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-                    subjects);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, objects);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, phis);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, games);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, sums);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.TimestampTz, timestamps);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, opponents);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodOffsets);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodOpponents);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodPhis);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodGames);
-                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodSums);
-                folded += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
-                foldCalls++;
+                var cell = cells[off + i];
+                subjects[i] = cell.Key.S.ToBytes();
+                types[i] = cell.Key.T.ToBytes();
+                objects[i] = cell.Key.O?.ToBytes()!;
+                phis[i] = cell.D.FirstPeriod.PhiFp1e9;
+                opponents[i] = cell.D.FirstPeriod.OpponentRatingFp1e9;
+                games[i] = cell.D.Games;
+                sums[i] = cell.D.SumScoreFp1e9;
+                timestamps[i] = TsFromUnixUs(cell.D.MaxTsUnixUs);
+                periodOffsets[i] = periodAt;
+                WritePeriods(
+                    in cell.D, periodOpponents, periodPhis,
+                    periodGames, periodSums, ref periodAt);
             }
-            runStart = runEnd;
+            periodOffsets[count] = periodAt;
+
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandTimeout = 0;
+            // One set-sized boundary owns the complete mixed-type chunk. Native
+            // routing locks and folds each physical type run without managed
+            // per-type calls or a terminal drain of scalar work.
+            command.CommandText =
+                "SELECT consensus.merge_evidence($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)";
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, subjects);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, types);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, objects);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, phis);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, games);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, sums);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.TimestampTz, timestamps);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, opponents);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodOffsets);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodOpponents);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodPhis);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodGames);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, periodSums);
+            folded += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
+            foldCalls++;
         }
         long foldTicks = System.Diagnostics.Stopwatch.GetTimestamp() - foldStarted;
 

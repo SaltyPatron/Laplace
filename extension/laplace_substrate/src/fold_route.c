@@ -76,6 +76,7 @@ PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge);
 PG_FUNCTION_INFO_V1(pg_laplace_attestation_merge_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_type);
+PG_FUNCTION_INFO_V1(pg_laplace_consensus_merge_evidence);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_upsert_evidence_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_refold_evidence_type);
 PG_FUNCTION_INFO_V1(pg_laplace_consensus_partition_leaf);
@@ -494,6 +495,21 @@ array_window(ArrayType *original, const Datum *src, const bool *src_nulls,
         return construct_md_array(d, nu, 1, dims, lbs,
                                   elmtype, elmlen, elmbyval, elmalign);
     return construct_array(d, n, elmtype, elmlen, elmbyval, elmalign);
+}
+
+static InArray
+in_array_window(const InArray *source, int start, int n,
+                Oid elmtype, int elmlen, bool elmbyval, char elmalign)
+{
+    InArray out;
+
+    out.array = array_window(source->array, source->elems, source->nulls,
+                             source->n, start, n,
+                             elmtype, elmlen, elmbyval, elmalign);
+    out.elems = source->elems + start;
+    out.nulls = source->nulls != NULL ? source->nulls + start : NULL;
+    out.n = n;
+    return out;
 }
 
 typedef struct FoldStateArrays
@@ -1654,14 +1670,15 @@ static const char *EVIDENCE_LOCK_SQL =
 
 
 static const char *EVIDENCE_WRITE_SQL =
-    "UPDATE laplace.consensus c SET "
-    " rating=b.rating,rd=b.rd,volatility=b.volatility,"
-    " witness_count=CASE WHEN b.recomputed THEN b.games ELSE c.witness_count+b.games END,"
-    " last_observed_at=CASE WHEN b.recomputed THEN b.ts ELSE GREATEST(c.last_observed_at,b.ts) END "
-    "FROM unnest($1::bytea[],$2::bytea[],$3::int8[],$4::timestamptz[],"
+    "MERGE INTO laplace.consensus c "
+    "USING unnest($1::bytea[],$2::bytea[],$3::int8[],$4::timestamptz[],"
     " $5::bool[],$6::int8[],$7::int8[],$8::int8[]) "
     " AS b(id,s,games,ts,recomputed,rating,rd,volatility) "
-    "WHERE c.type_id='\\x%s'::bytea AND c.subject_id=b.s AND c.id=b.id";
+    "ON c.type_id='\\x%s'::bytea AND c.subject_id=b.s AND c.id=b.id "
+    "WHEN MATCHED THEN UPDATE SET "
+    " rating=b.rating,rd=b.rd,volatility=b.volatility,"
+    " witness_count=CASE WHEN b.recomputed THEN b.games ELSE c.witness_count+b.games END,"
+    " last_observed_at=CASE WHEN b.recomputed THEN b.ts ELSE GREATEST(c.last_observed_at,b.ts) END";
 
 typedef struct FoldEvidenceStates
 {
@@ -1837,7 +1854,7 @@ write_evidence_states(const uint8_t *type16, ArrayType *ids,
     SPIPlanPtr plan=typed_plan(&evidence_write_plans,
         "consensus evidence result writes",type16,EVIDENCE_WRITE_SQL,8,args);
     int rc=SPI_execute_plan(plan,vals,NULL,false,0);
-    if (rc!=SPI_OK_UPDATE || SPI_processed!=(uint64)subjects->n)
+    if (rc!=SPI_OK_MERGE || SPI_processed!=(uint64)subjects->n)
         ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
                        errmsg("%s: locked evidence targets changed before result write",label)));
     pfree(flags);
@@ -1883,6 +1900,110 @@ validate_evidence_delta(const InArray *phis, const InArray *games,
                                errmsg("%s: grouped period totals do not match cell totals",label)));
         }
     }
+}
+
+/* Primary admission boundary for a complete mixed-type working set. The caller
+ * crosses into PostgreSQL once; native code retains physical partition routing
+ * by consuming adjacent type runs inside that one operation. */
+Datum
+pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
+{
+    const char *label = "consensus_merge_evidence";
+    InArray subjects, types, objects, phis, games, sums, ts, opps;
+    PeriodArrays periods;
+    int64 affected = 0;
+    int run_start = 0;
+
+    in_array(fcinfo, 0, BYTEAOID, -1, false, 'i', false, label, &subjects);
+    in_array(fcinfo, 1, BYTEAOID, -1, false, 'i', false, label, &types);
+    in_array(fcinfo, 2, BYTEAOID, -1, false, 'i', true, label, &objects);
+    in_array(fcinfo, 3, INT8OID, 8, true, 'd', false, label, &phis);
+    in_array(fcinfo, 4, INT8OID, 8, true, 'd', false, label, &games);
+    in_array(fcinfo, 5, INT8OID, 8, true, 'd', false, label, &sums);
+    in_array(fcinfo, 6, TIMESTAMPTZOID, 8, true, 'd', false, label, &ts);
+    memset(&opps, 0, sizeof(opps));
+    if (PG_NARGS() > 7 && !PG_ARGISNULL(7))
+        in_array(fcinfo, 7, INT8OID, 8, true, 'd', false, label, &opps);
+    read_period_arrays(fcinfo, subjects.n, label, &periods);
+
+    if (types.n != subjects.n || objects.n != subjects.n ||
+        phis.n != subjects.n || games.n != subjects.n ||
+        sums.n != subjects.n || ts.n != subjects.n ||
+        (opps.n > 0 && opps.n != subjects.n))
+        ereport(ERROR,
+                (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
+                 errmsg("%s: parallel arrays must share length", label)));
+    if (subjects.n == 0)
+        PG_RETURN_INT64(0);
+
+    validate_evidence_delta(&phis, &games, &sums, &periods, label);
+    if (IsolationUsesXactSnapshot())
+        ereport(ERROR,
+                (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                 errmsg("%s: retry the evidence transaction at READ COMMITTED", label)));
+    if (SPI_connect() != SPI_OK_CONNECT)
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("%s: SPI_connect failed", label)));
+
+    while (run_start < subjects.n)
+    {
+        const uint8_t *type16 = bytea16(types.elems[run_start], label);
+        int run_end = run_start + 1;
+        InArray run_subjects, run_objects, run_games, run_ts;
+        Datum *cell_ids;
+        ArrayType *ids;
+        FoldPriorStates *priors;
+        FoldEvidenceStates *evidence;
+        FoldStateArrays folds;
+
+        while (run_end < subjects.n &&
+               memcmp(bytea16(types.elems[run_end], label), type16, 16) == 0)
+            ++run_end;
+        if (run_end < subjects.n &&
+            memcmp(type16, bytea16(types.elems[run_end], label), 16) > 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_DATA_EXCEPTION),
+                     errmsg("%s: type ids must be bytewise sorted", label)));
+
+        run_subjects = in_array_window(&subjects, run_start,
+                                       run_end - run_start,
+                                       BYTEAOID, -1, false, 'i');
+        run_objects = in_array_window(&objects, run_start,
+                                      run_end - run_start,
+                                      BYTEAOID, -1, false, 'i');
+        run_games = in_array_window(&games, run_start,
+                                    run_end - run_start,
+                                    INT8OID, 8, true, 'd');
+        run_ts = in_array_window(&ts, run_start,
+                                 run_end - run_start,
+                                 TIMESTAMPTZOID, 8, true, 'd');
+
+        cell_ids = typed_cell_ids(type16, &run_subjects, &run_objects, label);
+        ids = construct_array(cell_ids, run_subjects.n,
+                              BYTEAOID, -1, false, 'i');
+        lock_evidence_targets(type16, ids, &run_subjects, &run_objects,
+                              &run_ts, label);
+        priors = read_run_priors(type16, types.elems[run_start], cell_ids,
+                                 &run_subjects, 0, run_subjects.n, label);
+        if (priors->matched_n != (uint64)run_subjects.n)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: locked target is absent from its physical owner", label)));
+        evidence = read_evidence_states(type16, &run_subjects, &run_objects,
+                                        &run_games, &run_ts, priors,
+                                        label, false);
+        fold_run_states(&phis, &opps, &games, &sums, &periods,
+                        run_start, run_subjects.n, priors, label,
+                        &folds, evidence->recomputed);
+        affected += write_evidence_states(type16, ids, &run_subjects,
+                                          evidence, &folds, label);
+        run_start = run_end;
+        CHECK_FOR_INTERRUPTS();
+    }
+
+    SPI_finish();
+    PG_RETURN_INT64(affected);
 }
 
 /* Direct routed form for a caller-owned single type run. Besides eliminating

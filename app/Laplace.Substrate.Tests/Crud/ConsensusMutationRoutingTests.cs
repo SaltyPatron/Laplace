@@ -127,6 +127,8 @@ public sealed class ConsensusMutationRoutingTests
         Assert.DoesNotContain("laplace.consensus_fold(", refold, StringComparison.Ordinal);
         var entry = Read("extension", "laplace_substrate", "sql", "functions",
             "fold", "consensus_upsert.sql.in");
+        Assert.Contains("CREATE OR REPLACE FUNCTION consensus.merge_evidence(", entry);
+        Assert.Contains("AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_merge_evidence'", entry);
         Assert.Contains("CREATE OR REPLACE FUNCTION consensus.upsert_evidence_type(", entry);
         Assert.Contains("AS 'EXECUTION_LIBRARY', 'pg_laplace_consensus_upsert_evidence_type'", entry);
         Assert.Contains("CREATE OR REPLACE FUNCTION consensus.refold_evidence_type(", entry);
