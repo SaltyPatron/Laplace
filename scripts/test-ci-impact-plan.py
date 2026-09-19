@@ -234,7 +234,7 @@ class ImpactPlanTests(unittest.TestCase):
                 self.assertEqual(value["delivery_actions"], ["install", "live"])
                 self.assertNotIn("publish", value["delivery_actions"])
                 self.assertNotIn("managed-dev", value["dev_suites"])
-                self.assertEqual(value["live_suites"], ["live-floor", "live-api"])
+                self.assertEqual(value["live_suites"], ["live-api"])
                 self.assertFalse(value["full_qualification"])
 
     def test_extension_sql_does_not_schedule_the_managed_ocean(self):

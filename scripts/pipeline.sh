@@ -159,6 +159,7 @@ restart_postgres() {
   # A missing /opt/laplace/app receipt must not force BUILD_COMPONENTS=all.
   # A missing SPA receipt must not force build-web on a native-only SHA.
   # Native install delivery must not require application publication.
+  # live-floor (full foundation) is the data ladder, not this SHA.
   oldpid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)
   [[ "$oldpid" != 0 ]] || oldpid=""
   echo "restart_postgres ($reason): systemctl restart $unit (was pid ${oldpid:-none})"

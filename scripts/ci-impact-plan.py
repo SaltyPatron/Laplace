@@ -159,7 +159,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             components.add("native")
             build_components.add("native")
             delivery_actions.add("install")
-            live_suites.update(BASE_LIVE_SUITES)
+            live_suites.add("live-api")
             continue
 
         if native_test_path(path):
