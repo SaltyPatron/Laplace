@@ -117,9 +117,12 @@ def verify_spa(base: str) -> None:
 
 def verify_typed_operation(base: str) -> None:
     body = json.dumps({"name": "ops.substrate_counts", "max_rows": 20}).encode()
+    api_key = os.environ.get("LAPLACE_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("typed substrate verification requires LAPLACE_API_KEY")
     status, content_type, response = request("POST", base + "/v1/op", body, {
         "Content-Type": "application/json",
-        "X-Laplace-Tenant": "release-verify",
+        "Authorization": f"Bearer {api_key}",
     })
     if status != 200:
         raise ValueError(f"typed substrate operation returned HTTP {status}")

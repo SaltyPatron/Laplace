@@ -592,12 +592,50 @@ check_application_live() {
   fi
 }
 
+issue_live_proof_credential() {
+  local api_base="$1" operator_token="${LAPLACE_OPERATOR_TOKEN:-}" issued_json
+  if [[ -z "$operator_token" && -r /opt/laplace/secrets/operator.env ]]; then
+    operator_token="$(
+      set -a
+      # shellcheck disable=SC1091
+      source /opt/laplace/secrets/operator.env
+      printf '%s' "${LAPLACE_OPERATOR_TOKEN:-}"
+    )"
+  fi
+  [[ -n "$operator_token" ]] || {
+    echo "::error::live verification requires LAPLACE_API_KEY or LAPLACE_OPERATOR_TOKEN" >&2
+    return 1
+  }
+  issued_json="$(curl -fsS -X POST "$api_base/v1/billing/operator/keys" \
+    -H 'Content-Type: application/json' \
+    -H "X-Laplace-Operator-Token: $operator_token" \
+    --data '{"tenant":"ci-deployment-proof","label":"installed-product-verification"}')" || {
+      echo "::error::could not issue the bounded live-verification credential" >&2
+      return 1
+    }
+  ISSUED_JSON="$issued_json" python3 - <<'PY'
+import json
+import os
+
+issued = json.loads(os.environ["ISSUED_JSON"])
+print(issued["api_key"], issued["key_prefix"], sep="\t")
+PY
+}
+
+revoke_live_proof_credential() {
+  local api_base="$1" api_key="$2" key_prefix="$3"
+  [[ -n "$key_prefix" ]] || return 0
+  curl -fsS -X POST "$api_base/v1/billing/keys/revoke" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $api_key" \
+    --data "{\"key_prefix\":\"$key_prefix\"}" >/dev/null
+}
+
 check_t0_perfcache_runtime() {
   local host="${PGHOST:-/var/run/postgresql}"
   local user="${PGUSER:-laplace_admin}"
   local database="${PGDATABASE:-laplace}"
   local word_id db_receipt perfcache_path file_receipt api_key="${LAPLACE_API_KEY:-}"
-  local operator_token="${LAPLACE_OPERATOR_TOKEN:-}" issued_prefix="" issued_json=""
   local api_base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local -a proof_headers=(-H 'Content-Type: application/json')
 
@@ -646,58 +684,19 @@ PY
   fi
   echo "::notice::T0 ROM receipt aligned: $db_receipt"
 
-  if [[ -z "$api_key" && -z "$operator_token" && -r /opt/laplace/secrets/operator.env ]]; then
-    operator_token="$(
-      set -a
-      # shellcheck disable=SC1091
-      source /opt/laplace/secrets/operator.env
-      printf '%s' "${LAPLACE_OPERATOR_TOKEN:-}"
-    )"
-  fi
-
-  if [[ -z "$api_key" ]]; then
-    if [[ -z "$operator_token" ]]; then
-      echo "::error::live storage proof requires LAPLACE_API_KEY or LAPLACE_OPERATOR_TOKEN" >&2
-      return 1
-    fi
-    issued_json="$(curl -fsS -X POST "$api_base/v1/billing/operator/keys" \
-      -H 'Content-Type: application/json' \
-      -H "X-Laplace-Operator-Token: $operator_token" \
-      --data '{"tenant":"ci-deployment-proof","label":"installed-storage-proof"}')" || {
-        echo "::error::could not issue the bounded live-proof credential" >&2
-        return 1
-      }
-    IFS=$'\t' read -r api_key issued_prefix < <(ISSUED_JSON="$issued_json" python3 - <<'PY'
-import json
-import os
-
-issued = json.loads(os.environ["ISSUED_JSON"])
-print(issued["api_key"], issued["key_prefix"], sep="\t")
-PY
-    )
-  fi
-  proof_headers+=(-H "Authorization: Bearer $api_key")
-
-  revoke_proof_key() {
-    [[ -n "$issued_prefix" ]] || return 0
-    curl -fsS -X POST "$api_base/v1/billing/keys/revoke" \
-      -H 'Content-Type: application/json' \
-      -H "Authorization: Bearer $api_key" \
-      --data "{\"key_prefix\":\"$issued_prefix\"}" >/dev/null
+  [[ -n "$api_key" ]] || {
+    echo "::error::live storage proof requires the bounded verification credential" >&2
+    return 1
   }
+  proof_headers+=(-H "Authorization: Bearer $api_key")
 
   local proof
   proof="$(curl -fsS -X POST "$api_base/v1/explore/storage-proof" \
     "${proof_headers[@]}" \
     --data '{"text":"A"}')" || {
-      revoke_proof_key || true
       echo "::error::deployed storage-proof endpoint is unavailable" >&2
       return 1
     }
-  revoke_proof_key || {
-    echo "::error::could not revoke the bounded live-proof credential" >&2
-    return 1
-  }
   PROOF_JSON="$proof" DB_RECEIPT="$db_receipt" python3 - <<'PY' || {
 import json
 import math
@@ -721,13 +720,26 @@ PY
     printf '%s\n' "$proof" >&2
     return 1
   }
-  unset api_key operator_token issued_json
+  unset api_key
   echo "::notice::storage-proof endpoint verified against live T0 ROM"
 }
 
-verify_installed_product() {
+verify_installed_product() (
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local ui_base="${LAPLACE_PUBLIC_UI_BASE:-http://127.0.0.1:8080}"
+  local api_key="${LAPLACE_API_KEY:-}" issued_prefix=""
+  if [[ -z "$api_key" ]]; then
+    IFS=$'\t' read -r api_key issued_prefix < <(issue_live_proof_credential "$base")
+  fi
+  [[ -n "$api_key" ]] || {
+    echo "::error::could not obtain the bounded live-verification credential" >&2
+    return 1
+  }
+  export LAPLACE_API_KEY="$api_key"
+  cleanup_live_proof_credential() {
+    revoke_live_proof_credential "$base" "$api_key" "$issued_prefix"
+  }
+  trap cleanup_live_proof_credential EXIT
   require_deployed_revision
   if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
     # Managed-only publication deliberately has no source-native build tree.
@@ -741,7 +753,7 @@ verify_installed_product() {
   verify_installed_web_receipt
   check_t0_perfcache_runtime
   python3 scripts/verify-application-release.py --base "$ui_base" --timeout-seconds 60
-}
+)
 
 reconcile_installed_product() {
   # Reconciliation is a deliberate database mutation and is only selected when
