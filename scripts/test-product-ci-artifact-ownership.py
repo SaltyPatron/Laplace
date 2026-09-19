@@ -50,6 +50,13 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("LAPLACE_REUSE_INSTALLED_NATIVE", verify)
         self.assertIn("check-database-health.sh --installed-runtime", verify)
         self.assertIn('check-database-health.sh "${PGDATABASE:-laplace}"', verify)
+        storage = function("check_t0_perfcache_runtime")
+        self.assertIn("/opt/laplace/secrets/operator.env", storage)
+        self.assertIn("LAPLACE_OPERATOR_TOKEN", storage)
+        self.assertIn("/v1/billing/operator/keys", storage)
+        self.assertIn("/v1/billing/keys/revoke", storage)
+        self.assertIn("Authorization: Bearer $api_key", storage)
+        self.assertIn("X-Laplace-Operator-Token: $operator_token", storage)
         reconcile = function("reconcile_installed_product")
         self.assertLess(reconcile.index("require_deployed_revision"),
                         reconcile.index("reconcile-highway-masks.sh"))
@@ -136,8 +143,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
         qualification = function("run_release_qualification")
         self.assertIn("check_deps", qualification)
         self.assertIn("run_build", qualification)
-        self.assertIn("run_dev_test_matrix 1", qualification)
-        for forbidden in ("run_install", "run_database_maintenance", "run_db_tests", "run_publish"):
+        for forbidden in ("run_dev_test_matrix", "run_install", "run_database_maintenance", "run_db_tests", "run_publish"):
             self.assertNotIn(forbidden, qualification)
 
         candidate = function("run_release_candidate")
@@ -185,14 +191,14 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn('run_release_mutation_window "$actions"', delivery)
         self.assertIn('csv_selected "$actions" reconcile', delivery)
         self.assertIn('csv_selected "$actions" publish', delivery)
-        self.assertIn('csv_selected "$actions" live', delivery)
+        self.assertNotIn('csv_selected "$actions" live', delivery)
         self.assertNotIn("run_install", delivery)
         self.assertNotIn("run_database_maintenance --prepare", delivery)
         self.assertNotIn("run_db_tests", delivery)
         self.assertIn("run_publish", delivery)
         self.assertIn("verify_installed_product", delivery)
         self.assertIn("reconcile_installed_product", delivery)
-        self.assertIn("run_live_tests", delivery)
+        self.assertNotIn("run_live_tests", delivery)
         self.assertNotIn("run_release_qualification", delivery)
         self.assertNotIn("run_build", delivery)
         self.assertNotIn("run_release_activation", delivery)
@@ -262,7 +268,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
 
         fallback = function("force_full_carry_forward_impact")
         self.assertIn('LAPLACE_BUILD_COMPONENTS="managed"', fallback)
-        self.assertIn('LAPLACE_DELIVERY_ACTIONS="publish,live"', fallback)
+        self.assertIn('LAPLACE_DELIVERY_ACTIONS="publish"', fallback)
         self.assertNotIn('LAPLACE_BUILD_COMPONENTS="native', fallback)
         self.assertNotIn('LAPLACE_DB_SUITES="db-', fallback)
         self.assertNotIn("LAPLACE_DEV_SUITES=all", fallback)
@@ -350,14 +356,13 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertLess(model.index("require_built_revision"),
                         model.index("model-synthesize-ci.sh"))
 
-    def test_mainline_is_only_build_and_development_tests(self):
+    def test_mainline_is_build_only(self):
         owner = function("run_mainline")
         self.assertIn("run_release_qualification", owner)
         qualification = function("run_release_qualification")
         self.assertIn("check_deps", qualification)
         self.assertIn("run_build", qualification)
-        self.assertIn("run_dev_test_matrix 1", qualification)
-        for forbidden in ("run_install", "run_database_maintenance", "run_db_tests", "run_publish", "run_live_tests"):
+        for forbidden in ("run_dev_test_matrix", "run_install", "run_database_maintenance", "run_db_tests", "run_publish", "run_live_tests"):
             self.assertNotIn(forbidden, qualification)
 
     def test_database_maintenance_never_recreates_or_seeds_implicitly(self):

@@ -596,7 +596,10 @@ check_t0_perfcache_runtime() {
   local host="${PGHOST:-/var/run/postgresql}"
   local user="${PGUSER:-laplace_admin}"
   local database="${PGDATABASE:-laplace}"
-  local word_id db_receipt perfcache_path file_receipt
+  local word_id db_receipt perfcache_path file_receipt api_key="${LAPLACE_API_KEY:-}"
+  local operator_token="${LAPLACE_OPERATOR_TOKEN:-}" issued_prefix="" issued_json=""
+  local api_base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
+  local -a proof_headers=(-H 'Content-Type: application/json')
 
   word_id="$(psql -h "$host" -U "$user" -d "$database" -v ON_ERROR_STOP=1 -X -tAc \
     "SELECT encode(laplace.word_id('the'),'hex');")" || {
@@ -643,13 +646,58 @@ PY
   fi
   echo "::notice::T0 ROM receipt aligned: $db_receipt"
 
+  if [[ -z "$api_key" && -z "$operator_token" && -r /opt/laplace/secrets/operator.env ]]; then
+    operator_token="$(
+      set -a
+      # shellcheck disable=SC1091
+      source /opt/laplace/secrets/operator.env
+      printf '%s' "${LAPLACE_OPERATOR_TOKEN:-}"
+    )"
+  fi
+
+  if [[ -z "$api_key" ]]; then
+    if [[ -z "$operator_token" ]]; then
+      echo "::error::live storage proof requires LAPLACE_API_KEY or LAPLACE_OPERATOR_TOKEN" >&2
+      return 1
+    fi
+    issued_json="$(curl -fsS -X POST "$api_base/v1/billing/operator/keys" \
+      -H 'Content-Type: application/json' \
+      -H "X-Laplace-Operator-Token: $operator_token" \
+      --data '{"tenant":"ci-deployment-proof","label":"installed-storage-proof"}')" || {
+        echo "::error::could not issue the bounded live-proof credential" >&2
+        return 1
+      }
+    IFS=$'\t' read -r api_key issued_prefix < <(ISSUED_JSON="$issued_json" python3 - <<'PY'
+import json
+import os
+
+issued = json.loads(os.environ["ISSUED_JSON"])
+print(issued["api_key"], issued["key_prefix"], sep="\t")
+PY
+    )
+  fi
+  proof_headers+=(-H "Authorization: Bearer $api_key")
+
+  revoke_proof_key() {
+    [[ -n "$issued_prefix" ]] || return 0
+    curl -fsS -X POST "$api_base/v1/billing/keys/revoke" \
+      -H 'Content-Type: application/json' \
+      -H "Authorization: Bearer $api_key" \
+      --data "{\"key_prefix\":\"$issued_prefix\"}" >/dev/null
+  }
+
   local proof
-  proof="$(curl -fsS -X POST "${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}/v1/explore/storage-proof" \
-    -H 'Content-Type: application/json' \
+  proof="$(curl -fsS -X POST "$api_base/v1/explore/storage-proof" \
+    "${proof_headers[@]}" \
     --data '{"text":"A"}')" || {
+      revoke_proof_key || true
       echo "::error::deployed storage-proof endpoint is unavailable" >&2
       return 1
     }
+  revoke_proof_key || {
+    echo "::error::could not revoke the bounded live-proof credential" >&2
+    return 1
+  }
   PROOF_JSON="$proof" DB_RECEIPT="$db_receipt" python3 - <<'PY' || {
 import json
 import math
@@ -673,6 +721,7 @@ PY
     printf '%s\n' "$proof" >&2
     return 1
   }
+  unset api_key operator_token issued_json
   echo "::notice::storage-proof endpoint verified against live T0 ROM"
 }
 
