@@ -161,10 +161,11 @@ def plan_changed(root: Path, paths: list[str]) -> dict[str, object]:
         for path in production
         if not (reverse.get(path, set()) & production)
     }
-    # Building selected tests also compiles their ProjectReference closure. Add
-    # affected production leaves so compile-only executables/tools with no test
-    # consumer are still proved without compiling unrelated projects.
-    build = sorted(tests | production_roots)
+    # Candidate publication builds production leaves only. Test projects belong
+    # exclusively to explicit test operations; pulling every reverse-dependent
+    # test executable into an ordinary application build made a one-file API
+    # change compile the test estate even when no test suite was selected.
+    build = sorted(production_roots)
 
     return {
         "full": False,

@@ -81,7 +81,7 @@ def shell_assignment(name: str, value: str) -> str:
 
 def configure_operator(
     home: Path,
-    legacy_root: Path,
+    laplace_root: Path,
     refactor_root: Path,
     install_prefix: Path,
     public_base_url: str,
@@ -89,8 +89,7 @@ def configure_operator(
 ) -> list[Path]:
     loader = home / ".config/shell/laplace.env"
     values = {
-        "LAPLACE_ROOT": str(legacy_root),
-        "LAPLACE_LEGACY_ROOT": str(legacy_root),
+        "LAPLACE_ROOT": str(laplace_root),
         "LAPLACE_REFACTOR_ROOT": str(refactor_root),
         "LAPLACE_INSTALL_PREFIX": str(install_prefix),
         "LAPLACE_APP_DIR": str(install_prefix / "app"),
@@ -108,6 +107,9 @@ def configure_operator(
         '  . "$HOME/.config/shell/secrets.env"',
         '  case "$_laplace_shell_flags" in *a*) ;; *) set +a ;; esac',
         "  unset _laplace_shell_flags",
+        "fi",
+        'if [ -n "${LICHESS_API:-}" ] && [ -z "${LICHESS_TOKEN:-}" ]; then',
+        '  export LICHESS_TOKEN="$LICHESS_API"',
         "fi",
         *(shell_assignment(name, value) for name, value in values.items()),
         "",
@@ -131,9 +133,16 @@ def configure_operator(
 
 
 def configure_runner(
-    path: Path, install_prefix: Path, public_base_url: str, default_agent: str
+    path: Path,
+    laplace_root: Path,
+    refactor_root: Path,
+    install_prefix: Path,
+    public_base_url: str,
+    default_agent: str,
 ) -> bool:
     values = {
+        "LAPLACE_ROOT": str(laplace_root),
+        "LAPLACE_REFACTOR_ROOT": str(refactor_root),
         "LAPLACE_INSTALL_PREFIX": str(install_prefix),
         "LAPLACE_APP_DIR": str(install_prefix / "app"),
         "LAPLACE_DB": "Host=/var/run/postgresql;Username=laplace_admin;Database=laplace",
@@ -152,7 +161,7 @@ def configure_runner(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--home", type=Path)
-    parser.add_argument("--legacy-root", type=Path)
+    parser.add_argument("--laplace-root", "--legacy-root", dest="laplace_root", type=Path)
     parser.add_argument("--refactor-root", type=Path)
     parser.add_argument("--install-prefix", type=Path, default=Path("/opt/laplace"))
     parser.add_argument("--public-base-url", default="https://hart-server:8443")
@@ -161,23 +170,30 @@ def main() -> None:
     parser.add_argument("--skip-operator", action="store_true")
     args = parser.parse_args()
 
-    if not args.skip_operator and not (args.home and args.legacy_root and args.refactor_root):
-        parser.error("--home, --legacy-root and --refactor-root are required for operator setup")
+    if not args.skip_operator and not (args.home and args.laplace_root and args.refactor_root):
+        parser.error("--home, --laplace-root and --refactor-root are required for operator setup")
     if args.skip_operator and not args.runner_env:
         parser.error("--skip-operator requires --runner-env")
+    if args.runner_env and not (args.laplace_root and args.refactor_root):
+        parser.error("--runner-env requires --laplace-root and --refactor-root")
 
     changed = []
     if not args.skip_operator:
         changed.extend(configure_operator(
             args.home,
-            args.legacy_root,
+            args.laplace_root,
             args.refactor_root,
             args.install_prefix,
             args.public_base_url,
             args.default_agent,
         ))
     if args.runner_env and configure_runner(
-        args.runner_env, args.install_prefix, args.public_base_url, args.default_agent
+        args.runner_env,
+        args.laplace_root,
+        args.refactor_root,
+        args.install_prefix,
+        args.public_base_url,
+        args.default_agent,
     ):
         changed.append(args.runner_env)
     for path in changed:

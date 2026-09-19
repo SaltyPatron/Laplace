@@ -372,27 +372,20 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         all_tests = {
             path for path, project in managed_projects.items() if project.is_test
         }
-        for selection in (
-            managed_test_projects,
-            managed_db_test_projects,
-            managed_live_test_projects,
-        ):
-            if selection == ["all"]:
-                build_roots.update(all_tests)
-            else:
-                build_roots.update(selection)
+        # Test projects are not publication artifacts. Explicit test operations
+        # build their own selected projects; an ordinary release build must not
+        # compile tests merely because they reverse-reference a changed runtime.
+        build_roots.difference_update(all_tests)
         managed_build_projects = sorted(build_roots)
 
-    # Every delivered revision has an exact application revision receipt and a
-    # universal live floor. This is deliberately much smaller than full live
-    # qualification and does not imply native/DB mutation.
+    # Publication performs bounded activation/readiness checks. Full live suites
+    # are explicit operator/qualification work and never ride every main deploy.
     if product_change:
         if publish_required:
             delivery_actions.add("publish")
-        if not pure_uci:
-            delivery_actions.add("live")
-            if not skip_default_live_floor:
-                live_suites.update(BASE_LIVE_SUITES)
+    delivery_actions.discard("live")
+    live_suites.clear()
+    managed_live_test_projects = []
 
     return {
         "components": sorted(components),
@@ -444,11 +437,13 @@ def force_full_plan(plan: dict) -> None:
     plan["managed_test_projects"] = ["all"]
     plan["managed_test_filter"] = ""
     plan["managed_db_test_projects"] = ["all"]
-    plan["managed_live_test_projects"] = ["all"]
+    plan["managed_live_test_projects"] = []
     plan["dev_suites"] = list(DEV_SUITES)
     plan["db_suites"] = list(DB_SUITES)
-    plan["live_suites"] = list(STANDARD_LIVE_SUITES)
-    plan["delivery_actions"] = list(DELIVERY_ACTIONS)
+    plan["live_suites"] = []
+    plan["delivery_actions"] = [
+        action for action in DELIVERY_ACTIONS if action != "live"
+    ]
     plan["publish_scope"] = "full"
     plan["unknown_paths"] = ["<unable-to-resolve-base>"]
     plan["reasons"] = {

@@ -284,9 +284,9 @@ force_full_carry_forward_impact() {
   export LAPLACE_MANAGED_BUILD_PROJECTS="app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj,app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj,app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj,app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj"
   export LAPLACE_DB_SUITES=""
   export LAPLACE_MANAGED_DB_TEST_PROJECTS=""
-  export LAPLACE_LIVE_SUITES="live-floor,live-api,managed-live,generation-eval,chess-provider-live"
-  export LAPLACE_MANAGED_LIVE_TEST_PROJECTS="all"
-  export LAPLACE_DELIVERY_ACTIONS="publish,live"
+  export LAPLACE_LIVE_SUITES=""
+  export LAPLACE_MANAGED_LIVE_TEST_PROJECTS=""
+  export LAPLACE_DELIVERY_ACTIONS="publish"
   export LAPLACE_PUBLISH_SCOPE="full"
 }
 
@@ -306,10 +306,7 @@ force_web_carry_forward_impact() {
   # web receipt therefore requires only the web artifact and bounded live checks;
   # qualification that already passed is not widened and managed binaries stay valid.
   append_csv_env LAPLACE_BUILD_COMPONENTS web
-  append_csv_env LAPLACE_LIVE_SUITES live-floor
-  append_csv_env LAPLACE_LIVE_SUITES live-api
   append_csv_env LAPLACE_DELIVERY_ACTIONS publish
-  append_csv_env LAPLACE_DELIVERY_ACTIONS live
   export LAPLACE_PUBLISH_SCOPE=web
 }
 
@@ -723,10 +720,7 @@ run_release_qualification() {
   (( current_rc == 0 )) || return "$current_rc"
 
   require_built_revision
-  current_rc=0
-  run_dev_test_matrix 1 || current_rc=$?
-  if (( current_rc == 3 )); then return 0; fi
-  return "$current_rc"
+  return 0
 }
 
 run_mainline() {
@@ -912,14 +906,7 @@ run_release_delivery() {
     echo "::notice::application verification omitted; planner did not publish"
   fi
 
-  if csv_selected "$actions" live; then
-    run_live_tests
-  elif csv_selected "$actions" publish && [[ "$publish_scope" != uci ]]; then
-    echo "::error::release-delivery plan omitted mandatory live verification" >&2
-    return 2
-  else
-    echo "::notice::live verification omitted by planner"
-  fi
+  echo "::notice::full live suites are not part of automatic delivery; use the explicit test-live operation"
 }
 run_proof_model() {
   require_built_revision

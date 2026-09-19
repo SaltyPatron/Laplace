@@ -13,4 +13,9 @@
     <ProjectReference Include="..\Laplace.Core\Laplace.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\config\agents.json"
+                      LogicalName="Laplace.Agents.defaults.agents.json" />
+  </ItemGroup>
+
 </Project>

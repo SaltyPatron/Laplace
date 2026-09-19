@@ -68,6 +68,7 @@ public sealed record AgentDescriptor(
 /// </summary>
 public sealed class AgentCatalog
 {
+    private const string DefaultConfigResource = "Laplace.Agents.defaults.agents.json";
     private readonly Dictionary<string, AgentDefinition> _aliases;
     private readonly Dictionary<string, (string? BaseUrl, string? ApiKeyEnv)> _providerOverrides;
     private readonly string? _configuredDefault;
@@ -108,7 +109,52 @@ public sealed class AgentCatalog
             configPath = null;
         }
 
-        return Parse(json, configPath, env);
+        return Parse(MergeWithInstalledConfig(json, configPath), configPath, env);
+    }
+
+    private static string MergeWithInstalledConfig(string? installedJson, string? configPath)
+    {
+        using var stream = typeof(AgentCatalog).Assembly.GetManifestResourceStream(DefaultConfigResource)
+            ?? throw new AgentException($"embedded agent defaults are missing: {DefaultConfigResource}");
+        using var reader = new StreamReader(stream);
+        var defaultsJson = reader.ReadToEnd();
+        if (string.IsNullOrWhiteSpace(installedJson)) return defaultsJson;
+
+        JsonNode? defaults;
+        JsonNode? installed;
+        try
+        {
+            defaults = JsonNode.Parse(defaultsJson);
+            installed = JsonNode.Parse(installedJson);
+        }
+        catch (JsonException ex)
+        {
+            throw new AgentException(
+                $"agents config is not valid JSON{(configPath is null ? "" : $" ({configPath})")}: {ex.Message}", ex);
+        }
+
+        if (defaults is not JsonObject defaultObject)
+            throw new AgentException("embedded agent defaults must be a JSON object");
+        if (installed is not JsonObject installedObject)
+            throw new AgentException(
+                $"agents config must be a JSON object{(configPath is null ? "" : $" ({configPath})")}");
+
+        var effective = (JsonObject)defaultObject.DeepClone();
+        Overlay(effective, installedObject);
+        return effective.ToJsonString();
+    }
+
+    private static void Overlay(JsonObject target, JsonObject configured)
+    {
+        foreach (var (name, value) in configured)
+        {
+            if (value is JsonObject configuredObject && target[name] is JsonObject targetObject)
+            {
+                Overlay(targetObject, configuredObject);
+                continue;
+            }
+            target[name] = value?.DeepClone();
+        }
     }
 
     /// <summary>Parse a config document without touching the filesystem.</summary>
