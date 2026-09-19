@@ -15,7 +15,6 @@ on:
       - "scripts/ci-product-freshness.py"
       - "scripts/ci_product_scope.py"
       - "scripts/product-ci.sh"
-      - "scripts/pipeline.sh"
       - "scripts/ci_managed_projects.py"
       - "scripts/test-parallel.sh"
       - "scripts/publish-applications.sh"

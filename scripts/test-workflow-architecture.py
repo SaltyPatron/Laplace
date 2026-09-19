@@ -211,7 +211,6 @@ class WorkflowArchitecture(unittest.TestCase):
             "scripts/publish-applications.sh",
             "scripts/test-suites/**",
             "scripts/product-ci.sh",
-            "scripts/pipeline.sh",
             "scripts/ci_managed_projects.py",
             "scripts/test-*.py",
             "scripts/test-*.sh",

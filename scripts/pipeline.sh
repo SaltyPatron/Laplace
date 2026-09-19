@@ -149,30 +149,23 @@ postgresql_restart_required() {
 }
 
 restart_postgres() {
-  local reason="$1" datadir pidfile oldpid="" tries=0 newpid="" still
-  datadir=$(psql -d postgres -U laplace_admin -tAc "SHOW data_directory")
-  pidfile="$datadir/postmaster.pid"
-  oldpid=$(head -1 "$pidfile" 2>/dev/null || true)
-  if [[ -z "$oldpid" ]]; then
-    oldpid=$(systemctl show -p MainPID --value laplace-postgresql.service 2>/dev/null || true)
-    [[ "$oldpid" != 0 ]] || oldpid=""
-  fi
-  if [[ -n "$oldpid" ]] && kill -0 "$oldpid" 2>/dev/null; then
-    echo "restart_postgres ($reason): SIGINT $oldpid"
-    kill -INT "$oldpid"
-  else
-    local unit=laplace-postgresql.service
-    if ! sudo -n systemctl restart "$unit" 2>/dev/null; then
-      unit=$(systemctl list-units --type=service --state=running --plain --no-legend 'postgres*' '*postgres*' 2>/dev/null | awk '{print $1}' | head -1)
-      [[ -n "$unit" ]] && sudo -n systemctl restart "$unit" || {
-        echo "::error::cannot restart PostgreSQL for $reason" >&2; return 1;
-      }
-    fi
-  fi
+  local reason="$1" unit=laplace-postgresql.service oldpid="" newpid="" tries=0 still
+  # systemd owns the postmaster. SIGINT against the pid is a clean exit, so
+  # systemd does not restart it — CI then waits 120s and dies. Every native
+  # install that replaces a mapped .so must bounce the unit, not the process.
+  oldpid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)
+  [[ "$oldpid" != 0 ]] || oldpid=""
+  echo "restart_postgres ($reason): systemctl restart $unit (was pid ${oldpid:-none})"
+  sudo -n systemctl restart "$unit" || {
+    echo "::error::cannot restart $unit for $reason" >&2
+    return 1
+  }
   until {
-    newpid=$(head -1 "$pidfile" 2>/dev/null || true)
-    [[ -n "$newpid" && "$newpid" != "$oldpid" ]]
-  } && psql -d postgres -U laplace_admin -tAc "SELECT 1" >/dev/null 2>&1; do
+    systemctl is-active --quiet "$unit" \
+      && newpid=$(systemctl show -p MainPID --value "$unit") \
+      && [[ -n "$newpid" && "$newpid" != 0 && "$newpid" != "$oldpid" ]] \
+      && psql -d postgres -U laplace_admin -tAc "SELECT 1" >/dev/null 2>&1
+  }; do
     tries=$((tries + 1))
     (( tries <= 120 )) || { echo "::error::PostgreSQL did not return after restart" >&2; return 1; }
     sleep 1
@@ -621,7 +614,9 @@ phase_publish() {
   # shellcheck source=deploy/linux/app-dir-contract.sh
   source "$ROOT/deploy/linux/app-dir-contract.sh"
   laplace_reconcile_app_dir_contract "$app_dir"
-  phase_chess_lab
+  if ! phase_chess_lab; then
+    echo "::warning::chess lab failed; API/MCP/UI publication continues"
+  fi
   phase_runtime_secrets
   local deploy_args=()
   [[ "${LAPLACE_FORCE_NPM:-0}" != 1 ]] || deploy_args+=(--force-npm)

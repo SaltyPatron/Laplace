@@ -222,6 +222,14 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertFalse(value["full_qualification"])
         self.assertEqual(value["ignored_paths"], ["scripts/test-parallel.sh"])
 
+    def test_pipeline_sh_schedules_install_not_the_managed_ocean(self):
+        value = plan("scripts/pipeline.sh")
+        self.assertEqual(value["managed_test_projects"], [])
+        self.assertIn("install", value["delivery_actions"])
+        self.assertIn("publish", value["delivery_actions"])
+        self.assertNotIn("managed-dev", value["dev_suites"])
+        self.assertFalse(value["full_qualification"])
+
     def test_extension_sql_does_not_schedule_the_managed_ocean(self):
         value = plan(
             "extension/laplace_substrate/sql/functions/ops/ingest_run_close.sql.in"

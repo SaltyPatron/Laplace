@@ -145,6 +145,20 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
         matched = False
 
+        if path == "scripts/pipeline.sh":
+            # Install/activation owner. SIGINT-under-systemd is why cmake
+            # never landed in /opt/laplace: Product ignored this file, then
+            # install killed postmaster and waited for a restart that systemd
+            # would not perform.
+            matched = product_change = True
+            managed_build_required.update(FULL_PUBLISH_PROJECTS)
+            publish_scope = "full"
+            components.update(("native", "managed"))
+            build_components.update(("native", "managed"))
+            delivery_actions.update(("install", "publish", "live"))
+            live_suites.update(STANDARD_LIVE_SUITES)
+            continue
+
         if native_test_path(path):
             matched = True
             build_components.add("native")

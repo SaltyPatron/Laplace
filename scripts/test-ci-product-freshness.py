@@ -30,7 +30,6 @@ class ProductFreshnessTests(unittest.TestCase):
             "scripts/ci-qualification-cache.py",
             "scripts/ci-product-freshness.py",
             "scripts/ci_product_scope.py",
-            "scripts/pipeline.sh",
             "scripts/ci_managed_projects.py",
             "scripts/test-parallel.sh",
             "scripts/publish-applications.sh",
