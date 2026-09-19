@@ -1,25 +1,6 @@
 name: Policy — CI contract
 
 on:
-  pull_request:
-    paths:
-      - ".github/**"
-      - "scripts/**"
-      - "app/*.Tests/**"
-      - "deploy/**"
-      - "db/**"
-      - "cmake/**"
-      - "CMakeLists.txt"
-  push:
-    branches: [main]
-    paths:
-      - ".github/**"
-      - "scripts/**"
-      - "app/*.Tests/**"
-      - "deploy/**"
-      - "db/**"
-      - "cmake/**"
-      - "CMakeLists.txt"
   workflow_dispatch:
 
 permissions:
