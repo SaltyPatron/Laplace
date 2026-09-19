@@ -191,6 +191,22 @@ That distinction is visible in the current source and SQL realization functions.
 
 The 16-bit packed ordinal and run-length fields are carrier fields, not global composition-size limits. `engine/core/src/trajectory.c` retains logical sequence position and splits long runs as needed. The native test `LaplaceCoreTrajectory.WiderThanTheOrdinalFieldRoundTrips` exercises 70,000 constituents.
 
+### Same-space occupancy is intentional
+
+Geometric placement is not a uniqueness allocator. Laplace does not require one empty point for every possible piece of knowledge.
+
+Two different ordered compositions may share the same centroid/Karcher location because a permutation-invariant center sees the same constituent multiset. For example, the compositions `c,a,t` and `a,c,t` may occupy the same point while remaining different canonical structures:
+
+```text
+identity(c,a,t) != identity(a,c,t)
+trajectory(c,a,t) != trajectory(a,c,t)
+coord(c,a,t) may equal coord(a,c,t)
+```
+
+That is not a collision in the knowledge model. The shared coordinate says something about common constituent locality; the ordered trajectory, content identity, Fréchet curve distance, containment/occurrence structure, relations, witnessing and other typed operators preserve the differences.
+
+A dense region can therefore contain many distinct structures and trajectories. Density and convergence are themselves usable substrate state. Coordinate/Hilbert equality may be a candidate/locality signal, never a replacement for canonical identity or ordered structure.
+
 ---
 
 ## 5. Observation, testimony and standing

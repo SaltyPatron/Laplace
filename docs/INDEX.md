@@ -10,6 +10,7 @@ Start here:
 - [`INVENTION.md`](INVENTION.md) — intended invention and proof boundaries;
 - [`INVENTIONS.md`](INVENTIONS.md) — mechanism/capability catalog;
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — architecture as currently built, including explicit divergences;
+- [`audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md`](audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md) — evidence-bound deviation ledger separating current gaps from repaired historical damage;
 - [`../AGENTS.md`](../AGENTS.md) — implementation/delivery/execution-grain contract;
 - [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md) — query-relative coupling and forward program;
 - [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md) — typed operation ISA;

@@ -27,6 +27,18 @@ When two derived sources disagree, return to the higher authority and correct th
 
 ## The invention model agents must preserve
 
+## Invention-first execution and anti-status-theater law
+
+Repository work must advance the invention rather than narrate its incompleteness.
+
+- Treat Laplace as one central knowledge system: recursive content, physicality/trajectory, occurrence, testimony/consensus, geometry/locality, source/context, calculations and domain state are overlapping webs over shared canonical identities. Do not reduce the machine to lookup, RAG, KNN, a tuple graph, one walk, one continuation engine or one relation table merely because that path is locally easy to implement.
+- Exploit the substrate's deliberate multiplicity. Coordinate equality or near-equality is not identity. Distinct ordered compositions may occupy the same geometric point/region while remaining different through canonical identity, ordered trajectory, Fréchet/Hausdorff/other typed metrics, relations, occurrence and evidence.
+- When a correction exposes a mismatch between invention and implementation, repair the authoritative documentation and owning issue as part of the same workstream, then repair the implementation. Do not turn the correction into a new homework sheet, branch, status memo or pile of speculative future tickets.
+- Do not use generic completion refrains as progress reporting. Phrases such as "Laplace is unfinished", "Laplace is not delivered", "this is not the full invention", "not production-ready" or equivalent global negatives are not substitutes for technical state. Unless the user explicitly asks for global status, report the exact bounded mechanism and evidence instead, then continue the repair in the same turn.
+- A plan, issue, test, audit, branch, PR or status paragraph is not a substitute for the requested implementation. Create or edit those artifacts only when they remove ambiguity, preserve invention law or track an already-owned implementation obligation. Do not stop after producing them when code/runtime work is in scope.
+- Do not redirect repository work into arguments about blame, motive, legal characterization or platform self-defense. When the requested task is technical, stay on repository evidence, concrete deviations and corrective changes.
+- Verification is proportional evidence, not a product substitute. Tests and gates should prove the behavior being changed; they must not become an ever-expanding prerequisite maze that prevents the requested feature, ingest, deployment or repair from being implemented and exercised.
+
 An agent working on Laplace must hold the whole machine in view rather than reducing it to whichever subsystem is currently open in an editor.
 
 ### Recursive bounded representation

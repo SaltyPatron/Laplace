@@ -20,6 +20,7 @@ The latest prompt does not erase higher-level project scope. A status file, issu
 - [`INVENTION.md`](INVENTION.md) — head-to-tail invention definition and proof model.
 - [`INVENTIONS.md`](INVENTIONS.md) — concise mechanism catalog.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current implementation architecture and known divergences.
+- [`audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md`](audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md) — current-vs-historical deviation ledger tied to concrete code/issues.
 - [`INVENTORY.md`](INVENTORY.md) — generated repository inventory/counts.
 - [`specs/33_Perfcache_Blob_Law.md`](specs/33_Perfcache_Blob_Law.md) — derived ROM law and the current blob roster (T0, highway, numbers, chess, factor/generation gaps).
 

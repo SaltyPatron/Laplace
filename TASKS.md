@@ -170,18 +170,13 @@ Current source has at least one documented realization divergence: native compos
 
 Current Hash128 and binary64 carrier widths are implementation windows, not theorem limits.
 
-## Delivery meaning
+## Completion evidence
 
-A change is not delivered merely because:
+Do not summarize the repository with a recurring global delivered/not-delivered label. Track the exact requested outcome and the evidence boundary that applies to it.
 
-- a plan or issue describes it;
-- code exists on an unmerged branch;
-- a PR is open;
-- unit tests pass locally;
-- a benchmark starts;
-- a source tree looks correct.
+Plans/issues, branch or PR state, local tests, benchmark startup and source inspection are evidence about particular steps. For an operator-visible runtime change, the relevant completion evidence is the authoritative branch plus the applicable CI/build, installed/deployed artifact, readback/receipt and observed behavior. For a documentation-only request, the committed document itself may be the requested artifact.
 
-Delivery means the authoritative branch, required CI, installed/deployed artifact where applicable, readback/proof, and operator-visible behavior agree with the requested acceptance boundary.
+When a boundary is missing, name that boundary precisely and continue the implementation rather than replacing the work with a generic statement that Laplace is unfinished or "not the full invention."
 
 ## Cross-repository references
 

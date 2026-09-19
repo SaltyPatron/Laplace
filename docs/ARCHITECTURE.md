@@ -6,6 +6,8 @@ It is **not** the authority for narrowing the invention. The intended machine, m
 
 When code and this document disagree, fix this document. When two current code paths disagree with each other or with the invention, record the divergence as an implementation obligation rather than declaring whichever path was inspected first to be the architecture.
 
+The dated, evidence-bound deviation ledger is [`audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md`](audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md). It separates current divergences from repaired historical defects so old failures do not get repeated as current status and current gaps do not get hidden by repaired code.
+
 ---
 
 ## 1. Persistent substrate
@@ -20,6 +22,8 @@ The PostgreSQL extension persists four primary substrate families under `extensi
 | `consensus` | folded proposition standing: rating, RD, volatility, witness count and related state |
 
 Supporting tables/journals include canonical names, repair/dirty state and ingest/index progress. Exact generated counts and partition inventory are intentionally not duplicated here; `docs/INVENTORY.md` is regenerated and CI-gated.
+
+Current ordinary physicality admission records source/unit/time provenance in `laplace.physicality_observations`. That structural provenance is not ordinary proposition testimony: it must not manufacture repeated `HAS_PHYSICALITY` attestations or consensus merely because the same typed physical form was observed in multiple source units. Explicit governed structural associations may still use the relation where their contract calls for it.
 
 The high-level separation is deliberate:
 
