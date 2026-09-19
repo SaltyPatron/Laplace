@@ -277,17 +277,11 @@ csv_selected() {
 }
 
 force_full_carry_forward_impact() {
-  # Missing installed-revision evidence makes the mutation/build closure uncertain;
-  # it does NOT make unrelated development-test inputs uncertain. Keep the planner's
-  # exact dev suites/projects and widen only what delivery must materialize/verify.
-  export LAPLACE_BUILD_COMPONENTS=all
-  export LAPLACE_MANAGED_BUILD_PROJECTS=all
-  export LAPLACE_MANAGED_DB_TEST_PROJECTS=all
-  export LAPLACE_MANAGED_LIVE_TEST_PROJECTS=all
-  export LAPLACE_DB_SUITES=all
-  export LAPLACE_LIVE_SUITES=all
-  export LAPLACE_DELIVERY_ACTIONS=all
-  export LAPLACE_PUBLISH_SCOPE=full
+  # Missing receipt means this SHA has not been published. It does not mean
+  # rebuild/test/publish every surface. Keep the planner's build, test, and
+  # delivery selections. Only ensure delivery still has a path to write a
+  # receipt (install), if the planner already asked for one.
+  :
 }
 
 append_csv_env() {
