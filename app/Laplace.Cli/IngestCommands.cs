@@ -678,22 +678,14 @@ internal static partial class IngestCommands
         IDecomposer dec, string ecosystemPath, bool skipLayerCheck, IngestCliArgs? cli = null,
         bool skipSourceCompletion = false)
     {
-        bool unicodeFoundation =
-            dec.LayerOrder == 0 && dec.SourceId == UnicodeSource.SourceId;
-        if (unicodeFoundation)
-        {
-            // Relation-law acceleration is independent of the Unicode content floor.
-            // The T0 content ROM is deliberately unavailable until source-derived
-            // Tier-0 rows have crossed the shared persistence barrier.
-            HighwayPerfcache.LoadDefault();
-            CodepointPerfcache.Unload();
-        }
-        else
-        {
-            if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
-            HighwayPerfcache.LoadDefault();
+        // T0 ROM is an accelerator (round-trip / bit-bang), not the populate
+        // path. Unicode admission still reads UCD and writes T0 rows into
+        // Postgres as the FK anchor. Unloading the blob here made content
+        // witness throw and blocked the floor.
+        if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
+        HighwayPerfcache.LoadDefault();
+        if (!(dec.LayerOrder == 0 && dec.SourceId == UnicodeSource.SourceId))
             LanguageReference.EnsureLoaded();
-        }
         var topo = IngestTopology.EnsureReady();
 
         NativeCorpusRuntime? corpusRuntime = dec is RepoDecomposer { VerifiedRepository: not null }
