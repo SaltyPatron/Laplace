@@ -13,6 +13,7 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
+#include "utils/timeout.h"
 
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/physicality_descriptor_admission.h"
@@ -1062,3 +1063,123 @@ Datum pg_laplace_physicality_descriptor_materialize(PG_FUNCTION_ARGS)
     admission_cleanup(s);
     PG_RETURN_NULL();
 }
+
+
+#ifdef LAPLACE_SUBSTRATE_TESTING
+/*
+ * Regression-only owner for the PostgreSQL -> portable cancellation boundary.
+ * Construct and authenticate the input before arming the backend's real
+ * STATEMENT_TIMEOUT. The timed region enters the production native planner
+ * immediately, so a slow SQL/PLpgSQL fixture cannot consume the timer first.
+ */
+PG_FUNCTION_INFO_V1(pg_laplace_physicality_descriptor_timeout_test);
+Datum pg_laplace_physicality_descriptor_timeout_test(PG_FUNCTION_ARGS)
+{
+    bytea *physicalities;
+    hash128_t source_id;
+    int32 repeats, timeout_ms;
+    const size_t budget = (size_t)512u * 1024u * 1024u;
+    intent_stage_t *stage = NULL;
+    physicality_descriptor_capture_t *capture = NULL;
+    physicality_descriptor_vocabulary_t *vocabulary = NULL;
+    physicality_descriptor_plan_t *plan = NULL;
+    physicality_descriptor_input_t *inputs = NULL;
+    const physicality_descriptor_input_t *decoded;
+    const physicality_descriptor_basis_t *basis;
+    physicality_descriptor_limits_t limits;
+    physicality_descriptor_status_t status;
+    size_t decoded_count = 0;
+
+    for (int i = 0; i < 4; ++i)
+        if (PG_ARGISNULL(i))
+            admission_invalid("null cancellation regression argument");
+
+    physicalities = PG_GETARG_BYTEA_PP(0);
+    source_id = admission_id(PG_GETARG_DATUM(1));
+    repeats = PG_GETARG_INT32(2);
+    timeout_ms = PG_GETARG_INT32(3);
+    if (repeats < 1024 || repeats > 1048576 || timeout_ms < 1 || timeout_ms > 10000)
+        admission_invalid("invalid cancellation regression dimensions");
+
+    if (intent_stage_from_tuple_bytes(
+            NULL, 0,
+            (const uint8_t *)VARDATA_ANY(physicalities), VARSIZE_ANY_EXHDR(physicalities),
+            NULL, 0, budget, &stage) != 0)
+        admission_invalid("cancellation regression physicality tuple is invalid");
+
+    {
+        const intent_stage_t *stages[1] = {stage};
+        status = physicality_descriptor_capture_stage_rows_cancelable(
+            stages, 1, budget, NULL, &capture);
+    }
+    if (status != PHYSICALITY_DESCRIPTOR_OK) {
+        intent_stage_free(stage);
+        admission_status(status, "cancellation regression capture");
+    }
+
+    decoded = physicality_descriptor_capture_inputs(capture, &decoded_count);
+    if (decoded == NULL || decoded_count != 1) {
+        physicality_descriptor_capture_free(capture);
+        intent_stage_free(stage);
+        admission_invalid("cancellation regression requires exactly one decoded body");
+    }
+
+    status = physicality_descriptor_vocabulary_create(&source_id, budget, &vocabulary);
+    if (status != PHYSICALITY_DESCRIPTOR_OK) {
+        physicality_descriptor_capture_free(capture);
+        intent_stage_free(stage);
+        admission_status(status, "cancellation regression vocabulary");
+    }
+    basis = physicality_descriptor_vocabulary_basis(vocabulary);
+
+    if ((Size)repeats > MaxAllocSize / sizeof(*inputs)) {
+        physicality_descriptor_vocabulary_free(vocabulary);
+        physicality_descriptor_capture_free(capture);
+        intent_stage_free(stage);
+        admission_invalid("cancellation regression input array is too large");
+    }
+    inputs = palloc((Size)repeats * sizeof(*inputs));
+    for (int32 i = 0; i < repeats; ++i)
+        inputs[i] = decoded[0];
+
+    limits.maximum_plan_bytes = budget;
+
+    PG_TRY();
+    {
+        /*
+         * The normal statement_timeout GUC is zero for this regression. Arm
+         * PostgreSQL's already-registered standard statement timer only after
+         * every fixture allocation/copy above has completed.
+         */
+        disable_timeout(STATEMENT_TIMEOUT, false);
+        enable_timeout_after(STATEMENT_TIMEOUT, timeout_ms);
+        status = physicality_descriptor_plan_build_cancelable(
+            inputs, (size_t)repeats, basis, &limits,
+            &admission_cancellation, &plan);
+        disable_timeout(STATEMENT_TIMEOUT, false);
+
+        if (status == PHYSICALITY_DESCRIPTOR_CANCELLED)
+            admission_status(status, "planner");
+        if (status != PHYSICALITY_DESCRIPTOR_OK)
+            admission_status(status, "cancellation regression planner");
+
+        physicality_descriptor_plan_free(plan);
+        plan = NULL;
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+             errmsg("physicality descriptor cancellation regression completed before statement timeout")));
+    }
+    PG_CATCH();
+    {
+        disable_timeout(STATEMENT_TIMEOUT, false);
+        physicality_descriptor_plan_free(plan);
+        physicality_descriptor_vocabulary_free(vocabulary);
+        physicality_descriptor_capture_free(capture);
+        intent_stage_free(stage);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    PG_RETURN_VOID();
+}
+#endif

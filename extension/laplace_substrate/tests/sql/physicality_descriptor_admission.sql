@@ -71,8 +71,20 @@ SELECT * FROM ops.physicality_descriptor_materialize(
     source_ids,unit_ids,priors,
     1700000000000000,byte_grant,operation_grant,logical_grant)
 $$;
+DO $timeout_adapter$
+DECLARE library text;
+BEGIN
+    SELECT p.probin INTO STRICT library
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='ops' AND p.proname='physicality_descriptor_materialize';
+    EXECUTE format(
+        'CREATE FUNCTION pg_temp.descriptor_timeout_cancel(bytea,bytea,integer,integer) '
+        'RETURNS void AS %L,%L LANGUAGE C STRICT',
+        library,'pg_laplace_physicality_descriptor_timeout_test');
+END
+$timeout_adapter$;
 CREATE FUNCTION pg_temp.descriptor_receipt(r pg_temp.descriptor_result) RETURNS jsonb
-LANGUAGE SQL IMMUTABLE AS $$
+LANGUAGE SQL IMMUTABLE AS $
 SELECT jsonb_build_object('source_forms',(r).source_form_count,'D_count',cardinality((r).descriptor_ids),
     'V_count',cardinality((r).view_ids),'D_first',encode((r).descriptor_ids[1],'hex'),
     'D_second',encode((r).descriptor_ids[2],'hex'),'V_first',encode((r).view_ids[1],'hex'),
@@ -178,41 +190,31 @@ BEGIN
     RAISE NOTICE 'physicality admission: absent selected Content preserves exact descriptor and reports null view with exact AB frontier';
 END
 $unavailable$;
--- Build the bounded workload before arming PostgreSQL's real statement timer.
--- Every tuple is the existing native AB fixture; the aligned entries represent
--- repeated observations. No test-only native callback or synthetic signal is used.
-CREATE TEMP TABLE descriptor_timeout_input ON COMMIT DROP AS
-SELECT decode(repeat(encode(f.tuples,'hex'),65536),'hex') AS raw,
-    f.tuples AS winner,
-    array_fill(s.source_id,ARRAY[65536]) AS sources,
-    array_fill(s.unit_id,ARRAY[65536]) AS units,
-    array_fill(0.8::float8,ARRAY[65536]) AS priors
-FROM descriptor_source s CROSS JOIN descriptor_frames f WHERE f.variant=0;
-SET LOCAL statement_timeout = '100ms';
+-- Exercise the real PostgreSQL statement timer only after one valid
+-- descriptor body and vocabulary have been prepared by the regression adapter.
+-- The timed region enters the production native planner immediately; no large
+-- SQL array/materialization step can consume the timer before native polling.
 DO $cancel$
-DECLARE request record; cancelled boolean := false; context text;
+DECLARE s record; cancelled boolean := false; context text;
 BEGIN
-    SELECT * INTO STRICT request FROM descriptor_timeout_input;
+    SELECT * INTO STRICT s FROM descriptor_source;
     BEGIN
-        PERFORM * FROM pg_temp.descriptor_call(
-            request.raw,request.winner,request.sources,request.units,request.priors);
+        PERFORM pg_temp.descriptor_timeout_cancel(
+            (SELECT tuples FROM descriptor_frames WHERE variant=0),
+            s.source_id,131072,1);
     EXCEPTION WHEN query_canceled THEN
         GET STACKED DIAGNOSTICS context = PG_EXCEPTION_CONTEXT;
-        -- A timeout during SQL preparation or some unrelated provider query
-        -- cannot stand in for the real native checkpoint/unwind boundary.
-        IF strpos(context,'physicality descriptor native ') = 0
-           OR strpos(context,' returned cancelled') = 0 THEN
-            RAISE EXCEPTION 'statement timeout did not return through a native cancellation checkpoint'
+        IF strpos(context,'physicality descriptor native planner returned cancelled') = 0 THEN
+            RAISE EXCEPTION 'statement timeout did not return through the native planner cancellation checkpoint'
                 USING DETAIL=context;
         END IF;
         cancelled := true;
     END;
     IF NOT cancelled THEN
-        RAISE EXCEPTION 'native admission completed instead of observing statement timeout';
+        RAISE EXCEPTION 'native planner completed instead of observing statement timeout';
     END IF;
 END
 $cancel$;
-SET LOCAL statement_timeout = 0;
 DO $retry$
 DECLARE actual pg_temp.descriptor_result; expected pg_temp.descriptor_result; s record;
 BEGIN
