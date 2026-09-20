@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ErrorText, LoadingText, Muted } from '@ui';
 
-import { apiPost, type ApiOptions, type Schemas } from '../../api/client';
+import { apiPost, PaymentRequiredError, type ApiOptions, type Schemas } from '../../api/client';
 
 import { useAppStore } from '../../store';
 
@@ -33,13 +33,16 @@ export function ConstellationView() {
   const { tenant, quoteId } = useAppStore();
   const exploreQuote = useExploreStore((s) => s.quoteId);
   const [graph, setGraph] = useState<VizResponse | null>(null);
-  const [unlocked, setUnlocked] = useState(false);
+  const [needsGate, setNeedsGate] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [autoTried, setAutoTried] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<BillingReceipt | null>(null);
 
   const quote = exploreQuote || quoteId;
 
   async function load() {
+    setBusy(true);
     setErr(null);
     const opts: ApiOptions = { tenant, quoteId: quote };
     try {
@@ -49,6 +52,7 @@ export function ConstellationView() {
         opts,
       );
       setGraph(res);
+      setNeedsGate(false);
       if (res.billing) {
         setReceipt({
           quote_id: String(res.billing.quote_id),
@@ -59,27 +63,38 @@ export function ConstellationView() {
         });
       }
     } catch (e) {
+      if (e instanceof PaymentRequiredError) {
+        setNeedsGate(true);
+        return;
+      }
       setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
   useEffect(() => {
-    if (unlocked) void load();
-  }, [unlocked]);
+    if (autoTried || graph || needsGate || busy) return;
+    setAutoTried(true);
+    void load();
+  }, [autoTried, graph, needsGate, busy]);
 
   const nodes = useMemo(() => (graph ? nodesFromGraph(graph.graph) : []), [graph]);
 
   return (
     <div className={styles.root}>
       <h2>Substrate constellation</h2>
-      <Muted className={styles.lead}>Warehouse-scale S³ sample via visualization.deep_export.</Muted>
-      {!unlocked ? (
+      <Muted className={styles.lead}>
+        Hilbert-stratified S³ coverage of stored physicalities — not a top-relations leaderboard.
+        {graph ? ` ${nodes.length} occupied strata shown.` : ''}
+      </Muted>
+      {needsGate ? (
         <GatePrompt
           serviceId="visualization.deep_export"
-          label="Load a gated substrate graph with geometry for the glome viewer."
+          label="Load the Hilbert-stratified substrate geometry sample."
           units={80}
           receipt={receipt}
-          onReady={() => setUnlocked(true)}
+          onReady={() => void load()}
         />
       ) : graph ? (
         <div className={styles.viewer}>
@@ -88,7 +103,7 @@ export function ConstellationView() {
       ) : err ? (
         <ErrorText>{err}</ErrorText>
       ) : (
-        <LoadingText>Loading constellation…</LoadingText>
+        <LoadingText>{busy ? 'Loading constellation…' : 'Preparing constellation…'}</LoadingText>
       )}
     </div>
   );

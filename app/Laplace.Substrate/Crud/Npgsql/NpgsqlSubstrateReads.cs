@@ -830,6 +830,29 @@ public static partial class NpgsqlSubstrateReads
                 param.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
             }, ct: ct, label: "entity_primary_forms_batch", onError: onError);
 
+    public readonly record struct ConstellationSampleRow(
+        int Ordinal, string IdHex, short PhysicalityType,
+        double X, double Y, double Z, double M, double Radius,
+        int Constituents, string HilbertHex);
+
+    /// <summary>Hilbert-stratified stored-physicality coverage for Constellation.</summary>
+    public static Task<IReadOnlyList<ConstellationSampleRow>> ConstellationSampleAsync(
+        NpgsqlConnection conn, int limit, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(conn, """
+            SELECT s.sample_ordinal, encode(s.entity_id, 'hex'), s.physicality_type,
+                   s.x, s.y, s.z, s.m, s.radius, s.n_constituents,
+                   encode(s.hilbert_index, 'hex')
+            FROM structural.constellation_sample(@limit) s
+            ORDER BY s.sample_ordinal
+            """,
+            static r => new ConstellationSampleRow(
+                r.GetInt32(0), r.GetString(1), r.GetInt16(2),
+                r.GetDouble(3), r.GetDouble(4), r.GetDouble(5), r.GetDouble(6),
+                r.GetDouble(7), r.GetInt32(8), r.GetString(9)),
+            p => p.AddWithValue("limit", Math.Max(0, limit)),
+            ct: ct, label: "constellation_sample", onError: onError);
+
     /// <summary><c>ops.entity_evidence_count(id)</c> — attestation rows whose subject is id.</summary>
     public static Task<long?> EvidenceCountAsync(
         NpgsqlConnection conn, byte[] id, CancellationToken ct,

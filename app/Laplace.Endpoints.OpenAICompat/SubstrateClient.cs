@@ -202,62 +202,45 @@ internal sealed partial class SubstrateClient : ISubstrateClient, IAsyncDisposab
         try
         {
             await using var conn = await _dataSource.OpenConnectionAsync(ct);
-            var edges = await ReadTopRelationsAsync(conn, Math.Max(0, limit), ct);
-            var nodes = edges
-                .SelectMany(edge => new[]
-                {
-                    (id: edge.SubjectIdHex, label: edge.Subject),
-                    (id: edge.ObjectIdHex, label: edge.Object)
-                })
-                .GroupBy(n => n.id, StringComparer.OrdinalIgnoreCase)
-                .Select(g => (id: g.Key, label: g.First().label))
-                .ToArray();
+            var samples = await NpgsqlSubstrateReads.ConstellationSampleAsync(
+                conn, Math.Max(0, limit), ct);
+            if (samples.Count == 0)
+                return new SubstrateVisualizationGraph([], []);
 
-            var nodeIds = new byte[nodes.Length][];
-            for (int i = 0; i < nodes.Length; i++)
-                nodeIds[i] = Convert.FromHexString(nodes[i].id);
+            var sampleHex = samples.Select(s => s.IdHex).ToList();
+            var labels = await ReadDisplayLabelsAsync(conn, sampleHex, ct);
+            var nodeIds = samples.Select(s => Convert.FromHexString(s.IdHex)).ToArray();
 
-            // ONE round-trip: first physicality (lowest type) per node, keyed by array ordinal.
-            var geometry = new (double X, double Y, double Z, double M, double Radius, int Constituents)?[nodes.Length];
-            if (includeGeometry && nodes.Length > 0)
-            {
-                foreach (var row in await NpgsqlSubstrateReads.EntityPrimaryFormsBatchAsync(conn, nodeIds, ct))
-                {
-                    int idx = (int)row.Ordinal - 1;
-                    if ((uint)idx >= (uint)geometry.Length) continue;
-                    geometry[idx] = (row.X, row.Y, row.Z, row.M, row.Radius, row.Constituents);
-                }
-            }
-
-            // ONE round-trip: evidence count per node over the same array.
-            var evidence = new long?[nodes.Length];
-            if (includeEvidence && nodes.Length > 0)
+            var evidence = new long?[samples.Count];
+            if (includeEvidence)
             {
                 foreach (var row in await NpgsqlSubstrateReads.EvidenceCountsBatchAsync(conn, nodeIds, ct))
                 {
-                    int idx = (int)row.Ordinal - 1;
-                    if ((uint)idx >= (uint)evidence.Length) continue;
-                    evidence[idx] = row.Count;
+                    var idx = (int)row.Ordinal - 1;
+                    if ((uint)idx < (uint)evidence.Length) evidence[idx] = row.Count;
                 }
             }
 
-            var output = new List<VisualizationNode>(nodes.Length);
-            for (int i = 0; i < nodes.Length; i++)
+            var output = new List<VisualizationNode>(samples.Count);
+            for (var i = 0; i < samples.Count; i++)
             {
-                var physicality = geometry[i];
+                var sample = samples[i];
                 output.Add(new VisualizationNode(
-                    IdHex: nodes[i].id,
-                    Label: nodes[i].label,
-                    X: physicality?.X,
-                    Y: physicality?.Y,
-                    Z: physicality?.Z,
-                    M: physicality?.M,
-                    Radius: physicality?.Radius,
-                    Constituents: physicality?.Constituents,
+                    IdHex: sample.IdHex,
+                    Label: DisplayLabel(labels, sample.IdHex, sample.IdHex),
+                    X: includeGeometry ? sample.X : null,
+                    Y: includeGeometry ? sample.Y : null,
+                    Z: includeGeometry ? sample.Z : null,
+                    M: includeGeometry ? sample.M : null,
+                    Radius: includeGeometry ? sample.Radius : null,
+                    Constituents: includeGeometry ? sample.Constituents : null,
                     EvidenceRows: evidence[i]));
             }
 
-            return new SubstrateVisualizationGraph(output, edges);
+            // This endpoint is physicality geometry. Consensus edges belong to
+            // Explore's belief/web projection, not to a fabricated graph over a
+            // spatial coverage sample.
+            return new SubstrateVisualizationGraph(output, []);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException)
         {

@@ -21,3 +21,72 @@ BEGIN ATOMIC
     WHERE p.entity_id = p_id
     ORDER BY p.type, p.id;
 END;
+
+
+-- Deterministic spatial coverage for the constellation viewer. This is not a
+-- consensus leaderboard and not an arbitrary LIMIT: the requested count divides
+-- the 128-bit Hilbert address space into equal leading-16-bit strata and elects
+-- the first stored physicality in each occupied interval. The installed
+-- physicalities_hilbert_btree serves each bounded seek.
+CREATE OR REPLACE FUNCTION structural.constellation_sample(p_limit integer DEFAULT 80)
+    RETURNS TABLE(
+        sample_ordinal integer,
+        entity_id bytea,
+        physicality_type smallint,
+        x double precision,
+        y double precision,
+        z double precision,
+        m double precision,
+        radius double precision,
+        n_constituents integer,
+        hilbert_index bytea)
+    LANGUAGE sql STABLE PARALLEL SAFE
+BEGIN ATOMIC
+    WITH cfg AS (
+        SELECT LEAST(GREATEST(COALESCE(p_limit, 0), 0), 1024) AS n
+    ),
+    bounds AS (
+        SELECT g.i,
+               ((g.i::bigint * 65536) / c.n)::integer AS lo16,
+               (((g.i + 1)::bigint * 65536) / c.n)::integer AS hi16
+        FROM cfg c
+        CROSS JOIN LATERAL generate_series(0, c.n - 1) AS g(i)
+        WHERE c.n > 0
+    ),
+    targets AS (
+        SELECT b.i,
+               decode(lpad(to_hex(b.lo16), 4, '0') || repeat('00', 14), 'hex') AS lo,
+               CASE WHEN b.hi16 >= 65536 THEN NULL::bytea
+                    ELSE decode(lpad(to_hex(b.hi16), 4, '0') || repeat('00', 14), 'hex')
+               END AS hi
+        FROM bounds b
+    ),
+    sampled AS (
+        SELECT t.i, p.entity_id, p.type,
+               ST_X(p.coord) AS x, ST_Y(p.coord) AS y,
+               ST_Z(p.coord) AS z, ST_M(p.coord) AS m,
+               p.radius_origin AS radius,
+               p.n_constituents, p.hilbert_index
+        FROM targets t
+        CROSS JOIN LATERAL (
+            SELECT p.entity_id, p.type, p.coord, p.radius_origin,
+                   p.n_constituents, p.hilbert_index, p.id
+            FROM laplace.physicalities p
+            WHERE p.hilbert_index >= t.lo
+              AND (t.hi IS NULL OR p.hilbert_index < t.hi)
+            ORDER BY p.hilbert_index, p.id
+            LIMIT 1
+        ) p
+    ),
+    distinct_entities AS (
+        SELECT s.*,
+               row_number() OVER (PARTITION BY s.entity_id ORDER BY s.i) AS entity_ord
+        FROM sampled s
+    )
+    SELECT row_number() OVER (ORDER BY d.i)::integer,
+           d.entity_id, d.type, d.x, d.y, d.z, d.m,
+           d.radius, d.n_constituents, d.hilbert_index
+    FROM distinct_entities d
+    WHERE d.entity_ord = 1
+    ORDER BY d.i;
+END;
