@@ -408,8 +408,14 @@ class WorkflowArchitecture(unittest.TestCase):
             self.assertIn(f'csv_selected "$actions" {selector}', automatic)
         self.assertIn("run_install", mutation)
         self.assertIn("run_database_maintenance --prepare", mutation)
-        self.assertIn("run_db_tests", mutation)
+        self.assertNotIn("run_db_tests", mutation)
         self.assertNotIn('run_release_mutation_window "$actions"', mutation)
+        self.assertIn("run_db_tests", automatic)
+        self.assertLess(
+            automatic.index('run_release_mutation_window "$actions"'),
+            automatic.index("run_db_tests"),
+        )
+        self.assertLess(automatic.index("run_db_tests"), automatic.index("run_publish"))
         self.assertIn("run_publish", automatic)
         self.assertIn("verify_installed_product", automatic)
         self.assertNotIn("run_live_tests", automatic)
