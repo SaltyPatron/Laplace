@@ -513,6 +513,11 @@ run_publish() {
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local api_key="${LAPLACE_API_KEY:-}" issued_prefix=""
 
+  # Publication consumes the install-final native closure. CMake installation
+  # finalizes RPATHs, so pre-install build-tree ELF bytes are not a deployable
+  # identity even when they came from the same qualified source revision.
+  export LAPLACE_REUSE_INSTALLED_NATIVE=1
+
   case "$scope" in
     api|api-web|full|all)
       if [[ -z "$api_key" ]]; then

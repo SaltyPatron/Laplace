@@ -374,6 +374,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
 
     def test_api_publication_uses_a_bounded_verification_credential(self):
         publish = function("run_publish")
+        self.assertIn("export LAPLACE_REUSE_INSTALLED_NATIVE=1", publish)
         self.assertIn("issue_live_proof_credential", publish)
         self.assertIn('export LAPLACE_API_KEY="$api_key"', publish)
         self.assertIn("revoke_live_proof_credential", publish)
