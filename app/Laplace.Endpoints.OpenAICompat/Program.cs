@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net;
 using System.Threading.RateLimiting;
 using Laplace.Chess.Service;
@@ -5,6 +6,7 @@ using Laplace.Engine.Core;
 using Laplace.Ingestion;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.ResponseCompression;
 using Laplace.Endpoints.OpenAICompat;
 using Laplace.Endpoints.OpenAICompat.Auth;
 using Laplace.Ops;
@@ -35,6 +37,17 @@ builder.Services.AddSingleton(sp => new ContentArtifactCloser(
     sp.GetRequiredService<SubstrateClient>().DataSource,
     message => sp.GetRequiredService<ILogger<ContentArtifactCloser>>().LogWarning("{Message}", message)));
 builder.Services.AddOpenApi();
+
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+    options.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+    options.Level = CompressionLevel.Fastest);
 
 const int perClientPerMinute = 300;
 const int webhookPerMinute = 120;
@@ -116,6 +129,7 @@ if (publicOrigin is not null)
     });
 }
 app.UseMiddleware<RefactorProxyMiddleware>();
+app.UseResponseCompression();
 
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
