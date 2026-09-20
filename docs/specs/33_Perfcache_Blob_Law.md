@@ -55,6 +55,16 @@ Cross-modality consumers reuse lower caches. Video does not need a private copy 
 
 Every higher cache binds the exact generations/recipes it depends on. A dependency change invalidates affected descendants, not unrelated caches.
 
+### Trunk-first lookup
+
+Higher-tier cache lookup should short-circuit lower recomputation.
+
+For a canonical image recipe, probe complete image/frame first; on miss probe regions, then patches, then pixels. A hit owns the already-verified descendant composition for that cache generation. Only missed branches descend.
+
+A deterministic materialization fingerprint may be used as an acceleration lookup key before the canonical root is known, provided the record binds the exact shape/recipe/dependency generation and collision/verification semantics cannot return an unrelated canonical object. The lookup fingerprint is not canonical identity.
+
+This makes repeated video frames image-cache hits rather than repeated pixel-tree construction, and lets partially novel images reuse known patch/region subtrees.
+
 ### Index-friendly lookup law
 
 Cache lookup should normally transform request/input state into canonical keys **before** indexed SQL/SPI access:
