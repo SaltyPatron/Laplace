@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 export interface VisualizationPalette {
   background: string;
@@ -78,42 +78,70 @@ function paletteEqual(a: VisualizationPalette, b: VisualizationPalette): boolean
 }
 
 /**
- * Keep WebGL renderers bound to live CSS tokens across system-theme changes and
- * explicit application appearance attributes instead of snapshotting once at mount.
+ * Keep every WebGL renderer bound to one live palette subscription. Storage Proof,
+ * entity glomes and graph panes can coexist without each installing its own
+ * MutationObserver / matchMedia / pageshow listeners.
  */
+let livePalette: VisualizationPalette = FALLBACK;
+let paletteInitialized = false;
+let paletteFrame = 0;
+let stopPaletteObservation: (() => void) | null = null;
+const paletteListeners = new Set<() => void>();
+
+function refreshPalette(): void {
+  if (typeof window === 'undefined') return;
+  window.cancelAnimationFrame(paletteFrame);
+  paletteFrame = window.requestAnimationFrame(() => {
+    const next = visualizationPalette();
+    paletteInitialized = true;
+    if (paletteEqual(livePalette, next)) return;
+    livePalette = next;
+    for (const listener of paletteListeners) listener();
+  });
+}
+
+function startPaletteObservation(): void {
+  if (stopPaletteObservation || typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (!paletteInitialized) {
+    livePalette = visualizationPalette();
+    paletteInitialized = true;
+  }
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  media.addEventListener('change', refreshPalette);
+  const observer = new MutationObserver(refreshPalette);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class', 'style', 'data-theme', 'data-appearance'],
+  });
+  window.addEventListener('pageshow', refreshPalette);
+  stopPaletteObservation = () => {
+    window.cancelAnimationFrame(paletteFrame);
+    media.removeEventListener('change', refreshPalette);
+    observer.disconnect();
+    window.removeEventListener('pageshow', refreshPalette);
+    stopPaletteObservation = null;
+  };
+}
+
+function subscribePalette(listener: () => void): () => void {
+  paletteListeners.add(listener);
+  if (paletteListeners.size === 1) startPaletteObservation();
+  return () => {
+    paletteListeners.delete(listener);
+    if (paletteListeners.size === 0) stopPaletteObservation?.();
+  };
+}
+
+function paletteSnapshot(): VisualizationPalette {
+  if (!paletteInitialized && typeof document !== 'undefined') {
+    livePalette = visualizationPalette();
+    paletteInitialized = true;
+  }
+  return livePalette;
+}
+
 export function useVisualizationPalette(): VisualizationPalette {
-  const [palette, setPalette] = useState<VisualizationPalette>(() => visualizationPalette());
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined;
-    let frame = 0;
-    const refresh = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        const next = visualizationPalette();
-        setPalette((current) => (paletteEqual(current, next) ? current : next));
-      });
-    };
-
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    media.addEventListener('change', refresh);
-    const observer = new MutationObserver(refresh);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class', 'style', 'data-theme', 'data-appearance'],
-    });
-    window.addEventListener('pageshow', refresh);
-    refresh();
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      media.removeEventListener('change', refresh);
-      observer.disconnect();
-      window.removeEventListener('pageshow', refresh);
-    };
-  }, []);
-
-  return palette;
+  return useSyncExternalStore(subscribePalette, paletteSnapshot, () => FALLBACK);
 }
 
 function relativeLuminance(rgb: [number, number, number]): number {
