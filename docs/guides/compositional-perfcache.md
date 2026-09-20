@@ -171,6 +171,28 @@ The registry resolves overlap by canonical key/generation and retains one semant
 
 This enables very small edge profiles as well as large server profiles without changing canonical identity.
 
+## Local addresses versus canonical addresses
+
+A compact module may assign a dense local slot to selected records:
+
+~~~text
+slot 0 -> canonical U+0020 record
+slot 1 -> canonical U+0021 record
+...
+~~~
+
+or:
+
+~~~text
+slot 17 -> canonical pixel #FF0000
+~~~
+
+The local slot is not the entity id, Tier-0 rank, Hilbert key or semantic ordinal. It exists only so the mapped module can do very cheap pointer arithmetic.
+
+That distinction lets a tiny ASCII/palette/band module be densely packed without corrupting global identity.
+
+The manifest records the mapping and canonical-generation fingerprint so a consumer can always recover/verify the global record.
+
 ## Cross-modality reuse
 
 Higher modalities consume lower cached structures; they do not clone them.
