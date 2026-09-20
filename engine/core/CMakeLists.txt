@@ -446,10 +446,10 @@ else()
     endif()
 endif()
 
-# Modality number compose floor (dense 0..255 channel-byte numbers) — spec 33 /
-# modality-ladder-law codepoint floor. Always emits from t0; no corpus path.
-# Shared by image (channel bytes) and audio (magnitudes in this range); signed
-# full-PCM and higher modality tiers (pixel/patch/…) are later ROM layers.
+# Canonical number ROM (dense 0..255) — spec 33 / compositional perfcache law.
+# Always emits from T0; no corpus path. Shared by image, audio, video and every
+# consumer of these exact integer roots. #1711 generalizes the same build/load
+# pattern to selector-scoped and higher-tier pixel/patch/region/image/audio ROMs.
 add_subdirectory(tools/modality_number_tables_emit)
 set(LAPLACE_MODALITY_NUMBER_PERFCACHE_BIN
     "${LAPLACE_PERFCACHE_DIR}/laplace_modality_number_perfcache.bin"
