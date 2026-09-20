@@ -23,6 +23,7 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.Text,
         EntityTypeRegistry.Ngram,
         EntityTypeRegistry.Collection,
+        EntityTypeRegistry.Range,
         EntityTypeRegistry.OpenSubtitlesAlignment,
         EntityTypeRegistry.OpenSubtitlesSequence,
         EntityTypeRegistry.FrameNetAnnotation,
