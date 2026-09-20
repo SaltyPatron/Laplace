@@ -171,6 +171,11 @@ The catalog is deliberately implementation-aware without making today's finite m
 127. **Cross-modality cache inheritance.** Video reuses image pixel/patch/region/image caches and audio sample/window/track caches; higher modalities compose lower canonical roots instead of cloning their cache state.
 128. **Index-preserving cache projection.** Cache/native lookup resolves request-side ids/coords/Hilbert/ranges before SQL/SPI index probes rather than wrapping indexed columns in per-row functions.
 
+129. **One composition, one entity everywhere.** The ordered child-id sequence owns canonical content identity independent of tier, source, modality, parent, container, role or cache profile; `[k,i,n,g]` is one entity wherever referenced.
+130. **Multiscale image DAG.** Exact 2×2/3×3/... pixel compositions are global canonical entities that may participate in many larger image/video parents simultaneously; the durable structure is an overlapping DAG/web, not a copied single-parent tree.
+131. **Occurrence-versus-identity at every scale.** An 8×8 region may contain 204 square occurrences while introducing only the canonical structures not already known; repeated lower-scale patterns add references/occurrences rather than content copies.
+132. **Construction tree is not ontology.** A temporary tier tree may schedule one decomposition, but single-parent scratch layout cannot redefine the durable many-parent canonical web.
+
 ## Product identity
 
 Laplace replaces opaque probabilistic runtime authority with exact reusable structure, bounded physicality, source-retaining testimony, uncertainty-bearing consensus, query-relative web response, sparse hop/fanout execution, coarse native operators and deterministic receipts.
