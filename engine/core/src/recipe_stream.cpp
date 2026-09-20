@@ -52,6 +52,10 @@ struct field_rule {
     double rank;
     std::unordered_map<std::string, std::string> aliases;
 };
+struct structure_rule {
+    std::string path, semantic_type;
+    uint32_t disposition = 0;
+};
 struct route_rule {
     std::string name, ns, prefix, identity, first, last, object_namespace, separator;
     std::string range_first, range_last;
@@ -148,6 +152,7 @@ struct laplace_recipe_stream {
     bool final = false, failed = false, active = false;
     std::string error, record_context;
     std::unordered_map<std::string, field_rule> fields;
+    std::unordered_map<std::string, structure_rule> structures;
     std::unordered_map<std::string, route_rule> routes;
     std::vector<node> stack;
     std::deque<node> pending;
@@ -429,7 +434,8 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
         s = std::make_unique<laplace_recipe_stream>(); s->witness = *witness; s->trust = trust;
         image_reader r{program,n};
         const uint32_t version = r.number();
-        const bool rcp2_or_later = version == 0x32504352u || version == 0x33504352u;
+        const bool rcp2_or_later = version == 0x32504352u || version == 0x33504352u
+            || version == 0x34504352u;
         if (version != 0x31504352u && !rcp2_or_later)
             throw std::runtime_error("unsupported recipe instruction version");
         s->depth = int(r.number());
@@ -467,7 +473,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             f.relation = r.hash(); f.parent = r.hash(); f.entity_type = r.hash(); f.lexical_relation = r.hash(); f.rank = r.real();
             uint32_t aliases = r.number();
             for (uint32_t a = 0; a < aliases; ++a) { auto k = r.text(); auto v = r.text(); if (!f.aliases.emplace(alias_key(k),v).second) throw std::runtime_error("duplicate value alias instruction"); }
-            if (version == 0x33504352u) {
+            if (version == 0x33504352u || version == 0x34504352u) {
                 const uint32_t has_default = r.number();
                 if (has_default > 1) throw std::runtime_error("invalid semantic-default instruction");
                 f.has_default = has_default != 0;
@@ -485,6 +491,20 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             std::string key = f.path;
             if (!s->fields.emplace(key,std::move(f)).second) throw std::runtime_error("duplicate field instruction");
         }
+        if (version == 0x34504352u) {
+            count = r.number();
+            for (uint32_t j = 0; j < count; ++j) {
+                structure_rule structure;
+                structure.path = r.text();
+                structure.semantic_type = r.text();
+                structure.disposition = r.number();
+                if (structure.path.empty() || structure.semantic_type.empty() || structure.disposition == 0)
+                    throw std::runtime_error("invalid structure instruction");
+                std::string key = structure.path;
+                if (!s->structures.emplace(key, std::move(structure)).second)
+                    throw std::runtime_error("duplicate structure instruction");
+            }
+        }
         count = r.number();
         for (uint32_t j = 0; j < count; ++j) {
             route_rule route; route.name = r.text(); route.ns = r.text(); route.prefix = r.text(); route.kind = r.number();
@@ -497,6 +517,16 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 auto key = alias_key(r.text()); auto value = r.text();
                 if (!route.aliases.emplace(key, value).second)
                     throw std::runtime_error("duplicate subject alias instruction");
+            }
+            if (version == 0x34504352u) {
+                const uint32_t structures = r.number();
+                route.structures.reserve(structures);
+                for (uint32_t k = 0; k < structures; ++k) {
+                    std::string path = r.text();
+                    if (s->structures.find(path) == s->structures.end())
+                        throw std::runtime_error("route references unknown structure " + path);
+                    route.structures.push_back(std::move(path));
+                }
             }
             if (route.kind > 2 || route.subject_codec > 2 || (route.range_first.empty() != route.range_last.empty()) ||
                 (!route.range_first.empty() && (route.kind == 0 || !nonzero(route.range_relation))))
