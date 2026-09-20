@@ -138,14 +138,14 @@ public sealed record IngestSourceProfile(
         new(384, 1, ResidentBytesPerComposeUnit: 2_048);
 
     /// <summary>
-    /// Image packaging → RGBA recovery buffer size dominates; one codepoint-floor
-    /// image ladder compose per file.
+    /// Image packaging → RGBA recovery buffer size dominates; current legacy
+    /// media recipe performs one compose per file. Representation correction is #1134.
     /// </summary>
     public static readonly IngestSourceProfile MediaImage = new(256_000, 1);
 
     /// <summary>
-    /// Audio packaging → PCM16 mono recovery size dominates; one codepoint-floor
-    /// audio ladder compose per file.
+    /// Audio packaging → PCM16 mono recovery size dominates; current legacy
+    /// media recipe performs one compose per file. Representation correction is #1134.
     /// </summary>
     public static readonly IngestSourceProfile MediaAudio = new(128_000, 1);
 
