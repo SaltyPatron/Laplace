@@ -397,11 +397,9 @@ reclaim_install_headroom() {
     fi
   fi
 
-  # Foundation ingest runtimes are immutable revision directories selected by
-  # one 'current' symlink. There is no reason to retain every historical copy:
-  # with the substrate quiet no ingest process can be executing an unselected
-  # runtime. Keep the selected donor plus this candidate and reclaim only exact
-  # 40-hex revision directories.
+  # A quiet ingest journal does not prove that another CLI operation has exited.
+  # Only runtimes whose launchers participate in lifetime leasing can be removed.
+  # Keep earlier unleased releases, the active donor, and this candidate.
   [[ -d "$ingest_root" && ! -L "$ingest_root" ]] || return 0
   current_ingest="$(readlink -f "$prefix/ingest/current" 2>/dev/null || true)"
   target_ingest="$ingest_root/$(git -C "$ROOT" rev-parse HEAD)"
@@ -409,9 +407,14 @@ reclaim_install_headroom() {
     [[ "$candidate" == "$current_ingest" || "$candidate" == "$target_ingest" ]] && continue
     base="${candidate##*/}"
     [[ "$base" =~ ^[0-9a-f]{40}$ ]] || continue
+    [[ -f "$candidate/.runtime-lease" ]] || continue
     if [[ -d "$candidate" && ! -L "$candidate" && -w "$candidate" && -w "$ingest_root" ]]; then
-      find "$candidate" -xdev -depth -delete || return 1
-      echo "::notice::reclaimed stale ingest runtime $candidate"
+      (
+        exec {runtime_lease}<"$candidate/.runtime-lease"
+        flock -n -x "$runtime_lease" || exit 0
+        find "$candidate" -xdev -depth -delete || exit 1
+        echo "::notice::reclaimed stale ingest runtime $candidate"
+      ) || return 1
     fi
   done < <(find "$ingest_root" -mindepth 1 -maxdepth 1 -xdev -type d -print0)
 }
@@ -489,12 +492,15 @@ phase_install() (
     local ingest_build="$install_stage/ingest" ingest_reference
     dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_build" --no-self-contained -v q
     cp -Pf "$install_stage$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so* "$ingest_build/"
+    touch "$ingest_build/.runtime-lease"
+    source "$ROOT/deploy/linux/payload-sync.sh"
+    laplace_wrap_runtime_lease "$ingest_build/Laplace.Cli"
     # Immutable releases share identical payload files with the active runtime.
     # Build on the build volume, then copy only new bytes onto the install volume.
     ingest_reference="$(readlink -f "$ingest_dir/current" 2>/dev/null || true)"
     local -a ingest_links=()
     [[ ! -d "$ingest_reference" ]] || ingest_links+=("--link-dest=$ingest_reference")
-    rsync -rlt --checksum --no-perms --executability "${ingest_links[@]}" \
+    rsync -rl --checksum --no-times --no-perms --executability "${ingest_links[@]}" \
       "$ingest_build/" "$ingest_stage/"
     printf '%s\n' "$ingest_revision" > "$ingest_stage/.laplace-source-revision"
     [[ -f "$ingest_stage/Laplace.Cli.dll" && -f "$ingest_stage/liblaplace_core.so" ]] || {
@@ -511,7 +517,7 @@ phase_install() (
   # Keep changed files temporary until the transfer succeeds. A full destination
   # leaves the serving T0/native files intact. Retain older execution modules:
   # other databases can still reference their content-addressed names.
-  rsync -rlt --checksum --delay-updates --omit-dir-times --no-perms --executability \
+  rsync -rl --checksum --delay-updates --no-times --no-perms --executability \
     "$install_stage$LAPLACE_INSTALL_PREFIX/" "$LAPLACE_INSTALL_PREFIX/"
   git -C "$ROOT" rev-parse HEAD > "$LAPLACE_INSTALL_PREFIX/lib/.laplace-source-revision"
   ingest_link_tmp="$ingest_dir/.current-$ingest_revision-$$"

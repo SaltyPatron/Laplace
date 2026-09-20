@@ -330,8 +330,11 @@ laplace_wrap_runtime_lease() {
 #!/usr/bin/env bash
 set -euo pipefail
 runtime_executable="$(readlink -f "${BASH_SOURCE[0]}")"
-exec 9<"$(dirname "$runtime_executable")/../.runtime-lease"
-flock -s 9
+runtime_directory="$(dirname "$runtime_executable")"
+runtime_lease_path="$runtime_directory/.runtime-lease"
+[[ -f "$runtime_lease_path" ]] || runtime_lease_path="$runtime_directory/../.runtime-lease"
+exec {runtime_lease}<"$runtime_lease_path"
+flock -s "$runtime_lease"
 exec "$runtime_executable.native" "$@"
 LAUNCHER
   chmod 0755 "$executable" || return 1

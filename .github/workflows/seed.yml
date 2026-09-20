@@ -134,6 +134,10 @@ jobs:
           export LAPLACE_CLI_BIN=/opt/laplace/bin/laplace
           source scripts/ci-environment.sh
 
+          # Local CLI runs are outside Actions scheduling. Share the same whole-run
+          # heartbeat/beacon interpretation as deployment and Operator recovery.
+          bash scripts/wait-for-quiet-substrate.sh "$PGDATABASE"
+
           # Operator execution must not depend on presentation/help rendering.
           # The actual ingest path performs its runtime-closure checks before writing.
 

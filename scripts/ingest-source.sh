@@ -43,6 +43,10 @@ if [[ -f "$INGEST_RUNTIME/Laplace.Cli.dll" && -f "$INGEST_RUNTIME/liblaplace_cor
     CLI_NATIVE="$INGEST_RUNTIME/liblaplace_core.so"
     ENGINE_NATIVE="$PREFIX/lib/liblaplace_core.so"
     export LD_LIBRARY_PATH="$INGEST_RUNTIME:$PREFIX/lib:${LD_LIBRARY_PATH:-}"
+    if [[ -f "$INGEST_RUNTIME/.runtime-lease" ]]; then
+        exec {ingest_runtime_lease}<"$INGEST_RUNTIME/.runtime-lease"
+        flock -s "$ingest_runtime_lease"
+    fi
     INGEST_USES_PREFIX=1
 else
     INGEST_USES_PREFIX=0

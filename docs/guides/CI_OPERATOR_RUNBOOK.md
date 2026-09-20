@@ -28,6 +28,18 @@ This is the operator-facing inventory. The Actions page should read like a contr
 
 **Internal — substrate ingest** is the single ingest mutation owner. Domain workflows resolve friendly presets into the low-level source/path/language/model inputs and then call it. It is not manually dispatchable.
 
+Installation prepares native and CLI payloads on the build filesystem before
+publishing them to `/opt/laplace`. Serving caches and extension modules are not
+deleted in advance. Native replacement uses delayed renames; a failed copy leaves
+the previous files intact. Ingest releases preserve library symlinks and share
+unchanged files with the previous immutable runtime. Old content-addressed
+PostgreSQL modules remain available for databases that still reference them.
+
+Seed and deployment workflows use the same run heartbeat/advisory-beacon predicate
+as Operator. A fresh heartbeat or held beacon keeps a run live. Recovery cancels a
+run and its unfinished file rows only when both witnesses are absent/stale, retaining
+all committed substrate content.
+
 ## Normal source-to-product story
 
 A product-affecting push is intentionally boring:
