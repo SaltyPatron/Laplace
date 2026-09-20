@@ -162,6 +162,10 @@ The catalog is deliberately implementation-aware without making today's finite m
 120. **Personal effective mind by composition.** A person's usable Laplace state is shared world + granted packages/private knowledge + witnessed experience + governance + active scope + compute envelope, not a separately trained opaque model.
 121. **Tests/gates are proof, not product.** Verification machinery is subordinate evidence for executable capabilities and must not become the implementation target when the accepted scope requires the actual construction/query/security/export/deployment behavior.
 
+122. **Canonical scalar trajectories.** Finite digital numbers such as 255 or 0.34567 compose from their exact canonical codepoint sequence into reusable scalar roots; repeated modality occurrences reuse the scalar identity instead of minting arbitrary numeric Tier-0 atoms.
+123. **Numeric content-versus-occurrence separation.** The scalar value is reusable content while sample/channel/pixel/tensor ordinal, time, precision and source role remain attributable occurrence/physicality state.
+124. **Wide finite constants are ordinary compositions.** A finite pi prefix or other long numeric surface is one ordered composition over existing atoms; local GeometryZM ordinal/run carrier widths do not define the composition-width theorem.
+
 ## Product identity
 
 Laplace replaces opaque probabilistic runtime authority with exact reusable structure, bounded physicality, source-retaining testimony, uncertainty-bearing consensus, query-relative web response, sparse hop/fanout execution, coarse native operators and deterministic receipts.
