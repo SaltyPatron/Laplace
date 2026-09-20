@@ -9,7 +9,7 @@ Laplace starts from a simple observation: a countably open Tier-0 address law an
 
 That makes text, code, games, media, model checkpoints, conversations and other finite symbolic structures instances of the same machine rather than separate pipelines.
 
-An arbitrarily long history of finite observations remains countable, so adding knowledge over time does not require expanding the geometric extent. The same bounded world can become denser and more richly interconnected while identity, trajectory, AST/DAG structure, relations, evidence and provenance preserve distinctions that coordinates alone do not.
+An arbitrarily long history of finite observations remains countable, so adding knowledge over time does not require expanding the geometric extent. The same bounded world can become denser and more richly interconnected while identity, trajectory/composition structure, derived AST/DAG projections, relations, evidence and provenance preserve distinctions that coordinates alone do not.
 
 ```text
 source / observation
@@ -35,10 +35,10 @@ Laplace is not a transformer implementation. It reconstructs many of the jobs fo
 
 The mechanisms below are not isolated research curiosities. Together they imply product capabilities that must remain visible in design and implementation:
 
-- **Structural software construction:** code is grammar-derived recursive structure. Generation should reuse, compose or minimally mutate known AST structure before inventing new code; compile/test/runtime outcomes witness the next repair.
-- **Duplicate-code convergence:** exact canonical AST duplicates converge automatically; normalized structure, control/data flow, algebraic form and behavioral evidence can expose deeper duplicate implementations for consolidation.
+- **Structural software construction:** code is grammar-derived recursive structure. Generation should reuse, compose or minimally mutate known canonical tier/trajectory structures before inventing new code; AST/CST is realized only when a consumer or toolchain requires it; compile/test/runtime outcomes witness the next repair.
+- **Duplicate-code convergence:** exact canonical tier/trajectory compositions converge automatically; derived AST shape, normalized structure, control/data flow, algebraic form and behavioral evidence can expose deeper duplicate implementations for consolidation.
 - **Whole-application mutation and fast realization:** a repository is one recursively composed application root. A small edit creates new identities only along the changed ancestry; unchanged subtrees are structurally shared. A checkout is an export of the resulting complete root.
-- **Repair knowledge across repositories:** failed and successful development attempts are witnessed trajectories. Their AST/dependency/diagnostic/Fréchet shapes can surface similar problems in other authorized repositories.
+- **Repair knowledge across repositories:** failed and successful development attempts are witnessed trajectories. Their tier/trajectory structure plus derived AST/dependency/diagnostic/Fréchet shapes can surface similar problems in other authorized repositories.
 - **Deterministic machine-cost analysis:** source, bytecode, executable/container and machine instructions can lower into control/data/dependency structure and then into target-ISA/microarchitecture cycle expressions instead of being reduced to benchmark averages.
 - **One knowledge world with explicit authority and compute:** knowledge packages grant governed scope/capabilities over the shared world; billing meters how deeply and broadly the same intelligence searches it through hops, fanout and physical work.
 - **Governed abstention and security:** knowledge remains knowledge. Authority/firmware decides what may be coupled, derived, realized, exported or executed, with explicit WHY/WHY_NOT receipts.
@@ -47,7 +47,7 @@ See [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) for the binding synthesis. Te
 
 ## What is different
 
-- **Exact recursive identity.** Same canonical content under the same declared recipe means the same executable entity. Repetition does not mint another copy of `king`, the same chess line, the same AST subtree or the same document fragment; new occurrences add provenance and evidence around reusable structure.
+- **Exact recursive identity.** Same canonical content under the same declared recipe means the same executable entity. Repetition does not mint another copy of `king`, the same chess line, the same code composition or the same document fragment; new occurrences add provenance and evidence around reusable structure.
 - **One composition is one entity everywhere.** [k,i,n,g] is the same king entity whether it is used as a word, name, title, label or constituent. Likewise, an exact 2x2 pixel composition inside an 8x8 region is that same global 2x2 entity wherever it occurs; parent/tier/role live in trajectories and occurrences, not the hash.
 - **Open Tier-0, bounded geometric realization.** Tier-0 has no architectural terminal rank; each selected executable generation materializes a finite set of ranks. The current Unicode generation places its finite standards window deterministically on the unit 3-sphere, while native composition remains on or inside the bounded 4D ball. Adding ranks densifies the same bounded world rather than increasing its geometric extent.
 - **Lossless trajectories.** A content trajectory stores the exact ordered constituent identities. Packed trajectory vertices are reversible manifests, not fake spatial positions; realized curves resolve those identities back to child coordinates in ordinal order.
