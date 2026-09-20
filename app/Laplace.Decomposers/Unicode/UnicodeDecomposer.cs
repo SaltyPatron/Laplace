@@ -437,7 +437,7 @@ public sealed class UnicodeDecomposer
 
         string root = Path.GetFullPath(ecosystemPath);
         string xml = Path.GetFullPath(
-            _ucdxmlZip ?? Path.Combine(root, "ucdxml", "ucd.all.flat.zip"));
+            _ucdxmlZip ?? Path.Combine(root, "ucdxml", "ucd.all.grouped.zip"));
         string ducet = Path.GetFullPath(
             _ducet ?? Path.Combine(root, "uca", "allkeys.txt"));
         bool hasCanonicalXml = File.Exists(xml);
@@ -1075,7 +1075,7 @@ public sealed class UnicodeDecomposer
         kind = relative switch
         {
             "uca/allkeys.txt" => ArtifactKind.Ducet,
-            "ucdxml/ucd.all.grouped.zip" or "ucdxml/ucd.all.flat.xml" => ArtifactKind.UcdXml,
+            "ucdxml/ucd.all.grouped.zip" or "ucdxml/ucd.all.grouped.xml" => ArtifactKind.UcdXml,
             "ucd/UnicodeData.txt" => ArtifactKind.UnicodeData,
             "ucd/Scripts.txt" => ArtifactKind.Scripts,
             "ucd/Blocks.txt" => ArtifactKind.Blocks,
