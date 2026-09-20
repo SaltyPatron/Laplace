@@ -813,6 +813,10 @@ server {{
     ssl_certificate {cert};
     ssl_certificate_key {key};
     ssl_protocols TLSv1.2 TLSv1.3;
+    # The host itself must be able to exercise the exact HTTPS/SNI path used by
+    # LAN clients for deployment readback and OAuth diagnostics.
+    allow 127.0.0.1;
+    allow ::1;
     allow {network};
     deny all;
     client_max_body_size 1m;

@@ -214,9 +214,7 @@ class ImpactPlanTests(unittest.TestCase):
             "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj",
             value["managed_build_projects"],
         )
-        self.assertEqual(
-            value["delivery_actions"], ["database", "reconcile", "publish"]
-        )
+        self.assertEqual(value["delivery_actions"], ["database", "publish"])
         self.assertEqual(value["publish_scope"], "api")
 
     def test_unknown_production_path_fails_safe_to_everything(self):

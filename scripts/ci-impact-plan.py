@@ -429,7 +429,15 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 db_suites.update(("db-health", "managed-db"))
                 invalidate(("db-health", "managed-db"), path)
             live_suites.update(STANDARD_LIVE_SUITES)
-            delivery_actions.update(("database", "reconcile", "publish", "live"))
+            if path.startswith("db/migrations/"):
+                # Versioned migrations apply their own bounded schema/data change
+                # and db-health validates the installed result. Highway-mask estate
+                # reconciliation belongs to native/extension invalidations; running
+                # it after an account, auth, or billing migration turns a small
+                # deployment into a historical consensus scan.
+                delivery_actions.update(("database", "publish", "live"))
+            else:
+                delivery_actions.update(("database", "reconcile", "publish", "live"))
             invalidate(STANDARD_LIVE_SUITES, path)
 
         if path.startswith("deploy/"):
