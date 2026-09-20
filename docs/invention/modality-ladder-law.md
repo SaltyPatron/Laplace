@@ -1,197 +1,177 @@
-# Modality ladder law — codepoint floor (binding)
+# Modality ladder law — one open identity floor, typed modality grammars
 
-This binding law supersedes every prior private tier-0 alphabet in this file and in the
-modality campaign code that mirrored it.
-(`modality_atoms*` packed-RGBA / PCM16 blake3 mints, image/audio “scalar content
-law” as distinct T0 alphabets). Geometry = identity/reconstruction only.
-Semantics live in the Glicko attestation graph. Do **not** hash embeddings as
-identity.
+This is a binding preservation law under docs/INVENTION.md and docs/CAPABILITIES.md.
 
-This document is law for identity. Implementation rip work is tracked in
-[`modality-codepoint-floor-checklist.md`](modality-codepoint-floor-checklist.md).
-Do not reintroduce private alphabets under new names.
+The historical version of this file incorrectly equated the entire abstract Tier-0 law with the currently selected Unicode codepoint generation, then forced non-text values such as image channels and audio samples through decimal text spellings. That reduction is retired.
 
----
+## One global identity law; many lawful primitive grammars
 
-## The one law (every modality)
+Laplace has one content-addressed identity/composition machine, not one private identity namespace per modality.
 
-1. **Tier-0 is always Unicode codepoints** for every modality. Same floor as text:
-   existing UCA T0 perfcache (`laplace_t0_perfcache`, `codepoint_table_*`). There
-   is **no** image-only or audio-only tier-0 alphabet. Packed RGBA uint32 blake3,
-   PCM int16 blake3, and any other private atom mint at tier-0 are **wrong** and
-   must be ripped.
-2. **Modalities are UAX#29-analogs:** deterministic segmentation / composition
-   **above** that shared floor. Order-preserving trajectory → tier>0 is an
-   invertible ordered constituent sequence (same structural shape as
-   grapheme → word → sentence → document).
-3. **Shared codepoint floor enables modality perfcaches.** Above T0, modalities
-   may emit O(1) ROM blobs (same *blob class* as chess position perfcache —
-   peer of `codepoint_table_load_perfcache`, not a second tier-0). Tier-0 remains
-   codepoints; modality ROM eliminates repeat DB resolve of composed ids, it does
-   not replace the floor.
-4. **Witnessed / calculated split.** Raw recovered values are witnessed by
-   encoding them into codepoint trajectories under this law. Interpretation
-   (Fourier, object detectors, learned embeddings) is calculated, versioned,
-   evictable: emit attestations, discard the transient transform.
+Tier-0 is an open, countably addressable atom law. Every concrete generation observes/materializes a finite prefix/set. The current Unicode generation is one standards-defined finite materialization of that law; its 1,114,112 codepoint positions are not the capacity or ontology of Tier-0.
 
----
+Textual surfaces naturally recover Unicode codepoints/graphemes under UAX/normalization rules. That does not imply that an image sample, PCM sample, chess square, machine instruction, ELF field or tensor factor must be converted into the decimal characters spelling its numeric value before it can participate in canonical structure.
 
-## Packaging vs identity
+The modality/provider grammar determines what physical/source primitives are recovered and the versioned recipe determines their substrate roles.
 
-Containers (JPEG, PNG, MP3, FLAC, Ogg Vorbis, WAV, MP4, …) are **unpack codecs**.
-They are not the modality and are not hashed for identity.
+## Provider → recipe → universal typed structure
 
-| Layer | Owns |
-|-------|------|
-| Packaging | `media_decode` / `ImageFileOpen` / `AudioFileOpen` — recover channel values / samples / frames only |
-| Identity ladder | compose those values into **codepoint trajectories** (digit → number → …), then modality tiers |
-| Corpus pairing | Source decomposers may attest content ↔ track with existing relations (e.g. `HAS_RECORDING`) — they do **not** become media lanes |
+Every admitted digital artifact follows the same boundary:
 
-Packaging output (planar RGBA bytes, mono PCM samples, ordered frames) is an
-**intermediate recovery buffer**, not a tier-0 alphabet. After recovery, encode
-into the shared content law below. Never blake3 the packaging buffer or the
-packed channel tuple as a leaf id.
+~~~text
+artifact/source bytes
+-> qualified syntax/container/codec/standards provider
+-> exact recovered nodes/records/fields/order/spans/errors
+-> versioned source recipe
+-> universal typed AST / canonical recursive structures
+   + occurrences
+   + governed references
+   + provenance
+   + testimony
+   + deterministic calculations
+   + reconstruction state
+~~~
 
----
+Tree-sitter is one provider family. XML/UCD parsers, PNG/JPEG decoders, audio codecs, PGN/FEN parsers, ELF/PE/Mach-O readers, JVM classfile decoders and model-container readers are other provider families.
 
-## Number / digit encoding (locked by existing substrate law)
+A provider-specific recovered primitive is not automatically canonical content merely because it is easy to hash.
 
-Quantized scalars (channel intensities, sample amplitudes, counts, indices that
-enter a modality ladder as numbers) use the **already-shipped text content /
-recipe-scalar law** — not a new modality numeric alphabet.
+## No private atom namespaces
 
-**Canonical form**
+A modality must not create a disconnected private Tier-0 universe whose identities cannot participate in the common canonical composition law.
 
-1. Render the integer in **decimal ASCII** via invariant culture digit string
-   (`CultureInfo.InvariantCulture` / UTF-8 bytes of `'0'`…`'9'`, optionally `'-'`
-   for signed audio samples). No leading zeros except the number zero itself
-   (`"0"`).
-2. Tier-0 leaves are the **Unicode digit codepoints** (and sign if present) —
-   U+0030…U+0039, U+002D — resolved through the existing T0 / UCA perfcache.
-3. The **number** id is the content-decomposition root of that digit string
-   (text content law). Single-digit values collapse to their codepoint ids
-   (tier-floor collapse). Multi-digit values compose above T0 like any other
-   short text root.
+But the remedy is not "serialize every value as decimal Unicode text."
 
-**Authority in code (do not fork)**
+A recipe explicitly declares how a recovered value participates:
 
-- `ModelCoordinates.ScalarId` — `app/Laplace.Decomposers/Model/ModelCoordinates.cs`
-  (`value.ToString(CultureInfo.InvariantCulture)` → `TryDecomposeRoot` on UTF-8).
-- Comments there pin: scalar identity = text content law; single digits =
-  codepoint ids; requires codepoint perfcache.
+- canonical atom/content under the common identity law;
+- ordered constituent of a higher composition;
+- occurrence/reference coordinate;
+- typed physicality/factor;
+- source/provenance metadata;
+- attributed testimony;
+- deterministic calculation operand/result;
+- packaging/reconstruction state;
+- transient decode state that is not persisted as semantic content.
 
-**Operator white example (image channel 255)**
+Unknown disposition stays unresolved rather than silently becoming content.
 
-```
-[[2,5,5],[2,5,5],[2,5,5]]
-```
+## Packaging is not semantic identity
 
-Three channels; each channel value **255** is the ordered digit codepoints
-`2`, `5`, `5` → composed **number** → **channel** → **pixel** → **patch** →
-**region** → **image**. Tier-0 in that trajectory is only the digit codepoints
-(and whatever other Unicode leaves a future signed/fractional extension needs);
-the pixel is never `blake3({R,G,B,A})`.
+Containers and codecs recover source structure. File offsets, compression blocks, archive paths, tensor offsets and similar packaging coordinates do not become semantic identity unless a declared reconstruction/content recipe specifically requires them.
 
-No hex, packed-byte, or “alphabet index = identity” shortcut for ladder leaves.
-Hex appears elsewhere in the substrate (ids, dumps); it is not the modality
-number law.
+Equal canonical content may converge across different packages while package/file occurrences remain separately attributable.
 
----
+## Numbers and scalars
 
-## What private alphabets were (void)
+There is no universal law that a scalar value must be identified by the Unicode decimal spelling of the value.
 
-The following are **void** as tier-0 identity. Keep only as packaging /
-recovery documentation until rip:
+A source recipe may use an existing canonical numeric representation when that representation is semantically correct, or may retain a typed physical/sample value as physicality/calculation/reconstruction state. The representation and precision boundary are explicit recipe inputs.
 
-| Void claim | Why void |
-|------------|----------|
-| Image atom = 4 bytes `{R,G,B,A}` blake3 | Private alphabet; bypasses codepoint floor |
-| Packed RGBA uint32 total-order rank as T0 | Order may inform *composition schedule*, not a second T0 |
-| Audio atom = LE int16 blake3 | Private alphabet |
-| Amplitude-order 65 536-atom audio T0 | Same defect |
-| On-demand mint of 2³² color atoms as T0 | Alphabet size argument for a false floor |
+The current modality-number perfcache is a finite derived accelerator for one selected numeric recipe. It is not proof that decimal text is the ontology of image/audio samples and it must not be used to force every modality through a textual ladder.
 
-S³ / Hilbert geometry still derives from content; it does not justify a separate
-atom id space. Chess already shows the correct pattern: composition above the
-shared codepoint floor, optional ROM perfcache for hot composed forms.
+## Modality examples
 
----
+### Text
 
-## Ladders (composition above codepoints)
+Provider/grammar:
+- Unicode/UAX/NFC and document-format structure.
 
-### Text (reference — live)
+Typical composition:
+- codepoint/grapheme/word/sentence plus source-native paragraph/section/chapter/table/AST structures when the provider supplies them.
 
-- Tier-0: codepoint / UCA order (perfcache)
-- Tiers: grapheme → word → sentence → document
-- Witnessed ≈ semantic for lexical sources
+Unicode is authoritative for textual scalar identity in this lane.
 
-### Code (witnessed AST)
+### Code and repositories
 
-- Tier-0: still Unicode/source text under content law (existing code lane) —
-  not a byte-hash floor that fragments from text
-- Segmentation: tree-sitter unpack → ordered AST child sequence
-- Relations: `HAS_AST_CHILD`, `HAS_AST_KIND` (+ existing `CONTAINS` / `CALLS` / …)
+Provider/grammar:
+- exact language grammar (Tree-sitter or other qualified provider);
+- Git object/container provider where repository history is selected;
+- compiler/object/disassembly providers for calculated execution analysis.
 
-### Image (generic lane — target shape)
+Canonical structure includes ordered syntax/AST and repository/tree composition. Calls, types, dependencies, toolchain outcomes and execution analysis remain typed state around those identities.
 
-- Dispatch: `rgba-image` → `RgbaImageDecomposer` (names may stay; identity must change)
-- Packaging: JPEG, PNG, BMP, GIF, TGA, planar `.rgba` → recover per-channel bytes
-- **Encode:** each channel value → digit codepoints → number → channel sequence →
-  pixel → patch → region → image (operator white)
-- **Leaf order rock lock (v1, still binding for higher tiers):** patch-major —
-  patches in row-major grid order; within each patch, pixels row-major. Changing
-  it reassigns every Patch/Region/Image id. Hilbert 2D→1D remains a future
-  scan-order option (new lock, not a silent swap).
-- Patch size: `LAPLACE_IMAGE_PATCH_SIZE` = 8 (reassigns higher ids if changed)
-- Relations: `HAS_REGION`, `HAS_PATCH`; reuse `ADJACENT_TO_PIXEL`, `IS_PIXEL_OF`,
-  `DEPICTS`, `CAPTIONS`
-- Absent alpha from RGB packaging: recover as `A = 0xFF` **value**, then encode
-  that value under the digit law (same as other channels) — not a packed-RGBA leaf
+Construction uses this grammar in reverse: reuse/compose/minimally mutate canonical AST before realizing source.
 
-### Audio (generic track lane — target shape)
+### Images
 
-- Dispatch: `track-audio` → `TrackAudioDecomposer`
-- Packaging: WAV, MP3, FLAC, Ogg Vorbis (+ magic sniff) → recover sample values
-- **Encode:** each sample amplitude → digit (signed decimal) codepoint trajectory
-  → number → sample → window/frame → onset segment → phrase → track
-- Channel remains a **partition** of streams (not a tier), unless a future law
-  explicitly composes multi-channel trajectories
-- Onset segmentation for witnessed infra may stay fixed-hop placeholder; real
-  onset detector = calculated layer later
-- Calculated later: `HAS_SPECTRAL_PELOT`, `HAS_ONSET_SEGMENT` — attest, discard STFT
+Provider/grammar:
+- exact image/container decoder recovers dimensions, channels, samples, metadata and ordering.
 
-### Video (generic lane — target shape)
+The recipe decides which decoded sample/channel/region structures are canonical content/physicality/reconstruction state. It does not turn RGBA into a private universe, and it does not require 255 to become the textual characters 2,5,5 merely to be lawful.
 
-- Dispatch: `frame-video` → `FrameVideoDecomposer`
-- Spatial: image ladder per frame (same codepoint-floor image law)
-- Temporal: `PRECEDES_IN_TIME`; membership `HAS_FRAME` / `IS_FRAME_OF`
-- Root: content-addressed over ordered frame roots (not path hash)
-- Container demux is packaging only
+### Audio
 
-### Chess (analogy — already correct class)
+Provider/grammar:
+- exact audio/container decoder recovers sample format, channels, sample order, timing and metadata.
 
-- Tier-0 remains codepoints / shared floor
-- Position (and related) ROM is an **above-T0** perfcache blob, not a private T0
-- Image/audio modality ROMs, when built, follow this class
+Precision/sample format is part of the recipe/physicality boundary. Spectral/onset/features are versioned calculations unless the source literally supplies them.
 
----
+### Video
 
-## Reseed / freeze implications
+Provider/grammar:
+- container demux + image/audio/frame/timing structure.
 
-- Relation canonicals in `engine/manifest/relation_types.toml` stay ADR 0001
-  append-only (no renumber).
-- Any ids already minted under void private alphabets are **not** the identity
-  law going forward. Do not “freeze” packed-RGBA or PCM16 atom alphabets as rock
-  locks; rip and replace with codepoint-floor composition before corpus seed of
-  media lanes.
-- First image/audio seed under the **corrected** law freezes digit rendering and
-  higher-tier leaf order (patch-major, hop sizes), not a private T0 alphabet.
+Frame ordering and synchronization remain exact occurrences/trajectories. Codec/container packaging does not own semantic identity.
 
----
+### Chess
 
-## Non-goals (this law doc)
+Provider/grammar:
+- PGN/FEN/rule engine/tablebase/provider formats.
 
-- Does not authorize implementing native ladders in the same turn as a doc-only
-  agent task.
-- Does not make embeddings, spectrograms, or container bytes identity.
-- Does not elevate packaging recovery buffers to tier-0.
+Squares, pieces, positions, moves, lines and games are deterministic domain structures under the common content/occurrence/evidence machine. Hot position perfcaches are derived accelerators, not a private cognition ontology.
+
+### Models
+
+Provider/grammar:
+- tokenizer/config/container/tensor structure.
+
+Raw parameter numerics may be transient operands used to derive circuit physicalities/evidence. Checkpoint packaging and raw weight blobs do not become a second durable model ontology.
+
+### Executables / bytecode
+
+Provider/grammar:
+- ELF/PE/Mach-O/JAR/classfile/disassembly and related exact structural providers.
+
+Recovered source/bytecode/machine structures may be further calculated into CFG/data/dependency state and target-machine cycle derivations. Those calculations remain versioned and attributable.
+
+## Physicality and trajectory
+
+A modality's canonical structure may have one or more typed physicalities.
+
+Packed trajectory carrier data is an exact constituent manifest; it is not child geometry. Realized curves resolve child identities to the requested physicality coordinates before geometric metrics are applied.
+
+Fréchet/Hausdorff/angular/Hilbert/locality are typed comparison operators, never a replacement for canonical identity or source semantics.
+
+## Perfcache law
+
+A perfcache may materialize deterministic finite derived data for hot structures under spec 33.
+
+It is rebuildable, versioned, verified against canonical state/recipe, never the semantic authority, and never permission to invent a private identity law for convenience.
+
+## Reseed / generation implications
+
+Changing a binding canonicalization/composition recipe can change identities and therefore requires a new generation/reseed where those identities are persisted.
+
+Changing only a lawful physical execution plan (chunk size, worker count, batching, accelerator/provider) must not change canonical results.
+
+## Acceptance
+
+- one global identity/composition law is preserved across modalities;
+- Unicode remains authoritative for textual Unicode surfaces without being promoted into the ontology of every digital primitive;
+- each provider/recipe has complete field-role disposition;
+- packaging and provenance do not silently salt reusable content;
+- exact source ordering/reconstruction is preserved where required;
+- calculations remain distinguishable from observations/testimony;
+- modality-specific physicality is typed and queryable;
+- perfcaches remain derived;
+- software construction, machine analysis and export consume the same canonical structures instead of private modality worlds.
+
+## Non-success
+
+- private image/audio/code/model atom namespaces with their own identity law;
+- converting arbitrary physical values to decimal text solely to satisfy an obsolete "all atoms are Unicode codepoints" rule;
+- treating codec/container bytes or offsets as semantic identity by default;
+- hashing transient embeddings/calculations as canonical identity;
+- flattening source-native AST/document/media structure into a generic text ladder;
+- using a modality-specific parser as a private persistence/cognition engine.
