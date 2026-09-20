@@ -75,12 +75,6 @@ typedef struct LaplacePromptHilbertCandidate
     uint8 delta[16];
 } LaplacePromptHilbertCandidate;
 
-typedef struct LaplacePromptGeometryPoint
-{
-    uint32 off;
-    uint32 node;
-} LaplacePromptGeometryPoint;
-
 typedef struct LaplacePromptIntent
 {
     MemoryContext owner;
@@ -294,15 +288,6 @@ laplace_prompt_hilbert_compare(const void *left, const void *right)
     return order ? order : memcmp(&a->id, &b->id, sizeof(hash128_t));
 }
 
-static inline int
-laplace_prompt_geometry_point_compare(const void *left, const void *right)
-{
-    const LaplacePromptGeometryPoint *a = left, *b = right;
-    if (a->off != b->off) return a->off < b->off ? -1 : 1;
-    if (a->node != b->node) return a->node < b->node ? -1 : 1;
-    return 0;
-}
-
 static inline void
 laplace_prompt_hilbert_delta(const uint8 left[16], const uint8 right[16],
                              uint8 out[16])
@@ -459,50 +444,41 @@ laplace_prompt_geometry_scan_anchor(
 }
 
 static inline void
-laplace_prompt_geometry_shape(LaplacePromptIntent *intent, int fanout,
-                              SPIPlanPtr frechet_plan,
+laplace_prompt_geometry_shape(LaplacePromptIntent *intent, uint32 root_node,
+                              int fanout, SPIPlanPtr frechet_plan,
                               const hash128_t *candidates, int candidate_count)
 {
     if (!frechet_plan || candidate_count <= 0 || fanout <= 0)
         return;
     size_t node_count = tier_tree_node_count(intent->input->tree);
-    if (node_count > (size_t) INT_MAX ||
-        node_count > MaxAllocSize / sizeof(LaplacePromptGeometryPoint))
-        elog(ERROR, "prompt geometry: realized prompt curve exceeds allocation capacity");
-    const uint8 *tiers = tier_tree_tier_array(intent->input->tree);
-    const uint32 *offsets = tier_tree_text_off_array(intent->input->tree);
+    const uint32 *first_children =
+        tier_tree_first_child_idx_array(intent->input->tree);
+    const uint32 *child_counts =
+        tier_tree_child_count_array(intent->input->tree);
     const double *coords = tier_tree_coord_array(intent->input->tree);
-    LaplacePromptGeometryPoint *points =
-        palloc(sizeof(*points) * Max(node_count, (size_t) 1));
-    int point_count = 0;
-    uint8 chosen_tier = 1;
-    for (size_t node = 0; node < node_count; ++node)
-        if (tiers[node] == chosen_tier)
-            points[point_count++] = (LaplacePromptGeometryPoint) {
-                .off = offsets[node], .node = (uint32) node};
-    if (point_count < 2)
-    {
-        point_count = 0;
-        chosen_tier = 0;
-        for (size_t node = 0; node < node_count; ++node)
-            if (tiers[node] == chosen_tier)
-                points[point_count++] = (LaplacePromptGeometryPoint) {
-                    .off = offsets[node], .node = (uint32) node};
-    }
-    if (point_count < 2)
-    {
-        pfree(points);
+    if ((size_t) root_node >= node_count)
+        elog(ERROR, "prompt geometry: root curve node is outside canonical tree");
+    uint32 first_child = first_children[root_node];
+    uint32 child_count = child_counts[root_node];
+    if (child_count < 2)
         return;
-    }
-    qsort(points, point_count, sizeof(*points), laplace_prompt_geometry_point_compare);
+    if (first_child == TIER_TREE_INVALID ||
+        (size_t) first_child + (size_t) child_count > node_count ||
+        (Size) child_count > MaxAllocSize / sizeof(Datum))
+        elog(ERROR, "prompt geometry: realized root curve is invalid");
 
+    /* Match structural.entity_curve exactly: one point per immediate ordered
+     * constituent of the active root.  Using all graphemes in a multi-word
+     * prompt compares different composition levels and is not a Frechet metric
+     * over the same declared physicality. */
+    int point_count = (int) child_count;
     Datum *x = palloc(sizeof(Datum) * point_count);
     Datum *y = palloc(sizeof(Datum) * point_count);
     Datum *z = palloc(sizeof(Datum) * point_count);
     Datum *m = palloc(sizeof(Datum) * point_count);
     for (int i = 0; i < point_count; ++i)
     {
-        Size base = (Size) points[i].node * 4;
+        Size base = ((Size) first_child + (Size) i) * 4;
         x[i] = Float8GetDatum(coords[base + 0]);
         y[i] = Float8GetDatum(coords[base + 1]);
         z[i] = Float8GetDatum(coords[base + 2]);
@@ -548,7 +524,7 @@ laplace_prompt_geometry_shape(LaplacePromptIntent *intent, int fanout,
     for (int i = 0; i < candidate_count; ++i)
         pfree(DatumGetPointer(ids[i]));
     pfree(candidate_array); pfree(xa); pfree(ya); pfree(za); pfree(ma);
-    pfree(ids); pfree(x); pfree(y); pfree(z); pfree(m); pfree(points);
+    pfree(ids); pfree(x); pfree(y); pfree(z); pfree(m);
 }
 
 static inline void
@@ -667,7 +643,8 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     /* Shape refinement is deliberately over the declared root angular KNN
      * population: no hidden 500-row probe and never packed trajectory bits. */
     laplace_prompt_geometry_shape(
-        intent, fanout, frechet_plan, root_angular, root_angular_count);
+        intent, root_node, fanout, frechet_plan,
+        root_angular, root_angular_count);
     pfree(root_angular);
 
     if (intent->geometry_count > 0)
