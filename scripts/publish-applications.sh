@@ -433,7 +433,7 @@ application_api_main() (
     exit "$rc"' EXIT
   trap 'exit 143' TERM HUP
   trap 'exit 130' INT
-  application_guard --snapshot "$backup/runtime-before.json"
+  application_guard --installed-runtime --snapshot "$backup/runtime-before.json"
   mkdir -m 0700 "$backup/app"
   application_api_snapshot "$backup/app"
   application_api_manifest "$backup/app" "$backup/previous.json"
@@ -447,7 +447,7 @@ application_api_main() (
   application_api_control start
   application_api_verify "$backup/next.json" "$backup/verified.json"
   application_revision_verify
-  application_guard --compare "$backup/runtime-before.json"
+  application_guard --installed-runtime --compare "$backup/runtime-before.json"
   cp "$backup/next.json" "$ROOT/build/.api-publish-payload.json"
   cp "$backup/verified.json" "$ROOT/build/.api-publish-verified.json"
   cp "$backup/runtime-before.json" "$ROOT/build/.api-publish-native.json"

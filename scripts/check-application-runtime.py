@@ -328,6 +328,60 @@ def snapshot(root, prefix, database, *, purpose="publication"):
     return state
 
 
+def installed_runtime_snapshot(root, prefix, database):
+    """Bind API-only publication to the already-installed native/SQL runtime.
+
+    A managed-only candidate deliberately has no CMake tree. Its publication
+    contract is that the installed native and database generation remains
+    byte-for-byte and identity-for-identity unchanged across the API swap.
+    """
+    database_incarnation(database)
+    if not 180000 <= int(database["server_version"]) < 190000:
+        raise ValueError("application runtime guard requires the deployed PostgreSQL 18 contract")
+    if type(database["running_ingests"]) is not int or database["running_ingests"] < 0:
+        raise ValueError("invalid ingest journal observation")
+    if not database["extension_functions"]:
+        raise ValueError("live extension function contract is missing")
+    migrations = {path.name for path in (root / "db/migrations").glob("*.sql")}
+    if not migrations or not migrations.issubset(set(database["migrations"] or [])):
+        raise ValueError("pending/unknown migrations; use the full database pipeline")
+
+    manifest = prefix / "share/postgresql/18/extension/laplace_execution_module.txt"
+    execution = manifest.read_text().strip()
+    if not re.fullmatch(r"laplace_execution_[0-9a-f]{16}", execution):
+        raise ValueError("invalid installed native execution module identity")
+    installed_paths = [*MODULES.values(), "lib/liblaplace_syzygy.so",
+                       f"lib/postgresql/18/{execution}.so",
+                       str(manifest.relative_to(prefix))]
+    hashes = {}
+    for relative in installed_paths:
+        path = prefix / relative
+        if not path.is_file():
+            raise ValueError(f"installed native artifact missing: {relative}")
+        hashes[relative] = digest(path)
+
+    mapped = mapped_native_identities(prefix, database, hashes)
+    for name in ("laplace_geom", "laplace_substrate"):
+        installed = control_version(prefix / "share/postgresql/18/extension" / f"{name}.control")
+        if installed != database["extensions"].get(name):
+            raise ValueError(f"{name} installed SQL version differs from the database")
+    for setting in ROMS:
+        path = Path(database["roms"].get(setting, ""))
+        if not path.is_absolute() or not path.resolve().is_relative_to(prefix.resolve()):
+            raise ValueError(f"unverified installed ROM path: {setting}")
+        hashes[setting] = digest(path)
+    for filename in ("laplace_chess_transition_perfcache.bin", "laplace_modality_number_perfcache.bin"):
+        hashes[filename] = digest(prefix / "share/laplace" / filename)
+    installed_pair = prefix / "share/laplace/chess-floor/current/receipt.json"
+    if installed_pair.exists():
+        hashes["chess_floor_pair_receipt"] = digest(installed_pair)
+
+    state = {"format": FORMAT, "scope": "installed-runtime", "artifacts": hashes,
+             "database": copy.deepcopy(database)}
+    state["database"]["native_mappings"] = mapped
+    return state
+
+
 def compatible(before, after, *, purpose="publication"):
     """Compare runtime contracts while retaining journal progress as an observation.
 
@@ -360,18 +414,23 @@ def main():
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--purpose", choices=("publication", "recording"), default="publication")
+    parser.add_argument("--installed-runtime", action="store_true")
     parser.add_argument("--compare", type=Path)
     args = parser.parse_args()
     prefix = Path(os.environ.get("LAPLACE_INSTALL_PREFIX", "/opt/laplace"))
     pg_prefix = Path(os.environ.get("LAPLACE_PG_PREFIX", "/opt/laplace/pgsql-18"))
-    state = snapshot(args.repo_root, prefix, read_database(pg_prefix), purpose=args.purpose)
+    database = read_database(pg_prefix)
+    state = (installed_runtime_snapshot(args.repo_root, prefix, database)
+             if args.installed_runtime else
+             snapshot(args.repo_root, prefix, database, purpose=args.purpose))
     if args.compare and not compatible(json.loads(args.compare.read_text()), state, purpose=args.purpose):
         raise ValueError("native/database runtime changed during the guarded operation")
     if args.snapshot:
         with args.snapshot.open("x") as output:
             json.dump(state, output, sort_keys=True)
-    print(f"PASS: configured installed-form and mapped native artifacts, installed SQL versions and applied migrations match; "
-          f"purpose={args.purpose}; observed_running_ingests={state['database']['running_ingests']}")
+    scope = state.get("scope", "configured-build")
+    print(f"PASS: installed-form and mapped native artifacts, installed SQL versions and applied migrations match; "
+          f"scope={scope}; purpose={args.purpose}; observed_running_ingests={state['database']['running_ingests']}")
 
 
 if __name__ == "__main__":
