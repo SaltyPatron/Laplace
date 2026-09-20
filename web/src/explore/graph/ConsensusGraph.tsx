@@ -1,10 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { Field, Input, Muted, SegmentedControl } from '@ui';
 import { forceCollide, forceManyBody, forceRadial } from 'd3-force-3d';
-import { CanvasTexture, LinearFilter, Mesh, MeshBasicMaterial, MOUSE, Object3D, SphereGeometry, Sprite, SpriteMaterial, type Camera, type Vector3 } from 'three';
+import { CanvasTexture, LinearFilter, MOUSE, Object3D, Sprite, SpriteMaterial, type Camera, type Vector3 } from 'three';
 import type { ExploreConsensusRow } from '../types';
 import type { WalkPathNode } from '../store';
-import { ensureVisualizationContrast, rgba, useVisualizationPalette, type VisualizationPalette } from '../visualizationPalette';
+import { ensureVisualizationContrast, lerpColor, rgba, useVisualizationPalette, type VisualizationPalette } from '../visualizationPalette';
 import styles from './ConsensusGraph.module.css';
 import { useGraphFlyControls } from './useGraphFlyControls';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
@@ -169,15 +169,86 @@ export function graphForDimension(base: GraphData, dim: Dim, centerId: string): 
  */
 const LABEL_FONT_PX = 44;
 const MAX_VISIBLE_LABELS = 128;
-const nodeSphereGeometry = new SphereGeometry(NODE_REL_SIZE, 12, 12);
-const nodeMaterialCache = new Map<string, MeshBasicMaterial>();
 
-function nodeMaterial(color: string): MeshBasicMaterial {
-  const cached = nodeMaterialCache.get(color);
-  if (cached) return cached;
-  const material = new MeshBasicMaterial({ color, toneMapped: false });
-  nodeMaterialCache.set(color, material);
-  return material;
+interface NodeVisual {
+  color: string;
+  val: number;
+  support: number;
+  opposition: number;
+  witnesses: number;
+}
+
+function endpointId(endpoint: string | WebNode): string {
+  return typeof endpoint === 'string' ? endpoint : endpoint.id;
+}
+
+/**
+ * Nodes are not anonymous topology dots. Summarize the canonical signed Glicko
+ * testimony touching each retained entity:
+ *   hue  = positive support vs negative/refuted opposition
+ *   mass = witness volume (log-scaled) plus standing magnitude
+ *
+ * This is presentation only. The belief coordinates still come from the native
+ * normalized-Laplacian projection; witness counts are not multiplied back into
+ * the Glicko edge weight.
+ */
+function buildNodeVisuals(
+  data: GraphData,
+  centerId: string,
+  palette: VisualizationPalette,
+): Map<string, NodeVisual> {
+  const raw = new Map<string, { support: number; opposition: number; witnesses: number }>();
+  for (const node of data.nodes)
+    raw.set(node.id, { support: 0, opposition: 0, witnesses: 0 });
+
+  for (const edge of data.links) {
+    const source = endpointId(edge.source as unknown as string | WebNode);
+    const target = endpointId(edge.target as unknown as string | WebNode);
+    const signed = Number.isFinite(edge.weight) ? edge.weight : 0;
+    const opposition = edge.refuted || signed < 0 ? Math.abs(signed) : 0;
+    const support = edge.refuted ? 0 : Math.max(0, signed);
+    const witnesses = Number.isFinite(edge.witnesses) ? Math.max(0, edge.witnesses) : 0;
+    for (const id of [source, target]) {
+      const value = raw.get(id);
+      if (!value) continue;
+      value.support += support;
+      value.opposition += opposition;
+      value.witnesses += witnesses;
+    }
+  }
+
+  const visuals = new Map<string, NodeVisual>();
+  for (const node of data.nodes) {
+    const value = raw.get(node.id) ?? { support: 0, opposition: 0, witnesses: 0 };
+    const standing = value.support + value.opposition;
+    const balance = standing > 0 ? (value.support - value.opposition) / standing : 0;
+    const intensity = Math.min(1, standing / 3);
+    let color = palette.muted;
+    if (node.id === centerId || node.walk) {
+      color = palette.signal;
+    } else if (standing > 0 && balance < -0.08) {
+      color = lerpColor(palette.steel, palette.error, Math.min(1, Math.abs(balance) * 0.55 + intensity * 0.45));
+    } else if (standing > 0 && balance > 0.08) {
+      color = lerpColor(palette.steel, palette.signal, Math.min(1, balance * 0.55 + intensity * 0.45));
+    } else if (standing > 0) {
+      color = palette.steel;
+    }
+    color = ensureVisualizationContrast(color, palette.background, palette.primary);
+
+    const evidenceMass = Math.log2(value.witnesses + 1);
+    const val = node.id === centerId
+      ? 8
+      : Math.max(1, Math.min(10, 1 + evidenceMass * 0.72 + Math.min(3, standing)));
+
+    visuals.set(node.id, {
+      color,
+      val,
+      support: value.support,
+      opposition: value.opposition,
+      witnesses: value.witnesses,
+    });
+  }
+  return visuals;
 }
 
 function labelSprite(
@@ -355,6 +426,10 @@ export function ConsensusGraph({
     [data.nodes],
   );
   const beliefMode = dim === 'belief' && beliefAvailable;
+  const nodeVisuals = useMemo(
+    () => buildNodeVisuals(data, centerId, palette),
+    [data, centerId, palette],
+  );
   const labelledIds = useMemo(() => {
     if (data.nodes.length <= MAX_VISIBLE_LABELS) return new Set(data.nodes.map((node) => node.id));
     const ordered = data.nodes.slice().sort((a, b) => {
@@ -549,8 +624,8 @@ export function ConsensusGraph({
         <Muted className={styles.legend}>
           {expanded
             ? beliefMode
-              ? `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · native normalized-Laplacian belief geometry · positive signed Glicko = affinity · refutations do not bind`
-              : `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · force projection · signed Glicko standing drives attraction`
+              ? `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · native normalized-Laplacian belief geometry · node hue = support/refutation · node mass = witnesses · refutations do not bind`
+              : `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · force projection · node hue = support/refutation · node mass = witnesses · signed Glicko drives attraction`
             : `1-hop · ${data.nodes.length}n · expand for native belief geometry`}
           {' · '}
           {dim !== '2d'
@@ -592,14 +667,19 @@ export function ConsensusGraph({
               if (l.refuted || l.weight < 0) return rgba(palette.error, 0.42 + 0.42 * Math.abs(l.weight));
               return rgba(palette.steel, 0.14 + 0.8 * binding(l.weight));
             }}
-            nodeLabel={(n: WebNode) => `${n.label} · hop ${n.hop}`}
+            nodeLabel={(n: WebNode) => {
+              const visual = nodeVisuals.get(n.id);
+              return visual
+                ? `${n.label} · hop ${n.hop} · +${visual.support.toFixed(2)} / −${visual.opposition.toFixed(2)} standing · ${visual.witnesses.toLocaleString()} witnesses`
+                : `${n.label} · hop ${n.hop}`;
+            }}
             linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · rating ${l.rating.toFixed(1)} · RD ${l.rd.toFixed(1)} · σ ${l.volatility.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
-            nodeThreeObjectExtend={false}
+            nodeRelSize={1.55}
+            nodeVal={(n: WebNode) => nodeVisuals.get(n.id)?.val ?? 1}
+            nodeColor={(n: WebNode) => nodeVisuals.get(n.id)?.color ?? palette.muted}
+            nodeThreeObjectExtend
             nodeThreeObject={(n: WebNode) => {
               const root = new Object3D();
-              const color = hopColor(n.hop, n.walk || n.id === centerId, palette);
-              root.add(new Mesh(nodeSphereGeometry, nodeMaterial(color)));
-
               if (labelledIds.has(n.id)) {
                 const label = n.label.length > 22 ? `${n.label.slice(0, 21)}…` : n.label;
                 const sprite = labelSprite(
@@ -610,7 +690,9 @@ export function ConsensusGraph({
                   labelMaterials.current,
                 );
                 if (sprite) {
-                  sprite.position.set(0, NODE_REL_SIZE * 3.2, 0);
+                  const visual = nodeVisuals.get(n.id);
+                  const radius = 1.55 * Math.cbrt(Math.max(1, visual?.val ?? 1));
+                  sprite.position.set(0, radius + NODE_REL_SIZE * 2.4, 0);
                   root.add(sprite);
                 }
               }
@@ -639,7 +721,12 @@ export function ConsensusGraph({
             backgroundColor={palette.background}
             enablePanInteraction
             enableZoomInteraction
-            nodeLabel={(n: WebNode) => `${n.label} · hop ${n.hop}`}
+            nodeLabel={(n: WebNode) => {
+              const visual = nodeVisuals.get(n.id);
+              return visual
+                ? `${n.label} · hop ${n.hop} · +${visual.support.toFixed(2)} / −${visual.opposition.toFixed(2)} standing · ${visual.witnesses.toLocaleString()} witnesses`
+                : `${n.label} · hop ${n.hop}`;
+            }}
             linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · rating ${l.rating.toFixed(1)} · RD ${l.rd.toFixed(1)} · σ ${l.volatility.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
             linkWidth={(l: WebEdge) => 0.3 + binding(l.weight) * 1.25 + witnessMass(l.witnesses) * 0.65}
             linkColor={(l: WebEdge) => {
@@ -661,12 +748,13 @@ export function ConsensusGraph({
             }}
             nodeCanvasObject={(node: WebNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
               // World-space radius (not /globalScale) — zoom-in reveals gaps instead of ballooning.
-              const r = node.hop === 0 ? 3.2 : Math.max(1.6, 2.6 - node.hop * 0.25);
+              const visual = nodeVisuals.get(node.id);
+              const r = 1.7 + Math.cbrt(Math.max(1, visual?.val ?? 1)) * 1.15;
               const x = (node as WebNode & { x: number; y: number }).x;
               const y = (node as WebNode & { x: number; y: number }).y;
               ctx.beginPath();
               ctx.arc(x, y, r, 0, 2 * Math.PI);
-              ctx.fillStyle = hopColor(node.hop, node.walk || node.id === centerId, palette);
+              ctx.fillStyle = visual?.color ?? hopColor(node.hop, node.walk || node.id === centerId, palette);
               ctx.fill();
               if (globalScale >= 1.15) {
                 const label = node.label.length > 18 ? `${node.label.slice(0, 17)}…` : node.label;
