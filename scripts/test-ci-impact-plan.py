@@ -64,7 +64,7 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["managed_test_filter"], "")
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["browser_test_suites"], [
-            "typecheck", "read-resource", "workspace-ui", "data-ui", "chess-ui"
+            "typecheck", "read-resource", "workspace-ui", "data-ui"
         ])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish"])
@@ -432,6 +432,39 @@ class ImpactPlanTests(unittest.TestCase):
             value = json.loads(result.stdout)
             self.assertEqual(value["changed_files"], ["web/src/Removed.tsx"])
             self.assertIn("browser-dev", value["dev_suites"])
+
+    def test_git_diff_ignores_extension_sql_comment_only_changes(self):
+        with tempfile.TemporaryDirectory(prefix="impact-sql-comment-") as tmp:
+            repo = Path(tmp)
+            sql = repo / "extension/laplace_substrate/example.sql.in"
+            web = repo / "web/src/App.tsx"
+            sql.parent.mkdir(parents=True)
+            web.parent.mkdir(parents=True)
+            sql.write_text("-- old explanation\nSELECT 1;\n", encoding="utf-8")
+            web.write_text("export const value = 1;\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "ci@example.invalid"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "CI"], cwd=repo, check=True)
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            sql.write_text("-- clearer explanation\n-- still commentary\nSELECT 1;\n", encoding="utf-8")
+            web.write_text("export const value = 2;\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "head"], cwd=repo, check=True)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "--root", str(repo),
+                 "--base", base, "--head", head],
+                check=True, text=True, capture_output=True,
+            )
+            value = json.loads(result.stdout)
+            self.assertEqual(value["build_components"], ["web"])
+            self.assertNotIn("native-dev", value["dev_suites"])
+            self.assertNotIn("native-db", value["db_suites"])
+            self.assertNotIn("chess-ui", value["browser_test_suites"])
+            self.assertIn("extension/laplace_substrate/example.sql.in", value["ignored_paths"])
 
 
 if __name__ == "__main__":

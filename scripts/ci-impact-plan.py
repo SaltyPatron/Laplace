@@ -405,7 +405,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             elif path == "web/src/api/client.ts":
                 browser_test_suites.update(("read-resource", "workspace-ui", "data-ui"))
             else:
-                browser_test_suites.update(BROWSER_TEST_SUITES)
+                browser_test_suites.update(("read-resource", "workspace-ui", "data-ui"))
             live_suites.update(BASE_LIVE_SUITES)
             delivery_actions.update(("publish", "live"))
             invalidate(("browser-dev",), path)
@@ -567,6 +567,21 @@ def git_changed_files(root: Path, base: str, head: str) -> tuple[list[str], bool
     return [line.strip() for line in result.stdout.splitlines() if line.strip()], False
 
 
+def sql_comment_only_change(root: Path, base: str, head: str, path: str) -> bool:
+    """Return true when an extension SQL change alters comments only."""
+    if (not path.startswith("extension/")
+            or not path.endswith((".sql", ".sql.in"))):
+        return False
+    result = subprocess.run(
+        ["git", "diff", "--quiet", "--ignore-matching-lines=^[[:space:]]*--",
+         f"{base}..{head}", "--", path],
+        cwd=root,
+        text=True,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def force_full_plan(plan: dict) -> None:
     plan["full_qualification"] = True
     plan["components"] = list(ALL_COMPONENTS)
@@ -686,7 +701,17 @@ def main() -> int:
     if not changed:
         changed, forced_full = git_changed_files(root, args.base, args.head)
 
-    plan = classify_paths(changed, root)
+    comment_only_sql: list[str] = []
+    effective = changed
+    if not forced_full and not args.changed_file:
+        comment_only_sql = [
+            path for path in changed
+            if sql_comment_only_change(root, args.base, args.head, path)
+        ]
+        effective = [path for path in changed if path not in comment_only_sql]
+
+    plan = classify_paths(effective, root)
+    plan["ignored_paths"] = sorted(set(plan["ignored_paths"] + comment_only_sql))
     if forced_full:
         force_full_plan(plan)
     plan["base"] = args.base
