@@ -175,7 +175,7 @@ Current `Laplace` has a generic driver/scheduler/apply spine, but its `IngestSou
 - **OMW:** the active uppercase and lowercase trees are duplicated legacy estates (each 1,455 files, including 1,259 `.tab` files plus `.git` and checkpoint state). The staged OMW 2.0 generation contains 32 WN-LMF XML lexicons plus per-lexicon license/citation/readme material. Recipe/provider work belongs against the staged WN-LMF generation, not deeper legacy-tab special cases.
 - **Open English WordNet:** OEWN 2025+ is already staged as `english-wordnet-2025-plus.xml.gz`. It should share the generic WN-LMF provider/recipe core with OMW rather than creating another WordNet-specific semantic engine.
 - **CILI:** the active estate is a mutable Git checkout; the staged current snapshot contains immutable archives plus extracted ILI/WordNet mapping artifacts. Recipe qualification should target the staged snapshot before activation.
-- **Universal Dependencies:** active v2.17 contains 686 `.conllu` files; staged v2.18 contains 712 `.conllu` files among 2,502 files. Semantic/AST recipe work must target v2.18 now, while activation waits for the release+recipe boundary.
+- **Universal Dependencies:** active v2.17 contains 686 `.conllu` files; staged v2.18 contains 712 `.conllu` files among 2,502 files. Semantic/tier-composition recipe work must target v2.18 now, while activation waits for the release+recipe boundary.
 - **Tatoeba:** the active estate exposes a smaller subset; the staged 2026-08-29 generation contains 15 selected core/sidecar artifacts (compressed exports plus CSV sidecars). One recipe/profile must disposition those fields/sidecars instead of treating each as a new private ingest lane.
 - **Wiktionary:** the active tree contains older raw/extracted and English-specific material; the selected 2026-08-28 raw Wiktextract gzip is staged. Schema/recipe work should bind that selected raw generation instead of filename-specific legacy selection.
 - **Mapping estate:** FrameBase 2.0, VerbAtlas 1.1 and pinned SemLink/VerbNet/PropBank snapshots are already staged alongside the current active sources. Their coverage/supersession work and their recipes are one dependency graph.
@@ -306,7 +306,7 @@ artifact/release authority
 provider/grammar/codec identity
 artifact and source-object framing
 canonical composition/occurrence grain
-field/AST-role disposition
+field / structural-role disposition
 ordering/multiplicity semantics
 reference namespaces
 provenance/testimony rules
