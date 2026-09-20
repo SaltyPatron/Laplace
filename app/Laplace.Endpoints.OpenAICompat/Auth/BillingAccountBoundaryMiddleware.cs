@@ -125,6 +125,13 @@ internal sealed class BillingAccountBoundaryMiddleware(RequestDelegate next)
             {
                 await Reject(http, 503, "subscription_configuration_incomplete", "Subscriptions require configured Stripe and durable PostgreSQL billing storage."); return;
             }
+            if ((options.Value.ApiKey.StartsWith("sk_live_", StringComparison.Ordinal)
+                    || options.Value.ApiKey.StartsWith("rk_live_", StringComparison.Ordinal))
+                && !options.Value.CommercialCatalogApproved)
+            {
+                await Reject(http, 503, "commercial_catalog_review_required",
+                    "Live checkout is disabled until the operator explicitly approves the measured commercial catalog."); return;
+            }
             var existing = await entitlements.GetByTenantAsync(tenant.TenantId, ct);
             if (existing.Any(e => !string.IsNullOrWhiteSpace(e.StripeSubscriptionId)
                 && e.Status is "active" or "trialing" or "past_due" or "unpaid" or "incomplete" or "paused"))

@@ -164,6 +164,12 @@ internal static class AppComposition
                 "false" or "0" => false,
                 _ => throw new InvalidOperationException("LAPLACE_BILLING_BYPASS must be true, false, 1, or 0.")
             };
+            options.CommercialCatalogApproved = FirstConfig("LAPLACE_COMMERCIAL_CATALOG_APPROVED")?.ToLowerInvariant() switch
+            {
+                null or "false" or "0" => false,
+                "true" or "1" => true,
+                _ => throw new InvalidOperationException("LAPLACE_COMMERCIAL_CATALOG_APPROVED must be true, false, 1, or 0.")
+            };
         });
         return services;
     }

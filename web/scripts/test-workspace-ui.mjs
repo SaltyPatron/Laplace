@@ -127,7 +127,16 @@ try {
     if (path === '/v1/account') {
       const tenantId = route.request().headers()['x-laplace-tenant'];
       assert.ok(tenantId, 'workspace permissions must be scoped to the selected tenant');
-      return route.fulfill({ json: { tenantId, workspaces: [{ tenantId, role: 'owner' }] } });
+      return route.fulfill({ json: {
+        tenantId,
+        workspaces: [{ tenantId, role: 'owner' }],
+        configuration: {
+          billingEnforced: false,
+          stripeConfigured: true,
+          stripeMode: 'sandbox',
+          commercialCatalogApproved: false,
+        },
+      } });
     }
     if (path === '/v1/ops/catalog') return route.fulfill({ json: { object: 'op.catalog', truncated_at: null, operations: [
       { name: 'ops.fixture_read', args: 'p_id bigint, p_text text, p_optional text DEFAULT NULL', returns: 'TABLE(answer text)', kind: 'function', writable: false, destructive: false,
@@ -149,6 +158,7 @@ try {
     }
     if (path === '/v1/billing/plans') { billingPlansCalls++; return route.fulfill({ json: { data: [{ plan_id: 'fixture', name: 'Fixture plan', monthly_price_cents: 1255, description: 'UI-only fixture', monthly_credits: {} }] } }); }
     if (path === '/v1/billing/catalog') { billingCatalogCalls++; return route.fulfill({ status: 503, json: { error: { message: 'Fixture catalog unavailable' } } }); }
+    if (path === '/v1/billing/entitlements') return route.fulfill({ json: { data: [] } });
     if (path === '/v1/billing/usage') { heldUsage = route; return; }
     // No unexpected fixture action may reach a real server.
     return route.fulfill({ status: 501, json: { error: { message: `Unprovided fixture route: ${path}` } } });

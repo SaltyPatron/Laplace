@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Muted } from '@ui';
+import { Button, Muted } from '@ui';
 import { useAppStore, type QuerySeed } from '../store';
 import { Leaderboards } from './Leaderboards';
 import { Scoreboard } from './Scoreboard';
@@ -59,6 +59,10 @@ export function HomeView({ onGoto }: Props) {
             carries who asserted it and how strongly the whole graph agrees. Ask it, and the answer
             comes back with its confidence and its witnesses attached.
           </p>
+          <div className={styles.heroActions}>
+            <Button onClick={() => onGoto('chat')}>Try Laplace</Button>
+            <Button variant="ghost" onClick={() => nav('/billing')}>Plans and transparent usage</Button>
+          </div>
         </div>
         <div className={styles.heroInstrument} aria-hidden="true">
           <img

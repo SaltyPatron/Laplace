@@ -40,10 +40,12 @@ internal static class AccountEndpoints
                     billingEnforced = !stripe.Value.Bypass,
                     billingStore = store.Mode,
                     stripeConfigured = !string.IsNullOrWhiteSpace(stripe.Value.ApiKey),
+                    stripeMode = StripeMode(stripe.Value.ApiKey),
+                    commercialCatalogApproved = stripe.Value.CommercialCatalogApproved,
                     publicBaseUrl = stripe.Value.PublicBaseUrl,
                     persistentSessionKeys = !string.IsNullOrWhiteSpace(LaplaceInstall.TryReadConfig("LAPLACE_DATA_PROTECTION_KEYS", "identity.env")),
                     providers = identity.Providers.Select(p => new { id = p.Scheme, name = p.DisplayName, callbackPath = p.CallbackPath }),
-                    // Account authentication does not isolate the legacy global
+                    // Account authentication does not isolate the shared global
                     // substrate readers. Do not infer a privacy promise from login.
                     substrateScope = "shared", privateDataIsolation = false
                 }
@@ -258,6 +260,16 @@ internal static class AccountEndpoints
             && !string.IsNullOrWhiteSpace(tenant) ? (user, tenant) : null;
     }
     private static string? Role(HttpContext http) => http.Items.TryGetValue("laplace.workspace_role", out var role) ? role as string : null;
+
+    private static string StripeMode(string? key) => key switch
+    {
+        { } value when value.StartsWith("sk_test_", StringComparison.Ordinal)
+            || value.StartsWith("rk_test_", StringComparison.Ordinal) => "sandbox",
+        { } value when value.StartsWith("sk_live_", StringComparison.Ordinal)
+            || value.StartsWith("rk_live_", StringComparison.Ordinal) => "live",
+        { Length: > 0 } => "configured",
+        _ => "unconfigured"
+    };
     private static (Guid User, string Tenant)? Manager(HttpContext http) => Role(http) is "owner" or "admin" ? BrowserAccount(http) : null;
     private static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 160 && !name.Any(char.IsControl);
     private static IResult Error(int status, string code, string message) =>

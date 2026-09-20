@@ -43,6 +43,11 @@ on:
         type: string
         required: false
         default: ""
+      browser_test_suites:
+        description: "comma-separated browser suites selected by web ownership; typecheck is always included"
+        type: string
+        required: false
+        default: ""
       managed_test_filter:
         description: "optional VSTest filter for exact test-only class qualification"
         type: string
@@ -94,7 +99,7 @@ on:
         required: false
         default: ""
       publish_scope:
-        description: "full, api, or web publication scope; empty means the planner omitted publish"
+        description: "full, api, api-web, uci, or web publication scope; empty means the planner omitted publish"
         type: string
         required: false
         default: ""
@@ -217,6 +222,7 @@ jobs:
       LAPLACE_BUILD_COMPONENTS: ${{ inputs.build_components }}
       LAPLACE_MANAGED_BUILD_PROJECTS: ${{ inputs.managed_build_projects }}
       LAPLACE_MANAGED_TEST_PROJECTS: ${{ inputs.managed_test_projects }}
+      LAPLACE_BROWSER_TEST_SUITES: ${{ inputs.browser_test_suites }}
       LAPLACE_MANAGED_TEST_FILTER: ${{ inputs.managed_test_filter }}
       LAPLACE_NATIVE_TEST_FILTER: ${{ inputs.native_test_filter }}
       LAPLACE_MANAGED_DB_TEST_PROJECTS: ${{ inputs.managed_db_test_projects }}

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Banner, Button, ErrorText, Muted, ReadStatus, Table, TableScroll, Td, Th, useReadResource } from '@ui';
 import {
   apiGet, apiPost, type BillingCatalogResponse, type BillingPlansResponse,
-  type PlanSubscribeResponse, type UsageResponse,
+  type EntitlementsResponse, type PlanSubscribeResponse, type UsageResponse,
 } from '../api/client';
 import { AccountControls } from '../auth/AccountControls';
 import { useAppStore } from '../store';
@@ -33,10 +33,19 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
     enabled: signedIn,
     read: (signal) => apiGet<UsageResponse>('/v1/billing/usage', { tenant, signal }),
   });
+  const entitlementsRead = useReadResource({
+    key: JSON.stringify(['billing-entitlements', tenant, authUser?.id]),
+    enabled: signedIn,
+    read: (signal) => apiGet<EntitlementsResponse>('/v1/billing/entitlements', { tenant, signal }),
+  });
   const accountRead = useReadResource({
     key: JSON.stringify(['billing-permissions', tenant, authUser?.id]),
     enabled: signedIn,
-    read: (signal) => apiGet<{ tenantId: string; workspaces: { tenantId: string; role: string }[] }>(
+    read: (signal) => apiGet<{
+      tenantId: string;
+      workspaces: { tenantId: string; role: string }[];
+      configuration?: { billingEnforced: boolean; stripeConfigured: boolean; stripeMode: string; commercialCatalogApproved: boolean };
+    }>(
       '/v1/account', { tenant, signal }),
   });
   const current = accountRead.data?.workspaces.find((workspace) => workspace.tenantId === tenant);
@@ -49,11 +58,20 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
   const plans = (plansRead.data?.data ?? []).filter((plan) => plan.active !== false);
   const services = (servicesRead.data?.data ?? []).filter((service) => service.active !== false);
   const usage = usageRead.data;
+  const entitlements = entitlementsRead.data?.data ?? [];
+  const managedSubscription = entitlements.find((entry) =>
+    !!entry.stripe_subscription_id && ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'paused'].includes(entry.status));
+  const catalogCurrencies = [...new Set([
+    ...plans.map((plan) => plan.currency), ...services.map((service) => service.currency),
+  ].filter(Boolean))];
+  const usageCurrency = catalogCurrencies.length === 1 ? catalogCurrencies[0] : null;
+  const checkoutEnabled = accountRead.data?.configuration?.stripeMode !== 'live'
+    || accountRead.data.configuration?.commercialCatalogApproved === true;
 
   function refreshBilling() {
     setCheckout(null); setError('');
     void plansRead.refresh(); void servicesRead.refresh();
-    if (signedIn) { void usageRead.refresh(); void accountRead.refresh(); }
+    if (signedIn) { void usageRead.refresh(); void entitlementsRead.refresh(); void accountRead.refresh(); }
   }
 
   async function subscribe(planId: string) {
@@ -63,13 +81,28 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
     setError('');
     setCheckout(null);
     try {
-      setCheckout(await apiPost<PlanSubscribeResponse>(
-        `/v1/billing/plans/${encodeURIComponent(planId)}/subscribe`, { tenant }, { tenant }));
+      const result = await apiPost<PlanSubscribeResponse>(
+        `/v1/billing/plans/${encodeURIComponent(planId)}/subscribe`, { tenant }, { tenant });
+      setCheckout(result);
+      if (result.stripe_checkout_url) window.location.assign(result.stripe_checkout_url);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Subscription checkout failed.');
     } finally {
       submitting.current = false;
       setPendingPlan(null);
+    }
+  }
+
+  async function manageBilling() {
+    if (submitting.current || !canManage) return;
+    submitting.current = true; setPendingPlan('portal'); setError('');
+    try {
+      const result = await apiPost<{ url: string }>('/v1/billing/portal', {}, { tenant });
+      window.location.assign(result.url);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Billing management failed.');
+    } finally {
+      submitting.current = false; setPendingPlan(null);
     }
   }
 
@@ -87,6 +120,35 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
         && 'Only workspace owners and administrators can purchase or change subscriptions.'}</p>
       <ReadStatus label="Workspace permissions" resource={accountRead} />
     </>}
+    {accountRead.data?.configuration?.stripeMode === 'sandbox' && <Banner>
+      <strong>Stripe sandbox.</strong> Checkout, signed webhooks, subscription state, invoices, and the customer portal are exercised here without moving real money.
+    </Banner>}
+    {accountRead.data?.configuration && !accountRead.data.configuration.billingEnforced && <Banner>
+      <strong>Development access remains open.</strong> Payment does not unlock or withhold functionality on this host; subscriptions can be tested without turning development into a paywall.
+    </Banner>}
+    {accountRead.data?.configuration?.stripeMode === 'live' && !accountRead.data.configuration.commercialCatalogApproved && <Banner>
+      <strong>Live checkout is intentionally disabled.</strong> The operator must approve the measured commercial catalog before Laplace can accept real payments; development and existing account access remain available.
+    </Banner>}
+    <p className={styles.principle}>Every plan addresses the same witnessed Laplace knowledge world. Plans may change declared service allowances, execution depth and breadth, concurrency, and support—not what Laplace is permitted to know.</p>
+    {signedIn && <section className={styles.current} aria-labelledby="current-subscription">
+      <div className={styles.sectionHead}>
+        <h2 id="current-subscription">Current subscription</h2>
+        {canManage && managedSubscription && <Button variant="ghost" loading={pendingPlan === 'portal'}
+          disabled={pendingPlan != null} onClick={() => void manageBilling()}>Manage subscription and invoices</Button>}
+      </div>
+      <ReadStatus label="Subscription" resource={entitlementsRead} />
+      {entitlementsRead.data && entitlements.length === 0 && <Muted>No subscription is recorded for this workspace.</Muted>}
+      {entitlements.map((entry) => <div className={styles.entitlement} key={`${entry.plan_id}:${entry.stripe_subscription_id ?? 'none'}`}>
+        <div><strong>{entry.plan_id}</strong> · {entry.status}</div>
+        <Muted>{new Date(entry.period_start).toLocaleDateString()} through {new Date(entry.period_end).toLocaleDateString()}</Muted>
+        {Object.keys(entry.monthly_credits ?? {}).length > 0 && <ul className={styles.credits} aria-label="Remaining included service allowances">
+          {Object.entries(entry.monthly_credits).map(([service, allowance]) => {
+            const used = entry.used_credits?.[service] ?? 0;
+            return <li key={service}><span>{service}</span><span>{remaining(allowance, used)} remaining</span></li>;
+          })}
+        </ul>}
+      </div>)}
+    </section>}
     <h2>Plans</h2>
     <ReadStatus label="Plans" resource={plansRead} />
     {plansRead.data && plans.length === 0 && <Muted>No plans were returned by the catalog.</Muted>}
@@ -95,13 +157,17 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
         <h3>{plan.name}</h3>
         <p className={styles.price}>{plan.monthly_price_cents == null ? 'Price not reported' : `${amount(plan.monthly_price_cents, plan.currency)}/mo`}</p>
         <Muted>{plan.description}</Muted>
+        <strong className={styles.allowanceTitle}>Included monthly service allowances</strong>
         <ul className={styles.credits}>
           {Object.entries(plan.monthly_credits ?? {}).map(([service, credits]) => <li key={service}>
             <span>{service}</span><span>{credits.toLocaleString()}</span>
           </li>)}
         </ul>
-        <Button disabled={!canManage || !plan.plan_id || pendingPlan != null} loading={pendingPlan === plan.plan_id}
-          onClick={() => void subscribe(plan.plan_id ?? '')}>Subscribe</Button>
+        <Muted>Renews monthly until canceled. Changes, invoices, payment methods, and cancellation are available in Stripe's customer portal.</Muted>
+        {managedSubscription ? <Button disabled={pendingPlan != null || !canManage} loading={pendingPlan === 'portal'}
+          onClick={() => void manageBilling()}>{managedSubscription.plan_id === plan.plan_id ? 'Current plan — manage' : 'Manage current plan'}</Button>
+          : <Button disabled={!canManage || !checkoutEnabled || !plan.plan_id || pendingPlan != null} loading={pendingPlan === plan.plan_id}
+            onClick={() => void subscribe(plan.plan_id ?? '')}>Subscribe — {amount(plan.monthly_price_cents, plan.currency)}/month</Button>}
       </div>)}
     </div>
     {checkout && <Banner>
@@ -125,18 +191,23 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
     <h2>Usage — {tenant}</h2>
     {!signedIn ? <Muted>Sign in to view workspace usage.</Muted> : <ReadStatus label="Usage" resource={usageRead} />}
     {usage && (usage.entries?.length ? <>
-      <p>Recorded total: {formatCents(usage.total_amount_cents)}</p>
+      <p>Recorded total: {usageCurrency ? amount(usage.total_amount_cents, usageCurrency) : formatCents(usage.total_amount_cents)}</p>
       <TableScroll className={styles.catalogScroll}>
         <Table className={styles.catalog}>
           <thead><tr><Th>Service</Th><Th>Units</Th><Th>Recorded amount</Th><Th>Executed</Th></tr></thead>
           <tbody>{usage.entries.map((entry, index) => <tr key={index}>
             <Td>{entry.serviceId}</Td><Td>{entry.units}</Td>
-            <Td>{formatCents(entry.amountCents)}</Td>
+            <Td>{amount(entry.amountCents, services.find((service) => service.service_id === entry.serviceId)?.currency ?? usageCurrency ?? 'usd')}</Td>
             <Td>{entry.executedAt ? new Date(entry.executedAt).toLocaleString() : 'Not reported'}</Td>
           </tr>)}</tbody>
         </Table>
       </TableScroll>
-      <Muted>Historical usage rows do not include currency. Stripe invoices show the billed currency and final invoice totals.</Muted>
+      <Muted>Laplace records admitted work and its quoted amount. Stripe invoices remain the authoritative paid total.</Muted>
     </> : <Muted>No usage recorded for this tenant.</Muted>)}
   </div>;
+}
+
+function remaining(allowance: number | string, used: number | string): string {
+  try { return (BigInt(allowance) - BigInt(used)).toLocaleString(); }
+  catch { return '—'; }
 }

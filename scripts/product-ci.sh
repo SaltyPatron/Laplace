@@ -459,8 +459,11 @@ for env_name, (field, suite) in filter_suites.items():
         print(f"export {env_name}=")
 
 scope = os.environ.get("LAPLACE_PUBLISH_SCOPE", "api")
-if scope == "full" or plan.get("publish_scope") == "full":
+incoming_scope = plan.get("publish_scope", "api")
+if scope == "full" or incoming_scope == "full":
     scope = "full"
+elif {scope, incoming_scope} == {"api", "web"} or "api-web" in (scope, incoming_scope):
+    scope = "api-web"
 print(f"export LAPLACE_PUBLISH_SCOPE={shlex.quote(scope)}")
 PY
 )"
@@ -504,6 +507,10 @@ run_publish() {
   case "$scope" in
     web) bash scripts/publish-applications.sh web-recover ;;
     api) bash scripts/publish-applications.sh api-recover ;;
+    api-web)
+      bash scripts/publish-applications.sh api-recover
+      bash scripts/publish-applications.sh web-recover
+      ;;
     uci) bash scripts/publish-applications.sh uci-recover ;;
     full|all) bash scripts/publish-applications.sh recover ;;
     *)
@@ -516,6 +523,10 @@ run_publish() {
   case "$scope" in
     web) bash scripts/publish-applications.sh web-deploy ;;
     api) bash scripts/publish-applications.sh api-deploy ;;
+    api-web)
+      bash scripts/publish-applications.sh api-deploy
+      bash scripts/publish-applications.sh web-deploy
+      ;;
     uci) bash scripts/publish-applications.sh uci-deploy ;;
     full|all) bash scripts/publish-applications.sh deploy ;;
   esac
@@ -1028,6 +1039,9 @@ run_release_delivery() {
       verify_isolated_web_delivery
     elif [[ "$publish_scope" == api ]]; then
       verify_isolated_api_delivery
+    elif [[ "$publish_scope" == api-web ]]; then
+      verify_isolated_api_delivery
+      verify_isolated_web_delivery
     else
       verify_installed_product
     fi

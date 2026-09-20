@@ -17,6 +17,7 @@ from ci_managed_projects import (
 )
 
 DEV_SUITES = ("native-dev", "managed-dev", "uci-dev", "browser-dev")
+BROWSER_TEST_SUITES = ("typecheck", "read-resource", "workspace-ui", "data-ui", "chess-ui")
 DB_SUITES = ("db-health", "native-db", "managed-db")
 STANDARD_LIVE_SUITES = ("live-floor", "live-api", "managed-live", "generation-eval")
 CHESS_PROVIDER_LIVE_SUITE = "chess-provider-live"
@@ -172,6 +173,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     components: set[str] = set()
     build_components: set[str] = set()
     dev_suites: set[str] = set()
+    browser_test_suites: set[str] = set()
     db_suites: set[str] = set()
     live_suites: set[str] = set()
     delivery_actions: set[str] = set()
@@ -204,6 +206,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         components.update(ALL_COMPONENTS)
         build_components.update(("native", "managed", "web"))
         dev_suites.update(DEV_SUITES)
+        browser_test_suites.update(BROWSER_TEST_SUITES)
         db_suites.update(DB_SUITES)
         live_suites.update(STANDARD_LIVE_SUITES)
         delivery_actions.update(DELIVERY_ACTIONS)
@@ -374,6 +377,11 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             ):
                 components.add("web")
                 dev_suites.add("browser-dev")
+                browser_test_suites.add("typecheck")
+                if ("Billing" in path or "Account" in path or "/Auth/" in path):
+                    browser_test_suites.add("workspace-ui")
+                elif not path.endswith("/AppComposition.cs"):
+                    browser_test_suites.update(BROWSER_TEST_SUITES)
                 invalidate(("browser-dev",), path)
 
         if path.startswith("web/"):
@@ -385,6 +393,19 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             components.add("web")
             build_components.add("web")
             dev_suites.add("browser-dev")
+            browser_test_suites.add("typecheck")
+            if path.startswith(("web/src/billing/", "web/src/auth/")):
+                browser_test_suites.add("workspace-ui")
+            elif path.startswith("web/src/data/") or path == "web/scripts/test-data-workspace.mjs":
+                browser_test_suites.update(("read-resource", "data-ui"))
+            elif path.startswith("web/src/chess/"):
+                browser_test_suites.add("chess-ui")
+            elif path.startswith("web/src/home/"):
+                pass
+            elif path == "web/src/api/client.ts":
+                browser_test_suites.update(("read-resource", "workspace-ui", "data-ui"))
+            else:
+                browser_test_suites.update(BROWSER_TEST_SUITES)
             live_suites.update(BASE_LIVE_SUITES)
             delivery_actions.update(("publish", "live"))
             invalidate(("browser-dev",), path)
@@ -393,14 +414,22 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         if path.startswith("db/"):
             matched = product_change = True
             managed_build_required.add(API_PUBLISH_PROJECT)
-            managed_db_force_all = True
-            managed_live_force_all = True
             components.add("database")
             build_components.add("managed")
-            db_suites.update(("db-health", "managed-db"))
+            # Versioned migrations are applied by the database delivery action
+            # and then checked by the bounded health suite. They do not change
+            # managed test binaries and must not expand into every Tier=db test.
+            # Non-migration database assets retain the conservative managed DB
+            # qualification until they have a narrower owner.
+            if path.startswith("db/migrations/"):
+                db_suites.add("db-health")
+                invalidate(("db-health",), path)
+            else:
+                managed_db_force_all = True
+                db_suites.update(("db-health", "managed-db"))
+                invalidate(("db-health", "managed-db"), path)
             live_suites.update(STANDARD_LIVE_SUITES)
             delivery_actions.update(("database", "reconcile", "publish", "live"))
-            invalidate(("db-health", "managed-db"), path)
             invalidate(STANDARD_LIVE_SUITES, path)
 
         if path.startswith("deploy/"):
@@ -482,11 +511,21 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
     live_suites.clear()
     managed_live_test_projects = []
 
+    # API and SPA artifacts have independent build and publication paths. A
+    # revision touching both must publish both; whichever path happened to be
+    # visited last must never erase the other component from the delivery plan.
+    changed_api = any(path.startswith("app/Laplace.Endpoints.OpenAICompat")
+                      or path.startswith("app/Laplace.Api.Contracts") for path in delivery_paths)
+    changed_web = any(path.startswith("web/") for path in delivery_paths)
+    if publish_scope != "full" and changed_api and changed_web:
+        publish_scope = "api-web"
+
     return {
         "components": sorted(components),
         "build_components": sorted(build_components),
         "managed_build_projects": managed_build_projects,
         "managed_test_projects": managed_test_projects,
+        "browser_test_suites": [suite for suite in BROWSER_TEST_SUITES if suite in browser_test_suites],
         "managed_test_filter": managed_test_filter,
         "managed_db_test_filter": managed_db_test_filter,
         "managed_live_test_filter": managed_live_test_filter,
@@ -500,7 +539,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         "delivery_actions": [
             action for action in DELIVERY_ACTIONS if action in delivery_actions
         ],
-        "publish_scope": publish_scope if publish_scope in ("web", "api", "uci", "full") else "full",
+        "publish_scope": publish_scope if publish_scope in ("web", "api", "api-web", "uci", "full") else "full",
         "full_qualification": force_full or bool(unknown),
         "unknown_paths": sorted(set(unknown)),
         "ignored_paths": sorted(ignored),
@@ -534,6 +573,7 @@ def force_full_plan(plan: dict) -> None:
     plan["build_components"] = ["native", "managed", "web"]
     plan["managed_build_projects"] = ["all"]
     plan["managed_test_projects"] = ["all"]
+    plan["browser_test_suites"] = list(BROWSER_TEST_SUITES)
     plan["managed_test_filter"] = ""
     plan["managed_db_test_filter"] = ""
     plan["managed_live_test_filter"] = ""
@@ -566,6 +606,7 @@ def write_github_outputs(path: Path, plan: dict) -> None:
             "build_components",
             "managed_build_projects",
             "managed_test_projects",
+            "browser_test_suites",
             "managed_db_test_projects",
             "managed_live_test_projects",
         ):
@@ -593,6 +634,7 @@ def write_summary(path: Path, plan: dict) -> None:
         stream.write(f"- Candidate build components: {joined('build_components')}\n")
         stream.write(f"- Managed build projects: {joined('managed_build_projects')}\n")
         stream.write(f"- Managed unit-test projects: {joined('managed_test_projects')}\n")
+        stream.write(f"- Browser test suites: {joined('browser_test_suites')}\n")
         stream.write(f"- Managed test filter: {plan.get('managed_test_filter') or 'none'}\n")
         stream.write(f"- Managed DB test filter: {plan.get('managed_db_test_filter') or 'none'}\n")
         stream.write(f"- Managed live test filter: {plan.get('managed_live_test_filter') or 'none'}\n")

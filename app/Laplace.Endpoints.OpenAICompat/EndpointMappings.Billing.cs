@@ -91,7 +91,7 @@ internal static class BillingEndpoints
                 MonthlyCredits: plan.MonthlyCredits,
                 Next: new PlanNextStep(
                     quote.StripeCheckoutUrl,
-                    "Plan checkout activates monthly credits when Stripe sends checkout.session.completed.")));
+                    "Stripe Checkout starts a monthly subscription. It becomes active only after a signed Stripe event confirms the subscription; manage renewal, payment methods, invoices, and cancellation from the customer portal.")));
         })
         .WithTags("billing")
         .Accepts<PlanSubscribeRequest>("application/json")

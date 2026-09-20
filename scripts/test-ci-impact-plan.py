@@ -63,6 +63,9 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["managed_test_projects"], [])
         self.assertEqual(value["managed_test_filter"], "")
         self.assertEqual(value["dev_suites"], ["browser-dev"])
+        self.assertEqual(value["browser_test_suites"], [
+            "typecheck", "read-resource", "workspace-ui", "data-ui", "chess-ui"
+        ])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["delivery_actions"], ["publish"])
         self.assertEqual(value["publish_scope"], "web")
@@ -179,6 +182,19 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["publish_scope"], "uci")
         self.assertFalse(value["full_qualification"])
 
+    def test_api_and_web_change_publish_both_without_full_product_expansion(self):
+        value = plan(
+            "app/Laplace.Endpoints.OpenAICompat/Billing.cs",
+            "web/src/billing/BillingView.tsx",
+        )
+        self.assertEqual(value["build_components"], ["managed", "web"])
+        self.assertEqual(value["publish_scope"], "api-web")
+        self.assertEqual(value["browser_test_suites"], ["typecheck", "workspace-ui"])
+        self.assertEqual(value["managed_test_projects"], [
+            "app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj"
+        ])
+        self.assertFalse(value["full_qualification"])
+
     def test_chess_change_keeps_full_publication_and_uci_qualification(self):
         value = plan("app/Laplace.Chess/Service/Foo.cs")
         self.assertIn("managed-dev", value["dev_suites"])
@@ -187,12 +203,11 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertNotIn("native-dev", value["dev_suites"])
         self.assertEqual(value["live_suites"], [])
 
-    def test_database_sql_change_skips_native_install_but_runs_db_and_full_live(self):
+    def test_database_migration_applies_and_checks_health_without_all_managed_db_tests(self):
         value = plan("db/migrations/example.sql")
         self.assertEqual(value["dev_suites"], [])
-        self.assertEqual(
-            value["db_suites"], ["db-health", "managed-db"]
-        )
+        self.assertEqual(value["db_suites"], ["db-health"])
+        self.assertEqual(value["managed_db_test_projects"], [])
         self.assertEqual(value["build_components"], ["managed"])
         self.assertNotEqual(value["managed_build_projects"], ["all"])
         self.assertIn(
@@ -263,6 +278,12 @@ class ImpactPlanTests(unittest.TestCase):
         for path in (
             "scripts/pipeline.sh",
             "scripts/bootstrap-chess-lab.sh",
+            "scripts/bootstrap-laplace-runner.sh",
+            "scripts/bootstrap-stripe-dev.sh",
+            "scripts/configure-github-repo.sh",
+            "scripts/laplace",
+            "deploy/linux/laplace-api.env.example",
+            "deploy/linux/managed-services/laplace-stripe.service",
             "scripts/verify-application-release.py",
             "scripts/ingest-source.sh",
             "scripts/check-substrate-floor.sh",
@@ -275,6 +296,12 @@ class ImpactPlanTests(unittest.TestCase):
                 if path in (
                     "scripts/pipeline.sh",
                     "scripts/bootstrap-chess-lab.sh",
+                    "scripts/bootstrap-laplace-runner.sh",
+                    "scripts/bootstrap-stripe-dev.sh",
+                    "scripts/configure-github-repo.sh",
+                    "scripts/laplace",
+                    "deploy/linux/laplace-api.env.example",
+                    "deploy/linux/managed-services/laplace-stripe.service",
                     "scripts/verify-application-release.py",
                 ):
                     self.assertEqual(value["delivery_actions"], [])

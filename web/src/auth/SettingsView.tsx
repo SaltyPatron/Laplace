@@ -12,7 +12,8 @@ interface Account {
   userId: string; tenantId: string; displayName: string | null; email: string | null; provider: string;
   workspaces: Workspace[]; subscriptions: Subscription[];
   configuration: {
-    authMode: string; billingEnforced: boolean; billingStore: string; stripeConfigured: boolean;
+    authMode: string; billingEnforced: boolean; billingStore: string; stripeConfigured: boolean; stripeMode: string;
+    commercialCatalogApproved: boolean;
     publicBaseUrl: string | null; persistentSessionKeys: boolean; privateDataIsolation: boolean;
     providers: { id: string; name: string; callbackPath: string }[];
   };
@@ -227,12 +228,14 @@ export function SettingsView() {
 
         <Panel title="Privacy and deployment configuration">
           {!account.value.configuration.privateDataIsolation && <p className={styles.notice}>
-            This legacy host still uses shared substrate readers. Workspace membership protects account access, but does not yet establish private isolation across Explore, geometry, and all other data paths. Do not upload confidential company data to this shared host.
+            This development host still uses shared substrate readers. Workspace membership protects account access, but does not yet establish private isolation across Explore, geometry, and all other data paths. Do not upload confidential company data to this shared host.
           </p>}
           <dl className={styles.configuration}>
             <dt>Authentication</dt><dd>{account.value.configuration.authMode}</dd>
             <dt>Billing persistence</dt><dd>{account.value.configuration.billingStore}</dd>
             <dt>Billing enforcement</dt><dd>{account.value.configuration.billingEnforced ? 'Enabled' : 'Development bypass'}</dd>
+            <dt>Stripe mode</dt><dd>{account.value.configuration.stripeMode}</dd>
+            <dt>Commercial catalog</dt><dd>{account.value.configuration.commercialCatalogApproved ? 'Explicitly approved' : 'Live charging disabled'}</dd>
             <dt>Persistent session keys</dt><dd>{account.value.configuration.persistentSessionKeys ? 'Configured' : 'Not configured'}</dd>
             <dt>Public address</dt><dd>{account.value.configuration.publicBaseUrl || 'Not configured'}</dd>
           </dl>

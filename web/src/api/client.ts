@@ -10,6 +10,7 @@ export type PlanView = Schemas['PlanView'];
 export type BillingPlansResponse = Schemas['BillingPlansResponse'];
 export type CatalogServiceView = Schemas['CatalogServiceView'];
 export type BillingCatalogResponse = Schemas['BillingCatalogResponse'];
+export type EntitlementsResponse = Schemas['EntitlementsResponse'];
 export type PreflightQuoteResponse = Schemas['PreflightQuoteResponse'];
 export type PlanSubscribeResponse = Schemas['PlanSubscribeResponse'];
 export type UsageResponse = Schemas['UsageResponse'];

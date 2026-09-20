@@ -53,6 +53,12 @@ PRODUCT_IGNORED_EXACT = frozenset({
     "scripts/test-benchmark-suite.py",
     "scripts/validate-pipeline.py",
     "scripts/setup-host.sh",
+    "scripts/bootstrap-stripe-dev.sh",
+    "scripts/bootstrap-laplace-runner.sh",
+    "scripts/configure-github-repo.sh",
+    "scripts/laplace",
+    "deploy/linux/laplace-api.env.example",
+    "deploy/linux/managed-services/laplace-stripe.service",
 })
 
 PRODUCT_IGNORED_GLOBS = (
@@ -109,6 +115,12 @@ GITHUB_PATH_IGNORES = (
     "scripts/test-benchmark-suite.py",
     "scripts/validate-pipeline.py",
     "scripts/setup-host.sh",
+    "scripts/bootstrap-stripe-dev.sh",
+    "scripts/bootstrap-laplace-runner.sh",
+    "scripts/configure-github-repo.sh",
+    "scripts/laplace",
+    "deploy/linux/laplace-api.env.example",
+    "deploy/linux/managed-services/laplace-stripe.service",
 )
 
 

@@ -260,6 +260,17 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("web-deploy", source)
         self.assertIn("web-recover", source)
 
+    def test_combined_api_web_scope_publishes_only_those_two_artifacts(self):
+        publish = function("run_publish")
+        self.assertIn("api-web)", publish)
+        self.assertIn("publish-applications.sh api-deploy", publish)
+        self.assertIn("publish-applications.sh web-deploy", publish)
+
+        delivery = function("run_release_delivery")
+        self.assertIn('[[ "$publish_scope" == api-web ]]', delivery)
+        self.assertIn("verify_isolated_api_delivery", delivery)
+        self.assertIn("verify_isolated_web_delivery", delivery)
+
     def test_automatic_delivery_carries_impact_from_the_installed_revision(self):
         carry = function("carry_forward_undelivered_impact")
         self.assertIn(".laplace-source-revision", carry)

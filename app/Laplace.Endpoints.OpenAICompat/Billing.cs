@@ -16,6 +16,7 @@ internal sealed class StripeBillingOptions
     /// <summary>Externally reachable base URL; enables webhook self-provisioning when set.</summary>
     public string? PublicBaseUrl { get; set; }
     public bool Bypass { get; set; }
+    public bool CommercialCatalogApproved { get; set; }
 
 
     public bool SkipSignatureVerification { get; set; }
@@ -321,6 +322,10 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
         var configured = !string.IsNullOrWhiteSpace(_options.ApiKey);
         var entries = new List<StripeCatalogEntryResult>();
 
+        if (configured && IsLiveKey(_options.ApiKey) && !_options.CommercialCatalogApproved)
+            return new(true, _catalog.List().Select(price => new StripeCatalogEntryResult(
+                price.ServiceId, price.LookupKey, null, null, "commercial_catalog_not_approved")).ToArray());
+
         foreach (var price in _catalog.List())
         {
             if (!configured)
@@ -349,6 +354,8 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
         if (cached is not null)
             return cached;
         if (string.IsNullOrWhiteSpace(_options.ApiKey))
+            return null;
+        if (IsLiveKey(_options.ApiKey) && !_options.CommercialCatalogApproved)
             return null;
 
         try
@@ -451,6 +458,10 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
 
         return createdProduct.Id;
     }
+
+    private static bool IsLiveKey(string? key) =>
+        key?.StartsWith("sk_live_", StringComparison.Ordinal) == true
+        || key?.StartsWith("rk_live_", StringComparison.Ordinal) == true;
 }
 
 internal interface IBillingQuoteStore
@@ -519,7 +530,8 @@ internal sealed record StripeSessionDetails(
 
 internal interface IStripeCheckoutGateway
 {
-    Task<StripeCheckoutSessionResult> CreateCheckoutSessionAsync(BillingQuote quote, ServicePrice price, CancellationToken ct);
+    Task<StripeCheckoutSessionResult> CreateCheckoutSessionAsync(
+        BillingQuote quote, ServicePrice price, string? stripeCustomerId, CancellationToken ct);
     Task<bool> IsSessionPaidAsync(string sessionId, CancellationToken ct);
     Task<StripeSessionDetails> TryGetSessionAsync(string sessionId, CancellationToken ct);
 }
@@ -535,7 +547,8 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
         _catalogSync = catalogSync;
     }
 
-    public async Task<StripeCheckoutSessionResult> CreateCheckoutSessionAsync(BillingQuote quote, ServicePrice price, CancellationToken ct)
+    public async Task<StripeCheckoutSessionResult> CreateCheckoutSessionAsync(
+        BillingQuote quote, ServicePrice price, string? stripeCustomerId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(_options.ApiKey))
             return new StripeCheckoutSessionResult(false, null, null, "stripe_not_configured");
@@ -589,6 +602,10 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
                 Mode = price.RecurringInterval is null ? "payment" : "subscription",
                 SuccessUrl = _options.SuccessUrl,
                 CancelUrl = _options.CancelUrl,
+                ClientReferenceId = quote.Tenant,
+                Customer = string.IsNullOrWhiteSpace(stripeCustomerId) ? null : stripeCustomerId,
+                AllowPromotionCodes = true,
+                ExpiresAt = quote.ExpiresAt.UtcDateTime,
                 Metadata = new Dictionary<string, string>
                 {
                     ["quote_id"] = quote.QuoteId,
@@ -609,7 +626,8 @@ internal sealed class StripeCheckoutGateway : IStripeCheckoutGateway
                 LineItems = new List<SessionLineItemOptions> { lineItem }
             };
 
-            var session = await service.CreateAsync(options, cancellationToken: ct);
+            var session = await service.CreateAsync(options,
+                new RequestOptions { IdempotencyKey = $"laplace-checkout:{quote.QuoteId}" }, ct);
             return new StripeCheckoutSessionResult(true, session.Id, session.Url, null);
         }
         catch (StripeException ex)
@@ -722,12 +740,20 @@ internal sealed class BillingOrchestrator : IBillingOrchestrator
             StripeSessionId: null,
             StripeCheckoutUrl: null,
             CreatedAt: DateTimeOffset.UtcNow,
-            ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(30),
+            ExpiresAt: DateTimeOffset.UtcNow.AddHours(1),
             Consumed: false);
 
         quote = await _store.PutAsync(quote, ct);
 
-        var checkout = await _stripe.CreateCheckoutSessionAsync(quote, price, ct);
+        // Reuse the workspace's existing Stripe customer after cancellation or
+        // plan replacement. A workspace is one payer boundary; silently creating
+        // another customer on every checkout fragments invoices and portal state.
+        var stripeCustomerId = (await _entitlements.GetByTenantAsync(tenant, ct))
+            .Where(e => !string.IsNullOrWhiteSpace(e.StripeCustomerId))
+            .OrderByDescending(e => e.UpdatedAt)
+            .Select(e => e.StripeCustomerId)
+            .FirstOrDefault();
+        var checkout = await _stripe.CreateCheckoutSessionAsync(quote, price, stripeCustomerId, ct);
         if (!checkout.Created)
             return await _store.UpdateAsync(quote with { Status = "awaiting_manual_approval" }, ct);
 
