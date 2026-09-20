@@ -45,6 +45,8 @@ Sequence order lives in the exact trajectory/composition structure. Packed Geome
 
 Occurrence/containment is different from identity. One canonical entity can be found inside many larger trajectories/contexts without copying the entity once per occurrence.
 
+For example, `[k,i,n,g]` composes to one canonical entity. Word/name/title/label/sentence uses point at that same id. Likewise, one exact 2×2 pixel composition can occur in many overlapping 3×3/4×4/8×8/image/video trajectories without becoming a tier-local or parent-local copy.
+
 ---
 
 ## 3. Query-relative cognition begins before search
