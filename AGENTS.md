@@ -192,6 +192,8 @@ piece/square -> chess positions -> transitions/lines
 
 Video must reuse image/audio caches rather than creating video-private copies of their lower structures. The same image root may be referenced by many files/documents/videos while existing once as canonical content/cache state.
 
+Cache modules may be range/set/band/profile scoped: ASCII-only T0 projection, selected color palettes, selected frequency/filter-bank calculations, hot structures, or dependency closures are lawful acceleration profiles. They preserve global canonical ids/coords and never renumber the subset into a new semantic universe. Cache residency/profile selection is not knowledge authorization.
+
 Prefer cache lookup on the request side to produce ids/coords/Hilbert/ranges that feed normal indexed PostgreSQL/SPI probes. Do not hide indexed columns behind per-row cache functions and destroy index eligibility. If an expression-index function reads mmap state, its immutability/generation contract must make PostgreSQL's IMMUTABLE promise truthful.
 
 ### Content novelty is not observation volume
