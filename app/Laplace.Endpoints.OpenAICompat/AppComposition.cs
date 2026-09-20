@@ -196,13 +196,14 @@ internal static class AppComposition
         var configured = FirstConfig("LAPLACE_PUBLIC_BASE_URL")?.TrimEnd('/');
         if (string.IsNullOrWhiteSpace(configured)) return null;
         if (!Uri.TryCreate(configured, UriKind.Absolute, out var origin)
-            || origin.Scheme != Uri.UriSchemeHttps
+            || (origin.Scheme != Uri.UriSchemeHttps
+                && (origin.Scheme != Uri.UriSchemeHttp || !origin.IsLoopback))
             || origin.AbsolutePath != "/"
             || !string.IsNullOrEmpty(origin.Query)
             || !string.IsNullOrEmpty(origin.Fragment)
             || !string.IsNullOrEmpty(origin.UserInfo))
             throw new InvalidOperationException(
-                "LAPLACE_PUBLIC_BASE_URL must be an HTTPS origin without credentials, path, query, or fragment.");
+                "LAPLACE_PUBLIC_BASE_URL must be an HTTPS origin, or an HTTP loopback origin, without credentials, path, query, or fragment.");
         return origin;
     }
 

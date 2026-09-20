@@ -46,7 +46,8 @@ internal static class IdentityEndpoints
                     statusCode: StatusCodes.Status404NotFound);
 
             var destination = LocalReturnUrl(returnUrl);
-            if (settings.PublicOrigin is not null && !request.IsHttps)
+            if (settings.PublicOrigin is not null
+                && !IsPublicOrigin(request, settings.PublicOrigin))
             {
                 var login = new UriBuilder(settings.PublicOrigin)
                 {
@@ -130,6 +131,11 @@ internal static class IdentityEndpoints
             return "/";
         return value;
     }
+
+    private static bool IsPublicOrigin(HttpRequest request, Uri origin) =>
+        string.Equals(request.Scheme, origin.Scheme, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(request.Host.Host, origin.Host, StringComparison.OrdinalIgnoreCase)
+        && request.Host.Port == (origin.IsDefaultPort ? null : origin.Port);
 
     private static bool TryIdentity(
         ClaimsPrincipal principal, out Guid userId, out string tenantId)
