@@ -46,7 +46,10 @@ install -m 0644 "$HERE/laplace-api.service" /etc/systemd/system/laplace-api.serv
 
 echo "==> nginx redirect: /etc/nginx/sites-available/laplace (port $API_PORT -> TLS $TLS_PORT)"
 install -m 0644 "$HERE/nginx-laplace.conf" /etc/nginx/sites-available/laplace
-ln -sfn /etc/nginx/sites-available/laplace /etc/nginx/sites-enabled/laplace
+# laplace-managed owns the active 8080 redirect and 8443 TLS listener. Keeping
+# this compatibility file enabled at the same time creates duplicate server
+# blocks and makes nginx ignore one based on load order.
+rm -f /etc/nginx/sites-enabled/laplace
 
 echo "==> sudoers grant for $RUN_USER (restart API + reload nginx only)"
 # PostgreSQL bounce lives in /etc/sudoers.d/laplace-pg-bounce, written by

@@ -195,7 +195,7 @@ runner_dotnet() {
         DOTNET_NOLOGO=1 \
         DOTNET_CLI_TELEMETRY_OPTOUT=1 \
         TMPDIR=/build/laplace/work/scratch TMP=/build/laplace/work/scratch TEMP=/build/laplace/work/scratch \
-        bash -c "umask 0002; cd '$REPO_DIR/app' && dotnet $*"
+        bash -c "umask 0002; cd '$REPO_DIR' && dotnet $*"
 }
 
 layer1_up() {
