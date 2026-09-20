@@ -288,8 +288,12 @@ phase_build_app() {
 phase_build_web() {
   echo "===== PHASE — BUILD WEB ====="
   local lock_hash stamp previous
+  if [[ ! -f "$ROOT/web/openapi/openapi.json" ]]; then
+    echo "::notice::web OpenAPI contract absent in clean candidate; generating from endpoint project only"
+    LAPLACE_REUSE_INSTALLED_NATIVE=1 dotnet build       "$ROOT/app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj"       -c Release -v minimal --nologo
+  fi
   [[ -f "$ROOT/web/openapi/openapi.json" ]] || {
-    echo "::error::web/openapi/openapi.json missing — build the managed API contract first" >&2
+    echo "::error::endpoint project completed without web/openapi/openapi.json" >&2
     return 1
   }
 
