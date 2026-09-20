@@ -553,16 +553,21 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     }
 
     const char *angular_sql =
-        "SELECT w.id, public.laplace_angular_distance_4d("
-        "w.coord,public.ST_SetSRID(public.ST_MakePoint($1,$2,$3,$4),0)) "
-        "FROM laplace.v_word_points w "
-        "WHERE w.id<>$5 AND w.tier=$7 "
-        "AND public.laplace_direction_4d(w.coord) IS NOT NULL "
-        "AND public.laplace_direction_4d(public.ST_SetSRID("
-        "public.ST_MakePoint($1,$2,$3,$4),0)) IS NOT NULL "
-        "ORDER BY public.laplace_direction_4d(w.coord) <<->> "
-        "public.laplace_direction_4d(public.ST_SetSRID("
-        "public.ST_MakePoint($1,$2,$3,$4),0)),w.id LIMIT $6";
+        "WITH nearest AS MATERIALIZED ("
+        " SELECT w.id,w.coord,public.laplace_direction_4d(w.coord) <<->> "
+        " public.laplace_direction_4d(public.ST_SetSRID("
+        " public.ST_MakePoint($1,$2,$3,$4),0)) chord"
+        " FROM laplace.v_word_points w"
+        " WHERE w.id<>$5 AND w.tier=$7"
+        " AND public.laplace_direction_4d(w.coord) IS NOT NULL"
+        " AND public.laplace_direction_4d(public.ST_SetSRID("
+        " public.ST_MakePoint($1,$2,$3,$4),0)) IS NOT NULL"
+        " ORDER BY public.laplace_direction_4d(w.coord) <<->> "
+        " public.laplace_direction_4d(public.ST_SetSRID("
+        " public.ST_MakePoint($1,$2,$3,$4),0)) LIMIT $6"
+        ") SELECT id,public.laplace_angular_distance_4d("
+        " coord,public.ST_SetSRID(public.ST_MakePoint($1,$2,$3,$4),0))"
+        " FROM nearest ORDER BY chord,id";
     const char *hilbert_sql =
         "WITH same AS MATERIALIZED ("
         " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
