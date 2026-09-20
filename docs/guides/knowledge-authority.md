@@ -134,3 +134,8 @@ A principal may own a broad knowledge package and request a cheap surface scan. 
 More compute never grants additional knowledge authority. Lower compute never means a deliberately dumber model.
 
 See docs/BILLING_PLACEHOLDER_MIGRATION.md and docs/guides/machine-cost-analysis.md.
+
+
+## Current implementation owner
+
+#1708 owns first-class knowledge packages/grants/capabilities, forward-pass enforcement, honest authority receipts, and Red Spear / Blue Shield / White Judge execution.
