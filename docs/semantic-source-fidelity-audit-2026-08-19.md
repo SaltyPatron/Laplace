@@ -1,5 +1,8 @@
 # Semantic source fidelity audit — 2026-08-19
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 Status: measured against merged `main` at `ea45d509` (PR #1151) and the
 semantic resources present under `/vault/Data` on 2026-08-19. This is an input
 and decomposition audit, not a claim about rows currently resident in a seeded
