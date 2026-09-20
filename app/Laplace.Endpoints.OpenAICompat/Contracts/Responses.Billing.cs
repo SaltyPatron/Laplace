@@ -45,6 +45,7 @@ public sealed record ProductPriceView(
 
 public sealed record BillingPlansResponse(
     [property: JsonPropertyName("object")] string Object,
+    [property: JsonPropertyName("billing_enforced")] bool BillingEnforced,
     [property: JsonPropertyName("data")] IReadOnlyList<PlanView> Data);
 
 public sealed record PlanView(
