@@ -174,11 +174,15 @@ function ReferenceMarker({
   const [showLabel, setShowLabel] = useState(true);
   const visibleRef = useRef(true);
   const point = useMemo(() => new THREE.Vector3(...position), [position]);
+  const projected = useMemo(() => new THREE.Vector3(), []);
 
   useFrame(({ camera }) => {
-    // A near-side axis marker becomes a billboard over the data. Hide only that
-    // label while it is close to the camera; rotating/zooming away restores it.
-    const visible = camera.position.distanceTo(point) >= 1.45;
+    projected.copy(point).project(camera);
+    // Keep the six reference marks visible, but never put a DOM billboard over
+    // the middle of the knowledge cloud. Labels only appear near the perimeter.
+    const nearCenter = Math.abs(projected.x) < 0.34 && Math.abs(projected.y) < 0.34;
+    const behind = projected.z < -1 || projected.z > 1;
+    const visible = !nearCenter && !behind;
     if (visible === visibleRef.current) return;
     visibleRef.current = visible;
     setShowLabel(visible);
@@ -187,11 +191,11 @@ function ReferenceMarker({
   return (
     <group position={position}>
       <mesh>
-        <sphereGeometry args={[0.022, 10, 10]} />
+        <sphereGeometry args={[0.026, 10, 10]} />
         <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
       {showLabel ? (
-        <Html center>
+        <Html center distanceFactor={14} zIndexRange={[1, 0]}>
           <span className={styles.referenceLabel}>{label}</span>
         </Html>
       ) : null}
@@ -301,7 +305,7 @@ function GlomeScene({
         }}
       >
         <sphereGeometry args={[1, 9, 9]} />
-        <meshBasicMaterial vertexColors toneMapped={false} color={palette.primary} />
+        <meshBasicMaterial vertexColors toneMapped={false} color="#ffffff" />
       </instancedMesh>
       {trajectory.length > 1 ? (
         <Line
