@@ -149,6 +149,24 @@ program_structural_compare(const void *left, const void *right)
 }
 
 static int
+program_geometry_compare(const void *left, const void *right)
+{
+    const LaplacePromptGeometryCandidate *a = left, *b = right;
+    int order = memcmp(&a->source, &b->source, sizeof(hash128_t));
+    if (order) return order;
+    if (a->plane != b->plane) return a->plane < b->plane ? -1 : 1;
+    if (a->rank != b->rank) return a->rank < b->rank ? -1 : 1;
+    order = memcmp(&a->id, &b->id, sizeof(hash128_t));
+    if (order) return order;
+    if (a->plane == LAPLACE_PROMPT_GEOMETRY_HILBERT)
+        return memcmp(a->hilbert_delta, b->hilbert_delta,
+                      sizeof(a->hilbert_delta));
+    if (a->distance < b->distance) return -1;
+    if (a->distance > b->distance) return 1;
+    return 0;
+}
+
+static int
 program_channel_compare(const void *left, const void *right)
 {
     const LaplaceQueryChannel *a = left, *b = right;
@@ -236,6 +254,44 @@ program_fingerprint_structural(StringInfo bytes, const LaplacePromptIntent *inte
     pfree(items);
 }
 
+
+static void
+program_fingerprint_geometry(StringInfo bytes, const LaplacePromptIntent *intent)
+{
+    int count = intent ? intent->geometry_count : 0;
+    if (count < 0 || (count > 0 && !intent->geometry) ||
+        (Size) count > MaxAllocSize / sizeof(LaplacePromptGeometryCandidate))
+        elog(ERROR, "cognition program: geometry response set is invalid");
+    program_fingerprint_u32(bytes, (uint32) count);
+    if (count == 0) return;
+
+    LaplacePromptGeometryCandidate *items =
+        palloc(sizeof(*items) * (Size) count);
+    memcpy(items, intent->geometry, sizeof(*items) * (Size) count);
+    qsort(items, (size_t) count, sizeof(*items), program_geometry_compare);
+    for (int i = 0; i < count; ++i)
+    {
+        const LaplacePromptGeometryCandidate *candidate = &items[i];
+        appendBinaryStringInfo(bytes, (const char *) &candidate->source,
+                               sizeof(hash128_t));
+        appendBinaryStringInfo(bytes, (const char *) &candidate->id,
+                               sizeof(hash128_t));
+        program_fingerprint_u32(bytes, candidate->plane);
+        program_fingerprint_u32(bytes, candidate->rank);
+        if (candidate->plane == LAPLACE_PROMPT_GEOMETRY_HILBERT)
+            appendBinaryStringInfo(bytes,
+                (const char *) candidate->hilbert_delta,
+                sizeof(candidate->hilbert_delta));
+        else
+        {
+            uint64 bits = 0;
+            memcpy(&bits, &candidate->distance, sizeof(bits));
+            program_fingerprint_u64(bytes, bits);
+        }
+    }
+    pfree(items);
+}
+
 static void
 program_fingerprint_discourse(StringInfo bytes, const LaplacePromptIntent *intent)
 {
@@ -316,11 +372,11 @@ program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values,
                     int initial_channel_count)
 {
     StringInfoData bytes;
-    /* v8 binds the exact input role of every query channel plus the ordered
-     * discourse occurrence plane. Equal canonical ids in current observation,
-     * prior discourse, physicality, and generated working state remain distinct
-     * program coordinates instead of collapsing into one semantic bag. */
-    hash128_t domain = cognition_domain("laplace:cognition-program:v8");
+    /* v9 additionally binds the deterministic geometry response plane.
+     * Equal canonical ids reached through current observation, prior discourse,
+     * physicality, geometry, and generated working state remain distinct program
+     * coordinates instead of collapsing into one semantic bag. */
+    hash128_t domain = cognition_domain("laplace:cognition-program:v9");
     int member = -1;
     initStringInfo(&bytes);
     appendBinaryStringInfo(&bytes, (const char *) &domain, sizeof(domain));
@@ -337,12 +393,13 @@ program_fingerprint(LaplaceCognitionProgram *program, Datum *context_values,
     }
 
     /* COUPLE is part of the executable program state, not disposable setup.
-     * Bind every exact prompt-relative identity route, every native physicality
-     * crossing and every retained typed semantic response into the program id
-     * before ORIENT/ROUTE output can be claimed. Physicality remains structural
-     * data here; it is never serialized as a semantic attestation. */
+     * Bind every exact prompt-relative identity route, native physicality crossing,
+     * deterministic geometry response and retained typed semantic response into
+     * the program id before ORIENT/ROUTE output can be claimed. Physicality and
+     * geometry remain typed response data; neither becomes semantic testimony. */
     program_fingerprint_bindings(&bytes, intent);
     program_fingerprint_structural(&bytes, intent);
+    program_fingerprint_geometry(&bytes, intent);
     program_fingerprint_discourse(&bytes, intent);
     program_fingerprint_channels(&bytes, initial_channels, initial_channel_count);
 
