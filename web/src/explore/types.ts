@@ -282,3 +282,6 @@ export interface ExploreTrainingExportDetailResponse {
   };
   billing?: BillingReceipt | null;
 }
+
+export interface UnicodeCloudResponse { count:number; perfcache_receipt_hex:string; uca_order_u32_base64:string; hash128_base64:string; }
+export interface UnicodePointResponse { codepoint:number; display:string; id_hex:string; uca_order:number; x:number; y:number; z:number; m:number; radius:number; hilbert_hex:string; flags:number; }

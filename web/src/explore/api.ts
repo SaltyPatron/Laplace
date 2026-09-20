@@ -9,6 +9,8 @@ import type {
   ExploreTrainingExportDetailResponse,
   SalientFactRow,
   StorageProofResponse,
+  UnicodeCloudResponse,
+  UnicodePointResponse,
 } from './types';
 
 export interface DecomposeResponse {
@@ -166,3 +168,6 @@ export function exploreSourceRoster(idHex: string, limit = 40, opts?: ApiOptions
   return apiGet<{ rows: import('./types').SourceRosterRow[] }>(
     `/v1/explore/sources/${idHex}/roster?limit=${limit}`, opts);
 }
+
+export function exploreUnicodeCloud(opts: ApiOptions = {}) { return apiGet<UnicodeCloudResponse>('/v1/explore/unicode/cloud', opts); }
+export function exploreUnicodePoint(codepoint: number, opts: ApiOptions = {}) { return apiGet<UnicodePointResponse>(`/v1/explore/unicode/${codepoint}`, opts); }
