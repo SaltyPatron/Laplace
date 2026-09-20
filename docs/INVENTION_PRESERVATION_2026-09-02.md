@@ -1,5 +1,8 @@
 # Invention preservation correction — 2026-09-02
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 > **Current compound-capability authority:** read [`CAPABILITIES.md`](CAPABILITIES.md) with this preservation record. This dated document preserves invention boundaries but does not narrow later accepted consequences such as structural software construction/reuse, repair trajectories, knowledge authority/governance, machine-cost derivation or repository-root deployment.
 
 Status: **historical reconciliation memo; superseded as authority on 2026-09-14.**
