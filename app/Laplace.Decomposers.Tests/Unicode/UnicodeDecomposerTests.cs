@@ -328,7 +328,7 @@ public sealed class UnicodeDecomposerTests
     [Fact]
     public void Ucdxml_recipe_accounts_for_binary_reference_content_and_top_level_structures()
     {
-        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
+        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.grouped.xml");
         SourceRecipeField gc = recipe.Recipe.Field("repertoire/*/@gc");
         SourceRecipeField whiteSpace = recipe.Recipe.Field("repertoire/*/@WSpace");
         SourceRecipeField definition = recipe.Recipe.Field("repertoire/*/@kDefinition");
@@ -349,11 +349,11 @@ public sealed class UnicodeDecomposerTests
     {
         string aliases = Path.Combine(TestIngestPaths.UcdLatest, "ucd", "PropertyAliases.txt");
         string archivePath = Path.Combine(
-            TestIngestPaths.UcdLatest, "ucdxml", "ucd.all.flat.zip");
+            TestIngestPaths.UcdLatest, "ucdxml", "ucd.all.grouped.zip");
         Skip.IfNot(File.Exists(aliases) && File.Exists(archivePath),
             $"selected UCD generation is not present at {TestIngestPaths.UcdLatest}");
 
-        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
+        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.grouped.xml");
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
         ZipArchiveEntry entry = Assert.Single(archive.Entries);
         await using Stream xml = entry.Open();
@@ -374,7 +374,7 @@ public sealed class UnicodeDecomposerTests
     public async Task Unicode_snapshot_replays_the_exact_inflated_xml_bytes()
     {
         string xmlPath = Path.Combine(
-            TestIngestPaths.UcdLatest, "ucdxml", "ucd.all.flat.zip");
+            TestIngestPaths.UcdLatest, "ucdxml", "ucd.all.grouped.zip");
         string ducetPath = Path.Combine(TestIngestPaths.UcdLatest, "uca", "allkeys.txt");
         Skip.IfNot(File.Exists(xmlPath) && File.Exists(ducetPath),
             $"selected UCD generation is not present at {TestIngestPaths.UcdLatest}");
@@ -404,7 +404,7 @@ public sealed class UnicodeDecomposerTests
     [Fact]
     public void Ucd_recipe_reuses_iso15924_script_identity()
     {
-        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
+        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.grouped.xml");
         Assert.Equal("Latin", recipe.CanonicalValue("Script", "Latn"));
         Assert.Equal("Latin", recipe.CanonicalValue("Script_Extensions", "Latn"));
         Assert.Equal("Basic_Latin", recipe.CanonicalValue("Block", "Basic Latin"));
@@ -414,7 +414,7 @@ public sealed class UnicodeDecomposerTests
     [Fact]
     public void Ucd_structured_references_preserve_every_target_and_source_qualifier()
     {
-        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
+        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.grouped.xml");
         byte[] program = NativeRecipeCompiler.Compile(recipe.Recipe);
         List<AttestationRow> Parse(string value)
         {
@@ -510,7 +510,7 @@ public sealed class UnicodeDecomposerTests
     public void Ucdxml_binary_defaults_are_declared_and_do_not_expand_into_refuting_rows()
     {
         var recipe = InstalledSourceGeneration.Load(
-            "Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
+            "Unicode/UCD", "17.0.0", "UAX42/ucd.all.grouped.xml");
         SourceRecipeField[] binary = recipe.Recipe.Fields
             .Where(static field => field.ValueKind == SourceValueKind.Boolean)
             .ToArray();
