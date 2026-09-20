@@ -21,6 +21,6 @@
   },
   "next": {
     "checkout_url": null,
-    "note": "Plan checkout activates monthly credits when Stripe sends checkout.session.completed."
+    "note": "Stripe Checkout starts a monthly subscription. It becomes active only after a signed Stripe event confirms the subscription; manage renewal, payment methods, invoices, and cancellation from the customer portal."
   }
 }
