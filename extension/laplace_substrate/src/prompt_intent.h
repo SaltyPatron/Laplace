@@ -368,14 +368,16 @@ laplace_prompt_geometry_scan_anchor(
 {
     const double *coords = tier_tree_coord_array(intent->input->tree);
     const hilbert128_t *hilberts = tier_tree_hilbert_array(intent->input->tree);
+    const uint8 *tiers = tier_tree_tier_array(intent->input->tree);
     Datum source_datum = hash128_to_datum(source);
-    Datum angular_args[6] = {
+    Datum angular_args[7] = {
         Float8GetDatum(coords[(Size) node * 4 + 0]),
         Float8GetDatum(coords[(Size) node * 4 + 1]),
         Float8GetDatum(coords[(Size) node * 4 + 2]),
         Float8GetDatum(coords[(Size) node * 4 + 3]),
         source_datum,
-        Int32GetDatum(fanout)
+        Int32GetDatum(fanout),
+        Int16GetDatum((int16) tiers[node])
     };
     int rc = SPI_execute_plan(angular_plan, angular_args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
@@ -402,8 +404,9 @@ laplace_prompt_geometry_scan_anchor(
     bytea *hilbert = palloc(VARHDRSZ + 16);
     SET_VARSIZE(hilbert, VARHDRSZ + 16);
     memcpy(VARDATA(hilbert), hilberts[node].bytes, 16);
-    Datum hilbert_args[3] = {
-        PointerGetDatum(hilbert), source_datum, Int32GetDatum(fanout)
+    Datum hilbert_args[4] = {
+        PointerGetDatum(hilbert), source_datum, Int32GetDatum(fanout),
+        Int16GetDatum((int16) tiers[node])
     };
     rc = SPI_execute_plan(hilbert_plan, hilbert_args, NULL, true, 0);
     if (rc != SPI_OK_SELECT)
@@ -549,7 +552,8 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent,
         "SELECT w.id, public.laplace_angular_distance_4d("
         "w.coord,public.ST_SetSRID(public.ST_MakePoint($1,$2,$3,$4),0)) "
         "FROM laplace.v_word_points w "
-        "WHERE w.id<>$5 AND public.laplace_direction_4d(w.coord) IS NOT NULL "
+        "WHERE w.id<>$5 AND w.tier=$7 "
+        "AND public.laplace_direction_4d(w.coord) IS NOT NULL "
         "AND public.laplace_direction_4d(public.ST_SetSRID("
         "public.ST_MakePoint($1,$2,$3,$4),0)) IS NOT NULL "
         "ORDER BY public.laplace_direction_4d(w.coord) <<->> "
@@ -558,15 +562,18 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent,
     const char *hilbert_sql =
         "WITH same AS MATERIALIZED ("
         " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
-        " WHERE p.type=1 AND p.hilbert_index=$1 AND p.entity_id<>$2"
+        " JOIN laplace.entities e ON e.id=p.entity_id"
+        " WHERE p.type=1 AND e.tier=$4 AND p.hilbert_index=$1 AND p.entity_id<>$2"
         " ORDER BY p.entity_id LIMIT $3"
         "),before AS MATERIALIZED ("
         " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
-        " WHERE p.type=1 AND p.hilbert_index<$1 AND p.entity_id<>$2"
+        " JOIN laplace.entities e ON e.id=p.entity_id"
+        " WHERE p.type=1 AND e.tier=$4 AND p.hilbert_index<$1 AND p.entity_id<>$2"
         " ORDER BY p.hilbert_index DESC,p.entity_id DESC LIMIT $3"
         "),after AS MATERIALIZED ("
         " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
-        " WHERE p.type=1 AND p.hilbert_index>$1 AND p.entity_id<>$2"
+        " JOIN laplace.entities e ON e.id=p.entity_id"
+        " WHERE p.type=1 AND e.tier=$4 AND p.hilbert_index>$1 AND p.entity_id<>$2"
         " ORDER BY p.hilbert_index ASC,p.entity_id ASC LIMIT $3"
         ") SELECT * FROM same UNION ALL SELECT * FROM before UNION ALL SELECT * FROM after";
     const char *frechet_sql =
@@ -584,16 +591,16 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent,
         " FROM candidates c CROSS JOIN anchor a"
         " WHERE c.curve IS NOT NULL AND a.curve IS NOT NULL"
         ") SELECT id,d FROM scored WHERE d IS NOT NULL ORDER BY d,id LIMIT $6";
-    Oid angular_types[6] = {
-        FLOAT8OID,FLOAT8OID,FLOAT8OID,FLOAT8OID,BYTEAOID,INT4OID};
-    Oid hilbert_types[3] = {BYTEAOID,BYTEAOID,INT4OID};
+    Oid angular_types[7] = {
+        FLOAT8OID,FLOAT8OID,FLOAT8OID,FLOAT8OID,BYTEAOID,INT4OID,INT2OID};
+    Oid hilbert_types[4] = {BYTEAOID,BYTEAOID,INT4OID,INT2OID};
     Oid frechet_types[6] = {
         FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,
         BYTEAARRAYOID,INT4OID};
     SPIPlanPtr angular_plan = SPI_prepare_cursor(
-        angular_sql, 6, angular_types, CURSOR_OPT_PARALLEL_OK);
+        angular_sql, 7, angular_types, CURSOR_OPT_PARALLEL_OK);
     SPIPlanPtr hilbert_plan = SPI_prepare_cursor(
-        hilbert_sql, 3, hilbert_types, CURSOR_OPT_PARALLEL_OK);
+        hilbert_sql, 4, hilbert_types, CURSOR_OPT_PARALLEL_OK);
     SPIPlanPtr frechet_plan = SPI_prepare_cursor(
         frechet_sql, 6, frechet_types, CURSOR_OPT_PARALLEL_OK);
     if (!angular_plan || !hilbert_plan || !frechet_plan)
