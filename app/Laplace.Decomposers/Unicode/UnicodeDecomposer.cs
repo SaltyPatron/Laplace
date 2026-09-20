@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -25,6 +26,10 @@ public sealed class UnicodeDecomposer
     private readonly string? _ucdxmlZip;
     private readonly string? _ducet;
     private readonly ConcurrentStringSet _canonicalNames = new(StringComparer.Ordinal);
+    private readonly ConcurrentIdSet _ucdPropertyTypes = new();
+    private readonly ConcurrentIdSet _ucdPropertyDeclarations = new();
+    private readonly LaplaceCookbook _cookbook = LaplaceCookbook.Shared;
+    private UcdXmlRecipe? _ucdXmlRecipe;
 
     public UnicodeDecomposer(string? ucdxmlZip = null, string? ducet = null)
     {
@@ -71,12 +76,24 @@ public sealed class UnicodeDecomposer
         IReadOnlyList<ArtifactJob> jobs = ResolveArtifactJobs(context);
         ArtifactJob[] xml = jobs.Where(static job => job.Kind == ArtifactKind.UcdXml).ToArray();
         ArtifactJob[] ducet = jobs.Where(static job => job.Kind == ArtifactKind.Ducet).ToArray();
+        ArtifactJob[] propertyAliases = jobs
+            .Where(static job => job.Kind == ArtifactKind.PropertyAliases)
+            .ToArray();
         if (xml.Length != 1 || ducet.Length != 1)
             throw new InvalidOperationException(
                 $"Unicode floor requires exactly one admitted complete UCD XML and one DUCET artifact; "
                 + $"selected xml={xml.Length}, ducet={ducet.Length}.");
+        if (propertyAliases.Length != 1)
+            throw new InvalidOperationException(
+                "The Unicode UCDXML recipe requires exactly one PropertyAliases.txt sidecar; "
+                + $"selected aliases={propertyAliases.Length}.");
+        _ucdXmlRecipe = UcdXmlRecipe.Load(propertyAliases[0].Path);
+        _cookbook.Register(_ucdXmlRecipe.Recipe);
+        SemanticSourceRecipe selectedRecipe = _cookbook.Resolve(
+            _ucdXmlRecipe.Recipe.RecipeId);
 
-        FloorRunState floor = PrepareFloor(xml[0], ducet[0], context);
+        FloorRunState floor = PrepareFloor(
+            xml[0], ducet[0], selectedRecipe, context);
         await foreach (SubstrateChange change in RunFloorDataAsync(
                            floor, context, options, batch, ct).ConfigureAwait(false))
             yield return change;
@@ -92,18 +109,51 @@ public sealed class UnicodeDecomposer
         if (!CodepointPerfcache.IsLoaded)
             CodepointPerfcache.LoadDefault();
 
+        if (!floor.Skipped && options.MaxInputUnits == 0)
+        {
+            UnicodeSeedSnapshot snapshot = floor.Snapshot
+                ?? throw new InvalidOperationException("Unicode source snapshot was not retained.");
+            var semanticPhase = new UcdXmlSemanticPhase(this, snapshot, _ucdXmlRecipe, batch);
+            await foreach (SubstrateChange original in base.RunPhaseAsync(
+                               semanticPhase, context, options, ct).ConfigureAwait(false))
+            {
+                floor.Records += original.Metadata.InputUnitsConsumed;
+                floor.Entities += original.Entities.Length;
+                floor.Physicalities += original.Physicalities.Length;
+                floor.Attestations += original.Attestations.Length;
+                if (!original.IntentStages.IsDefaultOrEmpty)
+                    foreach (IntentStage stage in original.IntentStages)
+                    {
+                        if (stage.IsInvalid) continue;
+                        floor.Entities += stage.EntityCount;
+                        floor.Physicalities += stage.PhysicalityCount;
+                        floor.Attestations += stage.AttestationCount;
+                    }
+                SubstrateChange change = floor.SemanticRecipeId is { } semanticRecipeId
+                    ? SourceArtifactProvenance.Bind(original, semanticRecipeId)
+                    : original;
+                yield return change;
+            }
+            floor.Snapshot = null; // semantic phase owns and has disposed it.
+        }
+
         await foreach (SubstrateChange change in FinalizeFloorAsync(
                            floor, options, ct).ConfigureAwait(false))
             yield return change;
 
         if (options.MaxInputUnits > 0)
+        {
+            floor.Snapshot?.Dispose();
+            floor.Snapshot = null;
             yield break;
+        }
 
         if (SourceVocabularyBootstrap.BuildLicenseChange(Manifest) is { } licenseChange)
             yield return licenseChange;
 
         ArtifactJob[] independent = jobs
-            .Where(static job => job.Kind is not ArtifactKind.UcdXml and not ArtifactKind.Ducet)
+            .Where(static job => job.Kind is not ArtifactKind.UcdXml and not ArtifactKind.Ducet
+                && !IsRepertoireCompensation(job.Kind))
             .ToArray();
         await foreach (SubstrateChange change in RunArtifactPhasesAsync(
                            independent,
@@ -129,6 +179,8 @@ public sealed class UnicodeDecomposer
         public SourceArtifactIdentity? XmlIdentity { get; init; }
         public SourceArtifactIdentity? DucetIdentity { get; init; }
         public Hash128? RecipeId { get; init; }
+        public Hash128? SemanticRecipeId { get; init; }
+        public UnicodeSeedSnapshot? Snapshot { get; set; }
         public bool Skipped { get; set; }
         public long Records { get; set; }
         public long Entities { get; set; }
@@ -139,6 +191,7 @@ public sealed class UnicodeDecomposer
     private FloorRunState PrepareFloor(
         ArtifactJob xml,
         ArtifactJob ducet,
+        SemanticSourceRecipe semanticRecipe,
         IDecomposerContext context)
     {
         string xmlLabel = ClaimArtifact(context, xml.Path, xml.Label);
@@ -160,7 +213,12 @@ public sealed class UnicodeDecomposer
         Hash128? recipeId = xmlIdentity is { } xi && ducetIdentity is { } di
             ? SourceArtifactProvenance.RecipeId(
                 SourceName, Manifest.License.Version ?? "unknown", "tier0-floor",
-                [xi.ArtifactId, di.ArtifactId])
+                [xi.ArtifactId, di.ArtifactId, semanticRecipe.RecipeId])
+            : null;
+        Hash128? semanticRecipeId = xmlIdentity is { } semanticXml
+            ? SourceArtifactProvenance.RecipeId(
+                SourceName, Manifest.License.Version ?? "unknown", "ucdxml-semantic",
+                [semanticXml.ArtifactId, semanticRecipe.RecipeId])
             : null;
 
         return new FloorRunState
@@ -176,6 +234,7 @@ public sealed class UnicodeDecomposer
             XmlIdentity = xmlIdentity,
             DucetIdentity = ducetIdentity,
             RecipeId = recipeId,
+            SemanticRecipeId = semanticRecipeId,
         };
     }
 
@@ -206,7 +265,15 @@ public sealed class UnicodeDecomposer
         observability.OnFileStarted(
             SourceName, floor.DucetLabel, IngestBatchPipeline.TryFileBytes(floor.Ducet.Path));
 
-        var phase = new UnicodeFloorPhase(floor.Xml.Path, floor.Ducet.Path, batch);
+        floor.Snapshot = UnicodeSeed.OpenSnapshot(floor.Xml.Path, floor.Ducet.Path);
+        if (options.MaxInputUnits == 0)
+        {
+            UcdXmlRecipe recipe = _ucdXmlRecipe
+                ?? throw new InvalidOperationException("UCDXML recipe was not selected.");
+            await using Stream schemaStream = floor.Snapshot.OpenUcdXmlStream();
+            await recipe.ValidateProviderAsync(schemaStream, ct).ConfigureAwait(false);
+        }
+        var phase = new UnicodeFloorPhase(floor.Snapshot, batch);
         await foreach (SubstrateChange original in base.RunPhaseAsync(
                            phase, context, options, ct).ConfigureAwait(false))
         {
@@ -374,6 +441,7 @@ public sealed class UnicodeDecomposer
             _ucdxmlZip ?? Path.Combine(root, "ucdxml", "ucd.all.flat.zip"));
         string ducet = Path.GetFullPath(
             _ducet ?? Path.Combine(root, "uca", "allkeys.txt"));
+        bool hasCanonicalXml = File.Exists(xml);
 
         var artifacts = new List<IngestArtifact>();
         foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
@@ -390,10 +458,14 @@ public sealed class UnicodeDecomposer
                 disposition = IngestArtifactDisposition.EquivalentPackaging;
                 notes = "alternate packaging of a selected Unicode semantic role; retained but not admitted as another witness";
             }
-            else if (TryClassifyArtifact(full, root, xml, ducet, out _))
+            else if (TryClassifyArtifact(full, root, xml, ducet, out ArtifactKind kind))
             {
-                disposition = IngestArtifactDisposition.Admitted;
-                notes = "";
+                disposition = hasCanonicalXml && IsRepertoireCompensation(kind)
+                    ? IngestArtifactDisposition.Superseded
+                    : IngestArtifactDisposition.Admitted;
+                notes = hasCanonicalXml && IsRepertoireCompensation(kind)
+                    ? "semantic fields are admitted from the selected ucd.all.flat.xml recipe; retained as a conformance/packaging oracle, not duplicate testimony"
+                    : "";
             }
             else if (IsUnicodeControlArtifact(relative))
             {
@@ -578,6 +650,54 @@ public sealed class UnicodeDecomposer
         return id;
     }
 
+    private Hash128 PropertyValueEntity(
+        SubstrateChangeBuilder builder,
+        string property,
+        string value)
+    {
+        string canonicalProperty = _ucdXmlRecipe?.CanonicalProperty(property) ?? property;
+        string canonicalValue = _ucdXmlRecipe?.CanonicalValue(canonicalProperty, value) ?? value;
+        string prefix = canonicalProperty switch
+        {
+            "Script" or "Script_Extensions" => "unicode/script",
+            "Block" => "unicode/block",
+            "General_Category" => "unicode/category",
+            "Canonical_Combining_Class" => "unicode/combining_class",
+            "Bidi_Class" => "unicode/bidi_class",
+            "Age" => "unicode/age",
+            "Line_Break" => "unicode/line_break",
+            "East_Asian_Width" => "unicode/east_asian_width",
+            "Joining_Type" => "unicode/joining_type",
+            "Numeric_Type" => "unicode/numeric_type",
+            _ => $"unicode/property_value/{canonicalProperty}",
+        };
+        return ClassifierEntity(builder, prefix, canonicalValue);
+    }
+
+    private RelationTypeRegistry.RelationTypeResolution PropertyRelation(
+        SubstrateChangeBuilder builder,
+        string canonicalPropertyName)
+    {
+        canonicalPropertyName = _ucdXmlRecipe?.CanonicalProperty(canonicalPropertyName)
+            ?? canonicalPropertyName;
+        RelationTypeRegistry.RelationTypeResolution relation =
+            RelationTypeRegistry.ResolveUcdProperty(canonicalPropertyName);
+        _canonicalNames.Add(relation.Canonical);
+        if (_ucdPropertyTypes.Add(relation.Id))
+            builder.AddEntity(new EntityRow(
+                relation.Id, EntityTier.Word,
+                BootstrapIntentBuilder.RelationTypeMetaTypeId, Source));
+        if (relation.ParentId is { } parent)
+        {
+            AttestationRow declaration = NativeAttestation.Categorical(
+                relation.Id, "IS_A", parent, Source, null,
+                TC.StandardsDerived);
+            if (_ucdPropertyDeclarations.Add(declaration.Id))
+                builder.AddAttestation(declaration);
+        }
+        return relation;
+    }
+
     private static void EnsureOrdinalContexts(SubstrateChangeBuilder builder)
     {
         builder.AddEntity(new EntityRow(
@@ -716,6 +836,9 @@ public sealed class UnicodeDecomposer
                 new HashSet<int> { 1 }),
             ArtifactKind.UcaCommonTemplate => new CttPhase(this, job.Path, batch),
             ArtifactKind.NamesList => new NamesListPhase(this, job.Path, batch),
+            ArtifactKind.BoundaryTest => new BoundaryTestPhase(this, job.Path, batch),
+            ArtifactKind.NormalizationTest => new NormalizationTestPhase(this, job.Path, batch),
+            ArtifactKind.EmojiTest => new EmojiTestPhase(this, job.Path, batch),
             ArtifactKind.LinkBracket => new DelimitedCodepointPropertyPhase(
                 this, job.Path, batch, ["Link_Bracket"], new HashSet<int> { 0 }),
             ArtifactKind.LinkEmail => new CodepointListPropertyPhase(
@@ -737,10 +860,19 @@ public sealed class UnicodeDecomposer
         {
             var jobs = new List<ArtifactJob>(context.SelectedArtifacts.Count);
             var singletonKinds = new HashSet<ArtifactKind>();
+            bool selectedCanonicalXml = context.SelectedArtifacts.Any(artifact =>
+                string.Equals(
+                    Path.GetFullPath(artifact.Path), xml, StringComparison.Ordinal));
             foreach (IngestArtifact artifact in context.SelectedArtifacts)
             {
                 string path = Path.GetFullPath(artifact.Path);
                 ArtifactKind kind = ClassifyArtifact(path, baseDir, xml, ducet);
+                if (selectedCanonicalXml && IsRepertoireCompensation(kind))
+                    throw new InvalidOperationException(
+                        $"Unicode artifact graph admits '{artifact.Id}' even though its semantic fields "
+                        + "are owned by the selected ucd.all.flat.xml recipe. Mark the artifact "
+                        + "superseded (or select a source generation whose recipe does not cover it); "
+                        + "duplicate Unicode testimony is not admitted.");
                 if (IsSingletonArtifactRole(kind) && !singletonKinds.Add(kind))
                     throw new InvalidOperationException(
                         $"Unicode selected more than one admitted artifact for singleton role {kind}; "
@@ -799,6 +931,18 @@ public sealed class UnicodeDecomposer
             Path.Combine(baseDir, "ucd", "auxiliary", "WordBreakProperty.txt"), "ucd/auxiliary/WordBreakProperty.txt");
         AddIfPresent(legacy, ArtifactKind.SentenceBreak,
             Path.Combine(baseDir, "ucd", "auxiliary", "SentenceBreakProperty.txt"), "ucd/auxiliary/SentenceBreakProperty.txt");
+        AddIfPresent(legacy, ArtifactKind.BoundaryTest,
+            Path.Combine(baseDir, "ucd", "auxiliary", "GraphemeBreakTest.txt"), "ucd/auxiliary/GraphemeBreakTest.txt");
+        AddIfPresent(legacy, ArtifactKind.BoundaryTest,
+            Path.Combine(baseDir, "ucd", "auxiliary", "WordBreakTest.txt"), "ucd/auxiliary/WordBreakTest.txt");
+        AddIfPresent(legacy, ArtifactKind.BoundaryTest,
+            Path.Combine(baseDir, "ucd", "auxiliary", "SentenceBreakTest.txt"), "ucd/auxiliary/SentenceBreakTest.txt");
+        AddIfPresent(legacy, ArtifactKind.BoundaryTest,
+            Path.Combine(baseDir, "ucd", "auxiliary", "LineBreakTest.txt"), "ucd/auxiliary/LineBreakTest.txt");
+        AddIfPresent(legacy, ArtifactKind.NormalizationTest,
+            Path.Combine(baseDir, "ucd", "NormalizationTest.txt"), "ucd/NormalizationTest.txt");
+        AddIfPresent(legacy, ArtifactKind.EmojiTest,
+            Path.Combine(baseDir, "emoji", "emoji-test.txt"), "emoji/emoji-test.txt");
         AddIfPresent(legacy, ArtifactKind.IndicConjunctBreak,
             Path.Combine(baseDir, "ucd", "auxiliary", "IndicConjunctBreak.txt"), "ucd/auxiliary/IndicConjunctBreak.txt");
         AddIfPresent(legacy, ArtifactKind.HangulSyllableType,
@@ -952,6 +1096,11 @@ public sealed class UnicodeDecomposer
             "ucd/auxiliary/GraphemeBreakProperty.txt" => ArtifactKind.GraphemeBreak,
             "ucd/auxiliary/WordBreakProperty.txt" => ArtifactKind.WordBreak,
             "ucd/auxiliary/SentenceBreakProperty.txt" => ArtifactKind.SentenceBreak,
+            "ucd/auxiliary/GraphemeBreakTest.txt" or "ucd/auxiliary/WordBreakTest.txt"
+                or "ucd/auxiliary/SentenceBreakTest.txt" or "ucd/auxiliary/LineBreakTest.txt"
+                => ArtifactKind.BoundaryTest,
+            "ucd/NormalizationTest.txt" => ArtifactKind.NormalizationTest,
+            "emoji/emoji-test.txt" => ArtifactKind.EmojiTest,
             "ucd/auxiliary/IndicConjunctBreak.txt" => ArtifactKind.IndicConjunctBreak,
             "ucd/HangulSyllableType.txt" => ArtifactKind.HangulSyllableType,
             "ucd/VerticalOrientation.txt" => ArtifactKind.VerticalOrientation,
@@ -1021,7 +1170,10 @@ public sealed class UnicodeDecomposer
             and not ArtifactKind.UnihanProperties
             and not ArtifactKind.NamedSequences
             and not ArtifactKind.TabbedCodepointProperties
-            and not ArtifactKind.EmojiSequences;
+            and not ArtifactKind.EmojiSequences
+            and not ArtifactKind.BoundaryTest
+            and not ArtifactKind.NormalizationTest
+            and not ArtifactKind.EmojiTest;
 
     private static void AddUnihanFiles(List<ArtifactJob> jobs, string baseDir)
     {
@@ -1123,8 +1275,47 @@ public sealed class UnicodeDecomposer
         LinkBracket = 61,
         LinkEmail = 62,
         LinkTerm = 63,
+        BoundaryTest = 64,
+        NormalizationTest = 65,
+        EmojiTest = 66,
         Unknown = int.MaxValue,
     }
+
+    private static bool IsRepertoireCompensation(ArtifactKind kind) => kind is
+        ArtifactKind.UnicodeData
+        or ArtifactKind.Scripts
+        or ArtifactKind.DerivedAge
+        or ArtifactKind.LineBreak
+        or ArtifactKind.EastAsianWidth
+        or ArtifactKind.JoiningType
+        or ArtifactKind.NumericType
+        or ArtifactKind.BidiMirroring
+        or ArtifactKind.EmojiData
+        or ArtifactKind.NameAliases
+        or ArtifactKind.DerivedNormalization
+        or ArtifactKind.ScriptExtensions
+        or ArtifactKind.BinaryProperties
+        or ArtifactKind.GraphemeBreak
+        or ArtifactKind.WordBreak
+        or ArtifactKind.SentenceBreak
+        or ArtifactKind.IndicConjunctBreak
+        or ArtifactKind.HangulSyllableType
+        or ArtifactKind.VerticalOrientation
+        or ArtifactKind.IndicPositionalCategory
+        or ArtifactKind.IndicSyllabicCategory
+        or ArtifactKind.DerivedGeneralCategory
+        or ArtifactKind.DerivedCombiningClass
+        or ArtifactKind.DerivedBidiClass
+        or ArtifactKind.UnihanProperties
+        or ArtifactKind.BidiBrackets
+        or ArtifactKind.CaseFolding
+        or ArtifactKind.Jamo
+        or ArtifactKind.DerivedName
+        or ArtifactKind.DerivedDecompositionType
+        or ArtifactKind.DerivedJoiningGroup
+        or ArtifactKind.DerivedNumericValues
+        or ArtifactKind.CompositionExclusions
+        or ArtifactKind.TabbedCodepointProperties;
 
     private readonly record struct ArtifactJob(ArtifactKind Kind, string Path, string Label);
 
@@ -1171,16 +1362,13 @@ public sealed class UnicodeDecomposer
 
     private sealed class UnicodeFloorPhase : UnicodeComposePhase<UnicodeSeedRange>
     {
-        private readonly string _ucdxmlPath;
-        private readonly string _ducetPath;
+        private readonly UnicodeSeedSnapshot _snapshot;
         private readonly int _rangeSize;
-        private UnicodeSeedSnapshot? _snapshot;
 
-        public UnicodeFloorPhase(string ucdxmlPath, string ducetPath, int rangeSize)
+        public UnicodeFloorPhase(UnicodeSeedSnapshot snapshot, int rangeSize)
             : base(Math.Max(1, rangeSize), attestationCapacity: 0)
         {
-            _ucdxmlPath = ucdxmlPath;
-            _ducetPath = ducetPath;
+            _snapshot = snapshot;
             _rangeSize = Math.Max(1, rangeSize);
         }
 
@@ -1190,9 +1378,7 @@ public sealed class UnicodeDecomposer
 
         protected override void Compose(UnicodeSeedRange range, SubstrateChangeBuilder builder)
         {
-            UnicodeSeedSnapshot snapshot = _snapshot
-                ?? throw new InvalidOperationException("Unicode source snapshot was not initialized.");
-            snapshot.StageRange(builder.ContentStage, range.First, range.Count, Source);
+            _snapshot.StageRange(builder.ContentStage, range.First, range.Count, Source);
 
             int end = checked(range.First + range.Count);
             if (range.First == 0) EmitByteCatalog(builder);
@@ -1207,7 +1393,6 @@ public sealed class UnicodeDecomposer
             DecomposerOptions options,
             [EnumeratorCancellation] CancellationToken ct)
         {
-            _snapshot ??= UnicodeSeed.OpenSnapshot(_ucdxmlPath, _ducetPath);
             int remaining = options.MaxInputUnits > 0
                 ? checked((int)Math.Min(options.MaxInputUnits, _snapshot.Count))
                 : _snapshot.Count;
@@ -1219,13 +1404,6 @@ public sealed class UnicodeDecomposer
                 first += count;
                 await Task.Yield();
             }
-        }
-
-        public override ValueTask DisposeAsync()
-        {
-            _snapshot?.Dispose();
-            _snapshot = null;
-            return ValueTask.CompletedTask;
         }
 
         private static void EmitByteCatalog(SubstrateChangeBuilder builder)
@@ -1282,6 +1460,453 @@ public sealed class UnicodeDecomposer
                 builder.AddAttestation(NativeAttestation.Categorical(
                     byteId, "DECODES_TO", CodepointId(cp1252Target), Source,
                     TC.StandardsDerived, contextId: cp1252));
+        }
+    }
+
+    private enum UcdXmlSemanticKind
+    {
+        Repertoire,
+        Block,
+        NamedSequence,
+        StandardizedVariant,
+        CjkRadical,
+        DoNotEmit,
+    }
+
+    private readonly record struct UcdXmlSemanticRecord(
+        XmlRecordNode Node,
+        UcdXmlSemanticKind Kind,
+        uint Start,
+        uint End,
+        bool CountsSourceRow,
+        long EstimatedRows);
+
+    private sealed class UcdXmlSemanticPhase : UnicodeComposePhase<UcdXmlSemanticRecord>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly UnicodeSeedSnapshot _snapshot;
+        private readonly UcdXmlRecipe _recipe;
+        private readonly LaplaceRecipeInterpreter<UcdXmlSemanticRecord> _interpreter;
+        private bool _ownsSnapshot = true;
+
+        public UcdXmlSemanticPhase(
+            UnicodeDecomposer owner,
+            UnicodeSeedSnapshot snapshot,
+            UcdXmlRecipe recipe,
+            int batch)
+            : base(batch, commitEpoch: 1)
+        {
+            _owner = owner;
+            _snapshot = snapshot;
+            _recipe = recipe;
+            _interpreter = new LaplaceRecipeInterpreter<UcdXmlSemanticRecord>(recipe.Recipe);
+        }
+
+        protected override string PhaseLabel => "ucdxml/uax42";
+
+        protected override long UnitsPerRecord(UcdXmlSemanticRecord row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override long EstimatedOutputRows(UcdXmlSemanticRecord row) =>
+            row.EstimatedRows;
+
+        protected override void Compose(
+            UcdXmlSemanticRecord row,
+            SubstrateChangeBuilder builder)
+        {
+            if (row.Kind != UcdXmlSemanticKind.Repertoire)
+            {
+                ComposeStructure(row, builder);
+                return;
+            }
+
+            var target = new UcdXmlLoweringTarget(_owner, builder);
+            foreach (XmlRecordAttribute attribute in row.Node.Attributes)
+            {
+                if (attribute.Name is "cp" or "first-cp" or "last-cp") continue;
+                _interpreter.Lower(
+                    new SourceRecipeAssertion<UcdXmlSemanticRecord>(
+                        row, $"repertoire/*/@{attribute.Name}", attribute.Value),
+                    target);
+            }
+
+            foreach (XmlRecordNode alias in row.Node.ChildrenNamed("name-alias"))
+            {
+                string value = alias.Attribute("alias");
+                if (value.Length == 0) continue;
+                Hash128? aliasId = ContentEmitter.Emit(builder, value, Source);
+                if (aliasId is null) continue;
+                string aliasType = alias.Attribute("type", "unknown");
+                Hash128 context = _owner.ClassifierEntity(
+                    builder, "unicode/name_alias_type", aliasType);
+                target.Add(
+                    RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS"),
+                    aliasId.Value, context);
+            }
+            target.Flush(row.Start, row.End);
+        }
+
+        private void ComposeStructure(
+            UcdXmlSemanticRecord row,
+            SubstrateChangeBuilder builder)
+        {
+            string identity = row.Kind switch
+            {
+                UcdXmlSemanticKind.Block => row.Node.Attribute("name"),
+                UcdXmlSemanticKind.NamedSequence => row.Node.Attribute("cps"),
+                UcdXmlSemanticKind.StandardizedVariant => row.Node.Attribute("cps"),
+                UcdXmlSemanticKind.CjkRadical => row.Node.Attribute("number"),
+                UcdXmlSemanticKind.DoNotEmit => row.Node.Attribute("of"),
+                _ => throw new InvalidOperationException($"Unexpected UCDXML structure {row.Kind}."),
+            };
+            if (identity.Length == 0)
+                throw new InvalidDataException(
+                    $"UCDXML {row.Node.Name} record is missing its recipe identity field.");
+
+            Hash128? subject = row.Kind switch
+            {
+                UcdXmlSemanticKind.Block => _owner.ClassifierEntity(
+                    builder, "unicode/block",
+                    _recipe.CanonicalValue("Block", identity)),
+                UcdXmlSemanticKind.NamedSequence or UcdXmlSemanticKind.StandardizedVariant
+                    or UcdXmlSemanticKind.DoNotEmit => EmitXmlCodepointSequence(builder, identity),
+                UcdXmlSemanticKind.CjkRadical => _owner.ClassifierEntity(
+                    builder, "unicode/cjk_radical", identity),
+                _ => null,
+            };
+            if (subject is null) return;
+
+            string prefix = row.Kind switch
+            {
+                UcdXmlSemanticKind.Block => "blocks/block",
+                UcdXmlSemanticKind.NamedSequence => "named-sequences/named-sequence",
+                UcdXmlSemanticKind.StandardizedVariant =>
+                    "standardized-variants/standardized-variant",
+                UcdXmlSemanticKind.CjkRadical => "cjk-radicals/cjk-radical",
+                UcdXmlSemanticKind.DoNotEmit => "do-not-emit/instead",
+                _ => throw new InvalidOperationException($"Unexpected UCDXML structure {row.Kind}."),
+            };
+            var target = new UcdXmlEntityLoweringTarget(_owner, builder, subject.Value);
+            foreach (XmlRecordAttribute attribute in row.Node.Attributes)
+                _interpreter.Lower(
+                    new SourceRecipeAssertion<UcdXmlSemanticRecord>(
+                        row, $"{prefix}/@{attribute.Name}", attribute.Value),
+                    target);
+
+            if (row.Kind == UcdXmlSemanticKind.Block)
+            {
+                RelationTypeRegistry.RelationTypeResolution relation =
+                    _owner.PropertyRelation(builder, "Block");
+                NativeAttestation.AddCodepointRange(
+                    builder.ContentStage, row.Start, row.End, relation.Id,
+                    subject.Value, Source, contextId: null,
+                    sourceTrust: TC.StandardsDerived);
+            }
+        }
+
+        protected override async IAsyncEnumerable<UcdXmlSemanticRecord> ExtractRecordsAsync(
+            string ecosystemPath,
+            DecomposerOptions options,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            await using Stream xml = _snapshot.OpenUcdXmlStream();
+            await foreach (XmlRecordFrame frame in XmlRecordReader.ReadAsync(
+                               xml, recordDepth: 2, ct: ct).ConfigureAwait(false))
+            {
+                if (frame.Kind != XmlRecordFrameKind.Record) continue;
+                UcdXmlSemanticKind? kind = frame.Node.Name switch
+                {
+                    "char" or "reserved" or "noncharacter" or "surrogate" =>
+                        UcdXmlSemanticKind.Repertoire,
+                    "block" => UcdXmlSemanticKind.Block,
+                    "named-sequence" => UcdXmlSemanticKind.NamedSequence,
+                    "standardized-variant" => UcdXmlSemanticKind.StandardizedVariant,
+                    "cjk-radical" => UcdXmlSemanticKind.CjkRadical,
+                    "instead" => UcdXmlSemanticKind.DoNotEmit,
+                    _ => null,
+                };
+                if (kind is null) continue;
+
+                if (kind != UcdXmlSemanticKind.Repertoire)
+                {
+                    uint structureStart = 0;
+                    uint structureEnd = 0;
+                    if (kind == UcdXmlSemanticKind.Block
+                        && !TryRange(frame.Node, out structureStart, out structureEnd))
+                        throw new InvalidDataException(
+                            "UCDXML block has no valid first-cp/last-cp identity.");
+                    yield return new UcdXmlSemanticRecord(
+                        frame.Node, kind.Value, structureStart, structureEnd,
+                        CountsSourceRow: true,
+                        EstimatedRows: EstimateStructureRows(frame.Node));
+                    continue;
+                }
+
+                if (!TryRange(frame.Node, out uint start, out uint end))
+                    throw new InvalidDataException(
+                        $"UCDXML {frame.Node.Name} record has no valid cp or first-cp/last-cp identity.");
+
+                long rowsPerCodepoint = EstimateRowsPerCodepoint(frame.Node, _recipe.Recipe);
+                int transactionRows = IngestSizing.ResolveApplyTransactionRows();
+                uint window = checked((uint)Math.Max(
+                    1L, (transactionRows - Math.Min(transactionRows - 1L, rowsPerCodepoint))
+                        / Math.Max(1L, rowsPerCodepoint)));
+                bool first = true;
+                for (uint cursor = start; cursor <= end;)
+                {
+                    uint chunkEnd = (uint)Math.Min(
+                        (ulong)end, (ulong)cursor + window - 1UL);
+                    long estimated = checked(
+                        ((long)chunkEnd - cursor + 1L) * rowsPerCodepoint);
+                    yield return new UcdXmlSemanticRecord(
+                        frame.Node, kind.Value, cursor, chunkEnd, first, estimated);
+                    first = false;
+                    if (chunkEnd == uint.MaxValue) break;
+                    cursor = chunkEnd + 1;
+                }
+            }
+        }
+
+        public override ValueTask DisposeAsync()
+        {
+            if (_ownsSnapshot)
+            {
+                _ownsSnapshot = false;
+                _snapshot.Dispose();
+            }
+            return ValueTask.CompletedTask;
+        }
+
+        private static bool TryRange(XmlRecordNode node, out uint start, out uint end)
+        {
+            start = 0;
+            end = 0;
+            string cp = node.Attribute("cp");
+            if (uint.TryParse(cp, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out start))
+            {
+                end = start;
+                return end <= 0x10FFFFu;
+            }
+            return uint.TryParse(
+                       node.Attribute("first-cp"), NumberStyles.HexNumber,
+                       CultureInfo.InvariantCulture, out start)
+                && uint.TryParse(
+                       node.Attribute("last-cp"), NumberStyles.HexNumber,
+                       CultureInfo.InvariantCulture, out end)
+                && start <= end && end <= 0x10FFFFu;
+        }
+
+        private static long EstimateRowsPerCodepoint(
+            XmlRecordNode node,
+            SemanticSourceRecipe recipe)
+        {
+            long rows = 0;
+            foreach (XmlRecordAttribute attribute in node.Attributes)
+            {
+                if (attribute.Name is "cp" or "first-cp" or "last-cp") continue;
+                SourceRecipeField field = recipe.Field($"repertoire/*/@{attribute.Name}");
+                if (!field.Disposition.HasFlag(SourceFieldDisposition.Testimony)
+                    || (field.AbsentSentinel is not null
+                        && attribute.Value.Equals(field.AbsentSentinel, StringComparison.Ordinal)))
+                    continue;
+                long valueRows = field.ValueKind switch
+                {
+                    SourceValueKind.CodepointSequence or SourceValueKind.EnumeratedSequence =>
+                        Math.Max(1, attribute.Value.Split(
+                            field.SequenceSeparator ?? " ",
+                            StringSplitOptions.RemoveEmptyEntries).LongLength),
+                    SourceValueKind.Text or SourceValueKind.StructuredText =>
+                        Math.Max(1, Encoding.UTF8.GetByteCount(attribute.Value) * 4L),
+                    _ => 2,
+                };
+                rows = checked(rows + valueRows);
+            }
+            foreach (XmlRecordNode alias in node.ChildrenNamed("name-alias"))
+                rows = checked(rows + Math.Max(2, Encoding.UTF8.GetByteCount(alias.Attribute("alias")) * 4L));
+            return Math.Max(1, rows);
+        }
+
+        private static long EstimateStructureRows(XmlRecordNode node)
+        {
+            long rows = 1;
+            foreach (XmlRecordAttribute attribute in node.Attributes)
+                rows = checked(rows + Math.Max(
+                    2L, Encoding.UTF8.GetByteCount(attribute.Value) * 4L));
+            return rows;
+        }
+    }
+
+    private static Hash128? EmitXmlCodepointSequence(
+        SubstrateChangeBuilder builder,
+        string raw)
+    {
+        string[] tokens = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var text = new StringBuilder(tokens.Length);
+        foreach (string token in tokens)
+        {
+            if (!uint.TryParse(
+                    token, NumberStyles.HexNumber, CultureInfo.InvariantCulture,
+                    out uint codepoint)
+                || !Rune.TryCreate(codepoint, out Rune rune))
+                throw new InvalidDataException(
+                    $"UCDXML has invalid sequence codepoint '{token}' in '{raw}'.");
+            text.Append(rune.ToString());
+        }
+        return ContentEmitter.Emit(builder, text.ToString(), Source);
+    }
+
+    private sealed class UcdXmlEntityLoweringTarget(
+        UnicodeDecomposer owner,
+        SubstrateChangeBuilder builder,
+        Hash128 subjectId)
+        : ILaplaceRecipeLoweringTarget<UcdXmlSemanticRecord>
+    {
+        public void Lower(
+            in SourceRecipeAssertion<UcdXmlSemanticRecord> assertion,
+            SourceRecipeField field,
+            in SourceRecipeValue value)
+        {
+            if (value.IsAbsent || value.Raw.Length == 0
+                || !field.Disposition.HasFlag(SourceFieldDisposition.Testimony))
+                return;
+
+            RelationTypeRegistry.RelationTypeResolution relation =
+                owner.PropertyRelation(builder, field.PropertyName);
+            if (field.ValueKind == SourceValueKind.Boolean)
+            {
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    subjectId, relation.Id, obj: null, Source, contextId: null,
+                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived,
+                    confirm: value.Boolean
+                        ?? throw new InvalidDataException(
+                            $"Boolean recipe value missing for {field.SyntaxPath}.")));
+                return;
+            }
+
+            if (field.ValueKind == SourceValueKind.EnumeratedSequence)
+            {
+                foreach (string item in value.Sequence)
+                    Emit(owner.PropertyValueEntity(builder, field.PropertyName, item));
+                return;
+            }
+
+            Hash128? objectId = field.ValueKind switch
+            {
+                SourceValueKind.Codepoint => ParseXmlCodepoint(field, value.Raw),
+                SourceValueKind.CodepointSequence => EmitXmlCodepointSequence(builder, value.Raw),
+                SourceValueKind.Text or SourceValueKind.StructuredText =>
+                    ContentEmitter.Emit(builder, value.Raw, Source),
+                _ => owner.PropertyValueEntity(builder, field.PropertyName, value.Raw),
+            };
+            if (objectId is { } resolved) Emit(resolved);
+
+            void Emit(Hash128 resolved) =>
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    subjectId, relation.Id, resolved, Source, contextId: null,
+                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+    }
+
+    private static Hash128 ParseXmlCodepoint(SourceRecipeField field, string raw)
+    {
+        if (!uint.TryParse(
+                raw, NumberStyles.HexNumber, CultureInfo.InvariantCulture,
+                out uint codepoint) || codepoint > 0x10FFFFu)
+            throw new InvalidDataException(
+                $"UCDXML field '{field.SyntaxPath}' has invalid codepoint '{raw}'.");
+        return CodepointId(codepoint);
+    }
+
+    private sealed class UcdXmlLoweringTarget(
+        UnicodeDecomposer owner,
+        SubstrateChangeBuilder builder)
+        : ILaplaceRecipeLoweringTarget<UcdXmlSemanticRecord>
+    {
+        private readonly List<NativeAttestation.CodepointRangeRelation> _relations = [];
+
+        internal void Add(
+            Hash128 typeId,
+            Hash128? objectId,
+            Hash128? contextId = null,
+            bool confirm = true) =>
+            _relations.Add(new NativeAttestation.CodepointRangeRelation(
+                typeId, objectId, contextId, confirm));
+
+        internal void Flush(uint start, uint end)
+        {
+            NativeAttestation.AddCodepointRangeRelations(
+                builder.ContentStage, start, end,
+                System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_relations),
+                Source, TC.StandardsDerived);
+            _relations.Clear();
+        }
+
+        public void Lower(
+            in SourceRecipeAssertion<UcdXmlSemanticRecord> assertion,
+            SourceRecipeField field,
+            in SourceRecipeValue value)
+        {
+            if (value.IsAbsent || value.Raw.Length == 0) return;
+            RelationTypeRegistry.RelationTypeResolution relation =
+                owner.PropertyRelation(builder, field.PropertyName);
+            UcdXmlSemanticRecord subject = assertion.Subject;
+            string rawValue = value.Raw;
+
+            if (field.ValueKind == SourceValueKind.Boolean)
+            {
+                Add(
+                    relation.Id, objectId: null, contextId: null,
+                    confirm: value.Boolean
+                        ?? throw new InvalidDataException($"Boolean recipe value missing for {field.SyntaxPath}."));
+                return;
+            }
+
+            if (field.ValueKind == SourceValueKind.StructuredText
+                && field.Disposition.HasFlag(SourceFieldDisposition.Reference))
+            {
+                EmitStructuredReferences();
+                return;
+            }
+
+            if (field.ValueKind == SourceValueKind.EnumeratedSequence)
+            {
+                foreach (string item in value.Sequence)
+                    EmitObject(owner.PropertyValueEntity(builder, field.PropertyName, item));
+                return;
+            }
+
+            Hash128? objectId = field.ValueKind switch
+            {
+                SourceValueKind.Codepoint => ParseXmlCodepoint(field, value.Raw),
+                SourceValueKind.CodepointSequence => EmitXmlCodepointSequence(builder, value.Raw),
+                SourceValueKind.Text or SourceValueKind.StructuredText =>
+                    ContentEmitter.Emit(builder, value.Raw, Source),
+                _ => owner.PropertyValueEntity(builder, field.PropertyName, value.Raw),
+            };
+            if (objectId is { } resolved) EmitObject(resolved);
+
+            void EmitStructuredReferences()
+            {
+                Hash128? exact = ContentEmitter.Emit(builder, rawValue, Source);
+                if (exact is { } exactId)
+                {
+                    RelationTypeRegistry.RelationTypeResolution lexical =
+                        owner.PropertyRelation(builder, $"{field.PropertyName}_Source_Text");
+                    Add(lexical.Id, exactId);
+                }
+
+                foreach (UcdXmlRecipe.StructuredCodepointReference reference
+                         in UcdXmlRecipe.ParseStructuredReferences(field.SyntaxPath, rawValue))
+                {
+                    Hash128? context = reference.Qualifier is null
+                        ? null
+                        : ContentEmitter.Emit(builder, reference.Qualifier, Source);
+                    Add(relation.Id, CodepointId(reference.Codepoint), context);
+                }
+            }
+
+            void EmitObject(Hash128 resolved) => Add(relation.Id, resolved);
+
         }
     }
 
@@ -1425,7 +2050,13 @@ public sealed class UnicodeDecomposer
 
         protected override string PhaseLabel => _label;
 
-        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangeRecord row) => 1;
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangeRecord row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override long EstimatedOutputRows(UnicodePhysicalArtifactParser.RangeRecord row) =>
+            _allowed is not null && !_allowed.Contains(row.Value)
+                ? 0
+                : checked((long)row.End - row.Start + 2); // classifier + one edge/codepoint
 
         protected override void Compose(
             UnicodePhysicalArtifactParser.RangeRecord row,
@@ -1460,18 +2091,24 @@ public sealed class UnicodeDecomposer
 
         protected override string PhaseLabel => $"binary-properties/{Path.GetFileNameWithoutExtension(_path)}";
 
-        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.BinaryPropertyRange row) => 1;
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.BinaryPropertyRange row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override long EstimatedOutputRows(
+            UnicodePhysicalArtifactParser.BinaryPropertyRange row) =>
+            checked((long)row.End - row.Start + 2); // property relation type + edge range
 
         protected override void Compose(
             UnicodePhysicalArtifactParser.BinaryPropertyRange row,
             SubstrateChangeBuilder builder)
         {
-            Hash128 propertyId = _owner.ClassifierEntity(
-                builder, "unicode/property", row.Property);
+            RelationTypeRegistry.RelationTypeResolution relation =
+                _owner.PropertyRelation(builder, row.Property);
             NativeAttestation.AddCodepointRange(
                 builder.ContentStage, row.Start, row.End,
-                UcdProperties.RelTypeHasProperty, propertyId, Source,
-                contextId: null, sourceTrust: TC.StandardsDerived);
+                relation.Id, objectId: null, sourceId: Source,
+                contextId: null, sourceTrust: TC.StandardsDerived,
+                confirm: true);
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.BinaryPropertyRange>
@@ -1498,19 +2135,24 @@ public sealed class UnicodeDecomposer
 
         protected override string PhaseLabel => $"property/{_property}";
 
-        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangeRecord row) => 1;
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangeRecord row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override long EstimatedOutputRows(UnicodePhysicalArtifactParser.RangeRecord row) =>
+            checked((long)row.End - row.Start + 2); // value + one edge/codepoint
 
         protected override void Compose(
             UnicodePhysicalArtifactParser.RangeRecord row,
             SubstrateChangeBuilder builder)
         {
-            Hash128 keyId = _owner.ClassifierEntity(builder, "unicode/property_key", _property);
+            RelationTypeRegistry.RelationTypeResolution relation =
+                _owner.PropertyRelation(builder, _property);
             Hash128 valueId = _owner.ClassifierEntity(
                 builder, $"unicode/property_value/{_property}", row.Value);
             NativeAttestation.AddCodepointRange(
                 builder.ContentStage, row.Start, row.End,
-                UcdProperties.RelTypeHasProperty, valueId, Source,
-                contextId: keyId, sourceTrust: TC.StandardsDerived);
+                relation.Id, valueId, Source,
+                contextId: null, sourceTrust: TC.StandardsDerived);
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.RangeRecord>
@@ -1532,7 +2174,15 @@ public sealed class UnicodeDecomposer
 
         protected override string PhaseLabel => "script-extensions";
 
-        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangeRecord row) => 1;
+        protected override long UnitsPerRecord(UnicodePhysicalArtifactParser.RangeRecord row) =>
+            row.CountsSourceRow ? 1 : 0;
+
+        protected override long EstimatedOutputRows(UnicodePhysicalArtifactParser.RangeRecord row)
+        {
+            int values = row.Value.Split(
+                ' ', StringSplitOptions.RemoveEmptyEntries).Length;
+            return checked(values * ((long)row.End - row.Start + 2));
+        }
 
         protected override void Compose(
             UnicodePhysicalArtifactParser.RangeRecord row,
@@ -1554,7 +2204,11 @@ public sealed class UnicodeDecomposer
                 string ecosystemPath,
                 DecomposerOptions options,
                 CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.RangeRecordsAsync(_path, ct);
+            UnicodePhysicalArtifactParser.RangeRecordsAsync(
+                _path,
+                ct,
+                outputRowsPerCodepoint: static value => value.Split(
+                    ' ', StringSplitOptions.RemoveEmptyEntries).Length);
     }
 
     private sealed class UnihanPropertyPhase
@@ -1572,14 +2226,13 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.UnihanPropertyRow row,
             SubstrateChangeBuilder builder)
         {
-            Hash128 keyId = _owner.ClassifierEntity(
-                builder, "unicode/unihan_property", row.Property);
+            RelationTypeRegistry.RelationTypeResolution relation =
+                _owner.PropertyRelation(builder, row.Property);
             Hash128? valueId = ContentEmitter.Emit(builder, row.Value, Source);
             if (valueId is null) return;
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                CodepointId(row.Codepoint), UcdProperties.RelTypeHasProperty,
-                valueId.Value, Source, keyId,
-                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+                CodepointId(row.Codepoint), relation.Id,
+                valueId.Value, Source, null, TC.StandardsDerived));
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.UnihanPropertyRow>
@@ -1861,16 +2514,14 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.PropertyAliasRow row,
             SubstrateChangeBuilder builder)
         {
-            Hash128 propertyId = _owner.ClassifierEntity(
-                builder, "unicode/property_key", row.CanonicalProperty);
+            RelationTypeRegistry.RelationTypeResolution property =
+                _owner.PropertyRelation(builder, row.CanonicalProperty);
             Hash128? aliasId = ContentEmitter.Emit(builder, row.Alias, Source);
             if (aliasId is null) return;
-            Hash128 context = _owner.ClassifierEntity(
-                builder, "unicode/property_key", "Property_Alias");
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                propertyId, UcdProperties.RelTypeHasProperty,
-                aliasId.Value, Source, context,
-                RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+                property.Id, RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS"),
+                aliasId.Value, Source, contextId: null,
+                witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyAliasRow>
@@ -1898,21 +2549,21 @@ public sealed class UnicodeDecomposer
             UnicodePhysicalArtifactParser.PropertyValueAliasRow row,
             SubstrateChangeBuilder builder)
         {
-            Hash128 propertyKey = _owner.ClassifierEntity(
-                builder, "unicode/property_key", row.Property);
-            Hash128 valueId = _owner.ClassifierEntity(
-                builder, $"unicode/property_value/{row.Property}", row.CanonicalValue);
+            RelationTypeRegistry.RelationTypeResolution property =
+                _owner.PropertyRelation(builder, row.Property);
+            Hash128 valueId = _owner.PropertyValueEntity(
+                builder, property.Canonical, row.CanonicalValue);
             Hash128? aliasId = ContentEmitter.Emit(builder, row.Alias, Source);
             if (aliasId is null) return;
             double weight = RelationTypeRank.StandardsStructural * TC.StandardsDerived;
 
             if (row.CountsSourceRow)
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    propertyKey, UcdProperties.RelTypeHasProperty,
+                    property.Id, RelationTypeRegistry.RelationTypeId("HAS_MEMBER"),
                     valueId, Source, null, weight));
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                valueId, UcdProperties.RelTypeHasProperty,
-                aliasId.Value, Source, propertyKey, weight));
+                valueId, RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS"),
+                aliasId.Value, Source, contextId: null, witnessWeight: weight));
         }
 
         protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyValueAliasRow>
@@ -2120,6 +2771,173 @@ public sealed class UnicodeDecomposer
             ExtractRecordsAsync(
                 string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
             UnicodePhysicalArtifactParser.NamesListAsync(_path, ct);
+    }
+
+    private sealed class BoundaryTestPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.BoundaryTestRow>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+        private readonly string _property;
+
+        public BoundaryTestPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch, commitEpoch: 1)
+        {
+            _owner = owner;
+            _path = path;
+            _property = Path.GetFileNameWithoutExtension(path) switch
+            {
+                "GraphemeBreakTest" => "Grapheme_Break_Test",
+                "WordBreakTest" => "Word_Break_Test",
+                "SentenceBreakTest" => "Sentence_Break_Test",
+                "LineBreakTest" => "Line_Break_Test",
+                string name => throw new InvalidOperationException(
+                    $"Unknown Unicode boundary-test artifact '{name}'."),
+            };
+        }
+
+        protected override string PhaseLabel => $"ucd/{_property}";
+
+        protected override long EstimatedOutputRows(
+            UnicodePhysicalArtifactParser.BoundaryTestRow row) =>
+            checked(Math.Max(4L,
+                (Encoding.UTF8.GetByteCount(row.Sequence)
+                 + Encoding.UTF8.GetByteCount(row.Boundaries)
+                 + Encoding.UTF8.GetByteCount(row.Description)) * 4L));
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.BoundaryTestRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128? sequence = ContentEmitter.Emit(builder, row.Sequence, Source);
+            Hash128? boundaries = ContentEmitter.Emit(builder, row.Boundaries, Source);
+            if (sequence is null || boundaries is null) return;
+            RelationTypeRegistry.RelationTypeResolution expectation =
+                _owner.PropertyRelation(builder, _property);
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                sequence.Value, expectation.Id, boundaries.Value,
+                Source, contextId: null,
+                witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+
+            if (row.Description.Length == 0) return;
+            Hash128? description = ContentEmitter.Emit(builder, row.Description, Source);
+            if (description is null) return;
+            RelationTypeRegistry.RelationTypeResolution descriptionRelation =
+                _owner.PropertyRelation(builder, $"{_property}_Description");
+            builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                sequence.Value, descriptionRelation.Id, description.Value,
+                Source, contextId: boundaries.Value,
+                witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.BoundaryTestRow>
+            ExtractRecordsAsync(
+                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.BoundaryTestsAsync(_path, ct);
+    }
+
+    private sealed class NormalizationTestPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.NormalizationTestRow>
+    {
+        private static readonly string[] Forms = ["NFC", "NFD", "NFKC", "NFKD"];
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+
+        public NormalizationTestPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
+
+        protected override string PhaseLabel => "ucd/NormalizationTest";
+
+        protected override long EstimatedOutputRows(
+            UnicodePhysicalArtifactParser.NormalizationTestRow row) =>
+            checked(Math.Max(8L,
+                (Encoding.UTF8.GetByteCount(row.Source)
+                 + Encoding.UTF8.GetByteCount(row.Nfc)
+                 + Encoding.UTF8.GetByteCount(row.Nfd)
+                 + Encoding.UTF8.GetByteCount(row.Nfkc)
+                 + Encoding.UTF8.GetByteCount(row.Nfkd)
+                 + Encoding.UTF8.GetByteCount(row.Description)) * 4L));
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.NormalizationTestRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128? source = ContentEmitter.Emit(builder, row.Source, Source);
+            if (source is null) return;
+            string[] expected = [row.Nfc, row.Nfd, row.Nfkc, row.Nfkd];
+            Hash128? description = row.Description.Length == 0
+                ? null
+                : ContentEmitter.Emit(builder, row.Description, Source);
+            for (int i = 0; i < Forms.Length; ++i)
+            {
+                Hash128? target = ContentEmitter.Emit(builder, expected[i], Source);
+                if (target is null) continue;
+                RelationTypeRegistry.RelationTypeResolution relation =
+                    _owner.PropertyRelation(builder, $"Normalization_Test_{Forms[i]}");
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    source.Value, relation.Id, target.Value, Source,
+                    contextId: description,
+                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+            }
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.NormalizationTestRow>
+            ExtractRecordsAsync(
+                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.NormalizationTestsAsync(_path, ct);
+    }
+
+    private sealed class EmojiTestPhase
+        : UnicodeComposePhase<UnicodePhysicalArtifactParser.EmojiTestRow>
+    {
+        private readonly UnicodeDecomposer _owner;
+        private readonly string _path;
+
+        public EmojiTestPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
+
+        protected override string PhaseLabel => "emoji/emoji-test";
+
+        protected override long EstimatedOutputRows(
+            UnicodePhysicalArtifactParser.EmojiTestRow row) =>
+            checked(Math.Max(8L,
+                (Encoding.UTF8.GetByteCount(row.Sequence)
+                 + Encoding.UTF8.GetByteCount(row.Name)
+                 + Encoding.UTF8.GetByteCount(row.Group)
+                 + Encoding.UTF8.GetByteCount(row.Subgroup)) * 4L));
+
+        protected override void Compose(
+            UnicodePhysicalArtifactParser.EmojiTestRow row,
+            SubstrateChangeBuilder builder)
+        {
+            Hash128? sequence = ContentEmitter.Emit(builder, row.Sequence, Source);
+            if (sequence is null) return;
+            EmitValue("Emoji_Test_Status", row.Status, content: false);
+            EmitValue("Emoji_Test_Version", row.Version, content: false);
+            EmitValue("Emoji_Test_Name", row.Name, content: true);
+            EmitValue("Emoji_Test_Group", row.Group, content: true);
+            EmitValue("Emoji_Test_Subgroup", row.Subgroup, content: true);
+
+            void EmitValue(string property, string raw, bool content)
+            {
+                if (raw.Length == 0) return;
+                Hash128? value = content
+                    ? ContentEmitter.Emit(builder, raw, Source)
+                    : _owner.PropertyValueEntity(builder, property, raw);
+                if (value is null) return;
+                RelationTypeRegistry.RelationTypeResolution relation =
+                    _owner.PropertyRelation(builder, property);
+                builder.AddAttestation(NativeAttestation.CategoricalResolved(
+                    sequence.Value, relation.Id, value.Value, Source,
+                    contextId: null,
+                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
+            }
+        }
+
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.EmojiTestRow>
+            ExtractRecordsAsync(
+                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.EmojiTestsAsync(_path, ct);
     }
 
     private sealed class MirrorPhase

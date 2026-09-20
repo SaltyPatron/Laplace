@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Engine.Core;
 
 namespace Laplace.Decomposers.Unicode;
 
@@ -23,7 +24,8 @@ internal static class UnicodePhysicalArtifactParser
     internal readonly record struct RangeRecord(
         uint Start,
         uint End,
-        string Value);
+        string Value,
+        bool CountsSourceRow = true);
 
     internal readonly record struct MirrorRow(uint Codepoint, uint Mirror);
     internal readonly record struct AliasRow(uint Codepoint, string Alias);
@@ -36,7 +38,8 @@ internal static class UnicodePhysicalArtifactParser
     internal readonly record struct BinaryPropertyRange(
         uint Start,
         uint End,
-        string Property);
+        string Property,
+        bool CountsSourceRow = true);
     internal readonly record struct UnihanPropertyRow(
         uint Codepoint,
         string Property,
@@ -113,6 +116,27 @@ internal static class UnicodePhysicalArtifactParser
         string Value,
         bool CountsSourceRow);
 
+    internal readonly record struct BoundaryTestRow(
+        string Sequence,
+        string Boundaries,
+        string Description);
+
+    internal readonly record struct NormalizationTestRow(
+        string Source,
+        string Nfc,
+        string Nfd,
+        string Nfkc,
+        string Nfkd,
+        string Description);
+
+    internal readonly record struct EmojiTestRow(
+        string Sequence,
+        string Status,
+        string Version,
+        string Name,
+        string Group,
+        string Subgroup);
+
     internal static async IAsyncEnumerable<UnicodeDataRow> UnicodeDataAsync(
         string path,
         [EnumeratorCancellation] CancellationToken ct)
@@ -167,7 +191,9 @@ internal static class UnicodePhysicalArtifactParser
 
     internal static async IAsyncEnumerable<RangeRecord> RangeRecordsAsync(
         string path,
-        [EnumeratorCancellation] CancellationToken ct)
+        [EnumeratorCancellation] CancellationToken ct,
+        int? maxExpandedRows = null,
+        Func<string, int>? outputRowsPerCodepoint = null)
     {
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
@@ -178,13 +204,26 @@ internal static class UnicodePhysicalArtifactParser
             string range = line[..semi].Trim();
             string value = line[(semi + 1)..].Trim();
             if (value.Length == 0 || !TryRange(range, out uint start, out uint end)) continue;
-            yield return new RangeRecord(start, end, value);
+            bool first = true;
+            int rowLimit = maxExpandedRows ?? IngestSizing.ResolveApplyTransactionRows();
+            int multiplier = Math.Max(1, outputRowsPerCodepoint?.Invoke(value) ?? 1);
+            uint window = checked((uint)Math.Max(
+                1, rowLimit / multiplier - 1));
+            for (uint cursor = start; cursor <= end;)
+            {
+                uint chunkEnd = (uint)Math.Min((ulong)end, (ulong)cursor + window - 1UL);
+                yield return new RangeRecord(cursor, chunkEnd, value, first);
+                first = false;
+                if (chunkEnd == uint.MaxValue) break;
+                cursor = chunkEnd + 1;
+            }
         }
     }
 
     internal static async IAsyncEnumerable<BinaryPropertyRange> BinaryPropertyRangesAsync(
         string path,
-        [EnumeratorCancellation] CancellationToken ct)
+        [EnumeratorCancellation] CancellationToken ct,
+        int? maxExpandedRows = null)
     {
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(path, ct))
         {
@@ -196,7 +235,17 @@ internal static class UnicodePhysicalArtifactParser
             if (property.Length == 0
                 || !TryRange(fields[0].Trim(), out uint start, out uint end))
                 continue;
-            yield return new BinaryPropertyRange(start, end, property);
+            bool first = true;
+            uint window = checked((uint)Math.Max(
+                1, (maxExpandedRows ?? IngestSizing.ResolveApplyTransactionRows()) - 2));
+            for (uint cursor = start; cursor <= end;)
+            {
+                uint chunkEnd = (uint)Math.Min((ulong)end, (ulong)cursor + window - 1UL);
+                yield return new BinaryPropertyRange(cursor, chunkEnd, property, first);
+                first = false;
+                if (chunkEnd == uint.MaxValue) break;
+                cursor = chunkEnd + 1;
+            }
         }
     }
 
@@ -690,6 +739,124 @@ internal static class UnicodePhysicalArtifactParser
                 first = false;
                 if (cp == 0x10FFFFu) break;
             }
+        }
+    }
+
+    internal static async IAsyncEnumerable<BoundaryTestRow> BoundaryTestsAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (ReadOnlyMemory<byte> lineMemory in
+                       StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            if (lineMemory.IsEmpty) continue;
+            string line = Encoding.UTF8.GetString(lineMemory.Span);
+            int commentAt = line.IndexOf('#');
+            string rule = (commentAt >= 0 ? line[..commentAt] : line).Trim();
+            if (rule.Length == 0) continue;
+            string description = commentAt >= 0 ? line[(commentAt + 1)..].Trim() : string.Empty;
+            string[] tokens = rule.Split(
+                (char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (tokens.Length < 3 || tokens.Length % 2 == 0) continue;
+
+            var sequence = new StringBuilder(tokens.Length / 2);
+            var boundaries = new StringBuilder(tokens.Length / 2 + 1);
+            bool valid = true;
+            for (int i = 0; i < tokens.Length; ++i)
+            {
+                if ((i & 1) == 0)
+                {
+                    if (tokens[i] is not ("÷" or "×")) { valid = false; break; }
+                    boundaries.Append(tokens[i]);
+                    continue;
+                }
+                if (!uint.TryParse(
+                        tokens[i], NumberStyles.HexNumber, CultureInfo.InvariantCulture,
+                        out uint codepoint)
+                    || !Rune.TryCreate(codepoint, out Rune rune))
+                {
+                    valid = false;
+                    break;
+                }
+                sequence.Append(rune.ToString());
+            }
+            if (valid && sequence.Length != 0)
+                yield return new BoundaryTestRow(
+                    sequence.ToString(), boundaries.ToString(), description);
+        }
+    }
+
+    internal static async IAsyncEnumerable<NormalizationTestRow> NormalizationTestsAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (ReadOnlyMemory<byte> lineMemory in
+                       StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            if (lineMemory.IsEmpty) continue;
+            string line = Encoding.UTF8.GetString(lineMemory.Span);
+            int commentAt = line.IndexOf('#');
+            string rule = (commentAt >= 0 ? line[..commentAt] : line).Trim();
+            if (rule.Length == 0 || rule[0] == '@') continue;
+            string[] fields = rule.Split(';', StringSplitOptions.TrimEntries);
+            if (fields.Length < 5
+                || !TryHexSequenceText(fields[0], out string source)
+                || !TryHexSequenceText(fields[1], out string nfc)
+                || !TryHexSequenceText(fields[2], out string nfd)
+                || !TryHexSequenceText(fields[3], out string nfkc)
+                || !TryHexSequenceText(fields[4], out string nfkd))
+                throw new InvalidDataException(
+                    $"NormalizationTest has an invalid conformance row: '{rule}'.");
+            yield return new NormalizationTestRow(
+                source, nfc, nfd, nfkc, nfkd,
+                commentAt >= 0 ? line[(commentAt + 1)..].Trim() : string.Empty);
+        }
+    }
+
+    internal static async IAsyncEnumerable<EmojiTestRow> EmojiTestsAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        string group = string.Empty;
+        string subgroup = string.Empty;
+        await foreach (ReadOnlyMemory<byte> lineMemory in
+                       StreamingUtf8LineReader.ReadLinesAsync(path, ct))
+        {
+            if (lineMemory.IsEmpty) continue;
+            string line = Encoding.UTF8.GetString(lineMemory.Span).Trim();
+            if (line.StartsWith("# group:", StringComparison.Ordinal))
+            {
+                group = line[8..].Trim();
+                continue;
+            }
+            if (line.StartsWith("# subgroup:", StringComparison.Ordinal))
+            {
+                subgroup = line[11..].Trim();
+                continue;
+            }
+            if (line.Length == 0 || line[0] == '#') continue;
+
+            int hash = line.IndexOf('#');
+            string rule = (hash >= 0 ? line[..hash] : line).Trim();
+            string comment = hash >= 0 ? line[(hash + 1)..].Trim() : string.Empty;
+            string[] fields = rule.Split(';', StringSplitOptions.TrimEntries);
+            if (fields.Length < 2
+                || !TryHexSequenceText(fields[0], out string sequence)
+                || fields[1].Length == 0)
+                throw new InvalidDataException($"emoji-test has an invalid row: '{rule}'.");
+
+            string version = string.Empty;
+            string name = comment;
+            string[] commentParts = comment.Split(
+                (char[]?)null, 3,
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (commentParts.Length >= 2 && commentParts[1].StartsWith('E'))
+            {
+                version = commentParts[1];
+                name = commentParts.Length >= 3 ? commentParts[2] : string.Empty;
+            }
+            yield return new EmojiTestRow(
+                sequence, fields[1], version, name, group, subgroup);
         }
     }
 

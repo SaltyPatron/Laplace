@@ -424,6 +424,15 @@ public static class IngestSizing
         return IntCount(envelope / connections / Math.Max(1, transitBytesPerRow));
     }
 
+    /// <summary>
+    /// Maximum expanded rows owned by one apply transaction. The limiting domain
+    /// is one PostgreSQL backend's private executor grant, not the larger client
+    /// working-set envelope.
+    /// </summary>
+    public static int ResolveApplyTransactionRows() => IntCount(
+        PostgresResourcePlan.Current.WorkMemBytes
+        / MemoryTopology.AttestationMergeTransitBytesPerRow);
+
     private static int IntCount(long value) =>
         (int)Math.Clamp(value, 1, int.MaxValue);
 

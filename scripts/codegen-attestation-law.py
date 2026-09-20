@@ -150,7 +150,7 @@ def c_hash(hi: int, lo: int) -> str:
 
 
 def emit_dynamic_resolvers(dynamic: dict, ranks: dict) -> str:
-    """Codegen DEP_/EDEP_/FEAT_ dynamic family resolvers."""
+    """Codegen governed dynamic-family resolvers."""
 
     def rank_val(key: str) -> float:
         return float(ranks.get(key, 0.09))
@@ -158,10 +158,12 @@ def emit_dynamic_resolvers(dynamic: dict, ranks: dict) -> str:
     dep = dynamic.get("deprel", {})
     edep = dynamic.get("enhanced_deprel", {})
     feat = dynamic.get("feature", {})
+    ucd = dynamic.get("ucd_property", {})
 
     dep_rank = rank_val(dep.get("rank", "partitive"))
     edep_rank = rank_val(edep.get("rank", "partitive"))
     feat_rank = rank_val(feat.get("rank", "partitive"))
+    ucd_rank = rank_val(ucd.get("rank", "standards_structural"))
 
     sym_map = {
         "symmetric": "LAPLACE_REL_SYMMETRY_SYMMETRIC",
@@ -170,6 +172,7 @@ def emit_dynamic_resolvers(dynamic: dict, ranks: dict) -> str:
     dep_sym = sym_map.get(dep.get("symmetry", "asymmetric"), "LAPLACE_REL_SYMMETRY_ASYMMETRIC")
     edep_sym = sym_map.get(edep.get("symmetry", "asymmetric"), "LAPLACE_REL_SYMMETRY_ASYMMETRIC")
     feat_sym = sym_map.get(feat.get("symmetry", "asymmetric"), "LAPLACE_REL_SYMMETRY_ASYMMETRIC")
+    ucd_sym = sym_map.get(ucd.get("symmetry", "asymmetric"), "LAPLACE_REL_SYMMETRY_ASYMMETRIC")
 
     return f"""
 static void dyn_trim(char* s) {{
@@ -325,6 +328,19 @@ int laplace_relation_resolve_feature(
                                 {feat_rank}, {feat_sym},
                                 out_type_id, out_rank, out_symmetry, out_flip, out_parent_id);
 }}
+
+int laplace_relation_resolve_ucd_property(
+    const char* property_name,
+    hash128_t* out_type_id,
+    double* out_rank,
+    laplace_rel_symmetry_t* out_symmetry,
+    uint8_t* out_flip,
+    hash128_t* out_parent_id) {{
+    return dyn_resolve_prefixed(property_name, "{ucd.get('prefix', 'UCD_')}", '\\0',
+                                "{ucd.get('root', 'HAS_ATTRIBUTE')}", {1 if ucd.get('lowercase_input', False) else 0},
+                                {ucd_rank}, {ucd_sym},
+                                out_type_id, out_rank, out_symmetry, out_flip, out_parent_id);
+}}
 """
 
 
@@ -400,6 +416,9 @@ int laplace_relation_resolve_enhanced_deprel(const char* deprel, hash128_t* out_
 int laplace_relation_resolve_feature(const char* feature_name, hash128_t* out_type_id,
                                      double* out_rank, laplace_rel_symmetry_t* out_symmetry,
                                      uint8_t* out_flip, hash128_t* out_parent_id);
+int laplace_relation_resolve_ucd_property(const char* property_name, hash128_t* out_type_id,
+                                          double* out_rank, laplace_rel_symmetry_t* out_symmetry,
+                                          uint8_t* out_flip, hash128_t* out_parent_id);
 
 #ifdef __cplusplus
 }

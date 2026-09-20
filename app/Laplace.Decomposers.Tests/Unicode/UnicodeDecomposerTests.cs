@@ -1,5 +1,8 @@
 using System.Collections.Immutable;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Tests;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -269,6 +272,276 @@ public sealed class UnicodeDecomposerTests
     }
 
     [Fact]
+    public async Task Range_parser_windows_expansion_without_changing_source_row_accounting()
+    {
+        string file = Path.Combine(
+            Path.GetTempPath(), "laplace-range-window-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            await File.WriteAllTextAsync(file, "0000..0009 ; Alphabetic\n");
+            var rows = new List<UnicodePhysicalArtifactParser.BinaryPropertyRange>();
+            await foreach (var row in UnicodePhysicalArtifactParser.BinaryPropertyRangesAsync(
+                               file, CancellationToken.None, maxExpandedRows: 5))
+                rows.Add(row);
+
+            Assert.Equal(4, rows.Count);
+            Assert.Equal([(uint)3, 3, 3, 1], rows.Select(static r => r.End - r.Start + 1));
+            Assert.True(rows[0].CountsSourceRow);
+            Assert.All(rows.Skip(1), static row => Assert.False(row.CountsSourceRow));
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public async Task Range_parser_accounts_for_multi_relation_expansion()
+    {
+        string file = Path.Combine(
+            Path.GetTempPath(), "laplace-range-multi-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            await File.WriteAllTextAsync(file, "0041..0048 ; Latn Grek Cyrl\n");
+            var rows = new List<UnicodePhysicalArtifactParser.RangeRecord>();
+            await foreach (var row in UnicodePhysicalArtifactParser.RangeRecordsAsync(
+                               file,
+                               CancellationToken.None,
+                               maxExpandedRows: 9,
+                               outputRowsPerCodepoint: static value => value.Split(
+                                   ' ', StringSplitOptions.RemoveEmptyEntries).Length))
+                rows.Add(row);
+
+            Assert.Equal(4, rows.Count);
+            Assert.All(rows, static row => Assert.Equal((uint)2, row.End - row.Start + 1));
+            Assert.True(rows[0].CountsSourceRow);
+            Assert.All(rows.Skip(1), static row => Assert.False(row.CountsSourceRow));
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void Ucdxml_recipe_accounts_for_binary_reference_content_and_top_level_structures()
+    {
+        string file = Path.Combine(
+            Path.GetTempPath(), "laplace-property-aliases-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            File.WriteAllText(file,
+                "gc ; General_Category\n"
+                + "WSpace ; White_Space\n"
+                + "kDefinition ; kDefinition\n");
+
+            UcdXmlRecipe recipe = UcdXmlRecipe.Load(file);
+            SourceRecipeField gc = recipe.Recipe.Field("repertoire/*/@gc");
+            SourceRecipeField whiteSpace = recipe.Recipe.Field("repertoire/*/@WSpace");
+            SourceRecipeField definition = recipe.Recipe.Field("repertoire/*/@kDefinition");
+
+            Assert.Equal("General_Category", gc.PropertyName);
+            Assert.Equal(SourceValueKind.Enumerated, gc.ValueKind);
+            Assert.Equal(SourceValueKind.Boolean, whiteSpace.ValueKind);
+            Assert.Equal("White_Space", whiteSpace.PropertyName);
+            Assert.Equal(SourceValueKind.Text, definition.ValueKind);
+            Assert.True(definition.Disposition.HasFlag(SourceFieldDisposition.Content));
+            Assert.Contains(recipe.Recipe.Structures,
+                static s => s.SyntaxPath == "named-sequences");
+            Assert.Contains(recipe.Recipe.Structures,
+                static s => s.SyntaxPath == "do-not-emit");
+            Assert.Equal(UcdXmlRecipe.RepertoireAttributes.Length + 16, recipe.Recipe.Fields.Count);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [SkippableFact]
+    [Trait("Tier", "perf")]
+    [Trait("Scope", "full-corpus")]
+    public async Task Ucdxml_recipe_accounts_for_the_complete_selected_provider_schema()
+    {
+        string aliases = Path.Combine(TestIngestPaths.UcdLatest, "ucd", "PropertyAliases.txt");
+        string archivePath = Path.Combine(
+            TestIngestPaths.UcdLatest, "ucdxml", "ucd.all.flat.zip");
+        Skip.IfNot(File.Exists(aliases) && File.Exists(archivePath),
+            $"selected UCD generation is not present at {TestIngestPaths.UcdLatest}");
+
+        UcdXmlRecipe recipe = UcdXmlRecipe.Load(aliases);
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        ZipArchiveEntry entry = Assert.Single(archive.Entries);
+        await using Stream xml = entry.Open();
+        await recipe.ValidateProviderAsync(xml);
+    }
+
+    [SkippableFact]
+    [Trait("Tier", "perf")]
+    [Trait("Scope", "full-corpus")]
+    public async Task Unicode_snapshot_replays_the_exact_inflated_xml_bytes()
+    {
+        string xmlPath = Path.Combine(
+            TestIngestPaths.UcdLatest, "ucdxml", "ucd.all.flat.zip");
+        string ducetPath = Path.Combine(TestIngestPaths.UcdLatest, "uca", "allkeys.txt");
+        Skip.IfNot(File.Exists(xmlPath) && File.Exists(ducetPath),
+            $"selected UCD generation is not present at {TestIngestPaths.UcdLatest}");
+
+        using UnicodeSeedSnapshot snapshot = UnicodeSeed.OpenSnapshot(xmlPath, ducetPath);
+        await using Stream replay = snapshot.OpenUcdXmlStream();
+        byte[] actual = await SHA256.HashDataAsync(replay);
+
+        using ZipArchive archive = ZipFile.OpenRead(xmlPath);
+        ZipArchiveEntry entry = Assert.Single(archive.Entries);
+        await using Stream expectedStream = entry.Open();
+        byte[] expected = await SHA256.HashDataAsync(expectedStream);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void Ucd_property_relations_are_typed_dynamic_children_of_has_attribute()
+    {
+        RelationTypeRegistry.RelationTypeResolution relation =
+            RelationTypeRegistry.ResolveUcdProperty("General_Category");
+
+        Assert.Equal("UCD_GENERAL_CATEGORY", relation.Canonical);
+        Assert.Equal(RelationTypeRegistry.RelationTypeId("HAS_ATTRIBUTE"), relation.ParentId);
+        Assert.Equal(RelationTypeRegistry.Symmetry.Asymmetric, relation.Symmetry);
+    }
+
+    [Fact]
+    public void Ucd_recipe_reuses_iso15924_script_identity()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(), "laplace-ucd-aliases-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string properties = Path.Combine(root, "PropertyAliases.txt");
+            File.WriteAllText(properties, "sc ; Script\nscx ; Script_Extensions\nblk ; Block\n");
+            File.WriteAllText(
+                Path.Combine(root, "PropertyValueAliases.txt"),
+                "sc ; Latn ; Latin\nblk ; ASCII ; Basic_Latin\n");
+
+            UcdXmlRecipe recipe = UcdXmlRecipe.Load(properties);
+            Assert.Equal("Latin", recipe.CanonicalValue("Script", "Latn"));
+            Assert.Equal("Latin", recipe.CanonicalValue("Script_Extensions", "Latn"));
+            Assert.Equal("Basic_Latin", recipe.CanonicalValue("Block", "Basic Latin"));
+            Assert.Equal(
+                LanguageGraph.ScriptEntityId("Latin"),
+                Hash128.OfCanonical("unicode/script/Latin/v1"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Ucd_structured_references_preserve_every_target_and_source_qualifier()
+    {
+        IReadOnlyList<UcdXmlRecipe.StructuredCodepointReference> references =
+            UcdXmlRecipe.ParseStructuredReferences(
+                "repertoire/*/@kSemanticVariant",
+                "U+5EDD<kMatthews U+53AE<kFenn,kMatthews");
+
+        Assert.Equal(2, references.Count);
+        Assert.Equal(0x5EDDu, references[0].Codepoint);
+        Assert.Equal("kMatthews", references[0].Qualifier);
+        Assert.Equal(0x53AEu, references[1].Codepoint);
+        Assert.Equal("kFenn,kMatthews", references[1].Qualifier);
+        Assert.Throws<InvalidDataException>(() =>
+            UcdXmlRecipe.ParseStructuredReferences(
+                "repertoire/*/@kSemanticVariant", "kMatthews"));
+    }
+
+    [Fact]
+    public async Task Normalization_test_parser_preserves_all_five_sequences_and_description()
+    {
+        string file = Path.Combine(
+            Path.GetTempPath(), "laplace-normalization-test-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            await File.WriteAllTextAsync(file,
+                "@Part0 # Specific cases\n"
+                + "1E0A 0323;1E0C 0307;0044 0323 0307;1E0C 0307;0044 0323 0307; # exact case\n");
+            var rows = new List<UnicodePhysicalArtifactParser.NormalizationTestRow>();
+            await foreach (var row in UnicodePhysicalArtifactParser.NormalizationTestsAsync(
+                               file, CancellationToken.None))
+                rows.Add(row);
+
+            UnicodePhysicalArtifactParser.NormalizationTestRow parsed = Assert.Single(rows);
+            Assert.Equal("Ḍ̇", parsed.Source);
+            Assert.Equal("Ḍ̇", parsed.Nfc);
+            Assert.Equal("Ḍ̇", parsed.Nfd);
+            Assert.Equal(parsed.Nfc, parsed.Nfkc);
+            Assert.Equal(parsed.Nfd, parsed.Nfkd);
+            Assert.Equal("exact case", parsed.Description);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public async Task Emoji_test_parser_preserves_sequence_qualification_version_and_palette_groups()
+    {
+        string file = Path.Combine(
+            Path.GetTempPath(), "laplace-emoji-test-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            await File.WriteAllTextAsync(file,
+                "# group: Smileys & Emotion\n"
+                + "# subgroup: face-smiling\n"
+                + "1F600 ; fully-qualified # 😀 E1.0 grinning face\n");
+            var rows = new List<UnicodePhysicalArtifactParser.EmojiTestRow>();
+            await foreach (var row in UnicodePhysicalArtifactParser.EmojiTestsAsync(
+                               file, CancellationToken.None))
+                rows.Add(row);
+
+            UnicodePhysicalArtifactParser.EmojiTestRow parsed = Assert.Single(rows);
+            Assert.Equal("😀", parsed.Sequence);
+            Assert.Equal("fully-qualified", parsed.Status);
+            Assert.Equal("E1.0", parsed.Version);
+            Assert.Equal("grinning face", parsed.Name);
+            Assert.Equal("Smileys & Emotion", parsed.Group);
+            Assert.Equal("face-smiling", parsed.Subgroup);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void Binary_property_negative_is_refuting_testimony_on_the_same_typed_cell()
+    {
+        Hash128 source = Hash128.OfCanonical("test/unicode/source");
+        Hash128 relation = RelationTypeRegistry.ResolveUcdProperty("White_Space").Id;
+        using var builder = new SubstrateChangeBuilder(
+            source, "test/unicode/binary-refute", null,
+            entityCapacity: 0, physicalityCapacity: 0, attestationCapacity: 1);
+
+        NativeAttestation.AddCodepointRange(
+            builder.ContentStage, 0x41, 0x41, relation, objectId: null,
+            sourceId: source, contextId: null, sourceTrust: SourceTrust.StandardsDerived,
+            confirm: false);
+        SubstrateChange change = builder.Build();
+        var decoded = new List<AttestationRow>();
+        CopyTupleParser.DecodeAttestations(
+            change.IntentStages.Select(
+                static stage => stage.TupleBuffer(IntentStageTable.Attestations)).ToList(),
+            decoded);
+
+        AttestationRow row = Assert.Single(decoded);
+        Assert.Equal(AttestationOutcome.Refute, row.Outcome);
+        Assert.Equal(relation, row.TypeId);
+        Assert.Null(row.ObjectId);
+        Assert.Null(row.ContextId);
+    }
+
+    [Fact]
     public async Task Unihan_parser_preserves_property_name_and_exact_value()
     {
         string file = Path.Combine(Path.GetTempPath(), "laplace-unihan-" + Guid.NewGuid().ToString("N") + ".txt");
@@ -283,6 +556,32 @@ public sealed class UnicodeDecomposerTests
             Assert.Equal((uint)0x4E00, parsed.Codepoint);
             Assert.Equal("kDefinition", parsed.Property);
             Assert.Equal("one; a, an; alone", parsed.Value);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public async Task Uax_boundary_test_parser_preserves_sequence_breaks_and_explanation()
+    {
+        string file = Path.Combine(
+            Path.GetTempPath(), "laplace-grapheme-test-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            await File.WriteAllTextAsync(
+                file, "÷ 000D × 000A ÷ # CR × LF ÷ [0.3]\n");
+            var rows = new List<UnicodePhysicalArtifactParser.BoundaryTestRow>();
+            await foreach (UnicodePhysicalArtifactParser.BoundaryTestRow row in
+                           UnicodePhysicalArtifactParser.BoundaryTestsAsync(
+                               file, CancellationToken.None))
+                rows.Add(row);
+
+            UnicodePhysicalArtifactParser.BoundaryTestRow parsed = Assert.Single(rows);
+            Assert.Equal("\r\n", parsed.Sequence);
+            Assert.Equal("÷×÷", parsed.Boundaries);
+            Assert.Equal("CR × LF ÷ [0.3]", parsed.Description);
         }
         finally
         {

@@ -20,12 +20,17 @@ int laplace_attestation_codepoint_range_add(
     uint32_t last_codepoint,
     const hash128_t* type_id,
     const hash128_t* object_id,
+    uint8_t object_is_null,
     const hash128_t* source_id,
     const hash128_t* context_id,
     uint8_t context_is_null,
     double source_trust,
+    int confirm,
     int64_t observation_count) {
-    if (!stage || !type_id || !object_id || !source_id
+    if (!stage || !type_id || object_is_null > 1
+        || (!object_is_null && !object_id) || !source_id
+        || context_is_null > 1 || (!context_is_null && !context_id)
+        || (confirm != 0 && confirm != 1)
         || first_codepoint > last_codepoint || last_codepoint > 0x10FFFFu
         || observation_count <= 0) return -1;
 
@@ -40,9 +45,9 @@ int laplace_attestation_codepoint_range_add(
             hash128_t subject;
             hash128_blake3(u8, len, &subject);
             int rc = laplace_attestation_resolved_build(
-                &subject, type_id, object_id, 0, source_id,
+                &subject, type_id, object_id, object_is_null, source_id,
                 context_is_null ? NULL : context_id, context_is_null,
-                source_trust, 1, observation_count, 0, &staged[n]);
+                source_trust, confirm, observation_count, 0, &staged[n]);
             if (rc != 0) return rc;
             ++n;
             if (cp == 0x10FFFFu) { ++cp; break; }
@@ -50,6 +55,63 @@ int laplace_attestation_codepoint_range_add(
         }
         if (laplace_attestation_staged_batch_add(stage, staged, n, NULL) != 0)
             return -2;
+    }
+    return 0;
+}
+
+int laplace_attestation_codepoint_range_relations_add(
+    intent_stage_t* stage,
+    uint32_t first_codepoint,
+    uint32_t last_codepoint,
+    const laplace_codepoint_range_relation_t* relations,
+    size_t relation_count,
+    const hash128_t* source_id,
+    double source_trust) {
+    if (!stage || (!relations && relation_count) || !source_id
+        || first_codepoint > last_codepoint || last_codepoint > 0x10FFFFu
+        || !isfinite(source_trust) || source_trust < 0.0 || source_trust > 1.0)
+        return -1;
+    if (relation_count == 0) return 0;
+
+    enum { CHUNK = 256 };
+    laplace_attestation_staged_t staged[CHUNK];
+    uint32_t cp = first_codepoint;
+    while (cp <= last_codepoint) {
+        uint8_t u8[4];
+        size_t len = laplace_utf8_encode(cp, u8);
+        hash128_t subject;
+        hash128_blake3(u8, len, &subject);
+
+        for (size_t start = 0; start < relation_count; start += CHUNK) {
+            size_t count = relation_count - start;
+            if (count > CHUNK) count = CHUNK;
+            for (size_t i = 0; i < count; ++i) {
+                const laplace_codepoint_range_relation_t* relation = &relations[start + i];
+                if ((relation->object_is_null != 0 && relation->object_is_null != 1)
+                    || (relation->context_is_null != 0 && relation->context_is_null != 1)
+                    || (relation->confirm != 0 && relation->confirm != 1)
+                    || relation->reserved != 0 || relation->observation_count <= 0)
+                    return -1;
+                int rc = laplace_attestation_resolved_build(
+                    &subject,
+                    &relation->type_id,
+                    relation->object_is_null ? NULL : &relation->object_id,
+                    (uint8_t)relation->object_is_null,
+                    source_id,
+                    relation->context_is_null ? NULL : &relation->context_id,
+                    (uint8_t)relation->context_is_null,
+                    source_trust,
+                    relation->confirm,
+                    relation->observation_count,
+                    0,
+                    &staged[i]);
+                if (rc != 0) return rc;
+            }
+            if (laplace_attestation_staged_batch_add(stage, staged, count, NULL) != 0)
+                return -2;
+        }
+        if (cp == 0x10FFFFu) break;
+        ++cp;
     }
     return 0;
 }
@@ -863,4 +925,3 @@ int laplace_attestation_pos_xpos(
         stage, "HAS_XPOS", subject, xpos_entity, 0, source, context, context_is_null,
         trust_weight, 1, observation_count);
 }
-

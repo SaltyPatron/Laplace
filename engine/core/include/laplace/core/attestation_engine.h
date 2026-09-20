@@ -52,6 +52,9 @@ int laplace_relation_resolve_enhanced_deprel(const char* deprel, hash128_t* out_
 int laplace_relation_resolve_feature(const char* feature_name, hash128_t* out_type_id,
                                      double* out_rank, laplace_rel_symmetry_t* out_symmetry,
                                      uint8_t* out_flip, hash128_t* out_parent_id);
+int laplace_relation_resolve_ucd_property(const char* property_name, hash128_t* out_type_id,
+                                          double* out_rank, laplace_rel_symmetry_t* out_symmetry,
+                                          uint8_t* out_flip, hash128_t* out_parent_id);
 
 size_t      laplace_relation_manifest_count(void);
 const char* laplace_relation_manifest_canonical(size_t idx);
@@ -278,11 +281,36 @@ int laplace_attestation_codepoint_range_add(
     uint32_t last_codepoint,
     const hash128_t* type_id,
     const hash128_t* object_id,
+    uint8_t object_is_null,
     const hash128_t* source_id,
     const hash128_t* context_id,
     uint8_t context_is_null,
     double source_trust,
+    int confirm,
     int64_t observation_count);
+
+typedef struct {
+    hash128_t type_id;
+    hash128_t object_id;
+    hash128_t context_id;
+    int32_t object_is_null;
+    int32_t context_is_null;
+    int32_t confirm;
+    int32_t reserved;
+    int64_t observation_count;
+} laplace_codepoint_range_relation_t;
+
+/* One source record -> one native call for every property asserted across its
+ * codepoint range. The codepoint identity is encoded/hashed once, then reused
+ * across the complete relation vector. */
+int laplace_attestation_codepoint_range_relations_add(
+    intent_stage_t* stage,
+    uint32_t first_codepoint,
+    uint32_t last_codepoint,
+    const laplace_codepoint_range_relation_t* relations,
+    size_t relation_count,
+    const hash128_t* source_id,
+    double source_trust);
 
 int laplace_attestation_witness_batch_add(
     intent_stage_t*                        stage,

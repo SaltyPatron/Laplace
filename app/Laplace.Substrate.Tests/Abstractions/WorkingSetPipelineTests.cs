@@ -134,6 +134,53 @@ public sealed class WorkingSetPipelineTests
     }
 
     [Fact]
+    public async Task WorkingSet_OutputExpansionClosesBeforeApplyTransactionLimit()
+    {
+        var config = new IngestBatchConfig
+        {
+            SourceId = TestSource,
+            BatchLabelPrefix = "working-set-expanded-output",
+            BatchSize = 100,
+            ProbeChunkSize = 100,
+            WorkingSet = true,
+            WorkingSetProbeInterval = 100,
+            MaxOutputRows = 10,
+        };
+        var handler = new DirectComposeHandler<int>(
+            (record, builder) =>
+            {
+                for (int row = 0; row < 6; ++row)
+                {
+                    Hash128 id = Hash128.OfCanonical($"expanded/{record}/{row}");
+                    builder.ContentStage.AddEntity(id, EntityTier.Word, TestSource, TestSource);
+                }
+            },
+            estimatedOutputRows: static _ => 6);
+        var changes = new List<SubstrateChange>();
+        try
+        {
+            await foreach (SubstrateChange change in IngestBatchPipeline.RunAsync(
+                               new IngestBatchPipeline.ListRecordStream<int>([1, 2, 3]),
+                               handler,
+                               config))
+                changes.Add(change);
+
+            Assert.Equal(3, changes.Count);
+            Assert.All(changes, static change =>
+            {
+                Assert.Equal(1, change.Metadata.InputUnitsConsumed);
+                Assert.Equal(6, Assert.Single(change.IntentStages).EntityCount);
+            });
+        }
+        finally
+        {
+            foreach (SubstrateChange change in changes)
+                foreach (IntentStage stage in change.IntentStages)
+                    stage.Dispose();
+        }
+    }
+
+    [Fact]
     public void WorkingSetConcurrency_RecomputesRecordAndProbeCapsFromSharedEnvelope()
     {
         var profile = IngestSourceProfile.UdSentence;

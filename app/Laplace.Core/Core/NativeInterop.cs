@@ -808,6 +808,15 @@ public static unsafe partial class NativeInterop
         byte* outFlip,
         Hash128* outParentId);
 
+    [LibraryImport(Library, EntryPoint = "laplace_relation_resolve_ucd_property", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int RelationResolveUcdProperty(
+        string propertyName,
+        Hash128* outTypeId,
+        double* outRank,
+        int* outSymmetry,
+        byte* outFlip,
+        Hash128* outParentId);
+
     [LibraryImport(Library, EntryPoint = "laplace_attestation_categorical_build", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int AttestationCategoricalBuild(
         string surfaceRelation,
@@ -900,9 +909,28 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_attestation_codepoint_range_add")]
     internal static unsafe partial int AttestationCodepointRangeAdd(
         IntPtr stage, uint firstCodepoint, uint lastCodepoint,
-        Hash128* typeId, Hash128* objectId, Hash128* sourceId,
+        Hash128* typeId, Hash128* objectId, byte objectIsNull, Hash128* sourceId,
         Hash128* contextId, byte contextIsNull,
-        double sourceTrust, long observationCount);
+        double sourceTrust, int confirm, long observationCount);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CodepointRangeRelationNative
+    {
+        internal Hash128 TypeId;
+        internal Hash128 ObjectId;
+        internal Hash128 ContextId;
+        internal int ObjectIsNull;
+        internal int ContextIsNull;
+        internal int Confirm;
+        internal int Reserved;
+        internal long ObservationCount;
+    }
+
+    [LibraryImport(Library, EntryPoint = "laplace_attestation_codepoint_range_relations_add")]
+    internal static unsafe partial int AttestationCodepointRangeRelationsAdd(
+        IntPtr stage, uint firstCodepoint, uint lastCodepoint,
+        CodepointRangeRelationNative* relations, nuint relationCount,
+        Hash128* sourceId, double sourceTrust);
 
     [LibraryImport(Library, EntryPoint = "laplace_attestation_aggregated_batch_build")]
     internal static partial int AttestationAggregatedBatchBuild(

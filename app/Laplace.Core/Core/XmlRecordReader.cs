@@ -78,6 +78,18 @@ public static class XmlRecordReader
             yield return frame;
     }
 
+    public static async IAsyncEnumerable<XmlRecordFrame> ReadAsync(
+        Stream stream,
+        int recordDepth,
+        int bufferSize = 128 * 1024,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await foreach (XmlRecordFrame frame in ReadAsync(
+            stream, recordDepth, bufferSize, observeBufferedCharacters: null, ct: ct)
+            .ConfigureAwait(false))
+            yield return frame;
+    }
+
     internal static async IAsyncEnumerable<XmlRecordFrame> ReadAsync(
         Stream stream,
         int recordDepth,

@@ -18,6 +18,14 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_unicode_seed_snapshot_count")]
     internal static partial nuint UnicodeSeedSnapshotCount(IntPtr snapshot);
 
+    [LibraryImport(Library, EntryPoint = "laplace_unicode_seed_snapshot_xml_copy")]
+    internal static partial int UnicodeSeedSnapshotXmlCopy(
+        IntPtr snapshot,
+        nuint offset,
+        byte* destination,
+        nuint destinationCapacity,
+        nuint* outCopied);
+
     [LibraryImport(Library, EntryPoint = "laplace_unicode_seed_snapshot_stage")]
     internal static partial int UnicodeSeedSnapshotStage(
         IntPtr snapshot, nuint first, nuint count, IntPtr stage, Hash128* sourceId);

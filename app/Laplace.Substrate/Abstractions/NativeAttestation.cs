@@ -5,6 +5,13 @@ namespace Laplace.Decomposers.Abstractions;
 
 public static class NativeAttestation
 {
+    public readonly record struct CodepointRangeRelation(
+        Hash128 TypeId,
+        Hash128? ObjectId,
+        Hash128? ContextId,
+        bool Confirm = true,
+        long ObservationCount = 1);
+
     public static unsafe List<int> CorroboratedIndexes(ReadOnlySpan<short> left, ReadOnlySpan<short> right)
     {
         if (left.Length != right.Length) throw new ArgumentException("Candidate outcome arrays must align.");
@@ -293,26 +300,73 @@ public static class NativeAttestation
         uint firstCodepoint,
         uint lastCodepoint,
         Hash128 typeId,
-        Hash128 objectId,
+        Hash128? objectId,
         Hash128 sourceId,
         Hash128? contextId,
         double sourceTrust,
+        bool confirm = true,
         long observationCount = 1)
     {
         ArgumentNullException.ThrowIfNull(stage);
-        Hash128 type = typeId, obj = objectId, source = sourceId;
+        Hash128 type = typeId, obj = objectId ?? default, source = sourceId;
         Hash128 context = contextId ?? default;
         int rc = NativeInterop.AttestationCodepointRangeAdd(
             stage.DangerousNativeHandle,
             firstCodepoint, lastCodepoint,
-            &type, &obj, &source,
+            &type, objectId is null ? null : &obj,
+            (byte)(objectId is null ? 1 : 0), &source,
             contextId is null ? null : &context,
             (byte)(contextId is null ? 1 : 0),
-            sourceTrust, observationCount);
+            sourceTrust, confirm ? 1 : 0, observationCount);
         GC.KeepAlive(stage);
         if (rc != 0)
             throw new InvalidOperationException(
                 $"native codepoint-range attestation staging failed (rc={rc}, range=U+{firstCodepoint:X4}..U+{lastCodepoint:X4})");
+    }
+
+    public static unsafe void AddCodepointRangeRelations(
+        IntentStage stage,
+        uint firstCodepoint,
+        uint lastCodepoint,
+        ReadOnlySpan<CodepointRangeRelation> relations,
+        Hash128 sourceId,
+        double sourceTrust)
+    {
+        ArgumentNullException.ThrowIfNull(stage);
+        if (relations.IsEmpty) return;
+        var native = new NativeInterop.CodepointRangeRelationNative[relations.Length];
+        for (int i = 0; i < relations.Length; ++i)
+        {
+            CodepointRangeRelation relation = relations[i];
+            if (relation.ObservationCount <= 0)
+                throw new ArgumentOutOfRangeException(nameof(relations));
+            native[i] = new NativeInterop.CodepointRangeRelationNative
+            {
+                TypeId = relation.TypeId,
+                ObjectId = relation.ObjectId ?? default,
+                ContextId = relation.ContextId ?? default,
+                ObjectIsNull = relation.ObjectId is null ? 1 : 0,
+                ContextIsNull = relation.ContextId is null ? 1 : 0,
+                Confirm = relation.Confirm ? 1 : 0,
+                ObservationCount = relation.ObservationCount,
+            };
+        }
+
+        fixed (NativeInterop.CodepointRangeRelationNative* request = native)
+        {
+            int rc = NativeInterop.AttestationCodepointRangeRelationsAdd(
+                stage.DangerousNativeHandle,
+                firstCodepoint,
+                lastCodepoint,
+                request,
+                (nuint)native.Length,
+                &sourceId,
+                sourceTrust);
+            GC.KeepAlive(stage);
+            if (rc != 0)
+                throw new InvalidOperationException(
+                    $"native codepoint range-relation staging failed (rc={rc}, range=U+{firstCodepoint:X4}..U+{lastCodepoint:X4}, relations={native.Length})");
+        }
     }
 
 

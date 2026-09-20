@@ -77,7 +77,8 @@ internal static class IngestDescentFlush
         ISet<Hash128>? probedAbsent,
         CancellationToken ct,
         long residentBudgetBytes = long.MaxValue,
-        bool rootsAlreadyProbed = false)
+        bool rootsAlreadyProbed = false,
+        long outputRowBudget = long.MaxValue)
     {
         var batch = new WorkingSetDeferredBatch<TRecord>();
         if (records.Count == 0) return batch;
@@ -101,6 +102,33 @@ internal static class IngestDescentFlush
             {
                 ct.ThrowIfCancellationRequested();
                 int waveCount = Math.Min(composeWorkers, records.Count - consumed);
+                long waveRows = 0;
+                int admitted = 0;
+                while (admitted < waveCount)
+                {
+                    long rows = Math.Max(
+                        0, handler.EstimatedOutputRows(records[consumed + admitted]));
+                    if (waveRows + rows > outputRowBudget)
+                    {
+                        // A single source record may be indivisible. Admit that
+                        // oversized singleton only into an otherwise empty, full-size
+                        // transaction window. A partial remaining window belongs to the
+                        // records already composed by its caller and must close first.
+                        if (admitted == 0
+                            && batch.Pending.Count == 0
+                            && outputRowBudget >= config.MaxOutputRows)
+                        {
+                            waveRows = rows;
+                            admitted = 1;
+                        }
+                        break;
+                    }
+                    waveRows = checked(waveRows + rows);
+                    admitted++;
+                    if (waveRows >= outputRowBudget) break;
+                }
+                if (admitted == 0) break;
+                waveCount = admitted;
                 var units = new IIngestDeferredUnit?[waveCount];
                 try
                 {
@@ -130,7 +158,9 @@ internal static class IngestDescentFlush
                     foreach (var unit in units) unit?.Dispose();
                 }
                 consumed += waveCount;
+                outputRowBudget = Math.Max(0, outputRowBudget - waveRows);
                 if (batch.ResidentBytes >= residentBudgetBytes) break;
+                if (outputRowBudget == 0) break;
             }
         }
         catch

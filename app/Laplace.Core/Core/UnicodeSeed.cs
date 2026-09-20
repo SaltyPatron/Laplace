@@ -99,6 +99,17 @@ public sealed unsafe class UnicodeSeedSnapshot : SafeHandle
     }
 
     /// <summary>
+    /// Opens the exact inflated XML bytes retained by this source snapshot. The
+    /// returned stream holds a native snapshot reference and performs bounded memory
+    /// copies; it never reopens the physical UCD artifact.
+    /// </summary>
+    public Stream OpenUcdXmlStream()
+    {
+        ObjectDisposedException.ThrowIf(IsClosed, this);
+        return new SnapshotXmlStream(this);
+    }
+
+    /// <summary>
     /// One managed/native crossing stages a complete contiguous floor range. Native owns
     /// entity/physicality tuple construction; managed code only records the source span.
     /// </summary>
@@ -138,5 +149,87 @@ public sealed unsafe class UnicodeSeedSnapshot : SafeHandle
                 $"Unicode source stage emitted {entityCount} entities/{physicalityCount} physicalities for {count} codepoints.");
 
         stage.RecordPhysicalitySourceRange(firstPhysicality, physicalityCount, sourceId);
+    }
+
+    private sealed class SnapshotXmlStream : Stream
+    {
+        private readonly UnicodeSeedSnapshot _owner;
+        private readonly IntPtr _snapshot;
+        private nuint _position;
+        private bool _released;
+
+        internal SnapshotXmlStream(UnicodeSeedSnapshot owner)
+        {
+            _owner = owner;
+            bool added = false;
+            try
+            {
+                owner.DangerousAddRef(ref added);
+                if (!added) throw new ObjectDisposedException(nameof(UnicodeSeedSnapshot));
+                _snapshot = owner.DangerousGetHandle();
+            }
+            catch
+            {
+                if (added) owner.DangerousRelease();
+                throw;
+            }
+        }
+
+        public override bool CanRead => !_released;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => checked((long)_position);
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            ObjectDisposedException.ThrowIf(_released, this);
+            if (buffer.IsEmpty) return 0;
+            nuint copied = 0;
+            int rc;
+            unsafe
+            {
+                fixed (byte* destination = buffer)
+                    rc = NativeInterop.UnicodeSeedSnapshotXmlCopy(
+                        _snapshot, _position, destination,
+                        checked((nuint)buffer.Length), &copied);
+            }
+            if (rc != 0 || copied > (nuint)buffer.Length)
+                throw new InvalidDataException(
+                    $"Unicode source snapshot XML read failed at {_position} (rc={rc}, copied={copied}).");
+            _position = checked(_position + copied);
+            return checked((int)copied);
+        }
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(Read(buffer.Span));
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (!_released)
+            {
+                _released = true;
+                _owner.DangerousRelease();
+            }
+            base.Dispose(disposing);
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
     }
 }

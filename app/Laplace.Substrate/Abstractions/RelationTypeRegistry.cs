@@ -20,6 +20,7 @@ public static class RelationTypeRegistry
     private static readonly ConcurrentDictionary<string, RelationTypeResolution> DeprelCache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, RelationTypeResolution> EnhancedDeprelCache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, RelationTypeResolution> FeatureCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, RelationTypeResolution> UcdPropertyCache = new(StringComparer.Ordinal);
 
     public static Hash128 RelationTypeId(string canonicalName)
     {
@@ -138,6 +139,26 @@ public static class RelationTypeRegistry
     {
         ArgumentException.ThrowIfNullOrEmpty(featureName);
         return FeatureCache.GetOrAdd(featureName, static f => ResolveFeatureUncached(f));
+    }
+
+    public static RelationTypeResolution ResolveUcdProperty(string canonicalPropertyName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(canonicalPropertyName);
+        return UcdPropertyCache.GetOrAdd(canonicalPropertyName, static p =>
+        {
+            unsafe
+            {
+                Hash128 typeId, parentId;
+                double rank;
+                byte flip;
+                int symmetry;
+                int rc = NativeInterop.RelationResolveUcdProperty(
+                    p, &typeId, &rank, &symmetry, &flip, &parentId);
+                if (rc != 0)
+                    throw new InvalidOperationException($"UCD property relation resolution failed for '{p}' (rc={rc}).");
+                return DynamicResolution(p, "UCD_", typeId, parentId, rank, symmetry, flip);
+            }
+        });
     }
 
     private static RelationTypeResolution ResolveFeatureUncached(string featureName)

@@ -308,6 +308,9 @@ public interface IIngestRecordHandler<TRecord>
     void WalkWitness(TRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit);
 
     long UnitsPerRecord(TRecord record) => 1;
+
+    /// <summary>Upper bound on durable rows emitted by this source record.</summary>
+    long EstimatedOutputRows(TRecord record) => 1;
 }
 
 /// <summary>Handler with per-batch dedup state that must reset after each yielded change.</summary>
@@ -401,6 +404,7 @@ public sealed class IngestBatchConfig
     public int? EntityCapacity { get; init; }
     public int? PhysicalityCapacity { get; init; }
     public int? AttestationCapacity { get; init; }
+    public int MaxOutputRows { get; init; } = IngestSizing.ResolveApplyTransactionRows();
 
     public SubstrateChangeBuilder NewBuilder(int batchNumber)
     {
@@ -468,6 +472,7 @@ public sealed class IngestBatchConfig
             EntityCapacity = EntityCapacity,
             PhysicalityCapacity = PhysicalityCapacity,
             AttestationCapacity = AttestationCapacity,
+            MaxOutputRows = MaxOutputRows,
             WorkingSet = WorkingSet,
             WorkingSetProbeInterval = WorkingSetProbeInterval,
             WorkingSetRecordCap = WorkingSetRecordCap,
@@ -1393,6 +1398,8 @@ public static class IngestBatchPipeline
         int inFlight = state.InBatch + Math.Max(0, pendingCount);
         if (recordCap > 0 && inFlight >= recordCap)
             return true;
+        if (state.EstimatedOutputRows >= config.MaxOutputRows)
+            return true;
 
         long staged = state.Builder.StagedBytesEstimate;
         long deferred = state.WorkingSetDeferred is IWorkingSetDeferredBatch resident
@@ -1433,17 +1440,21 @@ public static class IngestBatchPipeline
                     config.EffectiveConcurrentWorkingSets);
                 long available = Math.Max(1,
                     envelope - state.Builder.StagedBytesEstimate - deferred.ResidentBytes);
+                long outputRowsAvailable = Math.Max(
+                    1L, (long)config.MaxOutputRows - state.EstimatedOutputRows);
                 var composed = await IngestDescentFlush.ComposeBatchAsync(
                     batch, handler, reader, state.Builder, config, probedAbsent, ct,
-                    available, rootsAlreadyProbed).ConfigureAwait(false);
+                    available, rootsAlreadyProbed, outputRowsAvailable).ConfigureAwait(false);
                 rootsAlreadyProbed = true;
                 deferred.Shortcircuited.AddRange(composed.Shortcircuited);
                 deferred.Pending.AddRange(composed.Pending);
                 deferred.AddResidentBytes(composed.ResidentBytes);
                 foreach (var (_, units) in composed.Shortcircuited)
-                    state.AddUnits(units);
+                    state.AddUnits(units, 0);
                 foreach (var (record, _) in composed.Pending)
-                    state.AddUnits(handler.UnitsPerRecord(record));
+                    state.AddUnits(
+                        handler.UnitsPerRecord(record),
+                        handler.EstimatedOutputRows(record));
 
                 if (batch.Count > 0 || ShouldCloseWorkingSet(state, config))
                 {
@@ -1458,10 +1469,11 @@ public static class IngestBatchPipeline
             var drained = await IngestDescentFlush.ProbeAndDrainAsync(
                 batch, handler, reader, state.Builder, config, probedAbsent, ct).ConfigureAwait(false);
 
-            foreach (var (_, units) in drained)
+            foreach (var (record, units) in drained)
             {
-                state.AddUnits(units);
-                if (state.InBatch >= config.BatchSize)
+                state.AddUnits(units, handler.EstimatedOutputRows(record));
+                if (state.InBatch >= config.BatchSize
+                    || state.EstimatedOutputRows >= config.MaxOutputRows)
                 {
                     yield return await state.YieldBatchAsync(ct);
                     state.ResetBuilder(config.NewBuilder(state.BatchNumber));
@@ -1474,6 +1486,7 @@ public static class IngestBatchPipeline
     {
         public SubstrateChangeBuilder Builder { get; private set; } = builder;
         public int InBatch { get; private set; }
+        public long EstimatedOutputRows { get; private set; }
         public int BatchNumber { get; private set; }
         internal object? WorkingSetDeferred { get; set; }
         private long _rowsInBatch;
@@ -1511,10 +1524,12 @@ public static class IngestBatchPipeline
             probedAbsent?.Clear();
         }
 
-        public void AddUnits(long units)
+        public void AddUnits(long units, long estimatedOutputRows)
         {
             InBatch++;
             _rowsInBatch += units;
+            EstimatedOutputRows = checked(
+                EstimatedOutputRows + Math.Max(0, estimatedOutputRows));
         }
 
         public void ResetBuilder(SubstrateChangeBuilder next)
@@ -1530,6 +1545,7 @@ public static class IngestBatchPipeline
             var change = await Builder.SetInputUnitsConsumed(_rowsInBatch).BuildAsync(ct);
             InBatch = 0;
             _rowsInBatch = 0;
+            EstimatedOutputRows = 0;
             BatchNumber++;
             return change;
         }

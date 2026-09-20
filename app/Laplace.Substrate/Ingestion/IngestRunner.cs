@@ -166,13 +166,16 @@ public sealed class IngestRunner
             topo.ApplyPartitions,
             recordBatchOverride: batchSize,
             commitRowsOverride: commitRows > 0 ? commitRows : null);
+        int applyRowLimit = Math.Min(
+            sizing.CommitRows,
+            IngestSizing.ResolveApplyTransactionRows());
         int maxIntentsPerCommit = commitRows > 0
             ? sizing.MaxIntentsPerCommit
             : batchSize;
 
-        static int RowsOf(SubstrateChange c)
+        static long RowsOf(SubstrateChange c)
         {
-            int rows = c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
+            long rows = (long)c.Entities.Length + c.Physicalities.Length + c.Attestations.Length;
             if (!c.IntentStages.IsDefaultOrEmpty)
                 foreach (var s in c.IntentStages)
                     rows += s.EntityCount + s.PhysicalityCount + s.AttestationCount;
@@ -212,18 +215,19 @@ public sealed class IngestRunner
 
         bool workingSet = Laplace.Decomposers.Abstractions.WorkingSetMode.Enabled;
         long wsBytes = 0;
-        bool ShouldFlush(int intents, int rows) =>
+        bool ShouldFlush(int intents, long rows) =>
             commitRows > 0
-                ? (rows >= commitRows || intents >= batchSize)
-                : intents >= batchSize;
+                ? (rows >= Math.Min(commitRows, applyRowLimit) || intents >= batchSize)
+                : rows >= applyRowLimit || intents >= batchSize;
 
         long applyEnvelope = Math.Min(
             IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
             Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes);
         var admissionWindow = new IngestAdmissionWindow(applyEnvelope);
-        bool ShouldFlushWithCap(int intents, int rows) =>
+        bool ShouldFlushWithCap(int intents, long rows) =>
             workingSet
-                ? ShouldFlushWorkingSet(wsBytes, applyEnvelope)
+                ? rows >= applyRowLimit
+                    || ShouldFlushWorkingSet(wsBytes, applyEnvelope)
                     || admissionWindow.ModeledSourcePayloadBytes >= applyEnvelope
                 : ShouldFlush(intents, rows) || intents >= maxIntentsPerCommit;
 
@@ -256,7 +260,7 @@ public sealed class IngestRunner
 
                 var sbatch = new List<SubstrateChange>(batchSize);
                 using var sbatchOwnership = new ApplyEnvelopeBatchOwner(sbatch);
-                int sbatchRows = 0;
+                long sbatchRows = 0;
                 Hash128? sbatchSource = null;
                 await foreach (var intent in decomposer
                     .DecomposeAsync(ctx, options.DecomposerOptions, runCt).WithCancellation(runCt))
@@ -315,7 +319,8 @@ public sealed class IngestRunner
                         sbatchSource = null;
                     }
                     if (workingSet && sbatch.Count > 0
-                        && (wsBytes + sib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
+                        && (sbatchRows + RowsOf(intent) > applyRowLimit
+                            || wsBytes + sib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
                             || admissionWindow.ShouldFlushBefore(admission)))
                     {
                         LogAdmissionWindow(sbatch.Count);
@@ -384,7 +389,7 @@ public sealed class IngestRunner
                             long units = intent.Metadata.InputUnitsConsumed;
                             if (units > 0) Interlocked.Add(ref counters._inputUnitsComposed, units);
                             options.Progress?.Report(MakeProgress(counters));
-                            int r = RowsOf(intent);
+                            long r = RowsOf(intent);
                             long b = BytesOf(intent);
                             var admission = workingSet
                                 ? IngestAdmissionSizing.Measure(intent, b, producerCt)
@@ -496,7 +501,8 @@ public sealed class IngestRunner
                             await FlushBucketAsync(bucket);
 
                         if (workingSet && bucket.Batch.Count > 0
-                            && (bucket.Bytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
+                            && (bucket.Rows + queued.Rows > applyRowLimit
+                                || bucket.Bytes + ib > Laplace.Decomposers.Abstractions.WorkingSetMode.BudgetBytes
                                 || bucket.AdmissionWindow.ShouldFlushBefore(admission)))
                             await FlushBucketAsync(bucket);
 
@@ -508,7 +514,8 @@ public sealed class IngestRunner
                         bucket.Bytes += ib;
 
                         bool capacityReached = workingSet
-                            ? ShouldFlushWorkingSet(bucket.Bytes, applyEnvelope)
+                            ? bucket.Rows >= applyRowLimit
+                                || ShouldFlushWorkingSet(bucket.Bytes, applyEnvelope)
                                 || bucket.AdmissionWindow.ModeledSourcePayloadBytes >= applyEnvelope
                             : ShouldFlush(bucket.Batch.Count, bucket.Rows)
                                 || bucket.Batch.Count >= maxIntentsPerCommit;
@@ -1234,13 +1241,13 @@ public sealed class IngestRunner
     }
 
     private readonly record struct QueuedIntent(
-        SubstrateChange Intent, int Rows, long SerializedBytes, IngestAdmissionSizing Admission);
+        SubstrateChange Intent, long Rows, long SerializedBytes, IngestAdmissionSizing Admission);
 
     private sealed class ApplyBatchBucket(int capacity, long envelope)
     {
         internal List<SubstrateChange> Batch { get; } = new(capacity);
         internal IngestAdmissionWindow AdmissionWindow { get; } = new(envelope);
-        internal int Rows;
+        internal long Rows;
         internal long Bytes;
         internal Hash128? Source;
 

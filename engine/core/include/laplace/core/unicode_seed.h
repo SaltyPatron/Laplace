@@ -28,6 +28,16 @@ int laplace_unicode_seed_snapshot_open(
 void laplace_unicode_seed_snapshot_free(laplace_unicode_seed_snapshot_t* snapshot);
 size_t laplace_unicode_seed_snapshot_count(const laplace_unicode_seed_snapshot_t* snapshot);
 
+/* Copy a bounded slice of the exact inflated UCDXML member retained by the
+ * source snapshot. The generic XML provider consumes this stream without a
+ * second physical-artifact open. */
+int laplace_unicode_seed_snapshot_xml_copy(
+    const laplace_unicode_seed_snapshot_t* snapshot,
+    size_t offset,
+    uint8_t* destination,
+    size_t destination_capacity,
+    size_t* out_copied);
+
 /* Stage one bounded contiguous codepoint range directly into the native ingest
  * IntentStage: one tier-0 Codepoint entity and one atomic Content physicality
  * per codepoint. One managed/native crossing owns the complete range. */

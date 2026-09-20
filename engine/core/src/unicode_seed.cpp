@@ -266,6 +266,78 @@ static bool read_zip_single_entry(const char* zip_path, std::vector<uint8_t>& ou
     return crc32(0, out.data(), (uInt)out.size()) == crc;
 }
 
+static bool read_ucd_document(const char* path, std::vector<uint8_t>& document) {
+    size_t n = std::strlen(path);
+    if (n > 4 && std::strcmp(path + n - 4, ".zip") == 0)
+        return read_zip_single_entry(path, document);
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return false;
+    document.assign(std::istreambuf_iterator<char>(input),
+                    std::istreambuf_iterator<char>());
+    return !document.empty();
+}
+
+static int compute_from_document(
+    const uint8_t* document,
+    size_t document_size,
+    const char* ducet_path,
+    laplace_perfcache_record_t* out_records,
+    size_t out_capacity) {
+    if (!document || document_size == 0 || !ducet_path || !out_records) return -1;
+    if (out_capacity < CP_COUNT) return -1;
+
+    UcdData data;
+    SaxCtx context{&data, false};
+    if (laplace_ucd_xml_parse(
+            document, document_size, on_start, on_end, &context) != 0)
+        return -2;
+
+    DucetKeys ducet;
+    int rc = parse_ducet(ducet_path, ducet);
+    if (rc != 0) return rc;
+
+    std::vector<uint32_t> order(CP_COUNT);
+    for (uint32_t i = 0; i < CP_COUNT; ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b){
+        if (ducet.key[a] != ducet.key[b]) return ducet.key[a] < ducet.key[b];
+        return a < b;
+    });
+    std::vector<uint32_t> uca_rank(CP_COUNT);
+    for (uint32_t rank = 0; rank < CP_COUNT; ++rank)
+        uca_rank[order[rank]] = rank;
+
+    // DUCET rank is identity order, not latitude. Use the open radical-inverse
+    // placement so every prefix spreads over the whole S3 shell.
+    for (uint32_t cp = 0; cp < CP_COUNT; ++cp) {
+        uint32_t rank = uca_rank[cp];
+        double coord[4];
+        super_fibonacci_point_open(rank, coord);
+        hilbert128_t hilbert;
+        hilbert4d_encode(coord, &hilbert);
+        uint8_t utf8[4];
+        size_t utf8_size = laplace_utf8_encode(cp, utf8);
+        hash128_t hash;
+        hash128_blake3(utf8, utf8_size, &hash);
+        uint32_t flags = laplace_pc_pack_flags(
+            data.gb[cp], data.wb[cp], data.sb[cp], data.incb[cp],
+            data.ccc[cp], data.white_space[cp]);
+
+        laplace_perfcache_record_t& record = out_records[cp];
+        record.codepoint = cp;
+        record.uca_order = rank;
+        record.coord[0] = coord[0];
+        record.coord[1] = coord[1];
+        record.coord[2] = coord[2];
+        record.coord[3] = coord[3];
+        record.hilbert = hilbert;
+        record.hash = hash;
+        record.flags = flags;
+        record._pad = 0;
+    }
+    return 0;
+}
+
 extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
                                             const char* ducet_path,
                                             laplace_perfcache_record_t* out_records,
@@ -273,71 +345,19 @@ extern "C" int laplace_unicode_seed_compute(const char* ucdxml_path,
     if (!ucdxml_path || !ducet_path || !out_records) return -1;
     if (out_capacity < CP_COUNT) return -1;
 
-    UcdData d;
-    SaxCtx ctx{&d, false};
-
-    bool is_zip = false;
-    {
-        size_t n = std::strlen(ucdxml_path);
-        is_zip = (n > 4 && std::strcmp(ucdxml_path + n - 4, ".zip") == 0);
+    try {
+        std::vector<uint8_t> doc;
+        if (!read_ucd_document(ucdxml_path, doc)) return -2;
+        return compute_from_document(
+            doc.data(), doc.size(), ducet_path, out_records, out_capacity);
+    } catch (...) {
+        return -4;
     }
-    std::vector<uint8_t> doc;
-    if (is_zip) {
-        if (!read_zip_single_entry(ucdxml_path, doc)) return -2;
-    } else {
-        FILE* p = std::fopen(ucdxml_path, "rb");
-        if (!p) return -2;
-        uint8_t chunk[1 << 16];
-        size_t got;
-        while ((got = std::fread(chunk, 1, sizeof chunk, p)) > 0)
-            doc.insert(doc.end(), chunk, chunk + got);
-        std::fclose(p);
-    }
-    if (doc.empty()) return -2;
-    if (laplace_ucd_xml_parse(doc.data(), doc.size(), on_start, on_end, &ctx) != 0)
-        return -2;
-    std::vector<uint8_t>().swap(doc);
-
-    DucetKeys dk;
-    int rc = parse_ducet(ducet_path, dk);
-    if (rc != 0) return rc;
-
-    std::vector<uint32_t> order(CP_COUNT);
-    for (uint32_t i = 0; i < CP_COUNT; ++i) order[i] = i;
-    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b){
-        if (dk.key[a] != dk.key[b]) return dk.key[a] < dk.key[b];
-        return a < b;
-    });
-    std::vector<uint32_t> uca_rank(CP_COUNT);
-    for (uint32_t r = 0; r < CP_COUNT; ++r) uca_rank[order[r]] = r;
-
-    // DUCET rank is identity order, not latitude.  Use the open
-    // radical-inverse placement so every prefix of the rank sequence spreads
-    // over the whole S3 shell instead of filling one band as the corpus grows.
-    for (uint32_t cp = 0; cp < CP_COUNT; ++cp) {
-        uint32_t rank = uca_rank[cp];
-        double coord[4];
-        super_fibonacci_point_open(rank, coord);
-        hilbert128_t hb; hilbert4d_encode(coord, &hb);
-        uint8_t u8[4]; size_t n = laplace_utf8_encode(cp, u8);
-        hash128_t h; hash128_blake3(u8, n, &h);
-        uint32_t flags = laplace_pc_pack_flags(
-            d.gb[cp], d.wb[cp], d.sb[cp], d.incb[cp], d.ccc[cp], d.white_space[cp]);
-
-        laplace_perfcache_record_t& r = out_records[cp];
-        r.codepoint = cp;
-        r.uca_order = rank;
-        r.coord[0] = coord[0]; r.coord[1] = coord[1]; r.coord[2] = coord[2]; r.coord[3] = coord[3];
-        r.hilbert = hb;
-        r.hash = h;
-        r.flags = flags;
-        r._pad = 0;
-    }
-    return 0;
 }
 
 struct laplace_unicode_seed_snapshot {
     std::vector<laplace_perfcache_record_t> records;
+    std::vector<uint8_t> ucdxml;
 };
 
 extern "C" int laplace_unicode_seed_snapshot_open(
@@ -351,16 +371,20 @@ extern "C" int laplace_unicode_seed_snapshot_open(
     if (!snapshot) return -4;
     try {
         snapshot->records.resize(CP_COUNT);
+        if (!read_ucd_document(ucdxml_path, snapshot->ucdxml)) {
+            delete snapshot;
+            return -2;
+        }
+        int rc = compute_from_document(
+            snapshot->ucdxml.data(), snapshot->ucdxml.size(), ducet_path,
+            snapshot->records.data(), snapshot->records.size());
+        if (rc != 0) {
+            delete snapshot;
+            return rc;
+        }
     } catch (...) {
         delete snapshot;
         return -4;
-    }
-
-    int rc = laplace_unicode_seed_compute(
-        ucdxml_path, ducet_path, snapshot->records.data(), snapshot->records.size());
-    if (rc != 0) {
-        delete snapshot;
-        return rc;
     }
     *out_snapshot = snapshot;
     return 0;
@@ -374,6 +398,24 @@ extern "C" void laplace_unicode_seed_snapshot_free(
 extern "C" size_t laplace_unicode_seed_snapshot_count(
     const laplace_unicode_seed_snapshot_t* snapshot) {
     return snapshot ? snapshot->records.size() : 0u;
+}
+
+extern "C" int laplace_unicode_seed_snapshot_xml_copy(
+    const laplace_unicode_seed_snapshot_t* snapshot,
+    size_t offset,
+    uint8_t* destination,
+    size_t destination_capacity,
+    size_t* out_copied) {
+    if (!snapshot || !out_copied || (!destination && destination_capacity != 0))
+        return -1;
+    *out_copied = 0;
+    if (offset > snapshot->ucdxml.size()) return -1;
+    size_t available = snapshot->ucdxml.size() - offset;
+    size_t copied = std::min(available, destination_capacity);
+    if (copied != 0)
+        std::memcpy(destination, snapshot->ucdxml.data() + offset, copied);
+    *out_copied = copied;
+    return 0;
 }
 
 extern "C" int laplace_unicode_seed_snapshot_stage(

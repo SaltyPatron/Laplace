@@ -474,6 +474,7 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
     protected abstract void Compose(TRecord record, SubstrateChangeBuilder builder);
 
     protected virtual long UnitsPerRecord(TRecord record) => 1;
+    protected virtual long EstimatedOutputRows(TRecord record) => 1;
 
     /// <summary>
     /// Default: compose callback runs in <see cref="IIngestDeferredUnit.DrainInto"/> (serial).
@@ -482,7 +483,10 @@ public abstract class ComposeDecomposer<TRecord> : Decomposer<TRecord>
     /// <see cref="IIngestRecordHandler{TRecord}.CreateDeferredUnit"/>.
     /// </summary>
     protected override IIngestRecordHandler<TRecord> CreateHandler() =>
-        new DirectComposeHandler<TRecord>(Compose, unitsPerRecord: UnitsPerRecord);
+        new DirectComposeHandler<TRecord>(
+            Compose,
+            unitsPerRecord: UnitsPerRecord,
+            estimatedOutputRows: EstimatedOutputRows);
 
     protected override IngestBatchConfig BuildPipelineConfig(
         IDecomposerContext context, DecomposerOptions options) =>

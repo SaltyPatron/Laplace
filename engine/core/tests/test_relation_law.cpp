@@ -33,6 +33,28 @@ TEST(LaplaceRelationLaw, HasUposResolvesToHasPos) {
     EXPECT_TRUE(hash128_equals(&upos, &pos));
 }
 
+TEST(LaplaceAttestationEngine, CodepointRangeRelationBatchStagesCartesianAssertions) {
+    intent_stage_t* stage = intent_stage_new(8);
+    ASSERT_NE(nullptr, stage);
+    hash128_t source = hash_path("unicode/test/source");
+    laplace_codepoint_range_relation_t relations[2] = {};
+    relations[0].type_id = relation_type_id("UCD_SCRIPT");
+    relations[0].object_id = hash_path("unicode/script/Latin/v1");
+    relations[0].context_is_null = 1;
+    relations[0].confirm = 1;
+    relations[0].observation_count = 1;
+    relations[1].type_id = relation_type_id("UCD_WHITE_SPACE");
+    relations[1].object_is_null = 1;
+    relations[1].context_is_null = 1;
+    relations[1].confirm = 0;
+    relations[1].observation_count = 1;
+
+    EXPECT_EQ(0, laplace_attestation_codepoint_range_relations_add(
+        stage, 0x41u, 0x43u, relations, 2, &source, 0.95));
+    EXPECT_EQ(6u, intent_stage_attestation_count(stage));
+    intent_stage_free(stage);
+}
+
 TEST(LaplaceRelationLaw, HasXposInHasPosFamily) {
     hash128_t xpos;
     ASSERT_EQ(0, laplace_relation_resolve("HAS_XPOS", &xpos));
@@ -115,6 +137,22 @@ TEST(LaplaceRelationLaw, FeatureDynamicFamily) {
     hash128_t has_feature = relation_type_id("HAS_FEATURE");
     EXPECT_TRUE(hash128_equals(&feat_number, &tid));
     EXPECT_TRUE(hash128_equals(&has_feature, &parent_id));
+}
+
+TEST(LaplaceRelationLaw, UcdPropertyDynamicFamily) {
+    hash128_t tid, parent_id;
+    double rank = 0;
+    laplace_rel_symmetry_t sym = LAPLACE_REL_SYMMETRY_SYMMETRIC;
+    uint8_t flip = 1;
+    ASSERT_EQ(0, laplace_relation_resolve_ucd_property(
+        "General_Category", &tid, &rank, &sym, &flip, &parent_id));
+    hash128_t expected = relation_type_id("UCD_GENERAL_CATEGORY");
+    hash128_t has_attribute = relation_type_id("HAS_ATTRIBUTE");
+    EXPECT_TRUE(hash128_equals(&expected, &tid));
+    EXPECT_TRUE(hash128_equals(&has_attribute, &parent_id));
+    EXPECT_DOUBLE_EQ(0.08, rank);
+    EXPECT_EQ(LAPLACE_REL_SYMMETRY_ASYMMETRIC, sym);
+    EXPECT_EQ(0, flip);
 }
 
 TEST(LaplacePosLaw, WiktionaryMapsToCanonical) {
