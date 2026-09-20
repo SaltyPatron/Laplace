@@ -126,22 +126,30 @@ seed_billing_from_operator_files() {
 }
 
 layer1_clean_foreign_build_artifacts() {
-    local proj mutable
-    for proj in "$REPO_DIR"/app/Laplace.*; do
-        [ -d "$proj" ] || continue
-        ls "$proj"/*.csproj >/dev/null 2>&1 || continue
+    local project proj mutable managed_root=/build/laplace/work/setup-managed
+
+    # The checkout is intentionally shared by the operator and CI account. The
+    # shared group must own directory inheritance; the operator's private primary
+    # group cannot grant the runner access in the other direction.
+    sudo find "$REPO_DIR" -xdev ! -type l -exec chgrp "$RUNNER_USER" {} +
+    sudo find "$REPO_DIR" -xdev -type d -exec chmod g+rws {} +
+    sudo find "$REPO_DIR" -xdev -type f -exec chmod g+rwX {} +
+
+    sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 2770 "$managed_root"
+    while IFS= read -r -d '' project; do
+        proj="${project%/*}"
         for dir in obj bin; do
             local d="$proj/$dir"
             if [ ! -e "$d" ]; then
-                sudo install -d -g "$RUNNER_USER" -m 2770 "$d"
+                sudo install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 2770 "$d"
             fi
-            # User identity is not drift: repair shared access without deleting
-            # another group member's outputs or transferring their ownership.
-            sudo find "$d" -xdev ! -type l -exec chgrp "$RUNNER_USER" {} +
+            # These are generated outputs, so the build account—not root—owns
+            # them. The operator retains full access through the shared group.
+            sudo find "$d" -xdev ! -type l -exec chown "$RUNNER_USER:$RUNNER_USER" {} +
             sudo find "$d" -xdev -type d -exec chmod g+rws {} +
             sudo find "$d" -xdev -type f -exec chmod g+rwX {} +
         done
-    done
+    done < <(find "$REPO_DIR/app" -mindepth 2 -maxdepth 2 -type f -name '*.csproj' -print0)
 
     # Code generation is also a shared mutable-output boundary. setup-host hands
     # Layer 1 to laplace-runner, while the same checkout is routinely used by the
@@ -172,6 +180,7 @@ layer1_clean_foreign_build_artifacts() {
 runner_dotnet() {
     sudo -u "$RUNNER_USER" -H \
         PATH="$PATH" \
+        LAPLACE_BUILD_ROOT=/build/laplace/work/setup-managed \
         DOTNET_NOLOGO=1 \
         DOTNET_CLI_TELEMETRY_OPTOUT=1 \
         TMPDIR=/build/laplace/work/scratch TMP=/build/laplace/work/scratch TEMP=/build/laplace/work/scratch \
@@ -240,11 +249,13 @@ layer1_build_install_extensions() {
     }
     sudo -u "$RUNNER_USER" -H env \
         GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$REPO_DIR" \
+        LAPLACE_BUILD_ROOT=/build/laplace/work/setup-managed \
         TMPDIR=/build/laplace/work/scratch TMP=/build/laplace/work/scratch TEMP=/build/laplace/work/scratch \
         bash -c '
             set -e
             source "$2" --force >/dev/null
             set -u
+            umask 0002
             cd "$1"
             bash scripts/pipeline.sh build &&
             bash scripts/pipeline.sh install
