@@ -140,6 +140,37 @@ Likewise, the finite set of patches/regions/images already known to Laplace can 
 
 The same canonical image can occur in many files, documents or videos while the image record exists once.
 
+## Trunk-first cache short-circuit
+
+Probe the highest lawful reusable composition before rebuilding its descendants.
+
+For a decoded image:
+
+~~~text
+decoded image + shape/recipe
+-> image cache key
+   hit  -> reuse complete image root; stop
+   miss -> region keys
+           hit  -> reuse region
+           miss -> patch keys
+                   hit  -> reuse patch
+                   miss -> pixel/direct-domain lookup
+~~~
+
+This is the perfcache analogue of trunk-to-leaf existence probing. Work is proportional to the novel branches, not automatically to every node in the artifact.
+
+A cache lookup key may be a deterministic materialization fingerprint over exact recovered bytes/shape/recipe that maps to the canonical record. That lookup fingerprint is acceleration state, **not** semantic identity. Collision/verification behavior must be explicit; a key collision cannot silently return the wrong canonical object.
+
+For repeated video frames this matters enormously: after decode, a complete-image hit can bypass image tree reconstruction entirely. If the whole frame is new but most patches are known, only novel branches need composition.
+
+Audio can use the same strategy:
+
+~~~text
+track -> segment -> window -> sample
+~~~
+
+and software repositories can do the same with repository/file/AST-subtree caches.
+
 ## What a record can carry
 
 A perfcache record may carry deterministic facts needed by hot operations, for example:
