@@ -387,6 +387,8 @@ image/audio generations.
 Cache/native lookup should resolve request-side keys before SQL/SPI queries so ordinary
 database indexes remain eligible.
 
+Selector-scoped modules are part of the intended registry. A deployment may load an ASCII range, an explicit color palette, a generated finite format domain, a speech/filter-bank calculation band, a hot/admitted set or the dependency closure of selected higher roots. These modules preserve global canonical ids/coords; they change residency/acceleration, not knowledge authority.
+
 
 
 The as-built architecture must be read together with `docs/CAPABILITIES.md`. Several product capabilities arise only by composing existing substrate mechanisms; they must not be dismissed because no single table/function is named after the product verb.
