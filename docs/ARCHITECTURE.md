@@ -413,7 +413,7 @@ The as-built architecture must be read together with `docs/CAPABILITIES.md`. Sev
 
 Code/repository admission already uses grammar-derived structure. The intended construction direction is the inverse: bind an exact target grammar/toolchain, couple the requirement against known canonical code, reuse/compose existing subtrees where possible, minimally mutate close structures, realize source, run toolchains/tests, witness outcomes, and iterate on the smallest divergent subtree.
 
-Exact canonical AST duplication is identity reuse. Deeper normalized/algebraic/behavioral duplication is calculated evidence for consolidation.
+Exact canonical tier/trajectory composition duplication is identity reuse. AST/CST is a derived projection when useful to a compiler/editor/toolchain; deeper normalized structural/algebraic/behavioral duplication is calculated evidence for consolidation.
 
 ### Application roots and repair trajectories
 
