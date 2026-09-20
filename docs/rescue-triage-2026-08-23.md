@@ -1,5 +1,8 @@
 # Rescue triage — patch-id verified, 2026-08-23
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 Every dangling commit tested by `git patch-id --stable` against all 1,904 patch-ids
 in main. LANDED = this exact patch is in main under some commit (rebase/squash copy).
 NOT_IN_MAIN = the patch does not appear in main and the work is only in rescue/*.
