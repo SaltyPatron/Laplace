@@ -21,6 +21,8 @@ export interface GlomeNode {
   ordinal?: number;
   runLength?: number;
   mu?: number;
+  /** Count of evidence rows touching this entity; visual mass only, not truth. */
+  evidenceRows?: number;
   kind?: 'primary' | 'constituent' | 'neighbor' | 'walk' | 'peer';
   /** Optional paint override (Packed ordinal ramp). */
   color?: string;
@@ -227,15 +229,44 @@ function GlomeScene({
   onSelectOrdinal?: (ordinal: number | null) => void;
 }) {
   const [hover, setHover] = useState<GlomeNode | null>(null);
-  const instances = useRef<THREE.InstancedMesh>(null);
-  const transform = useMemo(() => new THREE.Object3D(), []);
   const invalidate = useThree((s) => s.invalidate);
-  const instanceColors = useMemo(() => {
-    const values = new Float32Array(Math.max(1, nodes.length) * 3);
+  const instanceMesh = useMemo(() => {
+    // Build the complete InstancedMesh before Three ever compiles its material.
+    // Both earlier implementations populated instanceColor after mount; depending
+    // on the renderer/program cache that left USE_INSTANCING_COLOR absent and the
+    // entity spheres rendered black. setColorAt() here creates the attribute on
+    // the object before its first render, which is the supported Three.js path.
+    const geometry = new THREE.SphereGeometry(1, 9, 9);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      toneMapped: false,
+    });
+    const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, nodes.length));
+    const transform = new THREE.Object3D();
     const color = new THREE.Color();
+    const densityScale =
+      nodes.length <= 8 ? 2.8
+        : nodes.length <= 24 ? 2.2
+          : nodes.length <= 96 ? 1.6
+            : nodes.length >= 1000 ? 0.8
+              : 1;
+
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
+      const [x, y, z] = project(n, projection, xmAngle, zmAngle);
       const ordHit = highlightOrdinal != null && n.ordinal === highlightOrdinal;
+      const runScale = Math.min(0.009, Math.log2(Math.max(1, n.runLength ?? 1)) * 0.0015);
+      const evidenceScale = n.evidenceRows && n.evidenceRows > 0
+        ? 1 + Math.min(0.55, Math.log2(n.evidenceRows + 1) * 0.045)
+        : 1;
+      const radius = (ordHit ? 0.036 : 0.016 + runScale) * densityScale * evidenceScale;
+
+      transform.position.set(x, y, z);
+      transform.scale.setScalar(radius);
+      transform.updateMatrix();
+      mesh.setMatrixAt(i, transform.matrix);
+
       color.set(
         n.color
           ?? (n.kind === 'walk' ? palette.walk
@@ -243,70 +274,44 @@ function GlomeScene({
               : n.kind === 'constituent' ? palette.constituent
                 : ordHit || highlightIds.has(n.id) ? palette.highlight : palette.primary),
       );
-      color.toArray(values, i * 3);
+      mesh.setColorAt(i, color);
     }
-    return new THREE.InstancedBufferAttribute(values, 3);
-  }, [nodes, highlightIds, highlightOrdinal, palette]);
 
-  useEffect(() => {
-    const mesh = instances.current;
-    if (!mesh) return;
-    const densityScale =
-      nodes.length <= 8 ? 2.8
-        : nodes.length <= 24 ? 2.2
-          : nodes.length <= 96 ? 1.6
-            : nodes.length >= 1000 ? 0.8
-              : 1;
-    for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i];
-      const [x, y, z] = project(n, projection, xmAngle, zmAngle);
-      const ordHit = highlightOrdinal != null && n.ordinal === highlightOrdinal;
-      // Run length is metadata, not literal volume. Keep dense trajectories
-      // legible while still giving repeated constituents a visible cue.
-      const runScale = Math.min(0.009, Math.log2(Math.max(1, n.runLength ?? 1)) * 0.0015);
-      const radius = (ordHit ? 0.036 : 0.016 + runScale) * densityScale;
-      transform.position.set(x, y, z);
-      transform.scale.setScalar(radius);
-      transform.updateMatrix();
-      mesh.setMatrixAt(i, transform.matrix);
-    }
     mesh.count = nodes.length;
     mesh.instanceMatrix.needsUpdate = true;
-    // Instance colors are allocated before material compilation instead of
-    // appearing lazily after first paint (which rendered black points).
-    mesh.instanceColor = instanceColors;
-    mesh.instanceColor.needsUpdate = true;
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const material of materials) material.needsUpdate = true;
-    // Demand-mode does not repaint after mutating InstancedMesh matrices/colors.
-    // Invalidate AFTER the mutations, otherwise every instance is visually left
-    // at its initial origin transform until the user happens to move the camera.
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    return mesh;
+  }, [nodes, projection, xmAngle, zmAngle, highlightIds, highlightOrdinal, palette]);
+
+  useEffect(() => {
     invalidate();
-  }, [nodes, projection, xmAngle, zmAngle, instanceColors, transform, invalidate]);
+    return () => {
+      instanceMesh.geometry.dispose();
+      const materials = Array.isArray(instanceMesh.material)
+        ? instanceMesh.material
+        : [instanceMesh.material];
+      for (const material of materials) material.dispose();
+    };
+  }, [instanceMesh, invalidate]);
 
   return (
     <>
       <color attach="background" args={[palette.background]} />
       <ContextLossGuard />
       <InvalidateOnData revision={revision} />
-      <instancedMesh
-        ref={instances}
-        args={[undefined, undefined, nodes.length]}
-        instanceColor={instanceColors}
-        onPointerMove={(e) => {
+      <primitive
+        object={instanceMesh}
+        onPointerMove={(e: { stopPropagation: () => void; instanceId?: number }) => {
           e.stopPropagation();
           setHover(e.instanceId == null ? null : nodes[e.instanceId] ?? null);
         }}
         onPointerOut={() => setHover(null)}
-        onClick={(e) => {
+        onClick={(e: { stopPropagation: () => void; instanceId?: number }) => {
           e.stopPropagation();
           const n = e.instanceId == null ? null : nodes[e.instanceId];
           onSelectOrdinal?.(n?.ordinal ?? null);
         }}
-      >
-        <sphereGeometry args={[1, 9, 9]} />
-        <meshBasicMaterial vertexColors toneMapped={false} color="#ffffff" />
-      </instancedMesh>
+      />
       {trajectory.length > 1 ? (
         <Line
           points={trajectory}
@@ -345,6 +350,7 @@ function GlomeScene({
             {hover.ordinal != null ? <span> · ord {hover.ordinal}</span> : null}
             {hover.runLength != null && hover.runLength > 1 ? <span> · rle {hover.runLength}</span> : null}
             {hover.mu != null ? <span> · μ {hover.mu.toFixed(1)}</span> : null}
+            {hover.evidenceRows != null ? <span> · evidence {hover.evidenceRows.toLocaleString()}</span> : null}
             {projection === 'placement' && Number.isFinite(hover.radius)
               ? <span> · r {hover.radius.toFixed(3)}</span>
               : null}

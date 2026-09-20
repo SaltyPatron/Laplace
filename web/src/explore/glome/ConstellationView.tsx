@@ -10,14 +10,25 @@ import { useExploreStore } from '../store';
 import { GatePrompt } from '../components/GatePrompt';
 import type { BillingReceipt } from '../types';
 import { GlomeCanvas, type GlomeNode } from './GlomeCanvas';
+import { ensureVisualizationContrast, lerpColor, useVisualizationPalette, type VisualizationPalette } from '../visualizationPalette';
 import styles from './ConstellationView.module.css';
 
 type VizResponse = Schemas['VisualizationGraphResponse'];
 
-function nodesFromGraph(graph: VizResponse['graph']): GlomeNode[] {
-  return (graph?.nodes ?? [])
-    .filter((n) => n.x != null && n.y != null && n.z != null)
-    .map((n) => ({
+function nodesFromGraph(
+  graph: VizResponse['graph'],
+  palette: VisualizationPalette,
+): GlomeNode[] {
+  const rows = (graph?.nodes ?? [])
+    .filter((n) => n.x != null && n.y != null && n.z != null);
+  const maxEvidence = Math.max(0, ...rows.map((n) => Number(n.evidenceRows ?? 0)));
+  const maxLogEvidence = Math.log2(maxEvidence + 1);
+
+  return rows.map((n) => {
+    const evidenceRows = Math.max(0, Number(n.evidenceRows ?? 0));
+    const evidenceT = maxLogEvidence > 0 ? Math.log2(evidenceRows + 1) / maxLogEvidence : 0;
+    const painted = lerpColor(palette.steel, palette.signal, evidenceT);
+    return {
       id: n.idHex ?? '',
       label: n.label ?? n.idHex ?? '',
       x: Number(n.x),
@@ -25,8 +36,11 @@ function nodesFromGraph(graph: VizResponse['graph']): GlomeNode[] {
       z: Number(n.z),
       m: Number(n.m ?? 0),
       radius: Number(n.radius ?? 1),
+      evidenceRows,
+      color: ensureVisualizationContrast(painted, palette.background, palette.primary),
       kind: 'primary' as const,
-    }));
+    };
+  });
 }
 
 export function ConstellationView() {
@@ -38,6 +52,7 @@ export function ConstellationView() {
   const [autoTried, setAutoTried] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<BillingReceipt | null>(null);
+  const palette = useVisualizationPalette();
 
   const quote = exploreQuote || quoteId;
 
@@ -48,7 +63,7 @@ export function ConstellationView() {
     try {
       const res = await apiPost<VizResponse>(
         '/v1/visualizations/substrate',
-        { limit: 80, include_geometry: true, include_evidence: false },
+        { limit: 80, include_geometry: true, include_evidence: true },
         opts,
       );
       setGraph(res);
@@ -79,13 +94,14 @@ export function ConstellationView() {
     void load();
   }, [autoTried, graph, needsGate, busy]);
 
-  const nodes = useMemo(() => (graph ? nodesFromGraph(graph.graph) : []), [graph]);
+  const nodes = useMemo(() => (graph ? nodesFromGraph(graph.graph, palette) : []), [graph, palette]);
 
   return (
     <div className={styles.root}>
       <h2>Substrate constellation</h2>
       <Muted className={styles.lead}>
         Hilbert-stratified S³ coverage of stored physicalities — not a top-relations leaderboard.
+        Entity paint and point mass now encode log evidence volume; they do not claim semantic truth.
         {graph ? ` ${nodes.length} occupied strata shown.` : ''}
       </Muted>
       {needsGate ? (
