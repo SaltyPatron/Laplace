@@ -660,13 +660,14 @@ public sealed class IngestRunner
                 filesTotal: declaredFiles);
         log.LogInformation(
             "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
-            + "files_done={FilesDone} files_total={FilesTotal} intents={Applied}/{Produced} "
+            + "files_done={FilesDone} files_total={FilesTotal} files_reused_complete={FilesReusedComplete} "
+            + "intents={Applied}/{Produced} "
             + "rows_new={Ent}e+{Phys}p+{Att}a elapsed_s={Elapsed:F1} failed={Failed} status={Status} "
             + "bootstrap_rows_new={BootEnt}e+{BootPhys}p+{BootAtt}a "
             + "synset_hit_cum={SynHit} synset_miss_cum={SynMiss} lang_miss_cum={LangMiss}",
             decomposer.SourceName, decomposer.LayerOrder,
             counters.InputUnitsDone, declaredInput,
-            counters.FilesDone, declaredFiles,
+            counters.FilesDone, declaredFiles, counters.FilesSkippedComplete,
             result.UnitsApplied, result.UnitsAttempted,
             result.EntitiesInserted, result.PhysicalitiesInserted, result.AttestationsInserted,
             result.WallClock.TotalSeconds, result.UnitsFailed, status,
@@ -1174,6 +1175,7 @@ public sealed class IngestRunner
             {
                 file = unit[IngestBatchPipeline.SkippedBoundaryUnitPrefix.Length..];
                 fileStatus = "skipped-complete";
+                Interlocked.Increment(ref c._filesSkippedComplete);
             }
             else if (unit.StartsWith(IngestBatchPipeline.CancelledBoundaryUnitPrefix, StringComparison.Ordinal))
             {
@@ -1187,7 +1189,7 @@ public sealed class IngestRunner
             {
                 Console.Error.WriteLine(
                     $"INGEST_FILE_COMMITTED source={c.SourceName} file={file} "
-                    + $"files={done}/{total} "
+                    + $"files={done}/{total} file_status={fileStatus} "
                     + $"run_elapsed_s={c.Sw?.Elapsed.TotalSeconds ?? 0:F0}");
             }
             return;
@@ -1334,6 +1336,7 @@ public sealed class IngestRunner
         internal long _inputUnitsDone;
         internal long _inputUnitsComposed;
         internal int _filesDone;
+        internal int _filesSkippedComplete;
         internal string? _currentFile;
         internal EntityAdmissionTracker EntityAdmission { get; } = new();
         internal Stopwatch? Sw;
@@ -1343,6 +1346,7 @@ public sealed class IngestRunner
         public long InputUnitsDone => Interlocked.Read(ref _inputUnitsDone);
         public long InputUnitsComposed => Interlocked.Read(ref _inputUnitsComposed);
         public int FilesDone => Volatile.Read(ref _filesDone);
+        public int FilesSkippedComplete => Volatile.Read(ref _filesSkippedComplete);
         public string? CurrentFile => Volatile.Read(ref _currentFile);
         public long UnitsAttempted => Interlocked.Read(ref _unitsAttempted);
         public long UnitsProduced => Interlocked.Read(ref _unitsProduced);
