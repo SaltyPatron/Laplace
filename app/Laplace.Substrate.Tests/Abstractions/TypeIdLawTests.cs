@@ -86,6 +86,7 @@ public class TypeIdLawTests
             nameof(PhysicalityType.Content),
             nameof(PhysicalityType.Projection),
             nameof(PhysicalityType.Set),
+            nameof(PhysicalityType.Range),
             nameof(PhysicalityType.ParseStructure),
         };
 
