@@ -1,9 +1,17 @@
 # Tree-sitter grammar wiring
 
-Tree-sitter is the container-format parsing engine for the substrate: its only job is to
-strip raw content out of structured formats before handing off to the tiered decomposer
-pipeline (see `grammar_registry.c`). This directory is where grammar object libraries are
-declared for the build.
+Tree-sitter is a grammar-provider and compatibility parsing estate for the substrate.
+It is not the universal container-format engine and its CST is not Laplace's canonical
+knowledge representation. Canonical structure is tiered entity composition plus exact
+physicality trajectories; grammar productions/fields/precedence/conflicts can be admitted
+as ordinary knowledge that constrains higher-tier composition.
+
+Use these parsers when their grammar contributes source structure, validation or realization
+that the active recipe needs. Do not route a bulk/structured source through Tree-sitter merely
+because a grammar exists: standards/streaming readers (for example the UCD XML reader) are
+preferred when they recover the same source facts without materializing a redundant tree.
+This directory declares the Tree-sitter grammar object libraries available to
+`grammar_registry.c`.
 
 ## Where grammar sources come from
 
