@@ -221,6 +221,18 @@ This is the sense in which Laplace unlocks AST for all knowledge: exact recursiv
 
 Where the recipe declares exact reconstruction, the persisted typed AST plus retained provider facts must be sufficient to reproduce the admitted source bytes/structure. Intentional transformations produce new content and an explicit structural edit/derivation receipt rather than silently mutating the observation.
 
+### Software construction from typed AST
+
+The universal AST is not only an ingest representation. It is also the construction space for software.
+
+A code-producing operation should bind an exact target language/grammar/toolchain generation, search known canonical structures before inventing new ones, compose reusable structures where possible, and construct only the smallest genuinely novel subtree required by the active obligations. Source text is realized from the selected structure after grammar/type/API/dependency constraints have been applied.
+
+This makes syntactically invalid token guessing unnecessary. A Bash request is constructed under the admitted Bash grammar/runtime contract; a Zsh request requires a qualified Zsh provider rather than silently substituting Bash because the surfaces look similar.
+
+Exact duplicate AST subtrees converge by identity. Deeper duplication can be calculated through normalized AST, control/data-flow, algebraic and behavioral equivalence under declared contracts. Generation and duplicate elimination are therefore the same optimization pressure: reuse or compose existing canonical structure before minting another implementation.
+
+Compile, link, test, static-analysis, simulation and runtime results are witnessed outcomes on exact candidate structures/toolchains/environments. A failed attempt remains reusable negative evidence; a successful repair establishes an explicit repair trajectory that later construction can couple against.
+
 ### Content novelty and observation volume are different
 
 If the same word, AST subtree, chess line, sentence or other canonical composition is observed repeatedly, the structure should converge rather than be minted repeatedly.
@@ -549,6 +561,14 @@ This law is reflected in `AGENTS.md`, the operation ISA, the native extension so
 
 ---
 
+### Program decomposition and machine-cost derivation
+
+The same decomposition law applies to executable behavior. Source ASTs, bytecode, object/container formats and decoded machine instructions may be lowered into control-flow, data-flow and dependency structure with explicit execution-count variables.
+
+Given a declared target ISA, microarchitecture/scheduling model, memory/initial-state assumptions and clock, Laplace may derive instruction instances, resource-constrained cycles and corresponding machine time. Unfixed loop counts, branch outcomes, cache state, I/O, scheduler interference and similar quantities remain symbolic, conditional or distributional rather than being replaced with benchmark averages.
+
+Observed runs are witnesses against that calculated model. They validate/calibrate missing physical/environment state; they do not become semantic authority for work already derivable from the artifact and target machine model.
+
 ## 11. Ingestion is the learning process
 
 Laplace does not require an offline gradient-training cycle to admit new knowledge.
@@ -621,6 +641,36 @@ Any exported artifact must retain a reproducible recipe/scope and must not silen
 
 ---
 
+### Repository root, structural sharing and deployment
+
+A repository/application is itself a recursively composed object. A bounded code change should remint only the changed leaf/subtree and the ancestry required to produce a new application root; unrelated canonical subtrees remain shared.
+
+Conceptually:
+
+```text
+R0 + bounded mutation Δ
+→ changed AST subtree
+→ changed file/container ancestry
+→ new complete repository root R1
+```
+
+The complete application therefore exists as R1 even when only a tiny fraction of its structure was newly constructed. A conventional checkout is a realization/export of that root.
+
+This supports a stronger patch/deployment object:
+
+```text
+FROM R0
+TO   R1
+transfer = closure(R1) - objects already present
+proof    = derivation + compile/test/analysis/runtime receipts
+activate = R1
+rollback = R0
+```
+
+Mutable database/config/secret/external-system transitions remain explicit obligations; immutable structural sharing is not permission to ignore mutable world state.
+
+Development itself becomes a witnessed trajectory across roots and failures. A successful repair can subsequently couple against other authorized repositories to find exact duplicates, structurally/algebraically similar implementations, or similarly shaped failure trajectories. Fréchet may compare ordered trajectories where appropriate, alongside AST/dependency/call/control-flow/evidence planes.
+
 ## 16. One knowledge world, variable compute
 
 Product tiers should not be implemented as progressively knowledge-reduced Laplace variants.
@@ -642,6 +692,34 @@ Where work is billable, the same physical plan that governs execution should sup
 That is why `EXPLAIN`, work receipts, benchmark calibration and hop/fanout accounting are product architecture rather than billing decoration.
 
 ---
+
+### Knowledge authority, packages and effective scope
+
+One knowledge world does not mean every principal has authority to use every part of it.
+
+Knowledge, authority and compute are independent axes:
+
+```text
+knowledge  = what canonical/witnessed/calculated state exists
+authority  = what this principal may discover/couple/traverse/derive/realize/export/execute
+compute    = how much work this operation may spend over the allowed world
+```
+
+Knowledge packages are content-addressed authority manifests over the shared world, not separately trained or duplicated smaller models. A school grade, Formula 1 corpus, enterprise private domain, personal history or temporary task scope can be granted through explicit package/authority relations.
+
+Grant inheritance follows declared authority/package relations, not arbitrary semantic connectivity. Capabilities such as DISCOVER, INSPECT, SEARCH, COUPLE, TRAVERSE, DERIVE, REALIZE, PERSIST, EXPORT, EXECUTE and DELEGATE remain separately governable.
+
+The effective operation scope is the intersection of tenant/world isolation, principal/role/relationship grants, knowledge entitlements, active caller scope and kernel governance.
+
+### Governance and honest abstention
+
+Governance is not deletion of knowledge. A fact may remain known, including sourced evidence that a capability is dangerous/restricted, while the current principal lacks authority to couple, derive, realize, export or execute it.
+
+This permits explicit receipted dispositions such as allow, deny, abstain or require stronger authority. Even revealing that restricted knowledge exists may itself require DISCOVER.
+
+Standing and permission are distinct. Consensus estimates support/uncertainty for propositions; authority decides whether an operation is allowed. A permission decision is not a popularity vote and must not be smuggled into canonical identity.
+
+Red Spear / Blue Shield / White Judge are security roles over this same model: adversarial boundary exploration, runtime enforcement, and explicit policy/authority adjudication with receipts rather than a hidden judge model.
 
 ## 17. Proof: mathematics, executable construction and witness
 
