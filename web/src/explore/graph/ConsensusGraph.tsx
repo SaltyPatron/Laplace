@@ -598,7 +598,7 @@ export function ConsensusGraph({
                 clickTimer.current = null;
               }, 280);
             }}
-            nodeCanvasObject={(node: WebNode, ctx, globalScale) => {
+            nodeCanvasObject={(node: WebNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
               // World-space radius (not /globalScale) — zoom-in reveals gaps instead of ballooning.
               const r = node.hop === 0 ? 3.2 : Math.max(1.6, 2.6 - node.hop * 0.25);
               const x = (node as WebNode & { x: number; y: number }).x;
@@ -615,7 +615,7 @@ export function ConsensusGraph({
                 ctx.fillText(label, x + r + 1.2, y + fontSize * 0.35);
               }
             }}
-            nodePointerAreaPaint={(node: WebNode, color, ctx) => {
+            nodePointerAreaPaint={(node: WebNode, color: string, ctx: CanvasRenderingContext2D) => {
               const r = node.hop === 0 ? 4 : 3;
               const x = (node as WebNode & { x: number; y: number }).x;
               const y = (node as WebNode & { x: number; y: number }).y;
