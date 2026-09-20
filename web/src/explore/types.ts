@@ -131,6 +131,12 @@ export interface StorageProofNodeRow {
   packed_vertices: StorageProofPackedVertexRow[];
   realized_vertices: StorageProofRealizedVertexRow[];
 }
+export interface StorageProofInvariantRow {
+  key: string;
+  label: string;
+  passed: boolean;
+  observed: string;
+}
 export interface StorageProofResponse {
   text: string;
   root_id_hex: string;
@@ -140,6 +146,7 @@ export interface StorageProofResponse {
   database_perfcache_receipt_hex?: string | null;
   database_perfcache_error?: string | null;
   perfcache_aligned?: boolean | null;
+  invariants: StorageProofInvariantRow[];
   nodes: StorageProofNodeRow[];
 }
 export interface ExploreAnchorNeighborRow {

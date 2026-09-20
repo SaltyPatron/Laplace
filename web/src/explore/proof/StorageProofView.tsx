@@ -12,7 +12,7 @@ import type {
 import { GlomeCanvas, type GlomeNode } from '../glome/GlomeCanvas';
 import styles from './StorageProofView.module.css';
 
-const STORAGE_PROOF_SURFACE_VERSION = 'v4' as const;
+const STORAGE_PROOF_SURFACE_VERSION = 'v5' as const;
 const TWO_POW_53_MINUS_1 = (1n << 53n) - 1n;
 const MANTISSA_MASK = (1n << 52n) - 1n;
 const TWO_PI = 6.2831853071795864769252867665590057683943387987502;
@@ -508,11 +508,12 @@ export function StorageProofView() {
       <header className={styles.hero}>
         <div>
           <span className={styles.eyebrow}>Executable storage proof · T0 ROM {STORAGE_PROOF_SURFACE_VERSION}</span>
-          <h2>Storage Proof · finite coordinate address · exact reversible trajectory</h2>
+          <h2>Storage Proof · deterministic knowledge structure in one bounded 4-D world</h2>
           <p>
-            One prompt, one native decomposition: identity, O(Tier) trunk/leaf structure,
-            4-D placement, 128-bit Hilbert locality, and the exact 212-bit packed carrier
-            emitted for each composition.
+            This surface executes the real decomposition/composition kernels and reports their
+            calculated invariants: canonical Merkle convergence, S³ Tier-0 placement, bounded
+            centroid closure, exact packed constituent manifests, realized trajectories and
+            deterministic Hilbert locality. Derived views never replace canonical state.
           </p>
         </div>
         <form className={styles.promptForm} onSubmit={submit}>
@@ -583,11 +584,29 @@ export function StorageProofView() {
           <section className={styles.section}>
             <div className={styles.sectionHead}>
               <div>
-                <h3>Storage law</h3>
+                <h3>Executable invariants</h3>
+                <p>These receipts are calculated from this prompt's real native output, not asserted by the browser.</p>
+              </div>
+            </div>
+            <div className={styles.invariantGrid}>
+              {proof.invariants.map((invariant) => (
+                <article className={invariant.passed ? styles.invariantPass : styles.invariantFail} key={invariant.key}>
+                  <span>{invariant.passed ? 'PASS' : 'FAIL'}</span>
+                  <strong>{invariant.label}</strong>
+                  <code>{invariant.observed}</code>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className={styles.section}>
+            <div className={styles.sectionHead}>
+              <div>
+                <h3>What the receipts mean</h3>
                 <p>
-                  A fixed finite geometric domain carries an unbounded family of finite recursive
-                  compositions. Identity, placement, locality, and reversible sequence storage are
-                  separate mechanisms and are shown separately below.
+                  A fixed bounded geometric domain carries a countably open Tier-0 address law and
+                  recursively composed observed knowledge. Identity, physicality, locality, packed
+                  structure and realized trajectory are deterministic but non-interchangeable state.
                 </p>
               </div>
             </div>
@@ -633,34 +652,38 @@ export function StorageProofView() {
 
               <article className={styles.lawCard}>
                 <span className={styles.lawStep}>04 · exact sequence manifest</span>
-                <strong>Order and identity are not thrown away by the centroid</strong>
+                <strong>Same content converges; order and identity survive composition</strong>
                 <p>
+                  Equal canonical content converges on the same Merkle identity and subtree.
                   The physicality trajectory stores each child identity plus logical position,
                   run length, tier/atom metadata, and flags in four 53-bit float payload slots.
-                  This carrier is exactly reversible identity cargo; it is not a path of positions.
+                  Repetition reuses canonical structure and RLE compresses repeated constituents
+                  without changing the logical expanded sequence.
                 </p>
                 <code>vertex = pack(child.id, ordinal, run_length, flags) → 4 × 53 bits</code>
               </article>
 
               <article className={styles.lawCard}>
-                <span className={styles.lawStep}>05 · realized geometry</span>
-                <strong>Spatial shape is reconstructed from live child coordinates</strong>
+                <span className={styles.lawStep}>05 · deterministic derived geometry</span>
+                <strong>Spatial telemetry is calculated from canonical child physicalities</strong>
                 <p>
-                  When geometry is required, Laplace resolves the stored child IDs through their
-                  physicalities and orders those real coordinates by ordinal. Fréchet/Hausdorff
-                  operate on this realized curve, never on the mantissa carrier.
+                  When a geometric operation is requested, Laplace resolves the stored child IDs
+                  through their canonical physicalities and orders those exact coordinates by
+                  ordinal. The resulting curve is a deterministic derived view; canonical identity
+                  and the packed manifest remain intact. Geometry never replaces them.
                 </p>
                 <code>manifest child IDs → live PointZM → ordered realized curve</code>
               </article>
 
               <article className={styles.lawCard}>
-                <span className={styles.lawStep}>06 · recursive addressability</span>
-                <strong>Complexity grows by composition, not by enlarging the coordinate domain</strong>
+                <span className={styles.lawStep}>06 · central knowledge world</span>
+                <strong>Complexity and telemetry accumulate without enlarging the geometric boundary</strong>
                 <p>
-                  Every finite node has a finite content address, one bounded 4-D placement, and a
-                  finite exact child manifest. Those nodes become children of higher nodes without
-                  allocating a larger geometric space. The limiting resource is computation and
-                  materialization, not exhaustion of the 4-D coordinate domain.
+                  Every observed composition becomes another canonical addressable structure whose
+                  physicality and trajectory can participate in higher compositions, occurrences,
+                  relations and evidence. Distinct structures may share a centroid while their
+                  identities and trajectories remain distinct; the fixed 4-D boundary does not
+                  become the identity store.
                 </p>
                 <code>finite basis → finite nodes → finite parents → …</code>
               </article>
@@ -798,7 +821,7 @@ export function StorageProofView() {
               <div>
                 <h3>Finite address ledger</h3>
                 <p>
-                  Every emitted storage node in this proof, with its exact recursive parent,
+                  Every emitted node in this observation, with its exact recursive parent,
                   content address, 4-D coordinate and Hilbert locality key. Select any row to
                   drive the detailed address, packed carrier and realized-curve views.
                 </p>
@@ -911,8 +934,8 @@ export function StorageProofView() {
                 <div className={styles.glomePair}>
                   <article className={styles.visualCard}>
                     <header>
-                      <strong>212-bit carrier projection</strong>
-                      <span>53 bits × X/Y/Z/M</span>
+                      <strong>212-bit carrier inspection</strong>
+                      <span>exact 53-bit payload × X/Y/Z/M</span>
                     </header>
                     <div className={styles.canvasTall}>
                       <GlomeCanvas
@@ -920,7 +943,7 @@ export function StorageProofView() {
                         projection="carrier"
                         highlightOrdinal={selectedPackedRow?.logical_ordinal ?? null}
                         fill
-                        note="Packed X/Y/Z sign+mantissa payloads are mapped independently into 3-D bit-space. M is metadata (ordinal/run/flags), not a spatial axis; its exact bits are decoded below."
+                        note="Display-only inspection of the exact packed payload bits. The browser view is not canonical state; the decoded 212-bit carrier below is. M carries metadata (ordinal/run/flags), not spatial position."
                       />
                     </div>
                   </article>

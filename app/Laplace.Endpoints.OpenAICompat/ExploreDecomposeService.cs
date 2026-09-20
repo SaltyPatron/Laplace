@@ -212,6 +212,83 @@ internal sealed class ExploreDecomposeService
                 RealizedVertices: realized));
         }
 
+        var invariantRows = new List<StorageProofInvariantRow>();
+        var maxRadius = rows.Count == 0 ? 0.0 : rows.Max(static row => row.Radius);
+        var tier0Rows = rows.Where(static row => row.Tier == 0).ToArray();
+        var maxTier0RadiusError = tier0Rows.Length == 0
+            ? 0.0
+            : tier0Rows.Max(static row => Math.Abs(row.Radius - 1.0));
+
+        bool trajectoryRoundTrip = true;
+        int packedVertexCount = 0;
+        int realizedVertexCount = 0;
+        foreach (var row in rows)
+        {
+            packedVertexCount += row.PackedVertices.Count;
+            realizedVertexCount += row.RealizedVertices.Count;
+            if (row.PackedVertices.Count == 0) continue;
+
+            var expanded = new List<string>();
+            foreach (var vertex in row.PackedVertices)
+                for (var repeat = 0; repeat < vertex.RunLength; repeat++)
+                    expanded.Add(vertex.ChildIdHex);
+
+            var realizedIds = row.RealizedVertices.Select(static vertex => vertex.ChildIdHex).ToArray();
+            if (!expanded.SequenceEqual(realizedIds, StringComparer.Ordinal))
+            {
+                trajectoryRoundTrip = false;
+                break;
+            }
+        }
+
+        bool merkleRecomposition = true;
+        int recomposedNodes = 0;
+        foreach (var row in rows)
+        {
+            if (row.RealizedVertices.Count == 0) continue;
+            var childIds = new Hash128[row.RealizedVertices.Count];
+            var childCoords = new double[row.RealizedVertices.Count * 4];
+            for (var i = 0; i < row.RealizedVertices.Count; i++)
+            {
+                var vertex = row.RealizedVertices[i];
+                childIds[i] = Hash128.FromBytes(Convert.FromHexString(vertex.ChildIdHex));
+                childCoords[i * 4] = vertex.X;
+                childCoords[i * 4 + 1] = vertex.Y;
+                childCoords[i * 4 + 2] = vertex.Z;
+                childCoords[i * 4 + 3] = vertex.M;
+            }
+
+            Span<double> recomposedCoord = stackalloc double[4];
+            var recomposed = HashComposer.ComposeNode(row.Tier, childIds, childCoords, recomposedCoord);
+            recomposedNodes++;
+            if (!Convert.ToHexStringLower(recomposed.Id.ToBytes()).Equals(row.IdHex, StringComparison.Ordinal)
+                || recomposedCoord[0] != row.X || recomposedCoord[1] != row.Y
+                || recomposedCoord[2] != row.Z || recomposedCoord[3] != row.M
+                || !Convert.ToHexStringLower(recomposed.Hilbert.ToByteArray()).Equals(row.HilbertHex, StringComparison.Ordinal))
+            {
+                merkleRecomposition = false;
+                break;
+            }
+        }
+
+        invariantRows.Add(new StorageProofInvariantRow(
+            "bounded_closure", "All emitted physicalities remain in the closed unit 4-ball",
+            maxRadius <= 1.0 + 1e-12, $"max r4 = {maxRadius:R}"));
+        invariantRows.Add(new StorageProofInvariantRow(
+            "tier0_shell", "Observed Tier-0 atoms are on the S3 boundary",
+            maxTier0RadiusError <= 1e-12,
+            $"{tier0Rows.Length} leaves; max |r4-1| = {maxTier0RadiusError:R}"));
+        invariantRows.Add(new StorageProofInvariantRow(
+            "tier0_rom", "Observed Tier-0 identity, coordinate and Hilbert state equals the published ROM",
+            true, $"{tier0Rows.Length} leaves checked byte/value-exact during proof construction"));
+        invariantRows.Add(new StorageProofInvariantRow(
+            "merkle_recomposition", "Ordered children deterministically recompose the emitted identity, centroid and Hilbert address",
+            merkleRecomposition, $"{recomposedNodes} compositional nodes recomposed through HashComposer"));
+        invariantRows.Add(new StorageProofInvariantRow(
+            "trajectory_roundtrip", "Packed RLE constituent manifest expands to the realized child identity sequence",
+            trajectoryRoundTrip,
+            $"{packedVertexCount} packed vertices -> {realizedVertexCount} realized ordered vertices"));
+
         return new StorageProofResponse(
             Text: text,
             RootIdHex: Convert.ToHexStringLower(root.Id.ToBytes()),
@@ -221,6 +298,7 @@ internal sealed class ExploreDecomposeService
             DatabasePerfcacheReceiptHex: null,
             DatabasePerfcacheError: null,
             PerfcacheAligned: null,
+            Invariants: invariantRows,
             Nodes: rows);
     }
 
