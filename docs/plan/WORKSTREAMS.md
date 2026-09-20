@@ -97,6 +97,22 @@ Verify every public/internal operation has one semantic owner, correct layer pla
 
 The proof class must match the claim: theorem, executable invariant, finite exhaustive check, live-substrate counterexample scan, benchmark receipt or deployed product proof.
 
+## W18 — Structural software construction and repair
+
+Treat repository/code generation as inverse admission over the universal typed AST. Bind an exact target grammar/toolchain; couple against known canonical structures; reuse/compose/minimally mutate before creating novel AST; realize source; compile/test/analyze/simulate/run; witness outcomes; repair the smallest divergent subtree.
+
+Exact duplicate code converges automatically. Normalized AST, call/dependency/control/data flow, algebraic/behavioral evidence and trajectory/Fréchet similarity should drive deeper consolidation and cross-repository repair discovery. A repository root is the complete application state; checkout is realization/export of that root.
+
+Historical owners include #452/#765/#894 plus current code/toolchain owners.
+
+## W19 — Knowledge authority, governance and security
+
+Keep knowledge, permission and compute separate. Implement explicit knowledge/package grants plus operation capabilities (DISCOVER/INSPECT/SEARCH/COUPLE/TRAVERSE/DERIVE/REALIZE/PERSIST/EXPORT/EXECUTE/DELEGATE), resolved against tenant/role/relationship scope and kernel governance.
+
+Unauthorized state must not influence COUPLE merely because output could be redacted later. Red Spear/Blue Shield/White Judge map to authorized adversarial exploration, enforcement and explicit policy adjudication/receipt rather than private security cognition stacks.
+
+Commercial providers supply entitlement evidence; compute billing remains the independent hop/fanout/resource axis.
+
 ## Cross-cutting resource/capacity law
 
 Every workstream that performs expensive work participates in the same plan/admission/receipt model:
