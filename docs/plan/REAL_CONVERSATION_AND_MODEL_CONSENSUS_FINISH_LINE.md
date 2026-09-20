@@ -112,14 +112,20 @@ Ablation must be possible: source A only, source B only, pooled A+B, etc. The re
 Code generation is not a private model path.
 
 ```text
-generate/select code structure
--> stage exact content
--> run declared toolchain/test/calculation provider
--> witness/record the result with provenance/recipe
+resolve exact target language / grammar / toolchain
+-> couple requirement against known code/AST/call/dependency structures
+-> reuse exact canonical structures first
+-> compose known structures next
+-> minimally adapt the closest lawful subtree when possible
+-> construct novel AST only where necessary
+-> realize/stage exact source/content
+-> run declared compiler/linker/test/analyzer/simulator/runtime providers
+-> witness/record every success/failure with provenance/recipe
+-> repair the smallest divergent subtree
 -> next cognition round sees the changed evidence state
 ```
 
-Compile/test failure is a typed outcome, not reason to delete/remint the code entity.
+Compile/test failure is a typed outcome, not reason to delete/remint the code entity. Failed attempts remain reusable negative evidence; successful repair trajectories can couple against other authorized repositories to expose exact/structural/algebraic duplicates or similarly shaped defects. A repository is a complete recursive application root, so a bounded edit should remint only its changed ancestry while unrelated structure is reused.
 
 ## No architectural fixed context window
 
