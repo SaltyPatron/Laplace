@@ -69,6 +69,8 @@ For an 8×8 region this is 204 square occurrences: 64 1×1, 49 2×2, 36 3×3, 25
 
 These are occurrence references, not necessarily novel canonical records. Equal lower-scale structures converge globally.
 
+A subpatch cache record is global canonical content, not a parent-owned/tier-owned copy. The same ordered 2x2 composition inside ten different 8x8 regions is one canonical entity referenced ten times. Cache class, parent region, scale occurrence and local module slot never salt that entity id.
+
 A multiscale image ROM may therefore store compact local references to canonical subpatch records across selected or all scales. This gives higher image/video operations exact reusable structural response without recomputing every sliding window.
 
 The cache profile declares which scale families are resident; omission of a scale is an acceleration choice, not a change to canonical image identity.
