@@ -401,6 +401,7 @@ laplace_prompt_geometry_scan_anchor(
             hash128_eq(source, &intent->root) && *root_angular_count < fanout)
             root_angular[(*root_angular_count)++] = id;
     }
+    SPI_freetuptable(SPI_tuptable);
 
     bytea *hilbert = palloc(VARHDRSZ + 16);
     SET_VARSIZE(hilbert, VARHDRSZ + 16);
@@ -441,6 +442,7 @@ laplace_prompt_geometry_scan_anchor(
         laplace_prompt_geometry_append(
             intent, source, &ordered[row].id, LAPLACE_PROMPT_GEOMETRY_HILBERT,
             (uint32) row + 1u, ordered[row].delta, 0.0);
+    SPI_freetuptable(SPI_tuptable);
     if (ordered) pfree(ordered);
     pfree(hilbert);
     pfree(DatumGetPointer(source_datum));
@@ -454,6 +456,9 @@ laplace_prompt_geometry_shape(LaplacePromptIntent *intent, int fanout,
     if (!frechet_plan || candidate_count <= 0 || fanout <= 0)
         return;
     size_t node_count = tier_tree_node_count(intent->input->tree);
+    if (node_count > (size_t) INT_MAX ||
+        node_count > MaxAllocSize / sizeof(LaplacePromptGeometryPoint))
+        elog(ERROR, "prompt geometry: realized prompt curve exceeds allocation capacity");
     const uint8 *tiers = tier_tree_tier_array(intent->input->tree);
     const uint32 *offsets = tier_tree_text_off_array(intent->input->tree);
     const double *coords = tier_tree_coord_array(intent->input->tree);
@@ -528,6 +533,7 @@ laplace_prompt_geometry_shape(LaplacePromptIntent *intent, int fanout,
             intent, &intent->root, &id, LAPLACE_PROMPT_GEOMETRY_FRECHET,
             (uint32) row + 1u, NULL, DatumGetFloat8(distance_value));
     }
+    SPI_freetuptable(SPI_tuptable);
 
     for (int i = 0; i < candidate_count; ++i)
         pfree(DatumGetPointer(ids[i]));
@@ -635,6 +641,8 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
      * carries every exact current occurrence as provenance, so one indexed read
      * per metric plane preserves the complete prompt without RBAR SPI over its
      * codepoints/graphemes/tokens. */
+    if ((Size) fanout > MaxAllocSize / sizeof(hash128_t))
+        elog(ERROR, "prompt geometry: fanout exceeds allocation capacity");
     hash128_t *root_angular = palloc(sizeof(hash128_t) * (Size) fanout);
     int root_angular_count = 0;
     laplace_prompt_geometry_scan_anchor(
