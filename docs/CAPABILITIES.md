@@ -144,6 +144,8 @@ This means the benefits compound upward: once pixels/patches/images are cached, 
 
 A cached image is also a multiscale structural basis. An 8×8 region contains 204 contiguous square occurrences across 1×1..8×8. Those occurrences point at globally reusable canonical subpatch roots, so two different regions/images can share exact lower-scale structures even when their complete roots differ. This gives image/video cognition exact multiscale matching without learned filters or repeated window recomputation.
 
+The multiscale image basis is a DAG, not a tier-local copy tree. One canonical 2×2 entity may be referenced by many overlapping 3×3/4×4/8×8 regions and by many images/video frames. A scratch builder with a single parent pointer is therefore only an execution aid; durable identity/physicality/occurrence state must preserve many-parent reuse.
+
 Cache lookup should produce canonical keys for indexed database/native operations rather than hide indexed columns behind per-row functions.
 
 Cache profiles can be intentionally narrow without creating smaller knowledge worlds. A device may map ASCII rather than all Unicode, a selected color palette rather than every pixel value, or a declared speech-frequency/filter-bank segment rather than every audio calculation. Members retain their global canonical identity. Missing cache entries fall back to canonical execution when available; authorization remains a separate knowledge/governance axis.
