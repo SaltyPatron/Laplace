@@ -977,9 +977,10 @@ run_release_mutation_window() (
   local actions="$1"
   local api_was_active=0 mutation_rc=0
 
-  # Install and extension/database mutation are one maintenance window. pipeline.sh
-  # also protects standalone phases, but release delivery owns the larger sequence:
-  # do not start the old API after install only to stop it again for ALTER EXTENSION.
+  # Keep the user-facing API down only for the mutations that can invalidate its
+  # loaded native/SQL contract. Qualification reads do not belong in this outage:
+  # a retained DB suite can take minutes and previously left nginx returning 502
+  # for that entire interval even though install/ALTER EXTENSION had already ended.
   systemctl is-active --quiet laplace-api 2>/dev/null && api_was_active=1 || true
   cleanup_release_mutation_window() {
     mutation_rc=$?
@@ -1000,9 +1001,8 @@ run_release_mutation_window() (
 
   if csv_selected "$actions" database; then
     run_database_maintenance --prepare
-    run_db_tests
   else
-    echo "::notice::database preparation/regression remains valid; database mutation skipped"
+    echo "::notice::database preparation remains valid; database mutation skipped"
   fi
 
   if [[ "$api_was_active" == 1 ]]; then
@@ -1026,6 +1026,7 @@ run_release_candidate() {
   (( current_rc == 0 )) || return "$current_rc"
 
   run_release_mutation_window "install,database"
+  run_db_tests
   run_publish
 }
 
@@ -1077,6 +1078,13 @@ run_release_delivery() {
   fi
 
   run_release_mutation_window "$actions"
+
+  # Database qualification runs with the API back online. These suites validate
+  # the installed candidate; they are not themselves an install/ALTER mutation
+  # and must not turn a short maintenance window into minutes of 502s.
+  if csv_selected "$actions" database; then
+    run_db_tests
+  fi
 
   # Publication is a planner action, not a tax on native-only SHAs. pipeline.sh
   # install + postgres bounce does not republish API/MCP/UI.
