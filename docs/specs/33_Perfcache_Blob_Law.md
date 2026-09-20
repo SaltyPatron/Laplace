@@ -111,6 +111,61 @@ dependency closure
 
 The selector is part of the blob generation/receipt. A subset cache never renumbers or re-identifies its members. For example, ASCII U+0041 retains the same canonical T0 identity and placement it has in the full Unicode generation; a local dense slot may accelerate lookup but is not a new Tier-0 rank.
 
+### Profile manifest contract
+
+A selector-scoped cache generation has a deterministic manifest. At minimum it binds:
+
+~~~text
+profile/module id
+cache class
+canonical recipe/generation
+selector kind
+selector payload/hash
+dependency modules/generations
+local lookup layout
+canonical record layout/version
+generator identity/version
+output blob hashes/sizes
+fallback policy
+publication generation
+~~~
+
+Selector payload examples:
+
+~~~text
+range:
+  start: U+0000
+  end:   U+007F
+
+explicit-set:
+  canonical values / ids / source selector artifact hash
+
+band:
+  analyzer recipe
+  lower/upper band or explicit bin/filter ids
+
+hot-set:
+  exact canonical ids plus selection epoch/metric receipt
+
+closure:
+  selected higher roots plus exact dependency walk recipe
+~~~
+
+Local slot numbers inside a compact module are acceleration addresses only. A module loader returns the global canonical record/id/coord represented by that slot.
+
+Profiles/modules may overlap. Overlap is verified by canonical record parity; it does not create duplicate semantic state.
+
+Fallback policy is explicit:
+
+~~~text
+canonical-fallback
+remote-fetch
+profile-miss
+deny-by-authority   # authority layer only, never inferred from a cache miss
+~~~
+
+A cache miss is never silently interpreted as an authorization denial.
+
 ### Modular composition
 
 Several cache modules may be mapped together as one runtime profile:
