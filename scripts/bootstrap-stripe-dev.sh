@@ -25,6 +25,7 @@ DEFAULT_CANCEL_URL="http://127.0.0.1:5187/billing/cancel"
 DEFAULT_CURRENCY="usd"
 PERSIST_ZSH=0
 PRINT_ONLY=0
+INSTALL_SERVICE=0
 # Prefer operator name; accept legacy LAPLACE_STRIPE_API_KEY.
 API_KEY="${STRIPE_API_SECRET:-${LAPLACE_STRIPE_API_KEY:-}}"
 WEBHOOK_SECRET="${STRIPE_WEBHOOK_SECRET:-${LAPLACE_STRIPE_WEBHOOK_SECRET:-}}"
@@ -37,6 +38,7 @@ Options:
   --api-key <value>   Stripe test secret (sk_test_...) → STRIPE_API_SECRET
   --persist-zsh       Append source line to ~/.zshrc if missing
   --print-only        Print export lines only, do not write files
+  --install-service   Install/start the Linux Stripe webhook listener (root)
   -h, --help          Show this help
 
 Recommended flow:
@@ -62,6 +64,10 @@ while [[ $# -gt 0 ]]; do
       PRINT_ONLY=1
       shift
       ;;
+    --install-service)
+      INSTALL_SERVICE=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -74,7 +80,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! command -v stripe >/dev/null 2>&1; then
+STRIPE_CLI="$(command -v stripe 2>/dev/null || true)"
+if [[ -z "$STRIPE_CLI" && -x "$OP_HOME/.npm-global/bin/stripe" ]]; then
+  STRIPE_CLI="$OP_HOME/.npm-global/bin/stripe"
+fi
+if [[ -z "$STRIPE_CLI" ]]; then
   echo "stripe CLI not found. Install: https://docs.stripe.com/stripe-cli/install" >&2
   echo "Continuing without CLI; key/bootstrap still works." >&2
 fi
@@ -146,3 +156,54 @@ echo "How to set key in CI/runner environment:"
 echo "  1) Store STRIPE_API_SECRET in ~/.config/shell/secrets.env (setup-host seeds /opt/laplace/secrets/stripe.env)."
 echo "  2) Or export STRIPE_API_SECRET before pipeline publish (refreshes the drop)."
 echo "  3) Keep live keys separate; never reuse test keys in live mode."
+
+install_listener_service() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    echo "--install-service requires root (use setup-host.sh stripe)." >&2
+    return 1
+  fi
+  if [[ -z "$STRIPE_CLI" ]]; then
+    echo "Stripe CLI not found for operator $OP_HOME; listener service not installed." >&2
+    return 1
+  fi
+
+  local native_cli="$STRIPE_CLI"
+  local resolved
+  resolved="$(readlink -f "$STRIPE_CLI")"
+  if [[ "$resolved" == */@stripe/cli/bin/shim.js ]]; then
+    local candidates=("$OP_HOME"/.npm-global/lib/node_modules/@stripe/cli/node_modules/@stripe/cli-linux-*/bin/stripe)
+    if [[ ${#candidates[@]} -ne 1 || ! -x "${candidates[0]}" ]]; then
+      echo "Could not resolve the native Stripe CLI behind $STRIPE_CLI." >&2
+      return 1
+    fi
+    native_cli="${candidates[0]}"
+  fi
+  "$native_cli" version >/dev/null
+
+  install -d -o laplace-runner -g laplace-runner -m 2775 /opt/laplace/bin
+  install -o root -g laplace-runner -m 0755 "$native_cli" /opt/laplace/bin/stripe
+
+  local secret_file=/opt/laplace/secrets/stripe.env
+  install -d -o laplace-runner -g laplace-runner -m 2770 /opt/laplace/secrets
+  local temp
+  temp="$(mktemp /opt/laplace/secrets/.stripe.env.XXXXXX)"
+  if [[ -f "$secret_file" ]]; then
+    grep -v '^STRIPE_API_KEY=' "$secret_file" >"$temp" || true
+  fi
+  printf 'STRIPE_API_KEY=%s\n' "$API_KEY" >>"$temp"
+  chown laplace-runner:laplace-runner "$temp"
+  chmod 0640 "$temp"
+  mv -f "$temp" "$secret_file"
+
+  local unit_src
+  unit_src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/deploy/linux/managed-services/laplace-stripe.service"
+  install -o root -g root -m 0644 "$unit_src" /etc/systemd/system/laplace-stripe.service
+  systemctl daemon-reload
+  systemctl enable --now laplace-stripe.service
+  systemctl is-active --quiet laplace-stripe.service
+  echo "Stripe listener active: laplace-stripe.service -> http://127.0.0.1:5187/v1/billing/webhooks/stripe"
+}
+
+if [[ "$INSTALL_SERVICE" -eq 1 ]]; then
+  install_listener_service
+fi

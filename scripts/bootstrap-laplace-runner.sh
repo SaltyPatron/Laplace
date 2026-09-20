@@ -1982,6 +1982,7 @@ bootstrap_operator_secrets() {
         dst="$dst_dir/stripe.env"
         {
             printf 'STRIPE_API_SECRET=%s\n' "$val"
+            printf 'STRIPE_API_KEY=%s\n' "$val"
             local pub whsec
             pub="$(grep -E '^(STRIPE_API_Publishable|STRIPE_API_PUBLISHED|STRIPE_API_PUBLISHABLE)=' "$src" 2>/dev/null | head -1 || true)"
             [ -n "$pub" ] && printf '%s\n' "STRIPE_API_Publishable=${pub#*=}"

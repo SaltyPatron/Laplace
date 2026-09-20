@@ -1,0 +1,34 @@
+[Unit]
+Description=Laplace Stripe CLI webhook listener (development)
+After=network-online.target laplace-api.service
+Wants=network-online.target
+PartOf=laplace-api.service
+ConditionPathExists=/opt/laplace/secrets/stripe.env
+
+[Service]
+Type=simple
+User=laplace-runner
+Group=laplace-runner
+WorkingDirectory=/var/lib/agents/laplace-runner
+EnvironmentFile=/opt/laplace/secrets/stripe.env
+ExecStart=/opt/laplace/bin/stripe listen --skip-update --log-level error --device-name laplace-dev --events checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,invoice.paid,invoice.payment_failed,customer.subscription.created,customer.subscription.deleted,customer.subscription.updated,customer.subscription.paused,customer.subscription.resumed --forward-to http://127.0.0.1:5187/v1/billing/webhooks/stripe
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+# Stripe prints the signing secret on stderr at every connection. The value is
+# already installed in stripe.env; never duplicate it into the system journal.
+StandardOutput=null
+StandardError=null
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -717,7 +717,7 @@ phase_runtime_secrets() {
   local stripe="${STRIPE_API_SECRET:-${LAPLACE_STRIPE_API_KEY:-}}" whsec="${STRIPE_WEBHOOK_SECRET:-${LAPLACE_STRIPE_WEBHOOK_SECRET:-}}"
   dst="$dir/stripe.env"
   if [[ -n "$stripe" ]]; then
-    { printf 'STRIPE_API_SECRET=%s\n' "$stripe"; [[ -z "$whsec" ]] || printf 'STRIPE_WEBHOOK_SECRET=%s\n' "$whsec"; [[ -z "${STRIPE_API_Publishable:-${STRIPE_API_PUBLISHABLE:-}}" ]] || printf 'STRIPE_API_Publishable=%s\n' "${STRIPE_API_Publishable:-$STRIPE_API_PUBLISHABLE}"; } >"$dst.tmp"
+    { printf 'STRIPE_API_SECRET=%s\nSTRIPE_API_KEY=%s\n' "$stripe" "$stripe"; [[ -z "$whsec" ]] || printf 'STRIPE_WEBHOOK_SECRET=%s\n' "$whsec"; [[ -z "${STRIPE_API_Publishable:-${STRIPE_API_PUBLISHABLE:-}}" ]] || printf 'STRIPE_API_Publishable=%s\n' "${STRIPE_API_Publishable:-$STRIPE_API_PUBLISHABLE}"; } >"$dst.tmp"
     chmod 640 "$dst.tmp"; mv "$dst.tmp" "$dst"
   elif [[ "$in_ci" == 1 ]]; then echo "::error::STRIPE_API_SECRET is required" >&2; missing=1; fi
 

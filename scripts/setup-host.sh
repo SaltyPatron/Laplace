@@ -131,7 +131,7 @@ seed_billing_from_operator_files() {
 
     if [ -x "$STRIPE_BOOTSTRAP" ]; then
         STRIPE_API_SECRET="$stripe_key" \
-            "$STRIPE_BOOTSTRAP" --api-key "$stripe_key" --persist-zsh || yellow "stripe-dev.env bootstrap warned"
+            "$STRIPE_BOOTSTRAP" --api-key "$stripe_key" --persist-zsh --install-service || yellow "stripe listener bootstrap warned"
     fi
     sudo STRIPE_API_SECRET="$stripe_key" LAPLACE_OPERATOR="$LAPLACE_OPERATOR" "$BOOTSTRAP" stripe || yellow "runner stripe env warned"
     green "✓ local billing seed from $src (overwritten by next CI publish)"
