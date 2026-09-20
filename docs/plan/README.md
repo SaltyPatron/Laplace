@@ -47,3 +47,8 @@ When using any plan in this directory:
 3. re-check issue/code/runtime status;
 4. preserve useful acceptance/counterexamples;
 5. do not inherit stale global priority, completion percentage, finite machine limit, another-repository ownership, or reduced/MVP substitute from the plan.
+
+
+## Capability preservation
+
+Plans are subordinate to [`../CAPABILITIES.md`](../CAPABILITIES.md) and the invention authority. A plan may schedule/prove a mechanism; it may not turn the proof artifact into the feature or omit compound consequences because they span several workstreams.
