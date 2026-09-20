@@ -109,23 +109,25 @@ Ablation must be possible: source A only, source B only, pooled A+B, etc. The re
 
 ## Code/tool feedback uses the same loop
 
-Code generation is not a private model path.
+Code construction is not a private model path and is not unconstrained text generation.
 
 ```text
-resolve exact target language / grammar / toolchain
--> couple requirement against known code/AST/call/dependency structures
+resolve exact target language / grammar / runtime / toolchain
+-> couple requirement against canonical AST/repository/call/dependency state
 -> reuse exact canonical structures first
 -> compose known structures next
--> minimally adapt the closest lawful subtree when possible
+-> minimally adapt close lawful subtrees
 -> construct novel AST only where necessary
--> realize/stage exact source/content
--> run declared compiler/linker/test/analyzer/simulator/runtime providers
--> witness/record every success/failure with provenance/recipe
+-> realize/stage exact source
+-> compile/link/test/analyze/simulate/run under declared providers
+-> witness every success/failure with exact provenance/recipe
 -> repair the smallest divergent subtree
 -> next cognition round sees the changed evidence state
 ```
 
-Compile/test failure is a typed outcome, not reason to delete/remint the code entity. Failed attempts remain reusable negative evidence; successful repair trajectories can couple against other authorized repositories to expose exact/structural/algebraic duplicates or similarly shaped defects. A repository is a complete recursive application root, so a bounded edit should remint only its changed ancestry while unrelated structure is reused.
+Compile/test/runtime failure is a typed outcome, not reason to delete/remint the code entity. Failed attempts remain reusable negative evidence. Successful repair trajectories can couple against other authorized repositories to expose exact/structural/algebraic duplicates or similarly shaped defects.
+
+A repository is a complete recursive application root. A bounded edit remints only its changed subtree and ancestry while unrelated canonical structure is reused. Checkout/export realizes that complete root.
 
 ## No architectural fixed context window
 
