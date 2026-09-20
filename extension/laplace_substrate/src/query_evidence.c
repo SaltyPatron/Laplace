@@ -154,7 +154,7 @@ static bool
 query_operand_role_valid(uint32 role)
 {
     return role >= LAPLACE_QUERY_OPERAND_OBSERVATION &&
-           role <= LAPLACE_QUERY_OPERAND_WORKING;
+           role <= LAPLACE_QUERY_OPERAND_GEOMETRY;
 }
 
 static uint32
