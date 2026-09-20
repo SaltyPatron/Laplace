@@ -36,6 +36,47 @@ A* = union(n >= 0) A^n.
 
 `A*` is countably infinite whenever arbitrarily long finite compositions are allowed. More generally, finite rooted typed trees/DAG descriptions over a countable basis are countable. A finite atom window therefore does not imply a finite family of representable finite objects.
 
+### Open Tier-0 rank law; finite observation/materialization
+
+Tier-0 itself is not defined by Unicode's current finite population. The abstract address law is open-ended:
+
+```text
+T0 = { p(n) | n in N }
+```
+
+where `p(n)` is the deterministic Tier-0 placement/address generated for rank `n` under the selected recipe. There is no architectural final `N` in that law.
+
+Every concrete observation, perfcache generation, database population or execution remains finite. If an observation/materialization has admitted ranks `0..k-1`, then
+
+```text
+T0(observed,k) = { p(0), p(1), ..., p(k-1) }
+```
+
+is finite even though the address law itself is unbounded. Unicode 17 happens to provide a useful standards-defined finite window of 1,114,112 codepoint positions; that count belongs to the selected Unicode generation, not to the mathematical cardinality/capacity of Tier-0.
+
+The phrase **finite when observed** is a useful conceptual analogy for this distinction: every physical observation/materialization is finite while the generative/address law has no terminal rank. It is not an invocation of the quantum Heisenberg uncertainty relation.
+
+The open Super-Fibonacci/radical-inverse placement matters here because the location of rank `n` is determined without requiring a final population size. Extending the realized prefix therefore densifies the bounded shell instead of redefining the earlier addresses around a new terminal `N`.
+
+### One bounded geometric world is navigable
+
+The bounded domain is not merely a container. It is a navigable structural world. Canonical identities, typed physicalities, ordered trajectories and overlapping relation/evidence webs all inhabit the same finite geometric extent.
+
+Navigation is deliberately plural rather than one universal scalar distance:
+
+```text
+concept/entity
+  -> Hilbert/locality neighborhood
+  -> angular/geodesic neighborhood
+  -> trajectory/Fréchet or set/Hausdorff comparison
+  -> centroid/Karcher summaries
+  -> containment / precedes / co-occurrence / gaps / usage
+  -> typed relations / testimony / source / context
+  -> next concept/entity
+```
+
+Distinct knowledge may occupy the same coordinate or region; identity and path structure keep it distinct. Consequently finite geometric extent does not impose one-object-per-point occupancy. The geometry supplies locality and measurable routes through the central knowledge system; the full Laplace object supplies identity, order, semantics, evidence and provenance.
+
 ### Current bounded placement
 
 Let the selected geometric frame be the closed unit ball

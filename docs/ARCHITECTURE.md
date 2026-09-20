@@ -376,7 +376,7 @@ Architecture claims are not all proved the same way.
 
 - Bounded centroid closure is a mathematical invariant of the current native composition rule.
 - Exact mantissa/trajectory round-trip is an executable serialization property.
-- The selected finite Tier-0/Unicode placement window can be exhaustively exercised.
+- The selected finite **Unicode materialization of the open Tier-0 rank law** can be exhaustively exercised; its finite count is an implementation-generation property, not the Tier-0 mathematical ceiling.
 - Retained-database reconstruction tests prove exact reconstruction for their admitted fixtures/corpora.
 - A populated live substrate is implementation evidence at scale, not a replacement for the theorem.
 - Performance claims require exact revision/artifact/host/provider/workload receipts.

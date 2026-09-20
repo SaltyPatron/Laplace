@@ -1,5 +1,8 @@
--- Configured tier-0 atom window N (GH #813). Never a SQL literal — the C
--- binding reads LAPLACE_PERFCACHE_RECORD_COUNT from the perfcache format header.
+-- Configured finite atom/Unicode materialization count for the selected executable
+-- generation (GH #813). This is NOT the mathematical capacity of Tier-0: the abstract
+-- Tier-0 rank/address law is open-ended (n ∈ N). Never duplicate this generation count
+-- as a SQL literal — the C binding reads LAPLACE_PERFCACHE_RECORD_COUNT from the
+-- perfcache format header.
 -- No DROP: atom_census() BEGIN ATOMIC depends on this; DROP would fail the
 -- extension upgrade (GH #764). CREATE OR REPLACE is enough for the C binding.
 CREATE OR REPLACE FUNCTION laplace.atom_window()

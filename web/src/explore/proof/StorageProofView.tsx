@@ -554,7 +554,7 @@ export function StorageProofView() {
             <div><span>Emitted nodes</span><strong>{proof.nodes.length.toLocaleString()}</strong></div>
             <div><span>Max tier</span><strong>{maxTier}</strong></div>
             <div><span>Tier-0 leaves</span><strong>{tier0Count.toLocaleString()}</strong></div>
-            <div><span>Atom window</span><strong>{proof.atom_window.toLocaleString()}</strong></div>
+            <div><span>Unicode window</span><strong>{proof.atom_window.toLocaleString()}</strong></div>
             <div><span>Proof surface</span><strong>{STORAGE_PROOF_SURFACE_VERSION}</strong></div>
             <div>
               <span>T0 ROM receipt</span>
@@ -593,13 +593,16 @@ export function StorageProofView() {
             </div>
             <div className={styles.lawGrid}>
               <article className={styles.lawCard}>
-                <span className={styles.lawStep}>01 · finite floor ROM</span>
-                <strong>Tier 0 is a fixed address basis</strong>
+                <span className={styles.lawStep}>01 · open Tier-0 law · finite Unicode ROM</span>
+                <strong>Tier 0 has no terminal rank; Unicode is one finite observed window</strong>
                 <p>
-                  The v4 perfcache stores every Unicode codepoint&apos;s content ID, DUCET/UCA
-                  order, 4-D S³ coordinate, 128-bit Hilbert key, and segmentation properties.
-                  DUCET order feeds the open Super-Fibonacci map; early ranks are interleaved
-                  across the full shell instead of filling one latitude band.
+                  The current v4 ROM materializes the selected Unicode generation: every
+                  codepoint&apos;s content ID, DUCET/UCA order, 4-D S³ coordinate, 128-bit Hilbert
+                  key, and segmentation properties. The underlying rank/address law is open
+                  (`n ∈ ℕ`); 1,114,112 is this Unicode window, not Tier-0 capacity. DUCET order
+                  feeds the open Super-Fibonacci map, so extending a realized prefix densifies
+                  the same bounded shell instead of filling one latitude band or requiring a
+                  final population N.
                 </p>
                 <code>codepoint → {'{'} id, uca_order, x, y, z, m, hilbert, flags {'}'}</code>
               </article>
