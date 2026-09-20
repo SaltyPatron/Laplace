@@ -1,5 +1,6 @@
 {
   "object": "list",
+  "billing_enforced": true,
   "data": [
     {
       "plan_id": "developer",
