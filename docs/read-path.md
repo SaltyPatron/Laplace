@@ -2,7 +2,7 @@
 
 This file describes the current read/cognition execution law. The previous version was a valuable measured audit from 2026-08-14/15, but its phased repair instructions became stale as those paths changed. That exact historical report remains available in Git history; it must not be used as a current implementation plan.
 
-Authority for the invention is [`INVENTION.md`](INVENTION.md), [`INVENTIONS.md`](INVENTIONS.md), [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md), [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md), and `AGENTS.md`.
+Authority for the invention is [`INVENTION.md`](INVENTION.md), [`INVENTIONS.md`](INVENTIONS.md), [`CAPABILITIES.md`](CAPABILITIES.md), [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md), [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md), and `AGENTS.md`.
 
 ---
 
