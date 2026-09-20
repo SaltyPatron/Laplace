@@ -1472,7 +1472,7 @@ public sealed class UnicodeDecomposer
             InstalledSourceGeneration recipe)
         {
             _snapshot = snapshot;
-            _runtime = new NativeSourceRecipe(recipe.Recipe);
+            _runtime = new NativeSourceRecipe(recipe.Recipe, recordDepth: 3);
         }
 
         public Hash128 SourceId => Source;
