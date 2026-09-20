@@ -336,7 +336,7 @@ phase_build_native() {
     -DLAPLACE_EXTERNAL="$LAPLACE_EXTERNAL" \
     -DLAPLACE_INSTALL_STAGED=ON \
     -DLAPLACE_UCD_PATH="$ucd" \
-    -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.all.flat.zip" \
+    -DLAPLACE_UCDXML_ZIP="$ucd/ucdxml/ucd.all.grouped.zip" \
     -DLAPLACE_DUCET_FILE="$ucd/uca/allkeys.txt" \
     -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
     -DLAPLACE_CHESS_OPENINGS="$chess_openings" \
