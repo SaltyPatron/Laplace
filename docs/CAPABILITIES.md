@@ -171,7 +171,7 @@ Laplace's decomposition law applies to programs and machines as well as document
 ```text
 source / executable / JAR / bytecode / object/container
 → exact syntax/container recovery
-→ universal typed AST / bytecode / machine-instruction structure
+→ canonical tier/trajectory structure + derived AST/bytecode/machine-instruction projection
 → control-flow + data/dependency structure
 → explicit execution-count variables
 → target ISA
