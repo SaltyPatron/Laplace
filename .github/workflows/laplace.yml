@@ -23,12 +23,14 @@ on:
       - "scripts/check-deployed-revision.sh"
       - "scripts/test-parallel.sh"
       - "scripts/publish-applications.sh"
+      - "scripts/db-migrations.sh"
       - "scripts/verify-api-payload.py"
       - "scripts/verify-application-release.py"
       - "scripts/check-application-runtime.py"
       - "scripts/check-database-health.sh"
       - "scripts/configure-laplace-environment.py"
       - "deploy/linux/deploy.sh"
+      - "deploy/linux/payload-sync.sh"
       - "scripts/test-suites/**"
       - "scripts/test-*.py"
       - "scripts/test-*.sh"
@@ -42,13 +44,6 @@ on:
       - "scripts/test-benchmark-suite.py"
       - "scripts/validate-pipeline.py"
       - "scripts/setup-host.sh"
-  workflow_dispatch:
-    inputs:
-      base_sha:
-        description: "Exclusive base revision for an exact main-delivery recovery run"
-        type: string
-        required: true
-
 permissions:
   contents: read
 
@@ -92,7 +87,7 @@ jobs:
         id: plan
         shell: bash
         env:
-          BASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
+          BASE_SHA: ${{ github.event.before }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
