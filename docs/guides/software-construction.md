@@ -156,3 +156,10 @@ Deployment itself can become a governed operation: resolve current state, check 
 A real software-construction implementation demonstrates that exact grammar/toolchain target is bound before construction; canonical reuse is attempted before novel structure; syntax is valid by construction for the selected grammar; type/API/dependency constraints participate; failures and successes are witnessed with exact provenance; repair changes a bounded subtree rather than regenerating the project; duplicate implementations feed reuse/consolidation; repository-root identity changes only through affected ancestry; complete checkout realization has exact parity; and cross-repository analogies are explainable and authority-scoped.
 
 Tests prove these behaviors. They are not the behaviors themselves.
+
+
+## Current implementation owners
+
+- #894 — structural constructor, canonical reuse, toolchain witnesses and repair trajectories.
+- #452 — repository Git/history/application-root representation and root-transition patching.
+- #1710 — full-repository mutation/reuse/realization benchmark.
