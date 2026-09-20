@@ -30,8 +30,14 @@ public readonly record struct ContentIngestRecord(
 public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {
     private readonly Hash128 _sourceId;
+    private readonly double? _sourceTrust;
 
-    public ContentIngestHandler(Hash128 sourceId) => _sourceId = sourceId;
+    public ContentIngestHandler(Hash128 sourceId, double? sourceTrust = null)
+    {
+        _sourceId = sourceId;
+        _sourceTrust = sourceTrust;
+        if (sourceTrust is { } trust) SubstrateChange.ValidateSourcePrior(trust);
+    }
 
     public IIngestDeferredUnit CreateDeferredUnit(ContentIngestRecord record)
     {
@@ -40,7 +46,7 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
             : record.SourceId != default
                 ? record.SourceId
                 : _sourceId;
-        return new ContentDeferredUnit(record.CanonicalUtf8, directSource);
+        return new ContentDeferredUnit(record.CanonicalUtf8, directSource, _sourceTrust);
     }
 
     public void WalkWitness(ContentIngestRecord record, Hash128 root, SubstrateChangeBuilder builder, IIngestDeferredUnit unit)
@@ -51,13 +57,15 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
     {
         private readonly byte[] _canonical;
         private readonly Hash128 _sourceId;
+        private readonly double? _sourceTrust;
         private TierTree? _tree;
         private bool _disposed;
 
-        public ContentDeferredUnit(byte[] canonical, Hash128 sourceId)
+        public ContentDeferredUnit(byte[] canonical, Hash128 sourceId, double? sourceTrust)
         {
             _canonical = canonical;
             _sourceId = sourceId;
+            _sourceTrust = sourceTrust;
             _tree = ContentTierSpine.BuildTree(canonical);
         }
 
@@ -73,6 +81,10 @@ public sealed class ContentIngestHandler : IIngestRecordHandler<ContentIngestRec
             if (_tree is null)
                 _tree = ContentTierSpine.BuildTree(_canonical);
             if (_tree is null) return default;
+            // A document can own its native rows under its content root rather
+            // than the corpus registry id. Carry the producer's declared prior
+            // with that exact owner; witness weights are not source priors.
+            if (_sourceTrust is { } trust) builder.DeclareSourcePrior(_sourceId, trust);
             return ContentTierSpine.EmitTree(
                 builder, _tree, _sourceId, descentBitmap ?? ReadOnlySpan<byte>.Empty, out var rootId)
                 ? rootId : default;

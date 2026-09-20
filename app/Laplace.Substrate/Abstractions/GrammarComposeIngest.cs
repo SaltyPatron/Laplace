@@ -105,7 +105,7 @@ public sealed class GrammarComposeHandler : IIngestRecordHandler<GrammarComposeR
                 || !GrammarSourceFileSupport.IsExactNativeText(record.Utf8))
                 throw new InvalidDataException("Raw source admission requires exact native text and physical file metadata.");
             _record = record; _sourceId = sourceId; _trust = trust;
-            _content = new ContentIngestHandler(sourceId).CreateDeferredUnit(new ContentIngestRecord(record.Utf8));
+            _content = new ContentIngestHandler(sourceId, trust).CreateDeferredUnit(new ContentIngestRecord(record.Utf8));
         }
         public TierTree? TreeForBatchProbe => _content.TreeForBatchProbe;
         public long ResidentBytes => _content.ResidentBytes;

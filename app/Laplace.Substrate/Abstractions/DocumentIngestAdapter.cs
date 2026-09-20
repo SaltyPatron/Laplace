@@ -35,7 +35,8 @@ public sealed class DocumentMultiFileStream : IMultiFileRecordStream<ContentInge
 
 public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRecord>
 {
-    private readonly ContentIngestHandler _inner = new(DocumentSource.SourceId);
+    private readonly ContentIngestHandler _inner =
+        new(DocumentSource.SourceId, SourceTrust.StructuredCorpus);
 
     public DocumentIngestHandler(int layerOrder) => LayerOrder = layerOrder;
 

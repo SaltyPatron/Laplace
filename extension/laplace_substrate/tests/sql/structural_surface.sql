@@ -53,25 +53,25 @@ BEGIN
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
     VALUES
-        (public.laplace_hash128_blake3('test/cluster/phys-l0'), l0, 1,
+        (public.laplace_hash128_blake3(l0 || decode('0100','hex')), l0, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.0,0.0,0.0,0.0),0), decode(repeat('00',16),'hex'), NULL,0,now()),
-        (public.laplace_hash128_blake3('test/cluster/phys-l1'), l1, 1,
+        (public.laplace_hash128_blake3(l1 || decode('0100','hex')), l1, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.1,0.1,0.1,0.1),0), decode(repeat('01',16),'hex'), NULL,0,now()),
-        (public.laplace_hash128_blake3('test/cluster/phys-l2'), l2, 1,
+        (public.laplace_hash128_blake3(l2 || decode('0100','hex')), l2, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.8,0.8,0.8,0.8),0), decode(repeat('02',16),'hex'), NULL,0,now()),
-        (public.laplace_hash128_blake3('test/cluster/phys-l3'), l3, 1,
+        (public.laplace_hash128_blake3(l3 || decode('0100','hex')), l3, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.9,0.9,0.9,0.9),0), decode(repeat('03',16),'hex'), NULL,0,now()),
-        (public.laplace_hash128_blake3('test/cluster/phys-seed'), seed, 1,
+        (public.laplace_hash128_blake3(seed || decode('0100','hex')), seed, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.40,0.40,0.40,0.40),0), decode(repeat('10',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(l0,1,1,0),
              public.laplace_mantissa_pack(l1,2,1,0)]),2,now()),
-        (public.laplace_hash128_blake3('test/cluster/phys-near'), near_word, 1,
+        (public.laplace_hash128_blake3(near_word || decode('0100','hex')), near_word, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.41,0.41,0.41,0.41),0), decode(repeat('11',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(l0,1,1,0),
              public.laplace_mantissa_pack(l1,2,1,0)]),2,now()),
-        (public.laplace_hash128_blake3('test/cluster/phys-far'), far_word, 1,
+        (public.laplace_hash128_blake3(far_word || decode('0100','hex')), far_word, 1,
          public.ST_SetSRID(public.ST_MakePoint(0.95,0.95,0.95,0.95),0), decode(repeat('12',16),'hex'),
          public.ST_MakeLine(ARRAY[
              public.laplace_mantissa_pack(l2,1,1,0),
