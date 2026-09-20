@@ -362,6 +362,33 @@ Export/reconstruction remains subject to the same universal execution-grain law:
 
 ## Compound capability architecture
 
+### Compositional perfcache lattice
+
+Current source has several separately wired cache families: T0/codepoint, highway,
+modality-number, chess position/transition, plus process-local memoization. The intended
+architecture is the shared cache registry/dependency lattice in spec 33 and #1711.
+
+Higher deterministic tiers are valid mmap candidates:
+
+~~~text
+number -> pixel -> patch -> region -> image
+number/sample -> window -> segment -> track
+image + audio -> video composition
+~~~
+
+Dense finite domains may use direct addressing. High-cardinality domains may export
+their finite admitted/hot canonical estate through a deterministic sparse lookup.
+
+The architectural gap is therefore not "image/video lacks its own cache." It is that
+the existing loaders/publication paths are still individually wired and do not yet
+express one dependency manifest/registry through which video can reuse loaded
+image/audio generations.
+
+Cache/native lookup should resolve request-side keys before SQL/SPI queries so ordinary
+database indexes remain eligible.
+
+
+
 The as-built architecture must be read together with `docs/CAPABILITIES.md`. Several product capabilities arise only by composing existing substrate mechanisms; they must not be dismissed because no single table/function is named after the product verb.
 
 ### Software construction and reuse
