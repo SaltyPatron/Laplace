@@ -188,7 +188,22 @@ internal static class AppComposition
             IdentityConfig("LAPLACE_AUTH_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID"),
             IdentityConfig("LAPLACE_AUTH_GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"),
             "https://accounts.google.com", "/signin-google");
-        return new BrowserAuthSettings(providers);
+        return new BrowserAuthSettings(providers, PublicOrigin());
+    }
+
+    private static Uri? PublicOrigin()
+    {
+        var configured = FirstConfig("LAPLACE_PUBLIC_BASE_URL")?.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(configured)) return null;
+        if (!Uri.TryCreate(configured, UriKind.Absolute, out var origin)
+            || origin.Scheme != Uri.UriSchemeHttps
+            || origin.AbsolutePath != "/"
+            || !string.IsNullOrEmpty(origin.Query)
+            || !string.IsNullOrEmpty(origin.Fragment)
+            || !string.IsNullOrEmpty(origin.UserInfo))
+            throw new InvalidOperationException(
+                "LAPLACE_PUBLIC_BASE_URL must be an HTTPS origin without credentials, path, query, or fragment.");
+        return origin;
     }
 
     private static void AddProvider(ICollection<ExternalOidcProvider> providers,

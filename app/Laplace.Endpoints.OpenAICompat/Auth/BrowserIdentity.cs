@@ -31,12 +31,16 @@ internal sealed class BrowserAuthSettings
     public const string CookieScheme = "laplace.browser";
     private readonly Dictionary<string, ExternalOidcProvider> _providers;
 
-    public BrowserAuthSettings(IEnumerable<ExternalOidcProvider> providers)
+    public BrowserAuthSettings(
+        IEnumerable<ExternalOidcProvider> providers,
+        Uri? publicOrigin = null)
     {
         _providers = providers.ToDictionary(p => p.Scheme, StringComparer.OrdinalIgnoreCase);
+        PublicOrigin = publicOrigin;
     }
 
     public IReadOnlyCollection<ExternalOidcProvider> Providers => _providers.Values;
+    public Uri? PublicOrigin { get; }
     public bool TryGetProvider(string scheme, out ExternalOidcProvider provider) =>
         _providers.TryGetValue(scheme, out provider!);
 }

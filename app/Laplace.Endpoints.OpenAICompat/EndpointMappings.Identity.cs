@@ -36,7 +36,8 @@ internal static class IdentityEndpoints
         .Produces<AuthMeResponse>();
 
         app.MapGet("/v1/auth/login/{provider}", (
-            string provider, string? returnUrl, BrowserAuthSettings settings) =>
+            string provider, string? returnUrl, HttpRequest request,
+            BrowserAuthSettings settings) =>
         {
             if (!settings.TryGetProvider(provider, out var configured))
                 return Results.Json(new ErrorResponse(new ErrorBody(
@@ -45,6 +46,15 @@ internal static class IdentityEndpoints
                     statusCode: StatusCodes.Status404NotFound);
 
             var destination = LocalReturnUrl(returnUrl);
+            if (settings.PublicOrigin is not null && !request.IsHttps)
+            {
+                var login = new UriBuilder(settings.PublicOrigin)
+                {
+                    Path = $"/v1/auth/login/{Uri.EscapeDataString(configured.Scheme)}",
+                    Query = $"returnUrl={Uri.EscapeDataString(destination)}"
+                };
+                return Results.Redirect(login.Uri.AbsoluteUri);
+            }
             return Results.Challenge(
                 new AuthenticationProperties { RedirectUri = destination },
                 [configured.Scheme]);
