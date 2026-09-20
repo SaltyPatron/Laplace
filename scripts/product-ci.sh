@@ -316,7 +316,13 @@ force_web_carry_forward_impact() {
   # qualification that already passed is not widened and managed binaries stay valid.
   append_csv_env LAPLACE_BUILD_COMPONENTS web
   append_csv_env LAPLACE_DELIVERY_ACTIONS publish
-  export LAPLACE_PUBLISH_SCOPE=web
+  # Adding an unpublished SPA must not discard an already-selected API/native
+  # closure. Otherwise installation advances the prefix while API stays stale.
+  case "${LAPLACE_PUBLISH_SCOPE:-web}" in
+    full|all|uci) export LAPLACE_PUBLISH_SCOPE=full ;;
+    api|api-web) export LAPLACE_PUBLISH_SCOPE=api-web ;;
+    *) export LAPLACE_PUBLISH_SCOPE=web ;;
+  esac
 }
 
 carry_forward_installed_web_impact() {

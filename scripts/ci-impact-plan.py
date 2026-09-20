@@ -389,7 +389,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             # The SPA has an independent sealed artifact and publication transaction.
             # A web-only change therefore builds/qualifies/publishes only the web
             # component; API/UCI/MCP/Lichess binaries remain byte-identical.
-            publish_scope = "web"
+            publish_scope = "full" if publish_scope in ("full", "uci") else "web"
             components.add("web")
             build_components.add("web")
             dev_suites.add("browser-dev")
