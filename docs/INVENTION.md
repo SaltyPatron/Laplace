@@ -250,6 +250,29 @@ As a corpus matures, structural novelty can therefore taper while observation vo
 
 ---
 
+### Canonical scalars are reusable compositions
+
+Finite digital numeric values do not require new Tier-0 atom kinds. Under a declared exact scalar recipe, a number is an ordered composition of the existing textual atoms that spell its canonical form.
+
+For example:
+
+~~~text
+0.34567 -> ['0', '.', '3', '4', '5', '6', '7']
+255     -> ['2', '5', '5']
+~~~
+
+The resulting scalar root is reusable canonical content. Re-observing the same exact scalar in audio, image, model, measurement or other domains reuses that root; the new information is its occurrence/role/ordinal/channel/time/precision in the containing structure.
+
+A finite prefix of pi is the same mechanism at larger width: one ordered composition over existing digit/punctuation atoms, not one new atom per digit or one new atom per numeric value. The current trajectory implementation treats packed ordinal/run fields as local carrier fields rather than composition-width ceilings.
+
+Analog phenomena enter only through finite digital observations. The source's exact quantization/precision is part of the recipe/reconstruction contract; Laplace does not claim an infinite-precision real has been physically stored.
+
+This is another instance of the global rule:
+
+~~~text
+content novelty != occurrence volume
+~~~
+
 ## 4. Physicality, trajectory and realization
 
 Identity, physicality, packed trajectory and realized curve are different coordinates of the same object and must not be collapsed into one concept.
