@@ -235,6 +235,32 @@ struct laplace_recipe_stream {
         }
         return emitted;
     }
+    size_t attest_range_facts(intent_stage_t* stage, uint32_t first, uint32_t last) {
+        constexpr size_t chunk = 256;
+        laplace_attestation_staged_t staged[chunk];
+        size_t staged_n = 0;
+        size_t emitted = 0;
+        for (uint32_t cp = first;; ++cp) {
+            const hash128_t subj = point_id(cp);
+            for (const fact& f : facts) {
+                staged[staged_n] = {};
+                build_attestation(subj, f, staged[staged_n++]);
+                if (staged_n == chunk) {
+                    check(laplace_attestation_staged_batch_add(
+                        stage, staged, staged_n, nullptr), "testimony admission");
+                    emitted += staged_n;
+                    staged_n = 0;
+                }
+            }
+            if (cp == last) break;
+        }
+        if (staged_n) {
+            check(laplace_attestation_staged_batch_add(
+                stage, staged, staged_n, nullptr), "testimony admission");
+            emitted += staged_n;
+        }
+        return emitted;
+    }
     void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
         bool subject_binding, const std::map<std::string, std::string>& attributes) {
         try { lower_field(stage, path, raw, subject_binding, attributes); }
@@ -678,22 +704,41 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
                     if (!capacity) throw std::runtime_error("recipe byte envelope cannot hold testimony");
                     while (rows(s->ready.get()) < capacity) {
                         if (!s->record_facts_done) {
-                            const hash128_t subj = s->range ? point_id(s->cursor) : s->subject;
                             const size_t available = capacity - rows(s->ready.get());
-                            const size_t remaining = s->facts.size() - s->fact_offset;
-                            const size_t emit = std::min(available, remaining);
-                            if (emit)
-                                s->fact_offset += s->attest_facts(
-                                    s->ready.get(), subj, s->fact_offset, emit);
-                            if (s->fact_offset != s->facts.size()) break;
-                            s->fact_offset = 0;
-                            if (s->range && s->cursor != s->end) {
-                                ++s->cursor;
-                                // Empty facts have no per-position work to perform.
-                                if (s->facts.empty()) s->cursor = s->end;
-                                continue;
+                            if (s->range && s->fact_offset == 0 && !s->facts.empty()
+                                && available >= s->facts.size()) {
+                                const size_t subjects = std::min<size_t>(
+                                    available / s->facts.size(),
+                                    static_cast<size_t>(s->end - s->cursor) + 1);
+                                const uint32_t last = static_cast<uint32_t>(
+                                    s->cursor + subjects - 1);
+                                const size_t emitted = s->attest_range_facts(
+                                    s->ready.get(), s->cursor, last);
+                                if (emitted != subjects * s->facts.size())
+                                    throw std::runtime_error("range testimony batch cardinality mismatch");
+                                s->cursor = last;
+                                if (s->cursor != s->end) {
+                                    ++s->cursor;
+                                    continue;
+                                }
+                                s->record_facts_done = true;
+                            } else {
+                                const hash128_t subj = s->range ? point_id(s->cursor) : s->subject;
+                                const size_t remaining = s->facts.size() - s->fact_offset;
+                                const size_t emit = std::min(available, remaining);
+                                if (emit)
+                                    s->fact_offset += s->attest_facts(
+                                        s->ready.get(), subj, s->fact_offset, emit);
+                                if (s->fact_offset != s->facts.size()) break;
+                                s->fact_offset = 0;
+                                if (s->range && s->cursor != s->end) {
+                                    ++s->cursor;
+                                    // Empty facts have no per-position work to perform.
+                                    if (s->facts.empty()) s->cursor = s->end;
+                                    continue;
+                                }
+                                s->record_facts_done = true;
                             }
-                            s->record_facts_done = true;
                         }
                         if (s->membership) {
                             if (rows(s->ready.get()) == capacity) break;
