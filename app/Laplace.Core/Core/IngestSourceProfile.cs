@@ -138,14 +138,14 @@ public sealed record IngestSourceProfile(
         new(384, 1, ResidentBytesPerComposeUnit: 2_048);
 
     /// <summary>
-    /// Image packaging → RGBA recovery buffer size dominates; one codepoint-floor
-    /// image ladder compose per file.
+    /// Image packaging → RGBA recovery buffer size dominates; scalar channel roots
+    /// are reusable content and image occurrences/shape are completed under #1134.
     /// </summary>
     public static readonly IngestSourceProfile MediaImage = new(256_000, 1);
 
     /// <summary>
-    /// Audio packaging → PCM16 mono recovery size dominates; one codepoint-floor
-    /// audio ladder compose per file.
+    /// Audio packaging → PCM16 mono recovery size dominates; exact integer sample
+    /// roots are reusable scalar content and rate/channel/occurrence state is #1134.
     /// </summary>
     public static readonly IngestSourceProfile MediaAudio = new(128_000, 1);
 

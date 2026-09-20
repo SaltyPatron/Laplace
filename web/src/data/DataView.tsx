@@ -3,14 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Field, Input, Modal, Muted, Panel, ReadStatus, Select, TextArea, useReadResource } from '@ui';
 import { ResultWorkspace, type ResultColumn } from '../ui/composites/ResultWorkspace/ResultWorkspace';
 import { captureRows } from '../ui/lib/resultRows';
-import { admitContent, readContent } from './api';
+import { admitContentRaw, readContent, readContentBytes } from './api';
 import { useAppStore } from '../store';
-import { decodeContent, textBytes, type ContentMode } from './content';
+import { textBytes, type ContentMode } from './content';
 import { type UploadItem } from './uploadQueue';
 import { useUploadQueue } from './UploadProvider';
 import styles from './DataView.module.css';
 
-type VisibleItem = Omit<UploadItem, 'read' | 'receipt'> & { file_id?: string; content_id?: string; source?: string; modality?: string | null };
+type VisibleItem = Omit<UploadItem, 'read' | 'body' | 'receipt'> & { file_id?: string; content_id?: string; source?: string; modality?: string | null };
 export function DataView() {
   const { tenant, authUser } = useAppStore();
   return <DataWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} />;
@@ -61,17 +61,19 @@ function DataWorkspace({ tenant }: { tenant: string }) {
         <Field label="Files" help="Selection does not upload anything. Original UTF-8 bytes, including line endings and a byte-order mark, are sent only when you start admission.">
           <Input type="file" multiple onChange={(event) => {
             for (const file of Array.from(event.target.files ?? [])) queue.add({ name: file.name, path: file.webkitRelativePath || file.name, mode,
-              bytes: file.size, modifiedAt: new Date(file.lastModified).toISOString(), read: async () => new Uint8Array(await file.arrayBuffer()) });
+              bytes: file.size, modifiedAt: new Date(file.lastModified).toISOString(),
+              body: () => file, read: async () => new Uint8Array(await file.arrayBuffer()) });
             event.target.value = '';
           }} />
         </Field>
-        <Muted>Files are read and sent one at a time. No hidden retry, text normalization, repository crawl or seed-manifest execution occurs.</Muted>
+        <Muted>Files are streamed by the browser as raw request bodies one at a time—no base64/JSON expansion. No hidden retry, text normalization, repository crawl or seed-manifest execution occurs.</Muted>
       </div></Panel>
       <Panel title="Author an artifact"><form className={styles.stack} onSubmit={(event) => {
         event.preventDefault();
         try {
           const bytes = textBytes(text);
-          queue.add({ name, path: path || name, mode, bytes: bytes.length, read: async () => bytes }); setError(null);
+          queue.add({ name, path: path || name, mode, bytes: bytes.length,
+            body: () => new Blob([bytes], { type: 'text/plain;charset=utf-8' }), read: async () => bytes }); setError(null);
         } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
       }}>
         <Field label="Artifact name"><Input required value={name} onChange={(event) => setName(event.target.value)} placeholder="notes.md" /></Field>
@@ -82,10 +84,10 @@ function DataWorkspace({ tenant }: { tenant: string }) {
     </div>
     <Panel title="Selected artifacts" expandable>
       <p>Starting admission sends the selected bytes to this server under tenant <strong>{tenant}</strong>. Removing a selection does not retract or delete admitted data.</p>
-      <div className={styles.toolbar}><Button disabled={queued === 0 || state.running} onClick={() => void queue.start((kind, payload) => {
+      <div className={styles.toolbar}><Button disabled={queued === 0 || state.running} onClick={() => void queue.startRaw((kind, meta, body) => {
           const current = useAppStore.getState();
           if (JSON.stringify([current.tenant, current.authUser?.id]) !== scope) throw new Error('The account or tenant changed before submission');
-          return admitContent(kind, payload, { tenant });
+          return admitContentRaw(kind, meta, body, { tenant });
         })}>Ingest {queued} queued artifact{queued === 1 ? '' : 's'}</Button>
         <Button variant="ghost" disabled={!state.running || state.stopping} onClick={queue.stop}>{state.stopping ? 'Stopping after current request' : 'Stop after current request'}</Button>
         <span role="status">{admitted} admitted · {queued} queued{state.running ? ' · admission active' : ''}</span></div>
@@ -109,12 +111,13 @@ function ContentInspector({ id, tenant }: { id: string; tenant: string }) {
     read: (signal) => readContent(id, { tenant, signal }),
   });
   const content = readback.data;
-  function download() {
+  async function download() {
     if (!content) return;
     try {
-      const bytes = decodeContent(content.content_base64);
+      const bytes = await readContentBytes(id, { tenant });
       const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = (content.name || `${id}.bin`).split(/[\\/]/).pop() || `${id}.bin`;
+      const fallback = id + '.bin';
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = (content.name || fallback).split(/[\\/]/).pop() || fallback;
       document.body.appendChild(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); setError(null);
     } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
@@ -122,9 +125,9 @@ function ContentInspector({ id, tenant }: { id: string; tenant: string }) {
     {!valid ? <ErrorText>This address is not a 32-character hexadecimal ID.</ErrorText> : <ReadStatus label="Admitted content" resource={readback} />}
     {content && <div className={styles.stack}>
       <h3>{content.name || content.path || 'Content artifact'}</h3><Muted>{content.bytes ?? 'Unreported'} bytes · {content.modality ?? 'text'} · {content.source}</Muted>
-      <div className={styles.toolbar}><Button onClick={download}>Download returned bytes</Button><Link to={`/explore/entity/${content.content_id}`}>Explore content structure</Link><Link to={`/explore/entity/${content.source_id}`}>Inspect source</Link></div>
-      {content.text !== null ? <pre className={styles.preview}>{content.text.slice(0, 131072).replace(/[\uD800-\uDBFF]$/, '')}</pre> : <Muted>No text rendering was returned. The byte download uses content_base64, not a reconstructed display string.</Muted>}
-      {content.text && content.text.length > 131072 && <Muted>Long text preview truncated. The byte download contains the complete returned content_base64.</Muted>}
+      <div className={styles.toolbar}><Button onClick={() => void download()}>Download exact bytes</Button><Link to={`/explore/entity/${content.content_id}`}>Explore content structure</Link><Link to={`/explore/entity/${content.source_id}`}>Inspect source</Link></div>
+      {content.text !== null ? <pre className={styles.preview}>{content.text.slice(0, 131072).replace(/[\uD800-\uDBFF]$/, '')}</pre> : <Muted>No text preview was returned. Download exact bytes streams the binary response separately.</Muted>}
+      {content.text && content.text.length > 131072 && <Muted>Long text preview truncated. Download exact bytes retrieves the complete reconstructed content separately.</Muted>}
       <details><summary>Identifiers and source context</summary><pre className={styles.preview}>{JSON.stringify({ requested_id: content.requested_id, kind: content.kind, file_id: content.file_id, document_id: content.document_id, content_id: content.content_id, metadata_id: content.metadata_id, source_id: content.source_id, path: content.path, modified_at: content.modified_at, contexts: content.contexts }, null, 2)}</pre></details>
     </div>}{error && <ErrorText role="alert">{error}</ErrorText>}
   </Panel>;

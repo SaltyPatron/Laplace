@@ -109,17 +109,25 @@ Ablation must be possible: source A only, source B only, pooled A+B, etc. The re
 
 ## Code/tool feedback uses the same loop
 
-Code generation is not a private model path.
+Code construction is not a private model path and is not unconstrained text generation.
 
 ```text
-generate/select code structure
--> stage exact content
--> run declared toolchain/test/calculation provider
--> witness/record the result with provenance/recipe
+resolve exact target language / grammar / runtime / toolchain
+-> couple requirement against canonical AST/repository/call/dependency state
+-> reuse exact canonical structures first
+-> compose known structures next
+-> minimally adapt close lawful subtrees
+-> construct novel AST only where necessary
+-> realize/stage exact source
+-> compile/link/test/analyze/simulate/run under declared providers
+-> witness every success/failure with exact provenance/recipe
+-> repair the smallest divergent subtree
 -> next cognition round sees the changed evidence state
 ```
 
-Compile/test failure is a typed outcome, not reason to delete/remint the code entity.
+Compile/test/runtime failure is a typed outcome, not reason to delete/remint the code entity. Failed attempts remain reusable negative evidence. Successful repair trajectories can couple against other authorized repositories to expose exact/structural/algebraic duplicates or similarly shaped defects.
+
+A repository is a complete recursive application root. A bounded edit remints only its changed subtree and ancestry while unrelated canonical structure is reused. Checkout/export realizes that complete root.
 
 ## No architectural fixed context window
 

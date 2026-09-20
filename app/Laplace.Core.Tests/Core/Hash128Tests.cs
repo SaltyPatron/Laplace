@@ -73,9 +73,9 @@ public class Hash128Tests
     {
         // CONTENT-ADDRESSING LAW: same content = same hash. The id is a
         // function of the child-id sequence only. word_id('a') == grapheme
-        // 'a' == codepoint 'a' is by design, not a collision: rows for the
-        // same content at different tiers are distinguished by the
-        // (id, tier) compound key at the schema level, never by the id.
+        // 'a' == codepoint 'a' is by design, not a collision. There is one
+        // canonical entity id/row; tier/type uses are separate interpretation /
+        // physicality / occurrence state, never another entity key.
         var a = Hash128.Blake3("x"u8);
         var t1 = Hash128.Merkle(1, new[] { a });
         var t2 = Hash128.Merkle(2, new[] { a });

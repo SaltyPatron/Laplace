@@ -25,6 +25,24 @@ Load these sources before selecting or changing work:
 
 When two derived sources disagree, return to the higher authority and correct the lower source. A stale issue, comment, checklist, milestone, branch description, status report, or historical implementation cannot override the invention. Do not ask the user to restate a requirement already present in higher authority.
 
+## Compound-capability preservation
+
+Read `docs/CAPABILITIES.md` before narrowing a task to a local subsystem. The invention's value often appears only when multiple primitive laws are composed. Those compound consequences are part of the accepted machine, not optional marketing prose.
+
+In particular, preserve these consequences when relevant:
+
+- grammar/typed-AST code construction with reuse and minimal structural mutation rather than token-ish source generation;
+- exact/normalized/semantic duplicate-code convergence and consolidation as part of construction;
+- compile/test/simulation/runtime failures as witnessed repair trajectories that affect later construction;
+- cross-repository structural/trajectory comparison, including Fréchet where order/curve shape is relevant;
+- repository root as the complete application object, with structural sharing and checkout/export as realization;
+- verified root-transition patch/deployment rather than file-diff ceremony as semantic authority;
+- exact/symbolic machine-cost derivation from artifacts, execution counts, ISA, microarchitecture, machine state and clock;
+- knowledge grants/capabilities and governance as explicit authority over one shared knowledge world;
+- hops/fanout/provider/resource budgets as compute-depth/breadth economics over that same world.
+
+A proof artifact does not become the feature. If accepted scope is "construct/fix/export/deploy/analyze," completing a test, gate, issue, plan, benchmark harness or audit without the executable capability is non-success.
+
 ## The invention model agents must preserve
 
 ## Invention-first execution and anti-status-theater law
@@ -75,6 +93,28 @@ Canonical content identity answers *what structure is this?* A physicality answe
 The current GeometryZM trajectory carrier is exact serialization. Four binary64 components provide 4 × 53 = 212 reversible carrier bits: the complete 128-bit constituent entity id plus packed ordinal, run length and flags. Packed trajectory coordinates are **not** the constituent's realized position. Realized curves unpack child ids and resolve each child's actual physicality coordinate in logical ordinal order.
 
 Never run geometric path metrics over packed hash carriers and call the result semantic geometry. Never interpret a 16-bit packed ordinal/run field as a global composition-size ceiling when the trajectory implementation supplies logical order/RLE semantics beyond that field width.
+
+### Reusable scalar trajectories
+
+Finite digital scalars are compositions, not atom-allocation events. Do not mint a new
+Tier-0 entity for an amplitude, color channel, tensor value, measurement, or other
+ordinary numeric value.
+
+Under the declared exact scalar recipe:
+
+```text
+0.34567 -> ['0','.','3','4','5','6','7'] -> one canonical scalar root
+255     -> ['2','5','5']                 -> one canonical number root
+```
+
+Repeated occurrences reuse that root. Their sample/channel/pixel/tensor ordinal, time,
+precision, source and modality role remain separate occurrence/physicality state.
+
+A finite prefix of pi is the same mechanism at larger width. The repository benchmark
+explicitly notes that pi's million digits compose as one word, and the trajectory core
+proves compositions wider than the local 16-bit packed ordinal field round-trip. Never
+interpret the open Tier-0 address law as permission to allocate arbitrary media values
+into new atom ranks.
 
 ### One structure, many overlapping webs
 
@@ -134,6 +174,27 @@ An in-memory frontier or residual is only a bounded working projection over cano
 Likewise, a Laplace “layer” is a routed processing/fold round over extensible typed planes/operators, not a fixed serial list of neural blocks. Attestation, witnessing, physicality, coordinate/Hilbert locality, centroid/Fréchet geometry, containment/trajectory, standing, source/context, model testimony and domain calculators can be enabled as typed channels under the operation ISA. New lawful operators extend the registry instead of creating a rival cognition path.
 
 Laplace is not required to reproduce transformer mathematics in order to reproduce useful AI functions.
+
+### Perfcache composition and cross-modality reuse
+
+Perfcaches form a compositional lattice over deterministic reusable structure; they are not one blob per modality.
+
+A complete finite tier may be a dense direct-address ROM. A huge possible tier may cache the finite admitted/hot canonical estate with an explicit deterministic sparse lookup. Higher-tier caches are lawful.
+
+Examples:
+
+```text
+numbers -> pixels -> patches -> regions -> images
+numbers -> samples -> windows -> segments -> tracks
+images + audio -> video timing/synchronization
+piece/square -> chess positions -> transitions/lines
+```
+
+Video must reuse image/audio caches rather than creating video-private copies of their lower structures. The same image root may be referenced by many files/documents/videos while existing once as canonical content/cache state.
+
+Cache modules may be range/set/band/profile scoped: ASCII-only T0 projection, selected color palettes, selected frequency/filter-bank calculations, hot structures, or dependency closures are lawful acceleration profiles. They preserve global canonical ids/coords and never renumber the subset into a new semantic universe. Cache residency/profile selection is not knowledge authorization.
+
+Prefer cache lookup on the request side to produce ids/coords/Hilbert/ranges that feed normal indexed PostgreSQL/SPI probes. Do not hide indexed columns behind per-row cache functions and destroy index eligibility. If an expression-index function reads mmap state, its immutability/generation contract must make PostgreSQL's IMMUTABLE promise truthful.
 
 ### Content novelty is not observation volume
 

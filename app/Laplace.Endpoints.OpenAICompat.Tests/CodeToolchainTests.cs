@@ -34,14 +34,14 @@ public sealed class CodeToolchainTests
     [InlineData("c#", "c-sharp")]
     [InlineData("rs", "rust")]
     [InlineData("ts", "typescript")]
-    public void CodeModelUsesNativeGrammarRegistry(string requested, string expected)
+    public void CodeConstructionUsesNativeGrammarRegistry(string requested, string expected)
     {
         Assert.True(CodePlayerService.TryNormalizeModality(requested, out var modality));
         Assert.Equal(expected, modality);
     }
 
     [Fact]
-    public void CodeModelHasAnExactGovernedIdWithoutPrematureCatalogPromotion()
+    public void CodeCompatibilitySelectorHasGovernedIdWithoutModelCatalogPromotion()
     {
         Assert.True(ModelCatalog.IsCode("laplace-code-001"));
         Assert.DoesNotContain(ModelCatalog.All, model => model.Id == ModelCatalog.Code);

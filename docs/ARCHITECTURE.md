@@ -360,6 +360,77 @@ Export/reconstruction remains subject to the same universal execution-grain law:
 
 ---
 
+## Compound capability architecture
+
+### Multiscale image DAG versus scratch tier tree
+
+The current `tier_tree_t` is a construction structure with one `parent_idx`. That is suitable for one selected decomposition but cannot itself be the durable ontology for overlapping image windows.
+
+A canonical 2×2 subpatch can belong to many 3×3, 4×4 and 8×8 occurrences simultaneously. The persistent model is therefore:
+
+~~~text
+canonical subpatch entity P
++ one Content physicality/trajectory describing P's ordered constituents
++ many parent/container occurrences/trajectory references to P
+~~~
+
+not one copied P per parent.
+
+The current fixed 8×8 image tree only materializes one partition hierarchy and is therefore incomplete relative to the multiscale law. #1711 owns a separate canonical subpatch/cache DAG path rather than overloading `parent_idx` with multiple parents.
+
+### Compositional perfcache lattice
+
+Current source has several separately wired cache families: T0/codepoint, highway,
+modality-number, chess position/transition, plus process-local memoization. The intended
+architecture is the shared cache registry/dependency lattice in spec 33 and #1711.
+
+Higher deterministic tiers are valid mmap candidates:
+
+~~~text
+number -> pixel -> patch -> region -> image
+number/sample -> window -> segment -> track
+image + audio -> video composition
+~~~
+
+Dense finite domains may use direct addressing. High-cardinality domains may export
+their finite admitted/hot canonical estate through a deterministic sparse lookup.
+
+The architectural gap is therefore not "image/video lacks its own cache." It is that
+the existing loaders/publication paths are still individually wired and do not yet
+express one dependency manifest/registry through which video can reuse loaded
+image/audio generations.
+
+Cache/native lookup should resolve request-side keys before SQL/SPI queries so ordinary
+database indexes remain eligible.
+
+Selector-scoped modules are part of the intended registry. A deployment may load an ASCII range, an explicit color palette, a generated finite format domain, a speech/filter-bank calculation band, a hot/admitted set or the dependency closure of selected higher roots. These modules preserve global canonical ids/coords; they change residency/acceleration, not knowledge authority.
+
+
+
+The as-built architecture must be read together with `docs/CAPABILITIES.md`. Several product capabilities arise only by composing existing substrate mechanisms; they must not be dismissed because no single table/function is named after the product verb.
+
+### Software construction and reuse
+
+Code/repository admission already uses grammar-derived structure. The intended construction direction is the inverse: bind an exact target grammar/toolchain, couple the requirement against known canonical code, reuse/compose existing subtrees where possible, minimally mutate close structures, realize source, run toolchains/tests, witness outcomes, and iterate on the smallest divergent subtree.
+
+Exact canonical AST duplication is identity reuse. Deeper normalized/algebraic/behavioral duplication is calculated evidence for consolidation.
+
+### Application roots and repair trajectories
+
+A repository root is the complete application object. A local code mutation should create new structure only along the changed ancestry; unchanged files/subtrees remain shared canonical state. Full checkout/export is realization of the resulting root.
+
+Compiler/test/runtime failures and fixes are first-class ordered observations. Their AST/dependency/diagnostic/trajectory shapes can be queried against other authorized repositories to surface related defects or already-known repairs.
+
+### Authority and compute
+
+Tenant isolation, knowledge grants/capabilities, active scope, governance and compute envelope are separate inputs to execution. Unauthorized state must not merely be redacted after influencing cognition; COUPLE/ROUTE/REALIZE/EXPORT/EXECUTE eligibility must honor the effective authority boundary.
+
+Hops/fanout/resources determine cognition depth/breadth over the allowed world. Knowledge entitlement does not imply unlimited compute, and compute allowance does not grant forbidden knowledge.
+
+### Machine-cost lane
+
+The current machine-cost analyzer is an implementation foothold, not the architectural limit. The full contract lowers source/bytecode/object/executable state into control/data/dependency structure, binds explicit execution counts plus target ISA/microarchitecture/memory/clock, and derives exact/symbolic cycles/time. Linearized scheduling without control-flow weighting is a bounded partial calculation and must remain labeled as such.
+
 ## 12. Build, install and runtime boundaries
 
 Linux delivery is driven by `.github/workflows/laplace.yml` and `scripts/pipeline.sh`; host reconciliation/bootstrap lives in `scripts/setup-host.sh`. Windows entry points live under `scripts/win/`.

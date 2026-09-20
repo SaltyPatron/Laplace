@@ -4,9 +4,7 @@ MOLD-A-MODEL SYNTHESIS MAP
 Purpose
 -------
 
-This specification maps conventional model slots to substrate-native evidence and
-operators. It is a semantic map, not a requirement to reproduce a source checkpoint's
-topology or copy its weights.
+This specification maps conventional target-model slots to substrate-native evidence and operators. It is a consumer/export semantic map, not the native Laplace cognition ontology, not a requirement to reproduce a source checkpoint's topology, and not a product-tier model definition.
 
 Slot map
 --------
@@ -16,23 +14,34 @@ Conventional surface         Substrate-native construction
 Vocabulary / tokenizer       Unicode floor, canonical entities, modality trajectories
 Token embedding              content identity, S³ placement, source-scoped projections
 Positional encoding          trajectory ordinal, curve continuity, Hilbert locality
-Attention Q/K/V/O            typed circuit factors, pair evidence, routed relations
+Attention Q                  active admitted observation + discourse + obligations
+Attention K                  indexed typed addresses/planes able to respond
+Attention QK                 query-relative COUPLE response under effective scope
+Attention V                  responding physicalities/facts/evidence/calculations
+Attention O                  receipted fold into updated bindings/frontier/obligations
 Attention heads              source circuits grouped/aligned by witnessed function
 MLP / experts                factor trajectories, gated typed transformations
-Router / gate                relation bands, task orientation, evidence-conditioned route
+Router / gate                ORIENT/ROUTE over task, evidence, authority and resource constraints
 Residual stream              typed strata carried through the active frontier
 Normalization                deterministic scale policy derived by recipe/evidence
 Logit / output head          typed completion candidates and conservative consensus score
-KV / runtime cache           session/frontier state with deterministic invalidation
-Layers                       ordered operation schedule, not mandatory source ordinals
+KV / runtime cache           persistent substrate + witnessed session/frontier + rebuildable perfcaches
+Layers                       target artifact slots; native Laplace uses repeated routed processing/fold rounds, not one fixed transformer stack
 Loss / optimizer history     witnessed outcomes and standing uncertainty-bearing fold
+
+Authority law
+-------------
+
+A target construction may only consume source/context/evidence state within the principal's effective knowledge/capability scope, including EXPORT when a consumer artifact leaves the current boundary.
+
+A narrow exported model is a deliberately finite consumer artifact. It does not redefine the live Laplace world as less knowledgeable and must not be used as the cheap-tier execution path.
 
 Construction law
 ----------------
 
-1. Resolve canonical content and declared source scope.
-2. Select eligible recorded and calculated witnesses.
-3. Route evidence by relation type, band, tier, modality, and task.
+1. Resolve effective principal authority plus explicit target/export scope.
+2. Resolve canonical content and eligible recorded/calculated witnesses from that scope.
+3. Apply the declared export recipe/operator mapping; do not substitute this target construction sequence for the native forward-pass COUPLE/ORIENT/ROUTE program.
 4. Build bounded candidate circuits/operators from factors and trajectories.
 5. Fold corroboration/conflict while retaining source provenance.
 6. Materialize the declared layer/head/expert/operator schedule.

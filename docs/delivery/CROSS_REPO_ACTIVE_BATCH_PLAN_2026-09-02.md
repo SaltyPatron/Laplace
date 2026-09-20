@@ -1,5 +1,8 @@
 # Cross-repository batch plan — 2026-09-02
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 Status: **historical delivery snapshot; superseded as current scheduling authority.**
 
 This document is retained because it records a real period in which `SaltyPatron/Laplace` and `SaltyPatron/Laplace-Refactor` were advancing related implementation work in parallel. The detailed September 2 SHAs, incidents, P0/P1/P2 batch ordering and then-live deployment state remain available in Git history.

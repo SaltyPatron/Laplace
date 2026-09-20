@@ -15,7 +15,7 @@ export interface VisiblePollingOptions {
  * - keeps the callback fresh without restarting the timer on every render.
  */
 export function useVisiblePolling(
-  task: () => void | Promise<void>,
+  task: () => unknown | Promise<unknown>,
   { intervalMs, enabled = true, immediate = true }: VisiblePollingOptions,
 ): void {
   const taskRef = useRef(task);

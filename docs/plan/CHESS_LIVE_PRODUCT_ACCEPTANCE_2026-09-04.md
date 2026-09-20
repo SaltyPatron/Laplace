@@ -1,5 +1,8 @@
 # Chess live-product acceptance — 2026-09-04
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 This document pins the deployed failures observed during the 2026-09-04 product pass so they do not get lost across narrow fixes, reseeds, deployments, or agent hand-offs.
 
 It is an **acceptance matrix**, not a substitute for the governing issues. Each row names the owner issue/PR and the live proof required before the failure is considered closed.

@@ -102,7 +102,7 @@ The catalog is deliberately implementation-aware without making today's finite m
 ## Conversation, operations and serving
 
 72. **Conversation as witnessed trajectory.** Sessions contain ordered turns, bindings and obligations; corrections/dependencies add evidence without deleting history.
-73. **Code as player.** Generate, stage, compile/test, witness outcomes and feed them into subsequent decisions through the same operation substrate.
+73. **Code as player.** Construct grammar-valid AST/repository structure by canonical reuse/composition/minimal mutation, realize it, compile/test/analyze it, witness outcomes and feed the explicit repair trajectory into subsequent decisions through the same operation substrate.
 74. **Explainability as typed receipt.** Answers/operations can expose bounded cells, routes, scores, evidence roots, source scope, stages, selection and writes rather than one opaque confidence score.
 75. **Closed self-improvement loop.** Prompt, response, tool, evaluation and feedback outcomes can deposit through governed lanes and affect later standing/cognition without offline retraining.
 76. **One typed operation ISA.** SQL, MCP, OpenAI-compatible serving, games, code, model inspection and export compose the same governed operation algebra rather than inventing private semantics.
@@ -144,6 +144,37 @@ The catalog is deliberately implementation-aware without making today's finite m
 103. **Structural geometry/semantic-web orthogonality.** S³/ball coordinates, trajectory geometry, Hilbert locality and related indexes describe/nominate structural state. Typed semantic relations, testimony, deterministic calculations, dependence and standing remain distinct.
 104. **Falsifiable operator-generation law.** Sparse intersections/dot products, incidence/transport, Laplacian/spectral methods, Lanczos, QR/Gram-Schmidt, SVD, Procrustes, geometric metrics, Glicko-2, A*/best-first and other mathematics apply only through contracts naming input state, assumptions, scope/evidence roots, direction/roles, numeric boundary, resources, output, loss/approximation, provenance and counterexamples.
 105. **Theorem / implementation / witness / benchmark separation.** Mathematical closure is proved mathematically; executable serialization and reconstruction are tested; finite windows may be exhaustively checked; live databases supply implementation witnesses; performance claims require exact receipts. None is silently substituted for another.
+
+106. **Knowledge authority as a separate axis.** What exists in the shared world, what a principal may use, and how much compute one operation may spend are independent state.
+107. **Knowledge packages as authority manifests.** Curriculum, licensed domains, enterprise/private corpora and personal scopes grant governed access/capabilities over shared canonical knowledge rather than minting smaller trained models.
+108. **Capability-scoped cognition.** DISCOVER/INSPECT/SEARCH/COUPLE/TRAVERSE/DERIVE/REALIZE/PERSIST/EXPORT/EXECUTE/DELEGATE may be granted independently over an explicit scope.
+109. **Governance without epistemic erasure.** Restricted or dangerous knowledge remains attributable knowledge; governance decides permitted operations and can produce explicit receipted abstention instead of pretending the fact is unknown.
+110. **Adversary/defender/judge as one authority algebra.** Red Spear probes boundaries, Blue Shield enforces them, and White Judge adjudicates declared authority/policy/evidence without introducing a hidden judge model.
+111. **Grammar-constrained software construction.** Program generation operates over the exact admitted target grammar/AST plus type/API/dependency obligations, realizing source only after structural selection rather than probabilistically mixing language dialects.
+112. **Generation-by-reuse before novelty.** Construction first reuses exact canonical code, then composes known structures, then minimally adapts close structures, and only then creates genuinely novel AST.
+113. **Duplicate implementation convergence.** Exact AST duplicates converge by identity; normalized AST, control/data flow, algebraic form and behavioral evidence can expose deeper redundant implementations for consolidation.
+114. **Witnessed repair trajectory.** Compiler/linker/test/analyzer/simulator/runtime failures and successful fixes remain ordered evidence attached to exact code/toolchain/environment identities; failed attempts are reusable negative knowledge.
+115. **Cross-repository analogical maintenance.** A repair can couple against other authorized repositories through exact identity, AST/dependency/control-flow shape, trajectory/Fréchet geometry, diagnostics and evidence to surface similar latent problems.
+116. **Repository root as complete application state.** A bounded code change remints only changed structure and ancestry while the rest of the application root is structurally shared; a checkout is a realization of that root.
+117. **Root-transition patch/deployment.** A patch may be represented as R0 → R1 plus missing closure and derivation/verification receipts, with mutable migrations/config/external obligations explicitly modeled.
+118. **Program-to-hardware derivation.** Source/bytecode/object/executable decomposition can continue through control/data/dependency structure to target ISA/microarchitecture scheduling, symbolic execution counts, resource-constrained cycles and machine time.
+119. **Calculated-versus-observed execution.** Benchmarks and hardware counters witness/calibrate the explicit machine-cost model; they do not replace exact/symbolic derivation with context-free averages.
+120. **Personal effective mind by composition.** A person's usable Laplace state is shared world + granted packages/private knowledge + witnessed experience + governance + active scope + compute envelope, not a separately trained opaque model.
+121. **Tests/gates are proof, not product.** Verification machinery is subordinate evidence for executable capabilities and must not become the implementation target when the accepted scope requires the actual construction/query/security/export/deployment behavior.
+
+122. **Canonical scalar trajectories.** Finite digital numbers such as 255 or 0.34567 compose from their exact canonical codepoint sequence into reusable scalar roots; repeated modality occurrences reuse the scalar identity instead of minting arbitrary numeric Tier-0 atoms.
+123. **Numeric content-versus-occurrence separation.** The scalar value is reusable content while sample/channel/pixel/tensor ordinal, time, precision and source role remain attributable occurrence/physicality state.
+124. **Wide finite constants are ordinary compositions.** A finite pi prefix or other long numeric surface is one ordered composition over existing atoms; local GeometryZM ordinal/run carrier widths do not define the composition-width theorem.
+
+125. **Compositional perfcache lattice.** Deterministic mmap caches may exist at any reusable composition tier rather than one blob per top-level modality.
+126. **Dense-or-sparse cache generation.** A practical finite state space may be exhaustively direct-addressed; a huge possible tier may cache the finite admitted/hot canonical estate with an explicitly declared lookup law.
+127. **Cross-modality cache inheritance.** Video reuses image pixel/patch/region/image caches and audio sample/window/track caches; higher modalities compose lower canonical roots instead of cloning their cache state.
+128. **Index-preserving cache projection.** Cache/native lookup resolves request-side ids/coords/Hilbert/ranges before SQL/SPI index probes rather than wrapping indexed columns in per-row functions.
+
+129. **One composition, one entity everywhere.** The ordered child-id sequence owns canonical content identity independent of tier, source, modality, parent, container, role or cache profile; `[k,i,n,g]` is one entity wherever referenced.
+130. **Multiscale image DAG.** Exact 2×2/3×3/... pixel compositions are global canonical entities that may participate in many larger image/video parents simultaneously; the durable structure is an overlapping DAG/web, not a copied single-parent tree.
+131. **Occurrence-versus-identity at every scale.** An 8×8 region may contain 204 square occurrences while introducing only the canonical structures not already known; repeated lower-scale patterns add references/occurrences rather than content copies.
+132. **Construction tree is not ontology.** A temporary tier tree may schedule one decomposition, but single-parent scratch layout cannot redefine the durable many-parent canonical web.
 
 ## Product identity
 

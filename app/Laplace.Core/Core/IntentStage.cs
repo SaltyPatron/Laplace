@@ -369,7 +369,9 @@ public sealed partial class IntentStage : SafeHandle
 
     /// <summary>
     /// Compose planar RGBA recovery → image ladder above shared codepoint T0
-    /// (digit→number→channel→pixel→patch→region→image). Requires T0 perfcache.
+    /// (digit→number→channel→pixel→patch→region→image). Requires the lower
+    /// canonical floor today; #1711 permits trunk-first higher-tier image ROM
+    /// hits to bypass descendant recomposition when a compatible module is loaded.
     /// </summary>
     public static TierTree? BuildImageTree(ReadOnlySpan<byte> rgba, uint width, uint height)
     {

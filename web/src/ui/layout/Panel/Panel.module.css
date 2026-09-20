@@ -7,6 +7,10 @@
     border-radius: var(--radius-md);
     padding: 1rem 1.15rem;
     box-shadow: var(--shadow-instrument);
+    /* Long workspaces can contain dozens of heavyweight panels. Let the browser
+       skip offscreen subtree style/layout/paint until a panel approaches the viewport. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 18rem;
   }
 
   .fill {

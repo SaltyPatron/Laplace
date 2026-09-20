@@ -1,5 +1,8 @@
 # SQL cohesion, planner, surface, and reseed audit — 2026-08-18
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 ## Executive verdict
 
 The SQL has received real local optimization work, but it is not yet an
@@ -791,11 +794,15 @@ endpoint or file format:
 | Geometry/point | Exact id-to-point/Hilbert records and bounded neighbor auxiliaries; point facts only |
 | Calculated projections | Model factors, spectral bases, embeddings, FFT/features keyed by `(content_root, operation_version, scope)`; evictable testimony accelerators, never content identity |
 
-Do not attempt an exhaustive cache of all RGBA pixels, audio windows, video
-frames, or arbitrary ASTs. Cache the finite shared number/grammar floors and the
-observed hot deterministic compositions for a declared source generation.
-Content-addressability already supplies dedupe; the bundle should exploit it,
-not build a second identity system.
+**Current correction:** the audit's original blanket "do not attempt an exhaustive
+cache" rule was too broad. A deterministic higher tier may be exhaustively cached
+when its declared finite state space is practical for the target machine/resource
+envelope. A pixel recipe with a serviceable finite population can therefore use a
+complete direct-address ROM. When patches, regions, frames, images, audio windows or
+AST subtrees have an enormous possible universe, cache the finite admitted/hot
+canonical estate instead. The common rule is now spec 33 / #1711: caches follow
+reusable composition tiers, higher modalities reuse lower cache generations, and no
+cache creates a second identity system.
 
 ### SIMD and numerical-library placement
 

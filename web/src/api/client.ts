@@ -74,8 +74,10 @@ async function parseError(res: Response): Promise<never> {
 
 /** One transport/error/cancellation contract for every product surface. No implicit retries. */
 async function request<T>(path: string, init: RequestInit, opts: ApiOptions): Promise<T> {
+  const headers = new Headers(laplaceHeaders(opts));
+  if (init.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
   const res = await fetch(path, {
-    ...init, headers: laplaceHeaders(opts), signal: opts.signal, credentials: 'same-origin',
+    ...init, headers, signal: opts.signal, credentials: 'same-origin',
   });
   if (!res.ok) await parseError(res);
   if (res.status === 204) return undefined as T;
@@ -151,6 +153,15 @@ export function apiPutText<T>(path: string, body: string, opts: ApiOptions = {})
 
 export function apiPost<T>(path: string, payload: unknown, opts: ApiOptions = {}): Promise<T> {
   return request<T>(path, { method: 'POST', body: JSON.stringify(payload) }, opts);
+}
+
+export function apiPostBody<T>(
+  path: string,
+  body: BodyInit,
+  contentType = 'application/octet-stream',
+  opts: ApiOptions = {},
+): Promise<T> {
+  return request<T>(path, { method: 'POST', body, headers: { 'Content-Type': contentType } }, opts);
 }
 
 /** Send an already formed JSON request without rounding its numeric literals. */

@@ -1,7 +1,6 @@
 # Substrate model construction: layers, heads, factors, and readout
 
-The normative construction law is in specs 09 and 12. This note explains the mechanism
-without claiming that a particular experimental materializer is the finished design.
+The normative construction law is in specs 09 and 12. This file describes consumer/model construction from the substrate; it is not the native Laplace cognition ontology and it does not define commercial intelligence tiers. The live substrate remains one knowledge world under explicit knowledge authority and compute envelopes. This note explains the mechanism without claiming that a particular experimental materializer is the finished design.
 
 ## Evidence objects
 
@@ -35,9 +34,7 @@ not share identity by default.
 
 ## Layers and schedules
 
-Layers are ordered rounds of typed composition. Their schedule may reflect tier ascent,
-hop/depth, residual/frontier stages, relation bands, modality transforms, and recipe
-constraints. Every emitted constituent updates state before the next round.
+For an exported conventional model, target layers are consumer slots populated by a declared recipe. Native Laplace processing layers/rounds are instead routed folds over typed planes/operators under the canonical forward program. Do not infer a fixed transformer layer stack from the existence of an export recipe. Every native emitted act updates state before the next coupling/frontier round.
 
 ## Output/readout
 
@@ -45,6 +42,8 @@ The readout selects typed completion candidates from standing evidence and activ
 Attested continuation distributions, circuit testimony, relation constraints, and
 realization policy may contribute. A closed-form log-odds lookup is a useful floor, not
 proof of exact contextual completion or general conversation.
+
+Knowledge-package grants are not model-source ablations. Source A/B/A+B is a diagnostic/export scope over authorized evidence; it is not a cheaper product's reduced world.
 
 ## Heterogeneous pooled construction
 

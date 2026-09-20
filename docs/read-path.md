@@ -2,7 +2,7 @@
 
 This file describes the current read/cognition execution law. The previous version was a valuable measured audit from 2026-08-14/15, but its phased repair instructions became stale as those paths changed. That exact historical report remains available in Git history; it must not be used as a current implementation plan.
 
-Authority for the invention is [`INVENTION.md`](INVENTION.md), [`INVENTIONS.md`](INVENTIONS.md), [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md), [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md), and `AGENTS.md`.
+Authority for the invention is [`INVENTION.md`](INVENTION.md), [`INVENTIONS.md`](INVENTIONS.md), [`CAPABILITIES.md`](CAPABILITIES.md), [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md), [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md), and `AGENTS.md`.
 
 ---
 
@@ -44,6 +44,8 @@ Normal convergence of equal canonical content is **content-address convergence**
 Sequence order lives in the exact trajectory/composition structure. Packed GeometryZM trajectory vertices carry complete constituent ids plus ordinal/run/flag metadata; they are not child positions. Geometric path reads resolve constituent ids to child physicality coordinates before measuring the realized curve.
 
 Occurrence/containment is different from identity. One canonical entity can be found inside many larger trajectories/contexts without copying the entity once per occurrence.
+
+For example, `[k,i,n,g]` composes to one canonical entity. Word/name/title/label/sentence uses point at that same id. Likewise, one exact 2×2 pixel composition can occur in many overlapping 3×3/4×4/8×8/image/video trajectories without becoming a tier-local or parent-local copy.
 
 ---
 

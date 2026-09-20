@@ -1,5 +1,8 @@
 # Laplace invention deviation ledger — 2026-09-19
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 ## Purpose
 
 This is an evidence-bound map of where the repository has diverged from the invention and which historical defects have already been repaired. It is not a replacement backlog, a global project-status label, or a license to restate old failures forever.

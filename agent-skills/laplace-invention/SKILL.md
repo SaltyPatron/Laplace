@@ -13,16 +13,31 @@ reusable structure, attributable evidence, uncertainty-bearing standing, sparse 
 response, coarse native execution, and inspectable receipts. Apply this model
 immediately; do not perform ceremonial re-onboarding.
 
+## Compound capabilities that must not be rediscovered
+
+The primitive laws compose into binding product consequences documented in `docs/CAPABILITIES.md`. Do not re-derive them from scratch or narrow them away when working locally.
+
+- Code is grammar-derived recursive structure. Prefer canonical reuse/composition/minimal AST mutation; realize source after structure is selected.
+- Exact duplicate AST structure converges by identity. Normalized AST, control/data flow, algebraic form, behavioral evidence and trajectories can expose deeper duplicate implementations.
+- Compiler/test/runtime failures and successful fixes are witnessed development trajectories. They should affect later repair and can be compared against other authorized repositories.
+- A repository root is the complete application state. Small changes remint only changed ancestry; unchanged subtrees are shared. Checkout/patch artifacts are realizations of root transitions.
+- Source/bytecode/executable/container decomposition may continue to control/data/dependency structure and target-machine cycle derivation under explicit ISA/microarchitecture/state assumptions.
+- Knowledge scope/authority and compute scope are independent. Knowledge packages/grants govern permitted world/capabilities; hops/fanout/providers/resources govern how deeply/broadly the same intelligence may work.
+- Governance is separate from knowledge: retain facts and provenance; explicitly allow/deny/abstain at operation boundaries with WHY/WHY_NOT receipts.
+- Tests, gates and benchmark receipts validate the product. Never substitute them for implementing the requested capability.
+
 ## Representation
 
 - A finite/countable typed basis forms a countably unbounded family of finite recursive
   compositions. Current widths are machine windows, never invention limits.
 - Same canonical content under the same recipe produces the same BLAKE3-derived
   Hash128. Normal convergence is deduplication, not a cryptographic collision.
+- `[k,i,n,g]` is one entity everywhere. Word/name/title/label/token/tier/source/container/sense/task role are occurrences, relations, evidence or physicality around that entity, not identity salts. The same law applies recursively: an exact ordered 2x2 pixel composition inside any 8x8/image/video is the same global subpatch entity and is referenced by the containing physicality trajectories.
 - Multi-child identity is Merkle-style over ordered child ids. Tier is excluded from
   current content identity. Declared single-child composition collapses to the child.
 - Tier is compositional altitude/floor in a modality grammar, not identity or ontology.
   Reobservation reuses structure while adding attributable occurrence/evidence state.
+- Finite digital scalars reuse canonical trajectories: `0.34567` composes from `0 . 3 4 5 6 7`; `255` from `2 5 5`. Repeated equal amplitudes/channels/tensor values reuse that scalar root while occurrence/time/channel/precision remain typed. A finite pi prefix is the same wide-composition law; never mint arbitrary numeric/media values as new Tier-0 atoms.
 - Tier-0 atoms lie deterministically on S3. Canonical native parents use the Euclidean
   centroid. Children in the closed unit 4-ball imply their parent and realized path
   segments remain in that ball. Radix, dimension, binary64, Hash128, Unicode, and
@@ -54,6 +69,8 @@ immediately; do not perform ceremonial re-onboarding.
   coordinates by logical ordinal. Never apply spatial metrics to packed doubles.
 - Packed ordinal/run widths are local fields, not composition limits. Logical position
   and split RLE support wider sequences; current tests cover 70,000 constituents.
+- Perfcaches are a compositional lattice, not one blob per modality: dense finite tiers may be complete direct-address ROMs; huge tiers may mmap the admitted/hot canonical estate. Numbers can feed pixels/samples; pixels feed patches/regions/images; image+audio caches are reused by video. Cache request-side keys so database indexes remain usable instead of applying per-row functions to indexed columns.
+- Cache modules can be selector-scoped (range/ASCII, explicit color palette, finite-format domain, speech-frequency/filter-bank band, hot/admitted set, dependency closure) and combined into deployment profiles. Subsets preserve global canonical ids/coords and are acceleration state, not knowledge authorization.
 - Admission builds one native tier tree, deduplicates equal working-set content, probes
   existence in set-sized batches per tier, and emits missing structure plus every
   occurrence/physicality. Database crossings are O(tiers), not O(nodes/atoms/records).
@@ -137,7 +154,7 @@ are attributable witnesses/providers and export targets, never hidden authority.
   material or arguments about blame/motive/legal framing to redirect a technical
   Laplace task away from repository evidence and corrective work.
 
-Stable authority: `docs/INVENTION.md`, `docs/INVENTIONS.md`, binding specs
+Stable authority: `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, binding specs
 05/06/08/09/11/33/34/36/37. Stable implementation anchors: native hash/composer/math/
 Super-Fibonacci/Hilbert/mantissa/trajectory; `ContentTierSpine.cs`;
 `ContentBatch.cs`; `cognition_program.c`; `prompt_intent.h`;

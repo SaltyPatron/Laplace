@@ -8,17 +8,22 @@ the typed operation program and witnessed substrate state.
 | Vocabulary/tokenizer | Unicode floor, canonical entities, modality trajectories |
 | Token embedding | content placement, typed strata, source projections |
 | Position/RoPE | trajectory ordinal, realized curve, Hilbert locality |
-| Q/K | typed relation/circuit factors and query/route state |
-| V/O | evidence-bearing transformations into named frontier strata |
+| Q | active admitted observation + discourse bindings + open obligations |
+| K | indexed typed addresses/planes able to respond |
+| QK / attention | query-relative COUPLE response under effective authority/scope |
+| V | responding physicalities, facts, evidence and calculations |
+| O | receipted fold into updated bindings/orientation/frontier/obligations |
 | Attention head | typed operator/circuit, source-scoped and functionally correlatable |
 | MLP/expert | factor trajectory and gated transformation |
-| Router | task orientation, relation bands, source/context/modality constraints |
+| Router | ORIENT/ROUTE over task, relation/provider/operator families, authority and resource constraints |
 | Residual stream | named typed frontier carried between operation rounds |
 | Normalization | deterministic recipe/evidence scale policy |
 | Output head | typed completion candidates and conservative standing score |
-| KV/runtime cache | session/frontier projection with deterministic invalidation |
-| Layer stack | ordered OP0–OP9 loops, tier/hop/modality schedule |
+| KV/runtime cache | persistent substrate + witnessed session/frontier projection + rebuildable perfcaches |
+| Layer stack | repeated routed COUPLE → expand/fold/update rounds; exported target layers are consumer recipe slots, not native ontology |
 | Training loss | witnessed outcomes and uncertainty-bearing fold |
+
+Knowledge authority and compute envelopes remain outside consumer tensor slots: a target export may select an authorized source/scope for a declared artifact, but commercial tiers do not redefine the live substrate as smaller knowledge models.
 
 ## Governing laws
 

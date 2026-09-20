@@ -23,6 +23,8 @@ public abstract class BillingStoreContractTests
 
 
     protected virtual bool Available => true;
+    protected virtual Task PrepareTenantAsync(string tenant) => Task.CompletedTask;
+    protected virtual Task CleanupTenantAsync(string tenant) => Task.CompletedTask;
 
     private void RequireStore() =>
         Skip.IfNot(Available, "LAPLACE_DB unreachable or app schema not applied — Postgres store contract skipped.");
@@ -60,22 +62,31 @@ public abstract class BillingStoreContractTests
     public async Task QuoteStore_PutGetUpdate_RoundTrips()
     {
         RequireStore();
-        var quote = NewQuote($"t-{Guid.NewGuid():N}");
-        await Quotes.PutAsync(quote, CancellationToken.None);
+        var tenant = $"t-{Guid.NewGuid():N}";
+        await PrepareTenantAsync(tenant);
+        try
+        {
+            var quote = NewQuote(tenant);
+            await Quotes.PutAsync(quote, CancellationToken.None);
 
-        var fetched = await Quotes.TryGetAsync(quote.QuoteId, CancellationToken.None);
-        Assert.NotNull(fetched);
-        Assert.Equal(quote.QuoteId, fetched!.QuoteId);
-        Assert.Equal(quote.Tenant, fetched.Tenant);
-        Assert.Equal("pending_payment", fetched.Status);
-        Assert.False(fetched.Consumed);
+            var fetched = await Quotes.TryGetAsync(quote.QuoteId, CancellationToken.None);
+            Assert.NotNull(fetched);
+            Assert.Equal(quote.QuoteId, fetched!.QuoteId);
+            Assert.Equal(quote.Tenant, fetched.Tenant);
+            Assert.Equal("pending_payment", fetched.Status);
+            Assert.False(fetched.Consumed);
 
-        await Quotes.UpdateAsync(fetched with { Status = "approved", Consumed = true }, CancellationToken.None);
-        var updated = await Quotes.TryGetAsync(quote.QuoteId, CancellationToken.None);
-        Assert.Equal("approved", updated!.Status);
-        Assert.True(updated.Consumed);
+            await Quotes.UpdateAsync(fetched with { Status = "approved", Consumed = true }, CancellationToken.None);
+            var updated = await Quotes.TryGetAsync(quote.QuoteId, CancellationToken.None);
+            Assert.Equal("approved", updated!.Status);
+            Assert.True(updated.Consumed);
 
-        Assert.Null(await Quotes.TryGetAsync("q_missing", CancellationToken.None));
+            Assert.Null(await Quotes.TryGetAsync("q_missing", CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupTenantAsync(tenant);
+        }
     }
 
     [SkippableFact]
@@ -83,16 +94,24 @@ public abstract class BillingStoreContractTests
     {
         RequireStore();
         var tenant = $"t-{Guid.NewGuid():N}";
-        var now = DateTimeOffset.UtcNow;
-        await Ledger.RecordAsync(new BillingUsageRecord("q_1", tenant, "completions", 1, 2, now.AddMinutes(-2)), CancellationToken.None);
-        await Ledger.RecordAsync(new BillingUsageRecord("q_2", tenant, "completions", 1, 2, now.AddMinutes(-1)), CancellationToken.None);
+        await PrepareTenantAsync(tenant);
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            await Ledger.RecordAsync(new BillingUsageRecord("q_1", tenant, "completions", 1, 2, now.AddMinutes(-2)), CancellationToken.None);
+            await Ledger.RecordAsync(new BillingUsageRecord("q_2", tenant, "completions", 1, 2, now.AddMinutes(-1)), CancellationToken.None);
 
-        var usage = await Ledger.GetByTenantAsync(tenant, CancellationToken.None);
-        Assert.Equal(2, usage.Count);
-        Assert.Equal("q_2", usage[0].QuoteId);
-        Assert.Equal("q_1", usage[1].QuoteId);
+            var usage = await Ledger.GetByTenantAsync(tenant, CancellationToken.None);
+            Assert.Equal(2, usage.Count);
+            Assert.Equal("q_2", usage[0].QuoteId);
+            Assert.Equal("q_1", usage[1].QuoteId);
 
-        Assert.Empty(await Ledger.GetByTenantAsync($"t-none-{Guid.NewGuid():N}", CancellationToken.None));
+            Assert.Empty(await Ledger.GetByTenantAsync($"t-none-{Guid.NewGuid():N}", CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupTenantAsync(tenant);
+        }
     }
 
     [SkippableFact]
@@ -100,37 +119,46 @@ public abstract class BillingStoreContractTests
     {
         RequireStore();
         var tenant = $"t-{Guid.NewGuid():N}";
-        var subscription = $"sub_{Guid.NewGuid():N}";
-        var plan = NewPlan("studio", synthesisCredits: 100);
+        await PrepareTenantAsync(tenant);
+        try
+        {
+            var subscription = $"sub_{Guid.NewGuid():N}";
+            var customer = $"cus_{Guid.NewGuid():N}";
+            var plan = NewPlan("studio", synthesisCredits: 100);
 
-        await Entitlements.ActivatePlanAsync(tenant, plan, "cus_x", subscription, DateTimeOffset.UtcNow, CancellationToken.None);
+            await Entitlements.ActivatePlanAsync(tenant, plan, customer, subscription, DateTimeOffset.UtcNow, CancellationToken.None);
 
-        var (consumed, debit) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 30, CancellationToken.None);
-        Assert.True(consumed);
-        Assert.Equal(70, debit.Remaining);
-        Assert.Equal("studio", debit.PlanId);
+            var (consumed, debit) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 30, CancellationToken.None);
+            Assert.True(consumed);
+            Assert.Equal(70, debit.Remaining);
+            Assert.Equal("studio", debit.PlanId);
 
-        var (overConsumed, overDebit) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 71, CancellationToken.None);
-        Assert.False(overConsumed);
-        Assert.Equal("insufficient_credits", overDebit.Status);
+            var (overConsumed, overDebit) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 71, CancellationToken.None);
+            Assert.False(overConsumed);
+            Assert.Equal("insufficient_credits", overDebit.Status);
 
-        var (unknownService, unknownDebit) = await Entitlements.TryConsumeCreditAsync(tenant, "no.such.service", 1, CancellationToken.None);
-        Assert.False(unknownService);
-        Assert.Equal("insufficient_credits", unknownDebit.Status);
+            var (unknownService, unknownDebit) = await Entitlements.TryConsumeCreditAsync(tenant, "no.such.service", 1, CancellationToken.None);
+            Assert.False(unknownService);
+            Assert.Equal("insufficient_credits", unknownDebit.Status);
 
-        var entitlements = await Entitlements.GetByTenantAsync(tenant, CancellationToken.None);
-        var entitlement = Assert.Single(entitlements);
-        Assert.Equal(30, entitlement.UsedCredits["synthesis"]);
+            var entitlements = await Entitlements.GetByTenantAsync(tenant, CancellationToken.None);
+            var entitlement = Assert.Single(entitlements);
+            Assert.Equal(30, entitlement.UsedCredits["synthesis"]);
 
-        var deactivated = await Entitlements.DeactivateSubscriptionAsync(subscription, "canceled", CancellationToken.None);
-        Assert.NotNull(deactivated);
-        Assert.Equal("canceled", deactivated!.Status);
+            var deactivated = await Entitlements.DeactivateSubscriptionAsync(subscription, "canceled", CancellationToken.None);
+            Assert.NotNull(deactivated);
+            Assert.Equal("canceled", deactivated!.Status);
 
-        var (afterCancel, cancelDebit) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 1, CancellationToken.None);
-        Assert.False(afterCancel);
-        Assert.Equal("insufficient_credits", cancelDebit.Status);
+            var (afterCancel, cancelDebit) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 1, CancellationToken.None);
+            Assert.False(afterCancel);
+            Assert.Equal("insufficient_credits", cancelDebit.Status);
 
-        Assert.Null(await Entitlements.DeactivateSubscriptionAsync($"sub_missing_{Guid.NewGuid():N}", "canceled", CancellationToken.None));
+            Assert.Null(await Entitlements.DeactivateSubscriptionAsync($"sub_missing_{Guid.NewGuid():N}", "canceled", CancellationToken.None));
+        }
+        finally
+        {
+            await CleanupTenantAsync(tenant);
+        }
     }
 
     [SkippableFact]
@@ -138,22 +166,30 @@ public abstract class BillingStoreContractTests
     {
         RequireStore();
         var tenant = $"t-{Guid.NewGuid():N}";
-        var subscription = $"sub_{Guid.NewGuid():N}";
-        var plan = NewPlan("studio", synthesisCredits: 50);
+        await PrepareTenantAsync(tenant);
+        try
+        {
+            var subscription = $"sub_{Guid.NewGuid():N}";
+            var customer = $"cus_{Guid.NewGuid():N}";
+            var plan = NewPlan("studio", synthesisCredits: 50);
 
-        await Entitlements.ActivatePlanAsync(tenant, plan, "cus_x", subscription, DateTimeOffset.UtcNow, CancellationToken.None);
-        await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 50, CancellationToken.None);
+            await Entitlements.ActivatePlanAsync(tenant, plan, customer, subscription, DateTimeOffset.UtcNow, CancellationToken.None);
+            await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 50, CancellationToken.None);
 
-        var (exhausted, _) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 1, CancellationToken.None);
-        Assert.False(exhausted);
+            var (exhausted, _) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 1, CancellationToken.None);
+            Assert.False(exhausted);
 
+            var renewed = await Entitlements.RenewPlanAsync(tenant, plan, null, null, DateTimeOffset.UtcNow, CancellationToken.None);
+            Assert.Equal(subscription, renewed.StripeSubscriptionId);
 
-        var renewed = await Entitlements.RenewPlanAsync(tenant, plan, null, null, DateTimeOffset.UtcNow, CancellationToken.None);
-        Assert.Equal(subscription, renewed.StripeSubscriptionId);
-
-        var (afterRenew, debit) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 50, CancellationToken.None);
-        Assert.True(afterRenew);
-        Assert.Equal(0, debit.Remaining);
+            var (afterRenew, debit) = await Entitlements.TryConsumeCreditAsync(tenant, "synthesis", 50, CancellationToken.None);
+            Assert.True(afterRenew);
+            Assert.Equal(0, debit.Remaining);
+        }
+        finally
+        {
+            await CleanupTenantAsync(tenant);
+        }
     }
 
     [SkippableFact]
@@ -186,31 +222,39 @@ public abstract class BillingStoreContractTests
     {
         RequireStore();
         var tenant = $"t-{Guid.NewGuid():N}";
-        var label = $"session:{Guid.NewGuid():N}";
-        var record = new Auth.ApiKeyRecord(
-            KeyHash: $"hash_{Guid.NewGuid():N}",
-            KeyPrefix: "sk-laplace-abcd",
-            Tenant: tenant,
-            Label: label,
-            CreatedAt: DateTimeOffset.UtcNow,
-            RevokedAt: null,
-            LastUsedAt: null);
-        await ApiKeys.PutAsync(record, CancellationToken.None);
+        await PrepareTenantAsync(tenant);
+        try
+        {
+            var label = $"session:{Guid.NewGuid():N}";
+            var record = new Auth.ApiKeyRecord(
+                KeyHash: $"hash_{Guid.NewGuid():N}",
+                KeyPrefix: "sk-laplace-abcd",
+                Tenant: tenant,
+                Label: label,
+                CreatedAt: DateTimeOffset.UtcNow,
+                RevokedAt: null,
+                LastUsedAt: null);
+            await ApiKeys.PutAsync(record, CancellationToken.None);
 
-        var fetched = await ApiKeys.TryGetAsync(record.KeyHash, CancellationToken.None);
-        Assert.NotNull(fetched);
-        Assert.Equal(tenant, fetched!.Tenant);
-        Assert.Null(fetched.RevokedAt);
+            var fetched = await ApiKeys.TryGetAsync(record.KeyHash, CancellationToken.None);
+            Assert.NotNull(fetched);
+            Assert.Equal(tenant, fetched!.Tenant);
+            Assert.Null(fetched.RevokedAt);
 
-        Assert.Single(await ApiKeys.GetByTenantAsync(tenant, CancellationToken.None));
-        Assert.Single(await ApiKeys.GetByLabelAsync(label, CancellationToken.None));
+            Assert.Single(await ApiKeys.GetByTenantAsync(tenant, CancellationToken.None));
+            Assert.Single(await ApiKeys.GetByLabelAsync(label, CancellationToken.None));
 
-        await ApiKeys.TouchAsync(record.KeyHash, DateTimeOffset.UtcNow, CancellationToken.None);
-        Assert.NotNull((await ApiKeys.TryGetAsync(record.KeyHash, CancellationToken.None))!.LastUsedAt);
+            await ApiKeys.TouchAsync(record.KeyHash, DateTimeOffset.UtcNow, CancellationToken.None);
+            Assert.NotNull((await ApiKeys.TryGetAsync(record.KeyHash, CancellationToken.None))!.LastUsedAt);
 
-        Assert.True(await ApiKeys.RevokeAsync(record.KeyHash, CancellationToken.None));
-        Assert.False(await ApiKeys.RevokeAsync(record.KeyHash, CancellationToken.None));
-        Assert.NotNull((await ApiKeys.TryGetAsync(record.KeyHash, CancellationToken.None))!.RevokedAt);
+            Assert.True(await ApiKeys.RevokeAsync(record.KeyHash, CancellationToken.None));
+            Assert.False(await ApiKeys.RevokeAsync(record.KeyHash, CancellationToken.None));
+            Assert.NotNull((await ApiKeys.TryGetAsync(record.KeyHash, CancellationToken.None))!.RevokedAt);
+        }
+        finally
+        {
+            await CleanupTenantAsync(tenant);
+        }
     }
 
     [SkippableFact]
@@ -267,6 +311,23 @@ public sealed class PostgresBillingStoreContractTests : BillingStoreContractTest
         {
             return null;
         }
+    }
+
+    protected override async Task PrepareTenantAsync(string tenant)
+    {
+        await using var command = DataSource.CreateCommand(
+            "INSERT INTO app.tenants (tenant_id, display_name, kind) VALUES (@tenant, @display, 'organization') ON CONFLICT (tenant_id) DO NOTHING");
+        command.Parameters.AddWithValue("tenant", tenant);
+        command.Parameters.AddWithValue("display", $"Billing contract {tenant}");
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
+    protected override async Task CleanupTenantAsync(string tenant)
+    {
+        await using var command = DataSource.CreateCommand(
+            "DELETE FROM app.tenants WHERE tenant_id = @tenant");
+        command.Parameters.AddWithValue("tenant", tenant);
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
 
     private protected override IBillingQuoteStore Quotes => new BillingPostgres.PostgresBillingQuoteStore(DataSource);

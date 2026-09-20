@@ -1,5 +1,8 @@
 # Search / resolution correction — 2026-09-13
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 ## Scope
 
 This records the corrected boundary between deterministic content identity, admitted substrate state, and Browse discovery in the Legacy repository. It does not claim complete cognition or search.

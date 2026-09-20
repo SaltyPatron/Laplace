@@ -4,10 +4,10 @@ namespace Laplace.Engine.Core;
 
 /// <summary>
 /// Managed face of <c>laplace_media_decode_*</c> — packaging unpack only.
-/// Returns planar RGBA / mono int16 recovery buffers. Identity is the
-/// codepoint-floor modality ladder (<see cref="IntentStage.ImageRootId"/> /
-/// <see cref="IntentStage.AudioRootId"/>), never container bytes and never
-/// blake3 of this recovery buffer as tier-0.
+/// Returns planar RGBA / mono int16 recovery buffers. The buffers are source
+/// recovery state, not identity by themselves. Their exact numeric values compose
+/// through reusable canonical scalar roots; channel/sample ordinals plus shape/rate/
+/// precision/provenance remain occurrence/reconstruction state (GH #1134).
 /// </summary>
 public static class MediaDecode
 {

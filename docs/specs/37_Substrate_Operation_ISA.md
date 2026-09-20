@@ -106,6 +106,39 @@ active state
 
 A*, Dijkstra, strongest-walk, containment, trajectory continuation, geometry and deterministic providers are operators callable by the routed program. No single search operator is the cognition ISA.
 
+## Authority / knowledge-scope contract
+
+Knowledge state, authority and compute are separate operation inputs.
+
+An executable operation may bind:
+
+```text
+principal / tenant / active identity
+role / relationship authority roots
+knowledge-package grants
+active caller-selected knowledge scope
+capability mask:
+  DISCOVER INSPECT SEARCH COUPLE TRAVERSE DERIVE
+  REALIZE PERSIST EXPORT EXECUTE DELEGATE
+kernel / organization / user governance
+```
+
+The effective scope is the lawful intersection of those boundaries. Authority/package inheritance follows declared authority relations, never arbitrary semantic connectivity.
+
+Operation families must enforce authority at the point where the capability matters. In particular, forbidden state must not enter COUPLE and then be hidden only at REALIZE. Likewise, permission to COUPLE/REASON does not imply permission to EXPORT or EXECUTE.
+
+Policy disposition is explicit state: allow, deny, abstain or require stronger authority. Receipts preserve the authority/policy root that made the decision without confusing permission with epistemic standing.
+
+## Program construction and repair contract
+
+Software construction is a typed ISA program over universal AST/repository state.
+
+The canonical pattern is reuse → compose → minimal adaptation → novel construction, followed by realization and declared toolchain/provider verification. Compiler/linker/test/analyzer/simulator/runtime outcomes are witnessed typed results and feed the next cognition round.
+
+Exact repeated AST structure converges by identity. Calculated normalized AST, control/data-flow, algebraic, behavioral and trajectory/Fréchet similarity may identify deeper duplicate implementations or analogous defects.
+
+Repository-root mutation is first-class: a local edit creates new identities only along the changed recursive ancestry and yields a new complete root. A patch/deployment may therefore be expressed as a verified root transition plus the missing closure and required mutable-world migrations.
+
 ## Resource/preflight contract
 
 The same typed program used for execution supplies the resource plan used for estimation/billing/capacity admission.

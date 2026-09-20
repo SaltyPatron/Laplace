@@ -212,10 +212,24 @@ internal static class ExploreEndpoints
             catch (InvalidOperationException ex) { return EndpointJson.ServiceUnavailable("unicode_cloud_unavailable", ex.Message); }
         }).WithTags("explore").Produces<UnicodeCloudResponse>();
 
-        app.MapGet("/v1/explore/unicode/positions.bin", (ExploreDecomposeService decompose) =>
+        app.MapGet("/v1/explore/unicode/positions/{receipt}.bin", (
+            HttpContext http,
+            string receipt,
+            ExploreDecomposeService decompose) =>
         {
-            try { return Results.Bytes(decompose.UnicodeCloudPositions(), "application/octet-stream"); }
-            catch (InvalidOperationException ex) { return EndpointJson.ServiceUnavailable("unicode_cloud_unavailable", ex.Message); }
+            try
+            {
+                UnicodeCloudResponse meta = decompose.UnicodeCloud();
+                if (!string.Equals(receipt, meta.PerfcacheReceiptHex, StringComparison.OrdinalIgnoreCase))
+                    return EndpointJson.NotFound("unicode_generation_not_found", "The requested T0 generation is not active.");
+                http.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+                http.Response.Headers.ETag = $"\"{meta.PerfcacheReceiptHex}\"";
+                return Results.Bytes(decompose.UnicodeCloudPositions(), "application/octet-stream");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return EndpointJson.ServiceUnavailable("unicode_cloud_unavailable", ex.Message);
+            }
         }).WithTags("explore").Produces(StatusCodes.Status200OK, contentType: "application/octet-stream");
 
         app.MapGet("/v1/explore/unicode/{codepoint:min(0):max(1114111)}", (uint codepoint, ExploreDecomposeService decompose) =>

@@ -71,9 +71,10 @@ export function useGraphFlyControls(
     const turnRate = 0.038;
 
     const step = () => {
-      raf.current = requestAnimationFrame(step);
+      raf.current = 0;
       const keys = pressed.current;
       if (keys.size === 0) return;
+      raf.current = requestAnimationFrame(step);
       const fg = graphRef.current;
       if (!fg) return;
 
@@ -185,24 +186,31 @@ export function useGraphFlyControls(
 
       if (!MOVE_KEYS.has(e.code)) return;
       pressed.current.add(e.code);
+      if (raf.current === 0) raf.current = requestAnimationFrame(step);
       if (e.code !== 'ShiftLeft' && e.code !== 'ShiftRight') e.preventDefault();
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
       pressed.current.delete(e.code);
+      if (pressed.current.size === 0 && raf.current !== 0) {
+        cancelAnimationFrame(raf.current);
+        raf.current = 0;
+      }
     };
 
     const onBlur = () => {
       pressed.current.clear();
+      if (raf.current !== 0) cancelAnimationFrame(raf.current);
+      raf.current = 0;
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
-    raf.current = requestAnimationFrame(step);
 
     return () => {
-      cancelAnimationFrame(raf.current);
+      if (raf.current !== 0) cancelAnimationFrame(raf.current);
+      raf.current = 0;
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);

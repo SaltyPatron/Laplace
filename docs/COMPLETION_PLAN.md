@@ -7,7 +7,7 @@ The previous annotated gap register is preserved at [`archive/plans/COMPLETION_P
 For current work use:
 
 1. current inventor instruction/correction;
-2. [`INVENTION.md`](INVENTION.md) and [`INVENTIONS.md`](INVENTIONS.md);
+2. [`INVENTION.md`](INVENTION.md), [`CAPABILITIES.md`](CAPABILITIES.md), and [`INVENTIONS.md`](INVENTIONS.md);
 3. binding specs + [`../AGENTS.md`](../AGENTS.md);
 4. current scoped decisions/plans;
 5. current GitHub issues/PRs;

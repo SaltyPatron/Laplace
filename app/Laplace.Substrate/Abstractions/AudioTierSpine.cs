@@ -10,6 +10,10 @@ namespace Laplace.Decomposers.Abstractions;
 /// codepoint T0 (codepoint→sample→window→onset→phrase→track) → O(tiers)
 /// existence → modality witness emit. Sibling of <see cref="ContentTierSpine"/>;
 /// same T0 floor. Do not blake3(pcm) as identity.
+///
+/// Perfcache law is compositional (#1711): reusable sample/window/segment/track
+/// structures may be mmap-accelerated and consumed unchanged by video or other
+/// multimodal containers.
 /// </summary>
 public static class AudioTierSpine
 {

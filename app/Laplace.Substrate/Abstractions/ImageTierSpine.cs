@@ -6,9 +6,14 @@ namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Image content path: planar RGBA recovery → native image ladder above shared
-/// codepoint T0 (digit→number→channel→pixel→patch→region→image) → O(tiers)
+/// codepoint T0 (digit→number→channel→pixel→current working patch/region/image) → O(tiers)
 /// existence → modality witness emit. Sibling of <see cref="ContentTierSpine"/>;
 /// same T0 floor, different composition above it. Do not blake3(rgba) as identity.
+///
+/// Perfcache law is compositional (#1711): the same canonical 2x2/3x3/... pixel
+/// composition has one id globally, independent of parent/tier/cache scale. Number,
+/// pixel, subpatch, region and image structures may each have mmap acceleration. A cached image/frame is
+/// reusable by video/document/multimodal consumers rather than recomposed privately.
 /// </summary>
 public static class ImageTierSpine
 {

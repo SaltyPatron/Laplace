@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../../primitives/Button';
 import {
   rowFields,
@@ -59,6 +59,7 @@ function ReceivedWorkspace<T extends object>({
   const [visibility, setVisibility] = useState<Record<string, boolean>>({});
   const [localFilter, setLocalFilter] = useState('');
   const filter = filterText ?? localFilter;
+  const deferredFilter = useDeferredValue(filter);
   const [selected, setSelected] = useState<SelectedRow<T>[]>([]);
   const [inspected, setInspected] = useState<SelectedRow<T> | null>(null);
   const [compare, setCompare] = useState(false);
@@ -84,10 +85,10 @@ function ReceivedWorkspace<T extends object>({
   const visible = fields.filter((field) => isVisible(field.key));
   const matching = useMemo(
     () => snapshot.rows.flatMap((row, index) =>
-      !filter || Object.keys(row).some((key) => valueText(rowValue(row, key)).includes(filter))
+      !deferredFilter || Object.keys(row).some((key) => valueText(rowValue(row, key)).includes(deferredFilter))
         ? [index]
         : []),
-    [snapshot.rows, filter],
+    [snapshot.rows, deferredFilter],
   );
   const pageCount = Math.max(1, Math.ceil(matching.length / pageSize));
   const page = Math.min(pageState, pageCount - 1);

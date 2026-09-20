@@ -1,12 +1,18 @@
-# Laplace model-construction recipe schema
+# Conventional-model export/construction recipe schema
 
-A **recipe** is a modality (JSON). It is the *build-a-bear parts list*: it names the architecture
-structure, the content slice, and — the core of it — the **operator array**: per layer, per head,
-exactly which substrate operator that head *is*. Recipes are deposited into the substrate as
+A recipe is a versioned consumer-artifact construction description (JSON). It names a target architecture structure, an explicitly authorized/export scope, and an operator array describing which substrate calculations populate target slots. Recipes are deposited into the substrate as
 content-addressed `Model_Recipe` entities (the JSON is the entity's canonical name; hparams are
 also emitted as queryable scalar attestations). Export reads the stored recipe via
 `model_recipes()` / `--recipe-from` — never a disk file. A hand-written recipe is a **dev fixture**
 that simulates an ingest or user-create event; it goes through deposit like any other.
+
+This schema describes a target artifact projection. It is not Laplace's native cognition architecture, not a knowledge package, and not a product-tier definition.
+
+## Authority and scope boundary
+
+The live substrate remains the semantic authority. A model export recipe may select source/context/evidence scope only when the caller is authorized for that scope and the export capability allows materialization. Selecting a narrow export artifact does not make the live Laplace world forget anything.
+
+Commercial "quick/standard/deep" levels are compute envelopes over the same authorized world; they are not recipe choices for progressively smaller intelligence.
 
 ## Top-level fields
 
@@ -20,7 +26,7 @@ that simulates an ingest or user-create event; it goes through deposit like any 
 | `rope` | bool (parameter-free; metadata only) |
 | `tie_embeddings` | bool |
 | `norm` | `"rmsnorm"` \| `"layernorm"` |
-| `vocab` | content/build-a-bear stuffing — see below |
+| `vocab` | target consumer vocabulary/materialization selection — see below; this is export state, not the live knowledge boundary |
 | `embed` | operator for `embed_tokens` (default `{"op":"coord"}`) |
 | `lm_head` | operator for `lm_head` (default `{"op":"trajectory"}`) |
 | `layers` | array of layer specs — the operator array |
@@ -70,7 +76,7 @@ determines every weight value; the math turning knowledge into weights is fixed.
 - Topology: `hidden_size`\*, `num_layers`, `num_heads`/layer, `kv_heads`, `intermediate_size`\*
 - Structure: `dense`/`moe`, `num_experts`, `experts_per_token` (routing), LoRA rank
 - Operator array: which operator each head is (the build-a-bear multi-select); per-layer schedule\*
-- Content: `vocab.source` (+ crawl `seeds`/`hops`/`fanout`/`size`) — what knowledge goes in
+- Content/materialization: `vocab.source` (+ selected scope controls) — what the target artifact materializes from the already authorized substrate; this does not alter what Laplace knows
 - Flags/output: `rope`(+theta), `tie_embeddings`, `norm`, `embed` op, `lm_head` op, format, dtype
   (\* = has a substrate-derived default; overridable.)
 
@@ -88,6 +94,8 @@ determines every weight value; the math turning knowledge into weights is fixed.
 UI states: a knob-with-derived-default shows the substrate's natural value and flags overrides as
 "deviates from substrate-natural." Constraints link knobs (`head_dim` integer, `experts_per_token ≤
 num_experts`, `kv_heads` divides `heads`) → validate/grey-out, not free fields.
+
+The target model may be deliberately finite/narrow as a consumer artifact. That is different from routing a cheaper Laplace request to a deliberately knowledge-reduced model.
 
 ## Validation by ablation (per-operator signatures)
 

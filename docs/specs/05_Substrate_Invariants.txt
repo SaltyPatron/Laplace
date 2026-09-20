@@ -26,6 +26,63 @@ Tier 0 is the universal Unicode codepoint floor for textual content. Tokens, wor
 phrases, sentences, documents, programs, games, model circuits, and other modalities
 compose above that floor; packaging bytes do not redefine their content identity.
 
+Rule #1c — Finite scalars are compositions, not new atoms
+-------------------------------------------------------------
+
+An arbitrary finite digital scalar does not mint a new Tier-0 atom merely because it
+appears in a physical modality.
+
+Under its declared exact numeric recipe, the scalar is canonical ordered content over
+the existing codepoint floor. For example:
+
+    255     -> ['2','5','5']
+    0.34567 -> ['0','.','3','4','5','6','7']
+
+Those constituents compose into one reusable scalar root. Re-observing the same exact
+scalar reuses that content id; sample/channel/pixel/tensor/time/ordinal/source context
+is occurrence/physicality state around it.
+
+A finite prefix of pi obeys the same rule at larger width. It is one ordered
+composition over existing digit/punctuation atoms, not one new atom kind per digit or
+one new Tier-0 atom per numeric value. Local packed ordinal/run field widths are
+serialization fields, not global composition-width limits.
+
+Analog phenomena enter only through a finite digital observation. The scalar recipe
+must retain enough radix/sign/precision/scale/exponent/source-format information to
+reconstruct that admitted digital value. An incidental host floating-point rendering
+is not authority when it loses source precision.
+
+Content novelty and occurrence volume remain distinct.
+
+Rule #1d — A constituent composition is one entity everywhere
+------------------------------------------------------------
+
+Canonical identity is the ordered canonical constituent identity sequence.
+
+If:
+
+    ['k','i','n','g']
+
+composes to entity K, then K is the entity referenced everywhere that exact composition
+occurs. "word", "name", "title", "label", "token", source, sentence position, language
+use, tier, container, sense, or task role do not mint another K.
+
+Those facts live in physicality/trajectory, occurrence, typed relations, testimony,
+context or calculation around K.
+
+The same rule applies recursively to image structure. If an exact ordered 2x2 pixel
+composition P occurs inside an 8x8 region, inside another image, or as a standalone
+selected patch, every occurrence references P. The containing 8x8 does not own a
+private copy or tier-specific hash of P.
+
+Likewise, if the exact ordered constituent sequence is admitted at two different tiers,
+hash128_merkle produces the same id. Tier is deliberately discarded by the executable
+hash law.
+
+Do not salt content identity with tier, source, parent/container, occurrence ordinal,
+semantic role/type label, modality, cache profile, physicality or provenance when those
+facts do not change the canonical ordered constituent content itself.
+
 Rule #2 — Physicality is typed
 ------------------------------
 

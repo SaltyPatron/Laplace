@@ -5,19 +5,21 @@ This directory contains invention law, implementation architecture, binding desi
 ## Read order
 
 1. [`INVENTION.md`](INVENTION.md) — canonical intended invention, theorem, recursive representation, coupling model, evidence model, execution model, and proof obligations.
-2. [`INVENTIONS.md`](INVENTIONS.md) — mechanism/capability catalog. It summarizes the invention; it does not override `INVENTION.md`.
-3. [`../AGENTS.md`](../AGENTS.md) — execution/authority rules for applying the invention during repository work.
-4. [`ARCHITECTURE.md`](ARCHITECTURE.md) — current source/as-built architecture. A mismatch with the invention is an implementation gap unless higher authority changes the invention.
-5. [`specs/README.md`](specs/README.md) — binding component contracts interpreted under the invention.
-6. GitHub issues — bounded implementation/acceptance ownership, interpreted under the authority above.
-7. Current code, tests, CI, live receipts and measurements — evidence of what is actually implemented.
-8. Dated plans, campaign ledgers, audits, recovery notes and archived documents — historical evidence only unless explicitly reactivated.
+2. [`CAPABILITIES.md`](CAPABILITIES.md) — binding synthesis of what those primitive laws enable together. Read this before narrowing work to a local test, gate or subsystem.
+3. [`INVENTIONS.md`](INVENTIONS.md) — mechanism/capability catalog. It summarizes the invention; it does not override `INVENTION.md`.
+4. [`../AGENTS.md`](../AGENTS.md) — execution/authority rules for applying the invention during repository work.
+5. [`ARCHITECTURE.md`](ARCHITECTURE.md) — current source/as-built architecture. A mismatch with the invention is an implementation gap unless higher authority changes the invention.
+6. [`specs/README.md`](specs/README.md) — binding component contracts interpreted under the invention and capability synthesis.
+7. GitHub issues — bounded implementation/acceptance ownership, interpreted under the authority above.
+8. Current code, tests, CI, live receipts and measurements — evidence of what is actually implemented.
+9. Dated plans, campaign ledgers, audits, recovery notes and archived documents — historical evidence only unless explicitly reactivated.
 
 The latest prompt does not erase higher-level project scope. A status file, issue body, old plan or another repository cannot silently narrow the invention or replace an explicit current inventor correction.
 
 ## Core invention / architecture
 
 - [`INVENTION.md`](INVENTION.md) — head-to-tail invention definition and proof model.
+- [`CAPABILITIES.md`](CAPABILITIES.md) — binding synthesis of the compound product consequences: knowledge authority, measured cognition, structural software construction, duplicate-code convergence, repair trajectories, machine-cost derivation and root-transition deployment.
 - [`INVENTIONS.md`](INVENTIONS.md) — concise mechanism catalog.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current implementation architecture and known divergences.
 - [`audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md`](audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md) — current-vs-historical deviation ledger tied to concrete code/issues.
@@ -82,6 +84,10 @@ Guides under [`guides/`](guides/) consume the common machine. They do not define
 
 Examples:
 
+- [Structural software construction](guides/software-construction.md) — grammar/AST construction, canonical reuse, duplicate convergence, witnessed repairs, cross-repository maintenance and root-transition deployment.
+- [Knowledge authority, governance and security](guides/knowledge-authority.md) — knowledge packages, capabilities, honest abstention, Red Spear / Blue Shield / White Judge and effective-mind composition.
+- [Machine-cost analysis and measured cognition](guides/machine-cost-analysis.md) — artifact→ISA/microarchitecture cycle derivation and compute-depth billing.
+- [Compositional perfcache lattice](guides/compositional-perfcache.md) — dense/sparse mmap ROMs for reusable scalar/pixel/patch/region/image/audio/chess/code structures and cross-modality cache reuse.
 - Knowledge Arena — pinned-world games exposing paths, evidence, hops/fanout and receipts.
 - Name Game — human-vs-Laplace resolution/identity/event latency proof.
 - Chess Forward Pass — chess as a cross-modal proving domain using the same coupling/ISA program.

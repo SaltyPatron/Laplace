@@ -2,15 +2,21 @@
  * Build-time emit for laplace_modality_number_perfcache.bin
  * (spec 33 / modality-ladder-law codepoint floor).
  *
- * Peer of laplace_chess_position_tables_emit in ROLE: load t0 → compose → blob.
- * Tier 0 remains CODEPOINTS only. This packs the dense channel-byte number
- * table (0..255) whose ids are text content roots of decimal digit strings —
- * the same ScalarId / word_id law, not packed-RGBA or PCM alphabets.
+ * Peer of laplace_chess_position_tables_emit in ROLE: load canonical lower
+ * generation → compose deterministic reusable records → mmap blob.
+ * Tier 0 remains CODEPOINTS only. This emits the dense canonical integer table
+ * 0..255 whose ids are content roots of decimal digit strings — shared by
+ * image, audio, video and any other consumer of those exact integers.
+ *
+ * This is one module in the compositional perfcache lattice (#1711), not an
+ * image/audio-private ROM and not a statement that higher tiers cannot be cached.
  *
  * Inputs:  --t0 (required) + --output (required)
  * Output:  dense value → id/coord/hilbert/n/tier + BLAKE3 trailer
  *
- * Runtime load: modality_number_table_load (O(1) index). No corpus required.
+ * Runtime load: modality_number_table_load (O(1) direct index). No corpus
+ * required. Selector-scoped/higher-tier modules are owned by the common
+ * perfcache registry work in #1711.
  */
 
 #include <cstdint>

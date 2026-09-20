@@ -7,9 +7,10 @@ namespace Laplace.Engine.Core.Tests;
 /// <summary>
 /// THE content-addressing law, spec 05 #1b: same content = same hash AT EVERY TIER. The id
 /// is a function of the child-id sequence and nothing else -- no tier, no ordinal, no
-/// container. It is what makes cross-source merging a hash collision rather than an
-/// entity-resolution pass, and what lets "cat" the word and "cat" standing alone as an
-/// answer be one entity.
+/// container. It is what makes cross-source observations converge on one canonical
+/// content entity without an entity-resolution pass, and what lets "cat" the word and
+/// "cat" standing alone as an answer be one entity. Ordinary convergence is not a
+/// cryptographic hash collision.
 ///
 /// hash128.c discards the tier parameter with an explicit `(void)tier` and its comment
 /// records that a tier byte was briefly mixed in on 2026-07-01, broke the law, and was

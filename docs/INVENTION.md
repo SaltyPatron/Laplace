@@ -183,6 +183,32 @@ Tier records compositional altitude within a selected recipe. It is not itself t
 
 The general law is recursive composition. The modality grammar determines which constituents are admitted and how they are grouped.
 
+### One composition, one entity, everywhere
+
+Content identity is not scoped to the place where the content was found.
+
+If the ordered constituents are:
+
+~~~text
+['k','i','n','g']
+~~~
+
+then the resulting canonical entity is the same entity wherever that exact composition appears. "word", "name", "label", "title", "token", tier, source, sentence, document, language use, semantic sense or application role are state about or around that entity.
+
+They do not create another content identity.
+
+The same law applies recursively to every modality. A 2x2 pixel composition occurring inside an 8x8 region is the same canonical 2x2 entity when it appears in another region, another image, a video frame, or as a standalone selected structure. Higher structures reference it through their physicality/trajectory/occurrence structure.
+
+Current executable hash128_merkle intentionally ignores its tier argument. For multi-child content, the hash is determined by the ordered child-id sequence. A singleton may collapse to its child under the current recipe.
+
+This is the fundamental deduplication law:
+
+~~~text
+same ordered canonical constituent content
+-> same entity
+-> many physicality/trajectory/occurrence references
+~~~
+
 ### Universal typed AST: structure for all digital knowledge
 
 Laplace treats syntax and structure as a universal knowledge problem, not a programming-language-only feature.
@@ -221,6 +247,18 @@ This is the sense in which Laplace unlocks AST for all knowledge: exact recursiv
 
 Where the recipe declares exact reconstruction, the persisted typed AST plus retained provider facts must be sufficient to reproduce the admitted source bytes/structure. Intentional transformations produce new content and an explicit structural edit/derivation receipt rather than silently mutating the observation.
 
+### Software construction from typed AST
+
+The universal AST is not only an ingest representation. It is also the construction space for software.
+
+A code-producing operation should bind an exact target language/grammar/toolchain generation, search known canonical structures before inventing new ones, compose reusable structures where possible, and construct only the smallest genuinely novel subtree required by the active obligations. Source text is realized from the selected structure after grammar/type/API/dependency constraints have been applied.
+
+This makes syntactically invalid token guessing unnecessary. A Bash request is constructed under the admitted Bash grammar/runtime contract; a Zsh request requires a qualified Zsh provider rather than silently substituting Bash because the surfaces look similar.
+
+Exact duplicate AST subtrees converge by identity. Deeper duplication can be calculated through normalized AST, control/data-flow, algebraic and behavioral equivalence under declared contracts. Generation and duplicate elimination are therefore the same optimization pressure: reuse or compose existing canonical structure before minting another implementation.
+
+Compile, link, test, static-analysis, simulation and runtime results are witnessed outcomes on exact candidate structures/toolchains/environments. A failed attempt remains reusable negative evidence; a successful repair establishes an explicit repair trajectory that later construction can couple against.
+
 ### Content novelty and observation volume are different
 
 If the same word, AST subtree, chess line, sentence or other canonical composition is observed repeatedly, the structure should converge rather than be minted repeatedly.
@@ -237,6 +275,29 @@ Later observations may still add:
 As a corpus matures, structural novelty can therefore taper while observation volume continues to grow. The architecture permits that convergence; an exact logarithmic growth rate is an empirical/model claim and must be measured before being asserted quantitatively.
 
 ---
+
+### Canonical scalars are reusable compositions
+
+Finite digital numeric values do not require new Tier-0 atom kinds. Under a declared exact scalar recipe, a number is an ordered composition of the existing textual atoms that spell its canonical form.
+
+For example:
+
+~~~text
+0.34567 -> ['0', '.', '3', '4', '5', '6', '7']
+255     -> ['2', '5', '5']
+~~~
+
+The resulting scalar root is reusable canonical content. Re-observing the same exact scalar in audio, image, model, measurement or other domains reuses that root; the new information is its occurrence/role/ordinal/channel/time/precision in the containing structure.
+
+A finite prefix of pi is the same mechanism at larger width: one ordered composition over existing digit/punctuation atoms, not one new atom per digit or one new atom per numeric value. The current trajectory implementation treats packed ordinal/run fields as local carrier fields rather than composition-width ceilings.
+
+Analog phenomena enter only through finite digital observations. The source's exact quantization/precision is part of the recipe/reconstruction contract; Laplace does not claim an infinite-precision real has been physically stored.
+
+This is another instance of the global rule:
+
+~~~text
+content novelty != occurrence volume
+~~~
 
 ## 4. Physicality, trajectory and realization
 
@@ -549,6 +610,45 @@ This law is reflected in `AGENTS.md`, the operation ISA, the native extension so
 
 ---
 
+### Program decomposition and machine-cost derivation
+
+The same decomposition law applies to executable behavior. Source ASTs, bytecode, object/container formats and decoded machine instructions may be lowered into control-flow, data-flow and dependency structure with explicit execution-count variables.
+
+Given a declared target ISA, microarchitecture/scheduling model, memory/initial-state assumptions and clock, Laplace may derive instruction instances, resource-constrained cycles and corresponding machine time. Unfixed loop counts, branch outcomes, cache state, I/O, scheduler interference and similar quantities remain symbolic, conditional or distributional rather than being replaced with benchmark averages.
+
+Observed runs are witnesses against that calculated model. They validate/calibrate missing physical/environment state; they do not become semantic authority for work already derivable from the artifact and target machine model.
+
+### Perfcaches follow reusable structure, not modality names
+
+A perfcache may accelerate any deterministic reusable canonical layer, not only Tier-0 and not only one named modality.
+
+The cache dependency follows composition:
+
+~~~text
+codepoints
+-> scalar/number roots
+-> image channels / audio samples
+-> pixels / audio windows
+-> patches / segments
+-> regions / tracks
+-> images / frames
+-> video timing/synchronization
+~~~
+
+Higher consumers reuse lower cached records. Video does not clone image or audio structure; it reuses frame/image and audio roots, then composes the genuinely new order/timing/synchronization state.
+
+When a recipe's legal finite state space is practical to enumerate, the whole tier may be emitted as a dense direct-address mmap ROM. When the possible universe is too large, the finite admitted/hot canonical estate may be emitted into a deterministic sparse mmap lookup. Both are lawful perfcaches.
+
+Pixels, patches, regions, complete images, audio windows/tracks, chess positions/transitions, AST subtrees and other higher structures may therefore be cached when doing so removes repeated deterministic work.
+
+Cache generations record their lower-generation/recipe dependencies. A lower change invalidates affected dependents, not unrelated caches.
+
+Cache modules may also be selector-scoped while preserving the same canonical members: an ASCII range, an explicit color palette, a generated finite format domain, a speech-oriented frequency/filter-bank band, a hot/admitted set, or the dependency closure of selected higher structures. Several modules can compose into one deployment profile. A subset module never renumbers its members into a new semantic universe.
+
+Cache residency/profile selection is acceleration/deployment state, not knowledge authority. An authorized cache miss falls back to the canonical path when the deployment supports it; a constrained offline deployment reports local capability/cache absence rather than changing identity or pretending the knowledge does not exist.
+
+Cache-backed database operations should preserve planner/index use by resolving request-side ids/coordinates/Hilbert/ranges before indexed probes instead of wrapping indexed columns in per-row functions.
+
 ## 11. Ingestion is the learning process
 
 Laplace does not require an offline gradient-training cycle to admit new knowledge.
@@ -621,6 +721,36 @@ Any exported artifact must retain a reproducible recipe/scope and must not silen
 
 ---
 
+### Repository root, structural sharing and deployment
+
+A repository/application is itself a recursively composed object. A bounded code change should remint only the changed leaf/subtree and the ancestry required to produce a new application root; unrelated canonical subtrees remain shared.
+
+Conceptually:
+
+```text
+R0 + bounded mutation Δ
+→ changed AST subtree
+→ changed file/container ancestry
+→ new complete repository root R1
+```
+
+The complete application therefore exists as R1 even when only a tiny fraction of its structure was newly constructed. A conventional checkout is a realization/export of that root.
+
+This supports a stronger patch/deployment object:
+
+```text
+FROM R0
+TO   R1
+transfer = closure(R1) - objects already present
+proof    = derivation + compile/test/analysis/runtime receipts
+activate = R1
+rollback = R0
+```
+
+Mutable database/config/secret/external-system transitions remain explicit obligations; immutable structural sharing is not permission to ignore mutable world state.
+
+Development itself becomes a witnessed trajectory across roots and failures. A successful repair can subsequently couple against other authorized repositories to find exact duplicates, structurally/algebraically similar implementations, or similarly shaped failure trajectories. Fréchet may compare ordered trajectories where appropriate, alongside AST/dependency/call/control-flow/evidence planes.
+
 ## 16. One knowledge world, variable compute
 
 Product tiers should not be implemented as progressively knowledge-reduced Laplace variants.
@@ -642,6 +772,34 @@ Where work is billable, the same physical plan that governs execution should sup
 That is why `EXPLAIN`, work receipts, benchmark calibration and hop/fanout accounting are product architecture rather than billing decoration.
 
 ---
+
+### Knowledge authority, packages and effective scope
+
+One knowledge world does not mean every principal has authority to use every part of it.
+
+Knowledge, authority and compute are independent axes:
+
+```text
+knowledge  = what canonical/witnessed/calculated state exists
+authority  = what this principal may discover/couple/traverse/derive/realize/export/execute
+compute    = how much work this operation may spend over the allowed world
+```
+
+Knowledge packages are content-addressed authority manifests over the shared world, not separately trained or duplicated smaller models. A school grade, Formula 1 corpus, enterprise private domain, personal history or temporary task scope can be granted through explicit package/authority relations.
+
+Grant inheritance follows declared authority/package relations, not arbitrary semantic connectivity. Capabilities such as DISCOVER, INSPECT, SEARCH, COUPLE, TRAVERSE, DERIVE, REALIZE, PERSIST, EXPORT, EXECUTE and DELEGATE remain separately governable.
+
+The effective operation scope is the intersection of tenant/world isolation, principal/role/relationship grants, knowledge entitlements, active caller scope and kernel governance.
+
+### Governance and honest abstention
+
+Governance is not deletion of knowledge. A fact may remain known, including sourced evidence that a capability is dangerous/restricted, while the current principal lacks authority to couple, derive, realize, export or execute it.
+
+This permits explicit receipted dispositions such as allow, deny, abstain or require stronger authority. Even revealing that restricted knowledge exists may itself require DISCOVER.
+
+Standing and permission are distinct. Consensus estimates support/uncertainty for propositions; authority decides whether an operation is allowed. A permission decision is not a popularity vote and must not be smuggled into canonical identity.
+
+Red Spear / Blue Shield / White Judge are security roles over this same model: adversarial boundary exploration, runtime enforcement, and explicit policy/authority adjudication with receipts rather than a hidden judge model.
 
 ## 17. Proof: mathematics, executable construction and witness
 

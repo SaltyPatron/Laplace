@@ -1,21 +1,50 @@
+import { lazy, Suspense } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { WarehouseHome } from './catalog/WarehouseHome';
-import { AuditPanel } from './catalog/AuditPanel';
-import { BrowseHome } from './browse/BrowseHome';
-import { StageBrowse } from './browse/StageBrowse';
-import { SourceBrowse } from './browse/SourceBrowse';
-import { EntityDetail } from './entity/EntityDetail';
-import { NotFoundExplorer } from './entity/NotFoundExplorer';
-import { ResolveBrowseRedirect } from './entity/ResolveBrowseRedirect';
-import { ConstellationView } from './glome/ConstellationView';
-import { HighwayLanding } from './highway/HighwayLanding';
-import { LayerPage } from './highway/LayerPage';
-import { MatchupView } from './matchup/MatchupView';
-import { MeshView } from './mesh/MeshView';
-import { WalkPanel } from './walk/WalkPanel';
 import { Breadcrumb } from './components/Breadcrumb';
+import { LoadingText } from '@ui';
 import { useExploreStore } from './store';
 import styles from './ExploreView.module.css';
+
+const loadBrowse = () => import('./browse/BrowseHome');
+const loadWarehouse = () => import('./catalog/WarehouseHome');
+const loadAudit = () => import('./catalog/AuditPanel');
+const loadStage = () => import('./browse/StageBrowse');
+const loadSource = () => import('./browse/SourceBrowse');
+const loadEntity = () => import('./entity/EntityDetail');
+const loadNotFound = () => import('./entity/NotFoundExplorer');
+const loadResolve = () => import('./entity/ResolveBrowseRedirect');
+const loadConstellation = () => import('./glome/ConstellationView');
+const loadHighway = () => import('./highway/HighwayLanding');
+const loadLayer = () => import('./highway/LayerPage');
+const loadMatchup = () => import('./matchup/MatchupView');
+const loadMesh = () => import('./mesh/MeshView');
+const loadWalk = () => import('./walk/WalkPanel');
+
+const BrowseHome = lazy(() => loadBrowse().then((m) => ({ default: m.BrowseHome })));
+const WarehouseHome = lazy(() => loadWarehouse().then((m) => ({ default: m.WarehouseHome })));
+const AuditPanel = lazy(() => loadAudit().then((m) => ({ default: m.AuditPanel })));
+const StageBrowse = lazy(() => loadStage().then((m) => ({ default: m.StageBrowse })));
+const SourceBrowse = lazy(() => loadSource().then((m) => ({ default: m.SourceBrowse })));
+const EntityDetail = lazy(() => loadEntity().then((m) => ({ default: m.EntityDetail })));
+const NotFoundExplorer = lazy(() => loadNotFound().then((m) => ({ default: m.NotFoundExplorer })));
+const ResolveBrowseRedirect = lazy(() => loadResolve().then((m) => ({ default: m.ResolveBrowseRedirect })));
+const ConstellationView = lazy(() => loadConstellation().then((m) => ({ default: m.ConstellationView })));
+const HighwayLanding = lazy(() => loadHighway().then((m) => ({ default: m.HighwayLanding })));
+const LayerPage = lazy(() => loadLayer().then((m) => ({ default: m.LayerPage })));
+const MatchupView = lazy(() => loadMatchup().then((m) => ({ default: m.MatchupView })));
+const MeshView = lazy(() => loadMesh().then((m) => ({ default: m.MeshView })));
+const WalkPanel = lazy(() => loadWalk().then((m) => ({ default: m.WalkPanel })));
+
+const EXPLORE_PREFETCH: Record<string, () => Promise<unknown>> = {
+  '/explore': loadBrowse,
+  '/explore/highway': loadHighway,
+  '/explore/mesh': loadMesh,
+  '/explore/warehouse': loadWarehouse,
+  '/explore/matchup': loadMatchup,
+  '/explore/constellation': loadConstellation,
+  '/explore/walk': loadWalk,
+  '/explore/audit': loadAudit,
+};
 
 function ExploreBreadcrumb() {
   const { pathname } = useLocation();
@@ -66,6 +95,8 @@ export function ExploreView() {
                 key={to}
                 className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}
                 to={to}
+                onPointerEnter={() => { void EXPLORE_PREFETCH[to]?.(); }}
+                onFocus={() => { void EXPLORE_PREFETCH[to]?.(); }}
                 end={to === '/explore' || to === '/explore/warehouse'}
               >
                 {label}
@@ -76,6 +107,7 @@ export function ExploreView() {
       </aside>
       <div className={styles.content}>
         <ExploreBreadcrumb />
+        <Suspense fallback={<LoadingText>Loading Explore tool…</LoadingText>}>
         <Routes>
           <Route index element={<BrowseHome />} />
           <Route path="warehouse" element={<WarehouseHome />} />
@@ -95,6 +127,7 @@ export function ExploreView() {
           <Route path="audit" element={<AuditPanel />} />
           <Route path="*" element={<Navigate to="/explore" replace />} />
         </Routes>
+        </Suspense>
       </div>
     </div>
   );

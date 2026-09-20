@@ -18,7 +18,12 @@ extern "C" {
  *   (see modality_witness.h); compose resolves T0 via codepoint_table.
  */
 
-/* Fixed patch edge (pixels). Rock-stable — changing it reassigns every patch id. */
+/* Current image working-partition edge (pixels).
+ * This is a physical decomposition/cache plan, NOT identity salt.
+ * A canonical square/subpatch id is determined only by its ordered constituent
+ * pixel ids; the same 2x2 remains the same entity whether discovered inside an
+ * 8x8, another image, or another cache profile. #1711 owns replacement of the
+ * fixed-only partition with the multiscale reusable subpatch lattice. */
 #define LAPLACE_IMAGE_PATCH_SIZE 8u
 
 /* RGBA channel count in packaging recovery order (R, G, B, A). */
@@ -39,12 +44,20 @@ extern "C" {
  *   tier 1 Number    — ordered digits of one channel value (no leading zeros; "0" for zero)
  *   tier 2 Channel   — wraps one Number (R then G then B then A)
  *   tier 3 Pixel     — ordered channels
- *   tier 4 Patch     — LAPLACE_IMAGE_PATCH_SIZE × LAPLACE_IMAGE_PATCH_SIZE, clipped
- *   tier 5 Region    — one row of patches
- *   tier 6 Image     — all regions
+ *   tier 4 Patch     — current working 8x8 partition (not the only canonical patch scale)
+ *   tier 5 Region    — current working row of patches
+ *   tier 6 Image     — current working root
+ *
+ * Canonical subpatches at 2x2, 3x3, ... are global content entities whenever
+ * their exact ordered pixel composition is materialized. Parent/tier/scale is
+ * occurrence/physicality state, never hash salt. #1711 owns full multiscale emission.
  *
  * Packaging (media_decode → planar RGBA) is INPUT only. Identity is the
  * codepoint/number/channel tree, never blake3(rgba bytes) as tier-0.
+ *
+ * #1711: deterministic Number/Pixel/Patch/Region/Image tiers may be emitted as
+ * mmap perfcache generations. Higher consumers such as video reuse those exact
+ * cached roots; they do not own another image identity/cache law.
  *
  * Leaf order rock lock: patch-major (patch grid row-major; within a patch,
  * pixels row-major; within a pixel, channels R,G,B,A; within a channel, MSD-first

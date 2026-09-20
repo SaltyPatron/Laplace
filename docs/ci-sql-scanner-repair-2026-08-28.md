@@ -1,5 +1,8 @@
 # Merged-main integration failure: SQL scanner false positive
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 Run [33140056131](https://github.com/SaltyPatron/Laplace/actions/runs/33140056131)
 at `c490b806` failed `ReadPath_NoNewHandWrittenSql`, naming `ChessLabPaths.cs`.
 All 570 chess integration tests and the PostgreSQL regression lane passed.

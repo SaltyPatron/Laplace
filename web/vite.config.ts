@@ -48,7 +48,8 @@ export default defineConfig({
         manualChunks: {
           three: ['three'],
           r3f: ['@react-three/fiber', '@react-three/drei'],
-          'force-graph': ['react-force-graph-2d', 'react-force-graph-3d'],
+          'force-graph-2d': ['react-force-graph-2d'],
+          'force-graph-3d': ['react-force-graph-3d'],
           react: ['react', 'react-dom', 'react-router-dom'],
         },
       },

@@ -12,6 +12,19 @@ contains one canonical result for each `(from-position, typed-move)` key. Repeat
 playings and repeated board occurrences can increase observed input counts
 without increasing either floor's unique record count.
 
+## General compositional-cache relation
+
+Chess position/transition floors are one instance of the common compositional perfcache law in spec 33 / #1711.
+
+~~~text
+piece/square vocabulary
+-> position records
+-> transition records
+-> line/replay composition
+~~~
+
+The same architecture now applies to image/audio/video and other deterministic recursive structures. Chess does not own a special cache ontology; it demonstrates mmap generation, canonical reuse, dependency-bound publication and process-lifetime hits that the common registry should generalize.
+
 ## Export verified recorded inputs
 
 Use the normal matched managed/native build and the existing installed database

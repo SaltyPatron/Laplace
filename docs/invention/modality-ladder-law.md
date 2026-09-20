@@ -1,197 +1,277 @@
-# Modality ladder law — codepoint floor (binding)
+# Modality ladder law — shared codepoint floor, reusable scalar trajectories, typed modality structure
 
-This binding law supersedes every prior private tier-0 alphabet in this file and in the
-modality campaign code that mirrored it.
-(`modality_atoms*` packed-RGBA / PCM16 blake3 mints, image/audio “scalar content
-law” as distinct T0 alphabets). Geometry = identity/reconstruction only.
-Semantics live in the Glicko attestation graph. Do **not** hash embeddings as
-identity.
+This binding law is read under docs/INVENTION.md and docs/CAPABILITIES.md.
 
-This document is law for identity. Implementation rip work is tracked in
-[`modality-codepoint-floor-checklist.md`](modality-codepoint-floor-checklist.md).
-Do not reintroduce private alphabets under new names.
+## The actual media/scalar law
 
----
+Do not mint an arbitrary sensor/sample value as a new Tier-0 atom.
 
-## The one law (every modality)
+A finite digital scalar such as:
 
-1. **Tier-0 is always Unicode codepoints** for every modality. Same floor as text:
-   existing UCA T0 perfcache (`laplace_t0_perfcache`, `codepoint_table_*`). There
-   is **no** image-only or audio-only tier-0 alphabet. Packed RGBA uint32 blake3,
-   PCM int16 blake3, and any other private atom mint at tier-0 are **wrong** and
-   must be ripped.
-2. **Modalities are UAX#29-analogs:** deterministic segmentation / composition
-   **above** that shared floor. Order-preserving trajectory → tier>0 is an
-   invertible ordered constituent sequence (same structural shape as
-   grapheme → word → sentence → document).
-3. **Shared codepoint floor enables modality perfcaches.** Above T0, modalities
-   may emit O(1) ROM blobs (same *blob class* as chess position perfcache —
-   peer of `codepoint_table_load_perfcache`, not a second tier-0). Tier-0 remains
-   codepoints; modality ROM eliminates repeat DB resolve of composed ids, it does
-   not replace the floor.
-4. **Witnessed / calculated split.** Raw recovered values are witnessed by
-   encoding them into codepoint trajectories under this law. Interpretation
-   (Fourier, object detectors, learned embeddings) is calculated, versioned,
-   evictable: emit attestations, discard the transient transform.
+~~~text
+0.34567
+~~~
 
----
+is canonical ordered content over the already admitted codepoint floor:
 
-## Packaging vs identity
+~~~text
+['0', '.', '3', '4', '5', '6', '7']
+~~~
 
-Containers (JPEG, PNG, MP3, FLAC, Ogg Vorbis, WAV, MP4, …) are **unpack codecs**.
-They are not the modality and are not hashed for identity.
+Likewise:
 
-| Layer | Owns |
-|-------|------|
-| Packaging | `media_decode` / `ImageFileOpen` / `AudioFileOpen` — recover channel values / samples / frames only |
-| Identity ladder | compose those values into **codepoint trajectories** (digit → number → …), then modality tiers |
-| Corpus pairing | Source decomposers may attest content ↔ track with existing relations (e.g. `HAS_RECORDING`) — they do **not** become media lanes |
+~~~text
+255    -> ['2','5','5']
+-32768 -> ['-','3','2','7','6','8']
+~~~
 
-Packaging output (planar RGBA bytes, mono PCM samples, ordered frames) is an
-**intermediate recovery buffer**, not a tier-0 alphabet. After recovery, encode
-into the shared content law below. Never blake3 the packaging buffer or the
-packed channel tuple as a leaf id.
+Those constituents compose into one reusable scalar/number identity and one exact ordered trajectory.
 
----
+When that same scalar occurs again, the scalar content is not recorded again. The containing modality records another occurrence/reference to that already-known scalar at a different sample/channel/pixel/time/ordinal.
 
-## Number / digit encoding (locked by existing substrate law)
+This is ordinary Laplace content-address convergence:
 
-Quantized scalars (channel intensities, sample amplitudes, counts, indices that
-enter a modality ladder as numbers) use the **already-shipped text content /
-recipe-scalar law** — not a new modality numeric alphabet.
+~~~text
+content novelty != occurrence volume
+~~~
 
-**Canonical form**
+## Pi is the same proof at larger width
 
-1. Render the integer in **decimal ASCII** via invariant culture digit string
-   (`CultureInfo.InvariantCulture` / UTF-8 bytes of `'0'`…`'9'`, optionally `'-'`
-   for signed audio samples). No leading zeros except the number zero itself
-   (`"0"`).
-2. Tier-0 leaves are the **Unicode digit codepoints** (and sign if present) —
-   U+0030…U+0039, U+002D — resolved through the existing T0 / UCA perfcache.
-3. The **number** id is the content-decomposition root of that digit string
-   (text content law). Single-digit values collapse to their codepoint ids
-   (tier-floor collapse). Multi-digit values compose above T0 like any other
-   short text root.
+A finite observed prefix of pi is not a million new Tier-0 atom kinds.
 
-**Authority in code (do not fork)**
+It is one ordered composition of the existing digit / punctuation codepoints. The repository's core benchmark already notes that "pi's million digits compose as ONE word"; the trajectory implementation separately proves that composition width is not limited by the local 16-bit ordinal field.
 
-- `ModelCoordinates.ScalarId` — `app/Laplace.Decomposers/Model/ModelCoordinates.cs`
-  (`value.ToString(CultureInfo.InvariantCulture)` → `TryDecomposeRoot` on UTF-8).
-- Comments there pin: scalar identity = text content law; single digits =
-  codepoint ids; requires codepoint perfcache.
+Conceptually:
 
-**Operator white example (image channel 255)**
+~~~text
+pi_N = compose(['3','.', '1','4','1','5','9', ... N finite digits ...])
+~~~
 
-```
-[[2,5,5],[2,5,5],[2,5,5]]
-```
+The exact finite digit prefix determines the canonical composition/root. Re-observing the same prefix reuses that root.
 
-Three channels; each channel value **255** is the ordered digit codepoints
-`2`, `5`, `5` → composed **number** → **channel** → **pixel** → **patch** →
-**region** → **image**. Tier-0 in that trajectory is only the digit codepoints
-(and whatever other Unicode leaves a future signed/fractional extension needs);
-the pixel is never `blake3({R,G,B,A})`.
+The packed GeometryZM trajectory is the exact ordered constituent manifest. One vertex carries one constituent identity plus local ordinal/run/flags. GeometryZM/varlena/memory/storage limits bound one executable materialization; they do not turn each digit or scalar value into a new atomic alphabet.
 
-No hex, packed-byte, or “alphabet index = identity” shortcut for ladder leaves.
-Hex appears elsewhere in the substrate (ids, dumps); it is not the modality
-number law.
+## Tier-0: current executable floor versus abstract law
 
----
+The current executable shared textual/number floor is the selected Unicode codepoint generation backed by the UCD/DUCET perfcache.
 
-## What private alphabets were (void)
+The abstract Tier-0 address law remains open and is not mathematically capped by today's Unicode release. That extensibility is not permission for a media decomposer to allocate arbitrary amplitude/color/sample values into unused Tier-0 ranks.
 
-The following are **void** as tier-0 identity. Keep only as packaging /
-recovery documentation until rip:
+A new Tier-0 atom generation is a governed foundation change. Ordinary digital numbers and modality values compose above the existing floor.
 
-| Void claim | Why void |
-|------------|----------|
-| Image atom = 4 bytes `{R,G,B,A}` blake3 | Private alphabet; bypasses codepoint floor |
-| Packed RGBA uint32 total-order rank as T0 | Order may inform *composition schedule*, not a second T0 |
-| Audio atom = LE int16 blake3 | Private alphabet |
-| Amplitude-order 65 536-atom audio T0 | Same defect |
-| On-demand mint of 2³² color atoms as T0 | Alphabet size argument for a false floor |
+## Exact scalar canonicalization
 
-S³ / Hilbert geometry still derives from content; it does not justify a separate
-atom id space. Chess already shows the correct pattern: composition above the
-shared codepoint floor, optional ROM perfcache for hot composed forms.
+A scalar recipe must be deterministic and lossless for the admitted digital representation.
 
----
+It declares, as applicable:
 
-## Ladders (composition above codepoints)
+- radix;
+- sign;
+- decimal point;
+- exponent form;
+- leading/trailing-zero normalization;
+- exact precision/scale;
+- integer/rational/fixed/floating source representation;
+- signed-zero / NaN / infinity handling when the source format permits them.
 
-### Text (reference — live)
+Do not stringify an inexact host floating-point approximation and call it the source value. Canonicalization starts from the exact admitted digital representation and its declared precision boundary.
 
-- Tier-0: codepoint / UCA order (perfcache)
-- Tiers: grapheme → word → sentence → document
-- Witnessed ≈ semantic for lexical sources
+For a value already supplied as an exact canonical decimal surface, ordinary content decomposition is the scalar identity/trajectory machinery. ModelCoordinates.ScalarId(string) is one current caller of that law.
 
-### Code (witnessed AST)
+## Audio
 
-- Tier-0: still Unicode/source text under content law (existing code lane) —
-  not a byte-hash floor that fragments from text
-- Segmentation: tree-sitter unpack → ordered AST child sequence
-- Relations: `HAS_AST_CHILD`, `HAS_AST_KIND` (+ existing `CONTAINS` / `CALLS` / …)
+An analog waveform enters Laplace only through a finite digital observation.
 
-### Image (generic lane — target shape)
+For each decoded sample occurrence:
 
-- Dispatch: `rgba-image` → `RgbaImageDecomposer` (names may stay; identity must change)
-- Packaging: JPEG, PNG, BMP, GIF, TGA, planar `.rgba` → recover per-channel bytes
-- **Encode:** each channel value → digit codepoints → number → channel sequence →
-  pixel → patch → region → image (operator white)
-- **Leaf order rock lock (v1, still binding for higher tiers):** patch-major —
-  patches in row-major grid order; within each patch, pixels row-major. Changing
-  it reassigns every Patch/Region/Image id. Hilbert 2D→1D remains a future
-  scan-order option (new lock, not a silent swap).
-- Patch size: `LAPLACE_IMAGE_PATCH_SIZE` = 8 (reassigns higher ids if changed)
-- Relations: `HAS_REGION`, `HAS_PATCH`; reuse `ADJACENT_TO_PIXEL`, `IS_PIXEL_OF`,
-  `DEPICTS`, `CAPTIONS`
-- Absent alpha from RGB packaging: recover as `A = 0xFF` **value**, then encode
-  that value under the digit law (same as other channels) — not a packed-RGBA leaf
+~~~text
+exact decoded sample value
+-> canonical scalar trajectory/root
+-> sample occurrence
+-> window/frame
+-> segment
+-> phrase/track
+~~~
 
-### Audio (generic track lane — target shape)
+The occurrence carries the context that is not the scalar itself:
 
-- Dispatch: `track-audio` → `TrackAudioDecomposer`
-- Packaging: WAV, MP3, FLAC, Ogg Vorbis (+ magic sniff) → recover sample values
-- **Encode:** each sample amplitude → digit (signed decimal) codepoint trajectory
-  → number → sample → window/frame → onset segment → phrase → track
-- Channel remains a **partition** of streams (not a tier), unless a future law
-  explicitly composes multi-channel trajectories
-- Onset segmentation for witnessed infra may stay fixed-hop placeholder; real
-  onset detector = calculated layer later
-- Calculated later: `HAS_SPECTRAL_PELOT`, `HAS_ONSET_SEGMENT` — attest, discard STFT
+- sample ordinal;
+- channel;
+- sample format / quantization precision;
+- sample rate / time mapping;
+- source/package/reconstruction provenance.
 
-### Video (generic lane — target shape)
+Example:
 
-- Dispatch: `frame-video` → `FrameVideoDecomposer`
-- Spatial: image ladder per frame (same codepoint-floor image law)
-- Temporal: `PRECEDES_IN_TIME`; membership `HAS_FRAME` / `IS_FRAME_OF`
-- Root: content-addressed over ordered frame roots (not path hash)
-- Container demux is packaging only
+~~~text
+S = compose(['0','.','3','4','5','6','7'])
 
-### Chess (analogy — already correct class)
+track:
+  sample #1201 -> S
+  sample #9342 -> S
+  sample #18117 -> S
+~~~
 
-- Tier-0 remains codepoints / shared floor
-- Position (and related) ROM is an **above-T0** perfcache blob, not a private T0
-- Image/audio modality ROMs, when built, follow this class
+There is one canonical S. There are three sample occurrences.
 
----
+A million identical amplitudes do not create a million scalar entities.
 
-## Reseed / freeze implications
+## Images
 
-- Relation canonicals in `engine/manifest/relation_types.toml` stay ADR 0001
-  append-only (no renumber).
-- Any ids already minted under void private alphabets are **not** the identity
-  law going forward. Do not “freeze” packed-RGBA or PCM16 atom alphabets as rock
-  locks; rip and replace with codepoint-floor composition before corpus seed of
-  media lanes.
-- First image/audio seed under the **corrected** law freezes digit rendering and
-  higher-tier leaf order (patch-major, hop sizes), not a private T0 alphabet.
+The same rule applies to channel values.
 
----
+~~~text
+N255 = compose(['2','5','5'])
 
-## Non-goals (this law doc)
+pixel A:
+  R -> N255
+  G -> N128
+  B -> N255
 
-- Does not authorize implementing native ladders in the same turn as a doc-only
-  agent task.
-- Does not make embeddings, spectrograms, or container bytes identity.
-- Does not elevate packaging recovery buffers to tier-0.
+pixel B:
+  R -> N255
+  ...
+~~~
+
+N255 is reusable canonical numeric content. Channel role, pixel location, dimensions, layout and source occurrence remain typed structure around it.
+
+Do not mint a packed RGBA tuple or channel intensity as a private Tier-0 atom merely because it is convenient.
+
+## Video, models, machine data and other numeric modalities
+
+Repeated numeric values reuse canonical scalar content where the declared recipe says the values denote the same exact scalar.
+
+Their modality roles remain distinct occurrences/physicalities:
+
+- frame/time/channel;
+- tensor coordinate/dtype/precision;
+- machine counter/register/field;
+- measurement unit/source/calibration;
+- domain-specific role.
+
+Canonical numeric equality does not erase those contexts.
+
+## Provider -> recipe -> shared structure
+
+Every source still uses its exact provider/grammar/codec:
+
+~~~text
+artifact
+-> provider recovers exact source structure
+-> recipe classifies fields/values
+-> reusable content/compositions
+   + ordered occurrences/trajectories
+   + physicality
+   + provenance
+   + testimony
+   + calculations
+   + reconstruction state
+~~~
+
+The provider does not get a private identity law.
+
+## Packaging is not identity
+
+JPEG/PNG/WAV/FLAC/MP3/MP4/JAR/ELF/etc. recover physical artifacts and source structure.
+
+Container offsets, compression blocks, paths and codec framing remain provenance/reconstruction unless a declared content recipe requires them.
+
+## Perfcache law
+
+A numeric perfcache is an accelerator for already-defined canonical scalar compositions.
+
+The current 0..255 number ROM precomputes the most common integer scalar roots used by byte-valued media. It does not mean:
+
+- the scalar universe stops at 255;
+- every scalar must be precomputed;
+- a cache is the identity authority.
+
+A fractional scalar such as 0.34567 can be composed normally without being present in that dense ROM. Repeated occurrences then reuse its canonical root through ordinary content addressing/indexing.
+
+## One scalar/subpatch entity across every containing tier
+
+Tier and modality role do not mint another copy of canonical content.
+
+~~~text
+['k','i','n','g'] -> K
+~~~
+
+K is the same entity whether it occurs as a word, name, title, label or constituent.
+
+For image structure:
+
+~~~text
+[p0,p1,p2,p3] -> P
+~~~
+
+P is the same canonical composition whether it occurs as one 2x2 subpatch of an 8x8 region, another region, another image or a video frame. Every containing trajectory references P.
+
+The containing physicality/occurrence carries spatial role, ordinal, shape/layout, source and reconstruction facts. Those are not hash salt.
+
+## Cross-modality perfcache reuse
+
+Perfcaches follow canonical composition tiers, not consumer modality names.
+
+For image/video:
+
+~~~text
+number roots
+-> channel roots
+-> pixel ROM
+-> patch ROM
+-> region ROM
+-> image/frame ROM
+                 \
+                  -> video order/timing composition
+~~~
+
+For audio/video:
+
+~~~text
+scalar/sample roots
+-> window ROM
+-> segment/phrase/track ROM
+                         \
+                          -> video audio/timing composition
+~~~
+
+A video frame that is already a cached canonical image must reuse that image record. A soundtrack reuses the same audio structures as standalone audio. Video adds the containing timing/synchronization trajectory rather than duplicating lower image/audio state.
+
+A finite practical tier may be exhaustively materialized into a dense direct-address mmap. A higher combinatorial tier may cache the finite admitted/hot canonical estate. Both remain derived acceleration under spec 33.
+
+Current implementation owner: #1711.
+
+## Physicality and trajectory
+
+Keep these distinct:
+
+~~~text
+canonical scalar/entity identity
+packed GeometryZM constituent trajectory
+real physicality coord
+realized child-coordinate curve
+modality occurrence / role
+~~~
+
+Packed trajectory values are exact manifests, not spatial sample values. Frechet/Hausdorff/etc. apply to realized curves when the operation calls for geometry.
+
+## Acceptance
+
+- arbitrary audio amplitudes/channel values are not minted as fake Tier-0 atoms;
+- exact finite numeric surfaces decompose to reusable canonical scalar roots;
+- equal scalar content converges across repeated occurrences;
+- occurrence ordinal/channel/time/pixel/tensor context remains independently attributable;
+- source precision/quantization is retained so scalar canonicalization is reversible;
+- pi or another long finite numeric surface can be represented as one wide ordered composition without turning digits into novel atoms;
+- composition width is not silently limited by the packed 16-bit ordinal copy;
+- number perfcaches accelerate common values without defining the scalar domain;
+- media packages remain provenance/reconstruction rather than identity authority.
+
+## Non-success
+
+- one new Tier-0 entity for every amplitude/sample/color value;
+- hashing raw PCM/RGBA as a private atom identity;
+- duplicating the same scalar entity for every occurrence;
+- losing sample rate/channel/precision/time while preserving only a flat scalar stream;
+- using host float formatting that cannot reconstruct the admitted digital value;
+- treating the 0..255 perfcache as the set of representable numbers.

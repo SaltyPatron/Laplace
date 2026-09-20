@@ -52,7 +52,7 @@ static int resolve_number_id(
     return 0;
 }
 
-/* Signed scalars are shared text content. Its UAX ladder may have an
+/* Signed scalar content reuses the shared canonical content ladder. Its UAX ladder may have an
  * intermediate digit word, so both identity and placement come from the exact
  * natural content node rather than a flat sign/digit centroid. */
 static int resolve_scalar_content_node(
@@ -108,12 +108,12 @@ int laplace_modality_hash_composer_resolver(
     uint32_t atom, void* user_data,
     hash128_t* out_id, double out_coord[4], hilbert128_t* out_hilbert) {
     (void)user_data;
-    /* Image + audio T0 = Unicode codepoints (shared floor). No private PCM/RGBA atoms. */
+    /* Numeric media leaves are canonical codepoint constituents, never private amplitude/color atoms. */
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hilbert);
 }
 
 /*
- * Image compose: T0 via codepoint_table; Number id = text content root of the
+ * Image compose: T0 via codepoint_table; Number id = reusable text/content root of the
  * digit string (ScalarId / laplace_content_root_id); Channel+ via merkle/centroid.
  */
 static int compose_image_tree(tier_tree_t* tree) {
@@ -182,7 +182,7 @@ static int compose_image_tree(tier_tree_t* tree) {
 }
 
 /*
- * Audio compose: T0 via codepoint_table; Sample (Number) id = text content root
+ * Audio compose: T0 via codepoint_table; Sample (Number) id = reusable content root
  * of the decimal digit string (same ScalarId law as image Number; signed may
  * prefix U+002D); Window+ via merkle/centroid.
  */

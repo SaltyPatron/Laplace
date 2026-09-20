@@ -1,5 +1,8 @@
 # Partition layout and the composition ladder — measured findings
 
+> **Status: dated measured evidence, not current invention/design authority.** This record preserves a 2026-08 observation/audit. Current architecture and product semantics are governed by `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, binding specs and `AGENTS.md`. Reproduce any claimed defect/state against current main/runtime before using it to choose implementation.
+
+
 Measured 2026-08-10 against the live `laplace` database while seeding was
 running. Estimates are `pg_class.reltuples` unless stated; exact counts are
 marked.
