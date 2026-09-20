@@ -66,13 +66,13 @@ Let `K_t` be the finite set of knowledge structures actually observed/materializ
 K_history = union(t in N) K_t
 ```
 
-is a countable union of finite sets and is therefore countable. More generally, every finite typed AST/tree/DAG over the countably open Tier-0 law has a finite description and belongs to the same countable structural universe.
+is a countable union of finite sets and is therefore countable. More generally, every finite typed composition/tree/DAG over the countably open Tier-0 law has a finite description and belongs to the same countable structural universe.
 
 Therefore the passage of time does not require Laplace's geometric domain to expand. New knowledge can continue to add canonical structures, occurrences, trajectories, testimony, provenance and higher-order compositions while their geometric realizations remain in the same fixed bounded domain.
 
 This is the precise sense in which **knowledge from an arbitrarily long past and arbitrarily long future can accumulate in one finite geometric world**, provided `knowledge` means finitely observable/describable structure. A genuinely arbitrary completed infinite object with no finite description is outside the storage claim of every finite machine; it is not required for the Laplace construction.
 
-The coordinate is not a container holding all of an object's information, so the construction does not require a unique point for every knowledge object. Multiple structures can share a location while identity, ordered trajectory, AST/DAG structure, relations, evidence and provenance keep them distinct.
+The coordinate is not a container holding all of an object's information, so the construction does not require a unique point for every knowledge object. Multiple structures can share a location while identity, ordered trajectory, composition/DAG structure, relations, evidence and provenance keep them distinct.
 
 ### One bounded geometric world is navigable
 
@@ -650,7 +650,7 @@ Higher consumers reuse lower cached records. Video does not clone image or audio
 
 When a recipe's legal finite state space is practical to enumerate, the whole tier may be emitted as a dense direct-address mmap ROM. When the possible universe is too large, the finite admitted/hot canonical estate may be emitted into a deterministic sparse mmap lookup. Both are lawful perfcaches.
 
-Pixels, patches, regions, complete images, audio windows/tracks, chess positions/transitions, AST subtrees and other higher structures may therefore be cached when doing so removes repeated deterministic work.
+Pixels, patches, regions, complete images, audio windows/tracks, chess positions/transitions, code compositions and other higher structures may therefore be cached when doing so removes repeated deterministic work.
 
 Cache generations record their lower-generation/recipe dependencies. A lower change invalidates affected dependents, not unrelated caches.
 
@@ -740,7 +740,7 @@ Conceptually:
 
 ```text
 R0 + bounded mutation Δ
-→ changed AST subtree
+→ changed canonical composition / derived AST projection
 → changed file/container ancestry
 → new complete repository root R1
 ```
@@ -760,7 +760,7 @@ rollback = R0
 
 Mutable database/config/secret/external-system transitions remain explicit obligations; immutable structural sharing is not permission to ignore mutable world state.
 
-Development itself becomes a witnessed trajectory across roots and failures. A successful repair can subsequently couple against other authorized repositories to find exact duplicates, structurally/algebraically similar implementations, or similarly shaped failure trajectories. Fréchet may compare ordered trajectories where appropriate, alongside AST/dependency/call/control-flow/evidence planes.
+Development itself becomes a witnessed trajectory across roots and failures. A successful repair can subsequently couple against other authorized repositories to find exact duplicates, structurally/algebraically similar implementations, or similarly shaped failure trajectories. Fréchet may compare ordered trajectories where appropriate, alongside structural-projection/dependency/call/control-flow/evidence planes.
 
 ## 16. One knowledge world, variable compute
 
