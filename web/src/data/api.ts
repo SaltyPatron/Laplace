@@ -1,10 +1,13 @@
-import { apiGet, apiPost, apiPostBody, type ApiOptions } from '../api/client';
+import { apiGet, apiGetArrayBuffer, apiPost, apiPostBody, type ApiOptions } from '../api/client';
 import { contentReceipt, type ContentMode, type ContentPayload, type ContentReadback } from './content';
 export async function admitContent(mode: ContentMode, payload: ContentPayload, options: ApiOptions) {
   return contentReceipt(await apiPost<unknown>(`/v1/content/${mode}`, payload, options));
 }
 export function readContent(id: string, options: ApiOptions) {
-  return apiGet<ContentReadback>(`/v1/content/${encodeURIComponent(id)}`, options);
+  return apiGet<ContentReadback>(`/v1/content/${encodeURIComponent(id)}?compact=true`, options);
+}
+export function readContentBytes(id: string, options: ApiOptions) {
+  return apiGetArrayBuffer(`/v1/content/${encodeURIComponent(id)}/raw`, options);
 }
 
 export async function admitContentRaw(

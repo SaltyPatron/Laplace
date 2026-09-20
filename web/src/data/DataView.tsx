@@ -3,9 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Field, Input, Modal, Muted, Panel, ReadStatus, Select, TextArea, useReadResource } from '@ui';
 import { ResultWorkspace, type ResultColumn } from '../ui/composites/ResultWorkspace/ResultWorkspace';
 import { captureRows } from '../ui/lib/resultRows';
-import { admitContentRaw, readContent } from './api';
+import { admitContentRaw, readContent, readContentBytes } from './api';
 import { useAppStore } from '../store';
-import { decodeContent, textBytes, type ContentMode } from './content';
+import { textBytes, type ContentMode } from './content';
 import { type UploadItem } from './uploadQueue';
 import { useUploadQueue } from './UploadProvider';
 import styles from './DataView.module.css';
@@ -111,12 +111,13 @@ function ContentInspector({ id, tenant }: { id: string; tenant: string }) {
     read: (signal) => readContent(id, { tenant, signal }),
   });
   const content = readback.data;
-  function download() {
+  async function download() {
     if (!content) return;
     try {
-      const bytes = decodeContent(content.content_base64);
+      const bytes = await readContentBytes(id, { tenant });
       const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = (content.name || `${id}.bin`).split(/[\\/]/).pop() || `${id}.bin`;
+      const fallback = id + '.bin';
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = (content.name || fallback).split(/[\\/]/).pop() || fallback;
       document.body.appendChild(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); setError(null);
     } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
@@ -124,9 +125,9 @@ function ContentInspector({ id, tenant }: { id: string; tenant: string }) {
     {!valid ? <ErrorText>This address is not a 32-character hexadecimal ID.</ErrorText> : <ReadStatus label="Admitted content" resource={readback} />}
     {content && <div className={styles.stack}>
       <h3>{content.name || content.path || 'Content artifact'}</h3><Muted>{content.bytes ?? 'Unreported'} bytes · {content.modality ?? 'text'} · {content.source}</Muted>
-      <div className={styles.toolbar}><Button onClick={download}>Download returned bytes</Button><Link to={`/explore/entity/${content.content_id}`}>Explore content structure</Link><Link to={`/explore/entity/${content.source_id}`}>Inspect source</Link></div>
-      {content.text !== null ? <pre className={styles.preview}>{content.text.slice(0, 131072).replace(/[\uD800-\uDBFF]$/, '')}</pre> : <Muted>No text rendering was returned. The byte download uses content_base64, not a reconstructed display string.</Muted>}
-      {content.text && content.text.length > 131072 && <Muted>Long text preview truncated. The byte download contains the complete returned content_base64.</Muted>}
+      <div className={styles.toolbar}><Button onClick={() => void download()}>Download exact bytes</Button><Link to={`/explore/entity/${content.content_id}`}>Explore content structure</Link><Link to={`/explore/entity/${content.source_id}`}>Inspect source</Link></div>
+      {content.text !== null ? <pre className={styles.preview}>{content.text.slice(0, 131072).replace(/[\uD800-\uDBFF]$/, '')}</pre> : <Muted>No text preview was returned. Download exact bytes streams the binary response separately.</Muted>}
+      {content.text && content.text.length > 131072 && <Muted>Long text preview truncated. Download exact bytes retrieves the complete reconstructed content separately.</Muted>}
       <details><summary>Identifiers and source context</summary><pre className={styles.preview}>{JSON.stringify({ requested_id: content.requested_id, kind: content.kind, file_id: content.file_id, document_id: content.document_id, content_id: content.content_id, metadata_id: content.metadata_id, source_id: content.source_id, path: content.path, modified_at: content.modified_at, contexts: content.contexts }, null, 2)}</pre></details>
     </div>}{error && <ErrorText role="alert">{error}</ErrorText>}
   </Panel>;

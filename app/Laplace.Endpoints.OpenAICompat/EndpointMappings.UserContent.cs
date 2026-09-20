@@ -142,7 +142,7 @@ internal static class UserContentEndpointMappings
             CancellationToken ct) =>
             await CloseRawAsync(http, tenants, closer, code: true, ct));
 
-        app.MapGet("/v1/content/{idHex}", async (
+        app.MapGet("/v1/content/{idHex}/raw", async (
             HttpContext http,
             string idHex,
             ITenantResolver tenants,
@@ -151,7 +151,35 @@ internal static class UserContentEndpointMappings
         {
             var tenant = await tenants.ResolveAsync(http, ct);
             var export = await substrate.ExportUserContentAsync(tenant.TenantId, idHex, ct);
-            return export is null ? Results.NotFound() : Results.Ok(export);
+            if (export is null) return Results.NotFound();
+            byte[] bytes = Convert.FromBase64String(export.ContentBase64);
+            string fileName = Path.GetFileName(export.Name ?? export.Path ?? idHex + ".bin");
+            return Results.File(bytes, "application/octet-stream", fileName);
+        });
+
+        app.MapGet("/v1/content/{idHex}", async (
+            HttpContext http,
+            string idHex,
+            bool? compact,
+            ITenantResolver tenants,
+            SubstrateClient substrate,
+            CancellationToken ct) =>
+        {
+            var tenant = await tenants.ResolveAsync(http, ct);
+            var export = await substrate.ExportUserContentAsync(tenant.TenantId, idHex, ct);
+            if (export is null) return Results.NotFound();
+            if (compact == true)
+            {
+                const int PreviewChars = 131072;
+                string? preview = export.Text;
+                if (preview is { Length: > PreviewChars })
+                {
+                    preview = preview[..PreviewChars];
+                    if (preview.Length > 0 && char.IsHighSurrogate(preview[^1])) preview = preview[..^1];
+                }
+                export = export with { ContentBase64 = "", Text = preview };
+            }
+            return Results.Ok(export);
         });
 
         return app;
