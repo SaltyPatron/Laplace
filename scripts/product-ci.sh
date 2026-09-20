@@ -1008,6 +1008,17 @@ run_release_delivery() {
   local publish_scope="${LAPLACE_PUBLISH_SCOPE:-full}"
   echo "::notice::delivery actions=$actions publish_scope=$publish_scope db_suites=${LAPLACE_DB_SUITES:-} live_suites=${LAPLACE_LIVE_SUITES:-}"
 
+  # Database-only and managed/web deliveries intentionally reuse the last
+  # independently qualified native artifact. Make that ownership explicit
+  # before the mutation window: db-health runs after migrations and must inspect
+  # the installed extension rather than demand a native build manifest that this
+  # plan correctly did not produce.
+  if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" native; then
+    unset LAPLACE_REUSE_INSTALLED_NATIVE || true
+  else
+    export LAPLACE_REUSE_INSTALLED_NATIVE=1
+  fi
+
   run_release_mutation_window "$actions"
 
   # Publication is a planner action, not a tax on native-only SHAs. pipeline.sh
@@ -1019,11 +1030,6 @@ run_release_delivery() {
     else
       export LAPLACE_REUSE_INSTALLED_WEB=1
       unset LAPLACE_REQUIRE_QUALIFIED_WEB || true
-    fi
-    if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" native; then
-      unset LAPLACE_REUSE_INSTALLED_NATIVE || true
-    else
-      export LAPLACE_REUSE_INSTALLED_NATIVE=1
     fi
     run_publish
   else
