@@ -189,14 +189,18 @@ internal static class AccountEndpoints
         }).WithTags("account");
 
         app.MapPost("/v1/billing/keys", async (HttpContext http, NewKeyRequest request,
-            IApiKeyService keys, IBillingEntitlementStore entitlements, CancellationToken ct) =>
+            IApiKeyService keys, IBillingEntitlementStore entitlements,
+            IOptions<StripeBillingOptions> billing, CancellationToken ct) =>
         {
             if (Manager(http) is not { } account) return Error(403, "workspace_admin_required", "Sign in as a workspace owner or administrator to create API keys.");
             if (request.Label?.Length > 160) return Error(400, "invalid_label", "Key labels may contain at most 160 characters.");
-            var plans = await entitlements.GetByTenantAsync(account.Tenant, ct);
-            var now = DateTimeOffset.UtcNow;
-            if (!plans.Any(p => p.Status == "active" && p.PeriodStart <= now && p.PeriodEnd > now))
-                return Error(402, "active_subscription_required", "An active workspace subscription is required to create an API key.");
+            if (!billing.Value.Bypass)
+            {
+                var plans = await entitlements.GetByTenantAsync(account.Tenant, ct);
+                var now = DateTimeOffset.UtcNow;
+                if (!plans.Any(p => p.Status == "active" && p.PeriodStart <= now && p.PeriodEnd > now))
+                    return Error(402, "active_subscription_required", "An active workspace subscription is required to create an API key.");
+            }
             var issued = await keys.IssueAsync(account.Tenant, request.Label?.Trim(), ct);
             return Results.Ok(new { key = issued.Key, keyPrefix = issued.Record.KeyPrefix,
                 tenantId = account.Tenant, message = "Save this secret now. It is shown only once." });
