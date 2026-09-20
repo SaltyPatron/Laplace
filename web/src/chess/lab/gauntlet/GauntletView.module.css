@@ -203,7 +203,8 @@
   .terminalPanel {
     display: flex;
     flex-direction: column;
-    min-height: 0;
+    flex: 0 0 auto;
+    height: auto;
   }
 
   .terminal {

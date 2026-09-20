@@ -69,6 +69,7 @@ export function HighwayLanding() {
                       and genuinely still loading. */}
                   {l.readGap ? '—'
                     : l.band == null ? <span className={styles.empty}>spans bands</span>
+                    : error ? '—'
                     : bands == null ? '…'
                     : rows == null ? '—'
                     : rows.toLocaleString()}
@@ -76,6 +77,14 @@ export function HighwayLanding() {
                 <td>
                   {l.readGap ? (
                     <span className={styles.missing}>not readable yet</span>
+                  ) : l.band == null ? (
+                    <span className={styles.empty}>spans bands</span>
+                  ) : error ? (
+                    <span className={styles.err}>unavailable</span>
+                  ) : bands == null ? (
+                    <span className={styles.empty}>loading…</span>
+                  ) : rows == null ? (
+                    <span className={styles.empty}>volume unavailable</span>
                   ) : rows === 0 ? (
                     <span className={styles.empty}>no consensus yet</span>
                   ) : (

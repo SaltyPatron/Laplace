@@ -24,8 +24,13 @@
 
   .fill > :last-child:not(.head) {
     flex: 1 1 auto;
-    min-height: 0;
     min-width: 0;
+  }
+
+  /* A fill child can opt into shrinking without overriding the minimum viewport
+     declared by a terminal, editor, or canvas with its own component class. */
+  .fill > :where(:last-child:not(.head)) {
+    min-height: 0;
   }
 
   .head {

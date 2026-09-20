@@ -1670,15 +1670,30 @@ static const char *EVIDENCE_LOCK_SQL =
 
 
 static const char *EVIDENCE_WRITE_SQL =
-    "MERGE INTO laplace.consensus c "
-    "USING unnest($1::bytea[],$2::bytea[],$3::int8[],$4::timestamptz[],"
-    " $5::bool[],$6::int8[],$7::int8[],$8::int8[]) "
-    " AS b(id,s,games,ts,recomputed,rating,rd,volatility) "
-    "ON c.type_id='\\x%s'::bytea AND c.subject_id=b.s AND c.id=b.id "
-    "WHEN MATCHED THEN UPDATE SET "
-    " rating=b.rating,rd=b.rd,volatility=b.volatility,"
-    " witness_count=CASE WHEN b.recomputed THEN b.games ELSE c.witness_count+b.games END,"
-    " last_observed_at=CASE WHEN b.recomputed THEN b.ts ELSE GREATEST(c.last_observed_at,b.ts) END";
+    "WITH input AS MATERIALIZED ("
+    " SELECT * FROM unnest($1::bytea[],$2::bytea[],$3::int8[],$4::timestamptz[],"
+    " $5::bool[],$6::int8[],$7::int8[],$8::int8[],$9::bytea[]) "
+    " AS b(id,s,games,ts,recomputed,rating,rd,volatility,o)), "
+    "replayed AS ("
+    " INSERT INTO laplace.consensus AS c "
+    " (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
+    " SELECT id,s,'\\x%s'::bytea,o,rating,rd,volatility,games,ts "
+    " FROM input WHERE recomputed ORDER BY id,s "
+    " ON CONFLICT (id,type_id,subject_id) DO UPDATE SET "
+    " rating=EXCLUDED.rating,rd=EXCLUDED.rd,volatility=EXCLUDED.volatility,"
+    " witness_count=EXCLUDED.witness_count,last_observed_at=EXCLUDED.last_observed_at "
+    " RETURNING 1), "
+    "incremental AS ("
+    " INSERT INTO laplace.consensus AS c "
+    " (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at) "
+    " SELECT id,s,'\\x%s'::bytea,o,rating,rd,volatility,games,ts "
+    " FROM input WHERE NOT recomputed ORDER BY id,s "
+    " ON CONFLICT (id,type_id,subject_id) DO UPDATE SET "
+    " rating=EXCLUDED.rating,rd=EXCLUDED.rd,volatility=EXCLUDED.volatility,"
+    " witness_count=c.witness_count+EXCLUDED.witness_count,"
+    " last_observed_at=GREATEST(c.last_observed_at,EXCLUDED.last_observed_at) "
+    " RETURNING 1) "
+    "SELECT (SELECT count(*) FROM replayed)+(SELECT count(*) FROM incremental)";
 
 typedef struct FoldEvidenceStates
 {
@@ -1836,29 +1851,36 @@ read_evidence_states(const uint8_t *type16, const InArray *subjects,
 
 static int64
 write_evidence_states(const uint8_t *type16, ArrayType *ids,
-                      const InArray *subjects, const FoldEvidenceStates *evidence,
+                      const InArray *subjects, const InArray *objects,
+                      const FoldEvidenceStates *evidence,
                       const FoldStateArrays *folds, const char *label)
 {
-    static const Oid args[8] =
+    static const Oid args[9] =
         {BYTEAARRAYOID,BYTEAARRAYOID,INT8ARRAYOID,TIMESTAMPTZARRAYOID,
-         BOOLARRAYOID,INT8ARRAYOID,INT8ARRAYOID,INT8ARRAYOID};
+         BOOLARRAYOID,INT8ARRAYOID,INT8ARRAYOID,INT8ARRAYOID,BYTEAARRAYOID};
     Datum *flags=palloc(sizeof(Datum)*subjects->n);
     for (int i=0;i<subjects->n;i++) flags[i]=BoolGetDatum(evidence->recomputed[i]);
-    Datum vals[8] = {
+    Datum vals[9] = {
         PointerGetDatum(ids),PointerGetDatum(subjects->array),
         PointerGetDatum(construct_array(evidence->counts,subjects->n,INT8OID,8,true,'d')),
         PointerGetDatum(construct_array(evidence->timestamps,subjects->n,TIMESTAMPTZOID,8,true,'d')),
         PointerGetDatum(construct_array(flags,subjects->n,BOOLOID,1,true,'c')),
         PointerGetDatum(folds->rating_array),PointerGetDatum(folds->rd_array),
-        PointerGetDatum(folds->volatility_array)};
+        PointerGetDatum(folds->volatility_array),PointerGetDatum(objects->array)};
     SPIPlanPtr plan=typed_plan(&evidence_write_plans,
-        "consensus evidence result writes",type16,EVIDENCE_WRITE_SQL,8,args);
+        "consensus evidence result writes",type16,EVIDENCE_WRITE_SQL,9,args);
     int rc=SPI_execute_plan(plan,vals,NULL,false,0);
-    if (rc!=SPI_OK_MERGE || SPI_processed!=(uint64)subjects->n)
+    bool isnull = true;
+    int64 affected = 0;
+    if (rc == SPI_OK_SELECT && SPI_processed == 1)
+        affected = DatumGetInt64(SPI_getbinval(
+            SPI_tuptable->vals[0],SPI_tuptable->tupdesc,1,&isnull));
+    if (isnull || affected != subjects->n)
         ereport(ERROR,(errcode(ERRCODE_INTERNAL_ERROR),
                        errmsg("%s: locked evidence targets changed before result write",label)));
     pfree(flags);
-    return (int64)SPI_processed;
+    SPI_freetuptable(SPI_tuptable);
+    return affected;
 }
 
 /* Keep the explicit delta contract checked even when durable testimony supplies
@@ -1996,7 +2018,7 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
         fold_run_states(&phis, &opps, &games, &sums, &periods,
                         run_start, run_subjects.n, priors, label,
                         &folds, evidence->recomputed);
-        affected += write_evidence_states(type16, ids, &run_subjects,
+        affected += write_evidence_states(type16, ids, &run_subjects, &run_objects,
                                           evidence, &folds, label);
         run_start = run_end;
         CHECK_FOR_INTERRUPTS();
@@ -2095,7 +2117,7 @@ consensus_upsert_type(FunctionCallInfo fcinfo, bool from_evidence)
         fold_run_states(&phis,&opps,&games,&sums,&periods,0,subjects.n,
                         priors,label,&folds,evidence->recomputed);
         int64 affected=write_evidence_states(
-            type16,cell_id_array,&subjects,evidence,&folds,label);
+            type16,cell_id_array,&subjects,&objects,evidence,&folds,label);
         SPI_finish();
         PG_RETURN_INT64(affected);
     }
@@ -2207,7 +2229,7 @@ pg_laplace_consensus_refold_evidence_type(PG_FUNCTION_ARGS)
     folds.rating_array=construct_array(priors->ratings,subjects.n,INT8OID,8,true,'d');
     folds.rd_array=construct_array(priors->rds,subjects.n,INT8OID,8,true,'d');
     folds.volatility_array=construct_array(priors->volatilities,subjects.n,INT8OID,8,true,'d');
-    affected=write_evidence_states(type16,ids,&subjects,evidence,&folds,label);
+    affected=write_evidence_states(type16,ids,&subjects,&objects,evidence,&folds,label);
     SPI_finish();
     PG_RETURN_INT64(affected);
 }
