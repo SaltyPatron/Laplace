@@ -100,13 +100,16 @@ snapshot_application_payload() {
   # Do not discard the successfully linked prefix. A second complete rsync pass
   # without --link-dest validates the whole snapshot and copies only entries the
   # first pass could not materialize; already-created hardlinks remain intact.
-  rsync -a --link-dest="$source_dir" "$@" "$source_dir/" "$destination_dir/" || rc=$?
+  # A rollback snapshot must be self-contained. The active flat API payload can
+  # contain native SONAME links; preserving those links would make rollback
+  # depend on the very files publication is about to replace.
+  rsync -a --copy-links --link-dest="$source_dir" "$@" "$source_dir/" "$destination_dir/" || rc=$?
   if [[ "$rc" -eq 0 ]]; then
     return 0
   fi
 
   echo "::notice::hardlink rollback snapshot was incomplete (rsync=$rc); completing it with private copies"
-  rsync -a "$@" "$source_dir/" "$destination_dir/"
+  rsync -a --copy-links "$@" "$source_dir/" "$destination_dir/"
 }
 
 # Unit tests source this file to exercise the transaction helpers without invoking
