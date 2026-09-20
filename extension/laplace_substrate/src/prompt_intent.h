@@ -649,8 +649,6 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
 
     if (intent->geometry_count > 0)
     {
-        HTAB *pending = laplace_prompt_binding_table(
-            "prompt geometry pending bindings", intent->owner);
         HASHCTL seen_ctl = {0};
         seen_ctl.keysize = sizeof(hash128_t);
         seen_ctl.entrysize = sizeof(hash128_t);
@@ -662,15 +660,6 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
         for (int i = 0; i < intent->geometry_count; ++i)
         {
             const LaplacePromptGeometryCandidate *candidate = &intent->geometry[i];
-            LaplacePromptIntentBinding *source =
-                hash_search(intent->bindings, &candidate->source, HASH_FIND, NULL);
-            if (!source || !source->origins) continue;
-            bool pending_found;
-            LaplacePromptIntentBinding *target =
-                hash_search(pending, &candidate->id, HASH_ENTER, &pending_found);
-            if (!pending_found) target->origins = NULL;
-            target->origins = bms_add_members(target->origins, source->origins);
-
             bool frontier_found;
             hash_search(frontier_seen, &candidate->id, HASH_ENTER, &frontier_found);
             if (!frontier_found)
@@ -681,20 +670,7 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
                 pfree(DatumGetPointer(id));
             }
         }
-        HASH_SEQ_STATUS sequence;
-        LaplacePromptIntentBinding *entry;
-        hash_seq_init(&sequence, pending);
-        while ((entry = hash_seq_search(&sequence)) != NULL)
-        {
-            bool binding_found;
-            LaplacePromptIntentBinding *target =
-                hash_search(intent->bindings, &entry->id, HASH_ENTER, &binding_found);
-            if (!binding_found) target->origins = NULL;
-            target->origins = bms_add_members(target->origins, entry->origins);
-            bms_free(entry->origins);
-        }
         hash_destroy(frontier_seen);
-        hash_destroy(pending);
         if (frontier)
         {
             pfree(intent->geometry_frontier);
