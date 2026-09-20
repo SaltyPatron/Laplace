@@ -84,7 +84,7 @@ Guides under [`guides/`](guides/) consume the common machine. They do not define
 
 Examples:
 
-- [Structural software construction](guides/software-construction.md) — grammar/AST construction, canonical reuse, duplicate convergence, witnessed repairs, cross-repository maintenance and root-transition deployment.
+- [Structural software construction](guides/software-construction.md) — grammar-constrained tier/trajectory construction with derived AST/CST projection, canonical reuse, duplicate convergence, witnessed repairs, cross-repository maintenance and root-transition deployment.
 - [Knowledge authority, governance and security](guides/knowledge-authority.md) — knowledge packages, capabilities, honest abstention, Red Spear / Blue Shield / White Judge and effective-mind composition.
 - [Machine-cost analysis and measured cognition](guides/machine-cost-analysis.md) — artifact→ISA/microarchitecture cycle derivation and compute-depth billing.
 - [Compositional perfcache lattice](guides/compositional-perfcache.md) — dense/sparse mmap ROMs for reusable scalar/pixel/patch/region/image/audio/chess/code structures and cross-modality cache reuse.
