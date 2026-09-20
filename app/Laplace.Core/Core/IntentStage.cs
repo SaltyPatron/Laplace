@@ -333,6 +333,30 @@ public sealed partial class IntentStage : SafeHandle
         }
     }
 
+    /// <summary>
+    /// Build the canonical source-representation UAX tier tree. This uses the same
+    /// codepoint/grapheme/word/sentence/document ladder and hash composer as ordinary
+    /// text, but retains validated original codepoints for exact source replay.
+    /// Grammar providers may annotate this tree; they do not define its identity.
+    /// </summary>
+    public static TierTree? BuildSourceContentTree(ReadOnlySpan<byte> sourceUtf8)
+    {
+        if (sourceUtf8.IsEmpty) return null;
+        unsafe
+        {
+            IntPtr treePtr = IntPtr.Zero;
+            fixed (byte* p = sourceUtf8)
+            {
+                int rc = NativeInterop.ContentWitnessSourceTreeBuild(
+                    p, (nuint)sourceUtf8.Length, &treePtr);
+                if (rc == -3) throw new InvalidOperationException(
+                    "source content witness requires the T0 perfcache — call CodepointPerfcache.LoadDefault() first");
+                if (rc != 0 || treePtr == IntPtr.Zero) return null;
+            }
+            return TierTree.FromExistingHandle(treePtr);
+        }
+    }
+
     public bool EmitContentTree(
     TierTree tree, Hash128 sourceId, ReadOnlySpan<byte> existingBitmap, out Hash128 rootId)
     {
