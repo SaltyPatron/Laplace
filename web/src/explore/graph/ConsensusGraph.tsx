@@ -17,6 +17,9 @@ export interface WebNode {
   label: string;
   hop: number;
   walk?: boolean;
+  beliefX?: number;
+  beliefY?: number;
+  beliefZ?: number;
   x?: number;
   y?: number;
   z?: number;
@@ -36,6 +39,9 @@ export interface WebEdge {
   weight: number;
   /** Canonical optimistic-bound verdict from consensus.refuted(rating, rd). */
   refuted: boolean;
+  rating: number;
+  rd: number;
+  volatility: number;
   walk?: boolean;
 }
 
@@ -44,7 +50,7 @@ export interface WebGraph {
   edges: WebEdge[];
 }
 
-type Dim = '2d' | '3d';
+type Dim = 'belief' | '2d' | '3d';
 type GraphData = { nodes: WebNode[]; links: WebEdge[] };
 
 /** World units — stay small vs link length so zoom-in is readable. */
@@ -98,28 +104,50 @@ function volumetricSeed(id: string, hop: number): [number, number, number] {
  * to leave the 3-D engine starting from the 2-D sheet it had just inherited.
  */
 export function graphForDimension(base: GraphData, dim: Dim, centerId: string): GraphData {
+  const spectral = base.nodes.filter((n) =>
+    Number.isFinite(n.beliefX) && Number.isFinite(n.beliefY) && Number.isFinite(n.beliefZ));
+  const beliefReady = dim === 'belief' && spectral.length > 0;
+  const center = spectral.find((n) => n.id === centerId) ?? spectral[0];
+  const cx = center?.beliefX ?? 0, cy = center?.beliefY ?? 0, cz = center?.beliefZ ?? 0;
+  let spectralRadius = 0;
+  if (beliefReady)
+    for (const n of spectral)
+      spectralRadius = Math.max(spectralRadius, Math.hypot(
+        (n.beliefX ?? 0) - cx, (n.beliefY ?? 0) - cy, (n.beliefZ ?? 0) - cz));
+  const targetRadius = Math.max(
+    SHELL_RADIUS * 1.5,
+    Math.min(SHELL_RADIUS * 5, SHELL_RADIUS * Math.sqrt(Math.max(2, spectral.length)) / 2),
+  );
+  // Translation and one uniform display scale preserve the native spectral geometry.
+  const spectralScale = spectralRadius > 0 ? targetRadius / spectralRadius : 1;
+
   const nodes = base.nodes.map((node) => {
     const clean: WebNode = {
-      id: node.id,
-      label: node.label,
-      hop: node.hop,
-      walk: node.walk,
+      id: node.id, label: node.label, hop: node.hop, walk: node.walk,
+      beliefX: node.beliefX, beliefY: node.beliefY, beliefZ: node.beliefZ,
     };
+    if (beliefReady) {
+      if (Number.isFinite(node.beliefX) && Number.isFinite(node.beliefY) && Number.isFinite(node.beliefZ)) {
+        const x = ((node.beliefX ?? 0) - cx) * spectralScale;
+        const y = ((node.beliefY ?? 0) - cy) * spectralScale;
+        const z = ((node.beliefZ ?? 0) - cz) * spectralScale;
+        return { ...clean, x, y, z, fx: x, fy: y, fz: z };
+      }
+      const [x, y, z] = volumetricSeed(node.id, node.hop);
+      return { ...clean, x, y, z, fx: x, fy: y, fz: z };
+    }
     if (node.id === centerId) {
-      return dim === '3d'
+      return dim !== '2d'
         ? { ...clean, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 0 }
         : { ...clean, x: 0, y: 0, fx: 0, fy: 0 };
     }
-    if (dim === '3d') {
+    if (dim !== '2d') {
       const [x, y, z] = volumetricSeed(node.id, node.hop);
       return { ...clean, x, y, z };
     }
     return clean;
   });
-  return {
-    nodes,
-    links: base.links.map((link) => ({ ...link })),
-  };
+  return { nodes, links: base.links.map((link) => ({ ...link })) };
 }
 
 /**
@@ -229,7 +257,7 @@ export function ConsensusGraph({
   onHopsChange,
   onFanoutChange,
   onMaxNodesChange,
-  dim = '3d',
+  dim = 'belief',
   onDimChange,
   toolbar,
 }: {
@@ -279,8 +307,8 @@ export function ConsensusGraph({
     };
   }, [centerId]);
 
-  useGraphFlyControls(shellRef, ref3d, dim === '3d' && size.width > 0);
-  const webGlReady = useDeferredWebGlMount(dim === '3d' && size.width > 0 && size.height > 0);
+  useGraphFlyControls(shellRef, ref3d, dim !== '2d' && size.width > 0);
+  const webGlReady = useDeferredWebGlMount(dim !== '2d' && size.width > 0 && size.height > 0);
 
   // Tear down the WebGL renderer before React drops the DOM node — tab switches
   // Graph↔Glome otherwise race and surface "WebGL context was lost".
@@ -312,6 +340,12 @@ export function ConsensusGraph({
   );
 
   const expanded = web != null && web.nodes.length > 0;
+  const beliefAvailable = useMemo(
+    () => data.nodes.some((n) =>
+      Number.isFinite(n.beliefX) && Number.isFinite(n.beliefY) && Number.isFinite(n.beliefZ)),
+    [data.nodes],
+  );
+  const beliefMode = dim === 'belief' && beliefAvailable;
   const labelledIds = useMemo(() => {
     if (data.nodes.length <= MAX_VISIBLE_LABELS) return new Set(data.nodes.map((node) => node.id));
     const ordered = data.nodes.slice().sort((a, b) => {
@@ -339,33 +373,31 @@ export function ConsensusGraph({
   const configureForces3d = useCallback(() => {
     const fg = ref3d.current;
     if (!fg) return;
-
-    fg.d3Force(
-      'charge',
-      forceManyBody()
-        .strength(CHARGE)
-        .distanceMax(SHELL_RADIUS * (maxHop + 2) * 2),
-    );
     const linkForce = fg.d3Force('link') as {
       distance?: (fn: (l: WebEdge) => number) => unknown;
       strength?: (fn: (l: WebEdge) => number) => unknown;
     } | undefined;
-    linkForce?.distance?.((l) => {
-      const bind = l.walk ? 1 : binding(l.weight);
-      return LINK_BASE + Math.max(1, l.hop || 1) * 10 + (1 - bind) * 86 + (l.refuted ? 48 : 0);
-    });
-    linkForce?.strength?.((l) => (l.walk ? 0.82 : binding(l.weight) * 0.9));
-    // Hop radius remains a weak orientation hint only. Standing/topology owns the
-    // shape: corroborated positive strands can collapse into basins while neutral
-    // and refuted claims are left to charge/collision and therefore scatter.
-    fg.d3Force(
-      'radial',
-      forceRadial((n: unknown) => ((n as WebNode).hop || 0) * SHELL_RADIUS).strength(0.06),
-    );
-    fg.d3Force('collide', forceCollide(NODE_REL_SIZE * 2.2).strength(1));
-    // Drop the default centering force so pan/recenter isn't fighting the layout.
-    (fg.d3Force as (name: string, force: null) => void)('center', null);
 
+    if (beliefMode) {
+      // Native eigenmap coordinates are pinned. Decorative forces would destroy
+      // the diffusion geometry this mode exists to inspect.
+      fg.d3Force('charge', forceManyBody().strength(0));
+      linkForce?.strength?.(() => 0);
+      fg.d3Force('radial', forceRadial(() => 0).strength(0));
+      fg.d3Force('collide', forceCollide(0).strength(0));
+    } else {
+      fg.d3Force('charge',
+        forceManyBody().strength(CHARGE).distanceMax(SHELL_RADIUS * (maxHop + 2) * 2));
+      linkForce?.distance?.((l) => {
+        const bind = l.walk ? 1 : binding(l.weight);
+        return LINK_BASE + Math.max(1, l.hop || 1) * 10 + (1 - bind) * 86 + (l.refuted ? 48 : 0);
+      });
+      linkForce?.strength?.((l) => (l.walk ? 0.82 : binding(l.weight) * 0.9));
+      fg.d3Force('radial',
+        forceRadial((n: unknown) => ((n as WebNode).hop || 0) * SHELL_RADIUS).strength(0.06));
+      fg.d3Force('collide', forceCollide(NODE_REL_SIZE * 2.2).strength(1));
+    }
+    (fg.d3Force as (name: string, force: null) => void)('center', null);
     const controls = fg.controls();
     // Orbit: LMB rotate, MMB/RMB translate (move origin), wheel zoom.
     if (controls) {
@@ -380,10 +412,10 @@ export function ConsensusGraph({
       };
       // Keyboard fly is handled by useGraphFlyControls — don't let Orbit steal arrows.
     }
-  }, [maxHop]);
+  }, [maxHop, beliefMode]);
 
   useEffect(() => {
-    if (dim !== '3d') return;
+    if (dim === '2d') return;
     configureForces3d();
   }, [dim, data.nodes.length, data.links.length, configureForces3d]);
 
@@ -415,7 +447,7 @@ export function ConsensusGraph({
     const key = `${dim}:${centerId}:${data.nodes.length}:${data.links.length}`;
     if (fittedKey.current === key) return;
     const t = setTimeout(() => {
-      if (dim === '3d') {
+      if (dim !== '2d') {
         configureForces3d();
         // Padding is in screen px around the fitted bounds. At 140 a 20-node
         // web sat as a faint speck in the middle of a large panel; enough room
@@ -440,7 +472,7 @@ export function ConsensusGraph({
   }
 
   function handleNodeClick(node: WebNode) {
-    if (dim === '3d') focusNode(node);
+    if (dim !== '2d') focusNode(node);
     if (!onNodeClick || node.id === centerId || node.id.length !== 32) return;
     if (clickTimer.current) {
       clearTimeout(clickTimer.current);
@@ -460,7 +492,7 @@ export function ConsensusGraph({
           <SegmentedControl
             value={dim}
             onValueChange={(v) => onDimChange(v as Dim)}
-            options={['3d', '2d']}
+            options={['belief', '3d', '2d']}
             label="Projection"
           />
         ) : null}
@@ -507,10 +539,12 @@ export function ConsensusGraph({
         {toolbar}
         <Muted className={styles.legend}>
           {expanded
-            ? `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · signed Glicko standing drives attraction · witnesses = visible mass`
-            : `1-hop · ${data.nodes.length}n · expand for signed Glicko standing`}
+            ? beliefMode
+              ? `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · native normalized-Laplacian belief geometry · positive signed Glicko = affinity · refutations do not bind`
+              : `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · force projection · signed Glicko standing drives attraction`
+            : `1-hop · ${data.nodes.length}n · expand for native belief geometry`}
           {' · '}
-          {dim === '3d'
+          {dim !== '2d'
             ? 'WASD/arrows move · Q/E turn · PgUp/PgDn up/down · Home origin · End antipode · Shift sprint · LMB orbit · MMB/RMB pan · click recenter · dbl-click open'
             : 'drag pan · scroll zoom · double-click open'}
         </Muted>
@@ -525,7 +559,7 @@ export function ConsensusGraph({
         onPointerDown={() => shellRef.current?.focus({ preventScroll: true })}
         aria-label="Consensus web viewer"
       >
-        {webGlReady && dim === '3d' ? (
+        {webGlReady && dim !== '2d' ? (
           <Suspense fallback={<Muted>Loading 3-D renderer…</Muted>}>
           <ForceGraph3D
             ref={ref3d as never}
@@ -550,7 +584,7 @@ export function ConsensusGraph({
               return rgba(palette.steel, 0.14 + 0.8 * binding(l.weight));
             }}
             nodeLabel={(n: WebNode) => `${n.label} · hop ${n.hop}`}
-            linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
+            linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · rating ${l.rating.toFixed(1)} · RD ${l.rd.toFixed(1)} · σ ${l.volatility.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
             nodeThreeObjectExtend={false}
             nodeThreeObject={(n: WebNode) => {
               const root = new Object3D();
@@ -580,7 +614,7 @@ export function ConsensusGraph({
               (n as WebNode & { fx?: number; fy?: number; fz?: number }).fy = n.y;
               (n as WebNode & { fx?: number; fy?: number; fz?: number }).fz = n.z;
             }}
-            cooldownTicks={120}
+            cooldownTicks={beliefMode ? 0 : 120}
             d3AlphaDecay={0.028}
             d3VelocityDecay={0.32}
           />
@@ -597,7 +631,7 @@ export function ConsensusGraph({
             enablePanInteraction
             enableZoomInteraction
             nodeLabel={(n: WebNode) => `${n.label} · hop ${n.hop}`}
-            linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
+            linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · rating ${l.rating.toFixed(1)} · RD ${l.rd.toFixed(1)} · σ ${l.volatility.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
             linkWidth={(l: WebEdge) => 0.3 + binding(l.weight) * 1.25 + witnessMass(l.witnesses) * 0.65}
             linkColor={(l: WebEdge) => {
               if (l.walk) return palette.signal;
@@ -661,6 +695,9 @@ function fromWeb(web: WebGraph, walkPath: WalkPathNode[]): GraphData {
       id: n.id,
       label: n.label,
       hop: n.hop,
+      beliefX: n.beliefX,
+      beliefY: n.beliefY,
+      beliefZ: n.beliefZ,
       walk: walkIdsHas(walkPath, n.id),
     });
   }
@@ -686,6 +723,9 @@ function fromWeb(web: WebGraph, walkPath: WalkPathNode[]): GraphData {
       hop: 0,
       weight: 1,
       refuted: false,
+      rating: 0,
+      rd: 0,
+      volatility: 0,
       walk: true,
     });
   }
@@ -726,6 +766,9 @@ function fromStar(
       // canonical signed fold and immediately becomes the standing-field layout.
       weight: 0,
       refuted: false,
+      rating: 0,
+      rd: 0,
+      volatility: 0,
       walk: false,
     });
   }
@@ -743,6 +786,9 @@ function fromStar(
       hop: 0,
       weight: 1,
       refuted: false,
+      rating: 0,
+      rd: 0,
+      volatility: 0,
       walk: true,
     });
   }

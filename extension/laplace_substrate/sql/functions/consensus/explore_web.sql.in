@@ -55,3 +55,18 @@ BEGIN ATOMIC
     SELECT * FROM consensus.explore_web(
         ARRAY[p_seed], p_hops, p_fanout, p_max_nodes);
 END;
+
+
+-- Node election and graph topology are separate. Restore every typed consensus
+-- edge whose two endpoints survived the bounded explore_web crawl.
+CREATE OR REPLACE FUNCTION consensus.explore_induced_edges(p_nodes bytea[])
+    RETURNS TABLE(
+        source_id bytea,
+        type_id bytea,
+        object_id bytea,
+        rating bigint,
+        rd bigint,
+        volatility bigint,
+        witness_count bigint)
+    AS 'EXECUTION_LIBRARY', 'pg_laplace_explore_induced_edges'
+    LANGUAGE C STABLE PARALLEL SAFE;

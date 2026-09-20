@@ -1914,6 +1914,36 @@ public static partial class NpgsqlSubstrateReads
                 p.AddWithValue("max_nodes", maxNodes);
             }, timeoutSeconds: timeoutSeconds, ct: ct, label: "explore_web", onError: onError);
 
+    public readonly record struct ExploreInducedEdgeRow(
+        string SourceIdHex, string TypeIdHex, string ObjectIdHex,
+        decimal Rating, decimal Rd, decimal Volatility, decimal EffMu,
+        long WitnessCount, double CompleteWeight, bool Refuted);
+
+    /// <summary>Exact induced testimony graph over an already bounded node set.</summary>
+    public static Task<IReadOnlyList<ExploreInducedEdgeRow>> ExploreInducedEdgesAsync(
+        NpgsqlConnection conn, byte[][] nodes, int timeoutSeconds, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(conn, """
+            SELECT encode(e.source_id, 'hex'), encode(e.type_id, 'hex'), encode(e.object_id, 'hex'),
+                   e.rating::numeric / 1000000000::numeric,
+                   e.rd::numeric / 1000000000::numeric,
+                   e.volatility::numeric / 1000000000::numeric,
+                   consensus.eff_mu(e.rating, e.rd),
+                   e.witness_count,
+                   consensus.walk_edge_weight(e.rating, e.rd),
+                   consensus.refuted(e.rating, e.rd)
+            FROM consensus.explore_induced_edges(@nodes) e
+            """,
+            static r => new ExploreInducedEdgeRow(
+                r.GetString(0), r.GetString(1), r.GetString(2),
+                r.GetDecimal(3), r.GetDecimal(4), r.GetDecimal(5), r.GetDecimal(6),
+                r.GetInt64(7), r.GetDouble(8), r.GetBoolean(9)),
+            p =>
+            {
+                var param = p.AddWithValue("nodes", nodes);
+                param.NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea;
+            }, timeoutSeconds: timeoutSeconds, ct: ct, label: "explore_induced_edges", onError: onError);
+
     public readonly record struct FastLabelRow(string IdHex, string? Label, short? Tier);
 
     /// <summary>

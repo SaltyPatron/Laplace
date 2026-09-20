@@ -39,7 +39,7 @@ export function GraphTab({
   const [hops, setHops] = useState(4);
   const [fanout, setFanout] = useState(24);
   const [nodeCapacity, setNodeCapacity] = useState(256);
-  const [dim, setDim] = useState<'2d' | '3d'>('3d');
+  const [dim, setDim] = useState<'belief' | '2d' | '3d'>('belief');
   const [web, setWeb] = useState<WebGraph | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [maxNodes, setMaxNodes] = useState(0);
@@ -66,6 +66,9 @@ export function GraphTab({
           id: n.id_hex,
           label: n.label,
           hop: n.hop,
+          beliefX: n.belief_x == null ? undefined : Number(n.belief_x),
+          beliefY: n.belief_y == null ? undefined : Number(n.belief_y),
+          beliefZ: n.belief_z == null ? undefined : Number(n.belief_z),
         })),
         edges: res.graph.edges.map((e) => ({
           source: e.source_id_hex,
@@ -76,6 +79,9 @@ export function GraphTab({
           hop: e.hop,
           weight: Number(e.complete_weight ?? 0),
           refuted: Boolean(e.refuted),
+          rating: Number(e.rating ?? 0),
+          rd: Number(e.rd ?? 0),
+          volatility: Number(e.volatility ?? 0),
         })),
       });
       setTruncated(Boolean(res.graph.truncated));
@@ -189,7 +195,7 @@ export function GraphTab({
           </Muted>
         ) : (
           <Muted className={styles.note}>
-            Multi-hop web: ≤{fanout} strongest unseen nodes per parent · capacity {nodeCapacity} · revisits suppressed.
+            Node election: ≤{fanout} strongest unseen per parent · exact induced testimony restored between retained nodes · native normalized-Laplacian belief geometry.
           </Muted>
         )}
         {busy && !web ? <LoadingText>Crawling consensus neighborhood…</LoadingText> : null}

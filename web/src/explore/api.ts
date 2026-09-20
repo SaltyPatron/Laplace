@@ -131,7 +131,15 @@ export function exploreConsensusGraph(
       label: string;
       hops: number;
       fanout: number;
-      nodes: { id_hex: string; label: string; hop: number; tier?: number | null }[];
+      nodes: {
+        id_hex: string;
+        label: string;
+        hop: number;
+        tier?: number | null;
+        belief_x?: number | null;
+        belief_y?: number | null;
+        belief_z?: number | null;
+      }[];
       edges: {
         source_id_hex: string;
         target_id_hex: string;
@@ -141,6 +149,9 @@ export function exploreConsensusGraph(
         hop: number;
         complete_weight?: number;
         refuted?: boolean;
+        rating?: number;
+        rd?: number;
+        volatility?: number;
       }[];
       truncated?: boolean;
       max_nodes?: number;

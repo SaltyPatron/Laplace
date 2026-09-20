@@ -28,6 +28,7 @@
 #include "explore_web.h"
 
 PG_FUNCTION_INFO_V1(pg_laplace_explore_web);
+PG_FUNCTION_INFO_V1(pg_laplace_explore_induced_edges);
 
 typedef struct {
 	char	key[16];
@@ -88,6 +89,31 @@ emit_edge(const EdgeOut *e, void *context)
 	values[4] = Int64GetDatum(e->rating);
 	values[5] = Int64GetDatum(e->rd);
 	values[6] = Int64GetDatum(e->witnesses);
+	tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+}
+
+/* explore_web elects a bounded vertex set. This second operation returns the
+ * actual induced testimony graph over those vertices. Discovery edges are not
+ * topology: dropping cross-links/cycles erases the conductance that spectral
+ * belief geometry is supposed to expose. */
+static void
+emit_induced_edge(const LaplaceConsensusRow *row, void *context)
+{
+	ReturnSetInfo *rsinfo = context;
+	Datum values[7];
+	bool nulls[7] = {false, false, false, false, false, false, false};
+
+	if (row->object_is_null ||
+		memcmp(&row->subject, &row->object, sizeof(hash128_t)) == 0)
+		return;
+
+	values[0] = hash128_to_datum(&row->subject);
+	values[1] = hash128_to_datum(&row->type);
+	values[2] = hash128_to_datum(&row->object);
+	values[3] = Int64GetDatum(row->rating);
+	values[4] = Int64GetDatum(row->rd);
+	values[5] = Int64GetDatum(row->volatility);
+	values[6] = Int64GetDatum(row->witnesses);
 	tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 }
 
@@ -375,5 +401,21 @@ pg_laplace_explore_web(PG_FUNCTION_ARGS)
 		PG_ARGISNULL(3) ? -1 : PG_GETARG_INT32(3),
 		PG_NARGS() > 4 && !PG_ARGISNULL(4) && PG_GETARG_BOOL(4),
 		emit_edge, fcinfo->resultinfo);
+	return (Datum) 0;
+}
+
+
+Datum
+pg_laplace_explore_induced_edges(PG_FUNCTION_ARGS)
+{
+	ArrayType *nodes;
+
+	InitMaterializedSRF(fcinfo, 0);
+	if (PG_ARGISNULL(0))
+		ereport(ERROR, (errmsg("explore_induced_edges: node set must not be NULL")));
+
+	nodes = PG_GETARG_ARRAYTYPE_P(0);
+	laplace_consensus_scan(nodes, nodes, NULL, emit_induced_edge,
+						   fcinfo->resultinfo, NULL);
 	return (Datum) 0;
 }

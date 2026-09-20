@@ -243,7 +243,10 @@ public sealed record ExploreGraphNode(
     [property: JsonPropertyName("id_hex")] string IdHex,
     [property: JsonPropertyName("label")] string Label,
     [property: JsonPropertyName("hop")] int Hop,
-    [property: JsonPropertyName("tier")] short? Tier);
+    [property: JsonPropertyName("tier")] short? Tier,
+    [property: JsonPropertyName("belief_x")] double? BeliefX = null,
+    [property: JsonPropertyName("belief_y")] double? BeliefY = null,
+    [property: JsonPropertyName("belief_z")] double? BeliefZ = null);
 
 public sealed record ExploreGraphEdge(
     [property: JsonPropertyName("source_id_hex")] string SourceIdHex,
@@ -253,7 +256,10 @@ public sealed record ExploreGraphEdge(
     [property: JsonPropertyName("witnesses")] long Witnesses,
     [property: JsonPropertyName("hop")] int Hop,
     [property: JsonPropertyName("complete_weight")] double CompleteWeight = 0,
-    [property: JsonPropertyName("refuted")] bool Refuted = false);
+    [property: JsonPropertyName("refuted")] bool Refuted = false,
+    [property: JsonPropertyName("rating")] decimal Rating = 0,
+    [property: JsonPropertyName("rd")] decimal Rd = 0,
+    [property: JsonPropertyName("volatility")] decimal Volatility = 0);
 
 public sealed record ExploreGraphResponse(
     [property: JsonPropertyName("id_hex")] string IdHex,

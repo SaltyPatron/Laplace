@@ -2,6 +2,7 @@ using System.Globalization;
 using Npgsql;
 using Laplace.Api.Contracts;
 using Laplace.Chess.Service;
+using Laplace.Engine.Dynamics;
 using Laplace.SubstrateCRUD.Npgsql;
 
 namespace Laplace.Endpoints.OpenAICompat;
@@ -539,11 +540,6 @@ internal sealed partial class SubstrateClient
         var seed = TryParseIdHex(idHex);
         if (seed is null) return null;
 
-        // Native SPI web expansion (pg_laplace_explore_web): one connection,
-        // undirected consensus probe, ≤fanout new nodes/frontier parent, all tiers.
-        // Display text is resolved after the bounded graph election: semantic names,
-        // exact shallow Unicode, one-constituent document/definition previews, then
-        // governed type/source fallbacks. The entity hash remains identity only.
         hops = Math.Max(0, hops);
         fanout = Math.Max(0, fanout);
         maxNodes = Math.Max(0, maxNodes);
@@ -556,81 +552,109 @@ internal sealed partial class SubstrateClient
 
             var seedHex = idHex.ToLowerInvariant();
             if (maxNodes == 0)
-                return new ExploreGraphResponse(
-                    seedHex, label, hops, fanout, [], [], true, 0);
+                return new ExploreGraphResponse(seedHex, label, hops, fanout, [], [], true, 0);
 
             var nodes = new Dictionary<string, ExploreGraphNode>(StringComparer.OrdinalIgnoreCase)
             {
                 [seedHex] = new ExploreGraphNode(seedHex, label, 0, tier),
             };
-            var edges = new List<ExploreGraphEdge>();
+
+            void AdmitNode(string hex, int candidateHop)
+            {
+                if (!nodes.TryGetValue(hex, out var node))
+                {
+                    nodes[hex] = new ExploreGraphNode(hex, hex, candidateHop, null);
+                    return;
+                }
+                if (candidateHop < node.Hop)
+                    nodes[hex] = node with { Hop = candidateHop };
+            }
+
+            // Phase 1: Glicko-ranked crawl elects only the bounded vertex set.
+            var discovery = await NpgsqlSubstrateReads.ExploreWebAsync(
+                conn, seed, hops, fanout, maxNodes,
+                Math.Max(SubstrateClient.DefaultCommandTimeoutSeconds, 60), ct);
+            foreach (var row in discovery)
+            {
+                AdmitNode(row.SourceIdHex.ToLowerInvariant(), row.Hop);
+                AdmitNode(row.ObjectIdHex.ToLowerInvariant(), row.Hop);
+            }
+
+            // Phase 2: restore the exact graph among those survivors. A discovery
+            // crawl is a tree; using it as topology throws away corroborating
+            // cross-links, cycles and conductance before the spectral organ sees them.
+            var nodeIds = nodes.Keys
+                .OrderBy(static x => x, StringComparer.Ordinal)
+                .Select(Convert.FromHexString)
+                .ToArray();
+            var induced = await NpgsqlSubstrateReads.ExploreInducedEdgesAsync(
+                conn, nodeIds, Math.Max(SubstrateClient.DefaultCommandTimeoutSeconds, 60), ct);
+
+            var edges = new List<ExploreGraphEdge>(induced.Count);
             var edgeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var typeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var unlabeled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            var edgeRows = await NpgsqlSubstrateReads.ExploreWebAsync(
-                conn, seed, hops, fanout, maxNodes, Math.Max(SubstrateClient.DefaultCommandTimeoutSeconds, 60), ct);
-            foreach (var w in edgeRows)
+            foreach (var row in induced)
             {
-                var sourceHex = w.SourceIdHex.ToLowerInvariant();
-                var typeHex = w.TypeIdHex.ToLowerInvariant();
-                var objectHex = w.ObjectIdHex.ToLowerInvariant();
-                var hop = w.Hop;
+                var sourceHex = row.SourceIdHex.ToLowerInvariant();
+                var typeHex = row.TypeIdHex.ToLowerInvariant();
+                var objectHex = row.ObjectIdHex.ToLowerInvariant();
+                if (!nodes.ContainsKey(sourceHex) || !nodes.ContainsKey(objectHex) || sourceHex == objectHex)
+                    continue;
+                if (!edgeKeys.Add($"{sourceHex}|{typeHex}|{objectHex}")) continue;
 
                 typeIds.Add(typeHex);
-                var key = $"{sourceHex}|{typeHex}|{objectHex}";
-                if (!edgeKeys.Add(key)) continue;
-
                 edges.Add(new ExploreGraphEdge(
                     SourceIdHex: sourceHex,
                     TargetIdHex: objectHex,
                     Type: typeHex,
-                    EffMu: w.EffMu,
-                    Witnesses: w.WitnessCount,
-                    Hop: hop,
-                    CompleteWeight: w.CompleteWeight,
-                    Refuted: w.Refuted));
-
-                if (!nodes.ContainsKey(sourceHex))
-                {
-                    nodes[sourceHex] = new ExploreGraphNode(sourceHex, sourceHex, hop, null);
-                    unlabeled.Add(sourceHex);
-                }
-                if (!nodes.ContainsKey(objectHex))
-                {
-                    nodes[objectHex] = new ExploreGraphNode(objectHex, objectHex, hop, null);
-                    unlabeled.Add(objectHex);
-                }
-                else if (hop < nodes[objectHex].Hop)
-                {
-                    nodes[objectHex] = nodes[objectHex] with { Hop = hop };
-                }
+                    EffMu: row.EffMu,
+                    Witnesses: row.WitnessCount,
+                    Hop: Math.Max(nodes[sourceHex].Hop, nodes[objectHex].Hop),
+                    CompleteWeight: row.CompleteWeight,
+                    Refuted: row.Refuted,
+                    Rating: row.Rating,
+                    Rd: row.Rd,
+                    Volatility: row.Volatility));
             }
 
-            // Batch-label endpoints + relation types only after the graph is bounded.
-            var idsToLabel = unlabeled.Concat(typeIds).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var idsToLabel = nodes.Keys
+                .Where(hex => !hex.Equals(seedHex, StringComparison.OrdinalIgnoreCase))
+                .Concat(typeIds)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             if (idsToLabel.Count > 0)
             {
                 var labels = await ReadDisplayLabelsAsync(conn, idsToLabel, ct);
                 foreach (var (hex, entry) in labels)
-                {
                     if (nodes.TryGetValue(hex, out var node))
                         nodes[hex] = node with
                         {
                             Label = TrimGraphLabel(entry.Label, hex),
                             Tier = node.Tier ?? entry.Tier,
                         };
-                }
 
                 for (var i = 0; i < edges.Count; i++)
                 {
-                    var e = edges[i];
-                    if (labels.TryGetValue(e.Type, out var tl))
-                        edges[i] = e with { Type = TrimGraphLabel(tl.Label, e.Type) };
+                    var edge = edges[i];
+                    if (labels.TryGetValue(edge.Type, out var typeLabel))
+                        edges[i] = edge with { Type = TrimGraphLabel(typeLabel.Label, edge.Type) };
                 }
             }
 
-            var truncated = nodes.Count >= maxNodes;
+            // Phase 3: the shipped normalized-Laplacian eigensolver. Positive
+            // signed Glicko standing is affinity. Refuted/negative testimony stays
+            // visible, but never gets abs()'d into a force that pulls a cluster together.
+            var belief = BuildBeliefProjection(nodes.Values, edges);
+            if (belief is not null)
+                foreach (var (hex, xyz) in belief)
+                    if (nodes.TryGetValue(hex, out var node))
+                        nodes[hex] = node with
+                        {
+                            BeliefX = xyz.X,
+                            BeliefY = xyz.Y,
+                            BeliefZ = xyz.Z,
+                        };
+
             return new ExploreGraphResponse(
                 IdHex: seedHex,
                 Label: label,
@@ -638,7 +662,7 @@ internal sealed partial class SubstrateClient
                 Fanout: fanout,
                 Nodes: nodes.Values.OrderBy(n => n.Hop).ThenBy(n => n.Label).ToList(),
                 Edges: edges,
-                Truncated: truncated,
+                Truncated: nodes.Count >= maxNodes,
                 MaxNodes: maxNodes);
         }
         catch (Exception ex) when (ex is NpgsqlException or TimeoutException or OperationCanceledException)
@@ -646,6 +670,63 @@ internal sealed partial class SubstrateClient
             throw new SubstrateUnavailableException(
                 $"Explore consensus graph query failed: {ex.GetType().Name}: {ex.Message}", ex);
         }
+    }
+
+    private static unsafe Dictionary<string, (double X, double Y, double Z)>? BuildBeliefProjection(
+        IReadOnlyCollection<ExploreGraphNode> nodes,
+        IReadOnlyList<ExploreGraphEdge> edges)
+    {
+        if (nodes.Count < 3) return null;
+
+        var ordered = nodes.OrderBy(static n => n.IdHex, StringComparer.Ordinal).ToArray();
+        var ordinal = new Dictionary<string, int>(ordered.Length, StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < ordered.Length; i++) ordinal[ordered[i].IdHex] = i;
+
+        var positive = edges
+            .Where(e => e.CompleteWeight > 0.0 && !e.Refuted &&
+                        double.IsFinite(e.CompleteWeight) &&
+                        ordinal.ContainsKey(e.SourceIdHex) &&
+                        ordinal.ContainsKey(e.TargetIdHex) &&
+                        !e.SourceIdHex.Equals(e.TargetIdHex, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (positive.Length == 0) return null;
+
+        var rows = new int[positive.Length];
+        var cols = new int[positive.Length];
+        var weights = new double[positive.Length];
+        for (var i = 0; i < positive.Length; i++)
+        {
+            rows[i] = ordinal[positive[i].SourceIdHex];
+            cols[i] = ordinal[positive[i].TargetIdHex];
+            weights[i] = positive[i].CompleteWeight;
+        }
+
+        var dimensions = Math.Min(3, ordered.Length - 2);
+        if (dimensions <= 0) return null;
+        var projected = new double[checked(ordered.Length * dimensions)];
+
+        int rc;
+        fixed (int* pr = rows)
+        fixed (int* pc = cols)
+        fixed (double* pw = weights)
+        fixed (double* po = projected)
+            rc = NativeInterop.LaplacianEigenmapsFromSparseGraph(
+                pr, pc, pw, (nuint)weights.Length, (nuint)ordered.Length,
+                (nuint)dimensions, po);
+        if (rc != 0) return null;
+
+        var result = new Dictionary<string, (double X, double Y, double Z)>(
+            ordered.Length, StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < ordered.Length; i++)
+        {
+            var x = projected[i * dimensions];
+            var y = dimensions > 1 ? projected[i * dimensions + 1] : 0.0;
+            var z = dimensions > 2 ? projected[i * dimensions + 2] : 0.0;
+            if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z))
+                return null;
+            result[ordered[i].IdHex] = (x, y, z);
+        }
+        return result;
     }
 
     private static async Task<Dictionary<string, (string Label, short? Tier)>> ReadDisplayLabelsAsync(
