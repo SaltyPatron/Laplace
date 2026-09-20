@@ -46,6 +46,10 @@ extern "C" {
  * Packaging (media_decode → planar RGBA) is INPUT only. Identity is the
  * codepoint/number/channel tree, never blake3(rgba bytes) as tier-0.
  *
+ * #1711: deterministic Number/Pixel/Patch/Region/Image tiers may be emitted as
+ * mmap perfcache generations. Higher consumers such as video reuse those exact
+ * cached roots; they do not own another image identity/cache law.
+ *
  * Leaf order rock lock: patch-major (patch grid row-major; within a patch,
  * pixels row-major; within a pixel, channels R,G,B,A; within a channel, MSD-first
  * digits). Returns 0 on success.
