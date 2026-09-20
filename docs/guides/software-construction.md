@@ -49,7 +49,7 @@ This means duplicate elimination is part of generation.
 
 ### Exact duplicates
 
-If two admitted AST subtrees are the same canonical composition under the same recipe, they have the same identity. Their occurrences, files, repositories and provenance remain distinct, but the implementation structure is already known to be identical.
+If two admitted code structures resolve to the same canonical composition under the same recipe, they have the same identity. An AST is one possible projection of that shared identity. Their occurrences, files, repositories and provenance remain distinct, but the implementation structure is already known to be identical.
 
 ### Deeper duplicates
 
@@ -81,7 +81,7 @@ A successful repair is not merely a diff. It is an evidence-backed transition ex
 
 Software repair is a natural residual operation. If several candidate structures satisfy the same type/API/toolchain constraints and one fails, the failure is attached to the exact divergent structure and context.
 
-Likewise, if a previously stable execution has one anomalous failure, Laplace can tug artifact identity, source/AST structure, dependencies, toolchain/runtime versions, target hardware, input, execution path, environment and prior repair trajectories. The unresolved residual remains explicit when the current model cannot explain it.
+Likewise, if a previously stable execution has one anomalous failure, Laplace can tug artifact identity, source/canonical structure, dependencies, toolchain/runtime versions, target hardware, input, execution path, environment and prior repair trajectories. The unresolved residual remains explicit when the current model cannot explain it.
 
 ## Cross-repository maintenance
 
