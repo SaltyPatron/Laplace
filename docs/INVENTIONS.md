@@ -166,6 +166,11 @@ The catalog is deliberately implementation-aware without making today's finite m
 123. **Numeric content-versus-occurrence separation.** The scalar value is reusable content while sample/channel/pixel/tensor ordinal, time, precision and source role remain attributable occurrence/physicality state.
 124. **Wide finite constants are ordinary compositions.** A finite pi prefix or other long numeric surface is one ordered composition over existing atoms; local GeometryZM ordinal/run carrier widths do not define the composition-width theorem.
 
+125. **Compositional perfcache lattice.** Deterministic mmap caches may exist at any reusable composition tier rather than one blob per top-level modality.
+126. **Dense-or-sparse cache generation.** A practical finite state space may be exhaustively direct-addressed; a huge possible tier may cache the finite admitted/hot canonical estate with an explicitly declared lookup law.
+127. **Cross-modality cache inheritance.** Video reuses image pixel/patch/region/image caches and audio sample/window/track caches; higher modalities compose lower canonical roots instead of cloning their cache state.
+128. **Index-preserving cache projection.** Cache/native lookup resolves request-side ids/coords/Hilbert/ranges before SQL/SPI index probes rather than wrapping indexed columns in per-row functions.
+
 ## Product identity
 
 Laplace replaces opaque probabilistic runtime authority with exact reusable structure, bounded physicality, source-retaining testimony, uncertainty-bearing consensus, query-relative web response, sparse hop/fanout execution, coarse native operators and deterministic receipts.
