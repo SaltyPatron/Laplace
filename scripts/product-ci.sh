@@ -1020,8 +1020,10 @@ run_release_delivery() {
   # plan correctly did not produce.
   if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" native; then
     unset LAPLACE_REUSE_INSTALLED_NATIVE || true
+    unset LAPLACE_DB_HEALTH_SCOPE || true
   else
     export LAPLACE_REUSE_INSTALLED_NATIVE=1
+    export LAPLACE_DB_HEALTH_SCOPE=installed
   fi
 
   run_release_mutation_window "$actions"

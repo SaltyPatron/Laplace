@@ -361,8 +361,10 @@ class ProductStageOwnershipContract(unittest.TestCase):
     def test_non_native_delivery_checks_the_installed_extension(self):
         delivery = function("run_release_delivery")
         reuse = delivery.index("export LAPLACE_REUSE_INSTALLED_NATIVE=1")
+        scope = delivery.index("export LAPLACE_DB_HEALTH_SCOPE=installed")
         mutation = delivery.index('run_release_mutation_window "$actions"')
         self.assertLess(reuse, mutation)
+        self.assertLess(scope, mutation)
         db_health = (ROOT / "scripts" / "test-suites" / "db-health.sh").read_text(encoding="utf-8")
         self.assertIn("LAPLACE_REUSE_INSTALLED_NATIVE", db_health)
         self.assertIn("check-database-health.sh --installed-runtime", db_health)
