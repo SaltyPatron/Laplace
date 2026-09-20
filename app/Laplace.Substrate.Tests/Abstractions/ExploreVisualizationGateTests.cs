@@ -39,10 +39,13 @@ public class ExploreVisualizationGateTests
         Assert.Contains("useVisualizationPalette()", glome);
         Assert.Contains("ensureVisualizationContrast", graph);
         Assert.Contains("ensureVisualizationContrast", glome);
-        Assert.Contains("nodeThreeObjectExtend={false}", graph);
-        Assert.Contains("new Mesh(nodeSphereGeometry, nodeMaterial(color))", graph);
-        Assert.Contains("new MeshBasicMaterial({ color, toneMapped: false })", graph);
-        Assert.Contains("<meshBasicMaterial vertexColors toneMapped={false} color={palette.primary} />", glome);
+        Assert.Contains("buildNodeVisuals(data, centerId, palette)", graph);
+        Assert.Contains("nodeColor={(n: WebNode)", graph);
+        Assert.Contains("nodeVal={(n: WebNode)", graph);
+        Assert.Contains("nodeThreeObjectExtend", graph);
+        Assert.DoesNotContain("new Mesh(nodeSphereGeometry", graph);
+        Assert.Contains("new THREE.InstancedMesh", glome);
+        Assert.Contains("mesh.setColorAt", glome);
         Assert.DoesNotContain("useMemo(() => visualizationPalette(), [])", graph);
         Assert.Contains("--viz-signal: #69d9d1", theme);
         Assert.Contains("--viz-steel: #8fc4e2", theme);
