@@ -168,7 +168,7 @@ export function graphForDimension(base: GraphData, dim: Dim, centerId: string): 
  * once zoomed in. Names are drawn for real so the web is legible on arrival.
  */
 const LABEL_FONT_PX = 44;
-const MAX_VISIBLE_LABELS = 128;
+const MAX_VISIBLE_LABELS = 48;
 
 interface NodeVisual {
   color: string;
@@ -433,12 +433,16 @@ export function ConsensusGraph({
   const labelledIds = useMemo(() => {
     if (data.nodes.length <= MAX_VISIBLE_LABELS) return new Set(data.nodes.map((node) => node.id));
     const ordered = data.nodes.slice().sort((a, b) => {
-      const ap = a.id === centerId ? -3 : a.walk ? -2 : a.hop;
-      const bp = b.id === centerId ? -3 : b.walk ? -2 : b.hop;
-      return ap - bp || a.id.localeCompare(b.id);
+      const ap = a.id === centerId ? Number.POSITIVE_INFINITY
+        : a.walk ? Number.MAX_SAFE_INTEGER
+          : nodeVisuals.get(a.id)?.val ?? 0;
+      const bp = b.id === centerId ? Number.POSITIVE_INFINITY
+        : b.walk ? Number.MAX_SAFE_INTEGER
+          : nodeVisuals.get(b.id)?.val ?? 0;
+      return bp - ap || a.hop - b.hop || a.id.localeCompare(b.id);
     });
     return new Set(ordered.slice(0, MAX_VISIBLE_LABELS).map((node) => node.id));
-  }, [data.nodes, centerId]);
+  }, [data.nodes, centerId, nodeVisuals]);
 
   useEffect(() => {
     const el = shellRef.current;
