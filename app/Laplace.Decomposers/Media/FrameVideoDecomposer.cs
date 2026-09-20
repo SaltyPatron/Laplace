@@ -13,6 +13,11 @@ namespace Laplace.Decomposers.Media;
 /// trajectory over frame roots; frame membership and adjacency are recovered from
 /// that trajectory rather than deposited as testimony. Video root = blake3 over
 /// ordered frame ladder roots (path-independent), not blake3 of frame RGBA buffers.
+///
+/// Compositional perfcache law (#1711): video is a consumer of the same cached
+/// number/pixel/patch/region/image structures used by standalone images, and of
+/// the same audio caches when soundtrack structure is admitted. It adds only the
+/// new frame/audio order, timing and synchronization structure.
 /// </summary>
 public sealed class FrameVideoDecomposer
     : Decomposer<VideoIngestRecord, FrameVideoSource, FullScope>, IIngestInventoryProvider
