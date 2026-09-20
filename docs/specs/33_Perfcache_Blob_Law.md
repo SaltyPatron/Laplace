@@ -36,9 +36,9 @@ This table is the current blob catalog. It is law for *what exists as a
 perfcache class*, not a claim that every row is loaded on the live host.
 Observed install state belongs in CI receipts and `scripts/check-deployed-revision.sh`.
 
-Tier-0 is always Unicode codepoints. Image, audio, and video do not mint a
-private atom alphabet; they compose above T0 (digit → number → channel / sample
-→ higher tiers). Glicko standing is not a perfcache. Attestation ids are not
+Tier-0 media scalar leaves use the shared Unicode codepoint floor; image/audio/video do not mint arbitrary amplitude/color/sample values as private atoms. Numeric values compose above T0 (digit/punctuation → canonical scalar/number → channel/sample occurrence → higher structure).
+
+The 0..255 numeric ROM is an acceleration of canonical composition, not the numeric domain. A value such as 0.34567 is represented by the exact ordered codepoint composition ['0','.','3','4','5','6','7'] through the ordinary content path when its declared source recipe uses that exact scalar surface. Repeated occurrences reuse the same scalar root. A long finite pi prefix is the same structural law at larger width and does not require a ROM entry. Glicko standing is not a perfcache. Attestation ids are not
 codepoint ids.
 
 | Blob | Role | Lookup | Rebuild | Notes |
