@@ -188,6 +188,26 @@ The current 0..255 number ROM precomputes the most common integer scalar roots u
 
 A fractional scalar such as 0.34567 can be composed normally without being present in that dense ROM. Repeated occurrences then reuse its canonical root through ordinary content addressing/indexing.
 
+## One scalar/subpatch entity across every containing tier
+
+Tier and modality role do not mint another copy of canonical content.
+
+~~~text
+['k','i','n','g'] -> K
+~~~
+
+K is the same entity whether it occurs as a word, name, title, label or constituent.
+
+For image structure:
+
+~~~text
+[p0,p1,p2,p3] -> P
+~~~
+
+P is the same canonical composition whether it occurs as one 2x2 subpatch of an 8x8 region, another region, another image or a video frame. Every containing trajectory references P.
+
+The containing physicality/occurrence carries spatial role, ordinal, shape/layout, source and reconstruction facts. Those are not hash salt.
+
 ## Cross-modality perfcache reuse
 
 Perfcaches follow canonical composition tiers, not consumer modality names.
