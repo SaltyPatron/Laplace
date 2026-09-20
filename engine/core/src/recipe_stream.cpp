@@ -4,6 +4,8 @@
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/attestation_engine.h"
+#include "laplace/core/ordered_composition.h"
+#include "laplace/core/trajectory.h"
 #include "recipe_delimited.hpp"
 #include <algorithm>
 #include <cmath>
@@ -270,6 +272,52 @@ struct laplace_recipe_stream {
         }
         return emitted;
     }
+    hash128_t interval_subject(intent_stage_t* stage, uint32_t first, uint32_t last) {
+        if (first == last) return point_id(first);
+
+        laplace_ordered_component_t components[2]{};
+        const uint32_t atoms[2] = {first, last};
+        for (size_t i = 0; i < 2; ++i) {
+            components[i].atom = atoms[i];
+            components[i].tier = 0;
+            components[i].has_atom = 1;
+            hilbert128_t ignored{};
+            check(codepoint_table_resolve_atom(
+                atoms[i], &components[i].id, components[i].coord, &ignored),
+                "range endpoint");
+        }
+
+        hash128_t range_type;
+        hash128_blake3_str("Range", &range_type);
+        laplace_ordered_composition_request_t request{
+            components, 2, range_type, witness, INTENT_STAGE_PG_EPOCH_UNIX_US
+        };
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_compose_batch(&request, 1, &result),
+            "range composition");
+
+        if (!intent_stage_witness_seen(stage, &result.id)) {
+            check(intent_stage_add_entity(
+                stage, &result.id, result.tier, &range_type, &witness), "range entity");
+
+            hash128_t ids[2] = {components[0].id, components[1].id};
+            double trajectory[8]{};
+            check(trajectory_build(ids, 2, trajectory), "range trajectory");
+            hash128_t physicality;
+            laplace_physicality_id_compute(result.id, 10, &physicality);
+            check(intent_stage_add_physicality(
+                stage, &physicality, &result.id, 10,
+                result.coord, &result.hilbert,
+                trajectory, 2, 2,
+                1, 0.0, 1, 0, INTENT_STAGE_PG_EPOCH_UNIX_US),
+                "range physicality");
+            check(intent_stage_witness_record(stage, &result.id), "range witness");
+            if (intent_stage_allocation_failed(stage))
+                throw std::runtime_error("range staging exceeded the admitted byte envelope");
+        }
+        return result.id;
+    }
+
     void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
         bool subject_binding, const std::map<std::string, std::string>& attributes) {
         try { lower_field(stage, path, raw, subject_binding, attributes); }
@@ -387,6 +435,12 @@ struct laplace_recipe_stream {
             cursor = point(single.empty() ? record.get(route.first) : single);
             end = single.empty() ? point(record.get(route.last)) : cursor;
             if (cursor > end) throw std::runtime_error("inverted ordinal range");
+        } else if (route.kind == 3) {
+            std::string single = record.get(route.identity);
+            const uint32_t first = point(single.empty() ? record.get(route.first) : single);
+            const uint32_t last = single.empty() ? point(record.get(route.last)) : first;
+            if (first > last) throw std::runtime_error("inverted interval range");
+            subject = interval_subject(stage, first, last);
         } else if (route.kind == 1) {
             const std::string value = record.get(route.identity);
             if (route.subject_codec == 0) subject = content(stage, value);
@@ -537,7 +591,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     route.inherit_parent_attributes = inherit != 0;
                 }
             }
-            if (route.kind > 2 || route.subject_codec > 2 || (route.range_first.empty() != route.range_last.empty()) ||
+            if (route.kind > 3 || route.subject_codec > 2 || (route.range_first.empty() != route.range_last.empty()) ||
                 (!route.range_first.empty() && (route.kind == 0 || !nonzero(route.range_relation))))
                 throw std::runtime_error("invalid record route instruction");
             auto key = route.name;
@@ -579,6 +633,11 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                             e.name, std::string(e.value, e.value_len)).second)
                         throw std::runtime_error("duplicate parent record attribute");
                 } else if (e.kind == 2) {
+                    if (s->parent_scope_active) {
+                        auto route = s->routes.find(s->parent_scope.name);
+                        if (route != s->routes.end())
+                            s->pending.push_back(std::move(s->parent_scope));
+                    }
                     s->parent_scope = {};
                     s->parent_scope_active = false;
                 }
@@ -597,6 +656,25 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                 node done = std::move(s->stack.back()); s->stack.pop_back();
                 if (s->stack.empty()) {
                     auto route = s->routes.find(done.name);
+                    if (s->parent_scope_active && s->parent_scope.name == "group") {
+                        auto cp = done.attributes.find("cp");
+                        auto first = done.attributes.find("first-cp");
+                        auto last = done.attributes.find("last-cp");
+                        const std::string* lo = cp != done.attributes.end() ? &cp->second
+                            : first != done.attributes.end() ? &first->second : nullptr;
+                        const std::string* hi = cp != done.attributes.end() ? &cp->second
+                            : last != done.attributes.end() ? &last->second : nullptr;
+                        if (lo && hi) {
+                            auto current_first = s->parent_scope.attributes.find("first-cp");
+                            if (current_first == s->parent_scope.attributes.end()
+                                || point(*lo) < point(current_first->second))
+                                s->parent_scope.attributes["first-cp"] = *lo;
+                            auto current_last = s->parent_scope.attributes.find("last-cp");
+                            if (current_last == s->parent_scope.attributes.end()
+                                || point(*hi) > point(current_last->second))
+                                s->parent_scope.attributes["last-cp"] = *hi;
+                        }
+                    }
                     if (route != s->routes.end() && route->second.inherit_parent_attributes) {
                         if (!s->parent_scope_active)
                             throw std::runtime_error("record requires inherited parent attributes");
