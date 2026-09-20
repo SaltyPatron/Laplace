@@ -34,6 +34,11 @@ int laplace_image_decomposer_run(
     if (!rgba) return -1;
 
     size_t n_px = (size_t)width * (size_t)height;
+    /* CURRENT WORKING PARTITION ONLY.
+     * These 8x8 buckets are an execution layout for the existing tree builder.
+     * They are not a namespace for patch identity. Equal ordered pixel
+     * compositions at any scale must converge globally; #1711 owns the
+     * multiscale subpatch lattice and cache short-circuit path. */
     uint32_t patch_w = (width + LAPLACE_IMAGE_PATCH_SIZE - 1) / LAPLACE_IMAGE_PATCH_SIZE;
     uint32_t patch_h = (height + LAPLACE_IMAGE_PATCH_SIZE - 1) / LAPLACE_IMAGE_PATCH_SIZE;
     size_t n_patch = (size_t)patch_w * (size_t)patch_h;
