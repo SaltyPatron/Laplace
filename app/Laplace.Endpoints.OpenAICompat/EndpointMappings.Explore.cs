@@ -212,7 +212,7 @@ internal static class ExploreEndpoints
             catch (InvalidOperationException ex) { return EndpointJson.ServiceUnavailable("unicode_cloud_unavailable", ex.Message); }
         }).WithTags("explore").Produces<UnicodeCloudResponse>();
 
-        app.MapGet("/v1/explore/unicode/{codepoint:uint}", (uint codepoint, ExploreDecomposeService decompose) =>
+        app.MapGet("/v1/explore/unicode/{codepoint:min(0):max(1114111)}", (uint codepoint, ExploreDecomposeService decompose) =>
         {
             try { return Results.Json(decompose.UnicodePoint(codepoint)); }
             catch (ArgumentOutOfRangeException) { return EndpointJson.NotFound("unicode_codepoint_not_found", $"U+{codepoint:X} is outside the selected Unicode window."); }
