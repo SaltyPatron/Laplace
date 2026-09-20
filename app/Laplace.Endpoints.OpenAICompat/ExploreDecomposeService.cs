@@ -46,17 +46,12 @@ internal sealed class ExploreDecomposeService
     public UnicodeCloudResponse UnicodeCloud()
     {
         EnsurePerfcache();
-        var records = CodepointPerfcache.Records;
-        var orders = new byte[checked(records.Length * sizeof(uint))];
-        var hashes = new byte[checked(records.Length * 16)];
-        for (var i = 0; i < records.Length; i++)
-        {
-            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
-                orders.AsSpan(i * sizeof(uint), sizeof(uint)), records[i].UcaOrder);
-            records[i].Hash.WriteBytes(hashes.AsSpan(i * 16, 16));
-        }
-        return new UnicodeCloudResponse(records.Length, CodepointPerfcache.ReceiptHex,
-            Convert.ToBase64String(orders), Convert.ToBase64String(hashes));
+        int count = CodepointPerfcache.Count;
+        return new UnicodeCloudResponse(
+            count,
+            CodepointPerfcache.ReceiptHex,
+            "laplace.t0-unicode-cloud/f32xyz-two-lanes/v1",
+            checked(count * 3 * sizeof(float) * 2));
     }
 
     public byte[] UnicodeCloudPositions()
