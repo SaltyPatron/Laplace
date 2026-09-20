@@ -90,6 +90,33 @@ public class TextDecomposerTests
     }
 
     [Fact]
+    public void SourceRoot_PreservesAuthoredUnicodeRepresentation()
+    {
+        CodepointPerfcache.LoadDefault();
+        byte[] precomposed = [0xC3, 0xA9];
+        byte[] decomposed = [0x65, 0xCC, 0x81];
+
+        Assert.Equal(
+            TextDecomposer.ContentRootId(precomposed),
+            TextDecomposer.ContentRootId(decomposed));
+        Assert.NotEqual(
+            TextDecomposer.SourceRootId(precomposed),
+            TextDecomposer.SourceRootId(decomposed));
+    }
+
+    [Fact]
+    public void SourceTreeRoot_EqualsDirectSourceRoot()
+    {
+        CodepointPerfcache.LoadDefault();
+        byte[] source = "def multiply(a, b):\n    return a * b\n"u8.ToArray();
+        using var tree = IntentStage.BuildSourceContentTree(source);
+        Assert.NotNull(tree);
+
+        Hash128 direct = Assert.IsType<Hash128>(TextDecomposer.SourceRootId(source));
+        Assert.Equal(direct, tree.RootId());
+    }
+
+    [Fact]
     public void HashComposerCanPopulateAfterDecompose()
     {
         using var t = TextDecomposer.Run("hi");
