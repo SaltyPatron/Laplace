@@ -217,6 +217,9 @@ public static unsafe partial class NativeInterop
     [LibraryImport(Library, EntryPoint = "laplace_text_decomposer_run")]
     internal static partial int TextDecomposerRun(byte* utf8, nuint len, IntPtr* outTree);
 
+    [LibraryImport(Library, EntryPoint = "laplace_text_decomposer_run_source")]
+    internal static partial int TextDecomposerRunSource(byte* utf8, nuint len, IntPtr* outTree);
+
     [LibraryImport(Library, EntryPoint = "laplace_normalize_nfc_utf8")]
     public static partial int NormalizeNfcUtf8(
         byte* utf8, nuint len, byte** outUtf8, nuint* outLen);
@@ -619,6 +622,12 @@ public static unsafe partial class NativeInterop
         nuint workerCount,
         IntPtr* outTree);
 
+    [LibraryImport(Library, EntryPoint = "content_witness_source_tree_build")]
+    internal static partial int ContentWitnessSourceTreeBuild(
+        byte* utf8,
+        nuint len,
+        IntPtr* outTree);
+
     [LibraryImport(Library, EntryPoint = "content_witness_emit_tree")]
     internal static partial int ContentWitnessEmitTree(
         IntPtr stage,
@@ -638,6 +647,12 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "laplace_content_root_id")]
     internal static partial int ContentRootId(
+        byte* utf8,
+        nuint len,
+        Hash128* outRootId);
+
+    [LibraryImport(Library, EntryPoint = "laplace_content_source_root_id")]
+    internal static partial int ContentSourceRootId(
         byte* utf8,
         nuint len,
         Hash128* outRootId);
