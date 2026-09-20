@@ -101,7 +101,8 @@ public sealed record SourceRecipeProviderRoute(
     string? RangeRelationProperty = null,
     string? RangeRelationName = null,
     string? RangeStartField = null,
-    string? RangeEndField = null);
+    string? RangeEndField = null,
+    bool InheritParentAttributes = false);
 
 public enum SourceArtifactDisposition
 {
@@ -410,6 +411,7 @@ public sealed class SemanticSourceRecipe
             Append(canonical, route.RangeRelationName ?? "");
             Append(canonical, route.RangeStartField ?? "");
             Append(canonical, route.RangeEndField ?? "");
+            Append(canonical, route.InheritParentAttributes ? "1" : "0");
             foreach (string path in route.StructurePaths.Order(StringComparer.Ordinal)) Append(canonical, path);
             foreach ((string child, string prefix) in (route.ChildFieldPrefixes
                          ?? new Dictionary<string, string>()).OrderBy(static pair => pair.Key, StringComparer.Ordinal))
