@@ -58,6 +58,22 @@ The phrase **finite when observed** is a useful conceptual analogy for this dist
 
 The open Super-Fibonacci/radical-inverse placement matters here because the location of rank `n` is determined without requiring a final population size. Extending the realized prefix therefore densifies the bounded shell instead of redefining the earlier addresses around a new terminal `N`.
 
+### Unbounded history does not require unbounded geometric extent
+
+Let `K_t` be the finite set of knowledge structures actually observed/materialized by some finite execution or observation event `t`. Over an unbounded sequence of such events,
+
+```text
+K_history = union(t in N) K_t
+```
+
+is a countable union of finite sets and is therefore countable. More generally, every finite typed AST/tree/DAG over the countably open Tier-0 law has a finite description and belongs to the same countable structural universe.
+
+Therefore the passage of time does not require Laplace's geometric domain to expand. New knowledge can continue to add canonical structures, occurrences, trajectories, testimony, provenance and higher-order compositions while their geometric realizations remain in the same fixed bounded domain.
+
+This is the precise sense in which **knowledge from an arbitrarily long past and arbitrarily long future can accumulate in one finite geometric world**, provided `knowledge` means finitely observable/describable structure. A genuinely arbitrary completed infinite object with no finite description is outside the storage claim of every finite machine; it is not required for the Laplace construction.
+
+The coordinate is not a container holding all of an object's information, so the construction does not require a unique point for every knowledge object. Multiple structures can share a location while identity, ordered trajectory, AST/DAG structure, relations, evidence and provenance keep them distinct.
+
 ### One bounded geometric world is navigable
 
 The bounded domain is not merely a container. It is a navigable structural world. Canonical identities, typed physicalities, ordered trajectories and overlapping relation/evidence webs all inhabit the same finite geometric extent.

@@ -9,6 +9,8 @@ Laplace starts from a simple observation: a countably open Tier-0 address law an
 
 That makes text, code, games, media, model checkpoints, conversations and other finite symbolic structures instances of the same machine rather than separate pipelines.
 
+An arbitrarily long history of finite observations remains countable, so adding knowledge over time does not require expanding the geometric extent. The same bounded world can become denser and more richly interconnected while identity, trajectory, AST/DAG structure, relations, evidence and provenance preserve distinctions that coordinates alone do not.
+
 ```text
 source / observation
         |
