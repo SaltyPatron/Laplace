@@ -6,7 +6,8 @@ namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
 /// Shared source-grammar semantic witness lowering. Grammar queries identify source spans;
-/// the active composer remains the sole authority for the entities those spans denote.
+/// Laplace content identity owns what those captured bytes denote. A parser tree may locate
+/// the spans, but parser-node identity is never required for DEFINES/CALLS/REFERENCES.
 /// </summary>
 public static class GrammarTagWitness
 {
@@ -42,6 +43,51 @@ public static class GrammarTagWitness
             builder.AddAttestation(attestation);
     }
 
+    /// <summary>
+    /// Run the grammar's tag query as provider evidence, then resolve only the captured
+    /// source spans through the canonical content spine. This avoids constructing a
+    /// parser-owned entity for every AST/CST node merely to witness a handful of semantic
+    /// relations. The full source file retains its own source-preserving tier trajectory.
+    /// </summary>
+    public static void EmitSource(
+        SubstrateChangeBuilder builder,
+        byte[] utf8,
+        string modality,
+        Hash128 sourceId,
+        double weight,
+        Hash128 contextId)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(utf8);
+        if (contextId == default || utf8.Length == 0) return;
+
+        IntPtr recipe = GrammarDecomposer.LookupById(modality);
+        byte[]? tags = GrammarTags.TagsSource(modality);
+        if (recipe == IntPtr.Zero || tags is null) return;
+
+        IReadOnlyList<TagCapture> captures = GrammarTags.Run(recipe, tags, utf8);
+        if (captures.Count == 0) return;
+
+        var spanIds = new Dictionary<(uint Start, uint End), Hash128>();
+        foreach (TagCapture capture in captures)
+        {
+            var key = (capture.StartByte, capture.EndByte);
+            if (spanIds.ContainsKey(key)
+                || capture.EndByte <= capture.StartByte
+                || capture.EndByte > (uint)utf8.Length)
+                continue;
+            ReadOnlySpan<byte> span = utf8.AsSpan(
+                checked((int)capture.StartByte),
+                checked((int)(capture.EndByte - capture.StartByte)));
+            if (ContentTierSpine.TryStageIntoBuilder(builder, span, sourceId, out Hash128 id))
+                spanIds.Add(key, id);
+        }
+
+        foreach (AttestationRow attestation in BuildFromCaptures(
+                     captures, spanIds, sourceId, contextId, weight))
+            builder.AddAttestation(attestation);
+    }
+
     internal static ImmutableArray<AttestationRow> Build(
         byte[] utf8,
         IntPtr recipe,
@@ -55,6 +101,16 @@ public static class GrammarTagWitness
             return ImmutableArray<AttestationRow>.Empty;
 
         IReadOnlyList<TagCapture> captures = GrammarTags.Run(recipe, tags, utf8);
+        return BuildFromCaptures(captures, spanIds, sourceId, contextId, weight);
+    }
+
+    private static ImmutableArray<AttestationRow> BuildFromCaptures(
+        IReadOnlyList<TagCapture> captures,
+        IReadOnlyDictionary<(uint Start, uint End), Hash128> spanIds,
+        Hash128 sourceId,
+        Hash128 contextId,
+        double weight)
+    {
         if (captures.Count == 0) return ImmutableArray<AttestationRow>.Empty;
 
         var rows = ImmutableArray.CreateBuilder<AttestationRow>();
