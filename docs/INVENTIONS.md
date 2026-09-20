@@ -102,7 +102,7 @@ The catalog is deliberately implementation-aware without making today's finite m
 ## Conversation, operations and serving
 
 72. **Conversation as witnessed trajectory.** Sessions contain ordered turns, bindings and obligations; corrections/dependencies add evidence without deleting history.
-73. **Code as player.** Generate, stage, compile/test, witness outcomes and feed them into subsequent decisions through the same operation substrate.
+73. **Code as player.** Construct grammar-valid AST/repository structure by canonical reuse/composition/minimal mutation, realize it, compile/test/analyze it, witness outcomes and feed the explicit repair trajectory into subsequent decisions through the same operation substrate.
 74. **Explainability as typed receipt.** Answers/operations can expose bounded cells, routes, scores, evidence roots, source scope, stages, selection and writes rather than one opaque confidence score.
 75. **Closed self-improvement loop.** Prompt, response, tool, evaluation and feedback outcomes can deposit through governed lanes and affect later standing/cognition without offline retraining.
 76. **One typed operation ISA.** SQL, MCP, OpenAI-compatible serving, games, code, model inspection and export compose the same governed operation algebra rather than inventing private semantics.
