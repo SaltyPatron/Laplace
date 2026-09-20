@@ -617,6 +617,10 @@ Pixels, patches, regions, complete images, audio windows/tracks, chess positions
 
 Cache generations record their lower-generation/recipe dependencies. A lower change invalidates affected dependents, not unrelated caches.
 
+Cache modules may also be selector-scoped while preserving the same canonical members: an ASCII range, an explicit color palette, a generated finite format domain, a speech-oriented frequency/filter-bank band, a hot/admitted set, or the dependency closure of selected higher structures. Several modules can compose into one deployment profile. A subset module never renumbers its members into a new semantic universe.
+
+Cache residency/profile selection is acceleration/deployment state, not knowledge authority. An authorized cache miss falls back to the canonical path when the deployment supports it; a constrained offline deployment reports local capability/cache absence rather than changing identity or pretending the knowledge does not exist.
+
 Cache-backed database operations should preserve planner/index use by resolving request-side ids/coordinates/Hilbert/ranges before indexed probes instead of wrapping indexed columns in per-row functions.
 
 ## 11. Ingestion is the learning process
