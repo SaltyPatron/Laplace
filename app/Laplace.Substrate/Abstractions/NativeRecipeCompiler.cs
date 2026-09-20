@@ -172,7 +172,8 @@ public static class NativeRecipeCompiler
                 || !string.IsNullOrEmpty(route.RangeEndField);
             if (membership is null && hasMembershipRange)
                 throw new InvalidDataException($"Range-membership route '{route.RecordName}' has no relation declaration.");
-            if (membership is not null && (subject.Kind == SourceSubjectBindingKind.CodepointRange
+            if (membership is not null && (subject.Kind is SourceSubjectBindingKind.CodepointRange
+                    or SourceSubjectBindingKind.CodepointInterval
                 || string.IsNullOrEmpty(route.RangeStartField) || string.IsNullOrEmpty(route.RangeEndField)))
                 throw new InvalidDataException($"Range-membership route '{route.RecordName}' has incomplete subject/range declarations.");
             WriteText(writer, route.RangeStartField);
