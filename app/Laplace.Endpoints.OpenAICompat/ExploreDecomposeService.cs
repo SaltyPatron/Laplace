@@ -43,6 +43,35 @@ internal sealed class ExploreDecomposeService
             Nodes: nodes);
     }
 
+    public UnicodeCloudResponse UnicodeCloud()
+    {
+        EnsurePerfcache();
+        var records = CodepointPerfcache.Records;
+        var orders = new byte[checked(records.Length * sizeof(uint))];
+        var hashes = new byte[checked(records.Length * 16)];
+        for (var i = 0; i < records.Length; i++)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+                orders.AsSpan(i * sizeof(uint), sizeof(uint)), records[i].UcaOrder);
+            records[i].Hash.WriteBytes(hashes.AsSpan(i * 16, 16));
+        }
+        return new UnicodeCloudResponse(records.Length, CodepointPerfcache.ReceiptHex,
+            Convert.ToBase64String(orders), Convert.ToBase64String(hashes));
+    }
+
+    public UnicodePointResponse UnicodePoint(uint codepoint)
+    {
+        EnsurePerfcache();
+        var records = CodepointPerfcache.Records;
+        if (codepoint >= (uint)records.Length) throw new ArgumentOutOfRangeException(nameof(codepoint));
+        ref readonly var r = ref records[(int)codepoint];
+        string display = Rune.IsValid((int)codepoint) ? new Rune((int)codepoint).ToString() : string.Empty;
+        double radius = Math.Sqrt(r.CoordX*r.CoordX+r.CoordY*r.CoordY+r.CoordZ*r.CoordZ+r.CoordM*r.CoordM);
+        return new UnicodePointResponse(codepoint, display, Convert.ToHexStringLower(r.Hash.ToBytes()),
+            r.UcaOrder, r.CoordX, r.CoordY, r.CoordZ, r.CoordM, radius,
+            Convert.ToHexStringLower(r.Hilbert.ToByteArray()), r.Flags);
+    }
+
     /// <summary>
     /// Exact, database-independent storage proof for a text surface.  The same
     /// TextDecomposer + HashComposer kernels compute identity, 4-D placement and
