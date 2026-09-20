@@ -981,7 +981,7 @@ public sealed class DecomposerArchitectureGateTests
         foreach (string relative in activePaths)
         {
             string text = File.ReadAllText(Path.Combine(repoRoot, relative));
-            Assert.Contains("ucd.all.flat", text, StringComparison.Ordinal);
+            Assert.Contains("ucd.all.grouped", text, StringComparison.Ordinal);
             Assert.DoesNotContain("ucd.nounihan.flat", text, StringComparison.Ordinal);
         }
 
