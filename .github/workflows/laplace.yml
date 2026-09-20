@@ -37,6 +37,7 @@ on:
       - "scripts/configure-laplace-environment.py"
       - "deploy/linux/deploy.sh"
       - "deploy/linux/payload-sync.sh"
+      - "deploy/linux/managed-publish.sh"
       - "deploy/linux/bootstrap-host.sh"
       - "deploy/linux/laplace-managed-deploy"
       - "deploy/linux/nginx-laplace.conf"

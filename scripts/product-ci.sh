@@ -544,6 +544,22 @@ verify_isolated_web_delivery() {
     --directory "${LAPLACE_APP_DIR:-/opt/laplace/app}/wwwroot"
   check_application_live
 }
+
+verify_isolated_api_delivery() {
+  require_deployed_revision
+  local receipt="$ROOT/build/.api-publish-verified.json"
+  jq -e '
+    .schema == "laplace.api-payload-verification/v1" and
+    .status == "passed" and
+    (.payload | type == "object") and
+    (.service.ActiveState == "active") and
+    (.service.SubState == "running")
+  ' "$receipt" >/dev/null || {
+    echo "::error::API-only publication receipt is missing or invalid: $receipt" >&2
+    return 1
+  }
+  check_application_live
+}
 run_live_tests() {
   require_deployed_revision
   local selected="${LAPLACE_LIVE_SUITES:-}"
@@ -748,7 +764,6 @@ PY
 
 verify_installed_product() (
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
-  local ui_base="${LAPLACE_PUBLIC_UI_BASE:-http://127.0.0.1:8080}"
   local expected="${1:-$(git rev-parse HEAD)}"
   local api_key="${LAPLACE_API_KEY:-}" issued_prefix=""
   if [[ -z "$api_key" ]]; then
@@ -775,7 +790,9 @@ verify_installed_product() (
   check_application_live
   verify_installed_web_receipt
   check_t0_perfcache_runtime
-  python3 scripts/verify-application-release.py --base "$ui_base" --timeout-seconds 60
+  # This verifies the application process. The managed-host owner separately
+  # verifies the public HTTP->HTTPS redirect, certificate, and reverse proxy.
+  python3 scripts/verify-application-release.py --base "$base" --timeout-seconds 60
 )
 
 verify_current_installed_product() {
@@ -1009,6 +1026,8 @@ run_release_delivery() {
       verify_isolated_uci_delivery
     elif [[ "$publish_scope" == web ]]; then
       verify_isolated_web_delivery
+    elif [[ "$publish_scope" == api ]]; then
+      verify_isolated_api_delivery
     else
       verify_installed_product
     fi
