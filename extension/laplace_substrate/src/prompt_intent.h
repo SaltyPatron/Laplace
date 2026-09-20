@@ -595,15 +595,29 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     Oid frechet_types[6] = {
         FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,
         BYTEAARRAYOID,INT4OID};
-    SPIPlanPtr angular_plan = SPI_prepare_cursor(
-        angular_sql, 7, angular_types, CURSOR_OPT_PARALLEL_OK);
-    SPIPlanPtr hilbert_plan = SPI_prepare_cursor(
-        hilbert_sql, 4, hilbert_types, CURSOR_OPT_PARALLEL_OK);
-    SPIPlanPtr frechet_plan = SPI_prepare_cursor(
-        frechet_sql, 6, frechet_types, CURSOR_OPT_PARALLEL_OK);
+    static SPIPlanPtr angular_plan = NULL;
+    static SPIPlanPtr hilbert_plan = NULL;
+    static SPIPlanPtr frechet_plan = NULL;
     if (!angular_plan || !hilbert_plan || !frechet_plan)
-        elog(ERROR, "prompt geometry: indexed response plan preparation failed: %s",
-             SPI_result_code_string(SPI_result));
+    {
+        SPIPlanPtr angular = SPI_prepare_cursor(
+            angular_sql, 7, angular_types,
+            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+        SPIPlanPtr hilbert = SPI_prepare_cursor(
+            hilbert_sql, 4, hilbert_types,
+            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+        SPIPlanPtr frechet = SPI_prepare_cursor(
+            frechet_sql, 6, frechet_types,
+            CURSOR_OPT_GENERIC_PLAN | CURSOR_OPT_PARALLEL_OK);
+        if (!angular || !hilbert || !frechet ||
+            SPI_keepplan(angular) != 0 ||
+            SPI_keepplan(hilbert) != 0 ||
+            SPI_keepplan(frechet) != 0)
+            elog(ERROR, "prompt geometry: cannot retain indexed response plans");
+        angular_plan = angular;
+        hilbert_plan = hilbert;
+        frechet_plan = frechet;
+    }
 
     size_t tree_nodes = tier_tree_node_count(intent->input->tree);
     const hash128_t *tree_ids = tier_tree_id_array(intent->input->tree);
@@ -632,9 +646,6 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
     laplace_prompt_geometry_shape(
         intent, fanout, frechet_plan, root_angular, root_angular_count);
     pfree(root_angular);
-    SPI_freeplan(angular_plan);
-    SPI_freeplan(hilbert_plan);
-    SPI_freeplan(frechet_plan);
 
     if (intent->geometry_count > 0)
     {
