@@ -31,6 +31,20 @@ prompt/root --> query-relative coupling --> indexed star expansion --> converge/
 
 Laplace is not a transformer implementation. It reconstructs many of the jobs for which transformers use tokenization, embeddings, attention, learned weights, layers, KV state and autoregressive decoding with explicit identities, trajectories, indexes, witnessed relations, uncertainty-bearing standing and sparse traversal.
 
+## What the architecture enables
+
+The mechanisms below are not isolated research curiosities. Together they imply product capabilities that must remain visible in design and implementation:
+
+- **Structural software construction:** code is grammar-derived recursive structure. Generation should reuse, compose or minimally mutate known AST structure before inventing new code; compile/test/runtime outcomes witness the next repair.
+- **Duplicate-code convergence:** exact canonical AST duplicates converge automatically; normalized structure, control/data flow, algebraic form and behavioral evidence can expose deeper duplicate implementations for consolidation.
+- **Whole-application mutation and fast realization:** a repository is one recursively composed application root. A small edit creates new identities only along the changed ancestry; unchanged subtrees are structurally shared. A checkout is an export of the resulting complete root.
+- **Repair knowledge across repositories:** failed and successful development attempts are witnessed trajectories. Their AST/dependency/diagnostic/Fréchet shapes can surface similar problems in other authorized repositories.
+- **Deterministic machine-cost analysis:** source, bytecode, executable/container and machine instructions can lower into control/data/dependency structure and then into target-ISA/microarchitecture cycle expressions instead of being reduced to benchmark averages.
+- **One knowledge world with explicit authority and compute:** knowledge packages grant governed scope/capabilities over the shared world; billing meters how deeply and broadly the same intelligence searches it through hops, fanout and physical work.
+- **Governed abstention and security:** knowledge remains knowledge. Authority/firmware decides what may be coupled, derived, realized, exported or executed, with explicit WHY/WHY_NOT receipts.
+
+See [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) for the binding synthesis. Tests, gates, issues and benchmarks prove these capabilities; they are not substitutes for implementing them.
+
 ## What is different
 
 - **Exact recursive identity.** Same canonical content under the same declared recipe means the same executable entity. Repetition does not mint another copy of `king`, the same chess line, the same AST subtree or the same document fragment; new occurrences add provenance and evidence around reusable structure.
