@@ -370,7 +370,7 @@ carry_forward_undelivered_impact() {
   # Manual/operator stages deliberately keep the scope they were dispatched with.
   [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]] || return 0
   case "${LAPLACE_STAGE:-}" in
-    release-qualification|release-delivery) ;;
+    mainline|release-qualification|release-delivery) ;;
     *) return 0 ;;
   esac
 
@@ -672,6 +672,7 @@ check_application_live() {
 
 issue_live_proof_credential() {
   local api_base="$1" operator_token="${LAPLACE_OPERATOR_TOKEN:-}" issued_json
+  local deadline=$((SECONDS + 60))
   if [[ -z "$operator_token" && -r /opt/laplace/secrets/operator.env ]]; then
     operator_token="$(
       set -a
@@ -684,10 +685,21 @@ issue_live_proof_credential() {
     echo "::error::live verification requires LAPLACE_API_KEY or LAPLACE_OPERATOR_TOKEN" >&2
     return 1
   }
+  # systemctl start returns when the process is launched, not when Kestrel has
+  # bound the socket and completed startup. Publication immediately follows a
+  # PostgreSQL/API restart, so wait at this exact boundary instead of turning a
+  # normal two-second startup into a failed deployment.
+  until curl -fsS "$api_base/health" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      echo "::error::installed laplace-api did not become ready for publication verification within 60 seconds" >&2
+      return 1
+    fi
+    sleep 1
+  done
   issued_json="$(curl -fsS -X POST "$api_base/v1/billing/operator/keys" \
     -H 'Content-Type: application/json' \
     -H "X-Laplace-Operator-Token: $operator_token" \
-    --data '{"tenant":"ci-deployment-proof","label":"installed-product-verification"}')" || {
+    --data '{"tenant":"local-dev","label":"installed-product-verification"}')" || {
       echo "::error::could not issue the bounded live-verification credential" >&2
       return 1
     }
@@ -891,7 +903,21 @@ run_release_qualification() {
 }
 
 run_mainline() {
-  run_release_qualification
+  check_deps
+  carry_forward_undelivered_impact
+
+  # Main is the development deployment lane. Compile the exact affected
+  # closure, deploy it in the same candidate reservation, and prove the
+  # installed surfaces. Broader development/integration suites are explicit
+  # audit operations; they do not hold deployment behind a second job.
+  local current_rc=0
+  release_selected_revision_current || current_rc=$?
+  if (( current_rc == 3 )); then return 0; fi
+  (( current_rc == 0 )) || return "$current_rc"
+
+  run_build
+  require_built_revision
+  run_release_delivery
 }
 
 release_selected_revision_current() {

@@ -32,16 +32,15 @@ class WorkflowOwnership(unittest.TestCase):
         self.assertIn('- "docs/**"', text)
         self.assertIn('- "**/*.md"', text)
 
-    def test_main_push_is_one_planned_qualification_delivery_chain(self):
+    def test_main_push_is_one_planned_build_deploy_readback_chain(self):
         text = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("  plan:", text)
         self.assertIn("scripts/ci-impact-plan.py", text)
-        self.assertIn("  mainline-qualification:", text)
-        self.assertIn("stage: release-qualification", text)
+        self.assertNotIn("  mainline-qualification:", text)
         self.assertIn("  mainline-delivery:", text)
-        self.assertIn("stage: release-delivery", text)
-        self.assertIn("needs: [plan, mainline-qualification]", text)
-        self.assertNotIn("workflow_dispatch:", text)
+        self.assertIn("stage: mainline", text)
+        self.assertIn("needs: plan", text)
+        self.assertIn("workflow_dispatch:", text)
         self.assertNotIn("\nconcurrency:\n", text)
 
     def test_manual_product_surface_exposes_only_meaningful_operator_operations(self):

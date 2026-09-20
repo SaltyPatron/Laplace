@@ -558,7 +558,7 @@ def bootstrap(source, address=None, network=None, hostname=None):
     had_proxy_link = NGINX_ENABLED.is_symlink() and NGINX_ENABLED.readlink() == NGINX_CONFIG
     try:
         ensure_text(STATE / "lan.json", json.dumps(settings, sort_keys=True) + "\n")
-        run("/usr/bin/install", "-d", "-m", "0700", "-o", "laplace-runner", "-g", "laplace-runner", str(ROOT / "app-backups"))
+        run("/usr/bin/install", "-d", "-m", "2770", "-o", "laplace-runner", "-g", "laplace-runner", str(ROOT / "app-backups"))
         for name in ("laplace-managed-deploy", "laplace-service-control"):
             ensure_text(LIBEXEC / name, (source / name).read_text(), 0o755)
         reconcile_host()

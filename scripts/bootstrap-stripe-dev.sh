@@ -200,7 +200,10 @@ install_listener_service() {
   unit_src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/deploy/linux/managed-services/laplace-stripe.service"
   install -o root -g root -m 0644 "$unit_src" /etc/systemd/system/laplace-stripe.service
   systemctl daemon-reload
-  systemctl enable --now laplace-stripe.service
+  # Reenable materializes every WantedBy edge even when an older version of the
+  # unit was already enabled only under multi-user.target.
+  systemctl reenable laplace-stripe.service
+  systemctl start laplace-stripe.service
   systemctl is-active --quiet laplace-stripe.service
   echo "Stripe listener active: laplace-stripe.service -> http://127.0.0.1:5187/v1/billing/webhooks/stripe"
 }

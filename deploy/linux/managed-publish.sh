@@ -138,8 +138,8 @@ case "${1:-}" in
     laplace_prune_unreferenced_releases "$APP_DIR"
     mkdir -p "$ROOT/build" "$BACKUP_ROOT"
     backup="$(mktemp -d "$BACKUP_ROOT/managed.XXXXXX")"
-    chmod 0700 "$backup"
-    mkdir -m 0700 "$backup/app" "$backup/secrets"
+    chmod 2770 "$backup"
+    mkdir -m 2770 "$backup/app" "$backup/secrets"
     python3 "$ROOT/scripts/install-stockfish.py" --prefix "${LAPLACE_INSTALL_PREFIX:-/opt/laplace}" --snapshot "$backup/stockfish.json"
     # Snapshot before replacing any app file. Preserve runtime config, logs,
     # user work, and all prior immutable runtime directories IN PLACE.

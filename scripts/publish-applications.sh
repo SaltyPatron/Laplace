@@ -423,7 +423,7 @@ application_api_main() (
     echo "::error::bootstrap-owned application backup root is missing" >&2; exit 1;
   }
   backup="$(mktemp -d /opt/laplace/app-backups/api.XXXXXX)"
-  chmod 0700 "$backup"
+  chmod 2770 "$backup"
   trap 'rc=$?; trap - EXIT
     if [[ "$attempted" == 1 ]]; then
       application_api_recover "$owner" || rc=1
@@ -434,7 +434,7 @@ application_api_main() (
   trap 'exit 143' TERM HUP
   trap 'exit 130' INT
   application_guard --installed-runtime --snapshot "$backup/runtime-before.json"
-  mkdir -m 0700 "$backup/app"
+  mkdir -m 2770 "$backup/app"
   application_api_snapshot "$backup/app"
   application_api_manifest "$backup/app" "$backup/previous.json"
   printf '%s\n' "$active" > "$backup/was-active"

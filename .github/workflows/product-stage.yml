@@ -208,7 +208,7 @@ jobs:
       # planner's exact suite/project scope is available. Keep this reusable
       # stage unique per invocation so it cannot cross-cancel an unrelated test.
       # Delivery remains non-preemptibly serialized at the installed-host boundary.
-      group: ${{ inputs.skip_if_superseded && inputs.stage == 'release-delivery' && 'laplace-main-delivery' || format('laplace-product-stage-{0}-{1}', inputs.stage, github.run_id) }}
+      group: ${{ inputs.skip_if_superseded && (inputs.stage == 'mainline' || inputs.stage == 'release-delivery') && 'laplace-main-delivery' || format('laplace-product-stage-{0}-{1}', inputs.stage, github.run_id) }}
       cancel-in-progress: false
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
@@ -342,6 +342,10 @@ jobs:
             [[ "$stale_workspace" != "$candidate_workspace" ]] || continue
             stale_sha="${stale_workspace##*/}"
             [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+            if find "$stale_workspace" -maxdepth 0 -mmin -120 -print -quit | grep -q .; then
+              echo "::notice::preserving recent candidate handoff $stale_sha"
+              continue
+            fi
             if [[ -n "$preserve_native_source" && "$stale_sha" == "$preserve_native_source" ]]; then
               echo "::notice::preserving latest native-qualified candidate $stale_sha for artifact reuse"
               continue
@@ -381,6 +385,9 @@ jobs:
             [[ "$stale_source" != "$candidate_workspace" ]] || continue
             stale_sha="${stale_source##*/}"
             [[ "$stale_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+            if find "$stale_build" -maxdepth 0 -mmin -120 -print -quit | grep -q .; then
+              continue
+            fi
             if [[ -n "$preserve_native_source" && "$stale_sha" == "$preserve_native_source" ]]; then
               continue
             fi
@@ -430,7 +437,7 @@ jobs:
           # revisions have independent source/build trees. Stateful operations also
           # reserve the installed host/database, while read-only qualification does not.
           case "$LAPLACE_STAGE" in
-            release-qualification|mainline|build|test-dev|check)
+            release-qualification|build|test-dev|check)
               ;;
             *)
               exec 9>"$work_root/host-resource.lock"

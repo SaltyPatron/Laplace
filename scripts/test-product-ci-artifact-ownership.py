@@ -55,7 +55,10 @@ class ProductStageOwnershipContract(unittest.TestCase):
         issued = function("issue_live_proof_credential")
         self.assertIn("/opt/laplace/secrets/operator.env", issued)
         self.assertIn("LAPLACE_OPERATOR_TOKEN", issued)
+        self.assertIn('until curl -fsS "$api_base/health"', issued)
+        self.assertIn("within 60 seconds", issued)
         self.assertIn("/v1/billing/operator/keys", issued)
+        self.assertIn('"tenant":"local-dev"', issued)
         revoked = function("revoke_live_proof_credential")
         self.assertIn("/v1/billing/keys/revoke", revoked)
         self.assertIn("Authorization: Bearer $api_key", revoked)
@@ -308,7 +311,9 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("LAPLACE_BUILD_COMPONENTS", build)
         self.assertIn("build-native", build)
         self.assertIn("build-app", build)
-        self.assertNotIn("reuse_qualified_native_build", build)
+        self.assertIn("if (( need_native == 1 )); then", build)
+        self.assertLess(build.index("if (( need_native == 1 )); then"),
+                        build.index("reuse_qualified_native_build"))
         self.assertIn("Never turn a managed edit into a C++ rebuild", build)
         self.assertIn("LAPLACE_REUSE_INSTALLED_NATIVE=1", build)
 
@@ -396,15 +401,14 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertLess(model.index("require_built_revision"),
                         model.index("model-synthesize-ci.sh"))
 
-    def test_mainline_runs_only_impact_selected_development_qualification(self):
+    def test_mainline_builds_then_deploys_without_a_test_gate(self):
         owner = function("run_mainline")
-        self.assertIn("run_release_qualification", owner)
-        qualification = function("run_release_qualification")
-        self.assertIn("check_deps", qualification)
-        self.assertIn("run_build", qualification)
-        self.assertIn("run_dev_test_matrix 1", qualification)
-        for forbidden in ("run_install", "run_database_maintenance", "run_db_tests", "run_publish", "run_live_tests"):
-            self.assertNotIn(forbidden, qualification)
+        self.assertIn("check_deps", owner)
+        self.assertIn("run_build", owner)
+        self.assertIn("run_release_delivery", owner)
+        self.assertNotIn("run_release_qualification", owner)
+        self.assertNotIn("run_dev_test_matrix", owner)
+        self.assertLess(owner.index("run_build"), owner.index("run_release_delivery"))
 
     def test_database_maintenance_never_recreates_or_seeds_implicitly(self):
         source = (ROOT / "scripts/maintain-installed-database.sh").read_text(encoding="utf-8")

@@ -63,11 +63,9 @@ on:
 permissions:
   contents: read
 
-# A main push is one product story. Read-only qualifications finish in dispatch
-# order so a newer commit cannot repeatedly discard nearly-complete work. Delivery is
-# non-preemptible. There is deliberately no workflow-level concurrency here,
-# because workflow-level cancellation would also kill a delivery already mutating
-# the installed product.
+# A main push is one product story. The affected closure is built, deployed, and
+# read back under one non-preemptible candidate/host reservation. Broad development
+# and integration suites are explicit audits; they do not delay this dev deployment.
 jobs:
   plan:
     name: Plan affected product work
@@ -114,41 +112,15 @@ jobs:
             --github-output "$GITHUB_OUTPUT" \
             --summary "$GITHUB_STEP_SUMMARY"
 
-  mainline-qualification:
-    name: Qualify affected product inputs
-    needs: plan
-    concurrency:
-      group: ${{ needs.plan.outputs.delivery_actions != '' && 'laplace-main-product-qualification-dispatch' || format('laplace-main-test-qualification-{0}-{1}', needs.plan.outputs.dev_suites, needs.plan.outputs.managed_test_projects) }}
-      cancel-in-progress: false
-    uses: ./.github/workflows/product-stage.yml
-    with:
-      stage: release-qualification
-      target_sha: ${{ github.sha }}
-      dev_suites: ${{ needs.plan.outputs.dev_suites }}
-      build_components: ${{ needs.plan.outputs.build_components }}
-      managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}
-      managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}
-      browser_test_suites: ${{ needs.plan.outputs.browser_test_suites }}
-      managed_test_filter: ${{ needs.plan.outputs.managed_test_filter }}
-      native_test_filter: ${{ needs.plan.outputs.native_test_filter }}
-      delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
-      publish_scope: ${{ needs.plan.outputs.publish_scope }}
-      skip_if_superseded: true
-    secrets: inherit
-
   mainline-delivery:
-    name: Install, validate, publish, and activate exact candidate
-    needs: [plan, mainline-qualification]
-    # Always enter the delivery owner after successful qualification. The target
-    # may be a test-only successor whose direct diff has no mutations while the
-    # installed product is still behind an earlier product commit. The release
-    # owner reconciles installed->target impact and no-ops when there is none.
+    name: Build, deploy, and read back affected product
+    needs: plan
     concurrency:
       group: laplace-main-delivery-dispatch
       cancel-in-progress: false
     uses: ./.github/workflows/product-stage.yml
     with:
-      stage: release-delivery
+      stage: mainline
       target_sha: ${{ github.sha }}
       build_components: ${{ needs.plan.outputs.build_components }}
       managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}

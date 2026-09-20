@@ -31,4 +31,7 @@ CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
-WantedBy=multi-user.target
+# Pull the listener back in whenever application publication restarts the API.
+# PartOf propagates the stop/restart down to this unit, while this Wants link
+# supplies the missing start edge on the way back up.
+WantedBy=multi-user.target laplace-api.service

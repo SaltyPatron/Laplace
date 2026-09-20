@@ -8,47 +8,36 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 class MainPushQueueContract(unittest.TestCase):
-    def test_main_push_is_one_chain_with_job_scoped_preemption(self):
+    def test_main_push_is_one_serial_build_deploy_readback_job(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
 
         self.assertIn("name: Product — main delivery", lifecycle)
         self.assertIn("\n  push:\n", lifecycle)
-        self.assertNotIn("workflow_dispatch:", lifecycle)
+        self.assertIn("workflow_dispatch:", lifecycle)
         self.assertNotIn("\nconcurrency:\n", lifecycle)
         self.assertFalse((WORKFLOWS / "mainline-delivery.yml").exists())
 
-        qualification = lifecycle.split("  mainline-qualification:\n", 1)[1].split(
-            "\n  mainline-delivery:\n", 1)[0]
         delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
-        self.assertIn("laplace-main-product-qualification-dispatch", qualification)
-        self.assertIn("laplace-main-test-qualification-{0}-{1}", qualification)
-        self.assertIn("needs.plan.outputs.dev_suites", qualification)
-        self.assertIn("needs.plan.outputs.managed_test_projects", qualification)
-        self.assertNotIn("'laplace-main-test-qualification-dispatch'", qualification)
-        self.assertIn("needs.plan.outputs.delivery_actions != ''", qualification)
-        self.assertIn("cancel-in-progress: true", qualification)
+        self.assertNotIn("  mainline-qualification:", lifecycle)
         self.assertIn("group: laplace-main-delivery-dispatch", delivery)
         self.assertIn("cancel-in-progress: false", delivery)
+        self.assertIn("stage: mainline", delivery)
 
-        # Qualification cancellation has one owner: the scoped caller above.
-        # The reusable stage must not cross-cancel a different suite/project plan.
+        # The reusable stage holds the same non-preemptible host reservation for
+        # build, deployment, and readback.
         self.assertNotIn("laplace-main-qualification", reusable)
         self.assertIn("laplace-main-delivery", reusable)
         self.assertIn("cancel-in-progress: false", reusable)
 
 
 class WorkflowArchitecture(unittest.TestCase):
-    def test_test_only_and_product_qualification_use_distinct_preemption_groups(self):
+    def test_main_deployment_does_not_have_a_separate_test_gate(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        qualification = lifecycle.split("  mainline-qualification:\n", 1)[1].split(
-            "\n  mainline-delivery:\n", 1)[0]
-        self.assertIn("laplace-main-product-qualification-dispatch", qualification)
-        self.assertIn("laplace-main-test-qualification-{0}-{1}", qualification)
-        self.assertIn("needs.plan.outputs.dev_suites", qualification)
-        self.assertIn("needs.plan.outputs.managed_test_projects", qualification)
-        self.assertNotIn("'laplace-main-test-qualification-dispatch'", qualification)
-        self.assertIn("needs.plan.outputs.delivery_actions != ''", qualification)
+        self.assertNotIn("  mainline-qualification:", lifecycle)
+        delivery = lifecycle.split("  mainline-delivery:\n", 1)[1]
+        self.assertNotIn("managed_test_projects:", delivery)
+        self.assertNotIn("browser_test_suites:", delivery)
 
     def test_no_ephemeral_repair_workflows_remain(self):
         names = {path.name for path in WORKFLOWS.glob("*.yml")}
@@ -109,40 +98,29 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn("[actions-evidence-archive]", text)
         self.assertIn("cancel-in-progress:", text)
 
-    def test_main_delivery_plans_then_qualifies_then_delivers(self):
+    def test_main_delivery_plans_then_builds_deploys_and_reads_back(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn("  plan:", lifecycle)
         self.assertIn("scripts/ci-impact-plan.py", lifecycle)
-        self.assertIn("  mainline-qualification:", lifecycle)
-        self.assertIn("needs: plan", lifecycle)
-        self.assertIn("stage: release-qualification", lifecycle)
-        self.assertIn("dev_suites: ${{ needs.plan.outputs.dev_suites }}", lifecycle)
+        self.assertNotIn("  mainline-qualification:", lifecycle)
         self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
         self.assertIn("managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}", lifecycle)
-        self.assertIn("managed_test_projects: ${{ needs.plan.outputs.managed_test_projects }}", lifecycle)
-        self.assertIn("managed_test_filter: ${{ needs.plan.outputs.managed_test_filter }}", lifecycle)
-        qualification = lifecycle.split("  mainline-qualification:\n", 1)[1].split(
-            "\n  mainline-delivery:\n", 1)[0]
-        self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", qualification)
-        self.assertIn("publish_scope: ${{ needs.plan.outputs.publish_scope }}", qualification)
         self.assertIn("  mainline-delivery:", lifecycle)
-        self.assertIn("needs: [plan, mainline-qualification]", lifecycle)
+        self.assertIn("needs: plan", lifecycle)
         self.assertNotIn("if: needs.plan.outputs.delivery_actions != ''", lifecycle)
-        self.assertIn("installed->target impact", lifecycle)
-        self.assertIn("stage: release-delivery", lifecycle)
+        self.assertIn("stage: mainline", lifecycle)
         self.assertIn("build_components: ${{ needs.plan.outputs.build_components }}", lifecycle)
         self.assertIn("delivery_actions: ${{ needs.plan.outputs.delivery_actions }}", lifecycle)
         self.assertIn("db_suites: ${{ needs.plan.outputs.db_suites }}", lifecycle)
         self.assertIn("live_suites: ${{ needs.plan.outputs.live_suites }}", lifecycle)
         self.assertIn("publish_scope: ${{ needs.plan.outputs.publish_scope }}", lifecycle)
-        self.assertEqual(2, lifecycle.count("uses: ./.github/workflows/product-stage.yml"))
-        self.assertEqual(2, lifecycle.count("skip_if_superseded: true"))
+        self.assertEqual(1, lifecycle.count("uses: ./.github/workflows/product-stage.yml"))
+        self.assertEqual(1, lifecycle.count("skip_if_superseded: true"))
 
     def test_targeted_code_player_does_not_duplicate_mainline_build(self):
         self.assertFalse((WORKFLOWS / "code-player-ci.yml").exists())
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
-        self.assertIn("stage: release-qualification", lifecycle)
-        self.assertIn("stage: release-delivery", lifecycle)
+        self.assertIn("stage: mainline", lifecycle)
 
     def test_superseded_push_is_rejected_only_for_product_relevant_changes(self):
         reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
@@ -437,10 +415,11 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn("run_live_tests", automatic)
         self.assertNotIn("run_release_activation", automatic)
 
-    def test_manual_product_operations_are_outside_main_delivery_graph(self):
+    def test_manual_maintenance_is_separate_from_main_delivery_dispatch(self):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         manual = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
-        self.assertNotIn("workflow_dispatch:", lifecycle)
+        self.assertIn("workflow_dispatch:", lifecycle)
+        self.assertIn('base_sha:', lifecycle)
         self.assertIn("workflow_dispatch:", manual)
         self.assertEqual(1, manual.count("uses: ./.github/workflows/product-stage.yml"))
         self.assertIn("stage: ${{ inputs.operation }}", manual)
