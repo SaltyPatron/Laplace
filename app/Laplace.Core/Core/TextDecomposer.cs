@@ -77,6 +77,33 @@ public static class TextDecomposer
         return id;
     }
 
+    /// <summary>
+    /// Root identity for source-representation text. Unlike <see cref="ContentRootId(ReadOnlySpan{byte})"/>,
+    /// this validates UTF-8 but preserves the original codepoints instead of NFC-normalizing them.
+    /// It is the canonical source-file identity primitive; grammar/CST shape is not part of the id.
+    /// </summary>
+    public static Hash128? SourceRootId(ReadOnlySpan<byte> utf8)
+    {
+        if (utf8.Length == 0) return null;
+        Hash128 id = default;
+        unsafe
+        {
+            lock (LaplaceCoreGate.Native)
+            {
+                fixed (byte* p = utf8)
+                {
+                    int rc = NativeInterop.ContentSourceRootId(p, (nuint)utf8.Length, &id);
+                    if (rc == -3) throw new InvalidOperationException(
+                        "laplace_content_source_root_id: perfcache not loaded — call CodepointPerfcache.LoadDefault() first");
+                    if (rc != 0)
+                        throw new InvalidOperationException(
+                            $"laplace_content_source_root_id failed (rc={rc}, len={utf8.Length})");
+                }
+            }
+        }
+        return id;
+    }
+
     public static Hash128? ContentRootId(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
