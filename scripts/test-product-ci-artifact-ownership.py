@@ -372,6 +372,14 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertIn("LAPLACE_BUILD_COMPONENTS", database)
         self.assertIn("LAPLACE_DB_HEALTH_SCOPE=installed", database)
 
+    def test_api_publication_uses_a_bounded_verification_credential(self):
+        publish = function("run_publish")
+        self.assertIn("issue_live_proof_credential", publish)
+        self.assertIn('export LAPLACE_API_KEY="$api_key"', publish)
+        self.assertIn("revoke_live_proof_credential", publish)
+        self.assertLess(publish.index("issue_live_proof_credential"),
+                        publish.index("api-recover"))
+
     def test_competitive_proof_extends_the_same_release_modules(self):
         proof = function("run_proof")
         stages = [

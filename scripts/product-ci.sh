@@ -508,7 +508,25 @@ run_db_tests() {
   fi
 }
 run_publish() {
+  (
   local scope="${LAPLACE_PUBLISH_SCOPE:-full}"
+  local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
+  local api_key="${LAPLACE_API_KEY:-}" issued_prefix=""
+
+  case "$scope" in
+    api|api-web|full|all)
+      if [[ -z "$api_key" ]]; then
+        IFS=$'\t' read -r api_key issued_prefix < <(issue_live_proof_credential "$base")
+      fi
+      [[ -n "$api_key" ]] || {
+        echo "::error::could not obtain the bounded publication-verification credential" >&2
+        return 1
+      }
+      export LAPLACE_API_KEY="$api_key"
+      trap 'revoke_live_proof_credential "$base" "$api_key" "$issued_prefix"' EXIT
+      ;;
+  esac
+
   case "$scope" in
     web) bash scripts/publish-applications.sh web-recover ;;
     api) bash scripts/publish-applications.sh api-recover ;;
@@ -535,6 +553,7 @@ run_publish() {
     uci) bash scripts/publish-applications.sh uci-deploy ;;
     full|all) bash scripts/publish-applications.sh deploy ;;
   esac
+  )
 }
 
 verify_isolated_uci_delivery() {
