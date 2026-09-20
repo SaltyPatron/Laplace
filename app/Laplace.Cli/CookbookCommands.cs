@@ -28,11 +28,17 @@ internal static class CookbookCommands
             return Materialize(args);
         if (args.Length >= 3 && args[0] == "ingest")
             return IngestAsync(args).GetAwaiter().GetResult();
+        if (args.Length == 3 && args[0] == "inventory")
+            return InventoryAsync(args).GetAwaiter().GetResult();
+        if (args.Length == 3 && args[0] == "ingest-source")
+            return IngestSourceAsync(args).GetAwaiter().GetResult();
 
         Console.Error.WriteLine(
             "usage: cookbook inspect <source-generation.recipe.json>\n"
-            + "       cookbook materialize <recipe.json> <input.xml> <output-directory>\n"
-            + "       cookbook ingest <recipe.json> <input.xml>\n"
+            + "       cookbook materialize <recipe.json> <input-file> <output-directory>\n"
+            + "       cookbook ingest <recipe.json> <input-file>\n"
+            + "       cookbook inventory <generation.json> <source-root>\n"
+            + "       cookbook ingest-source <generation.json> <source-root>\n"
             + "         [--source-id <32-hex-bytes> | --source-name <canonical-source-name>]\n"
             + "         [--trust <0..1>] [--record-depth <depth>]");
         return 2;
@@ -199,155 +205,55 @@ internal static class CookbookCommands
         RecipeOptions options = ParseOptions(args, 3, recipe);
         string inputPath = Path.GetFullPath(args[2]);
         if (!File.Exists(inputPath)) throw new FileNotFoundException("Recipe input does not exist.", inputPath);
-        await using var decomposer = new CookbookXmlDecomposer(recipe, options, inputPath);
+        await using var decomposer = new SingleArtifactRecipeDecomposer(recipe,
+            new RecipeExecutionOptions(options.SourceId, options.SourceName, options.Trust, options.RecordDepth), inputPath);
         return await IngestCommands.IngestViaRunnerAsync(decomposer, inputPath,
             skipLayerCheck: true, skipSourceCompletion: true).ConfigureAwait(false);
     }
 
-    private sealed class CookbookXmlDecomposer : IDecomposer, IIngestArtifactGraphProvider,
-        IIngestInventoryProvider, IIgnoresAmbientArtifactManifest
+    private static async Task<int> InventoryAsync(string[] args)
     {
-        private readonly SemanticSourceRecipe _recipe;
-        private readonly RecipeOptions _options;
-        private readonly string _inputPath;
-        private readonly NativeXmlRecipe _runtime;
-        private IReadOnlyCollection<string> _canonicalNames = [];
-        private FileStream? _input;
-        private IngestArtifact? _artifact;
-
-        internal CookbookXmlDecomposer(SemanticSourceRecipe recipe, RecipeOptions options, string inputPath)
+        SourceGenerationRecipe recipe = SourceGenerationRecipe.Load(args[1]);
+        ResolvedSourceGeneration resolved = await SourceGenerationResolver.ResolveAsync(recipe, args[2]).ConfigureAwait(false);
+        RecipeSyntaxProviderRegistry providers = RecipeSyntaxProviderRegistry.CreateDefault();
+        var bindings = resolved.Bindings.ToDictionary(static binding => binding.Artifact.Path, StringComparer.Ordinal);
+        string[] executionErrors = resolved.ExecutionErrors
+            .Concat(resolved.Graph.Artifacts.Where(static artifact => artifact.Disposition == IngestArtifactDisposition.Unsupported)
+                .Select(static artifact => $"Unresolved artifact '{artifact.RelativePath}': {artifact.Notes}"))
+            .Concat(resolved.Bindings
+            .Where(binding => !providers.Supports(binding.Provider))
+            .Select(static binding => $"No executable syntax provider is registered for '{binding.Provider}' ({binding.Artifact.RelativePath})."))
+            .Distinct(StringComparer.Ordinal).ToArray();
+        Console.WriteLine(JsonSerializer.Serialize(new
         {
-            _recipe = recipe;
-            _options = options;
-            _inputPath = inputPath;
-            _runtime = new NativeXmlRecipe(recipe, options.RecordDepth);
-            DeclaredRelations = recipe.Fields
-                .Where(static field => field.Disposition.HasFlag(SourceFieldDisposition.Testimony))
-                .Select(static field => field.RelationName ?? field.PropertyName)
-                .Concat(recipe.Fields.Where(static field => field.PreserveLexicalValue && field.LexicalRelationName is not null)
-                    .Select(static field => field.LexicalRelationName!))
-                .Concat(recipe.Fields.Where(static field => field.RelationParent is not null)
-                    .Select(static field => field.RelationParent!))
-                .Concat(recipe.ProviderRoutes.Where(static route => route.RangeRelationName is not null || route.RangeRelationProperty is not null)
-                    .Select(static route => route.RangeRelationName ?? route.RangeRelationProperty!))
-                .Concat(["HAS_PROPERTY", "HAS_VERSION", "IS_TYPED_AS", "HAS_NAME_ALIAS",
-                    "IS_A", "CONTAINS", "REQUIRES", "HAS_SOURCE_URL", "HAS_LICENSE", "HAS_CITATION"])
-                .Distinct(StringComparer.Ordinal).ToArray();
-        }
-
-        public Hash128 SourceId => _options.SourceId;
-        public string SourceName => _options.SourceName;
-        public int LayerOrder => 0;
-        public bool PerFileCompletion => true;
-        public Hash128 TrustClassId => SubstrateCanonicalIds.TrustClass("StructuredCorpus");
-        public IReadOnlyList<string> DeclaredRelations { get; }
-        public IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
-
-        public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
-        {
-            string[] typeNames = _recipe.Fields.Select(static field => field.ObjectEntityType)
-                .Concat(_recipe.ProviderRoutes.Select(static route => route.Subject.EntityType))
-                .Concat(_recipe.Structures.Select(static structure => structure.SemanticType))
-                .Concat(["Codepoint", "Recipe_Value", "Recipe_Subject"])
-                .Distinct(StringComparer.Ordinal).ToArray();
-            BootstrapIntentBuilder boot = await SourceVocabularyBootstrap.RegisterAsync(
-                context, SourceId, SourceName, TrustClassId, typeNames, DeclaredRelations, ct: ct)
-                .ConfigureAwait(false);
-            _canonicalNames = boot.CanonicalNames;
-        }
-
-        public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
-            IDecomposerContext context, DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct = default)
-        {
-            IngestArtifact artifact = _artifact ?? throw new InvalidOperationException("Recipe input has not been inventoried.");
-            FileStream input = _input ?? throw new InvalidOperationException("Recipe input has not been opened.");
-            SourceArtifactIdentity identity = SourceArtifactProvenance.Resolve(artifact);
-            string label = artifact.FileLabel;
-            string recipeName = $"cookbook/{Hex(_recipe.RecipeId)}/depth/{_options.RecordDepth}"
-                + $"/trust/{BitConverter.DoubleToInt64Bits(_options.Trust):x16}";
-            Hash128 generationId = SourceArtifactProvenance.RecipeId(
-                SourceName, _recipe.Release, recipeName, [identity.ArtifactId, _recipe.RecipeId]);
-            var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
-            if (!options.ReObservePresent
-                && await context.Reader.HasFileCompletedAsync(generationId, SourceId, LayerOrder, ct).ConfigureAwait(false))
+            generationId = Hex(resolved.GenerationId), recipe.Authority, recipe.Release,
+            sourceId = Hex(recipe.SourceId), recipe.SourceName, root = resolved.Root,
+            selectedFiles = resolved.Graph.Selected.Count,
+            physicalFiles = resolved.Graph.Artifacts.Count(static artifact => artifact.Disposition != IngestArtifactDisposition.Absent),
+            bytes = resolved.Graph.Artifacts.Sum(static artifact => artifact.Bytes ?? 0),
+            executable = executionErrors.Length == 0,
+            executionErrors,
+            artifacts = resolved.Graph.Artifacts.Select(artifact =>
             {
-                observability.OnFileComposed(SourceName, label, identity.ArtifactId,
-                    resumeFingerprint: generationId);
-                yield return IngestBatchPipeline.BuildSkippedBoundary(SourceId, label);
-                yield break;
-            }
-            observability.OnFileStarted(SourceName, label, input.Length);
-            yield return IngestBatchPipeline.BindFileLabel(
-                SourceArtifactProvenance.BuildChange(artifact, SourceId, TrustClassId), label)
-                with { CountsAsUnit = false };
-            using (var manifest = new SubstrateChangeBuilder(SourceId, $"cookbook/manifest/{Hex(_recipe.RecipeId)}"))
-            {
-                manifest.AddEntity(_recipe.RecipeId, EntityTier.Document, EntityTypeRegistry.SourceReference, SourceId);
-                if (ContentEmitter.Emit(manifest, _recipe.CanonicalForm, SourceId) is { } contentId)
-                    manifest.AddAttestation(NativeAttestation.Categorical(
-                        _recipe.RecipeId, "HAS_PROPERTY", contentId, SourceId, _options.Trust));
-                manifest.DeclareSourcePrior(_options.Trust);
-                yield return IngestBatchPipeline.BindFileLabel(manifest.Build() with { CountsAsUnit = false }, label);
-            }
-            yield return IngestBatchPipeline.BindFileLabel(
-                SourceArtifactProvenance.BuildRecipeChange(SourceName, _recipe.Release,
-                    recipeName, SourceId, TrustClassId, [identity.ArtifactId, _recipe.RecipeId]), label);
-            long records = 0, entities = 0, physicalities = 0, attestations = 0;
-            using var parsedHash = SHA256.Create();
-            using var parsedInput = new CryptoStream(input, parsedHash, CryptoStreamMode.Read, leaveOpen: true);
-            await foreach (SubstrateChange change in _runtime.ReadChangesAsync(
-                               parsedInput, SourceId, _options.Trust, label,
-                               IngestSizing.ResolveApplyTransactionRows(),
-                               IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
-                               IngestSizing.ResolveSequentialIoBufferBytes(), ct: ct).ConfigureAwait(false))
-            {
-                records += change.Metadata.InputUnitsConsumed;
-                foreach (IntentStage stage in change.IntentStages)
+                bindings.TryGetValue(artifact.Path, out ResolvedSourceArtifact? binding);
+                return new
                 {
-                    entities += stage.EntityCount;
-                    physicalities += stage.PhysicalityCount;
-                    attestations += stage.AttestationCount;
-                }
-                yield return IngestBatchPipeline.BindFileLabel(SourceArtifactProvenance.Bind(change, generationId), label);
-            }
-            if (parsedHash.Hash is not { } parsedDigest
-                || !CryptographicOperations.FixedTimeEquals(parsedDigest, Convert.FromHexString(artifact.Sha256)))
-                throw new IOException("Recipe input changed while being parsed; file completion was not recorded.");
-            observability.OnFileComposed(SourceName, label, identity.ArtifactId,
-                records, entities, physicalities, attestations, resumeFingerprint: generationId);
-            yield return IngestBatchPipeline.BuildFileCompletion(SourceId, label, generationId, LayerOrder, _canonicalNames);
-        }
+                    artifact = artifact.RelativePath, disposition = artifact.DispositionName,
+                    artifact.Bytes, artifact.Sha256, reason = artifact.Notes,
+                    provider = binding?.Provider, recipeId = binding?.Recipe is { } semantic ? Hex(semantic.RecipeId) : null,
+                    dependencies = binding?.Dependencies.Select(Hex).ToArray() ?? [],
+                };
+            }),
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
 
-        public async Task<IngestArtifactGraph?> DescribeArtifactsAsync(string ecosystemPath,
-            DecomposerOptions options, CancellationToken ct = default)
-        {
-            ct.ThrowIfCancellationRequested();
-            var info = new FileInfo(_inputPath);
-            _input = new FileStream(_inputPath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            // Keep the exact same open file handle for fingerprinting and native parsing.
-            // The exact-byte identity permits completion reuse without conflating releases.
-            string sha256 = Convert.ToHexStringLower(await SHA256.HashDataAsync(_input, ct).ConfigureAwait(false));
-            _input.Position = 0;
-            _artifact = new IngestArtifact(SourceName, _recipe.Release, info.Name, info.Name, _inputPath,
-                    IngestArtifactDisposition.Admitted, UpstreamUrl: "", FetchedAtUtc: "", Bytes: info.Length,
-                    Sha256: sha256, UpstreamChecksum: "", MediaType: "application/xml", License: "",
-                    Citation: _recipe.Authority, Language: "", Split: "", AnnotationOrigin: _recipe.Provider,
-                    Notes: $"Explicit cookbook input; recipe {Hex(_recipe.RecipeId)}", ModifiedAt: info.LastWriteTimeUtc);
-            return new IngestArtifactGraph([_artifact]);
-        }
-
-        public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-            => Task.FromResult<long?>(null);
-        public Task<IngestInventory?> DescribeInputAsync(IDecomposerContext context,
-            DecomposerOptions options, CancellationToken ct = default)
-        {
-            IngestArtifact artifact = _artifact ?? throw new InvalidOperationException("Recipe input has not been inventoried.");
-            return Task.FromResult<IngestInventory?>(new IngestInventory("records", 0,
-                [new IngestFileSpec(artifact.FileLabel, _inputPath, InputUnits: 0)], TracksFileCompletion: true));
-        }
-        public ValueTask DisposeAsync() => _input?.DisposeAsync() ?? ValueTask.CompletedTask;
+    private static async Task<int> IngestSourceAsync(string[] args)
+    {
+        SourceGenerationRecipe recipe = SourceGenerationRecipe.Load(args[1]);
+        await using var decomposer = new Laplace.Decomposers.Structured.Decomposer<SourceGenerationRecipe>(recipe, args[2]);
+        return await IngestCommands.IngestViaRunnerAsync(decomposer, args[2],
+            skipLayerCheck: true, skipSourceCompletion: true).ConfigureAwait(false);
     }
 
     private sealed class TupleOutput : IDisposable

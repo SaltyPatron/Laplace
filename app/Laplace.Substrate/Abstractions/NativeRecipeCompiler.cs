@@ -32,8 +32,29 @@ public static class NativeRecipeCompiler
 
         using var image = new MemoryStream();
         using var writer = new BinaryWriter(image, Utf8, leaveOpen: true);
-        writer.Write(0x31504352u); // RCP1
+        writer.Write(recipe.DelimitedSyntax is null ? 0x31504352u : 0x32504352u);
         writer.Write((uint)recordDepth);
+        if (recipe.DelimitedSyntax is { } syntax)
+        {
+            writer.Write(1u); // Native delimited provider; shared field/route instructions follow.
+            WriteText(writer, syntax.RecordName);
+            WriteText(writer, syntax.NamespaceUri);
+            WriteText(writer, syntax.Separator);
+            WriteText(writer, syntax.CommentPrefix);
+            writer.Write(syntax.TrimFields ? 1u : 0u);
+            WriteText(writer, syntax.DirectivePrefix);
+            WriteText(writer, syntax.DirectiveRecordName);
+            writer.Write(checked((uint)syntax.Columns.Count));
+            foreach (string column in syntax.Columns) WriteText(writer, column);
+            writer.Write(checked((uint)(syntax.DirectiveColumns?.Count ?? 0)));
+            foreach (string column in syntax.DirectiveColumns ?? []) WriteText(writer, column);
+            WriteText(writer, syntax.RangeColumn);
+            WriteText(writer, syntax.RangeSeparator);
+            WriteText(writer, syntax.RangeFirstField);
+            WriteText(writer, syntax.RangeLastField);
+            writer.Write(checked((uint)syntax.MinimumColumns));
+            writer.Write(syntax.AllowTrailingEmptyColumn ? 1u : 0u);
+        }
         writer.Write(checked((uint)recipe.Fields.Count));
         foreach (SourceRecipeField field in recipe.Fields)
         {

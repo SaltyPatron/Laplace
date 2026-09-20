@@ -1,0 +1,835 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "sourceName": "UnicodeDecomposer",
+  "trust": 1,
+  "trustClass": "StandardsDerived",
+  "layerOrder": 0,
+  "artifacts": [
+    {
+      "selector": "ReadMe.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "charts/CodeCharts.pdf",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "charts/RSIndex.pdf",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "charts/RSIndex.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "charts/Readme.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "charts/fr/CodeCharts.pdf",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "charts/fr/Readme.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "emoji/ReadMe.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "emoji/emoji-sequences.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "emoji/emoji-test.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "emoji/emoji-zwj-sequences.txt",
+      "required": true,
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS51/EmojiZWJSequences",
+      "recipePath": "emoji-zwj-sequences.recipe.json",
+      "recordDepth": 2
+    },
+    {
+      "selector": "idna/Idna2008.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "idna/IdnaMappingTable.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "idna/IdnaTestV2.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "idna/ReadMe.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "security/IdentifierStatus.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "security/IdentifierType.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "security/ReadMe.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "security/confusables.txt",
+      "required": true,
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS39/confusables",
+      "recipePath": "confusables.recipe.json",
+      "recordDepth": 2
+    },
+    {
+      "selector": "security/confusablesSummary.txt",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "security/intentional.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "security/uts39-data-17.0.0.zip",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "uca/CollationTest.zip",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "uca/ReadMe.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "uca/allkeys.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "uca/ctt.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "uca/decomps.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/ArabicShaping.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/BidiBrackets.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/BidiCharacterTest.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/BidiMirroring.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/BidiTest.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/Blocks.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/CJKRadicals.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/CaseFolding.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/CompositionExclusions.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/DerivedAge.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/DerivedCoreProperties.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/DerivedNormalizationProps.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/DoNotEmit.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/EastAsianWidth.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/EmojiSources.txt",
+      "required": true,
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UCD/EmojiSources",
+      "recipePath": "emoji-sources.recipe.json",
+      "recordDepth": 2
+    },
+    {
+      "selector": "ucd/EquivalentUnifiedIdeograph.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/HangulSyllableType.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Index.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/IndicPositionalCategory.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/IndicSyllabicCategory.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Jamo.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/LineBreak.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/NameAliases.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/NamedSequences.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/NamedSequencesProv.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/NamesList.html",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucd/NamesList.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/NormalizationCorrections.txt",
+      "required": true,
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UAX15/NormalizationCorrections",
+      "recipePath": "normalization-corrections.recipe.json",
+      "recordDepth": 2
+    },
+    {
+      "selector": "ucd/NormalizationTest.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/NushuSources.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/PropList.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/PropertyAliases.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/PropertyValueAliases.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/ReadMe.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/ScriptExtensions.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Scripts.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/SpecialCasing.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/StandardizedVariants.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/TangutSources.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/UCD.zip",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucd/USourceData.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/USourceGlyphs.pdf",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/USourceRSChart.pdf",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/UnicodeData.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Unihan.zip",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucd/Unihan_DictionaryIndices.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Unihan_DictionaryLikeData.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Unihan_IRGSources.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Unihan_NumericValues.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Unihan_OtherMappings.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Unihan_RadicalStrokeCounts.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Unihan_Readings.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Unihan_Variants.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/Unikemet.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/VerticalOrientation.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/auxiliary/GraphemeBreakProperty.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/auxiliary/GraphemeBreakTest.html",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/auxiliary/GraphemeBreakTest.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/auxiliary/LineBreakTest.html",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/auxiliary/LineBreakTest.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/auxiliary/SentenceBreakProperty.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/auxiliary/SentenceBreakTest.html",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/auxiliary/SentenceBreakTest.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/auxiliary/WordBreakProperty.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/auxiliary/WordBreakTest.html",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/auxiliary/WordBreakTest.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/emoji/ReadMe.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/emoji/emoji-data.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/emoji/emoji-variation-sequences.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/extracted/DerivedBidiClass.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/DerivedBinaryProperties.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/DerivedCombiningClass.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/DerivedDecompositionType.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/DerivedEastAsianWidth.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/extracted/DerivedGeneralCategory.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/DerivedJoiningGroup.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/DerivedJoiningType.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/DerivedLineBreak.txt",
+      "required": true,
+      "disposition": "Unsupported",
+      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+    },
+    {
+      "selector": "ucd/extracted/DerivedName.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/DerivedNumericType.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/DerivedNumericValues.txt",
+      "required": true,
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
+    },
+    {
+      "selector": "ucd/extracted/index.html",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/extracted/index.html%3FC=D;O=A",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/extracted/index.html%3FC=D;O=D",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/extracted/index.html%3FC=M;O=A",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/extracted/index.html%3FC=M;O=D",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/extracted/index.html%3FC=N;O=A",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/extracted/index.html%3FC=N;O=D",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/extracted/index.html%3FC=S;O=A",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/extracted/index.html%3FC=S;O=D",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/index.html",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/index.html%3FC=D;O=A",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/index.html%3FC=D;O=D",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/index.html%3FC=M;O=A",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/index.html%3FC=M;O=D",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/index.html%3FC=N;O=A",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/index.html%3FC=N;O=D",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/index.html%3FC=S;O=A",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucd/index.html%3FC=S;O=D",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    },
+    {
+      "selector": "ucdxml/ucd.all.flat.xml",
+      "required": true,
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "UAX42/ucd.all.flat.xml",
+      "recipePath": "ucd.all.flat.recipe.json",
+      "recordDepth": 2
+    },
+    {
+      "selector": "ucdxml/ucd.all.flat.zip",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucdxml/ucd.all.grouped.zip",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucdxml/ucd.nounihan.flat.zip",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucdxml/ucd.nounihan.grouped.zip",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucdxml/ucd.unihan.flat.xml",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucdxml/ucd.unihan.flat.zip",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucdxml/ucd.unihan.grouped.zip",
+      "required": true,
+      "disposition": "EquivalentPackaging",
+      "reason": "Alternative packaging or presentation retained in the selected physical graph; semantic authority remains the corresponding selected data artifacts."
+    },
+    {
+      "selector": "ucdxml/ucdxml.readme.txt",
+      "required": true,
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
+    }
+  ]
+}

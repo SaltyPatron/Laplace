@@ -1,0 +1,55 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS51/EmojiZWJSequences",
+  "fields": [
+    {
+      "syntaxPath": "record/@sequence",
+      "propertyName": "sequence",
+      "valueKind": "CodepointSequence",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@type",
+      "propertyName": "type",
+      "valueKind": "Enumerated",
+      "disposition": "Testimony",
+      "relationName": "UCD_EMOJI_SEQUENCE_TYPE",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08,
+      "objectNamespace": "unicode/emoji_sequence_type"
+    },
+    {
+      "syntaxPath": "record/@description",
+      "propertyName": "description",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "UCD_EMOJI_SEQUENCE_DESCRIPTION",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "sequence"
+      },
+      "structurePaths": []
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "sequence",
+      "type",
+      "description"
+    ]
+  }
+}

@@ -12,7 +12,8 @@ typedef struct laplace_recipe_stream laplace_recipe_stream_t;
 int laplace_recipe_stream_new(const uint8_t* program, size_t program_bytes,
     const hash128_t* witness, double trust, laplace_recipe_stream_t** out);
 /* Feed is legal only after all prior output was drained. Bytes are consumed
- * once through the registered streaming XML provider. */
+ * once through the recipe-selected XML or delimited syntax provider. Both
+ * providers recover records for the same field/subject/value executor. */
 int laplace_recipe_stream_feed(laplace_recipe_stream_t*, const uint8_t*, size_t, int final);
 /* 1: batch produced, 0: needs input/end, negative: failure. Output stage ownership
  * transfers to the caller. Every batch respects the explicit tuple-row envelope.

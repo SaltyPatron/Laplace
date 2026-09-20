@@ -1,0 +1,44 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX34/NamedSequences",
+  "fields": [
+    {
+      "syntaxPath": "record/@name",
+      "propertyName": "name",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "UCD_NAME",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08
+    },
+    {
+      "syntaxPath": "record/@sequence",
+      "propertyName": "sequence",
+      "valueKind": "CodepointSequence",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "sequence"
+      },
+      "structurePaths": []
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "name",
+      "sequence"
+    ]
+  }
+}

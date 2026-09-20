@@ -14,18 +14,32 @@ public sealed class InstalledSourceGeneration
     public string CanonicalValue(string property, string value) =>
         Recipe.CanonicalValue(Recipe.CanonicalProperty(property), value);
 
-    public static InstalledSourceGeneration Load(string relativePath)
+    public static InstalledSourceGeneration Load(
+        string authority, string? release, string syntax)
     {
         string? configured = Environment.GetEnvironmentVariable("LAPLACE_COOKBOOK_PATH");
-        string[] candidates = string.IsNullOrWhiteSpace(configured)
-            ? [Path.Combine(AppContext.BaseDirectory, relativePath),
-               Path.Combine(Environment.CurrentDirectory, relativePath)]
-            : [File.Exists(configured) ? configured : Path.Combine(configured, relativePath)];
-        string artifact = candidates.FirstOrDefault(File.Exists)
-            ?? throw new FileNotFoundException(
-                $"Cookbook source generation '{relativePath}' is not installed.");
-        SemanticSourceRecipe recipe = new LaplaceCookbook().InstallJson(artifact);
-        return new InstalledSourceGeneration(recipe, Path.GetFullPath(artifact));
+        string root = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(AppContext.BaseDirectory, "recipes")
+            : Path.GetFullPath(configured);
+        IEnumerable<string> paths = File.Exists(root) ? [root]
+            : Directory.Exists(root) ? Directory.EnumerateFiles(root, "*.recipe.json", SearchOption.AllDirectories)
+            : throw new DirectoryNotFoundException($"Cookbook installation '{root}' does not exist.");
+        var matches = new Dictionary<Laplace.Engine.Core.Hash128, InstalledSourceGeneration>();
+        foreach (string path in paths.Order(StringComparer.Ordinal))
+        {
+            SemanticSourceRecipe recipe = new LaplaceCookbook().InstallJson(path);
+            if (recipe.Authority != authority || recipe.Syntax != syntax
+                || (release is not null && recipe.Release != release)) continue;
+            matches.TryAdd(recipe.RecipeId, new InstalledSourceGeneration(recipe, Path.GetFullPath(path)));
+        }
+        return matches.Count switch
+        {
+            1 => matches.Values.Single(),
+            0 => throw new FileNotFoundException(
+                $"No installed recipe matches authority='{authority}', release='{release ?? "selected"}', syntax='{syntax}' in '{root}'."),
+            _ => throw new InvalidOperationException(
+                $"Several installed recipes match authority='{authority}', release='{release ?? "selected"}', syntax='{syntax}'. Select the exact recipe with LAPLACE_COOKBOOK_PATH."),
+        };
     }
 
 }

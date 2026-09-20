@@ -4,6 +4,7 @@
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/content_witness_batch.h"
 #include "laplace/core/attestation_engine.h"
+#include "recipe_delimited.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -44,7 +45,7 @@ struct image_reader {
     }
 };
 struct field_rule {
-    std::string path, absent, separator, object_namespace;
+    std::string path, absent, separator, object_namespace, context_field;
     uint32_t kind, disposition, codec;
     hash128_t relation, parent, entity_type, lexical_relation;
     double rank;
@@ -139,6 +140,7 @@ static size_t rows(const intent_stage_t* s) {
 
 struct laplace_recipe_stream {
     laplace_xml_stream_t* parser = nullptr;
+    std::unique_ptr<recipe_delimited_stream> delimited;
     hash128_t witness{};
     double trust = 0;
     int depth = 2;
@@ -157,6 +159,7 @@ struct laplace_recipe_stream {
     hash128_t subject{};
     std::vector<fact> facts;
     std::unordered_map<std::string, hash128_t> content_cache;
+    size_t content_cache_bytes = 0, content_cache_limit = 0, content_cache_entries = 0;
     std::unordered_set<std::string> declared_parents;
 
     ~laplace_recipe_stream() { laplace_xml_stream_free(parser); }
@@ -181,7 +184,14 @@ struct laplace_recipe_stream {
         std::unique_ptr<tier_tree_t, decltype(&tier_tree_free)> tree(raw, tier_tree_free);
         hash128_t root;
         check(content_witness_emit_tree(stage, tree.get(), &witness, nullptr, 0, &root), "content admission");
-        content_cache.emplace(text, root); return root;
+        const size_t entry_overhead = sizeof(hash128_t) + sizeof(std::string) + 4 * sizeof(void*);
+        if (content_cache.size() < content_cache_entries &&
+            entry_overhead <= content_cache_limit - content_cache_bytes &&
+            text.size() <= content_cache_limit - content_cache_bytes - entry_overhead) {
+            content_cache.emplace(text, root);
+            content_cache_bytes += text.size() + entry_overhead;
+        }
+        return root;
     }
     hash128_t classifier(intent_stage_t* stage, const std::string& ns, const std::string& value, hash128_t type) {
         if (ns.empty() || value.empty()) throw std::runtime_error("empty classifier binding");
@@ -206,17 +216,27 @@ struct laplace_recipe_stream {
         }
         check(laplace_attestation_staged_batch_add(stage, &row, 1, nullptr), "testimony admission");
     }
-    void field(intent_stage_t* stage, const std::string& path, const std::string& raw, bool subject_binding = false) {
-        try { lower_field(stage, path, raw, subject_binding); }
+    void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
+        bool subject_binding, const std::map<std::string, std::string>& attributes) {
+        try { lower_field(stage, path, raw, subject_binding, attributes); }
         catch (const std::runtime_error& e) {
             throw std::runtime_error("field " + path + " in " + record_context + ": " + e.what());
         }
     }
-    void lower_field(intent_stage_t* stage, const std::string& path, const std::string& raw, bool subject_binding) {
+    void lower_field(intent_stage_t* stage, const std::string& path, const std::string& raw,
+        bool subject_binding, const std::map<std::string, std::string>& attributes) {
         auto i = fields.find(path);
         if (i == fields.end()) throw std::runtime_error("recipe has no field disposition");
         const auto& rule = i->second;
-        if ((rule.disposition & (1u << 10)) || raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
+        if (rule.disposition & (1u << 10)) return;
+        const std::string* context_value = nullptr;
+        if (!rule.context_field.empty()) {
+            const auto context = attributes.find(rule.context_field);
+            if (context == attributes.end())
+                throw std::runtime_error("missing declared context field " + rule.context_field);
+            context_value = &context->second;
+        }
+        if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
         const bool testimony = (rule.disposition & (1u << 6)) != 0;
         const bool ordinary_content = (rule.disposition & (1u << 1)) != 0;
         if (!testimony && !ordinary_content) {
@@ -239,6 +259,10 @@ struct laplace_recipe_stream {
             }
         }
         fact f; f.relation = rule.relation; f.rank = rule.rank; f.explicit_rank = true;
+        if (context_value && !context_value->empty()) {
+            f.context = content(stage, *context_value);
+            f.has_context = true;
+        }
         if (rule.kind == 1) {
             if (raw == "Y" || raw == "Yes" || raw == "true" || raw == "True" || raw == "1") f.confirm = true;
             else if (raw == "N" || raw == "No" || raw == "false" || raw == "False" || raw == "0") f.confirm = false;
@@ -301,7 +325,6 @@ struct laplace_recipe_stream {
         if (record.ns != route.ns) throw std::runtime_error("record namespace mismatch: " + record.name);
         range = route.kind == 0;
         membership = false; record_facts_done = false; fact_offset = 0;
-        content_cache.clear();
         if (range) {
             std::string single = record.get(route.identity);
             cursor = point(single.empty() ? record.get(route.first) : single);
@@ -336,13 +359,14 @@ struct laplace_recipe_stream {
         for (const auto& a : record.attributes) {
             const bool bound = a.first == route.identity || a.first == route.first || a.first == route.last ||
                 a.first == route.range_first || a.first == route.range_last;
-            field(stage, route.prefix + "/@" + a.first, a.second, bound);
+            field(stage, route.prefix + "/@" + a.first, a.second, bound, record.attributes);
         }
         for (const auto& child : record.children) {
             auto prefix = route.children.find(child.name);
             if (prefix == route.children.end()) throw std::runtime_error("recipe has no child disposition: " + child.name);
             if (child.ns != route.ns || !child.children.empty()) throw std::runtime_error("unaccounted nested structure");
-            for (const auto& a : child.attributes) field(stage, prefix->second + "/@" + a.first, a.second);
+            for (const auto& a : child.attributes)
+                field(stage, prefix->second + "/@" + a.first, a.second, false, child.attributes);
         }
         active = true;
     }
@@ -356,9 +380,36 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
     try {
         s = std::make_unique<laplace_recipe_stream>(); s->witness = *witness; s->trust = trust;
         image_reader r{program,n};
-        if (r.number() != 0x31504352u) throw std::runtime_error("unsupported recipe instruction version");
+        const uint32_t version = r.number();
+        if (version != 0x31504352u && version != 0x32504352u)
+            throw std::runtime_error("unsupported recipe instruction version");
         s->depth = int(r.number());
         if (s->depth < 0 || s->depth > 128) throw std::runtime_error("invalid record depth");
+        uint32_t provider_kind = 0;
+        if (version == 0x32504352u) {
+            provider_kind = r.number();
+            if (provider_kind > 1) throw std::runtime_error("unsupported recipe syntax provider");
+            if (provider_kind == 1) {
+                recipe_delimited_config config;
+                config.record_name = r.text(); config.namespace_uri = r.text();
+                config.separator = r.text(); config.comment_prefix = r.text();
+                const uint32_t trim = r.number();
+                if (trim > 1) throw std::runtime_error("invalid field trimming instruction");
+                config.trim_fields = trim != 0;
+                config.directive_prefix = r.text(); config.directive_record_name = r.text();
+                const uint32_t column_count = r.number();
+                for (uint32_t i = 0; i < column_count; ++i) config.columns.push_back(r.text());
+                const uint32_t directive_column_count = r.number();
+                for (uint32_t i = 0; i < directive_column_count; ++i) config.directive_columns.push_back(r.text());
+                config.range_column = r.text(); config.range_separator = r.text();
+                config.range_first_field = r.text(); config.range_last_field = r.text();
+                config.minimum_columns = r.number();
+                const uint32_t trailing_empty = r.number();
+                if (trailing_empty > 1) throw std::runtime_error("invalid trailing-column instruction");
+                config.allow_trailing_empty_column = trailing_empty != 0;
+                s->delimited = std::make_unique<recipe_delimited_stream>(std::move(config));
+            }
+        }
         uint32_t count = r.number();
         for (uint32_t j = 0; j < count; ++j) {
             field_rule f; f.path = r.text(); f.kind = r.number(); f.disposition = r.number(); f.codec = r.number();
@@ -367,6 +418,9 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             f.relation = r.hash(); f.parent = r.hash(); f.entity_type = r.hash(); f.lexical_relation = r.hash(); f.rank = r.real();
             uint32_t aliases = r.number();
             for (uint32_t a = 0; a < aliases; ++a) { auto k = r.text(); auto v = r.text(); if (!f.aliases.emplace(alias_key(k),v).second) throw std::runtime_error("duplicate value alias instruction"); }
+            if (version == 0x32504352u) f.context_field = r.text();
+            if (!f.context_field.empty() && f.codec == 3)
+                throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
             std::string key = f.path;
             if (!s->fields.emplace(key,std::move(f)).second) throw std::runtime_error("duplicate field instruction");
         }
@@ -390,7 +444,8 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             if (!s->routes.emplace(key,std::move(route)).second) throw std::runtime_error("duplicate route instruction");
         }
         if (r.remaining) throw std::runtime_error("trailing recipe instructions");
-        s->check(laplace_xml_stream_new(&s->parser), "XML provider creation");
+        if (provider_kind == 0)
+            s->check(laplace_xml_stream_new(&s->parser), "XML provider creation");
         *out = s.release(); return 0;
     } catch (const std::bad_alloc&) { return -3; }
     catch (const std::exception& e) { if (s) { s->failed = true; try { s->error = e.what(); } catch (...) {} *out = s.release(); } return -2; }
@@ -399,6 +454,15 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
 extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint8_t* bytes, size_t n, int final) {
     if (!s || s->failed || s->final || !s->pending.empty() || s->active || s->ready) return -1;
     try {
+        if (s->delimited) {
+            s->delimited->feed(bytes, n, final != 0,
+                [&](const std::string& name, const std::string& ns,
+                    std::map<std::string, std::string>&& attributes) {
+                    s->pending.push_back(node{name, ns, std::move(attributes), {}});
+                });
+            s->final = final != 0;
+            return 0;
+        }
         const laplace_xml_event_t* events = nullptr; size_t count = 0;
         if (laplace_xml_stream_feed(s->parser,bytes,n,final,&events,&count) != 0)
             throw std::runtime_error(laplace_xml_stream_error(s->parser));
@@ -430,19 +494,79 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
 namespace {
 // Preserve all native interpretation/provenance tuples when coalescing records.
 // The final import is one set operation, independent of semantic row count.
+struct tuple_span {
+    const uint8_t* bytes;
+    size_t size;
+};
+struct tuple_selection {
+    std::array<std::vector<tuple_span>, 4> spans;
+    std::array<size_t, 4> byte_counts{};
+    size_t row_count = 0;
+};
 struct tuple_batch {
     std::array<std::vector<uint8_t>, 4> buffers;
+    // Keys contain the complete canonical tuple, not only its id. Distinct
+    // type/provenance interpretations and physical realizations survive; hash
+    // equality alone never establishes identity. Testimony is never indexed.
+    std::array<std::unordered_set<std::string>, 4> canonical_rows;
     size_t row_count = 0, base_bytes;
     explicit tuple_batch(size_t base) : base_bytes(base) {}
     static const uint8_t* buffer(const intent_stage_t* stage, size_t index, size_t* size) {
         return index == 3 ? intent_stage_entity_interpretation_tuple_ptr(stage, size)
             : intent_stage_tuple_ptr(stage, static_cast<intent_stage_table_t>(index + 1), size);
     }
-    bool fits(const intent_stage_t* stage, size_t maximum_rows, size_t maximum_bytes) const {
-        if (rows(stage) > maximum_rows - row_count || base_bytes > maximum_bytes) return false;
+    static size_t tuple_size(const uint8_t* bytes, size_t available, uint16_t columns) {
+        if (available < 2 || (uint16_t(bytes[0]) << 8 | bytes[1]) != columns)
+            throw std::runtime_error("recipe canonical tuple has invalid columns");
+        size_t offset = 2;
+        for (uint16_t column = 0; column < columns; ++column) {
+            if (available - offset < 4)
+                throw std::runtime_error("recipe canonical tuple has truncated field length");
+            const uint32_t length = uint32_t(bytes[offset]) << 24 |
+                uint32_t(bytes[offset + 1]) << 16 | uint32_t(bytes[offset + 2]) << 8 |
+                uint32_t(bytes[offset + 3]);
+            offset += 4;
+            if (length == UINT32_MAX) continue;
+            if (length > INT32_MAX || length > available - offset)
+                throw std::runtime_error("recipe canonical tuple has truncated field body");
+            offset += length;
+        }
+        return offset;
+    }
+    tuple_selection select(const intent_stage_t* stage) const {
+        tuple_selection selected;
+        for (size_t i = 0; i < buffers.size(); ++i) {
+            size_t size = 0; const uint8_t* bytes = buffer(stage, i, &size);
+            if (!size) continue;
+            if (i == 2) {
+                // Every source observation, including repeated interval facts,
+                // retains its exact testimony cardinality and replay semantics.
+                selected.spans[i].push_back({bytes, size});
+                selected.byte_counts[i] = size;
+                selected.row_count += intent_stage_attestation_count(stage);
+                continue;
+            }
+            std::unordered_set<std::string> local;
+            size_t offset = 0;
+            while (offset < size) {
+                const size_t length = tuple_size(bytes + offset, size - offset, i == 1 ? 10 : 4);
+                std::string key(reinterpret_cast<const char*>(bytes + offset), length);
+                if (canonical_rows[i].find(key) == canonical_rows[i].end() &&
+                    local.emplace(std::move(key)).second) {
+                    selected.spans[i].push_back({bytes + offset, length});
+                    selected.byte_counts[i] += length;
+                    if (i < 3) ++selected.row_count;
+                }
+                offset += length;
+            }
+        }
+        return selected;
+    }
+    bool fits(const tuple_selection& selected, size_t maximum_rows, size_t maximum_bytes) const {
+        if (selected.row_count > maximum_rows - row_count || base_bytes > maximum_bytes) return false;
         size_t remaining = maximum_bytes - base_bytes;
         for (size_t i = 0; i < buffers.size(); ++i) {
-            size_t added = 0; buffer(stage, i, &added);
+            const size_t added = selected.byte_counts[i];
             if (added > SIZE_MAX - buffers[i].size()) return false;
             size_t needed = buffers[i].size() + added;
             if (needed > remaining) return false;
@@ -457,12 +581,14 @@ struct tuple_batch {
         }
         return true;
     }
-    void append(const intent_stage_t* stage) {
-        for (size_t i = 0; i < buffers.size(); ++i) {
-            size_t size = 0; const auto* bytes = buffer(stage, i, &size);
-            if (size) buffers[i].insert(buffers[i].end(), bytes, bytes + size);
-        }
-        row_count += rows(stage);
+    void append(const tuple_selection& selected) {
+        for (size_t i = 0; i < buffers.size(); ++i)
+            for (const auto& span : selected.spans[i]) {
+                buffers[i].insert(buffers[i].end(), span.bytes, span.bytes + span.size);
+                if (i != 2)
+                    canonical_rows[i].emplace(reinterpret_cast<const char*>(span.bytes), span.size);
+            }
+        row_count += selected.row_count;
     }
     stage_ptr finish(size_t maximum_bytes) {
         intent_stage_t* raw = nullptr;
@@ -492,6 +618,12 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
         const size_t base = intent_stage_memory_bytes(empty.get());
         empty.reset();
         tuple_batch batch(base);
+        // Reuse exact value composition across physical records in this output
+        // working set. Cache eviction/rebatching changes work, never identities
+        // or field testimony. A deferred stage owns every row it has prepared.
+        s->content_cache.clear(); s->content_cache_bytes = 0;
+        s->content_cache_limit = maximum_bytes / 4;
+        s->content_cache_entries = maximum_rows;
         uint64_t finished = 0;
         while (!s->pending.empty() || s->ready) {
             if (!s->ready) {
@@ -536,11 +668,12 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
                     }
                 }
             }
-            if (!batch.fits(s->ready.get(), maximum_rows, maximum_bytes)) {
+            const tuple_selection selected = batch.select(s->ready.get());
+            if (!batch.fits(selected, maximum_rows, maximum_bytes)) {
                 if (batch.row_count || finished) break;
                 throw std::runtime_error("one record's structure exceeds the admitted output envelope");
             }
-            batch.append(s->ready.get()); finished += s->ready_completed;
+            batch.append(selected); finished += s->ready_completed;
             s->ready.reset(); s->ready_completed = 0;
             if (batch.row_count == maximum_rows) break;
         }

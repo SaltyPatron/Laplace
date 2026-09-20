@@ -1,0 +1,64 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UCD/EmojiSources",
+  "fields": [
+    {
+      "syntaxPath": "record/@sequence",
+      "propertyName": "sequence",
+      "valueKind": "CodepointSequence",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@docomo",
+      "propertyName": "docomo",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "UCD_EMOJI_SOURCE_DOCOMO",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08
+    },
+    {
+      "syntaxPath": "record/@kddi",
+      "propertyName": "kddi",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "UCD_EMOJI_SOURCE_KDDI",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08
+    },
+    {
+      "syntaxPath": "record/@softbank",
+      "propertyName": "softbank",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "UCD_EMOJI_SOURCE_SOFTBANK",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "sequence"
+      },
+      "structurePaths": []
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "sequence",
+      "docomo",
+      "kddi",
+      "softbank"
+    ]
+  }
+}

@@ -212,6 +212,12 @@ internal static class IngestDispatchTable
 
     internal static bool TryDispatch(string sourceKey, IngestCommands.IngestCliArgs cli, out Task<int> task)
     {
+        if (CliRuntime.Decomposers.TryResolveGeneration(sourceKey, cli.Path, out var configured, out var sourceRoot))
+        {
+            task = IngestCommands.IngestViaRunnerAsync(configured, sourceRoot,
+                skipLayerCheck: configured.LayerOrder == 0, cli, skipSourceCompletion: true);
+            return true;
+        }
         if (Routes.TryGetValue(sourceKey, out var handler))
         {
             task = handler(cli);
@@ -248,6 +254,7 @@ internal static class IngestDispatchTable
     /// </summary>
     internal static IReadOnlyCollection<string> RegisteredKeys =>
         Routes.Keys
+            .Concat(CliRuntime.Decomposers.SelectedGenerationKeys)
               .Concat(ModelAliases)
               .Concat(EtlManifest.Names.Where(EtlManifest.IsRoutable))
               .Distinct(StringComparer.OrdinalIgnoreCase)

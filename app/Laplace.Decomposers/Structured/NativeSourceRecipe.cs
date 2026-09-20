@@ -7,12 +7,12 @@ using Laplace.SubstrateCRUD;
 namespace Laplace.Decomposers.Structured;
 
 /// <summary>One compiled source recipe, native parsing/composition, and bulk writer handoffs.</summary>
-public sealed class NativeXmlRecipe
+public sealed class NativeSourceRecipe
 {
     private readonly byte[] _program;
     public SemanticSourceRecipe Recipe { get; }
 
-    public NativeXmlRecipe(SemanticSourceRecipe recipe, int recordDepth = 2)
+    public NativeSourceRecipe(SemanticSourceRecipe recipe, int recordDepth = 2)
     {
         Recipe = recipe ?? throw new ArgumentNullException(nameof(recipe));
         _program = NativeRecipeCompiler.Compile(recipe, recordDepth);

@@ -97,6 +97,20 @@ It may change performance, WAL, memory, CPU occupancy and scheduling. It may not
 
 ## Source-provider ownership
 
+Runtime source selection binds the entire selected artifact graph to authority,
+release, syntax-provider configuration, semantic recipes and exact artifact identities.
+`Decomposer<TRecipe>` executes that configuration through shared scheduling and
+admission. A single XML field map is one artifact recipe; it cannot stand in for
+Unicode or any other complete logical source. Source-specific bootstrap and codec
+algorithms remain provider operations; source filenames, releases and semantic
+field inventories must not select private decomposer implementations.
+
+Native COPY tuple buffers are transport into the shared writer, not delivered
+knowledge or cognition. Repeated identical canonical rows should coalesce within
+the working set before crossing that boundary, while distinct interpretations,
+occurrences and attributed testimony retain their semantics. Emitted row volume
+does not establish unique durable content or a witnessed answer.
+
 A source/provider may own:
 
 - enumeration of the source's selected physical artifact graph;

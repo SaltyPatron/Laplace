@@ -1,0 +1,57 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UTS39/confusables",
+  "fields": [
+    {
+      "syntaxPath": "record/@source",
+      "propertyName": "source",
+      "valueKind": "CodepointSequence",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@target",
+      "propertyName": "target",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "CONFUSABLE_WITH",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08,
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@status",
+      "propertyName": "status",
+      "valueKind": "Enumerated",
+      "disposition": "Testimony",
+      "relationName": "UCD_CONFUSABLE_STATUS",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08,
+      "objectNamespace": "unicode/confusable_status"
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "source"
+      },
+      "structurePaths": []
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "source",
+      "target",
+      "status"
+    ]
+  }
+}

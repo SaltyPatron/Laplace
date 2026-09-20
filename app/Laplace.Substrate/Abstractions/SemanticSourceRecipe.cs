@@ -121,6 +121,24 @@ public sealed record SourceRecipeArtifact(
     IReadOnlyList<string>? DependsOn = null,
     IReadOnlyList<string>? ProviderRoutes = null);
 
+/// <summary>Concrete delimited syntax; field meanings remain ordinary recipe rules.</summary>
+public sealed record SourceDelimitedSyntax(
+    string RecordName,
+    IReadOnlyList<string> Columns,
+    string Separator = ";",
+    string CommentPrefix = "#",
+    bool TrimFields = true,
+    string NamespaceUri = "",
+    string DirectivePrefix = "",
+    string DirectiveRecordName = "",
+    IReadOnlyList<string>? DirectiveColumns = null,
+    string RangeColumn = "",
+    string RangeSeparator = "..",
+    string RangeFirstField = "first",
+    string RangeLastField = "last",
+    int MinimumColumns = 0,
+    bool AllowTrailingEmptyColumn = false);
+
 /// <summary>
 /// Versioned, deterministic semantic recipe.  It is independent of batching,
 /// concurrency and storage tuning: those change execution, not what an assertion means.
@@ -144,12 +162,30 @@ public sealed class SemanticSourceRecipe
         IEnumerable<SourceRecipeStructure>? structures = null,
         IReadOnlyDictionary<string, string>? valueAliases = null,
         IEnumerable<SourceRecipeProviderRoute>? providerRoutes = null,
-        IEnumerable<SourceRecipeArtifact>? artifacts = null)
+        IEnumerable<SourceRecipeArtifact>? artifacts = null,
+        SourceDelimitedSyntax? delimitedSyntax = null)
     {
         Authority = Required(authority, nameof(authority));
         Release = Required(release, nameof(release));
         Provider = Required(provider, nameof(provider));
         Syntax = Required(syntax, nameof(syntax));
+        DelimitedSyntax = delimitedSyntax;
+        if (delimitedSyntax is { } delimited)
+        {
+            Required(delimited.RecordName, nameof(delimitedSyntax));
+            Required(delimited.Separator, nameof(delimitedSyntax));
+            if (delimited.Columns.Count == 0 || delimited.Columns.Any(string.IsNullOrWhiteSpace)
+                || delimited.Columns.Distinct(StringComparer.Ordinal).Count() != delimited.Columns.Count
+                || delimited.Separator.IndexOfAny(['\r', '\n']) >= 0
+                || delimited.MinimumColumns < 0 || delimited.MinimumColumns > delimited.Columns.Count)
+                throw new ArgumentException("Delimited syntax requires distinct columns and a non-line separator.", nameof(delimitedSyntax));
+            if (delimited.DirectivePrefix.Length != 0 && (delimited.DirectiveRecordName.Length == 0
+                || delimited.DirectiveColumns is not { Count: > 0 }))
+                throw new ArgumentException("Directive syntax requires a record route and columns.", nameof(delimitedSyntax));
+            if (delimited.RangeColumn.Length != 0 && (delimited.RangeSeparator.Length == 0
+                || delimited.RangeFirstField.Length == 0 || delimited.RangeLastField.Length == 0))
+                throw new ArgumentException("Range syntax requires separator and endpoint fields.", nameof(delimitedSyntax));
+        }
 
         SourceRecipeField[] fieldArray = fields?.ToArray()
             ?? throw new ArgumentNullException(nameof(fields));
@@ -227,6 +263,7 @@ public sealed class SemanticSourceRecipe
     public string Release { get; }
     public string Provider { get; }
     public string Syntax { get; }
+    public SourceDelimitedSyntax? DelimitedSyntax { get; }
     public IReadOnlyList<SourceRecipeField> Fields => _fieldList;
     public IReadOnlyList<SourceRecipeStructure> Structures { get; }
     public IReadOnlyDictionary<string, string> ValueAliases => _valueAliases;
@@ -285,6 +322,27 @@ public sealed class SemanticSourceRecipe
         Append(canonical, Release);
         Append(canonical, Provider);
         Append(canonical, Syntax);
+        if (DelimitedSyntax is { } delimited)
+        {
+            canonical.Append("|delimited/v1");
+            Append(canonical, delimited.RecordName);
+            Append(canonical, delimited.NamespaceUri);
+            Append(canonical, delimited.Separator);
+            Append(canonical, delimited.CommentPrefix);
+            Append(canonical, delimited.TrimFields ? "1" : "0");
+            Append(canonical, delimited.DirectivePrefix);
+            Append(canonical, delimited.DirectiveRecordName);
+            Append(canonical, delimited.Columns.Count.ToString(CultureInfo.InvariantCulture));
+            foreach (string column in delimited.Columns) Append(canonical, column);
+            Append(canonical, (delimited.DirectiveColumns?.Count ?? 0).ToString(CultureInfo.InvariantCulture));
+            foreach (string column in delimited.DirectiveColumns ?? []) Append(canonical, column);
+            Append(canonical, delimited.RangeColumn);
+            Append(canonical, delimited.RangeSeparator);
+            Append(canonical, delimited.RangeFirstField);
+            Append(canonical, delimited.RangeLastField);
+            Append(canonical, delimited.MinimumColumns.ToString(CultureInfo.InvariantCulture));
+            Append(canonical, delimited.AllowTrailingEmptyColumn ? "1" : "0");
+        }
         foreach (SourceRecipeField field in fields.OrderBy(static f => f.SyntaxPath, StringComparer.Ordinal))
         {
             canonical.Append("|f");

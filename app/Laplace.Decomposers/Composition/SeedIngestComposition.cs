@@ -18,6 +18,7 @@ using Laplace.Decomposers.VerbNet;
 using Laplace.Decomposers.Wiktionary;
 using Laplace.Decomposers.WordNet;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Structured;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Laplace.Decomposers.Composition;
@@ -29,12 +30,8 @@ namespace Laplace.Decomposers.Composition;
 public static class SeedIngestComposition
 {
     /// <summary>
-    /// The key -> decomposer binding, declared ONCE. A decomposer is a class, so
-    /// this binding is the one part of the ingest roster that genuinely cannot come
-    /// from the substrate — but it was written twice: as 24 AddTransient&lt;T&gt;()
-    /// lines and again as a 24-arm switch mapping the same key to the same T. Adding
-    /// a decomposer meant editing both, and editing only one produced either an
-    /// unresolvable service at runtime or a key the resolver rejected.
+    /// Built-in providers remain available when no runtime source generation is
+    /// selected. Explicit configuration routes through the shared recipe decomposer.
     /// </summary>
     internal static readonly (string Key, Type Decomposer)[] Registry =
     [
@@ -80,6 +77,7 @@ public static class SeedIngestComposition
             services.AddTransient(decomposer);
 
 
+        services.AddSingleton<SourceGenerationCatalog>();
         services.AddSingleton<ISeedDecomposerResolver, SeedDecomposerResolver>();
         return services;
     }
@@ -89,6 +87,9 @@ public static class SeedIngestComposition
 public interface ISeedDecomposerResolver
 {
     IDecomposer Resolve(string sourceKey);
+    IReadOnlyCollection<string> SelectedGenerationKeys => Array.Empty<string>();
+    bool TryResolveGeneration(string sourceKey, string? root, out IDecomposer decomposer, out string resolvedRoot)
+    { decomposer = null!; resolvedRoot = ""; return false; }
     IDecomposer ResolveModel(string modelDir, bool? persistEvidence = null);
     IDecomposer ResolveRecipe(string recipePath);
     IDecomposer ResolveEtl(EtlSource src);
@@ -99,15 +100,29 @@ public sealed class SeedDecomposerResolver : ISeedDecomposerResolver
 {
     private readonly IServiceProvider _sp;
     private readonly IEnumerable<IContentRecordAdapter> _adapters;
+    private readonly SourceGenerationCatalog _generations;
 
     public SeedDecomposerResolver(IServiceProvider sp, IEnumerable<IContentRecordAdapter> adapters)
     {
         _sp = sp;
         _adapters = adapters;
+        _generations = sp.GetService<SourceGenerationCatalog>() ?? new SourceGenerationCatalog();
+    }
+
+    public IReadOnlyCollection<string> SelectedGenerationKeys => _generations.Keys;
+
+    public bool TryResolveGeneration(string sourceKey, string? root, out IDecomposer decomposer, out string resolvedRoot)
+    {
+        if (!_generations.TryGet(sourceKey, out var recipe))
+        { decomposer = null!; resolvedRoot = ""; return false; }
+        resolvedRoot = Path.GetFullPath(root ?? recipe.Root ?? Path.GetDirectoryName(recipe.ManifestPath)!);
+        decomposer = new Structured.Decomposer<SourceGenerationRecipe>(recipe, resolvedRoot);
+        return true;
     }
 
     public IDecomposer Resolve(string sourceKey)
     {
+        if (TryResolveGeneration(sourceKey, null, out var configured, out _)) return configured;
         foreach (var (key, decomposer) in SeedIngestComposition.Registry)
             if (string.Equals(key, sourceKey, StringComparison.OrdinalIgnoreCase))
                 return (IDecomposer) _sp.GetRequiredService(decomposer);

@@ -89,7 +89,11 @@ public sealed class UnicodeDecomposer
                 "The Unicode UCDXML recipe requires exactly one PropertyAliases.txt sidecar; "
                 + $"selected aliases={propertyAliases.Length}.");
         _ucdXmlRecipe = InstalledSourceGeneration.Load(
-            "recipes/unicode/UCD/17.0.0/ucd.all.flat.recipe.json");
+            "Unicode/UCD",
+            context.HasArtifactGraph
+                ? context.SelectedArtifacts.First(a => Path.GetFullPath(a.Path) == Path.GetFullPath(xml[0].Path)).Release
+                : null,
+            "UAX42/ucd.all.flat.xml");
         _cookbook.Register(_ucdXmlRecipe.Recipe);
         SemanticSourceRecipe selectedRecipe = _cookbook.Resolve(
             _ucdXmlRecipe.Recipe.RecipeId);
@@ -1461,14 +1465,14 @@ public sealed class UnicodeDecomposer
     private sealed class UcdXmlSemanticPhase : IDecomposer
     {
         private readonly UnicodeSeedSnapshot _snapshot;
-        private readonly NativeXmlRecipe _runtime;
+        private readonly NativeSourceRecipe _runtime;
 
         public UcdXmlSemanticPhase(
             UnicodeSeedSnapshot snapshot,
             InstalledSourceGeneration recipe)
         {
             _snapshot = snapshot;
-            _runtime = new NativeXmlRecipe(recipe.Recipe);
+            _runtime = new NativeSourceRecipe(recipe.Recipe);
         }
 
         public Hash128 SourceId => Source;

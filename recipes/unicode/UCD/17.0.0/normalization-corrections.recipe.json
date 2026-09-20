@@ -1,0 +1,68 @@
+{
+  "authority": "Unicode/UCD",
+  "release": "17.0.0",
+  "provider": "laplace/native-streaming-delimited-recipe/v1",
+  "syntax": "UAX15/NormalizationCorrections",
+  "fields": [
+    {
+      "syntaxPath": "record/@source",
+      "propertyName": "source",
+      "valueKind": "CodepointSequence",
+      "disposition": "Identity, Reference",
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@old",
+      "propertyName": "old",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "UCD_NORMALIZATION_OLD_MAPPING",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08,
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@new",
+      "propertyName": "new",
+      "valueKind": "CodepointSequence",
+      "disposition": "Reference, Testimony",
+      "relationName": "UCD_NORMALIZATION_NEW_MAPPING",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08,
+      "referenceCodec": "UnicodeCodepointSequence",
+      "sequenceSeparator": " "
+    },
+    {
+      "syntaxPath": "record/@version",
+      "propertyName": "version",
+      "valueKind": "Text",
+      "disposition": "Content, Testimony",
+      "relationName": "UCD_NORMALIZATION_CORRECTION_VERSION",
+      "relationParent": "HAS_ATTRIBUTE",
+      "relationRank": 0.08
+    }
+  ],
+  "providerRoutes": [
+    {
+      "recordName": "record",
+      "namespaceUri": "",
+      "fieldPrefix": "record",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "source"
+      },
+      "structurePaths": []
+    }
+  ],
+  "delimitedSyntax": {
+    "recordName": "record",
+    "columns": [
+      "source",
+      "old",
+      "new",
+      "version"
+    ]
+  }
+}
