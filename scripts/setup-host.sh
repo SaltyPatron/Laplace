@@ -51,6 +51,7 @@ Usage: sudo bash $0
   storage                  Repair shared storage and runner environment; verify both writers.
   shared-workspace         Repair operator/runner checkout ownership only; no build or restart.
   migrations               Apply database migrations only; reuse the completed build.
+  stripe                   Seed Stripe secrets and install/start the dev webhook listener only.
   managed-services         Reconcile managed host policy only; no DB rebuild or app restart.
   managed-services-status  Read-only managed host configuration/drift report.
   cutechess-session        Prepare and start the persistent operator Qt session over SSH.
@@ -407,7 +408,7 @@ case "$MODE" in
     stripe)         do_stripe ;;
     -h|--help|help) usage ;;
     *)
-        red "Unknown mode: $MODE — use setup/storage/shared-workspace/migrations/managed-services/managed-services-status/cutechess-session/status/reset"
+        red "Unknown mode: $MODE — use setup/storage/shared-workspace/migrations/stripe/managed-services/managed-services-status/cutechess-session/status/reset"
         usage
         exit 64
         ;;
