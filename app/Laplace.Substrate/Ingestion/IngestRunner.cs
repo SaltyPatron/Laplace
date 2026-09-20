@@ -596,9 +596,14 @@ public sealed class IngestRunner
             && failures.Count == 0
             && filesComplete;
 
+        // A resumed multi-file run does not observe the input units inside marker-skipped
+        // files. Publishing this run's observed suffix as the source's exact total shrinks the
+        // inventory (VerbNet: 329 files became input_total=142 after 187 files were reused).
+        // Preserve the declared/previous inventory whenever any file was reused complete.
         if (fullSuccessfulExtraction
             && inventory is not null
-            && counters.InputUnitsDone > 0)
+            && counters.InputUnitsDone > 0
+            && counters.FilesSkippedComplete == 0)
             inventory.PublishExactTotal(counters.InputUnitsDone);
 
         if (!options.SkipSourceCompletion
