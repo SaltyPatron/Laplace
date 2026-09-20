@@ -54,6 +54,35 @@ is not authority when it loses source precision.
 
 Content novelty and occurrence volume remain distinct.
 
+Rule #1d — A constituent composition is one entity everywhere
+------------------------------------------------------------
+
+Canonical identity is the ordered canonical constituent identity sequence.
+
+If:
+
+    ['k','i','n','g']
+
+composes to entity K, then K is the entity referenced everywhere that exact composition
+occurs. "word", "name", "title", "label", "token", source, sentence position, language
+use, tier, container, sense, or task role do not mint another K.
+
+Those facts live in physicality/trajectory, occurrence, typed relations, testimony,
+context or calculation around K.
+
+The same rule applies recursively to image structure. If an exact ordered 2x2 pixel
+composition P occurs inside an 8x8 region, inside another image, or as a standalone
+selected patch, every occurrence references P. The containing 8x8 does not own a
+private copy or tier-specific hash of P.
+
+Likewise, if the exact ordered constituent sequence is admitted at two different tiers,
+hash128_merkle produces the same id. Tier is deliberately discarded by the executable
+hash law.
+
+Do not salt content identity with tier, source, parent/container, occurrence ordinal,
+semantic role/type label, modality, cache profile, physicality or provenance when those
+facts do not change the canonical ordered constituent content itself.
+
 Rule #2 — Physicality is typed
 ------------------------------
 
