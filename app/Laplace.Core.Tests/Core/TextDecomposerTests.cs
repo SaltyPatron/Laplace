@@ -113,7 +113,7 @@ public class TextDecomposerTests
         Assert.NotNull(tree);
 
         Hash128 direct = Assert.IsType<Hash128>(TextDecomposer.SourceRootId(source));
-        Assert.Equal(direct, tree.RootId());
+        Assert.Equal(direct, tree.GetNode(tree.NaturalUnitIndex()).Id);
     }
 
     [Fact]
