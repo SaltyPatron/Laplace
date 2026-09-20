@@ -183,6 +183,32 @@ Tier records compositional altitude within a selected recipe. It is not itself t
 
 The general law is recursive composition. The modality grammar determines which constituents are admitted and how they are grouped.
 
+### One composition, one entity, everywhere
+
+Content identity is not scoped to the place where the content was found.
+
+If the ordered constituents are:
+
+~~~text
+['k','i','n','g']
+~~~
+
+then the resulting canonical entity is the same entity wherever that exact composition appears. "word", "name", "label", "title", "token", tier, source, sentence, document, language use, semantic sense or application role are state about or around that entity.
+
+They do not create another content identity.
+
+The same law applies recursively to every modality. A 2x2 pixel composition occurring inside an 8x8 region is the same canonical 2x2 entity when it appears in another region, another image, a video frame, or as a standalone selected structure. Higher structures reference it through their physicality/trajectory/occurrence structure.
+
+Current executable hash128_merkle intentionally ignores its tier argument. For multi-child content, the hash is determined by the ordered child-id sequence. A singleton may collapse to its child under the current recipe.
+
+This is the fundamental deduplication law:
+
+~~~text
+same ordered canonical constituent content
+-> same entity
+-> many physicality/trajectory/occurrence references
+~~~
+
 ### Universal typed AST: structure for all digital knowledge
 
 Laplace treats syntax and structure as a universal knowledge problem, not a programming-language-only feature.
