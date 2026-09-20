@@ -1,5 +1,8 @@
 # SQL cohesion, planner, surface, and reseed audit — 2026-08-18
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 ## Executive verdict
 
 The SQL has received real local optimization work, but it is not yet an
