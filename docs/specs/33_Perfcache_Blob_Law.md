@@ -80,6 +80,72 @@ Do not wrap indexed database columns in a cache/function call per row when the r
 
 See `docs/guides/compositional-perfcache.md`.
 
+## Segmented / profile-scoped ROMs
+
+A cache generation may materialize only a declared subset of a canonical tier while preserving the same identities/coordinates/recipes as the full canonical world.
+
+Lawful selectors include:
+
+~~~text
+range
+  U+0000..U+007F                 # ASCII subset of the Unicode generation
+
+explicit set / palette
+  #000000 #FFFFFF #FF0000 ...   # selected exact colors/pixels
+
+generated finite set
+  every legal value under a declared compact format/bit depth
+
+band / interval
+  selected frequency bins or filter-bank bands under one analyzer recipe
+
+predicate over deterministic typed fields
+  selected entity/type/recipe classes
+
+hot/admitted set
+  structures already present or measured hot
+
+dependency closure
+  all lower records required by the selected higher structures
+~~~
+
+The selector is part of the blob generation/receipt. A subset cache never renumbers or re-identifies its members. For example, ASCII U+0041 retains the same canonical T0 identity and placement it has in the full Unicode generation; a local dense slot may accelerate lookup but is not a new Tier-0 rank.
+
+### Modular composition
+
+Several cache modules may be mapped together as one runtime profile:
+
+~~~text
+profile "terminal/code":
+  ASCII/basic-text segment
+  common scalar segment
+  Bash grammar/AST segment
+
+profile "speech":
+  selected textual/phonetic segment
+  scalar/sample segment
+  declared speech-frequency/filter-bank segment
+  hot audio-window/segment records
+
+profile "restricted-palette video":
+  selected color/pixel palette
+  patch/region/image closure over those colors
+  selected audio profile
+  video timing/synchronization structures
+~~~
+
+Overlapping modules converge by canonical key/record identity; they do not duplicate semantic content.
+
+A higher module may declare dependency closure over lower modules. A palette-specific patch ROM can therefore depend on the exact selected pixel palette generation rather than requiring the complete image universe.
+
+### Cache scope is not knowledge authority
+
+A cache profile answers **what is resident/accelerated here**, not **what the principal is allowed to know**.
+
+If an authorized value is absent from a mapped cache, the normal canonical path may calculate/read it and optionally publish it into a later cache generation. If the deployment intentionally lacks a fallback (for example, a constrained offline device), the result is a declared local capability/cache miss or remote-fetch requirement, not a different canonical identity and not evidence that the knowledge does not exist.
+
+Knowledge-package grants remain governed by the authority layer. A package may recommend or ship a matching cache profile for deployment economics, but the two objects stay distinct.
+
 ## Roster
 
 This table is the current blob catalog. It is law for *what exists as a
