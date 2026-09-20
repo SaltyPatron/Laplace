@@ -9,9 +9,12 @@ extern "C" {
 /*
  * Modality dispatch tags for witness type floors / emit.
  *
- * Tier-0 identity is ALWAYS Unicode codepoints (codepoint_table / T0 perfcache).
- * There is no image/audio leaf mint here — that forged floor was ripped.
- * Ladders: image_decomposer / audio_decomposer → modality_witness compose.
+ * These tags select the CURRENT image/audio implementation recipe.
+ * The historical "Tier-0 is always Unicode codepoints for every modality" claim
+ * is retired; Unicode is the selected textual generation, not the ontology of
+ * every physical sample. No private disconnected modality identity world is
+ * permitted either. docs/invention/modality-ladder-law.md and GH #1134 govern
+ * the replacement of the legacy decimal/codepoint media recipe.
  */
 typedef enum {
     LAPLACE_MODALITY_IMAGE = 1,
