@@ -584,6 +584,12 @@ record_semantic_channel(LaplaceCognitionProgram *program,
     SemanticOriginEntry *anchor;
     SemanticOriginEntry *candidate;
 
+    /* A relation reached from a geometry responder remains a geometry-routed
+     * semantic observation. It is fingerprinted in the program, but proximity
+     * cannot satisfy prompt semantic obligations or mint semantic ancestry. */
+    if (channel->operand_role == LAPLACE_QUERY_OPERAND_GEOMETRY)
+        return;
+
     if (!(laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0) ||
         !semantic_channel_traversable(channel) ||
         laplace_prompt_contract_relation(&channel->relation))
