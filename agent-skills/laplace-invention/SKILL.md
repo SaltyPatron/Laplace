@@ -32,6 +32,7 @@ The primitive laws compose into binding product consequences documented in `docs
   compositions. Current widths are machine windows, never invention limits.
 - Same canonical content under the same recipe produces the same BLAKE3-derived
   Hash128. Normal convergence is deduplication, not a cryptographic collision.
+- `[k,i,n,g]` is one entity everywhere. Word/name/title/label/token/tier/source/container/sense/task role are occurrences, relations, evidence or physicality around that entity, not identity salts. The same law applies recursively: an exact ordered 2x2 pixel composition inside any 8x8/image/video is the same global subpatch entity and is referenced by the containing physicality trajectories.
 - Multi-child identity is Merkle-style over ordered child ids. Tier is excluded from
   current content identity. Declared single-child composition collapses to the child.
 - Tier is compositional altitude/floor in a modality grammar, not identity or ontology.
