@@ -99,9 +99,9 @@ The proof class must match the claim: theorem, executable invariant, finite exha
 
 ## W18 — Structural software construction and repair
 
-Treat repository/code generation as inverse admission over the universal typed AST. Bind an exact target grammar/toolchain; couple against known canonical structures; reuse/compose/minimally mutate before creating novel AST; realize source; compile/test/analyze/simulate/run; witness outcomes; repair the smallest divergent subtree.
+Treat repository/code generation as inverse admission over canonical tiered compositions and physicality trajectories. Bind an exact target grammar/toolchain; couple against known canonical structures and grammar/rule knowledge; reuse/compose/minimally mutate before creating novel structure; realize AST/CST/source/IR only for the target consumer; compile/test/analyze/simulate/run; witness outcomes; repair the smallest divergent composition.
 
-Exact duplicate code converges automatically. Normalized AST, call/dependency/control/data flow, algebraic/behavioral evidence and trajectory/Fréchet similarity should drive deeper consolidation and cross-repository repair discovery. A repository root is the complete application state; checkout is realization/export of that root.
+Exact duplicate code converges automatically. Normalized structural projections (including AST when useful), call/dependency/control/data flow, algebraic/behavioral evidence and trajectory/Fréchet similarity should drive deeper consolidation and cross-repository repair discovery. A repository root is the complete application state; checkout is realization/export of that root.
 
 Historical owners include #452/#765/#894 plus current code/toolchain owners.
 
