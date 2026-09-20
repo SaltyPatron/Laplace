@@ -1,5 +1,7 @@
 # Invention preservation correction — 2026-09-02
 
+> **Current compound-capability authority:** read [`CAPABILITIES.md`](CAPABILITIES.md) with this preservation record. This dated document preserves invention boundaries but does not narrow later accepted consequences such as structural software construction/reuse, repair trajectories, knowledge authority/governance, machine-cost derivation or repository-root deployment.
+
 Status: **historical reconciliation memo; superseded as authority on 2026-09-14.**
 
 This file is retained because it records why several earlier compressed descriptions of Laplace were corrected. Its preservation laws have now been folded into the canonical authority documents:
