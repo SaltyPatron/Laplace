@@ -6,7 +6,7 @@ Start with the general invention authority in ../INVENTION.md and ../CAPABILITIE
 
 ## Core capability guides
 
-- [software-construction.md](software-construction.md) — grammar-constrained AST construction, canonical reuse, duplicate-code convergence, witnessed repair trajectories, cross-repository maintenance, complete application roots and root-transition deployment.
+- [software-construction.md](software-construction.md) — grammar-constrained tier/trajectory construction, derived AST/CST realization, canonical reuse, duplicate-code convergence, witnessed repair trajectories, cross-repository maintenance, complete application roots and root-transition deployment.
 - [knowledge-authority.md](knowledge-authority.md) — knowledge packages, RBAC/ReBAC/capabilities, governance without epistemic erasure, honest abstention, Red Spear / Blue Shield / White Judge and personal effective minds.
 - [machine-cost-analysis.md](machine-cost-analysis.md) — source/bytecode/executable decomposition, control/data/dependency structure, ISA/microarchitecture cycle derivation, calculated-vs-observed receipts and measured cognition billing.
 - [compositional-perfcache.md](compositional-perfcache.md) — perfcache dependency lattice across numbers, pixels, patches, regions, images, audio, video, chess and other reusable structures.
