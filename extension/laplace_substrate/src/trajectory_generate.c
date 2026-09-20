@@ -1082,6 +1082,33 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 LAPLACE_QUERY_OPERAND_PHYSICALITY, NULL);
         }
 
+        /* Geometry is another typed COUPLE response, not a relation rewrite.
+         * Its Hilbert/angular/Frechet responders inherit the exact prompt origins,
+         * then receive ordinary semantic/evidence reads under a distinct operand
+         * role before ORIENT. Reaching the same canonical id through physicality
+         * and geometry deliberately preserves both response roles. */
+        if (coupled_intent.geometry_frontier &&
+            ArrayGetNItems(ARR_NDIM(coupled_intent.geometry_frontier),
+                           ARR_DIMS(coupled_intent.geometry_frontier)) > 0)
+        {
+            ArrayIterator geometry_iterator =
+                array_create_iterator(coupled_intent.geometry_frontier, 0, NULL);
+            Datum geometry_value;
+            bool geometry_null;
+            while (array_iterate(geometry_iterator, &geometry_value, &geometry_null))
+            {
+                if (geometry_null) continue;
+                hash128_t id = datum_to_hash128(geometry_value);
+                hash_search(route_seen, &id, HASH_ENTER, NULL);
+                origin_add_occurrences(origins, &id,
+                    laplace_prompt_intent_origins(&coupled_intent, &id), walk_context);
+            }
+            array_free_iterator(geometry_iterator);
+            laplace_query_state_extend_batch_role(
+                query_state, coupled_intent.geometry_frontier,
+                LAPLACE_QUERY_OPERAND_GEOMETRY, NULL);
+        }
+
         for (;;)
         {
             int channel_count = 0;
