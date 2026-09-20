@@ -152,7 +152,7 @@ Cache profiles can be intentionally narrow without creating smaller knowledge wo
 
 ## Reusable numeric/scalar structure
 
-Numeric values follow the same content-addressed reuse law as words, AST subtrees and chess positions.
+Numeric values follow the same content-addressed reuse law as words, code compositions and chess positions.
 
 ~~~text
 0.34567
@@ -201,7 +201,7 @@ requirement / obligation
 → reuse existing structure where possible
 → compose existing structures where possible
 → adapt the smallest close structure where possible
-→ construct only genuinely novel AST structure
+→ construct only genuinely novel canonical structure
 → satisfy type/name/API/dependency constraints
 → realize source
 → compile/test/simulate/analyze
@@ -212,18 +212,18 @@ requirement / obligation
 
 If the target is Bash, Bash grammar and runtime semantics govern construction. If the target is Zsh and no qualified Zsh provider exists, Bash is not an acceptable probabilistic substitute. The correct state is an explicit missing-provider/unsupported construction until the requested grammar is available.
 
-AST validity is not sufficient for correctness; type/link/runtime/behavioral/toolchain evidence remains separate. The important change is that syntactic illegality does not need to be part of the generation search space.
+A realized AST's validity is not sufficient for correctness; type/link/runtime/behavioral/toolchain evidence remains separate. The important change is that syntactic illegality does not need to be part of the generation search space.
 
 ## Duplicate code should converge
 
-Content addressing makes exact duplicate code the trivial case: the same canonical AST subtree under the same recipe has the same identity even when observed in many repositories.
+Content addressing makes exact duplicate code the trivial case: the same canonical code composition under the same recipe has the same identity even when observed in many repositories.
 
 Duplicate detection then rises through increasingly stronger equivalence classes:
 
 ```text
 exact bytes
-→ exact canonical AST
-→ normalized AST
+→ exact canonical composition
+→ normalized structural/AST projection
 → equivalent control/data-flow shape
 → algebraic equivalence
 → behaviorally equivalent implementation under a declared contract
@@ -254,7 +254,7 @@ application root R0
 → successful verified root R1
 ```
 
-Compiler diagnostics, exceptions, test failures, static-analysis results, simulator outcomes, runtime observations and successful verification are typed witnessed outcomes attached to exact artifact/AST/toolchain/environment identities.
+Compiler diagnostics, exceptions, test failures, static-analysis results, simulator outcomes, runtime observations and successful verification are typed witnessed outcomes attached to exact canonical artifact/toolchain/environment identities plus any derived AST/IR projection.
 
 Failures are not discarded. They become reusable negative evidence. A later repair can avoid previously failed transformations when the relevant environment/structure matches.
 
@@ -274,7 +274,7 @@ Which other authorized repositories contain:
 - the same causal prerequisites under a different API/name/language surface?
 ```
 
-Fréchet is one typed comparison plane, not the whole detector. AST shape, dependency/call structure, control/data flow, source/toolchain context, testimony, geometry and prior outcomes remain typed.
+Fréchet is one typed comparison plane, not the whole detector. Canonical composition and derived AST shape, dependency/call structure, control/data flow, source/toolchain context, testimony, geometry and prior outcomes remain typed.
 
 A successful repair may therefore surface other repositories that warrant inspection before they fail. Governance determines whether Laplace may merely discover/report, propose a patch, validate it, write it, merge it, or deploy it.
 
@@ -344,7 +344,7 @@ Non-success includes:
 
 - stopping after writing prose/spec/issues when executable work is in scope;
 - implementing a toy vertical slice instead of the common machine;
-- replacing grammar/AST construction with token-ish code generation;
+- replacing grammar-constrained canonical construction with token-ish code generation;
 - replacing whole-application structural mutation with file-by-file regeneration;
 - treating duplicate-code findings as reports without wiring reuse/consolidation into construction;
 - hiding compile/test/runtime failures instead of witnessing them;
