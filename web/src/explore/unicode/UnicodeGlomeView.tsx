@@ -169,7 +169,7 @@ export function UnicodeGlomeView(){
    const kind=`unicode-cloud:${meta.positions_format}`;
    const artifact=await clientArtifactGetOrLoad(
      kind, meta.perfcache_receipt_hex, meta.positions_bytes,
-     () => exploreUnicodePositions({signal:controller.signal}),
+     () => exploreUnicodePositions(meta.perfcache_receipt_hex, {signal:controller.signal}),
    );
    setCacheState(artifact.source==='cache'?'hit':'stored');
    if(!controller.signal.aborted){ setBuffer(artifact.value); setStorage(await clientStorageEstimate()); }

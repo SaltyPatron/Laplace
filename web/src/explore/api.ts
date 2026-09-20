@@ -172,4 +172,4 @@ export function exploreSourceRoster(idHex: string, limit = 40, opts?: ApiOptions
 export function exploreUnicodeCloud(opts: ApiOptions = {}) { return apiGet<UnicodeCloudResponse>('/v1/explore/unicode/cloud', opts); }
 export function exploreUnicodePoint(codepoint: number, opts: ApiOptions = {}) { return apiGet<UnicodePointResponse>(`/v1/explore/unicode/${codepoint}`, opts); }
 
-export function exploreUnicodePositions(opts: ApiOptions = {}) { return apiGetArrayBuffer('/v1/explore/unicode/positions.bin', opts); }
+export function exploreUnicodePositions(receipt: string, opts: ApiOptions = {}) { return apiGetArrayBuffer(`/v1/explore/unicode/positions/${encodeURIComponent(receipt)}.bin`, opts); }
