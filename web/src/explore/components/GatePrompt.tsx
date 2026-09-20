@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, ErrorText, Muted, Stack, Text } from '@ui';
-import { apiGet, type PreflightQuoteResponse } from '../../api/client';
+import { apiGetCached, type PreflightQuoteResponse } from '../../api/client';
 import { useAppStore } from '../../store';
 import { preflight } from '../api';
 import { useExploreStore } from '../store';

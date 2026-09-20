@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { Field, Input, Muted, SegmentedControl } from '@ui';
 import { forceCollide, forceManyBody, forceRadial } from 'd3-force-3d';
 import { CanvasTexture, LinearFilter, Mesh, MeshBasicMaterial, MOUSE, Object3D, SphereGeometry, Sprite, SpriteMaterial, type Camera, type Vector3 } from 'three';
@@ -9,8 +9,8 @@ import styles from './ConsensusGraph.module.css';
 import { useGraphFlyControls } from './useGraphFlyControls';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
 
-const ForceGraph2D = lazy(() => import('react-force-graph-2d').then((m) => ({ default: m.default })));
-const ForceGraph3D = lazy(() => import('react-force-graph-3d').then((m) => ({ default: m.default })));
+const ForceGraph2D = lazy(() => import('react-force-graph-2d').then((m) => ({ default: m.default }))) as unknown as ComponentType<any>;
+const ForceGraph3D = lazy(() => import('react-force-graph-3d').then((m) => ({ default: m.default }))) as unknown as ComponentType<any>;
 
 export interface WebNode {
   id: string;
