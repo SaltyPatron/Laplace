@@ -16,7 +16,9 @@ typedef struct LaplacePromptParse
     laplace_ud_parse_t decoded;
     laplace_ud_parse_status_t decode_status;
     /* Exact current prompt ordinal for each source token, or -1. A complete
-     * alignment consumes every non-whitespace current occurrence in order. */
+     * alignment consumes every non-whitespace current occurrence in order.
+     * Source-declared multiword constituents share their one exact surface
+     * occurrence while retaining distinct token identities, lemmas and roles. */
     int *token_origins;
     bool aligned;
     bool positive_standing;

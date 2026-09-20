@@ -70,6 +70,111 @@ witness_order(const void *left, const void *right)
     return memcmp(&a->id, &b->id, sizeof(hash128_t));
 }
 
+typedef struct StructureTokenPosition
+{
+    hash128_t id;
+    size_t ordinal;
+} StructureTokenPosition;
+
+typedef struct StructureSurfaceRange
+{
+    size_t first, last;
+    hash128_t form;
+} StructureSurfaceRange;
+
+static int
+surface_range_order(const void *left, const void *right)
+{
+    const StructureSurfaceRange *a = left, *b = right;
+    if (a->first != b->first) return a->first < b->first ? -1 : 1;
+    if (a->last != b->last) return a->last < b->last ? -1 : 1;
+    return memcmp(&a->form, &b->form, sizeof(hash128_t));
+}
+
+/* A source-declared multiword token is one exact surface occurrence with
+ * several distinct syntactic constituents. Keep those constituents and their
+ * roles, while binding each to the shared occurrence that realizes them. */
+static bool
+align_parse_occurrences(LaplacePromptParse *parse, const StructureRead *read)
+{
+    const laplace_ud_parse_t *decoded = &parse->decoded;
+    StructureSurfaceRange *ranges = NULL;
+    size_t range_count = decoded->mwt_count;
+    bool aligned = false;
+    size_t token = 0, surface = 0, range = 0;
+
+    for (size_t i = 0; i < decoded->token_count; ++i)
+        parse->token_origins[i] = -1;
+    if (parse->decode_status != LAPLACE_UD_PARSE_OK) return false;
+    if (range_count > 0)
+    {
+        HASHCTL ctl = {0};
+        HTAB *positions;
+        bool valid = true;
+        if (range_count > MaxAllocSize / sizeof(*ranges))
+            elog(ERROR, "structural coupling surface ranges exceed allocation capacity");
+        ranges = palloc(sizeof(*ranges) * range_count);
+        ctl.keysize = sizeof(hash128_t);
+        ctl.entrysize = sizeof(StructureTokenPosition);
+        positions = hash_create("structural token positions", 128, &ctl,
+                                 HASH_ELEM | HASH_BLOBS);
+        for (size_t i = 0; i < decoded->token_count; ++i)
+        {
+            bool found;
+            StructureTokenPosition *position = hash_search(
+                positions, &decoded->tokens[i].ref_id, HASH_ENTER, &found);
+            if (found) valid = false;
+            position->ordinal = i;
+        }
+        for (size_t i = 0; valid && i < range_count; ++i)
+        {
+            const laplace_ud_mwt_t *mwt = &decoded->mwts[i];
+            const StructureTokenPosition *first = hash_search(
+                positions, &mwt->start_ref_id, HASH_FIND, NULL);
+            const StructureTokenPosition *last = hash_search(
+                positions, &mwt->end_ref_id, HASH_FIND, NULL);
+            if (!first || !last || first->ordinal >= last->ordinal)
+            {
+                valid = false;
+                break;
+            }
+            ranges[i] = (StructureSurfaceRange) {
+                .first = first->ordinal, .last = last->ordinal, .form = mwt->form_id};
+        }
+        hash_destroy(positions);
+        if (!valid) goto done;
+        qsort(ranges, range_count, sizeof(*ranges), surface_range_order);
+        for (size_t i = 1; i < range_count; ++i)
+            if (ranges[i].first <= ranges[i - 1].last) goto done;
+    }
+
+    while (token < decoded->token_count)
+    {
+        size_t last = token;
+        const hash128_t *form = &decoded->tokens[token].form_id;
+        if (range < range_count && ranges[range].first == token)
+        {
+            last = ranges[range].last;
+            form = &ranges[range].form;
+            ++range;
+        }
+        if (surface >= (size_t) read->form_count ||
+            !hash128_eq(form, &read->forms[surface])) goto done;
+        for (size_t i = token; i <= last; ++i)
+            parse->token_origins[i] = read->origins[surface];
+        token = last + 1;
+        ++surface;
+    }
+    aligned = surface == (size_t) read->form_count && range == range_count;
+
+done:
+    if (!aligned)
+        for (size_t i = 0; i < decoded->token_count; ++i)
+            parse->token_origins[i] = -1;
+    if (ranges) pfree(ranges);
+    return aligned;
+}
+
 static void
 release_parse(void *argument)
 {
@@ -140,18 +245,7 @@ receive_parse(Datum physicality, Datum entity, Datum geometry, void *context)
     parse->cleanup.arg = parse;
     MemoryContextRegisterResetCallback(read->state->owner, &parse->cleanup);
     parse->token_origins = palloc(Max(decoded.token_count, 1) * sizeof(int));
-    parse->aligned = status == LAPLACE_UD_PARSE_OK &&
-                     decoded.token_count == (size_t) read->form_count &&
-                     decoded.mwt_count == 0;
-    for (size_t i = 0; i < decoded.token_count; ++i)
-    {
-        parse->token_origins[i] = -1;
-        if (i < (size_t) read->form_count &&
-            hash128_eq(&decoded.tokens[i].form_id, &read->forms[i]))
-            parse->token_origins[i] = read->origins[i];
-        else
-            parse->aligned = false;
-    }
+    parse->aligned = align_parse_occurrences(parse, read);
     index->parse = parse;
     if (read->state->count == read->state->capacity)
     {
