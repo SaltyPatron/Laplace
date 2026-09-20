@@ -88,8 +88,26 @@ export async function apiGetArrayBuffer(path: string, opts: ApiOptions = {}): Pr
   return await res.arrayBuffer();
 }
 
+const inflightGets = new Map<string, Promise<unknown>>();
+
+function getRequestKey(path: string, opts: ApiOptions): string {
+  return JSON.stringify([path, browserWorkspace, opts.tenant ?? null, opts.quoteId ?? null,
+    opts.session ?? null, opts.operatorToken ?? null]);
+}
+
 export function apiGet<T>(path: string, opts: ApiOptions = {}): Promise<T> {
-  return request<T>(path, {}, opts);
+  // A caller-owned AbortSignal has its own cancellation lifetime and therefore
+  // cannot safely share transport ownership. Signal-free duplicate reads can.
+  if (opts.signal) return request<T>(path, {}, opts);
+  const key = getRequestKey(path, opts);
+  const existing = inflightGets.get(key);
+  if (existing) return existing as Promise<T>;
+  const pending = request<T>(path, {}, opts);
+  inflightGets.set(key, pending);
+  void pending.finally(() => {
+    if (inflightGets.get(key) === pending) inflightGets.delete(key);
+  });
+  return pending;
 }
 
 /** Preserve authored text byte-for-byte; the server owns its validation. */

@@ -1,29 +1,31 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Link as RouterLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { AppHeader, NavTabs, Panel, TenantField } from '@ui';
-import { ChatView } from './chat/ChatView';
+import { AppHeader, LoadingText, NavTabs, Panel, TenantField } from '@ui';
 import { HomeView } from './home/HomeView';
-import { QueryConsole } from './query/QueryConsole';
-import { TopicView } from './topic/TopicView';
-import { BillingView } from './billing/BillingView';
-import { ChessView } from './chess/ChessView';
-import { LabView } from './chess/lab/LabView';
-import { ChessDbView } from './chess/db/ChessDbView';
-import { ExploreView } from './explore/ExploreView';
-import { StorageProofView } from './explore/proof/StorageProofView';
-import { UnicodeGlomeView } from './explore/unicode/UnicodeGlomeView';
-import { AdminView } from './admin/AdminView';
-import { DataView } from './data/DataView';
 import { DataActivity, UploadProvider } from './data/UploadProvider';
 import { useAppStore } from './store';
 import { SubstrateStatusBanner } from './layout/SubstrateStatusBanner';
 import { AmbientFamiliar } from './layout/AmbientFamiliar';
 import { ViewErrorBoundary } from './layout/ViewErrorBoundary';
 import { AccountControls } from './auth/AccountControls';
-import { SettingsView, BillingReturnView } from './auth/SettingsView';
 import { apiGet, setApiWorkspace } from './api/client';
 import type { AuthProvider, AuthUser } from './store';
 import styles from './App.module.css';
+
+const ChatView = lazy(() => import('./chat/ChatView').then((m) => ({ default: m.ChatView })));
+const QueryConsole = lazy(() => import('./query/QueryConsole').then((m) => ({ default: m.QueryConsole })));
+const TopicView = lazy(() => import('./topic/TopicView').then((m) => ({ default: m.TopicView })));
+const BillingView = lazy(() => import('./billing/BillingView').then((m) => ({ default: m.BillingView })));
+const BillingReturnView = lazy(() => import('./auth/SettingsView').then((m) => ({ default: m.BillingReturnView })));
+const SettingsView = lazy(() => import('./auth/SettingsView').then((m) => ({ default: m.SettingsView })));
+const ChessView = lazy(() => import('./chess/ChessView').then((m) => ({ default: m.ChessView })));
+const LabView = lazy(() => import('./chess/lab/LabView').then((m) => ({ default: m.LabView })));
+const ChessDbView = lazy(() => import('./chess/db/ChessDbView').then((m) => ({ default: m.ChessDbView })));
+const ExploreView = lazy(() => import('./explore/ExploreView').then((m) => ({ default: m.ExploreView })));
+const StorageProofView = lazy(() => import('./explore/proof/StorageProofView').then((m) => ({ default: m.StorageProofView })));
+const UnicodeGlomeView = lazy(() => import('./explore/unicode/UnicodeGlomeView').then((m) => ({ default: m.UnicodeGlomeView })));
+const AdminView = lazy(() => import('./admin/AdminView').then((m) => ({ default: m.AdminView })));
+const DataView = lazy(() => import('./data/DataView').then((m) => ({ default: m.DataView })));
 
 const TABS: { id: string; label: string; path: string }[] = [
   { id: 'home', label: 'Home', path: '/' },
@@ -70,6 +72,7 @@ function Shell() {
     <DataActivity />
     <main id="main-content" tabIndex={-1} className={styles.main}>
       <ViewErrorBoundary resetKey={JSON.stringify([viewScope, location.key])}>
+        <Suspense fallback={<LoadingText>Loading workspace…</LoadingText>}>
         <Routes key={viewScope}>
           <Route path="/" element={<HomeView onGoto={(tab) => navigate(`/${tab}`)} />} />
           <Route path="/chat" element={<ChatView />} />
@@ -90,6 +93,7 @@ function Shell() {
           <Route path="/operator" element={<AdminView />} />
           <Route path="*" element={<Panel title="Workspace not found"><p>This address does not match a Laplace workspace. Use the navigation above or return Home.</p><RouterLink to="/">Return Home</RouterLink></Panel>} />
         </Routes>
+        </Suspense>
       </ViewErrorBoundary>
     </main>
     <AmbientFamiliar />
