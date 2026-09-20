@@ -35,6 +35,7 @@ LAPLACE_API_PAYLOAD_EXCLUDES=(
   --exclude '/laplace-api.env' --exclude '/agents.json' --exclude '/logs/'
   --exclude '/chess-lab-work/' --exclude '/mcp-runtime/' --exclude '/mcp/'
   --exclude '/releases/' --exclude '/managed-services/'
+  --exclude '/migrations/'
   --exclude '/laplace-uci' --exclude '/laplace-mcp' --exclude '/laplace-lichess'
 )
 

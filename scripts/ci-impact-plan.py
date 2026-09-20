@@ -29,7 +29,14 @@ API_PUBLISH_PROJECT = "app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.Open
 UCI_PUBLISH_PROJECT = "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj"
 MCP_PUBLISH_PROJECT = "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj"
 LICHESS_PUBLISH_PROJECT = "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj"
-FULL_PUBLISH_PROJECTS = (API_PUBLISH_PROJECT, UCI_PUBLISH_PROJECT, MCP_PUBLISH_PROJECT, LICHESS_PUBLISH_PROJECT)
+MIGRATIONS_PUBLISH_PROJECT = "app/Laplace.Migrations/Laplace.Migrations.csproj"
+FULL_PUBLISH_PROJECTS = (
+    API_PUBLISH_PROJECT,
+    UCI_PUBLISH_PROJECT,
+    MCP_PUBLISH_PROJECT,
+    LICHESS_PUBLISH_PROJECT,
+    MIGRATIONS_PUBLISH_PROJECT,
+)
 
 ROOT_FILES_FULL = {
     "Directory.Build.props",

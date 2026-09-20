@@ -281,7 +281,7 @@ force_full_carry_forward_impact() {
   # native prefix, database, or SPA. Recover only the managed application
   # surface and preserve those independent components byte-for-byte.
   export LAPLACE_BUILD_COMPONENTS="managed"
-  export LAPLACE_MANAGED_BUILD_PROJECTS="app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj,app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj,app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj,app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj"
+  export LAPLACE_MANAGED_BUILD_PROJECTS="app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj,app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj,app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj,app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj,app/Laplace.Migrations/Laplace.Migrations.csproj"
   export LAPLACE_DB_SUITES=""
   export LAPLACE_MANAGED_DB_TEST_PROJECTS=""
   export LAPLACE_MANAGED_TEST_FILTER=""

@@ -10,6 +10,7 @@ case "$command" in
 esac
 
 candidates=()
+candidates+=("${LAPLACE_APP_DIR:-/opt/laplace/app}/migrations/Laplace.Migrations.dll")
 if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
   candidates+=("$LAPLACE_BUILD_ROOT/app/bin/Laplace.Migrations/Release/net10.0/Laplace.Migrations.dll")
 fi

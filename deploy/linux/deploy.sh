@@ -387,7 +387,8 @@ fi
 UCI_STAGE="$(mktemp -d)"
 MCP_STAGE="$(mktemp -d)"
 LICHESS_STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE"' EXIT
+MIGRATIONS_STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE" "$MIGRATIONS_STAGE"' EXIT
 
 publish_uci() {
   echo "==> publish laplace-uci -> $UCI_STAGE"
@@ -406,15 +407,22 @@ publish_lichess() {
     -c Release --no-build --no-self-contained -o "$LICHESS_STAGE"
 }
 
+publish_migrations() {
+  echo "==> publish database migration runtime -> $MIGRATIONS_STAGE"
+  dotnet publish "$REPO_ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" \
+    -c Release --no-build --no-self-contained -o "$MIGRATIONS_STAGE"
+}
+
 if [[ "$SERIAL" -eq 1 ]]; then
-  echo "==> [2/4] publish API + UCI + MCP + Lichess (serial)"
+  echo "==> [2/4] publish API + UCI + MCP + Lichess + migrations (serial)"
   publish_api
   publish_uci
   publish_mcp
   publish_lichess
+  publish_migrations
 else
-  echo "==> [2/4] publish API || UCI || MCP || Lichess (parallel)"
-  api_log="$(mktemp)"; uci_log="$(mktemp)"; mcp_log="$(mktemp)"; lichess_log="$(mktemp)"
+  echo "==> [2/4] publish API || UCI || MCP || Lichess || migrations (parallel)"
+  api_log="$(mktemp)"; uci_log="$(mktemp)"; mcp_log="$(mktemp)"; lichess_log="$(mktemp)"; migrations_log="$(mktemp)"
   set +e
   publish_api >"$api_log" 2>&1 &
   api_pid=$!
@@ -424,15 +432,18 @@ else
   mcp_pid=$!
   publish_lichess >"$lichess_log" 2>&1 &
   lichess_pid=$!
+  publish_migrations >"$migrations_log" 2>&1 &
+  migrations_pid=$!
   wait "$api_pid"; api_rc=$?
   wait "$uci_pid"; uci_rc=$?
   wait "$mcp_pid"; mcp_rc=$?
   wait "$lichess_pid"; lichess_rc=$?
+  wait "$migrations_pid"; migrations_rc=$?
   set -e
-  cat "$api_log" "$uci_log" "$mcp_log" "$lichess_log"
-  rm -f "$api_log" "$uci_log" "$mcp_log" "$lichess_log"
-  if [[ "$api_rc" -ne 0 || "$uci_rc" -ne 0 || "$mcp_rc" -ne 0 || "$lichess_rc" -ne 0 ]]; then
-    echo "::error::publish failed (api=$api_rc uci=$uci_rc mcp=$mcp_rc lichess=$lichess_rc)"
+  cat "$api_log" "$uci_log" "$mcp_log" "$lichess_log" "$migrations_log"
+  rm -f "$api_log" "$uci_log" "$mcp_log" "$lichess_log" "$migrations_log"
+  if [[ "$api_rc" -ne 0 || "$uci_rc" -ne 0 || "$mcp_rc" -ne 0 || "$lichess_rc" -ne 0 || "$migrations_rc" -ne 0 ]]; then
+    echo "::error::publish failed (api=$api_rc uci=$uci_rc mcp=$mcp_rc lichess=$lichess_rc migrations=$migrations_rc)"
     exit 1
   fi
 fi
@@ -449,6 +460,9 @@ if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
 fi
 
 echo "==> [3/4] overlay SPA; prepare isolated UCI/MCP/Lichess runtimes"
+mkdir -p "$STAGE/migrations"
+cp -a "$MIGRATIONS_STAGE/." "$STAGE/migrations/"
+test -f "$STAGE/migrations/Laplace.Migrations.dll"
 rm -rf "$STAGE/wwwroot"
 mkdir -p "$STAGE/wwwroot"
 if [[ "$web_source" == installed ]]; then
