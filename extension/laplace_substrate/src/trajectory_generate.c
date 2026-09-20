@@ -49,6 +49,25 @@ typedef struct EvidenceSummary
     int32 negative_relation_families;
 } EvidenceSummary;
 
+typedef struct GeometrySummary
+{
+    bool has_angular;
+    bool has_frechet;
+    bool has_hilbert;
+    uint32 angular_rank;
+    uint32 frechet_rank;
+    uint32 hilbert_rank;
+    double angular_distance;
+    double frechet_distance;
+    uint8 hilbert_delta[16];
+} GeometrySummary;
+
+typedef struct GeometryEntry
+{
+    hash128_t id;
+    GeometrySummary summary;
+} GeometryEntry;
+
 typedef struct Candidate
 {
     hash128_t id;
@@ -57,6 +76,7 @@ typedef struct Candidate
     EvidenceSummary query;
     EvidenceSummary query_traversal;
     EvidenceSummary projection;
+    GeometrySummary geometry;
     bool intent_result;
 } Candidate;
 
@@ -374,7 +394,8 @@ propagate_candidate_origins(HTAB *origins, HTAB *candidate_index,
         const LaplaceQueryChannel *channel = &channels[i];
         if (!hash_search(candidate_index, &channel->candidate, HASH_FIND, NULL))
             continue;
-        if ((!channel->outbound && !relation_can_traverse_reverse(&channel->relation)) ||
+        if (channel->operand_role == LAPLACE_QUERY_OPERAND_GEOMETRY ||
+            (!channel->outbound && !relation_can_traverse_reverse(&channel->relation)) ||
             !(laplace_walk_edge_weight(channel->rating, channel->rd) > 0.0) ||
             laplace_prompt_contract_relation(&channel->relation))
             continue;
@@ -516,6 +537,13 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
         EvidenceRelationKey relation_key;
         double sign;
         bool found, relation_found;
+
+        /* Geometry is a distinct deterministic response plane.  Relation cells
+         * reached from a geometry operand stay available in the retained query
+         * state and program fingerprint, but they are not ordinary prompt
+         * testimony and cannot manufacture occurrence coverage. */
+        if (channel->operand_role == LAPLACE_QUERY_OPERAND_GEOMETRY)
+            continue;
 
         /* Incoming asymmetric testimony is valid retained evidence, but an
          * output projection may not silently invert its traversal law. */
@@ -684,6 +712,7 @@ candidate_add(Candidate **items, int *count, int *capacity, HTAB *index,
         .query = {0},
         .query_traversal = {0},
         .projection = {0},
+        .geometry = {0},
     };
     return (*count)++;
 }
@@ -744,6 +773,108 @@ relation_allowed_by_output_scope(const hash128_t *relation, ArrayType *scope)
     return found;
 }
 
+
+static HTAB *
+geometry_summaries(const LaplacePromptIntent *intent, MemoryContext owner)
+{
+    HTAB *summaries = new_id_index(
+        "forward geometry response summaries",
+        intent ? Max(intent->geometry_count, 16) : 16,
+        owner, sizeof(GeometryEntry));
+    if (!intent)
+        return summaries;
+
+    for (int i = 0; i < intent->geometry_count; ++i)
+    {
+        const LaplacePromptGeometryCandidate *candidate = &intent->geometry[i];
+        bool found;
+        GeometryEntry *entry = hash_search(
+            summaries, &candidate->id, HASH_ENTER, &found);
+        if (!found)
+            MemSet(&entry->summary, 0, sizeof(entry->summary));
+
+        switch (candidate->plane)
+        {
+            case LAPLACE_PROMPT_GEOMETRY_ANGULAR:
+                if (!entry->summary.has_angular ||
+                    candidate->distance < entry->summary.angular_distance ||
+                    (candidate->distance == entry->summary.angular_distance &&
+                     candidate->rank < entry->summary.angular_rank))
+                {
+                    entry->summary.has_angular = true;
+                    entry->summary.angular_rank = candidate->rank;
+                    entry->summary.angular_distance = candidate->distance;
+                }
+                break;
+            case LAPLACE_PROMPT_GEOMETRY_FRECHET:
+                if (!entry->summary.has_frechet ||
+                    candidate->distance < entry->summary.frechet_distance ||
+                    (candidate->distance == entry->summary.frechet_distance &&
+                     candidate->rank < entry->summary.frechet_rank))
+                {
+                    entry->summary.has_frechet = true;
+                    entry->summary.frechet_rank = candidate->rank;
+                    entry->summary.frechet_distance = candidate->distance;
+                }
+                break;
+            case LAPLACE_PROMPT_GEOMETRY_HILBERT:
+                if (!entry->summary.has_hilbert ||
+                    memcmp(candidate->hilbert_delta,
+                           entry->summary.hilbert_delta, 16) < 0 ||
+                    (memcmp(candidate->hilbert_delta,
+                            entry->summary.hilbert_delta, 16) == 0 &&
+                     candidate->rank < entry->summary.hilbert_rank))
+                {
+                    entry->summary.has_hilbert = true;
+                    entry->summary.hilbert_rank = candidate->rank;
+                    memcpy(entry->summary.hilbert_delta,
+                           candidate->hilbert_delta, 16);
+                }
+                break;
+            default:
+                elog(ERROR, "forward execution: unknown geometry response plane");
+        }
+    }
+    return summaries;
+}
+
+/* Geometry never outranks testimony, exact structure, recurrence, or
+ * refutation.  It is a typed late tie-breaker only.  Angular is the primary
+ * locality metric; Frechet refines comparable realized curves; Hilbert is the
+ * serialization/locality key and is not counted as an independent vote. */
+static int
+geometry_summary_compare(const GeometrySummary *a, const GeometrySummary *b)
+{
+    if (a->has_angular != b->has_angular)
+        return a->has_angular ? 1 : -1;
+    if (a->has_angular)
+    {
+        if (a->angular_distance != b->angular_distance)
+            return a->angular_distance < b->angular_distance ? 1 : -1;
+        if (a->angular_rank != b->angular_rank)
+            return a->angular_rank < b->angular_rank ? 1 : -1;
+    }
+
+    if (a->has_frechet && b->has_frechet)
+    {
+        if (a->frechet_distance != b->frechet_distance)
+            return a->frechet_distance < b->frechet_distance ? 1 : -1;
+        if (a->frechet_rank != b->frechet_rank)
+            return a->frechet_rank < b->frechet_rank ? 1 : -1;
+    }
+
+    if (a->has_hilbert != b->has_hilbert)
+        return a->has_hilbert ? 1 : -1;
+    if (a->has_hilbert)
+    {
+        int cmp = memcmp(a->hilbert_delta, b->hilbert_delta, 16);
+        if (cmp != 0) return cmp < 0 ? 1 : -1;
+        if (a->hilbert_rank != b->hilbert_rank)
+            return a->hilbert_rank < b->hilbert_rank ? 1 : -1;
+    }
+    return 0;
+}
+
 static int
 candidate_compare(const void *left, const void *right)
 {
@@ -767,6 +898,8 @@ candidate_compare(const void *left, const void *right)
     cmp = opposition_summary_compare(&a->query, &b->query);
     if (cmp != 0) return cmp > 0 ? -1 : 1;
     cmp = opposition_summary_compare(&a->projection, &b->projection);
+    if (cmp != 0) return cmp > 0 ? -1 : 1;
+    cmp = geometry_summary_compare(&a->geometry, &b->geometry);
     if (cmp != 0) return cmp > 0 ? -1 : 1;
     return memcmp(&a->id, &b->id, sizeof(hash128_t));
 }
@@ -1274,6 +1407,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 
     step_context = AllocSetContextCreate(walk_context, "forward query election",
                                          ALLOCSET_DEFAULT_SIZES);
+    HTAB *geometry_table = geometry_summaries(intent, walk_context);
 
     for (int32 step = 1; step <= steps &&
          !(intent && (intent->ambiguous || intent->budget_exhausted ||
@@ -1460,6 +1594,10 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 if (projection)
                     candidates[i].projection = projection->summary;
             }
+            GeometryEntry *geometry = hash_search(
+                geometry_table, &candidates[i].id, HASH_FIND, NULL);
+            if (geometry)
+                candidates[i].geometry = geometry->summary;
 
             /* A graph-only result must survive exact positive typed evidence
              * after candidate adjudication. Physical continuations remain an
