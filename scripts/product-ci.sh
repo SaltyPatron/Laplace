@@ -476,7 +476,12 @@ run_db_tests() {
   local selected="${LAPLACE_DB_SUITES:-}"
 
   if csv_selected "$selected" db-health; then
-    bash scripts/test-parallel.sh --profile db --suite db-health
+    if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" native; then
+      bash scripts/test-parallel.sh --profile db --suite db-health
+    else
+      LAPLACE_DB_HEALTH_SCOPE=installed \
+        bash scripts/test-parallel.sh --profile db --suite db-health
+    fi
   else
     echo "::notice::database planner kept db-health valid; suite not scheduled"
   fi

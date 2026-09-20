@@ -366,6 +366,9 @@ class ProductStageOwnershipContract(unittest.TestCase):
         db_health = (ROOT / "scripts" / "test-suites" / "db-health.sh").read_text(encoding="utf-8")
         self.assertIn("LAPLACE_REUSE_INSTALLED_NATIVE", db_health)
         self.assertIn("check-database-health.sh --installed-runtime", db_health)
+        database = function("run_db_tests")
+        self.assertIn("LAPLACE_BUILD_COMPONENTS", database)
+        self.assertIn("LAPLACE_DB_HEALTH_SCOPE=installed", database)
 
     def test_competitive_proof_extends_the_same_release_modules(self):
         proof = function("run_proof")
