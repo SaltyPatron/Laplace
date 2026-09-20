@@ -56,7 +56,7 @@ unresolved licenses, unenumerated upstream families, or unvalidated extracted tr
 | Tatoeba | smaller active subset | 15 selected 2026-08-29 core/sidecar artifacts | one source recipe must disposition every selected sidecar |
 | Wiktionary | older raw/extracted + English-specific material | 2026-08-28 raw Wiktextract gzip | bind schema/recipe to selected raw generation |
 | semantic mappings | active SemLink/VerbNet/PropBank plus legacy MapNet/WFN/PredicateMatrix | FrameBase 2.0, VerbAtlas 1.1, pinned SemLink/VerbNet/PropBank snapshots | coverage replacement and recipe qualification proceed together |
-| Tree-sitter | large grammar estate present | same estate is structural authority input, not a code-only tool | qualify provider set and lower concrete syntax through universal typed AST recipes |
+| Tree-sitter | large grammar estate present | same estate is structural authority input, not a code-only tool | qualify grammar/provider set and admit grammar/role knowledge into canonical tier/trajectory recipes; use AST/CST only as provider evidence/projection |
 
 The staging estate is therefore part of implementation work immediately. Final activation still requires the selected artifact graph and matching provider/recipe generation to agree.
 
