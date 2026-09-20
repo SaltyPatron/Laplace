@@ -9,12 +9,11 @@ extern "C" {
 /*
  * Modality dispatch tags for witness type floors / emit.
  *
- * These tags select the CURRENT image/audio implementation recipe.
- * The historical "Tier-0 is always Unicode codepoints for every modality" claim
- * is retired; Unicode is the selected textual generation, not the ontology of
- * every physical sample. No private disconnected modality identity world is
- * permitted either. docs/invention/modality-ladder-law.md and GH #1134 govern
- * the replacement of the legacy decimal/codepoint media recipe.
+ * These tags select the image/audio ladder while preserving the shared content law:
+ * arbitrary amplitudes/colors are NOT minted as private Tier-0 atoms. Finite numeric
+ * values compose from the existing codepoint floor into reusable scalar roots; their
+ * image/audio occurrences retain modality roles separately. See modality-ladder-law
+ * and GH #1134 for reconstruction/occurrence requirements.
  */
 typedef enum {
     LAPLACE_MODALITY_IMAGE = 1,
