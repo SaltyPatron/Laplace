@@ -47,6 +47,37 @@ typedef struct LaplacePromptRelationRead
     Bitmapset *operand_origins;
 } LaplacePromptRelationRead;
 
+typedef enum LaplacePromptGeometryPlane
+{
+    LAPLACE_PROMPT_GEOMETRY_HILBERT = 1,
+    LAPLACE_PROMPT_GEOMETRY_ANGULAR = 2,
+    LAPLACE_PROMPT_GEOMETRY_FRECHET = 3
+} LaplacePromptGeometryPlane;
+
+/* Geometry is deterministic response state, not testimony.  Hilbert retains an
+ * exact 128-bit scalar delta; angular/Frechet retain their native metric. */
+typedef struct LaplacePromptGeometryCandidate
+{
+    hash128_t source;
+    hash128_t id;
+    uint32 plane;
+    uint32 rank;
+    uint8 hilbert_delta[16];
+    double distance;
+} LaplacePromptGeometryCandidate;
+
+typedef struct LaplacePromptHilbertCandidate
+{
+    hash128_t id;
+    uint8 delta[16];
+} LaplacePromptHilbertCandidate;
+
+typedef struct LaplacePromptGeometryPoint
+{
+    uint32 off;
+    uint32 node;
+} LaplacePromptGeometryPoint;
+
 typedef struct LaplacePromptIntent
 {
     MemoryContext owner;
@@ -67,6 +98,12 @@ typedef struct LaplacePromptIntent
     LaplaceStructuralCandidate *structural;
     int structural_count;
     ArrayType *structural_frontier;
+    /* Placement/locality/shape remain a separate deterministic response plane.
+     * They may discover responders, but never manufacture testimony or standing. */
+    LaplacePromptGeometryCandidate *geometry;
+    int geometry_count;
+    int geometry_capacity;
+    ArrayType *geometry_frontier;
     /* Prior discourse is an ordered response plane of exact admitted turn/content
      * identities.  It remains distinct from current observation occurrences and
      * from testimony even when equal canonical identities appear in both. */
@@ -245,6 +282,432 @@ laplace_prompt_structural_key(const hash128_t *source, const hash128_t *target,
     return key;
 }
 
+
+static inline int
+laplace_prompt_hilbert_compare(const void *left, const void *right)
+{
+    const LaplacePromptHilbertCandidate *a = left, *b = right;
+    int order = memcmp(a->delta, b->delta, sizeof(a->delta));
+    return order ? order : memcmp(&a->id, &b->id, sizeof(hash128_t));
+}
+
+static inline int
+laplace_prompt_geometry_point_compare(const void *left, const void *right)
+{
+    const LaplacePromptGeometryPoint *a = left, *b = right;
+    if (a->off != b->off) return a->off < b->off ? -1 : 1;
+    if (a->node != b->node) return a->node < b->node ? -1 : 1;
+    return 0;
+}
+
+static inline void
+laplace_prompt_hilbert_delta(const uint8 left[16], const uint8 right[16],
+                             uint8 out[16])
+{
+    const uint8 *high = left, *low = right;
+    int borrow = 0;
+    if (memcmp(left, right, 16) < 0)
+    {
+        high = right;
+        low = left;
+    }
+    for (int i = 15; i >= 0; --i)
+    {
+        int value = (int) high[i] - (int) low[i] - borrow;
+        if (value < 0)
+        {
+            value += 256;
+            borrow = 1;
+        }
+        else
+            borrow = 0;
+        out[i] = (uint8) value;
+    }
+}
+
+static inline void
+laplace_prompt_geometry_append(LaplacePromptIntent *intent,
+                               const hash128_t *source, const hash128_t *id,
+                               uint32 plane, uint32 rank,
+                               const uint8 *hilbert_delta, double distance)
+{
+    if (intent->geometry_count == intent->geometry_capacity)
+    {
+        int64 capacity = intent->geometry_capacity ?
+            (int64) intent->geometry_capacity * 2 : 32;
+        if (capacity > INT_MAX ||
+            (Size) capacity > MaxAllocSize / sizeof(LaplacePromptGeometryCandidate))
+            elog(ERROR, "prompt geometry: response set exceeds allocation capacity");
+        intent->geometry = intent->geometry ?
+            repalloc(intent->geometry,
+                     sizeof(*intent->geometry) * (Size) capacity) :
+            palloc(sizeof(*intent->geometry) * (Size) capacity);
+        intent->geometry_capacity = (int) capacity;
+    }
+    LaplacePromptGeometryCandidate *target =
+        &intent->geometry[intent->geometry_count++];
+    MemSet(target, 0, sizeof(*target));
+    target->source = *source;
+    target->id = *id;
+    target->plane = plane;
+    target->rank = rank;
+    target->distance = distance;
+    if (hilbert_delta)
+        memcpy(target->hilbert_delta, hilbert_delta, sizeof(target->hilbert_delta));
+}
+
+/* One active prompt source at a time, never one SPI call per candidate.  The
+ * angular plan is the exact indexed S3 KNN used by generation.nearest_entity.
+ * The Hilbert plan reads at most fanout equal/predecessor/successor keys from
+ * the btree and C ranks their exact unsigned 128-bit scalar deltas. */
+static inline void
+laplace_prompt_geometry_scan_anchor(
+    LaplacePromptIntent *intent, const hash128_t *source, uint32 node,
+    int fanout, SPIPlanPtr angular_plan, SPIPlanPtr hilbert_plan,
+    hash128_t *root_angular, int *root_angular_count)
+{
+    const double *coords = tier_tree_coord_array(intent->input->tree);
+    const hilbert128_t *hilberts = tier_tree_hilbert_array(intent->input->tree);
+    Datum source_datum = hash128_to_datum(source);
+    Datum angular_args[6] = {
+        Float8GetDatum(coords[(Size) node * 4 + 0]),
+        Float8GetDatum(coords[(Size) node * 4 + 1]),
+        Float8GetDatum(coords[(Size) node * 4 + 2]),
+        Float8GetDatum(coords[(Size) node * 4 + 3]),
+        source_datum,
+        Int32GetDatum(fanout)
+    };
+    int rc = SPI_execute_plan(angular_plan, angular_args, NULL, true, 0);
+    if (rc != SPI_OK_SELECT)
+        elog(ERROR, "prompt geometry: angular KNN failed: %s",
+             SPI_result_code_string(rc));
+    for (uint64 row = 0; row < SPI_processed; ++row)
+    {
+        bool id_null, distance_null;
+        Datum id_value = SPI_getbinval(
+            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &id_null);
+        Datum distance_value = SPI_getbinval(
+            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 2, &distance_null);
+        if (id_null || distance_null) continue;
+        hash128_t id = datum_to_hash128(id_value);
+        double distance = DatumGetFloat8(distance_value);
+        laplace_prompt_geometry_append(
+            intent, source, &id, LAPLACE_PROMPT_GEOMETRY_ANGULAR,
+            (uint32) row + 1u, NULL, distance);
+        if (root_angular && root_angular_count &&
+            hash128_eq(source, &intent->root) && *root_angular_count < fanout)
+            root_angular[(*root_angular_count)++] = id;
+    }
+
+    bytea *hilbert = palloc(VARHDRSZ + 16);
+    SET_VARSIZE(hilbert, VARHDRSZ + 16);
+    memcpy(VARDATA(hilbert), hilberts[node].bytes, 16);
+    Datum hilbert_args[3] = {
+        PointerGetDatum(hilbert), source_datum, Int32GetDatum(fanout)
+    };
+    rc = SPI_execute_plan(hilbert_plan, hilbert_args, NULL, true, 0);
+    if (rc != SPI_OK_SELECT)
+        elog(ERROR, "prompt geometry: Hilbert locality read failed: %s",
+             SPI_result_code_string(rc));
+    if (SPI_processed > (uint64) INT_MAX ||
+        SPI_processed > (uint64) (MaxAllocSize / sizeof(LaplacePromptHilbertCandidate)))
+        elog(ERROR, "prompt geometry: Hilbert candidate set exceeds allocation capacity");
+    int hilbert_count = (int) SPI_processed;
+    LaplacePromptHilbertCandidate *ordered = hilbert_count > 0 ?
+        palloc(sizeof(*ordered) * (Size) hilbert_count) : NULL;
+    for (int row = 0; row < hilbert_count; ++row)
+    {
+        bool id_null, key_null;
+        Datum id_value = SPI_getbinval(
+            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &id_null);
+        Datum key_value = SPI_getbinval(
+            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 2, &key_null);
+        if (id_null || key_null)
+            elog(ERROR, "prompt geometry: indexed Hilbert row contains NULL");
+        bytea *key = DatumGetByteaPP(key_value);
+        if (VARSIZE_ANY_EXHDR(key) != 16)
+            elog(ERROR, "prompt geometry: stored Hilbert key is not 128 bits");
+        ordered[row].id = datum_to_hash128(id_value);
+        laplace_prompt_hilbert_delta(
+            hilberts[node].bytes, (const uint8 *) VARDATA_ANY(key),
+            ordered[row].delta);
+    }
+    qsort(ordered, hilbert_count, sizeof(*ordered), laplace_prompt_hilbert_compare);
+    for (int row = 0; row < Min(hilbert_count, fanout); ++row)
+        laplace_prompt_geometry_append(
+            intent, source, &ordered[row].id, LAPLACE_PROMPT_GEOMETRY_HILBERT,
+            (uint32) row + 1u, ordered[row].delta, 0.0);
+    if (ordered) pfree(ordered);
+    pfree(hilbert);
+    pfree(DatumGetPointer(source_datum));
+}
+
+static inline void
+laplace_prompt_geometry_shape(LaplacePromptIntent *intent, int fanout,
+                              SPIPlanPtr frechet_plan,
+                              const hash128_t *candidates, int candidate_count)
+{
+    if (!frechet_plan || candidate_count <= 0 || fanout <= 0)
+        return;
+    size_t node_count = tier_tree_node_count(intent->input->tree);
+    const uint8 *tiers = tier_tree_tier_array(intent->input->tree);
+    const uint32 *offsets = tier_tree_text_off_array(intent->input->tree);
+    const double *coords = tier_tree_coord_array(intent->input->tree);
+    LaplacePromptGeometryPoint *points =
+        palloc(sizeof(*points) * Max(node_count, (size_t) 1));
+    int point_count = 0;
+    uint8 chosen_tier = 1;
+    for (size_t node = 0; node < node_count; ++node)
+        if (tiers[node] == chosen_tier)
+            points[point_count++] = (LaplacePromptGeometryPoint) {
+                .off = offsets[node], .node = (uint32) node};
+    if (point_count < 2)
+    {
+        point_count = 0;
+        chosen_tier = 0;
+        for (size_t node = 0; node < node_count; ++node)
+            if (tiers[node] == chosen_tier)
+                points[point_count++] = (LaplacePromptGeometryPoint) {
+                    .off = offsets[node], .node = (uint32) node};
+    }
+    if (point_count < 2)
+    {
+        pfree(points);
+        return;
+    }
+    qsort(points, point_count, sizeof(*points), laplace_prompt_geometry_point_compare);
+
+    Datum *x = palloc(sizeof(Datum) * point_count);
+    Datum *y = palloc(sizeof(Datum) * point_count);
+    Datum *z = palloc(sizeof(Datum) * point_count);
+    Datum *m = palloc(sizeof(Datum) * point_count);
+    for (int i = 0; i < point_count; ++i)
+    {
+        Size base = (Size) points[i].node * 4;
+        x[i] = Float8GetDatum(coords[base + 0]);
+        y[i] = Float8GetDatum(coords[base + 1]);
+        z[i] = Float8GetDatum(coords[base + 2]);
+        m[i] = Float8GetDatum(coords[base + 3]);
+    }
+    Datum *ids = palloc(sizeof(Datum) * candidate_count);
+    for (int i = 0; i < candidate_count; ++i)
+        ids[i] = hash128_to_datum(&candidates[i]);
+
+    ArrayType *xa = construct_array(x, point_count, FLOAT8OID,
+                                    sizeof(float8), FLOAT8PASSBYVAL, TYPALIGN_DOUBLE);
+    ArrayType *ya = construct_array(y, point_count, FLOAT8OID,
+                                    sizeof(float8), FLOAT8PASSBYVAL, TYPALIGN_DOUBLE);
+    ArrayType *za = construct_array(z, point_count, FLOAT8OID,
+                                    sizeof(float8), FLOAT8PASSBYVAL, TYPALIGN_DOUBLE);
+    ArrayType *ma = construct_array(m, point_count, FLOAT8OID,
+                                    sizeof(float8), FLOAT8PASSBYVAL, TYPALIGN_DOUBLE);
+    ArrayType *candidate_array = construct_array(
+        ids, candidate_count, BYTEAOID, -1, false, TYPALIGN_INT);
+    Datum args[6] = {
+        PointerGetDatum(xa), PointerGetDatum(ya), PointerGetDatum(za),
+        PointerGetDatum(ma), PointerGetDatum(candidate_array), Int32GetDatum(fanout)
+    };
+    int rc = SPI_execute_plan(frechet_plan, args, NULL, true, 0);
+    if (rc != SPI_OK_SELECT)
+        elog(ERROR, "prompt geometry: Frechet refinement failed: %s",
+             SPI_result_code_string(rc));
+    for (uint64 row = 0; row < SPI_processed; ++row)
+    {
+        bool id_null, distance_null;
+        Datum id_value = SPI_getbinval(
+            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &id_null);
+        Datum distance_value = SPI_getbinval(
+            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 2, &distance_null);
+        if (id_null || distance_null) continue;
+        hash128_t id = datum_to_hash128(id_value);
+        laplace_prompt_geometry_append(
+            intent, &intent->root, &id, LAPLACE_PROMPT_GEOMETRY_FRECHET,
+            (uint32) row + 1u, NULL, DatumGetFloat8(distance_value));
+    }
+
+    for (int i = 0; i < candidate_count; ++i)
+        pfree(DatumGetPointer(ids[i]));
+    pfree(candidate_array); pfree(xa); pfree(ya); pfree(za); pfree(ma);
+    pfree(ids); pfree(x); pfree(y); pfree(z); pfree(m); pfree(points);
+}
+
+static inline void
+laplace_prompt_geometry_couple(LaplacePromptIntent *intent,
+                               Datum *values, bool *nulls,
+                               Datum *nodes, bool *node_nulls,
+                               int count, int fanout)
+{
+    MemoryContext previous = MemoryContextSwitchTo(intent->owner);
+    intent->geometry_frontier = construct_empty_array(BYTEAOID);
+    if (fanout <= 0)
+    {
+        MemoryContextSwitchTo(previous);
+        return;
+    }
+
+    const char *angular_sql =
+        "SELECT w.id, public.laplace_angular_distance_4d("
+        "w.coord,public.ST_SetSRID(public.ST_MakePoint($1,$2,$3,$4),0)) "
+        "FROM laplace.v_word_points w "
+        "WHERE w.id<>$5 AND public.laplace_direction_4d(w.coord) IS NOT NULL "
+        "AND public.laplace_direction_4d(public.ST_SetSRID("
+        "public.ST_MakePoint($1,$2,$3,$4),0)) IS NOT NULL "
+        "ORDER BY public.laplace_direction_4d(w.coord) <<->> "
+        "public.laplace_direction_4d(public.ST_SetSRID("
+        "public.ST_MakePoint($1,$2,$3,$4),0)),w.id LIMIT $6";
+    const char *hilbert_sql =
+        "WITH same AS MATERIALIZED ("
+        " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
+        " WHERE p.type=1 AND p.hilbert_index=$1 AND p.entity_id<>$2"
+        " ORDER BY p.entity_id LIMIT $3"
+        "),before AS MATERIALIZED ("
+        " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
+        " WHERE p.type=1 AND p.hilbert_index<$1 AND p.entity_id<>$2"
+        " ORDER BY p.hilbert_index DESC,p.entity_id DESC LIMIT $3"
+        "),after AS MATERIALIZED ("
+        " SELECT p.entity_id,p.hilbert_index FROM laplace.physicalities p"
+        " WHERE p.type=1 AND p.hilbert_index>$1 AND p.entity_id<>$2"
+        " ORDER BY p.hilbert_index ASC,p.entity_id ASC LIMIT $3"
+        ") SELECT * FROM same UNION ALL SELECT * FROM before UNION ALL SELECT * FROM after";
+    const char *frechet_sql =
+        "WITH anchor_points AS MATERIALIZED ("
+        " SELECT public.ST_MakePoint(p.x,p.y,p.z,p.m) coord,p.ord"
+        " FROM unnest($1::float8[],$2::float8[],$3::float8[],$4::float8[])"
+        " WITH ORDINALITY AS p(x,y,z,m,ord)"
+        "),anchor AS MATERIALIZED ("
+        " SELECT public.ST_MakeLine(coord ORDER BY ord) curve FROM anchor_points"
+        "),candidates AS MATERIALIZED ("
+        " SELECT u.id,u.ord,structural.entity_curve(u.id) curve"
+        " FROM unnest($5::bytea[]) WITH ORDINALITY AS u(id,ord)"
+        "),scored AS ("
+        " SELECT c.id,public.laplace_frechet_4d(c.curve,a.curve) d"
+        " FROM candidates c CROSS JOIN anchor a"
+        " WHERE c.curve IS NOT NULL AND a.curve IS NOT NULL"
+        ") SELECT id,d FROM scored WHERE d IS NOT NULL ORDER BY d,id LIMIT $6";
+    Oid angular_types[6] = {
+        FLOAT8OID,FLOAT8OID,FLOAT8OID,FLOAT8OID,BYTEAOID,INT4OID};
+    Oid hilbert_types[3] = {BYTEAOID,BYTEAOID,INT4OID};
+    Oid frechet_types[6] = {
+        FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,FLOAT8ARRAYOID,
+        BYTEAARRAYOID,INT4OID};
+    SPIPlanPtr angular_plan = SPI_prepare_cursor(
+        angular_sql, 6, angular_types, CURSOR_OPT_PARALLEL_OK);
+    SPIPlanPtr hilbert_plan = SPI_prepare_cursor(
+        hilbert_sql, 3, hilbert_types, CURSOR_OPT_PARALLEL_OK);
+    SPIPlanPtr frechet_plan = SPI_prepare_cursor(
+        frechet_sql, 6, frechet_types, CURSOR_OPT_PARALLEL_OK);
+    if (!angular_plan || !hilbert_plan || !frechet_plan)
+        elog(ERROR, "prompt geometry: indexed response plan preparation failed: %s",
+             SPI_result_code_string(SPI_result));
+
+    HASHCTL ctl = {0};
+    ctl.keysize = sizeof(hash128_t);
+    ctl.entrysize = sizeof(hash128_t);
+    ctl.hcxt = intent->owner;
+    HTAB *anchors = hash_create("prompt geometry anchors", Max(count + 1, 16),
+                                &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+    size_t tree_nodes = tier_tree_node_count(intent->input->tree);
+    const hash128_t *tree_ids = tier_tree_id_array(intent->input->tree);
+    uint32 root_node = TIER_TREE_INVALID;
+    for (size_t node = 0; node < tree_nodes; ++node)
+        if (hash128_eq(&tree_ids[node], &intent->root))
+        {
+            root_node = (uint32) node;
+            break;
+        }
+    if (root_node == TIER_TREE_INVALID)
+        elog(ERROR, "prompt geometry: admitted root is absent from canonical tree");
+
+    hash128_t *root_angular = palloc(sizeof(hash128_t) * (Size) fanout);
+    int root_angular_count = 0;
+    bool found;
+    hash_search(anchors, &intent->root, HASH_ENTER, &found);
+    laplace_prompt_geometry_scan_anchor(
+        intent, &intent->root, root_node, fanout, angular_plan, hilbert_plan,
+        root_angular, &root_angular_count);
+
+    for (int i = 0; i < count; ++i)
+    {
+        if (nulls[i] || node_nulls[i]) continue;
+        int node = DatumGetInt32(nodes[i]);
+        if (node < 0 || (size_t) node >= tree_nodes)
+            elog(ERROR, "prompt geometry: occurrence outside admitted tree");
+        hash128_t source = datum_to_hash128(values[i]);
+        hash_search(anchors, &source, HASH_ENTER, &found);
+        if (found) continue;
+        laplace_prompt_geometry_scan_anchor(
+            intent, &source, (uint32) node, fanout, angular_plan, hilbert_plan,
+            NULL, NULL);
+    }
+    hash_destroy(anchors);
+
+    /* Shape refinement is deliberately over the declared root angular KNN
+     * population: no hidden 500-row probe and never packed trajectory bits. */
+    laplace_prompt_geometry_shape(
+        intent, fanout, frechet_plan, root_angular, root_angular_count);
+    pfree(root_angular);
+    SPI_freeplan(angular_plan);
+    SPI_freeplan(hilbert_plan);
+    SPI_freeplan(frechet_plan);
+
+    if (intent->geometry_count > 0)
+    {
+        HTAB *pending = laplace_prompt_binding_table(
+            "prompt geometry pending bindings", intent->owner);
+        HASHCTL seen_ctl = {0};
+        seen_ctl.keysize = sizeof(hash128_t);
+        seen_ctl.entrysize = sizeof(hash128_t);
+        seen_ctl.hcxt = intent->owner;
+        HTAB *frontier_seen = hash_create(
+            "prompt geometry frontier identities", Max(intent->geometry_count, 16),
+            &seen_ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+        ArrayBuildState *frontier = NULL;
+        for (int i = 0; i < intent->geometry_count; ++i)
+        {
+            const LaplacePromptGeometryCandidate *candidate = &intent->geometry[i];
+            LaplacePromptIntentBinding *source =
+                hash_search(intent->bindings, &candidate->source, HASH_FIND, NULL);
+            if (!source || !source->origins) continue;
+            bool pending_found;
+            LaplacePromptIntentBinding *target =
+                hash_search(pending, &candidate->id, HASH_ENTER, &pending_found);
+            if (!pending_found) target->origins = NULL;
+            target->origins = bms_add_members(target->origins, source->origins);
+
+            bool frontier_found;
+            hash_search(frontier_seen, &candidate->id, HASH_ENTER, &frontier_found);
+            if (!frontier_found)
+            {
+                Datum id = hash128_to_datum(&candidate->id);
+                frontier = accumArrayResult(
+                    frontier, id, false, BYTEAOID, intent->owner);
+                pfree(DatumGetPointer(id));
+            }
+        }
+        HASH_SEQ_STATUS sequence;
+        LaplacePromptIntentBinding *entry;
+        hash_seq_init(&sequence, pending);
+        while ((entry = hash_seq_search(&sequence)) != NULL)
+        {
+            bool binding_found;
+            LaplacePromptIntentBinding *target =
+                hash_search(intent->bindings, &entry->id, HASH_ENTER, &binding_found);
+            if (!binding_found) target->origins = NULL;
+            target->origins = bms_add_members(target->origins, entry->origins);
+            bms_free(entry->origins);
+        }
+        hash_destroy(frontier_seen);
+        hash_destroy(pending);
+        if (frontier)
+        {
+            pfree(intent->geometry_frontier);
+            intent->geometry_frontier =
+                DatumGetArrayTypeP(makeArrayResult(frontier, intent->owner));
+        }
+    }
+    MemoryContextSwitchTo(previous);
+}
+
 /* The input scope has already bound exact occurrences at every canonical cut.
  * Pull their complete ordered successor set before ORIENT and retain that route
  * independently in the physicality response. This is not an n-gram edge and
@@ -381,6 +844,12 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
         entry->origins = bms_add_member(entry->origins, i);
         root_binding->origins = bms_add_member(root_binding->origins, i);
     }
+
+    /* Geometry responds before ORIENT from the canonical in-memory prompt tree.
+     * The anchor therefore exists even when the prompt has never been witnessed.
+     * Its results remain deterministic locality/shape state, not semantic truth. */
+    laplace_prompt_geometry_couple(
+        &result, values, nulls, nodes, node_nulls, count, fanout);
 
     /* Physicality participates in COUPLE before ORIENT. The native scope is the
      * same one later used for ordered continuation, so containment, membership,
