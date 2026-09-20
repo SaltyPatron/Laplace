@@ -2,6 +2,9 @@
 #define LAPLACE_PROMPT_INTENT_H
 
 #include "postgres.h"
+
+#include <math.h>
+
 #include "nodes/bitmapset.h"
 #include "utils/array.h"
 #include "utils/hsearch.h"
@@ -331,6 +334,13 @@ laplace_prompt_geometry_append(LaplacePromptIntent *intent,
                                uint32 plane, uint32 rank,
                                const uint8 *hilbert_delta, double distance)
 {
+    if (plane < LAPLACE_PROMPT_GEOMETRY_HILBERT ||
+        plane > LAPLACE_PROMPT_GEOMETRY_FRECHET ||
+        rank == 0 ||
+        (plane == LAPLACE_PROMPT_GEOMETRY_HILBERT && !hilbert_delta) ||
+        (plane != LAPLACE_PROMPT_GEOMETRY_HILBERT &&
+         (!isfinite(distance) || distance < 0.0)))
+        elog(ERROR, "prompt geometry: invalid deterministic metric response");
     if (intent->geometry_count == intent->geometry_capacity)
     {
         int64 capacity = intent->geometry_capacity ?
