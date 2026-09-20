@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ExplorePhysicalityRow } from '../types';
@@ -162,6 +162,43 @@ function ContextLossGuard() {
   return null;
 }
 
+function ReferenceMarker({
+  position,
+  label,
+  color,
+}: {
+  position: [number, number, number];
+  label: string;
+  color: string;
+}) {
+  const [showLabel, setShowLabel] = useState(true);
+  const visibleRef = useRef(true);
+  const point = useMemo(() => new THREE.Vector3(...position), [position]);
+
+  useFrame(({ camera }) => {
+    // A near-side axis marker becomes a billboard over the data. Hide only that
+    // label while it is close to the camera; rotating/zooming away restores it.
+    const visible = camera.position.distanceTo(point) >= 1.45;
+    if (visible === visibleRef.current) return;
+    visibleRef.current = visible;
+    setShowLabel(visible);
+  });
+
+  return (
+    <group position={position}>
+      <mesh>
+        <sphereGeometry args={[0.022, 10, 10]} />
+        <meshBasicMaterial color={color} toneMapped={false} />
+      </mesh>
+      {showLabel ? (
+        <Html center>
+          <span className={styles.referenceLabel}>{label}</span>
+        </Html>
+      ) : null}
+    </group>
+  );
+}
+
 function GlomeScene({
   nodes,
   trajectory,
@@ -189,11 +226,27 @@ function GlomeScene({
   const instances = useRef<THREE.InstancedMesh>(null);
   const transform = useMemo(() => new THREE.Object3D(), []);
   const invalidate = useThree((s) => s.invalidate);
+  const instanceColors = useMemo(() => {
+    const values = new Float32Array(Math.max(1, nodes.length) * 3);
+    const color = new THREE.Color();
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      const ordHit = highlightOrdinal != null && n.ordinal === highlightOrdinal;
+      color.set(
+        n.color
+          ?? (n.kind === 'walk' ? palette.walk
+            : n.kind === 'neighbor' ? palette.neighbor
+              : n.kind === 'constituent' ? palette.constituent
+                : ordHit || highlightIds.has(n.id) ? palette.highlight : palette.primary),
+      );
+      color.toArray(values, i * 3);
+    }
+    return new THREE.InstancedBufferAttribute(values, 3);
+  }, [nodes, highlightIds, highlightOrdinal, palette]);
 
   useEffect(() => {
     const mesh = instances.current;
     if (!mesh) return;
-    const hadInstanceColor = mesh.instanceColor != null;
     const densityScale =
       nodes.length <= 8 ? 2.8
         : nodes.length <= 24 ? 2.2
@@ -212,29 +265,20 @@ function GlomeScene({
       transform.scale.setScalar(radius);
       transform.updateMatrix();
       mesh.setMatrixAt(i, transform.matrix);
-      mesh.setColorAt(i, new THREE.Color(
-        n.color
-          ?? (n.kind === 'walk' ? palette.walk
-            : n.kind === 'neighbor' ? palette.neighbor
-              : n.kind === 'constituent' ? palette.constituent
-                : ordHit || highlightIds.has(n.id) ? palette.highlight : palette.primary),
-      ));
     }
     mesh.count = nodes.length;
     mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    // setColorAt allocates instanceColor lazily. The material may already have
-    // compiled once without USE_INSTANCING_COLOR, so force one recompile when
-    // that attribute first appears instead of rendering black/unpainted spheres.
-    if (!hadInstanceColor && mesh.instanceColor) {
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const material of materials) material.needsUpdate = true;
-    }
+    // Instance colors are allocated before material compilation instead of
+    // appearing lazily after first paint (which rendered black points).
+    mesh.instanceColor = instanceColors;
+    mesh.instanceColor.needsUpdate = true;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const material of materials) material.needsUpdate = true;
     // Demand-mode does not repaint after mutating InstancedMesh matrices/colors.
     // Invalidate AFTER the mutations, otherwise every instance is visually left
     // at its initial origin transform until the user happens to move the camera.
     invalidate();
-  }, [nodes, projection, xmAngle, zmAngle, highlightIds, highlightOrdinal, palette, transform, invalidate]);
+  }, [nodes, projection, xmAngle, zmAngle, instanceColors, transform, invalidate]);
 
   return (
     <>
@@ -244,6 +288,7 @@ function GlomeScene({
       <instancedMesh
         ref={instances}
         args={[undefined, undefined, nodes.length]}
+        instanceColor={instanceColors}
         onPointerMove={(e) => {
           e.stopPropagation();
           setHover(e.instanceId == null ? null : nodes[e.instanceId] ?? null);
@@ -267,20 +312,17 @@ function GlomeScene({
           opacity={0.82}
         />
       ) : null}
-      {[
+      {([
         [[1, 0, 0], '+X'], [[-1, 0, 0], '−X'],
         [[0, 1, 0], '+Y'], [[0, -1, 0], '−Y'],
         [[0, 0, 1], '+Z'], [[0, 0, -1], '−Z'],
-      ].map(([position, label]) => (
-        <group key={label as string} position={position as [number, number, number]}>
-          <mesh>
-            <sphereGeometry args={[0.032, 12, 12]} />
-            <meshBasicMaterial color={palette.reference} toneMapped={false} />
-          </mesh>
-          <Html center distanceFactor={7}>
-            <span className={styles.referenceLabel}>{label as string}</span>
-          </Html>
-        </group>
+      ] as const).map(([position, label]) => (
+        <ReferenceMarker
+          key={label}
+          position={[...position]}
+          label={label}
+          color={palette.reference}
+        />
       ))}
       <mesh>
         <sphereGeometry args={[1, 28, 28]} />
