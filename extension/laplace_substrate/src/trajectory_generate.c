@@ -1100,8 +1100,12 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 if (geometry_null) continue;
                 hash128_t id = datum_to_hash128(geometry_value);
                 hash_search(route_seen, &id, HASH_ENTER, NULL);
+                /* Geometry is a whole-observation response. Preserve the root's
+                 * exact prompt ancestry without promoting the responder itself
+                 * into the semantic binding table. */
                 origin_add_occurrences(origins, &id,
-                    laplace_prompt_intent_origins(&coupled_intent, &id), walk_context);
+                    laplace_prompt_intent_origins(
+                        &coupled_intent, &coupled_intent.root), walk_context);
             }
             array_free_iterator(geometry_iterator);
             laplace_query_state_extend_batch_role(
