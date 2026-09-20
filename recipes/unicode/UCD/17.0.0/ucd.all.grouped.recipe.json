@@ -6113,11 +6113,29 @@
   },
   "providerRoutes": [
     {
+      "recordName": "group",
+      "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
+      "fieldPrefix": "repertoire/*",
+      "subject": {
+        "kind": "CodepointInterval",
+        "identityField": "cp",
+        "rangeStartField": "first-cp",
+        "lastField": "last-cp",
+        "entityNamespace": null,
+        "entityType": "Range",
+        "sequenceSeparator": null
+      },
+      "structurePaths": [
+        "repertoire",
+        "repertoire/group"
+      ]
+    },
+    {
       "recordName": "char",
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "repertoire/*",
       "subject": {
-        "kind": "CodepointRange",
+        "kind": "CodepointInterval",
         "identityField": "cp",
         "rangeStartField": "first-cp",
         "lastField": "last-cp",
@@ -6132,15 +6150,14 @@
       ],
       "childFieldPrefixes": {
         "name-alias": "repertoire/*/name-alias"
-      },
-      "inheritParentAttributes": true
+      }
     },
     {
       "recordName": "reserved",
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "repertoire/*",
       "subject": {
-        "kind": "CodepointRange",
+        "kind": "CodepointInterval",
         "identityField": "cp",
         "rangeStartField": "first-cp",
         "lastField": "last-cp",
@@ -6155,15 +6172,14 @@
       ],
       "childFieldPrefixes": {
         "name-alias": "repertoire/*/name-alias"
-      },
-      "inheritParentAttributes": true
+      }
     },
     {
       "recordName": "noncharacter",
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "repertoire/*",
       "subject": {
-        "kind": "CodepointRange",
+        "kind": "CodepointInterval",
         "identityField": "cp",
         "rangeStartField": "first-cp",
         "lastField": "last-cp",
@@ -6178,15 +6194,14 @@
       ],
       "childFieldPrefixes": {
         "name-alias": "repertoire/*/name-alias"
-      },
-      "inheritParentAttributes": true
+      }
     },
     {
       "recordName": "surrogate",
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "repertoire/*",
       "subject": {
-        "kind": "CodepointRange",
+        "kind": "CodepointInterval",
         "identityField": "cp",
         "rangeStartField": "first-cp",
         "lastField": "last-cp",
@@ -6201,8 +6216,7 @@
       ],
       "childFieldPrefixes": {
         "name-alias": "repertoire/*/name-alias"
-      },
-      "inheritParentAttributes": true
+      }
     },
     {
       "recordName": "block",
