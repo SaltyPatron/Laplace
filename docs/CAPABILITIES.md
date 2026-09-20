@@ -142,6 +142,8 @@ If a layer's legal finite domain is practical to enumerate, use a dense direct-a
 
 This means the benefits compound upward: once pixels/patches/images are cached, video construction can reuse them instead of recomputing lower image structure; the same applies to audio. A complete known image can be an O(1)/bounded mmap lookup and still occur in many files/videos without another semantic copy.
 
+A cached image is also a multiscale structural basis. An 8×8 region contains 204 contiguous square occurrences across 1×1..8×8. Those occurrences point at globally reusable canonical subpatch roots, so two different regions/images can share exact lower-scale structures even when their complete roots differ. This gives image/video cognition exact multiscale matching without learned filters or repeated window recomputation.
+
 Cache lookup should produce canonical keys for indexed database/native operations rather than hide indexed columns behind per-row functions.
 
 Cache profiles can be intentionally narrow without creating smaller knowledge worlds. A device may map ASCII rather than all Unicode, a selected color palette rather than every pixel value, or a declared speech-frequency/filter-bank segment rather than every audio calculation. Members retain their global canonical identity. Missing cache entries fall back to canonical execution when available; authorization remains a separate knowledge/governance axis.
