@@ -244,6 +244,88 @@ Likewise, the finite set of patches/regions/images already known to Laplace can 
 
 The same canonical image can occur in many files, documents or videos while the image record exists once.
 
+## Scale-complete image substructure lattice
+
+An image region participates in every contiguous square subregion it contains, not only one fixed partition size.
+
+For an N×N region, the number of contiguous square occurrences across sizes 1×1 through N×N is:
+
+~~~text
+sum(k=1..N) (N-k+1)^2
+= sum(j=1..N) j^2
+= N(N+1)(2N+1)/6
+~~~
+
+For N=8:
+
+~~~text
+1x1  64
+2x2  49
+3x3  36
+4x4  25
+5x5  16
+6x6   9
+7x7   4
+8x8   1
+---------
+total 204
+~~~
+
+These are 204 **substructure occurrences** in that 8×8 region. Their canonical roots are globally reusable. If a 3×3 or 4×4 pattern has already occurred elsewhere, this region references the same canonical structure rather than creating another semantic copy.
+
+This creates a deterministic multiscale image basis:
+
+~~~text
+pixels
+-> every 2x2
+-> every 3x3
+-> every 4x4
+-> ...
+-> complete region
+~~~
+
+The basis is not limited to powers of two and is not a learned receptive field. It is exact source structure under the declared image recipe.
+
+### Why this compounds
+
+A larger region is described in terms of many already-known smaller canonical structures.
+
+Two non-identical 8×8 regions can therefore share dozens or hundreds of exact lower-scale structures even when their complete 8×8 roots differ.
+
+That gives Laplace exact multiscale response planes for:
+
+- structural equality;
+- partial overlap;
+- repeated textures/backgrounds;
+- edges/corners/shape fragments;
+- sprite/tile reuse;
+- video frame reuse;
+- cross-image similarity;
+- anomaly/residual detection.
+
+The cache can expose these roots directly, so a higher image/video operation does not rediscover the same lower-scale patterns.
+
+### Storage shape
+
+Do not confuse occurrence count with novelty count.
+
+An 8×8 region may reference 204 square occurrences while introducing far fewer new canonical roots.
+
+A ROM record can carry compact local references into the loaded cache generation:
+
+~~~text
+8x8 record
+  64 refs -> 1x1 roots
+  49 refs -> 2x2 roots
+  36 refs -> 3x3 roots
+  ...
+   1 ref  -> 8x8 root/self
+~~~
+
+Local slots are acceleration addresses only; they resolve to global canonical ids.
+
+A selected cache module may retain all scale references or only the scale families required by a workload. The selection is receipted and never changes the canonical structures themselves.
+
 ## Trunk-first cache short-circuit
 
 Probe the highest lawful reusable composition before rebuilding its descendants.
