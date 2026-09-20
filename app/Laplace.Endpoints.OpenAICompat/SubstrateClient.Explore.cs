@@ -694,11 +694,20 @@ internal sealed partial class SubstrateClient
         var rows = new int[positive.Length];
         var cols = new int[positive.Length];
         var weights = new double[positive.Length];
+        var degree = new double[ordered.Length];
         for (var i = 0; i < positive.Length; i++)
         {
-            rows[i] = ordinal[positive[i].SourceIdHex];
-            cols[i] = ordinal[positive[i].TargetIdHex];
-            weights[i] = positive[i].CompleteWeight;
+            var row = ordinal[positive[i].SourceIdHex];
+            var col = ordinal[positive[i].TargetIdHex];
+            var weight = positive[i].CompleteWeight;
+            rows[i] = row;
+            cols[i] = col;
+            weights[i] = weight;
+            // The native eigenmap symmetrizes W, so this is the same positive
+            // conductance test that decides whether a vertex belongs to the
+            // belief manifold at all.
+            degree[row] += weight;
+            degree[col] += weight;
         }
 
         var dimensions = Math.Min(3, ordered.Length - 2);
@@ -719,6 +728,12 @@ internal sealed partial class SubstrateClient
             ordered.Length, StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < ordered.Length; i++)
         {
+            // No positive conductance means no coordinate in the positive
+            // testimony manifold. Leaving it unprojected is intentional: the
+            // viewer scatters such dead ends outside the coherent basin instead
+            // of collapsing every zero-degree vertex onto the spectral origin.
+            if (!(degree[i] > 0.0)) continue;
+
             var x = projected[i * dimensions];
             var y = dimensions > 1 ? projected[i * dimensions + 1] : 0.0;
             var z = dimensions > 2 ? projected[i * dimensions + 2] : 0.0;

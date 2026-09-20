@@ -133,7 +133,16 @@ export function graphForDimension(base: GraphData, dim: Dim, centerId: string): 
         const z = ((node.beliefZ ?? 0) - cz) * spectralScale;
         return { ...clean, x, y, z, fx: x, fy: y, fz: z };
       }
-      const [x, y, z] = volumetricSeed(node.id, node.hop);
+      // A vertex with no positive conductance is outside the positive belief
+      // manifold. Keep it visible, but scatter it deterministically beyond the
+      // coherent spectral basin rather than pinning every dead end at (0,0,0).
+      const [sx, sy, sz] = volumetricSeed(node.id, node.hop);
+      const sr = Math.max(1e-9, Math.hypot(sx, sy, sz));
+      const outerRadius = targetRadius * (1.18 + Math.min(3, Math.max(0, node.hop)) * 0.12);
+      const outerScale = outerRadius / sr;
+      const x = sx * outerScale;
+      const y = sy * outerScale;
+      const z = sz * outerScale;
       return { ...clean, x, y, z, fx: x, fy: y, fz: z };
     }
     if (node.id === centerId) {
