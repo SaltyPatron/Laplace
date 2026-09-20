@@ -31,7 +31,7 @@ Read `docs/CAPABILITIES.md` before narrowing a task to a local subsystem. The in
 
 In particular, preserve these consequences when relevant:
 
-- grammar/typed-AST code construction with reuse and minimal structural mutation rather than token-ish source generation;
+- grammar-constrained tier/trajectory code construction with reuse and minimal structural mutation rather than token-ish source generation;
 - exact/normalized/semantic duplicate-code convergence and consolidation as part of construction;
 - compile/test/simulation/runtime failures as witnessed repair trajectories that affect later construction;
 - cross-repository structural/trajectory comparison, including Fréchet where order/curve shape is relevant;
@@ -198,7 +198,7 @@ Prefer cache lookup on the request side to produce ids/coords/Hilbert/ranges tha
 
 ### Content novelty is not observation volume
 
-Same canonical content converges. Re-observing `king`, a sentence, a chess line, an AST subtree or another exact composition does not require a duplicate canonical structure. New observations may add occurrences, provenance, testimony, statistics and standing around already-existing structure.
+Same canonical content converges. Re-observing `king`, a sentence, a chess line, a code composition or another exact composition does not require a duplicate canonical structure. New observations may add occurrences, provenance, testimony, statistics and standing around already-existing structure.
 
 Do not estimate substrate growth as if every observed byte or event necessarily creates a new independent node. Conversely, do not claim an exact logarithmic storage law unless a measurement/model establishes that rate.
 
