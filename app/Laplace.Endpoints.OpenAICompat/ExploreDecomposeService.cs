@@ -70,7 +70,7 @@ internal sealed class ExploreDecomposeService
 
             var records = CodepointPerfcache.Records;
             var payload = new byte[checked(records.Length * 3 * sizeof(float) * 2)];
-            var values = MemoryMarshal.Cast<byte, float>(payload);
+            Span<float> values = MemoryMarshal.Cast<byte, float>(payload.AsSpan());
             const ulong Mask53 = (1UL << 53) - 1, Mask42 = (1UL << 42) - 1, Mask22 = (1UL << 22) - 1;
             for (var i = 0; i < records.Length; i++)
             {
