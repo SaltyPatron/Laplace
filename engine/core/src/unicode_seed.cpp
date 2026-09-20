@@ -82,21 +82,37 @@ const char* attr(const char** a, const char* n) {
     return nullptr;
 }
 
-struct SaxCtx { UcdData* d; bool in_rep = false; };
+struct SaxCtx {
+    UcdData* d;
+    bool in_rep = false;
+    std::unordered_map<std::string, std::string> group_attrs;
+};
 
 void on_start(void* u, const char* name, const char** a) {
     auto* ctx = (SaxCtx*)u;
     if (std::strcmp((const char*)name, "repertoire") == 0) { ctx->in_rep = true; return; }
     if (!ctx->in_rep) return;
     const char* nm = (const char*)name;
+    if (std::strcmp(nm, "group") == 0) {
+        ctx->group_attrs.clear();
+        if (a) for (int i = 0; a[i]; i += 2)
+            ctx->group_attrs.emplace(a[i], a[i + 1]);
+        return;
+    }
     if (std::strcmp(nm,"char") && std::strcmp(nm,"reserved")
      && std::strcmp(nm,"noncharacter") && std::strcmp(nm,"surrogate")) return;
 
+    auto inherited = [&](const char* key) -> const char* {
+        if (const char* direct = attr(a, key)) return direct;
+        auto it = ctx->group_attrs.find(key);
+        return it == ctx->group_attrs.end() ? nullptr : it->second.c_str();
+    };
+
     uint32_t first, last;
-    auto cp = attr(a, "cp");
+    auto cp = inherited("cp");
     if (cp) { first = last = (uint32_t)std::stoul((const char*)cp, nullptr, 16); }
     else {
-        auto f = attr(a, "first-cp"); auto l = attr(a, "last-cp");
+        auto f = inherited("first-cp"); auto l = inherited("last-cp");
         if (!f || !l) return;
         first = (uint32_t)std::stoul((const char*)f, nullptr, 16);
         last  = (uint32_t)std::stoul((const char*)l, nullptr, 16);
@@ -104,9 +120,9 @@ void on_start(void* u, const char* name, const char** a) {
     if (last >= CP_COUNT) return;
 
     UcdData* d = ctx->d;
-    auto gcb = attr(a,"GCB"); auto wbv = attr(a,"WB"); auto sbv = attr(a,"SB");
-    auto inc = attr(a,"InCB"); auto cccv = attr(a,"ccc"); auto ep = attr(a,"ExtPict");
-    auto ws = attr(a,"WSpace");
+    auto gcb = inherited("GCB"); auto wbv = inherited("WB"); auto sbv = inherited("SB");
+    auto inc = inherited("InCB"); auto cccv = inherited("ccc"); auto ep = inherited("ExtPict");
+    auto ws = inherited("WSpace");
 
     uint8_t gbid = gcb ? map_gb((const char*)gcb) : LAPLACE_GB_OTHER;
     if (ep && std::strcmp((const char*)ep,"Y")==0) gbid = LAPLACE_GB_EXTENDED_PICTOGRAPHIC;
@@ -123,7 +139,14 @@ void on_start(void* u, const char* name, const char** a) {
 }
 void on_end(void* u, const char* name) {
     auto* ctx = (SaxCtx*)u;
-    if (std::strcmp(name,"repertoire")==0) ctx->in_rep = false;
+    if (std::strcmp(name, "group") == 0) {
+        ctx->group_attrs.clear();
+        return;
+    }
+    if (std::strcmp(name,"repertoire")==0) {
+        ctx->group_attrs.clear();
+        ctx->in_rep = false;
+    }
 }
 
 struct DucetKeys {
