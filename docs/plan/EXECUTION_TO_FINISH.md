@@ -4,6 +4,14 @@ This file is a compatibility/workstream index, not a permanent global execution 
 
 The previous revision arranged the repository into numbered “finish lines” and told agents to pick the earliest unfinished one. That was useful for one campaign, but it could override a later explicit user task and make a historical backlog sequence look like part of the invention. The detailed prior order remains available in Git history.
 
+## Capability completion is product completion
+
+Read `docs/CAPABILITIES.md` before selecting a local finish line. Tests, gates, benchmark harnesses, issue edits and CI green state are evidence only.
+
+When accepted work touches software construction, authority/governance, billing, program analysis or deployment, completion means the integrated behavior is executable: canonical reuse/minimal AST mutation, witnessed repair feedback, duplicate consolidation, repository-root realization, exact/symbolic machine-cost derivation, effective knowledge/capability scope and measured hop/fanout work as applicable.
+
+Do not choose an easier historical gate because the compound capability crosses several workstreams.
+
 ## Authority
 
 Active work follows:
