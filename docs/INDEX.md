@@ -1,5 +1,7 @@
 # Documentation index
 
+
+- [`CAPABILITIES.md`](CAPABILITIES.md) — binding synthesis of what the primitive invention laws enable together: knowledge authority/governance, measured cognition, grammar/AST software construction, duplicate-code convergence, repair trajectories, machine-cost derivation, repository-root mutation and proven root-transition deployment.
 The canonical documentation map is now [`README.md`](README.md).
 
 This file remains as a compatibility entry point for links/bookmarks that historically targeted `docs/INDEX.md`. It does **not** define an independent priority or authority order.
