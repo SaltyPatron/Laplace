@@ -173,35 +173,50 @@ function ReferenceMarker({
   label: string;
   color: string;
 }) {
-  const [showLabel, setShowLabel] = useState(true);
-  const visibleRef = useRef(true);
+  const [showLabel, setShowLabel] = useState(false);
+  const visibleRef = useRef(false);
   const point = useMemo(() => new THREE.Vector3(...position), [position]);
   const projected = useMemo(() => new THREE.Vector3(), []);
+  const outer = useMemo(
+    () => [position[0] * 1.055, position[1] * 1.055, position[2] * 1.055] as [number, number, number],
+    [position],
+  );
+  const labelPosition = useMemo(
+    () => [position[0] * 1.095, position[1] * 1.095, position[2] * 1.095] as [number, number, number],
+    [position],
+  );
 
   useFrame(({ camera }) => {
     projected.copy(point).project(camera);
-    // Keep the six reference marks visible, but never put a DOM billboard over
-    // the middle of the knowledge cloud. Labels only appear near the perimeter.
-    const nearCenter = Math.abs(projected.x) < 0.34 && Math.abs(projected.y) < 0.34;
+    // Axis labels are orientation references, never data. Only show one when
+    // the axis endpoint is actually near the viewport perimeter; ±Z therefore
+    // disappears while it points through the middle of the cloud.
+    const screenRadius = Math.hypot(projected.x, projected.y);
     const behind = projected.z < -1 || projected.z > 1;
-    const visible = !nearCenter && !behind;
+    const visible = !behind && screenRadius > 0.62;
     if (visible === visibleRef.current) return;
     visibleRef.current = visible;
     setShowLabel(visible);
   });
 
   return (
-    <group position={position}>
-      <mesh>
-        <sphereGeometry args={[0.026, 10, 10]} />
+    <>
+      <Line
+        points={[position, outer]}
+        color={color}
+        lineWidth={1.35}
+        transparent={false}
+      />
+      <mesh position={outer}>
+        <sphereGeometry args={[0.014, 8, 8]} />
         <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
       {showLabel ? (
-        <Html center distanceFactor={14} zIndexRange={[1, 0]}>
+        <Html position={labelPosition} center zIndexRange={[1, 0]}>
           <span className={styles.referenceLabel}>{label}</span>
         </Html>
       ) : null}
-    </group>
+    </>
   );
 }
 
