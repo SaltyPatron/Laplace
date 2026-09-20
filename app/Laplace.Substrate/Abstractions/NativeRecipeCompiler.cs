@@ -14,6 +14,7 @@ public static class NativeRecipeCompiler
     private const uint Rcp2 = 0x32504352u;
     private const uint Rcp3 = 0x33504352u;
     private const uint Rcp4 = 0x34504352u;
+    private const uint Rcp5 = 0x35504352u;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     public static byte[] Compile(SemanticSourceRecipe recipe, int recordDepth = 2)
@@ -42,7 +43,10 @@ public static class NativeRecipeCompiler
             field => field.DefaultValue is not null || field.OmitDefaultTestimony);
         bool hasStructures = recipe.Structures.Count != 0
             || recipe.ProviderRoutes.Any(route => route.StructurePaths.Count != 0);
-        uint version = hasStructures ? Rcp4 : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
+        bool hasInheritedAttributes = recipe.ProviderRoutes.Any(
+            static route => route.InheritParentAttributes);
+        uint version = hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
+            : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
         writer.Write(version);
         writer.Write((uint)recordDepth);
@@ -103,7 +107,7 @@ public static class NativeRecipeCompiler
             WriteHash(writer, lexical);
             writer.Write(rank);
             WriteAliases(writer, aliases, field.ValueAliasProperty ?? field.PropertyName);
-            if (version is Rcp3 or Rcp4)
+            if (version is Rcp3 or Rcp4 or Rcp5)
             {
                 writer.Write(field.DefaultValue is null ? 0u : 1u);
                 WriteText(writer, field.DefaultValue);
@@ -112,7 +116,7 @@ public static class NativeRecipeCompiler
             if (hasExtendedHeader) WriteText(writer, field.ContextField);
         }
 
-        if (version == Rcp4)
+        if (version is Rcp4 or Rcp5)
         {
             writer.Write(checked((uint)recipe.Structures.Count));
             foreach (SourceRecipeStructure structure in recipe.Structures)
@@ -179,7 +183,7 @@ public static class NativeRecipeCompiler
                 ? identity.ValueAliasProperty ?? identity.PropertyName
                 : recipe.CanonicalProperty(subject.IdentityField);
             WriteAliases(writer, aliases, property);
-            if (version == Rcp4)
+            if (version is Rcp4 or Rcp5)
             {
                 writer.Write(checked((uint)route.StructurePaths.Count));
                 foreach (string structurePath in route.StructurePaths)
@@ -189,6 +193,8 @@ public static class NativeRecipeCompiler
                             $"Route '{route.RecordName}' references unknown structure '{structurePath}'.");
                     WriteText(writer, structurePath);
                 }
+                if (version == Rcp5)
+                    writer.Write(route.InheritParentAttributes ? 1u : 0u);
             }
         }
 
