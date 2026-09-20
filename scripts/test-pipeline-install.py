@@ -97,7 +97,7 @@ phase_publish
         install = function("phase_install")
         self.assertNotIn('dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_dir"', install)
         self.assertIn('ingest_runtime_root="$ingest_dir/runtimes"', install)
-        self.assertIn('dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_stage"', install)
+        self.assertIn('dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_build"', install)
         self.assertIn('mv "$ingest_stage" "$ingest_runtime"', install)
         self.assertIn('ln -s "runtimes/$ingest_revision" "$ingest_link_tmp"', install)
         self.assertIn('mv -Tf "$ingest_link_tmp" "$ingest_dir/current"', install)

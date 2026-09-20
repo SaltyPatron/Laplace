@@ -71,7 +71,8 @@ public sealed class DocumentIngestHandler : IIngestRecordHandler<ContentIngestRe
         FileIdentity file = FileEntity.Emit(
             builder,
             DocumentSource.SourceId,
-            record.CanonicalUtf8,
+            FileEntity.RootComponent(unit.TreeForBatchProbe
+                ?? throw new InvalidOperationException("document content tree was released before file publication")),
             metadata,
             SourceTrust.StructuredCorpus);
         if (file.ContentRootId != contentRoot

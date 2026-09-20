@@ -3,6 +3,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include "blake3.h"
 
 #include "laplace/core/codepoint_table.h"
 #include "laplace/core/hash128.h"
@@ -366,6 +367,7 @@ typedef struct {
     uint64_t*  flags;
     double*    trajectory;
     size_t     capacity;
+    intent_stage_t* forms;
 } emit_scratch_t;
 
 static void emit_scratch_free(emit_scratch_t* scratch) {
@@ -373,6 +375,7 @@ static void emit_scratch_free(emit_scratch_t* scratch) {
     free(scratch->child_ids);
     free(scratch->flags);
     free(scratch->trajectory);
+    intent_stage_free(scratch->forms);
     memset(scratch, 0, sizeof(*scratch));
 }
 
@@ -423,20 +426,7 @@ static int emit_node(
     if (node.tier == 0) return 0;
     if (!should_emit_compositional(tree, idx)) return 0;
 
-    if (emit_entity) {
-        if (intent_stage_witness_seen(stage, &node.id)) return 0;
-        hash128_t type_id = laplace_content_tier_type_id(node.tier);
-        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
-            return -2;
-    } else {
-        /* This is a real retained node/form; E presence does not erase its
-         * interpretation. Collapsed wrappers and shared atomic floors already
-         * returned above. Historical entity tuples remain unchanged. */
-        hash128_t type_id = laplace_content_tier_type_id(node.tier);
-        if (intent_stage_add_entity_interpretation(
-                stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
-            return -2;
-    }
+    emit_entity = emit_entity && !intent_stage_witness_seen(stage, &node.id);
 
     double* traj = NULL;
     size_t m = node.child_count;
@@ -456,6 +446,42 @@ static int emit_node(
             scratch->flags[ci] = laplace_vertex_flags(
                 ch.tier, ch.tier == 0 ? 1 : 0, ch.atom);
         }
+    }
+
+    /* Repeated occurrences retain their ordered parent vertices. They do not
+     * need identical E/P/form bytes restaged for the same source observation.
+     * Include the entire realized form, not just E: distinct tier/coordinate/
+     * constituent-role interpretations of one canonical id remain observable.
+     * This scratch set lives for one emit call, so another source or observation
+     * never loses its physicality provenance through an earlier call's cache. */
+    blake3_hasher form;
+    hash128_t form_id;
+    blake3_hasher_init(&form);
+    blake3_hasher_update(&form, &node.id, sizeof(node.id));
+    blake3_hasher_update(&form, &node.tier, sizeof(node.tier));
+    blake3_hasher_update(&form, node.coord, sizeof(node.coord));
+    blake3_hasher_update(&form, &node.hilbert, sizeof(node.hilbert));
+    blake3_hasher_update(&form, &m, sizeof(m));
+    if (m > 1) {
+        blake3_hasher_update(&form, scratch->child_ids, m * sizeof(hash128_t));
+        blake3_hasher_update(&form, scratch->flags, m * sizeof(uint64_t));
+    }
+    blake3_hasher_finalize(&form, (uint8_t*)&form_id, sizeof(form_id));
+    if (intent_stage_witness_seen(scratch->forms, &form_id)) {
+        *emitted = 1;
+        return 0;
+    }
+    if (intent_stage_witness_record(scratch->forms, &form_id) != 0
+        || intent_stage_allocation_failed(scratch->forms)) return -2;
+
+    hash128_t type_id = laplace_content_tier_type_id(node.tier);
+    if (emit_entity) {
+        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
+            return -2;
+    } else if (intent_stage_add_entity_interpretation(
+            stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0) return -2;
+
+    if (m > 1) {
         traj = scratch->trajectory;
         if (trajectory_build_flagged_rle(
                 scratch->child_ids, scratch->flags, m, traj, &n_traj) != 0
@@ -544,8 +570,10 @@ int content_witness_emit_tree(
     if (root.tier == 0)
         return content_witness_emit_floor_atom(stage, root.atom, &root.id, now_us);
     emit_scratch_t scratch = {0};
+    scratch.forms = intent_stage_new(0);
+    if (!scratch.forms) return -2;
     uint8_t* emitted = (uint8_t*)calloc(nc, 1);
-    if (!emitted) return -2;
+    if (!emitted) { emit_scratch_free(&scratch); return -2; }
     uint32_t* novel = NULL;
     size_t novel_n = 0;
     int rc = 0;

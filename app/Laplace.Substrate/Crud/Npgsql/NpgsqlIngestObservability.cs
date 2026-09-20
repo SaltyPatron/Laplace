@@ -538,7 +538,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 + $"rate_rows_s={rate} baseline_rows_s={baseline} slowdown={slowdown}";
 
             Console.WriteLine($"INGEST_THROUGHPUT {receipt}");
-            if (verdict is "slow" or "unmeasured" or "unbaselined")
+            if (verdict is "slow")
                 Console.Error.WriteLine($"INGEST_THROUGHPUT_REJECTED {receipt}");
         }
         catch (Exception ex)

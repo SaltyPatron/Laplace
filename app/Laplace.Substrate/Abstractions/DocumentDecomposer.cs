@@ -196,10 +196,14 @@ public static class DocumentFileExtract
             throw new InvalidDataException(
                 $"document '{relativePath}' is empty; an admitted document must have content");
 
-        Hash128? contentRoot = ContentTierSpine.ResolveRoot(bytes);
-        if (contentRoot is null)
-            throw new InvalidDataException(
-                $"document '{relativePath}' has invalid UTF-8 or failed canonical content identity");
+        OrderedCompositionComponent contentRoot;
+        using (var contentTree = ContentTierSpine.BuildTree(bytes))
+        {
+            if (contentTree is null)
+                throw new InvalidDataException(
+                    $"document '{relativePath}' has invalid UTF-8 or failed canonical content identity");
+            contentRoot = FileEntity.RootComponent(contentTree);
+        }
 
         var metadata = FileMetadata.FromPath(file, relativePath) with
         {
@@ -208,7 +212,7 @@ public static class DocumentFileExtract
         FileIdentity fileIdentity;
         try
         {
-            fileIdentity = FileEntity.Resolve(bytes, metadata);
+            fileIdentity = FileEntity.Resolve(contentRoot, metadata);
         }
         catch (InvalidOperationException ex)
         {
@@ -217,12 +221,12 @@ public static class DocumentFileExtract
         }
 
         // A plain-text document introduces no extra composition around its content.
-        Hash128 documentId = contentRoot.Value;
+        Hash128 documentId = contentRoot.Id;
         yield return new ContentIngestRecord(
             CanonicalUtf8: bytes,
-            SourceId: contentRoot.Value,
+            SourceId: contentRoot.Id,
             Metadata: metadata,
-            ContentRootId: contentRoot.Value,
+            ContentRootId: contentRoot.Id,
             DocumentId: documentId,
             FileId: fileIdentity.FileId);
     }

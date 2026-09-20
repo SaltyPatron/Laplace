@@ -391,10 +391,13 @@ phase_install() (
   if ensure_extension_library_path; then library_path_changed=1; else path_rc=$?; [[ "$path_rc" == 1 ]] || exit "$path_rc"; fi
 
   local api_was_active=0 so_before so_after postgres_activation_required rc=0
+  local install_stage
+  install_stage="$(mktemp -d "$LAPLACE_BUILD_DIRECTORY/.install-XXXXXXXX")"
   systemctl is-active --quiet laplace-api 2>/dev/null && api_was_active=1 || true
   cleanup_install() {
     rc=$?
     trap - EXIT
+    rm -rf "$install_stage"
     if [[ "$api_was_active" == 1 ]]; then sudo -n systemctl start laplace-api || rc=1; fi
     exit "$rc"
   }
@@ -402,9 +405,10 @@ phase_install() (
   [[ "$api_was_active" != 1 ]] || sudo -n systemctl stop laplace-api
 
   so_before=$(preloaded_so_digest)
-  cmake --install "$LAPLACE_BUILD_DIRECTORY"
-  [[ -f "$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]] || { echo "::error::core library not installed" >&2; exit 1; }
-  git -C "$ROOT" rev-parse HEAD > "$LAPLACE_INSTALL_PREFIX/lib/.laplace-source-revision"
+  # Finish native and managed payload preparation on the build filesystem before
+  # changing the serving prefix. A publish failure must not split its runtime.
+  DESTDIR="$install_stage" cmake --install "$LAPLACE_BUILD_DIRECTORY"
+  [[ -f "$install_stage$LAPLACE_INSTALL_PREFIX/lib/liblaplace_core.so" ]] || { echo "::error::core library not staged" >&2; exit 1; }
   # Foundation ingest uses an immutable revision-addressed runtime. The legacy
   # flat directory may contain files from an operator-owned install and is never
   # overwritten by the service runner. Build into a fresh owned directory, then
@@ -441,8 +445,16 @@ phase_install() (
   if [[ ! -d "$ingest_runtime" ]]; then
     rm -rf "$ingest_stage"
     mkdir -p "$ingest_stage"
-    dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_stage" --no-self-contained -v q
-    cp -f "$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so* "$ingest_stage/"
+    local ingest_build="$install_stage/ingest" ingest_reference
+    dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_build" --no-self-contained -v q
+    cp -Pf "$install_stage$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so* "$ingest_build/"
+    # Immutable releases share identical payload files with the active runtime.
+    # Build on the build volume, then copy only new bytes onto the install volume.
+    ingest_reference="$(readlink -f "$ingest_dir/current" 2>/dev/null || true)"
+    local -a ingest_links=()
+    [[ ! -d "$ingest_reference" ]] || ingest_links+=("--link-dest=$ingest_reference")
+    rsync -rlt --checksum --no-perms --executability "${ingest_links[@]}" \
+      "$ingest_build/" "$ingest_stage/"
     printf '%s\n' "$ingest_revision" > "$ingest_stage/.laplace-source-revision"
     [[ -f "$ingest_stage/Laplace.Cli.dll" && -f "$ingest_stage/liblaplace_core.so" ]] || {
       echo "::error::ingest runtime missing after staged install: $ingest_stage" >&2
@@ -455,6 +467,12 @@ phase_install() (
     echo "::error::immutable ingest runtime is incomplete: $ingest_runtime" >&2
     exit 1
   }
+  # Keep changed files temporary until the transfer succeeds. A full destination
+  # leaves the serving T0/native files intact. Retain older execution modules:
+  # other databases can still reference their content-addressed names.
+  rsync -rlt --checksum --delay-updates --omit-dir-times --no-perms --executability \
+    "$install_stage$LAPLACE_INSTALL_PREFIX/" "$LAPLACE_INSTALL_PREFIX/"
+  git -C "$ROOT" rev-parse HEAD > "$LAPLACE_INSTALL_PREFIX/lib/.laplace-source-revision"
   ingest_link_tmp="$ingest_dir/.current-$ingest_revision-$$"
   rm -f "$ingest_link_tmp"
   ln -s "runtimes/$ingest_revision" "$ingest_link_tmp"
@@ -471,6 +489,7 @@ phase_install() (
   fi
   phase_activate_postgres "$postgres_activation_required"
   if [[ "$api_was_active" == 1 ]]; then sudo -n systemctl start laplace-api; api_was_active=0; fi
+  rm -rf "$install_stage"
   trap - EXIT
 )
 

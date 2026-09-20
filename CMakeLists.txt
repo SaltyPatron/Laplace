@@ -128,42 +128,10 @@ set(LAPLACE_INSTALL_EXEC_PERMS
 
 set(CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS ${LAPLACE_INSTALL_DIR_PERMS})
 
-install(CODE "
-  set(_laplace_install_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
-  message(STATUS \"Laplace pre-install cleanup under \${_laplace_install_root}\")
-  execute_process(
-    COMMAND sh -c \"
-      set -u
-      headers='\${_laplace_install_root}/include/laplace'
-      share='\${_laplace_install_root}/share/laplace'
-      if [ -e \\\"\$headers\\\" ]; then
-        find \\\"\$headers\\\" -type d -exec chmod 2775 {} + 2>/dev/null || true
-        find \\\"\$headers\\\" -type f -exec chmod 0664 {} + 2>/dev/null || true
-      fi
-      set -e
-      rm -rf \\\"\$headers\\\"
-      # share/laplace also contains the root-managed public LAN CA. Native
-      # installation owns only its generated perfcache payloads, so clean that
-      # namespace rather than deleting every entry and maintaining exceptions.
-      if [ -d \\\"\$share\\\" ]; then
-        find \\\"\$share\\\" -maxdepth 1 -type f -name 'laplace_*.bin' ! -name 'laplace_chess_position_perfcache.bin' ! -name 'laplace_chess_transition_perfcache.bin' -delete
-      fi
-      rm -f \${_laplace_install_root}/lib/liblaplace_*.so* 2>/dev/null || true
-      rm -f \${_laplace_install_root}/lib/postgresql/${LAPLACE_PG_MAJOR}/laplace_*.so 2>/dev/null || true
-      rm -f \${_laplace_install_root}/share/postgresql/${LAPLACE_PG_MAJOR}/extension/laplace_* 2>/dev/null || true
-    \"
-    RESULT_VARIABLE _laplace_wipe_rc
-  )
-  if(NOT _laplace_wipe_rc EQUAL 0)
-    message(FATAL_ERROR
-      \"Laplace pre-install cleanup failed under \${_laplace_install_root}.\"
-      \"\\nLikely a pre-fix cross-user g-w directory from a previous install.\"
-      \"\\nOne-time recovery (run once, never again under the structural fix):\"
-      \"\\n    repair ownership under \${CMAKE_INSTALL_PREFIX}/include/laplace and \${CMAKE_INSTALL_PREFIX}/share/laplace\"
-      \"\\nThen re-run cmake --install. The post-install invariant (end of the\"
-      \"\\nroot CMakeLists) prevents forward installs from recreating the state.\")
-  endif()
-")
+# Installation is additive. Existing modules may still be referenced by another
+# database or mapped by a running backend; caches remain usable until replacement
+# bytes have been staged. The pipeline stages DESTDIR and publishes with delayed
+# renames instead of deleting the serving runtime before attempting installation.
 
 add_subdirectory(engine)
 
