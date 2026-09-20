@@ -376,6 +376,46 @@ phase_test() {
   bash "$ROOT/scripts/test-parallel.sh" "${args[@]}"
 }
 
+reclaim_install_headroom() {
+  local app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  local prefix="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+  local ingest_root="$prefix/ingest/runtimes"
+  local current_ingest="" target_ingest="" candidate="" base=""
+  local managed_transaction="${LAPLACE_MANAGED_TRANSACTION_PATH:-/var/lib/laplace-managed/transaction.json}"
+
+  # Installation happens only after wait-for-quiet-substrate. Reclaim the exact
+  # deployment-owned debris whose liveness is mechanically knowable before we
+  # allocate another native/perfcache generation on the serving filesystem.
+  if [[ -r "$ROOT/deploy/linux/payload-sync.sh" ]]; then
+    # shellcheck source=deploy/linux/payload-sync.sh
+    source "$ROOT/deploy/linux/payload-sync.sh"
+    laplace_prune_unreferenced_releases "$app_dir"
+    # A managed transaction owns its rollback snapshot. Outside one, managed.*
+    # directories are completed/rolled-back debris by the payload-sync contract.
+    if [[ ! -e "$managed_transaction" ]]; then
+      laplace_prune_managed_backups "$prefix/app-backups"
+    fi
+  fi
+
+  # Foundation ingest runtimes are immutable revision directories selected by
+  # one 'current' symlink. There is no reason to retain every historical copy:
+  # with the substrate quiet no ingest process can be executing an unselected
+  # runtime. Keep the selected donor plus this candidate and reclaim only exact
+  # 40-hex revision directories.
+  [[ -d "$ingest_root" && ! -L "$ingest_root" ]] || return 0
+  current_ingest="$(readlink -f "$prefix/ingest/current" 2>/dev/null || true)"
+  target_ingest="$ingest_root/$(git -C "$ROOT" rev-parse HEAD)"
+  while IFS= read -r -d '' candidate; do
+    [[ "$candidate" == "$current_ingest" || "$candidate" == "$target_ingest" ]] && continue
+    base="${candidate##*/}"
+    [[ "$base" =~ ^[0-9a-f]{40}$ ]] || continue
+    if [[ -d "$candidate" && ! -L "$candidate" && -w "$candidate" && -w "$ingest_root" ]]; then
+      find "$candidate" -xdev -depth -delete || return 1
+      echo "::notice::reclaimed stale ingest runtime $candidate"
+    fi
+  done < <(find "$ingest_root" -mindepth 1 -maxdepth 1 -xdev -type d -print0)
+}
+
 phase_install() (
   echo "===== PHASE — INSTALL ====="
   [[ -f "$LAPLACE_BUILD_DIRECTORY/build.ninja" ]] || {
@@ -385,6 +425,7 @@ phase_install() (
   # Local CLI ingests do not hold Actions' resource reservation. Observe the
   # canonical run heartbeat/beacon before replacing their database libraries.
   bash "$ROOT/scripts/wait-for-quiet-substrate.sh" "$PGDATABASE"
+  reclaim_install_headroom
 
   local library_path_changed=0 server_release_changed=0 path_rc server_rc
   if postgresql_restart_required; then server_release_changed=1; else server_rc=$?; [[ "$server_rc" == 1 ]] || exit "$server_rc"; fi
