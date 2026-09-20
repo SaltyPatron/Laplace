@@ -35,14 +35,17 @@ public sealed class NativeSourceRecipe
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(readBufferBytes);
         using NativeRecipeStream native = NativeRecipeStream.Open(_program, sourceId, sourceTrust);
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(readBufferBytes);
+        // Drain parser events and tuple output between transport windows. A large
+        // I/O envelope must not queue an entire source's expanded syntax tree.
+        int feedBytes = Math.Min(readBufferBytes, 64 * 1024);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(feedBytes);
         long batch = 0;
         try
         {
             bool final = false;
             while (!final)
             {
-                int count = await input.ReadAsync(buffer.AsMemory(0, readBufferBytes), ct)
+                int count = await input.ReadAsync(buffer.AsMemory(0, feedBytes), ct)
                     .ConfigureAwait(false);
                 final = count == 0;
                 native.Feed(buffer.AsSpan(0, count), final);

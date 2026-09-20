@@ -132,12 +132,24 @@ int laplace_xml_stream_feed(laplace_xml_stream_t* s, const uint8_t* bytes,
     *events = NULL; *count = 0;
     if (!s || (!bytes && len) || len > INT_MAX || s->finished || s->failed) return -1;
     clear_events(s);
-    int rc = xmlParseChunk(s->parser, (const char*)bytes, (int)len, final != 0);
-    if (s->failed || rc != 0) {
-        if (!s->failed) s->failed = -2;
-        clear_events(s);
-        return s->failed;
-    }
+    /* A machine-sized read can exceed libxml2's lookup window even when every
+     * source token is small. Transport boundaries are not XML token boundaries:
+     * consume bounded parser windows inside this native call, keeping all events
+     * until the caller takes this batch. Do not disable XML's token/DTD limits. */
+    size_t offset = 0;
+    do {
+        size_t take = len - offset;
+        if (take > 65536) take = 65536;
+        int rc = xmlParseChunk(s->parser,
+            take ? (const char*)bytes + offset : NULL, (int)take,
+            final && offset + take == len);
+        if (s->failed || rc != 0) {
+            if (!s->failed) s->failed = -2;
+            clear_events(s);
+            return s->failed;
+        }
+        offset += take;
+    } while (offset < len);
     if (final) s->finished = 1;
     *events = s->events; *count = s->count;
     return 0;

@@ -39,6 +39,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     private Guid _runId;
     private volatile bool _active;
     private DateTime _lastProgressUtc;
+    private DateTime _lastHeartbeatUtc;
     private NpgsqlConnection? _livenessConn;
     private readonly System.Collections.Concurrent.ConcurrentQueue<FileJournalEvent> _fileEvents = new();
     private readonly object _fileFlushGate = new();
@@ -152,6 +153,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
         _runId = Guid.NewGuid();
         _active = true;
         _lastProgressUtc = DateTime.MinValue;
+        _lastHeartbeatUtc = DateTime.MinValue;
         ReconcileOrphanedRuns();
         bool journaled = Execute(
             "INSERT INTO laplace.ingest_run_journal "
@@ -349,63 +351,12 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// Terminate journal rows whose backend no longer exists.
-    ///
-    /// A run that dies WITH the cluster never reaches OnRunFinished, so its row keeps
-    /// status='running' forever and every later reader — verify-ingest-journal.sh,
-    /// ensure-foundation.sh's layer check, source_status — believes an ingest is still
-    /// in flight. Nothing else reconciles it: the process that would have written the
-    /// terminal row is the process that died.
-    ///
-    /// MEASURED 2026-08-10: FrameNetDecomposer sat at 13863/14900 files, status
-    /// 'running', after `apt install bc` triggered needrestart -> `systemctl restart
-    /// laplace-postgresql.service` and terminated the backend 93% through the corpus.
-    /// The row still read 'running' with no process behind it.
-    ///
-    /// Reconciled at the START of the next run AND by the deploy gate
-    /// (scripts/wait-for-quiet-substrate.sh), both against the same authority: the
-    /// per-run session advisory lock. The previous criterion here asked
-    /// pg_stat_activity whether ANY backend predated the run — and any long-lived
-    /// client defeats it: the API endpoint's connection pool predates every run,
-    /// so the NOT EXISTS never held and reconciliation NEVER FIRED. MEASURED
-    /// 2026-08-13: two UDDecomposer corpses sat 'running' for 8 and 6 hours with
-    /// zero backends behind them, wedging every deploy behind the substrate lock.
-    /// A lock keyed to the run and dropped by the server on session death is
-    /// per-run, unforgeable, and cannot be left behind.
+    /// Use the same heartbeat-plus-beacon predicate as Operator and deployment.
+    /// The canonical operation closes the orphan and its unfinished files together.
     /// </summary>
-    private void ReconcileOrphanedRuns()
-    {
-        Execute(
-            // 'cancelled', not 'interrupted': ingest_run_journal.status carries a CHECK
-            // constraint and 'interrupted' is not a member. The UPDATE would raise 23514,
-            // Execute() swallows it, and the row stays 'running' — the exact failure this
-            // reconciliation exists to repair.
-            "UPDATE laplace.ingest_run_journal j SET status = 'cancelled', ended_at = now(), "
-            + "error = 'run did not reach completion: liveness lock absent (cluster restart, "
-            + "OOM kill, or terminated session). Reconciled at the start of the next run.' "
-            + "WHERE j.status = 'running' "
-            + "  AND NOT EXISTS (SELECT 1 FROM pg_locks l "
-            + "                   WHERE l.locktype = 'advisory' "
-            + "                     AND l.database = (SELECT d.oid FROM pg_database d "
-            + "                                        WHERE d.datname = current_database()) "
-            + $"                    AND l.classid = {RunLivenessLockClass}::oid "
-            + "                     AND l.objsubid = 2 "
-            + "                     AND l.objid::bigint = (hashtext(j.run_id::text)::bigint & 4294967295))",
-            static _ => { });
-
-        // The file rows of a reconciled run. A file left 'running' was still producing;
-        // one left 'composed' was queued at the apply boundary. Both are incomplete and
-        // must follow the run to a terminal state rather than remaining falsely active.
-        // Keyed off the run's status, which the UPDATE above has just settled.
-        Execute(
-            "UPDATE laplace.ingest_file_journal f SET status = 'cancelled', ended_at = now(), "
-            + "error = 'file did not reach completion: run cancelled (cluster restart, OOM kill, "
-            + "or terminated session). Reconciled at the start of the next run.' "
-            + "WHERE f.status IN ('running','composed') "
-            + "  AND EXISTS (SELECT 1 FROM laplace.ingest_run_journal j "
-            + "               WHERE j.run_id = f.run_id AND j.status <> 'running')",
-            static _ => { }, "INGEST_FILE_JOURNAL_WRITE_FAILED");
-    }
+    private void ReconcileOrphanedRuns() => Execute(
+        "SELECT * FROM ops.ingest_reconcile_orphans(interval '90 seconds')",
+        static _ => { });
 
     public void OnIntentApplied(string sourceName, ApplyResult result) { }
 
@@ -835,12 +786,24 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
             var events = new List<FileJournalEvent>(_fileJournalFlushRows);
             while (events.Count < _fileJournalFlushRows && _fileEvents.TryDequeue(out var evt))
                 events.Add(evt);
-            if (events.Count == 0) return;
+            DateTime now = DateTime.UtcNow;
+            bool heartbeatDue = _active && now - _lastHeartbeatUtc >= ProgressInterval;
+            if (events.Count == 0 && !heartbeatDue) return;
 
             try
             {
                 using var conn = _ds.OpenConnection();
                 using var batch = new NpgsqlBatch(conn);
+                // The existing pump remains alive while parsing/apply produces no
+                // progress events. Use its pooled connection, not a new owner.
+                if (heartbeatDue)
+                {
+                    var heartbeat = new NpgsqlBatchCommand(
+                        "UPDATE laplace.ingest_run_journal SET heartbeat_at = clock_timestamp() "
+                        + "WHERE run_id = $1 AND status = 'running'");
+                    AddParameter(heartbeat, _runId, NpgsqlDbType.Uuid);
+                    batch.BatchCommands.Add(heartbeat);
+                }
 
                 var started = events.Where(e => e.Kind == FileJournalEventKind.Started).ToArray();
                 if (started.Length > 0)
@@ -946,6 +909,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 }
 
                 batch.ExecuteNonQuery();
+                if (heartbeatDue) _lastHeartbeatUtc = now;
             }
             catch (Exception ex)
             {
