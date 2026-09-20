@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Field, Input, Muted, SegmentedControl } from '@ui';
 import { forceCollide, forceManyBody, forceRadial } from 'd3-force-3d';
-import ForceGraph2D from 'react-force-graph-2d';
-import ForceGraph3D from 'react-force-graph-3d';
 import { CanvasTexture, LinearFilter, Mesh, MeshBasicMaterial, MOUSE, Object3D, SphereGeometry, Sprite, SpriteMaterial, type Camera, type Vector3 } from 'three';
 import type { ExploreConsensusRow } from '../types';
 import type { WalkPathNode } from '../store';
@@ -10,6 +8,9 @@ import { ensureVisualizationContrast, rgba, useVisualizationPalette, type Visual
 import styles from './ConsensusGraph.module.css';
 import { useGraphFlyControls } from './useGraphFlyControls';
 import { useDeferredWebGlMount } from '../useDeferredWebGlMount';
+
+const ForceGraph2D = lazy(() => import('react-force-graph-2d').then((m) => ({ default: m.default })));
+const ForceGraph3D = lazy(() => import('react-force-graph-3d').then((m) => ({ default: m.default })));
 
 export interface WebNode {
   id: string;
@@ -484,6 +485,7 @@ export function ConsensusGraph({
         aria-label="Consensus web viewer"
       >
         {webGlReady && dim === '3d' ? (
+          <Suspense fallback={<Muted>Loading 3-D renderer…</Muted>}>
           <ForceGraph3D
             ref={ref3d as never}
             width={size.width}
@@ -496,8 +498,8 @@ export function ConsensusGraph({
             linkDirectionalParticles={0}
             linkOpacity={0.45}
             rendererConfig={{
-              antialias: true,
-              powerPreference: 'default',
+              antialias: data.nodes.length < 512,
+              powerPreference: 'high-performance',
               failIfMajorPerformanceCaveat: false,
             }}
             linkWidth={(l: WebEdge) => 0.06 + tension(l.mu, maxMu) * 0.55}
@@ -537,8 +539,10 @@ export function ConsensusGraph({
             d3AlphaDecay={0.028}
             d3VelocityDecay={0.32}
           />
+          </Suspense>
         ) : null}
         {size.width > 0 && size.height > 0 && dim === '2d' ? (
+          <Suspense fallback={<Muted>Loading 2-D renderer…</Muted>}>
           <ForceGraph2D
             ref={ref2d as never}
             width={size.width}
@@ -593,6 +597,7 @@ export function ConsensusGraph({
             d3AlphaDecay={0.03}
             d3VelocityDecay={0.3}
           />
+          </Suspense>
         ) : null}
       </div>
     </div>
