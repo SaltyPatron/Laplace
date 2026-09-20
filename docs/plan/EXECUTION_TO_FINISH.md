@@ -8,7 +8,7 @@ The previous revision arranged the repository into numbered “finish lines” a
 
 Read `docs/CAPABILITIES.md` before selecting a local finish line. Tests, gates, benchmark harnesses, issue edits and CI green state are evidence only.
 
-When accepted work touches software construction, authority/governance, billing, program analysis or deployment, completion means the integrated behavior is executable: canonical reuse/minimal AST mutation, witnessed repair feedback, duplicate consolidation, repository-root realization, exact/symbolic machine-cost derivation, effective knowledge/capability scope and measured hop/fanout work as applicable.
+When accepted work touches software construction, authority/governance, billing, program analysis or deployment, completion means the integrated behavior is executable: canonical tier/trajectory reuse/minimal structural mutation, derived AST/CST realization where required, witnessed repair feedback, duplicate consolidation, repository-root realization, exact/symbolic machine-cost derivation, effective knowledge/capability scope and measured hop/fanout work as applicable.
 
 Do not choose an easier historical gate because the compound capability crosses several workstreams.
 
