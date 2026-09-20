@@ -56,7 +56,7 @@ Repository work must advance the invention rather than narrate its incompletenes
 - A plan, issue, test, audit, branch, PR or status paragraph is not a substitute for the requested implementation. Create or edit those artifacts only when they remove ambiguity, preserve invention law or track an already-owned implementation obligation. Do not stop after producing them when code/runtime work is in scope.
 - Do not redirect repository work into arguments about blame, motive, legal characterization or platform self-defense. When the requested task is technical, stay on repository evidence, concrete deviations and corrective changes.
 - Verification is proportional evidence, not a product substitute. Tests and gates should prove the behavior being changed; they must not become an ever-expanding prerequisite maze that prevents the requested feature, ingest, deployment or repair from being implemented and exercised.
-- Treat AST as universal knowledge structure, not a code-only subsystem. Before writing a source-private semantic parser/emitter, identify the exact syntax provider (Tree-sitter grammar, standards parser, codec, decoder, etc.), preserve its concrete nodes/fields/spans/errors, and express the semantic lowering as a versioned recipe into the universal typed AST. The shared machine then owns content/physicality, occurrence, reference, testimony, provenance, calculation and reconstruction lowering. Reuse the existing Tree-sitter grammar estate and generic AST/decomposition machinery wherever they fit; do not invent parallel modality-specific AST worlds.
+- Treat canonical tiered composition plus physicality trajectories as the universal knowledge structure. An AST/CST is a provider-specific view or export, never a second canonical ontology. Qualified parsers/codecs may recover exact source facts when the format requires them, but the shared machine owns ordered constituent composition across tiers, trajectory order/roles, occurrence, reference, testimony, provenance, calculation and reconstruction. UAX #29 is the concrete text segmentation case of this tier law; grammar, precedence, associativity, delimiter and role rules are ordinary admitted knowledge that can drive higher-tier composition. Reuse the Tree-sitter grammar estate as grammar knowledge, compatibility parsing, validation and realization support where it adds information; do not force Tree-sitter or a materialized AST through bulk/structured sources when native streaming/tier decomposition preserves the same facts more directly.
 
 ## Source-generation priority law
 
@@ -67,14 +67,14 @@ One selectable source generation is the bound tuple:
 ```text
 authority + release/version + exact artifact graph
 + syntax provider / grammar / codec generation
-+ semantic recipe/profile + universal-AST mapping generation
++ semantic recipe/profile + tier/composition mapping generation
 ```
 
 - A newer selected release already staged under `/vault/Data/.refresh-*` is an implementation input immediately. Develop and qualify the provider/recipe against those exact staged bytes instead of deepening a bespoke decomposer against a superseded active tree.
 - Do not activate a staged release until its provider/recipe accounts for the selected native schema and every field/role has a disposition. Release activation and recipe activation are one source-generation boundary.
-- Source-specific code owns irreducible recovery of concrete syntax and source-specific academic interpretation. The shared recipe/AST/admission machinery owns canonical content/physicality, trajectories/occurrences, typed references, provenance, testimony, calculations, reconstruction and persistence.
+- Source-specific code owns irreducible recovery of concrete syntax and source-specific academic interpretation. The shared recipe/tier/admission machinery owns canonical content/physicality, trajectories/occurrences, typed references, provenance, testimony, calculations, reconstruction and persistence.
 - One recovered value may legitimately participate in several state classes. A definition/example sentence is ordinary canonical content with physicality; `sense HAS_DEFINITION sentence` or `frame HAS_EXAMPLE sentence` is separate attributed testimony pointing at that same content.
-- Before adding another source-named emitter, parser object model or attestation policy, check whether the rule belongs in the shared recipe interpreter/universal AST. Reuse/port the existing `Laplace-Refactor` source-profile/source-decomposition machinery where it matches the invention instead of inventing a third admission model.
+- Before adding another source-named emitter, parser object model or attestation policy, check whether the rule belongs in the shared tier/composition recipe and trajectory machinery. Reuse/port the existing `Laplace-Refactor` source-profile/source-decomposition machinery where it matches the invention instead of inventing a third admission model.
 
 An agent working on Laplace must hold the whole machine in view rather than reducing it to whichever subsystem is currently open in an editor.
 
