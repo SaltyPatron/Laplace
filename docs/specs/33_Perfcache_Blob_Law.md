@@ -55,6 +55,24 @@ Cross-modality consumers reuse lower caches. Video does not need a private copy 
 
 Every higher cache binds the exact generations/recipes it depends on. A dependency change invalidates affected descendants, not unrelated caches.
 
+### Multiscale image basis
+
+For a declared image recipe, a cached N×N region may expose every contiguous square substructure at every scale.
+
+The occurrence count is:
+
+~~~text
+N(N+1)(2N+1)/6
+~~~
+
+For an 8×8 region this is 204 square occurrences: 64 1×1, 49 2×2, 36 3×3, 25 4×4, 16 5×5, 9 6×6, 4 7×7 and one 8×8.
+
+These are occurrence references, not necessarily novel canonical records. Equal lower-scale structures converge globally.
+
+A multiscale image ROM may therefore store compact local references to canonical subpatch records across selected or all scales. This gives higher image/video operations exact reusable structural response without recomputing every sliding window.
+
+The cache profile declares which scale families are resident; omission of a scale is an acceleration choice, not a change to canonical image identity.
+
 ### Trunk-first lookup
 
 Higher-tier cache lookup should short-circuit lower recomputation.
