@@ -188,6 +188,39 @@ The current 0..255 number ROM precomputes the most common integer scalar roots u
 
 A fractional scalar such as 0.34567 can be composed normally without being present in that dense ROM. Repeated occurrences then reuse its canonical root through ordinary content addressing/indexing.
 
+## Cross-modality perfcache reuse
+
+Perfcaches follow canonical composition tiers, not consumer modality names.
+
+For image/video:
+
+~~~text
+number roots
+-> channel roots
+-> pixel ROM
+-> patch ROM
+-> region ROM
+-> image/frame ROM
+                 \
+                  -> video order/timing composition
+~~~
+
+For audio/video:
+
+~~~text
+scalar/sample roots
+-> window ROM
+-> segment/phrase/track ROM
+                         \
+                          -> video audio/timing composition
+~~~
+
+A video frame that is already a cached canonical image must reuse that image record. A soundtrack reuses the same audio structures as standalone audio. Video adds the containing timing/synchronization trajectory rather than duplicating lower image/audio state.
+
+A finite practical tier may be exhaustively materialized into a dense direct-address mmap. A higher combinatorial tier may cache the finite admitted/hot canonical estate. Both remain derived acceleration under spec 33.
+
+Current implementation owner: #1711.
+
 ## Physicality and trajectory
 
 Keep these distinct:
