@@ -592,6 +592,33 @@ Given a declared target ISA, microarchitecture/scheduling model, memory/initial-
 
 Observed runs are witnesses against that calculated model. They validate/calibrate missing physical/environment state; they do not become semantic authority for work already derivable from the artifact and target machine model.
 
+### Perfcaches follow reusable structure, not modality names
+
+A perfcache may accelerate any deterministic reusable canonical layer, not only Tier-0 and not only one named modality.
+
+The cache dependency follows composition:
+
+~~~text
+codepoints
+-> scalar/number roots
+-> image channels / audio samples
+-> pixels / audio windows
+-> patches / segments
+-> regions / tracks
+-> images / frames
+-> video timing/synchronization
+~~~
+
+Higher consumers reuse lower cached records. Video does not clone image or audio structure; it reuses frame/image and audio roots, then composes the genuinely new order/timing/synchronization state.
+
+When a recipe's legal finite state space is practical to enumerate, the whole tier may be emitted as a dense direct-address mmap ROM. When the possible universe is too large, the finite admitted/hot canonical estate may be emitted into a deterministic sparse mmap lookup. Both are lawful perfcaches.
+
+Pixels, patches, regions, complete images, audio windows/tracks, chess positions/transitions, AST subtrees and other higher structures may therefore be cached when doing so removes repeated deterministic work.
+
+Cache generations record their lower-generation/recipe dependencies. A lower change invalidates affected dependents, not unrelated caches.
+
+Cache-backed database operations should preserve planner/index use by resolving request-side ids/coordinates/Hilbert/ranges before indexed probes instead of wrapping indexed columns in per-row functions.
+
 ## 11. Ingestion is the learning process
 
 Laplace does not require an offline gradient-training cycle to admit new knowledge.
