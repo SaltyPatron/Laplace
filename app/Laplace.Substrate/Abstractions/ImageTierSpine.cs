@@ -9,6 +9,10 @@ namespace Laplace.Decomposers.Abstractions;
 /// codepoint T0 (digit→number→channel→pixel→patch→region→image) → O(tiers)
 /// existence → modality witness emit. Sibling of <see cref="ContentTierSpine"/>;
 /// same T0 floor, different composition above it. Do not blake3(rgba) as identity.
+///
+/// Perfcache law is compositional (#1711): number, pixel, patch, region and image
+/// tiers may each have deterministic mmap acceleration. A cached image/frame is
+/// reusable by video/document/multimodal consumers rather than recomposed privately.
 /// </summary>
 public static class ImageTierSpine
 {
