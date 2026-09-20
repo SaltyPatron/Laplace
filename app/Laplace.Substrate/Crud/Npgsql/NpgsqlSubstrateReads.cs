@@ -1886,7 +1886,8 @@ public static partial class NpgsqlSubstrateReads
             }, ct: ct, label: "consensus_in_labeled", onError: onError);
 
     public readonly record struct ExploreWebEdgeRow(
-        string SourceIdHex, string TypeIdHex, string ObjectIdHex, short Hop, decimal EffMu, long WitnessCount);
+        string SourceIdHex, string TypeIdHex, string ObjectIdHex, short Hop, decimal EffMu,
+        long WitnessCount, double CompleteWeight, bool Refuted);
 
     /// <summary>
     /// Native SPI web expansion (pg_laplace_explore_web) — one connection, undirected
@@ -1897,11 +1898,14 @@ public static partial class NpgsqlSubstrateReads
         CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(conn, """
             SELECT encode(w.source_id, 'hex'), encode(w.type_id, 'hex'), encode(w.object_id, 'hex'),
-                   w.hop, consensus.eff_mu(w.rating, w.rd), w.witness_count
+                   w.hop, consensus.eff_mu(w.rating, w.rd), w.witness_count,
+                   consensus.walk_edge_weight(w.rating, w.rd),
+                   consensus.refuted(w.rating, w.rd)
             FROM consensus.explore_web(@seed, @hops, @fanout, @max_nodes) w
             """,
             static r => new ExploreWebEdgeRow(
-                r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt16(3), r.GetDecimal(4), r.GetInt64(5)),
+                r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt16(3), r.GetDecimal(4),
+                r.GetInt64(5), r.GetDouble(6), r.GetBoolean(7)),
             p =>
             {
                 p.Add("seed", NpgsqlDbType.Bytea).Value = seed;

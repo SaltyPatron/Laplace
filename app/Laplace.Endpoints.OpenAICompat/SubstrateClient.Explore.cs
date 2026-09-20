@@ -587,7 +587,9 @@ internal sealed partial class SubstrateClient
                     Type: typeHex,
                     EffMu: w.EffMu,
                     Witnesses: w.WitnessCount,
-                    Hop: hop));
+                    Hop: hop,
+                    CompleteWeight: w.CompleteWeight,
+                    Refuted: w.Refuted));
 
                 if (!nodes.ContainsKey(sourceHex))
                 {

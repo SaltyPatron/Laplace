@@ -74,6 +74,8 @@ export function GraphTab({
           mu: e.eff_mu,
           witnesses: e.witnesses,
           hop: e.hop,
+          weight: Number(e.complete_weight ?? 0),
+          refuted: Boolean(e.refuted),
         })),
       });
       setTruncated(Boolean(res.graph.truncated));

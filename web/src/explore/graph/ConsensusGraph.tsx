@@ -32,6 +32,10 @@ export interface WebEdge {
   mu: number;
   witnesses: number;
   hop: number;
+  /** Canonical OP4 complete weight: signed Glicko expectation in [-1, 1]. */
+  weight: number;
+  /** Canonical optimistic-bound verdict from consensus.refuted(rating, rd). */
+  refuted: boolean;
   walk?: boolean;
 }
 
@@ -176,10 +180,16 @@ function labelSprite(
   return sprite.clone() as Sprite;
 }
 
-/** Map eff_μ into a 0–1 tension for stroke/opacity (chess-heatmap style). */
-function tension(mu: number, maxMu: number): number {
-  if (!(maxMu > 0) || !Number.isFinite(mu)) return 0.25;
-  return Math.min(1, Math.max(0.12, mu / maxMu));
+/** Positive signed Glicko standing binds the layout; neutral/refuted strands do not. */
+function binding(weight: number): number {
+  if (!Number.isFinite(weight)) return 0;
+  return Math.min(1, Math.max(0, weight));
+}
+
+/** Witness mass is visual evidence only; Glicko already folded it into standing. */
+function witnessMass(witnesses: number): number {
+  if (!(witnesses > 0) || !Number.isFinite(witnesses)) return 0;
+  return Math.min(1, Math.log2(witnesses + 1) / 6);
 }
 
 type Fg3dApi = {
@@ -296,11 +306,6 @@ export function ConsensusGraph({
     [baseData, dim, centerId],
   );
 
-  const maxMu = useMemo(
-    () => Math.max(1, ...data.links.map((l) => l.mu)),
-    [data.links],
-  );
-
   const maxHop = useMemo(
     () => Math.max(0, ...data.nodes.map((n) => n.hop)),
     [data.nodes],
@@ -343,13 +348,19 @@ export function ConsensusGraph({
     );
     const linkForce = fg.d3Force('link') as {
       distance?: (fn: (l: WebEdge) => number) => unknown;
-      strength?: (n: number) => unknown;
+      strength?: (fn: (l: WebEdge) => number) => unknown;
     } | undefined;
-    linkForce?.distance?.((l) => LINK_BASE + Math.max(1, l.hop || 1) * 22);
-    linkForce?.strength?.(0.35);
+    linkForce?.distance?.((l) => {
+      const bind = l.walk ? 1 : binding(l.weight);
+      return LINK_BASE + Math.max(1, l.hop || 1) * 10 + (1 - bind) * 86 + (l.refuted ? 48 : 0);
+    });
+    linkForce?.strength?.((l) => (l.walk ? 0.82 : binding(l.weight) * 0.9));
+    // Hop radius remains a weak orientation hint only. Standing/topology owns the
+    // shape: corroborated positive strands can collapse into basins while neutral
+    // and refuted claims are left to charge/collision and therefore scatter.
     fg.d3Force(
       'radial',
-      forceRadial((n: unknown) => ((n as WebNode).hop || 0) * SHELL_RADIUS).strength(0.9),
+      forceRadial((n: unknown) => ((n as WebNode).hop || 0) * SHELL_RADIUS).strength(0.06),
     );
     fg.d3Force('collide', forceCollide(NODE_REL_SIZE * 2.2).strength(1));
     // Drop the default centering force so pan/recenter isn't fighting the layout.
@@ -385,13 +396,16 @@ export function ConsensusGraph({
     );
     const linkForce = fg.d3Force?.('link') as {
       distance?: (fn: (l: WebEdge) => number) => unknown;
-      strength?: (n: number) => unknown;
+      strength?: (fn: (l: WebEdge) => number) => unknown;
     } | undefined;
-    linkForce?.distance?.((l) => LINK_BASE + Math.max(1, l.hop || 1) * 18);
-    linkForce?.strength?.(0.4);
+    linkForce?.distance?.((l) => {
+      const bind = l.walk ? 1 : binding(l.weight);
+      return LINK_BASE + Math.max(1, l.hop || 1) * 8 + (1 - bind) * 72 + (l.refuted ? 40 : 0);
+    });
+    linkForce?.strength?.((l) => (l.walk ? 0.85 : binding(l.weight) * 0.92));
     fg.d3Force?.(
       'radial',
-      forceRadial((n: unknown) => ((n as WebNode).hop || 0) * (SHELL_RADIUS * 0.85)).strength(0.75),
+      forceRadial((n: unknown) => ((n as WebNode).hop || 0) * (SHELL_RADIUS * 0.85)).strength(0.05),
     );
     fg.d3Force?.('collide', forceCollide(5).strength(1));
   }, [dim, data.nodes.length, data.links.length]);
@@ -493,8 +507,8 @@ export function ConsensusGraph({
         {toolbar}
         <Muted className={styles.legend}>
           {expanded
-            ? `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · μ = strand tension`
-            : `1-hop · ${data.nodes.length}n · μ = strand tension`}
+            ? `${maxHop}-hop · ${data.nodes.length}n / ${data.links.length}e · signed Glicko standing drives attraction · witnesses = visible mass`
+            : `1-hop · ${data.nodes.length}n · expand for signed Glicko standing`}
           {' · '}
           {dim === '3d'
             ? 'WASD/arrows move · Q/E turn · PgUp/PgDn up/down · Home origin · End antipode · Shift sprint · LMB orbit · MMB/RMB pan · click recenter · dbl-click open'
@@ -529,14 +543,14 @@ export function ConsensusGraph({
               powerPreference: 'high-performance',
               failIfMajorPerformanceCaveat: false,
             }}
-            linkWidth={(l: WebEdge) => 0.06 + tension(l.mu, maxMu) * 0.55}
+            linkWidth={(l: WebEdge) => 0.05 + binding(l.weight) * 0.48 + witnessMass(l.witnesses) * 0.22}
             linkColor={(l: WebEdge) => {
               if (l.walk) return palette.signal;
-              const t = tension(l.mu, maxMu);
-              return rgba(palette.steel, 0.2 + 0.65 * t);
+              if (l.refuted || l.weight < 0) return rgba(palette.error, 0.42 + 0.42 * Math.abs(l.weight));
+              return rgba(palette.steel, 0.14 + 0.8 * binding(l.weight));
             }}
             nodeLabel={(n: WebNode) => `${n.label} · hop ${n.hop}`}
-            linkLabel={(l: WebEdge) => `${l.type} μ=${l.mu.toFixed(1)} · ${l.witnesses} wit`}
+            linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
             nodeThreeObjectExtend={false}
             nodeThreeObject={(n: WebNode) => {
               const root = new Object3D();
@@ -583,9 +597,13 @@ export function ConsensusGraph({
             enablePanInteraction
             enableZoomInteraction
             nodeLabel={(n: WebNode) => `${n.label} · hop ${n.hop}`}
-            linkLabel={(l: WebEdge) => `${l.type} μ=${l.mu.toFixed(1)}`}
-            linkWidth={(l: WebEdge) => 0.35 + tension(l.mu, maxMu) * 1.4}
-            linkColor={(l: WebEdge) => (l.walk ? palette.signal : hopColor(l.hop, false, palette))}
+            linkLabel={(l: WebEdge) => `${l.type} · Glicko ${l.weight.toFixed(3)} · μ=${l.mu.toFixed(1)} · ${l.witnesses} wit${l.refuted ? ' · refuted' : ''}`}
+            linkWidth={(l: WebEdge) => 0.3 + binding(l.weight) * 1.25 + witnessMass(l.witnesses) * 0.65}
+            linkColor={(l: WebEdge) => {
+              if (l.walk) return palette.signal;
+              if (l.refuted || l.weight < 0) return palette.error;
+              return rgba(palette.steel, 0.22 + 0.72 * binding(l.weight));
+            }}
             onNodeClick={(n: WebNode) => {
               if (!onNodeClick || n.id === centerId || n.id.length !== 32) return;
               if (clickTimer.current) {
@@ -666,6 +684,8 @@ function fromWeb(web: WebGraph, walkPath: WalkPathNode[]): GraphData {
       mu: 400,
       witnesses: 0,
       hop: 0,
+      weight: 1,
+      refuted: false,
       walk: true,
     });
   }
@@ -701,6 +721,11 @@ function fromStar(
       mu: e.eff_mu,
       witnesses: e.witnesses,
       hop: 1,
+      // The entity detail surface carries display μ only. Do not synthesize a
+      // browser-side Glicko weight from it; the expanded native web supplies the
+      // canonical signed fold and immediately becomes the standing-field layout.
+      weight: 0,
+      refuted: false,
       walk: false,
     });
   }
@@ -716,6 +741,8 @@ function fromStar(
       mu: 400,
       witnesses: 0,
       hop: 0,
+      weight: 1,
+      refuted: false,
       walk: true,
     });
   }

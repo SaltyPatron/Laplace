@@ -251,7 +251,9 @@ public sealed record ExploreGraphEdge(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("eff_mu")] decimal EffMu,
     [property: JsonPropertyName("witnesses")] long Witnesses,
-    [property: JsonPropertyName("hop")] int Hop);
+    [property: JsonPropertyName("hop")] int Hop,
+    [property: JsonPropertyName("complete_weight")] double CompleteWeight = 0,
+    [property: JsonPropertyName("refuted")] bool Refuted = false);
 
 public sealed record ExploreGraphResponse(
     [property: JsonPropertyName("id_hex")] string IdHex,

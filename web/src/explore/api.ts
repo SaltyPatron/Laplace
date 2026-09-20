@@ -139,6 +139,8 @@ export function exploreConsensusGraph(
         eff_mu: number;
         witnesses: number;
         hop: number;
+        complete_weight?: number;
+        refuted?: boolean;
       }[];
       truncated?: boolean;
       max_nodes?: number;
