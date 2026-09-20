@@ -20,3 +20,7 @@ Current specification set:
 - `37_Substrate_Operation_ISA.md` — typed operation algebra; stable opcode ids are names, not execution-order numbers (`OP10 COUPLE` executes after `OP0 RESOLVE` in unconstrained cognition).
 
 The common physical implementation law applies across all of them: repeated algorithmic work belongs in coarse native/set execution, while PostgreSQL owns durable indexed state/set access and SQL/C# remain orchestration/contract boundaries.
+
+## Capability synthesis
+
+Binding operation specs are read with [`../CAPABILITIES.md`](../CAPABILITIES.md). Specs define executable contracts for the integrated product; they must not be interpreted as isolated gates that narrow away structural software construction, knowledge authority/governance, repair learning, machine-cost derivation or repository-root mutation.
