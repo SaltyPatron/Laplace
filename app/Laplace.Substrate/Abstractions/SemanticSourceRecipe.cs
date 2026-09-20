@@ -77,9 +77,13 @@ public sealed record SourceRecipeStructure(
 
 public enum SourceSubjectBindingKind
 {
+    // Legacy expansion: one source range is lowered onto every codepoint subject.
     CodepointRange,
     ContentField,
     ClassifierField,
+    // Canonical interval subject: singleton collapses to its codepoint; a true span
+    // becomes one Range entity/physicality over the two canonical endpoints.
+    CodepointInterval,
 }
 
 public sealed record SourceRecipeSubjectBinding(
