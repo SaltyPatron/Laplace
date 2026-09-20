@@ -119,6 +119,31 @@ request
 
 Semantic work and implementation waste remain distinguishable. An inefficient implementation that burns excess SQL/SPI/PInvoke cycles is a defect, not permanent pricing authority.
 
+## Compositional perfcache reuse
+
+Perfcaches can materialize any deterministic reusable layer, not one blob per modality.
+
+~~~text
+number ROM
+  -> image pixel ROM
+     -> patch ROM
+        -> region ROM
+           -> image ROM
+
+number/scalar ROM
+  -> audio sample/window/segment/track ROM
+
+image + audio ROMs
+  -> reused directly by video
+  -> video adds timing/frame/audio synchronization
+~~~
+
+If a layer's legal finite domain is practical to enumerate, use a dense direct-address ROM. If the possible universe is huge, cache the finite admitted/hot canonical structures with a declared deterministic sparse lookup.
+
+This means the benefits compound upward: once pixels/patches/images are cached, video construction can reuse them instead of recomputing lower image structure; the same applies to audio. A complete known image can be an O(1)/bounded mmap lookup and still occur in many files/videos without another semantic copy.
+
+Cache lookup should produce canonical keys for indexed database/native operations rather than hide indexed columns behind per-row functions.
+
 ## Reusable numeric/scalar structure
 
 Numeric values follow the same content-addressed reuse law as words, AST subtrees and chess positions.
