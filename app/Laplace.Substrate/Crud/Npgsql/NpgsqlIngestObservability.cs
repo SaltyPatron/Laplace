@@ -22,13 +22,10 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
 
     /// <summary>
     /// classid of the per-run session advisory lock (objid = hashtext(run_id::text)).
-    /// The lock IS the liveness proof: the server releases it the moment this
-    /// process's session dies — OOM kill, SIGKILL, cluster bounce, cancelled CI
-    /// runner — so unlike a journal column it cannot be left behind by a process
-    /// that never got to clean up. Readers (ReconcileOrphanedRuns here, and
-    /// scripts/wait-for-quiet-substrate.sh) treat a 'running' row without this
-    /// lock as a corpse. The value is arbitrary but load-bearing: the gate script
-    /// carries the same constant, and they must agree.
+    /// The server releases this beacon when its session dies. Canonical liveness
+    /// in ops.ingest_run_live accepts either this beacon or a fresh heartbeat;
+    /// losing a pooled connection must not cancel a still-running ingest.
+    /// Both managed reconciliation and deployment consult that SQL predicate.
     /// </summary>
     private const int RunLivenessLockClass = 0x4C504C4B; // "LPLK"
 

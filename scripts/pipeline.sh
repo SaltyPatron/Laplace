@@ -150,6 +150,7 @@ postgresql_restart_required() {
 
 restart_postgres() {
   local reason="$1" unit=laplace-postgresql.service oldpid="" newpid="" tries=0 still
+  bash "$ROOT/scripts/wait-for-quiet-substrate.sh" "$PGDATABASE"
   # systemd owns the postmaster. SIGINT against the pid is a clean exit, so
   # systemd does not restart it — CI then waits 120s and dies. Every native
   # install that replaces a mapped .so must bounce the unit, not the process.
@@ -380,6 +381,10 @@ phase_install() (
   [[ -f "$LAPLACE_BUILD_DIRECTORY/build.ninja" ]] || {
     echo "::error::native build tree missing; run pipeline.sh build first" >&2; exit 1;
   }
+
+  # Local CLI ingests do not hold Actions' resource reservation. Observe the
+  # canonical run heartbeat/beacon before replacing their database libraries.
+  bash "$ROOT/scripts/wait-for-quiet-substrate.sh" "$PGDATABASE"
 
   local library_path_changed=0 server_release_changed=0 path_rc server_rc
   if postgresql_restart_required; then server_release_changed=1; else server_rc=$?; [[ "$server_rc" == 1 ]] || exit "$server_rc"; fi

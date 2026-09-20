@@ -983,6 +983,8 @@ run_release_mutation_window() (
   local actions="$1"
   local api_was_active=0 mutation_rc=0
 
+  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+
   # Keep the user-facing API down only for the mutations that can invalidate its
   # loaded native/SQL contract. Qualification reads do not belong in this outage:
   # a retained DB suite can take minutes and previously left nginx returning 502

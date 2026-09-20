@@ -1,77 +1,22 @@
 DROP FUNCTION IF EXISTS laplace.trajectory_unpacked_points(bytea);
+
+-- Entity and lane arrays describe one selected set. The native reader computes
+-- canonical physicality identities and performs partition-routed PK batches.
+-- Logical ordinals and RLE expansion use the canonical trajectory kernel.
+CREATE OR REPLACE FUNCTION generation.typed_trajectory_points(
+    p_entities bytea[], p_types smallint[])
+RETURNS TABLE(parent_id bytea, physicality_type smallint, entity_id bytea,
+              ordinal bigint, ctier integer)
+AS 'EXECUTION_LIBRARY', 'pg_laplace_typed_trajectory_points'
+LANGUAGE C STABLE PARALLEL RESTRICTED;
+
 CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea, p_type smallint)
     RETURNS TABLE(entity_id bytea, run_length int, ctier int)
-    LANGUAGE sql STABLE PARALLEL SAFE
-    -- MEASURED, not guessed. One call returns the points of ONE trajectory:
-    -- mean 5.93, max 15 over 500 sampled type=1 trajectories, and 3.47 actual
-    -- per loop in situ under auto_explain in compose_batch. Undeclared, Postgres
-    -- assumes 1000 -- ~170x high -- and that estimate is what pushed this body's
-    -- plan over parallel_setup_cost and gave every call its own Gather Merge.
-    -- Only 6 set-returning functions in this surface declare a real ROWS; the
-    -- rest ship the 1000 default and mis-plan their callers the same way.
-    ROWS 6
-
+    LANGUAGE sql STABLE PARALLEL RESTRICTED ROWS 6
 BEGIN ATOMIC
-
-    -- THE PHYSICALITIES LOOKUP IS FENCED IN A CTE, NOT JOINED INTO THE UNPACK.
-    --
-    -- physicalities is HASH (id) and this lookup is by entity_id -- an independent
-    -- content hash, not derivable from entity_id -- so its 64-way Append cannot prune.
-    -- Joined directly into the unpack, that Append multiplies against ST_DumpPoints'
-    -- declared 1000 rows (procost 5000): the body planned at cost 983,329, over
-    -- parallel_setup_cost, so EVERY call paid Gather Merge worker startup to return a
-    -- measured 3.47 rows.
-    --
-    -- MATERIALIZED here is an optimisation fence, not a value carrier: the Append runs
-    -- once and the 1000-row estimate multiplies against its result instead of against
-    -- 64 partitions. (Reading a bound ARRAY back from a CTE column is the opposite
-    -- case and is forbidden -- it makes a constant into a per-row variable and kills
-    -- pruning. See realize.resolve_name.)
-    --   joined            cost 983,329, Gather Merge, 37.7 ms/call
-    --   fenced            cost   8,012, no Gather,     6.2 ms/call
-    --
-    -- ORDER BY u.ordinal is the contract: every caller applies WITH ORDINALITY and
-    -- takes the position as the sequence. It is not decoration. The geometry
-    -- binding expands RLE with the core prefix-sum kernel, so callers never use
-    -- a stored geometry vertex as a logical constituent position.
-    WITH traj AS MATERIALIZED (
-        SELECT p.trajectory
-        FROM laplace.physicalities p
-        WHERE p.entity_id = p_entity AND p.type = p_type AND p.trajectory IS NOT NULL
-    )
-    -- ctier COMES OUT OF THE VERTEX, NOT OUT OF A LOOKUP.
-    --
-    -- The tier is bit-packed into each vertex's flags at pack time --
-    -- laplace_vertex_flags(tier, has_atom, atom), decoded by realize.vertex_tier,
-    -- and laplace_mantissa_unpack already returns those flags. The
-    -- previous body discarded them and recomputed the value with a correlated
-    -- `SELECT min(e.tier) FROM laplace.entities` PER POINT, plus a
-    -- realize.codepoint_for_id fallback.
-    --
-    -- Output-identical, verified over 3,005 constituent points of tier-3 containers:
-    -- the stored tier and the entities floor agree on every one (0<->0, 2<->2).
-    --
-    -- IT IS A FLOOR, AND IT CANNOT BE ANYTHING ELSE. Level is a property of the
-    -- (container, position) pair, not of the entity: the DAG is content-addressed and
-    -- recursive, so the same content recurs at many levels and dedupes trunk-down.
-    -- Ingest the verses, then the whole bible, and the verses resolve to the ids
-    -- already recorded -- now sitting one level deeper. entities.tier is one scalar per
-    -- entity, so it can only ever be the minimum over every container that content
-    -- has ever appeared in.
-    --
-    -- Measured consequence: the word 'a' occurs 152 times inside sentence
-    -- trajectories carrying tier 0, because laplace.word_id('a') IS the codepoint entity --
-    -- same content, same hash, one entity. No tier test and no type test separates
-    -- "a used as a word" from "a the codepoint". Only the CONTAINER's tier says which
-    -- level a constituent sits at, so callers must not filter on ctier to mean
-    -- "is a word" (see converse_compose).
-    SELECT u.entity_id,
-           1::int AS run_length,
-           realize.vertex_tier(u.flags)::int AS ctier
-    FROM traj,
-    LATERAL public.laplace_trajectory_expanded_constituents(traj.trajectory) u
-    ORDER BY u.ordinal
-;
+    SELECT t.entity_id, 1::int AS run_length, t.ctier
+    FROM generation.typed_trajectory_points(ARRAY[p_entity], ARRAY[p_type]) t
+    ORDER BY t.ordinal;
 END;
 
 -- Content-lane default. BEGIN ATOMIC, not a string body: the delegation is parsed at
@@ -80,7 +25,7 @@ END;
 -- qualified through the alias because RETURNS TABLE names are parameters in scope here.
 CREATE OR REPLACE FUNCTION generation.trajectory_unpacked_points(p_entity bytea)
     RETURNS TABLE(entity_id bytea, run_length int, ctier int)
-    LANGUAGE sql STABLE PARALLEL SAFE ROWS 6
+    LANGUAGE sql STABLE PARALLEL RESTRICTED ROWS 6
 BEGIN ATOMIC
     SELECT t.entity_id, t.run_length, t.ctier
     FROM generation.trajectory_unpacked_points(p_entity, 1::smallint) AS t;

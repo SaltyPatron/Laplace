@@ -2717,11 +2717,10 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlDataSource dataSource, byte[][] entityIds, CancellationToken ct,
         NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT d.id, p.entity_id, p.ord::integer
-            FROM unnest(@ids) AS d(id)
-            CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id)
-                 WITH ORDINALITY AS p(entity_id, run_length, ctier, ord)
-            ORDER BY d.id, p.ord
+            SELECT d.id, p.entity_id, p.ordinal::integer
+            FROM generation.typed_trajectory_points(@ids, ARRAY[1::smallint]) p
+            JOIN unnest(@ids) d(id) ON d.id = p.parent_id
+            ORDER BY d.id, p.ordinal
             """,
             static r => new TrajectoryConstituentRow(
                 (byte[])r[0], (byte[])r[1], r.GetInt32(2)),
@@ -2739,12 +2738,11 @@ public static partial class NpgsqlSubstrateReads
             NpgsqlDataSource dataSource, byte[][] entityIds, PhysicalityType[] types,
             CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT d.id, lane.type, p.entity_id, p.ord::integer
-            FROM unnest(@ids) AS d(id)
-            CROSS JOIN unnest(@types) AS lane(type)
-            CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id, lane.type)
-                 WITH ORDINALITY AS p(entity_id, run_length, ctier, ord)
-            ORDER BY d.id, lane.type, p.ord
+            SELECT d.id, lane.type, p.entity_id, p.ordinal::integer
+            FROM generation.typed_trajectory_points(@ids, @types) p
+            JOIN unnest(@ids) d(id) ON d.id = p.parent_id
+            JOIN unnest(@types) lane(type) ON lane.type = p.physicality_type
+            ORDER BY d.id, lane.type, p.ordinal
             """,
             static r => new TypedTrajectoryConstituentRow(
                 (byte[])r[0], (PhysicalityType)r.GetInt16(1), (byte[])r[2], r.GetInt32(3)),
@@ -2763,11 +2761,10 @@ public static partial class NpgsqlSubstrateReads
         NpgsqlDataSource dataSource, byte[][] entityIds, PhysicalityType type,
         CancellationToken ct, NpgsqlRead.ErrorTranslator? onError = null) =>
         NpgsqlRead.ReadRowsAsync(dataSource, """
-            SELECT d.id, p.entity_id, p.ord::integer
-            FROM unnest(@ids) AS d(id)
-            CROSS JOIN LATERAL generation.trajectory_unpacked_points(d.id, @type)
-                 WITH ORDINALITY AS p(entity_id, run_length, ctier, ord)
-            ORDER BY d.id, p.ord
+            SELECT d.id, p.entity_id, p.ordinal::integer
+            FROM generation.typed_trajectory_points(@ids, ARRAY[@type]) p
+            JOIN unnest(@ids) d(id) ON d.id = p.parent_id
+            ORDER BY d.id, p.ordinal
             """,
             static r => new TrajectoryConstituentRow(
                 (byte[])r[0], (byte[])r[1], r.GetInt32(2)),

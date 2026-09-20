@@ -21,6 +21,15 @@ SCRATCH_PREDECESSOR = (
     "dfade6c9b72277ed4d95e64376d283a4aa8821d2",
     "14d7470f276ed33562451a12c0724767bd43aa82",
 )
+# This installed generation has the same publication, service validation and
+# rollback implementation. The source changes only bootstrap's backup-directory
+# mode and nginx's loopback allow rules. Neither requires replacing the helper
+# to publish application payloads; retain its exact bytes in the staged receipt.
+PUBLICATION_PREDECESSOR = (
+    "bf491d485c5399241846226016465b841a4c8973",
+    "cf9a67f6271e3208bfda6c1d0d6904105ce17ac6",
+    "14d7470f276ed33562451a12c0724767bd43aa82",
+)
 
 def blob(raw):
     return hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
@@ -33,6 +42,8 @@ def select_profile(source, installed):
     identities = (blob(source[NAMES[0]]), blob(installed[NAMES[0]]), blob(installed[NAMES[1]]))
     if identities == SCRATCH_PREDECESSOR:
         return "retained-legacy-scratch"
+    if identities == PUBLICATION_PREDECESSOR:
+        return "retained-publication-policy"
     raise ValueError("installed managed policy requires a supported policy upgrade")
 
 def trusted_bytes(path, trusted_uid=0):
@@ -51,7 +62,7 @@ def trusted_bytes(path, trusted_uid=0):
     return raw
 
 def unit_text(text, name, profile):
-    if profile == "same-policy":
+    if profile in ("same-policy", "retained-publication-policy"):
         return text
     if profile != "retained-legacy-scratch" or name not in ("mcp", "lichess"):
         raise ValueError("unknown managed policy profile")
