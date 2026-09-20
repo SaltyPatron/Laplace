@@ -89,6 +89,88 @@ A sparse cache may use a minimal-perfect hash, open-addressed fixed table, deter
 
 "Not exhaustive" does not mean "not a perfcache."
 
+## Modular selectors and profiles
+
+A cache does not have to materialize a whole tier or only a heat-selected set. It may compile a declared modular subset.
+
+Useful selector classes include:
+
+- **range:** ASCII `U+0000..U+007F`, a numeric interval, a bounded ordinal range;
+- **explicit set:** selected hexadecimal colors, named palette entries, selected chess positions;
+- **generated finite domain:** all values permitted by one declared bit depth/format;
+- **band:** frequency bins/filter-bank coefficients inside a declared audio-analysis band;
+- **predicate:** records matching deterministic type/recipe fields;
+- **hot/admitted:** the finite known estate that has already occurred or crossed a usage threshold;
+- **dependency closure:** every constituent needed by a selected higher-tier object/package.
+
+The selector is versioned and receipted.
+
+### Example: palette ROM
+
+Suppose a deployment only needs a declared set of colors:
+
+~~~text
+palette:
+  #000000
+  #FFFFFF
+  #FF0000
+  #00FF00
+  #0000FF
+  ...
+~~~
+
+The image cache can compile only the corresponding canonical pixel/color records, then optionally precompute every serviceable patch/region structure over that palette.
+
+Those pixels keep the exact same canonical ids/coords they have in any full image generation.
+
+A different palette is another cache module, not another image ontology.
+
+### Example: ASCII profile
+
+An embedded/terminal/code workload may map only the ASCII segment of the Unicode generation plus the grammar/number structures it needs.
+
+~~~text
+U+0000..U+007F
+-> same canonical codepoint ids/coords as full T0
+-> local direct index
+~~~
+
+Do not renumber ASCII from 0..127 as a new canonical universe merely because the module is compact.
+
+### Example: speech-oriented audio profile
+
+A speech deployment may compile only the sample formats plus frequency-domain calculations it actually uses.
+
+The frequency cache is a **calculated projection**, not raw audio identity:
+
+~~~text
+sample-rate/window/analyzer recipe
++ declared speech band/filter-bank selector
+-> selected deterministic frequency-bin/filter records
+~~~
+
+Standalone audio and video soundtrack analysis can both reuse those records.
+
+Do not confuse "human speech frequency profile" with deleting frequencies from Laplace's knowledge. It is a resident calculation/cache profile.
+
+### Profile composition
+
+A runtime/device can map several modules:
+
+~~~text
+profile =
+  unicode/ascii
++ number/common
++ image/palette/acme-ui
++ audio/speech-band/v2
++ image/hot-patches
++ video/hot-frames
+~~~
+
+The registry resolves overlap by canonical key/generation and retains one semantic record.
+
+This enables very small edge profiles as well as large server profiles without changing canonical identity.
+
 ## Cross-modality reuse
 
 Higher modalities consume lower cached structures; they do not clone them.
