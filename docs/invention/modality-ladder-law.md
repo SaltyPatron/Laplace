@@ -1,177 +1,224 @@
-# Modality ladder law — one open identity floor, typed modality grammars
+# Modality ladder law — shared codepoint floor, reusable scalar trajectories, typed modality structure
 
-This is a binding preservation law under docs/INVENTION.md and docs/CAPABILITIES.md.
+This binding law is read under docs/INVENTION.md and docs/CAPABILITIES.md.
 
-The historical version of this file incorrectly equated the entire abstract Tier-0 law with the currently selected Unicode codepoint generation, then forced non-text values such as image channels and audio samples through decimal text spellings. That reduction is retired.
+## The actual media/scalar law
 
-## One global identity law; many lawful primitive grammars
+Do not mint an arbitrary sensor/sample value as a new Tier-0 atom.
 
-Laplace has one content-addressed identity/composition machine, not one private identity namespace per modality.
-
-Tier-0 is an open, countably addressable atom law. Every concrete generation observes/materializes a finite prefix/set. The current Unicode generation is one standards-defined finite materialization of that law; its 1,114,112 codepoint positions are not the capacity or ontology of Tier-0.
-
-Textual surfaces naturally recover Unicode codepoints/graphemes under UAX/normalization rules. That does not imply that an image sample, PCM sample, chess square, machine instruction, ELF field or tensor factor must be converted into the decimal characters spelling its numeric value before it can participate in canonical structure.
-
-The modality/provider grammar determines what physical/source primitives are recovered and the versioned recipe determines their substrate roles.
-
-## Provider → recipe → universal typed structure
-
-Every admitted digital artifact follows the same boundary:
+A finite digital scalar such as:
 
 ~~~text
-artifact/source bytes
--> qualified syntax/container/codec/standards provider
--> exact recovered nodes/records/fields/order/spans/errors
--> versioned source recipe
--> universal typed AST / canonical recursive structures
-   + occurrences
-   + governed references
+0.34567
+~~~
+
+is canonical ordered content over the already admitted codepoint floor:
+
+~~~text
+['0', '.', '3', '4', '5', '6', '7']
+~~~
+
+Likewise:
+
+~~~text
+255    -> ['2','5','5']
+-32768 -> ['-','3','2','7','6','8']
+~~~
+
+Those constituents compose into one reusable scalar/number identity and one exact ordered trajectory.
+
+When that same scalar occurs again, the scalar content is not recorded again. The containing modality records another occurrence/reference to that already-known scalar at a different sample/channel/pixel/time/ordinal.
+
+This is ordinary Laplace content-address convergence:
+
+~~~text
+content novelty != occurrence volume
+~~~
+
+## Pi is the same proof at larger width
+
+A finite observed prefix of pi is not a million new Tier-0 atom kinds.
+
+It is one ordered composition of the existing digit / punctuation codepoints. The repository's core benchmark already notes that "pi's million digits compose as ONE word"; the trajectory implementation separately proves that composition width is not limited by the local 16-bit ordinal field.
+
+Conceptually:
+
+~~~text
+pi_N = compose(['3','.', '1','4','1','5','9', ... N finite digits ...])
+~~~
+
+The exact finite digit prefix determines the canonical composition/root. Re-observing the same prefix reuses that root.
+
+The packed GeometryZM trajectory is the exact ordered constituent manifest. One vertex carries one constituent identity plus local ordinal/run/flags. GeometryZM/varlena/memory/storage limits bound one executable materialization; they do not turn each digit or scalar value into a new atomic alphabet.
+
+## Tier-0: current executable floor versus abstract law
+
+The current executable shared textual/number floor is the selected Unicode codepoint generation backed by the UCD/DUCET perfcache.
+
+The abstract Tier-0 address law remains open and is not mathematically capped by today's Unicode release. That extensibility is not permission for a media decomposer to allocate arbitrary amplitude/color/sample values into unused Tier-0 ranks.
+
+A new Tier-0 atom generation is a governed foundation change. Ordinary digital numbers and modality values compose above the existing floor.
+
+## Exact scalar canonicalization
+
+A scalar recipe must be deterministic and lossless for the admitted digital representation.
+
+It declares, as applicable:
+
+- radix;
+- sign;
+- decimal point;
+- exponent form;
+- leading/trailing-zero normalization;
+- exact precision/scale;
+- integer/rational/fixed/floating source representation;
+- signed-zero / NaN / infinity handling when the source format permits them.
+
+Do not stringify an inexact host floating-point approximation and call it the source value. Canonicalization starts from the exact admitted digital representation and its declared precision boundary.
+
+For a value already supplied as an exact canonical decimal surface, ordinary content decomposition is the scalar identity/trajectory machinery. ModelCoordinates.ScalarId(string) is one current caller of that law.
+
+## Audio
+
+An analog waveform enters Laplace only through a finite digital observation.
+
+For each decoded sample occurrence:
+
+~~~text
+exact decoded sample value
+-> canonical scalar trajectory/root
+-> sample occurrence
+-> window/frame
+-> segment
+-> phrase/track
+~~~
+
+The occurrence carries the context that is not the scalar itself:
+
+- sample ordinal;
+- channel;
+- sample format / quantization precision;
+- sample rate / time mapping;
+- source/package/reconstruction provenance.
+
+Example:
+
+~~~text
+S = compose(['0','.','3','4','5','6','7'])
+
+track:
+  sample #1201 -> S
+  sample #9342 -> S
+  sample #18117 -> S
+~~~
+
+There is one canonical S. There are three sample occurrences.
+
+A million identical amplitudes do not create a million scalar entities.
+
+## Images
+
+The same rule applies to channel values.
+
+~~~text
+N255 = compose(['2','5','5'])
+
+pixel A:
+  R -> N255
+  G -> N128
+  B -> N255
+
+pixel B:
+  R -> N255
+  ...
+~~~
+
+N255 is reusable canonical numeric content. Channel role, pixel location, dimensions, layout and source occurrence remain typed structure around it.
+
+Do not mint a packed RGBA tuple or channel intensity as a private Tier-0 atom merely because it is convenient.
+
+## Video, models, machine data and other numeric modalities
+
+Repeated numeric values reuse canonical scalar content where the declared recipe says the values denote the same exact scalar.
+
+Their modality roles remain distinct occurrences/physicalities:
+
+- frame/time/channel;
+- tensor coordinate/dtype/precision;
+- machine counter/register/field;
+- measurement unit/source/calibration;
+- domain-specific role.
+
+Canonical numeric equality does not erase those contexts.
+
+## Provider -> recipe -> shared structure
+
+Every source still uses its exact provider/grammar/codec:
+
+~~~text
+artifact
+-> provider recovers exact source structure
+-> recipe classifies fields/values
+-> reusable content/compositions
+   + ordered occurrences/trajectories
+   + physicality
    + provenance
    + testimony
-   + deterministic calculations
+   + calculations
    + reconstruction state
 ~~~
 
-Tree-sitter is one provider family. XML/UCD parsers, PNG/JPEG decoders, audio codecs, PGN/FEN parsers, ELF/PE/Mach-O readers, JVM classfile decoders and model-container readers are other provider families.
+The provider does not get a private identity law.
 
-A provider-specific recovered primitive is not automatically canonical content merely because it is easy to hash.
+## Packaging is not identity
 
-## No private atom namespaces
+JPEG/PNG/WAV/FLAC/MP3/MP4/JAR/ELF/etc. recover physical artifacts and source structure.
 
-A modality must not create a disconnected private Tier-0 universe whose identities cannot participate in the common canonical composition law.
-
-But the remedy is not "serialize every value as decimal Unicode text."
-
-A recipe explicitly declares how a recovered value participates:
-
-- canonical atom/content under the common identity law;
-- ordered constituent of a higher composition;
-- occurrence/reference coordinate;
-- typed physicality/factor;
-- source/provenance metadata;
-- attributed testimony;
-- deterministic calculation operand/result;
-- packaging/reconstruction state;
-- transient decode state that is not persisted as semantic content.
-
-Unknown disposition stays unresolved rather than silently becoming content.
-
-## Packaging is not semantic identity
-
-Containers and codecs recover source structure. File offsets, compression blocks, archive paths, tensor offsets and similar packaging coordinates do not become semantic identity unless a declared reconstruction/content recipe specifically requires them.
-
-Equal canonical content may converge across different packages while package/file occurrences remain separately attributable.
-
-## Numbers and scalars
-
-There is no universal law that a scalar value must be identified by the Unicode decimal spelling of the value.
-
-A source recipe may use an existing canonical numeric representation when that representation is semantically correct, or may retain a typed physical/sample value as physicality/calculation/reconstruction state. The representation and precision boundary are explicit recipe inputs.
-
-The current modality-number perfcache is a finite derived accelerator for one selected numeric recipe. It is not proof that decimal text is the ontology of image/audio samples and it must not be used to force every modality through a textual ladder.
-
-## Modality examples
-
-### Text
-
-Provider/grammar:
-- Unicode/UAX/NFC and document-format structure.
-
-Typical composition:
-- codepoint/grapheme/word/sentence plus source-native paragraph/section/chapter/table/AST structures when the provider supplies them.
-
-Unicode is authoritative for textual scalar identity in this lane.
-
-### Code and repositories
-
-Provider/grammar:
-- exact language grammar (Tree-sitter or other qualified provider);
-- Git object/container provider where repository history is selected;
-- compiler/object/disassembly providers for calculated execution analysis.
-
-Canonical structure includes ordered syntax/AST and repository/tree composition. Calls, types, dependencies, toolchain outcomes and execution analysis remain typed state around those identities.
-
-Construction uses this grammar in reverse: reuse/compose/minimally mutate canonical AST before realizing source.
-
-### Images
-
-Provider/grammar:
-- exact image/container decoder recovers dimensions, channels, samples, metadata and ordering.
-
-The recipe decides which decoded sample/channel/region structures are canonical content/physicality/reconstruction state. It does not turn RGBA into a private universe, and it does not require 255 to become the textual characters 2,5,5 merely to be lawful.
-
-### Audio
-
-Provider/grammar:
-- exact audio/container decoder recovers sample format, channels, sample order, timing and metadata.
-
-Precision/sample format is part of the recipe/physicality boundary. Spectral/onset/features are versioned calculations unless the source literally supplies them.
-
-### Video
-
-Provider/grammar:
-- container demux + image/audio/frame/timing structure.
-
-Frame ordering and synchronization remain exact occurrences/trajectories. Codec/container packaging does not own semantic identity.
-
-### Chess
-
-Provider/grammar:
-- PGN/FEN/rule engine/tablebase/provider formats.
-
-Squares, pieces, positions, moves, lines and games are deterministic domain structures under the common content/occurrence/evidence machine. Hot position perfcaches are derived accelerators, not a private cognition ontology.
-
-### Models
-
-Provider/grammar:
-- tokenizer/config/container/tensor structure.
-
-Raw parameter numerics may be transient operands used to derive circuit physicalities/evidence. Checkpoint packaging and raw weight blobs do not become a second durable model ontology.
-
-### Executables / bytecode
-
-Provider/grammar:
-- ELF/PE/Mach-O/JAR/classfile/disassembly and related exact structural providers.
-
-Recovered source/bytecode/machine structures may be further calculated into CFG/data/dependency state and target-machine cycle derivations. Those calculations remain versioned and attributable.
-
-## Physicality and trajectory
-
-A modality's canonical structure may have one or more typed physicalities.
-
-Packed trajectory carrier data is an exact constituent manifest; it is not child geometry. Realized curves resolve child identities to the requested physicality coordinates before geometric metrics are applied.
-
-Fréchet/Hausdorff/angular/Hilbert/locality are typed comparison operators, never a replacement for canonical identity or source semantics.
+Container offsets, compression blocks, paths and codec framing remain provenance/reconstruction unless a declared content recipe requires them.
 
 ## Perfcache law
 
-A perfcache may materialize deterministic finite derived data for hot structures under spec 33.
+A numeric perfcache is an accelerator for already-defined canonical scalar compositions.
 
-It is rebuildable, versioned, verified against canonical state/recipe, never the semantic authority, and never permission to invent a private identity law for convenience.
+The current 0..255 number ROM precomputes the most common integer scalar roots used by byte-valued media. It does not mean:
 
-## Reseed / generation implications
+- the scalar universe stops at 255;
+- every scalar must be precomputed;
+- a cache is the identity authority.
 
-Changing a binding canonicalization/composition recipe can change identities and therefore requires a new generation/reseed where those identities are persisted.
+A fractional scalar such as 0.34567 can be composed normally without being present in that dense ROM. Repeated occurrences then reuse its canonical root through ordinary content addressing/indexing.
 
-Changing only a lawful physical execution plan (chunk size, worker count, batching, accelerator/provider) must not change canonical results.
+## Physicality and trajectory
+
+Keep these distinct:
+
+~~~text
+canonical scalar/entity identity
+packed GeometryZM constituent trajectory
+real physicality coord
+realized child-coordinate curve
+modality occurrence / role
+~~~
+
+Packed trajectory values are exact manifests, not spatial sample values. Frechet/Hausdorff/etc. apply to realized curves when the operation calls for geometry.
 
 ## Acceptance
 
-- one global identity/composition law is preserved across modalities;
-- Unicode remains authoritative for textual Unicode surfaces without being promoted into the ontology of every digital primitive;
-- each provider/recipe has complete field-role disposition;
-- packaging and provenance do not silently salt reusable content;
-- exact source ordering/reconstruction is preserved where required;
-- calculations remain distinguishable from observations/testimony;
-- modality-specific physicality is typed and queryable;
-- perfcaches remain derived;
-- software construction, machine analysis and export consume the same canonical structures instead of private modality worlds.
+- arbitrary audio amplitudes/channel values are not minted as fake Tier-0 atoms;
+- exact finite numeric surfaces decompose to reusable canonical scalar roots;
+- equal scalar content converges across repeated occurrences;
+- occurrence ordinal/channel/time/pixel/tensor context remains independently attributable;
+- source precision/quantization is retained so scalar canonicalization is reversible;
+- pi or another long finite numeric surface can be represented as one wide ordered composition without turning digits into novel atoms;
+- composition width is not silently limited by the packed 16-bit ordinal copy;
+- number perfcaches accelerate common values without defining the scalar domain;
+- media packages remain provenance/reconstruction rather than identity authority.
 
 ## Non-success
 
-- private image/audio/code/model atom namespaces with their own identity law;
-- converting arbitrary physical values to decimal text solely to satisfy an obsolete "all atoms are Unicode codepoints" rule;
-- treating codec/container bytes or offsets as semantic identity by default;
-- hashing transient embeddings/calculations as canonical identity;
-- flattening source-native AST/document/media structure into a generic text ladder;
-- using a modality-specific parser as a private persistence/cognition engine.
+- one new Tier-0 entity for every amplitude/sample/color value;
+- hashing raw PCM/RGBA as a private atom identity;
+- duplicating the same scalar entity for every occurrence;
+- losing sample rate/channel/precision/time while preserving only a flat scalar stream;
+- using host float formatting that cannot reconstruct the admitted digital value;
+- treating the 0..255 perfcache as the set of representable numbers.
