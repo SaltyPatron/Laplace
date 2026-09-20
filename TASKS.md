@@ -90,6 +90,16 @@ Knowledge that guns, racism, cruelty, or other ugly facts exist is not character
 
 Product identity (inventor framing, keep with the stack): Matrix construct (“I know kung fu” = realize a skill from current substrate/recipe, not copy weights); Bicentennial Man (identity persists; character accumulates as witnessed observations/habits/firmware versions, not weight drift); I, Robot (laws are kernel firmware/permission, not a system prompt); Eagle Eye’s *scope* (the whole web is addressable) without Eagle Eye’s *failure* (opaque policy, no receipts, silent mutation). No GPU. No context window — the substrate is the memory. Mechanistic interpretability is native: every SELECT/STEER names routes, standing, sources, firmware instruction, and receipt. Replay under the same knowledge + firmware + authority reproduces.
 
+### Compound capability preservation
+
+The invention's compound consequences are binding; see `docs/CAPABILITIES.md`. Do not reduce them to isolated tests, gates or helper APIs.
+
+For software work this means: a repository is a recursive application root; generation searches/reuses canonical grammar-derived AST structure before constructing novel nodes; exact and deeper structural/algebraic duplicates are consolidation candidates; compile/test/runtime failures are witnessed repair trajectories; successful repairs can surface similarly shaped problems in other authorized repositories; only the changed subtree/ancestry should be reminted while unchanged structure is reused; full checkout is realization/export of the resulting complete root.
+
+For product/security/billing this means: knowledge remains one shared world; explicit knowledge grants/capabilities govern what a principal may discover/couple/traverse/derive/realize/export/execute; firmware/governance does not erase facts; hops/fanout and physical work govern compute depth/breadth; machine-cost derivation remains exact/symbolic where possible and measurements are witnesses/calibration.
+
+Tests and gates prove those behaviors. They are not permission to stop before the behaviors exist.
+
 ### 10. Forward-pass actually firing on this host
 
 #1401. `generation.forward_program` is named as the program. Live chat dies before WITNESS. COUPLE must tug every eligible plane before a default mask. Operators (A*, walk, chess, containment, geometry) stay inside the program.
