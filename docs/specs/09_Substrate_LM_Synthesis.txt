@@ -9,9 +9,7 @@ not require stochastic gradient training as its native learning mechanism. Conte
 ordered physicality, typed relations, source testimony, uncertainty, geometry, and
 observed outcomes are the model state.
 
-The system may ingest conventional checkpoints, but a checkpoint enters as a source of
-auditable testimony. The checkpoint is not the permanent runtime authority and its
-original architecture does not constrain the architecture of another source.
+The system may ingest conventional checkpoints, but a checkpoint enters as a source of auditable testimony/calculation evidence. The checkpoint is not the permanent runtime authority and its original architecture does not constrain the architecture of another source. The live Laplace world remains the semantic authority; conventional-model construction/export is a consumer projection.
 
 Universal floor and convergence
 -------------------------------
@@ -48,6 +46,13 @@ Functional alignment is calculated from token testimony, factors, trajectories,
 geometry, relation behavior, salience, and observed outcomes while retaining both
 source circuits.
 
+Knowledge authority and model-source scope
+------------------------------------------
+
+Source A/B/A+B scoping is a diagnostic/export evidence scope after effective principal authority has been resolved. It is not a knowledge-package implementation and not a commercial path for intentionally smaller intelligence.
+
+A caller may materialize a narrow target artifact while the live Laplace substrate remains fully knowledgeable within the caller's actual grants. Compute tiers continue to vary hops/fanout/resources over the same authorized world.
+
 Pooled heterogeneous-model consensus
 ------------------------------------
 
@@ -56,8 +61,7 @@ generate N answers for a judge, vote, or concatenation step. They do not require
 arithmetic, equal layer counts, compatible hidden sizes, common tokenizer vocabularies,
 or a shared modality.
 
-The standing fold occurs before selection. One canonical forward pass consumes the
-pooled evidence and emits one answer. Source-scoped A-only, B-only, and A+B execution is
+Recorded/calculated source evidence participates through the canonical forward program under query-relative COUPLE/ORIENT/ROUTE semantics. One canonical forward pass consumes the eligible pooled evidence and emits one answer. Source-scoped A-only, B-only, and A+B execution is
 an inspection and ablation facility, not post-hoc adjudication.
 
 Source disagreements remain inspectable. Consensus does not erase dissent, uncertainty,
@@ -69,8 +73,8 @@ Construction and export
 
 Export is a deterministic materialization of a declared substrate program:
 
-- Unicode/ISO plus one model source produces that source's clean, witnessed construction.
-- Multiple sources produce the pooled consensus construction.
+- An explicitly authorized/export-scoped source selection may produce a source-scoped diagnostic/consumer construction.
+- Multiple eligible sources may produce a pooled-evidence consumer construction.
 - Layers, heads, experts, dimensions, operators, and schedules derive from declared
   recipe, relation bands, tiers, content coverage, trajectories, and evidence—not a
   hardcoded Llama template.
