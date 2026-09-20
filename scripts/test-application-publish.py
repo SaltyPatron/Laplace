@@ -790,7 +790,7 @@ class ApiPayloadVerificationTests(unittest.TestCase):
                     self.api.health("http://127.0.0.1:5187", 123)
 
 
-    def test_actual_deploy_api_scope_builds_only_api_and_preserves_service_links(self):
+    def test_actual_managed_only_api_deploy_uses_prefix_native_and_preserves_other_products(self):
         import shutil
         repo = self.root
         (repo / "deploy/linux").mkdir(parents=True)
@@ -833,6 +833,11 @@ class ApiPayloadVerificationTests(unittest.TestCase):
             tool.chmod(0o755)
         app = repo / "installed"
         app.mkdir()
+        prefix = repo / "prefix"
+        native_root = prefix / "lib"
+        native_root.mkdir(parents=True)
+        for name in self.api.REQUIRED[3:]:
+            (native_root / name).write_bytes(("authoritative-prefix:" + name).encode())
         (app / "laplace-api.env").write_text("private configuration")
         (app / "managed-services").mkdir()
         (app / "managed-services/unit").write_text("preserved")
@@ -842,6 +847,7 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         env = dict(os.environ, PATH=str(repo / "tools") + os.pathsep + os.environ["PATH"],
                    API_FIXTURE_SOURCE=str(self.stage), API_TOOL_LOG=str(repo / "tools.log"),
                    LAPLACE_APP_DIR=str(app), LAPLACE_API_TRANSACTION="1",
+                   LAPLACE_INSTALL_PREFIX=str(prefix), LAPLACE_REUSE_INSTALLED_NATIVE="1",
                    LAPLACE_ENGINE_BUILD=str(self.build / "engine"),
                    LAPLACE_API_PAYLOAD_MANIFEST=str(manifest))
         subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
@@ -852,7 +858,9 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         result = subprocess.run(["bash", str(repo / "deploy/linux/deploy.sh"), "--api-only"],
                                 env=env, text=True, capture_output=True, timeout=30)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual("selected-build", self.api.read_manifest(manifest)["provenance"])
+        self.assertEqual("preserved-installed-native", self.api.read_manifest(manifest)["provenance"])
+        for name in self.api.REQUIRED[3:]:
+            self.assertEqual((native_root / name).read_bytes(), (app / name).read_bytes())
         self.assertEqual('<div id="root">fresh web</div>', (app / "wwwroot/index.html").read_text())
         self.assertEqual("private configuration", (app / "laplace-api.env").read_text())
         self.assertEqual("preserved", (app / "managed-services/unit").read_text())

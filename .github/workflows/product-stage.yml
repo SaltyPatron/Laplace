@@ -48,13 +48,33 @@ on:
         type: string
         required: false
         default: ""
+      native_test_filter:
+        description: "optional CTest regex selected from affected native components/cases"
+        type: string
+        required: false
+        default: ""
       managed_db_test_projects:
         description: "comma-separated DB-tier managed test csproj paths"
         type: string
         required: false
         default: ""
+      managed_db_test_filter:
+        description: "optional VSTest filter for exact DB-tier test classes"
+        type: string
+        required: false
+        default: ""
       managed_live_test_projects:
         description: "comma-separated live-tier managed test csproj paths"
+        type: string
+        required: false
+        default: ""
+      managed_live_test_filter:
+        description: "optional VSTest filter for exact live-tier test classes"
+        type: string
+        required: false
+        default: ""
+      native_db_test_filter:
+        description: "optional CTest regex for affected extension regression suites"
         type: string
         required: false
         default: ""
@@ -198,8 +218,12 @@ jobs:
       LAPLACE_MANAGED_BUILD_PROJECTS: ${{ inputs.managed_build_projects }}
       LAPLACE_MANAGED_TEST_PROJECTS: ${{ inputs.managed_test_projects }}
       LAPLACE_MANAGED_TEST_FILTER: ${{ inputs.managed_test_filter }}
+      LAPLACE_NATIVE_TEST_FILTER: ${{ inputs.native_test_filter }}
       LAPLACE_MANAGED_DB_TEST_PROJECTS: ${{ inputs.managed_db_test_projects }}
+      LAPLACE_MANAGED_DB_TEST_FILTER: ${{ inputs.managed_db_test_filter }}
       LAPLACE_MANAGED_LIVE_TEST_PROJECTS: ${{ inputs.managed_live_test_projects }}
+      LAPLACE_MANAGED_LIVE_TEST_FILTER: ${{ inputs.managed_live_test_filter }}
+      LAPLACE_NATIVE_DB_TEST_FILTER: ${{ inputs.native_db_test_filter }}
       LAPLACE_DB_SUITES: ${{ inputs.db_suites }}
       LAPLACE_LIVE_SUITES: ${{ inputs.live_suites }}
       LAPLACE_DELIVERY_ACTIONS: ${{ inputs.delivery_actions }}

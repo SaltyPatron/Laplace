@@ -5,7 +5,7 @@ cd "$ROOT"
 
 stage="${1:-build}"
 case "$stage" in
-  provision|reconcile|check|build|install|applications|deploy|proof|release-qualification|release-delivery|release-candidate|release-activation|proof-model|mainline|test-dev|test-db|test-live) ;;
+  provision|verify|chess-lab|reconcile|check|build|install|applications|deploy|proof|release-qualification|release-delivery|release-candidate|release-activation|proof-model|mainline|test-dev|test-db|test-live) ;;
   *) echo "unknown product stage: $stage" >&2; exit 2 ;;
 esac
 
@@ -284,6 +284,11 @@ force_full_carry_forward_impact() {
   export LAPLACE_MANAGED_BUILD_PROJECTS="app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj,app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj,app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj,app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj"
   export LAPLACE_DB_SUITES=""
   export LAPLACE_MANAGED_DB_TEST_PROJECTS=""
+  export LAPLACE_MANAGED_TEST_FILTER=""
+  export LAPLACE_NATIVE_TEST_FILTER=""
+  export LAPLACE_MANAGED_DB_TEST_FILTER=""
+  export LAPLACE_MANAGED_LIVE_TEST_FILTER=""
+  export LAPLACE_NATIVE_DB_TEST_FILTER=""
   export LAPLACE_LIVE_SUITES=""
   export LAPLACE_MANAGED_LIVE_TEST_PROJECTS=""
   export LAPLACE_DELIVERY_ACTIONS="publish"
@@ -435,6 +440,19 @@ for env_name, field in project_fields.items():
         selected.update(incoming)
         value = ",".join(sorted(selected))
     print(f"export {env_name}={shlex.quote(value)}")
+
+# A carried-forward invalidation may cover more paths than the direct push.
+# Preserve exact filters only when that test plane gained no carried work.
+filter_suites = {
+    "LAPLACE_NATIVE_TEST_FILTER": ("dev_suites", "native-dev"),
+    "LAPLACE_MANAGED_TEST_FILTER": ("dev_suites", "managed-dev"),
+    "LAPLACE_NATIVE_DB_TEST_FILTER": ("db_suites", "native-db"),
+    "LAPLACE_MANAGED_DB_TEST_FILTER": ("db_suites", "managed-db"),
+    "LAPLACE_MANAGED_LIVE_TEST_FILTER": ("live_suites", "managed-live"),
+}
+for env_name, (field, suite) in filter_suites.items():
+    if suite in plan.get(field, []):
+        print(f"export {env_name}=")
 
 scope = os.environ.get("LAPLACE_PUBLISH_SCOPE", "api")
 if scope == "full" or plan.get("publish_scope") == "full":
@@ -727,6 +745,7 @@ PY
 verify_installed_product() (
   local base="${LAPLACE_DEPLOYED_API_BASE:-http://127.0.0.1:5187}"
   local ui_base="${LAPLACE_PUBLIC_UI_BASE:-http://127.0.0.1:8080}"
+  local expected="${1:-$(git rev-parse HEAD)}"
   local api_key="${LAPLACE_API_KEY:-}" issued_prefix=""
   if [[ -z "$api_key" ]]; then
     IFS=$'\t' read -r api_key issued_prefix < <(issue_live_proof_credential "$base")
@@ -740,7 +759,7 @@ verify_installed_product() (
     revoke_live_proof_credential "$base" "$api_key" "$issued_prefix"
   }
   trap cleanup_live_proof_credential EXIT
-  require_deployed_revision
+  bash scripts/check-deployed-revision.sh "$expected"
   if [[ "${LAPLACE_REUSE_INSTALLED_NATIVE:-0}" == 1 ]]; then
     # Managed-only publication deliberately has no source-native build tree.
     # Validate the live catalog against the independently receipted installed
@@ -754,6 +773,24 @@ verify_installed_product() (
   check_t0_perfcache_runtime
   python3 scripts/verify-application-release.py --base "$ui_base" --timeout-seconds 60
 )
+
+verify_current_installed_product() {
+  local receipt="${LAPLACE_APP_DIR:-/opt/laplace/app}/.laplace-source-revision" expected
+  expected="$(cat "$receipt" 2>/dev/null || true)"
+  [[ "$expected" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "::error::installed application revision receipt is missing or invalid: $receipt" >&2
+    return 1
+  }
+  LAPLACE_REUSE_INSTALLED_NATIVE=1 verify_installed_product "$expected"
+}
+
+run_chess_lab() {
+  check_deps
+  bash scripts/pipeline.sh chess-lab
+  sudo -n systemctl restart laplace-api
+  check_application_live
+  python3 scripts/check-chess-dependencies.py --cutechess-gui
+}
 
 reconcile_installed_product() {
   # Reconciliation is a deliberate database mutation and is only selected when
@@ -774,6 +811,14 @@ run_release_qualification() {
   (( current_rc == 0 )) || return "$current_rc"
 
   run_build
+
+  # Execute only the suites invalidated by the changed implementation paths.
+  # Project and class selectors are supplied by the impact planner; unaffected
+  # suites remain represented by their existing qualification receipts.
+  current_rc=0
+  run_dev_test_matrix 1 || current_rc=$?
+  if (( current_rc == 3 )); then return 0; fi
+  (( current_rc == 0 )) || return "$current_rc"
 
   current_rc=0
   release_selected_revision_current || current_rc=$?
@@ -994,6 +1039,13 @@ run_proof() {
 case "$stage" in
   provision)
     provision_deps
+    ;;
+  verify)
+    check_deps
+    verify_current_installed_product
+    ;;
+  chess-lab)
+    run_chess_lab
     ;;
   check)
     run_ci_contract_checks

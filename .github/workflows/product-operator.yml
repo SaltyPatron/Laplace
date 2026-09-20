@@ -8,8 +8,8 @@ on:
         description: "Explicit installed-product operation; normal main delivery is automatic"
         type: choice
         required: true
-        default: reconcile
-        options: [reconcile, deploy]
+        default: verify
+        options: [verify, reconcile, chess-lab, deploy]
       full_clean:
         description: "Deploy only: discard candidate build outputs before rebuilding"
         type: boolean

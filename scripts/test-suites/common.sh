@@ -82,8 +82,13 @@ run_managed_dotnet_tests() {
   fi
 
   local solution generated="" rc=0 deadline="${LAPLACE_MANAGED_TEST_TIMEOUT:-15m}"
-  local impact_filter="${LAPLACE_MANAGED_TEST_FILTER:-}"
-  if [[ "$label" == managed-dev && -n "$impact_filter" ]]; then
+  local impact_filter=""
+  case "$label" in
+    managed-dev) impact_filter="${LAPLACE_MANAGED_TEST_FILTER:-}" ;;
+    managed-db) impact_filter="${LAPLACE_MANAGED_DB_TEST_FILTER:-}" ;;
+    managed-live) impact_filter="${LAPLACE_MANAGED_LIVE_TEST_FILTER:-}" ;;
+  esac
+  if [[ -n "$impact_filter" ]]; then
     filter="($filter)&($impact_filter)"
   fi
   solution="$(managed_test_solution "$selected" "$label")" || return $?

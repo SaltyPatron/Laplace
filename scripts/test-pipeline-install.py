@@ -72,6 +72,27 @@ phase_chess_lab
         self.assertEqual(23, result.returncode, result.stdout + result.stderr)
         self.assertEqual(1, len(self.calls().splitlines()))
 
+    def test_application_publish_does_not_rebuild_independent_chess_tools(self):
+        contract = self.base / "deploy/linux/app-dir-contract.sh"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            'laplace_reconcile_app_dir_contract() { printf "reconcile %s\\n" "$1" >> "$CALLS"; }\n'
+        )
+        app = self.base / "app"
+        app.mkdir()
+        result = self.run_shell(function("phase_publish") + r'''
+ROOT="$PWD"
+LAPLACE_APP_DIR="$PWD/app"
+phase_runtime_secrets() { printf 'runtime-secrets\n' >> "$CALLS"; }
+bash() { printf 'bash %s\n' "$*" >> "$CALLS"; }
+phase_publish
+''')
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(
+            [f"reconcile {app}", "runtime-secrets", f"bash {self.base}/deploy/linux/deploy.sh"],
+            self.calls().splitlines(),
+        )
+
     def test_install_publishes_immutable_ingest_runtime_without_overwriting_legacy_files(self):
         install = function("phase_install")
         self.assertNotIn('dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_dir"', install)

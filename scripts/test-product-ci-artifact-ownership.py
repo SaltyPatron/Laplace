@@ -46,7 +46,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertNotIn("require_built_revision", live)
         self.assertLess(live.index("require_deployed_revision"),
                         live.index("test-parallel.sh"))
-        verify = function("verify_installed_product")
+        verify = subshell_function("verify_installed_product", "verify_current_installed_product")
         self.assertIn("LAPLACE_REUSE_INSTALLED_NATIVE", verify)
         self.assertIn("check-database-health.sh --installed-runtime", verify)
         self.assertIn('check-database-health.sh "${PGDATABASE:-laplace}"', verify)
@@ -147,7 +147,9 @@ class ProductStageOwnershipContract(unittest.TestCase):
         qualification = function("run_release_qualification")
         self.assertIn("check_deps", qualification)
         self.assertIn("run_build", qualification)
-        for forbidden in ("run_dev_test_matrix", "run_install", "run_database_maintenance", "run_db_tests", "run_publish"):
+        self.assertIn("run_dev_test_matrix 1", qualification)
+        self.assertLess(qualification.index("run_build"), qualification.index("run_dev_test_matrix 1"))
+        for forbidden in ("run_install", "run_database_maintenance", "run_db_tests", "run_publish"):
             self.assertNotIn(forbidden, qualification)
 
         candidate = function("run_release_candidate")
@@ -360,13 +362,14 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertLess(model.index("require_built_revision"),
                         model.index("model-synthesize-ci.sh"))
 
-    def test_mainline_is_build_only(self):
+    def test_mainline_runs_only_impact_selected_development_qualification(self):
         owner = function("run_mainline")
         self.assertIn("run_release_qualification", owner)
         qualification = function("run_release_qualification")
         self.assertIn("check_deps", qualification)
         self.assertIn("run_build", qualification)
-        for forbidden in ("run_dev_test_matrix", "run_install", "run_database_maintenance", "run_db_tests", "run_publish", "run_live_tests"):
+        self.assertIn("run_dev_test_matrix 1", qualification)
+        for forbidden in ("run_install", "run_database_maintenance", "run_db_tests", "run_publish", "run_live_tests"):
             self.assertNotIn(forbidden, qualification)
 
     def test_database_maintenance_never_recreates_or_seeds_implicitly(self):

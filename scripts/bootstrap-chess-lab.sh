@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Chess Lab binaries for Linux — implementation detail.
-# Invoked by: setup-host (via bootstrap-laplace-runner) and pipeline.sh publish.
-# Humans: do not run this; run sudo bash scripts/setup-host.sh once, then CI.
+# Invoked by setup-host and the explicit product chess-lab operation. Application
+# publication deliberately does not rebuild independently versioned chess tools.
 
 set -euo pipefail
 umask 0002

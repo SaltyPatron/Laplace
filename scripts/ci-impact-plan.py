@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -51,6 +52,73 @@ def native_test_path(path: str) -> bool:
     ) or (
         normalized.startswith("extension/") and "/tests/" in normalized
     )
+
+
+def native_test_filter_for_paths(paths: list[str], root: Path) -> str:
+    """Select CTest cases owned by affected native components/test files."""
+    sources: set[Path] = set()
+    explicit: set[str] = set()
+    probe_names = {
+        "generated_stage_sink_native_probe.c": "generated_stage_sink_pg_native_helpers",
+        "physicality_descriptor_native_probe.c": "physicality_descriptor_pg_native_helpers",
+        "physicality_readback_native_probe.c": "physicality_readback_pg_native_helpers",
+        "test_ud_parse.c": "laplace_ud_parse_tests",
+        "test_task_shape.c": "laplace_task_shape_tests",
+    }
+    for raw in paths:
+        path = raw.replace("\\", "/")
+        candidate = root / path
+        if native_test_path(path):
+            if candidate.suffix == ".cpp":
+                sources.add(candidate)
+            elif candidate.name in probe_names:
+                explicit.add(probe_names[candidate.name])
+            else:
+                return ""
+        elif path.startswith("engine/core/"):
+            sources.update((root / "engine/core/tests").glob("*.cpp"))
+            explicit.update(("laplace_ud_parse_tests", "laplace_task_shape_tests"))
+        elif path.startswith("engine/dynamics/"):
+            sources.update((root / "engine/dynamics/tests").glob("*.cpp"))
+        elif path.startswith("engine/synthesis/"):
+            sources.update((root / "engine/synthesis/tests").glob("*.cpp"))
+        elif path.startswith("extension/laplace_substrate/"):
+            explicit.update((
+                "generated_stage_sink_pg_native_helpers",
+                "physicality_descriptor_pg_native_helpers",
+                "physicality_readback_pg_native_helpers",
+            ))
+        elif path.startswith(("engine/", "extension/")) or path in ROOT_FILES_FULL:
+            return ""
+
+    cases: set[str] = set(explicit)
+    macro = re.compile(
+        r"(?m)^\s*TEST(?:_F)?\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)"
+    )
+    for source in sources:
+        if not source.is_file():
+            return ""
+        cases.update(".".join(match) for match in macro.findall(source.read_text(encoding="utf-8")))
+    return "|".join(sorted(re.escape(case) for case in cases))
+
+
+def native_db_test_filter_for_paths(paths: list[str]) -> str:
+    owners = set()
+    for raw in paths:
+        path = raw.replace("\\", "/")
+        if path.startswith("extension/laplace_geom/"):
+            owners.add("laplace_geom")
+        elif path.startswith("extension/laplace_substrate/"):
+            owners.add("laplace_substrate")
+        elif path.startswith("engine/core/"):
+            owners.update(("laplace_geom", "laplace_substrate"))
+        elif path.startswith("engine/dynamics/"):
+            owners.add("laplace_substrate")
+        elif path.startswith("extension/"):
+            return ""
+    if not owners:
+        return ""
+    return "^(?:" + "|".join(f"regress_{re.escape(owner)}" for owner in sorted(owners)) + ")$"
 
 
 def managed_test_tiers(root: Path, path: str) -> set[str]:
@@ -189,30 +257,39 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             invalidate(("db-health", "native-db"), path)
             continue
 
-        if (
-            path == "CMakeLists.txt"
-            or path.startswith("cmake/")
-            or path.startswith("engine/")
-        ):
+        if path.startswith(("engine/core/", "engine/dynamics/", "engine/synthesis/")):
             matched = product_change = True
             managed_build_required.update(FULL_PUBLISH_PROJECTS)
-            # Rebuild/publish native-bound binaries. Do not schedule Chess,
-            # Decomposers, Agents, … as managed-dev for a core .cpp edit.
+            native_family = path.split("/", 2)[1]
             managed_changed_paths.append(
-                "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"
+                "app/Laplace.Core.Tests/Laplace.Core.Tests.csproj"
             )
-            managed_db_force_all = True
-            managed_live_force_all = True
             publish_scope = "full"
-            components.update(("native", "managed", "uci", "database"))
+            components.update(("native", "managed"))
             build_components.update(("native", "managed"))
-            dev_suites.update(("native-dev", "managed-dev", "uci-dev"))
-            db_suites.update(DB_SUITES)
-            live_suites.update(STANDARD_LIVE_SUITES)
-            delivery_actions.update(DELIVERY_ACTIONS)
-            invalidate(("native-dev", "managed-dev", "uci-dev"), path)
-            invalidate(DB_SUITES, path)
-            invalidate(STANDARD_LIVE_SUITES, path)
+            dev_suites.update(("native-dev", "managed-dev"))
+            delivery_actions.update(("install", "publish"))
+            invalidate(("native-dev", "managed-dev"), path)
+            if native_family in ("core", "dynamics"):
+                managed_changed_paths.append(
+                    "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"
+                )
+                components.add("database")
+                db_suites.update(DB_SUITES)
+                delivery_actions.update(("database", "reconcile"))
+                invalidate(DB_SUITES, path)
+            if native_family == "core":
+                managed_changed_paths.append(
+                    "app/Laplace.Chess.Tests/Laplace.Chess.Tests.csproj"
+                )
+                components.add("uci")
+                dev_suites.add("uci-dev")
+                invalidate(("uci-dev",), path)
+            continue
+
+        if path == "CMakeLists.txt" or path.startswith("cmake/") or path.startswith("engine/"):
+            full(path)
+            continue
 
         if path.startswith("app/"):
             matched = True
@@ -224,10 +301,10 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 # A DB/live-only test edit belongs to its actual execution tier.
                 # Sending it through managed-dev adds Tier!=db/live and can produce
                 # a false "zero tests matched" failure before the relevant suite runs.
-                if tiers == {"db"}:
+                if "db" in tiers and "live" not in tiers:
                     db_suites.add("managed-db")
                     invalidate(("managed-db",), path)
-                elif tiers == {"live"}:
+                elif "live" in tiers:
                     live_suites.add("managed-live")
                     invalidate(("managed-live",), path)
                 else:
@@ -336,6 +413,8 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
     managed_impact = plan_managed_projects(root, managed_changed_paths)
     managed_test_filter = ""
+    managed_db_test_filter = ""
+    managed_live_test_filter = ""
     if managed_changed_paths and all(managed_test_path(path) for path in managed_changed_paths):
         # Exact class filters are a managed-dev optimization only. An explicitly
         # DB/live/perf-tier class would be intersected with Tier!=db/live/perf by
@@ -343,8 +422,13 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         explicit_tiers = set().union(
             *(managed_test_tiers(root, path) for path in managed_changed_paths)
         )
-        if not (explicit_tiers & {"db", "live", "perf"}):
-            managed_test_filter = managed_test_filter_for_paths(root, managed_changed_paths)
+        exact_filter = managed_test_filter_for_paths(root, managed_changed_paths)
+        if "db" in explicit_tiers and "live" not in explicit_tiers:
+            managed_db_test_filter = exact_filter
+        elif "live" in explicit_tiers:
+            managed_live_test_filter = exact_filter
+        elif not (explicit_tiers & {"db", "live", "perf"}):
+            managed_test_filter = exact_filter
     if pure_uci and managed_impact["test_projects"]:
         dev_suites.add("managed-dev")
 
@@ -372,10 +456,14 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         all_tests = {
             path for path, project in managed_projects.items() if project.is_test
         }
-        # Test projects are not publication artifacts. Explicit test operations
-        # build their own selected projects; an ordinary release build must not
-        # compile tests merely because they reverse-reference a changed runtime.
-        build_roots.difference_update(all_tests)
+        selected_tests = set(managed_test_projects)
+        selected_tests.update(managed_db_test_projects)
+        selected_tests.update(managed_live_test_projects)
+        build_roots.update(selected_tests)
+        # dotnet test runs with --no-build, so every selected test project must
+        # be built in the candidate graph. Unselected reverse-reference tests
+        # remain excluded from ordinary publication builds.
+        build_roots.difference_update(all_tests - selected_tests)
         managed_build_projects = sorted(build_roots)
 
     # Publication performs bounded activation/readiness checks. Full live suites
@@ -393,6 +481,10 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         "managed_build_projects": managed_build_projects,
         "managed_test_projects": managed_test_projects,
         "managed_test_filter": managed_test_filter,
+        "managed_db_test_filter": managed_db_test_filter,
+        "managed_live_test_filter": managed_live_test_filter,
+        "native_test_filter": native_test_filter_for_paths(paths, root) if "native-dev" in dev_suites else "",
+        "native_db_test_filter": native_db_test_filter_for_paths(paths) if "native-db" in db_suites else "",
         "managed_db_test_projects": managed_db_test_projects,
         "managed_live_test_projects": managed_live_test_projects,
         "dev_suites": [suite for suite in DEV_SUITES if suite in dev_suites],
@@ -436,6 +528,10 @@ def force_full_plan(plan: dict) -> None:
     plan["managed_build_projects"] = ["all"]
     plan["managed_test_projects"] = ["all"]
     plan["managed_test_filter"] = ""
+    plan["managed_db_test_filter"] = ""
+    plan["managed_live_test_filter"] = ""
+    plan["native_test_filter"] = ""
+    plan["native_db_test_filter"] = ""
     plan["managed_db_test_projects"] = ["all"]
     plan["managed_live_test_projects"] = []
     plan["dev_suites"] = list(DEV_SUITES)
@@ -468,6 +564,10 @@ def write_github_outputs(path: Path, plan: dict) -> None:
         ):
             stream.write(f"{name}={','.join(plan[name])}\n")
         stream.write(f"managed_test_filter={plan.get('managed_test_filter', '')}\n")
+        stream.write(f"managed_db_test_filter={plan.get('managed_db_test_filter', '')}\n")
+        stream.write(f"managed_live_test_filter={plan.get('managed_live_test_filter', '')}\n")
+        stream.write(f"native_test_filter={plan.get('native_test_filter', '')}\n")
+        stream.write(f"native_db_test_filter={plan.get('native_db_test_filter', '')}\n")
         stream.write(f"publish_scope={plan['publish_scope']}\n")
         stream.write(
             f"full_qualification={'true' if plan['full_qualification'] else 'false'}\n"
@@ -487,6 +587,10 @@ def write_summary(path: Path, plan: dict) -> None:
         stream.write(f"- Managed build projects: {joined('managed_build_projects')}\n")
         stream.write(f"- Managed unit-test projects: {joined('managed_test_projects')}\n")
         stream.write(f"- Managed test filter: {plan.get('managed_test_filter') or 'none'}\n")
+        stream.write(f"- Managed DB test filter: {plan.get('managed_db_test_filter') or 'none'}\n")
+        stream.write(f"- Managed live test filter: {plan.get('managed_live_test_filter') or 'none'}\n")
+        stream.write(f"- Native test filter: {plan.get('native_test_filter') or 'none'}\n")
+        stream.write(f"- Native DB test filter: {plan.get('native_db_test_filter') or 'none'}\n")
         stream.write(f"- Managed DB-test projects: {joined('managed_db_test_projects')}\n")
         stream.write(f"- Managed live-test projects: {joined('managed_live_test_projects')}\n")
         stream.write(f"- Development suites: {joined('dev_suites')}\n")

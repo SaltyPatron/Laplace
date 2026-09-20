@@ -743,9 +743,6 @@ phase_publish() {
   # shellcheck source=deploy/linux/app-dir-contract.sh
   source "$ROOT/deploy/linux/app-dir-contract.sh"
   laplace_reconcile_app_dir_contract "$app_dir"
-  if ! phase_chess_lab; then
-    echo "::warning::chess lab failed; API/MCP/UI publication continues"
-  fi
   phase_runtime_secrets
   local deploy_args=()
   [[ "${LAPLACE_FORCE_NPM:-0}" != 1 ]] || deploy_args+=(--force-npm)
@@ -771,7 +768,7 @@ while [[ $# -gt 0 ]]; do
     --serial-tests) SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
     --force-all) shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|build-native|build-app|build-web|install|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|publish|foundation|test)
+    clean|codegen|build|build-native|build-app|build-web|install|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|chess-lab|publish|foundation|test)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -794,6 +791,7 @@ for phase in "${PHASES[@]}"; do
     tune-laplace) phase_tune_laplace ;;
     perfcache-guc) phase_perfcache_guc ;;
     api-env) phase_api_env ;;
+    chess-lab) phase_chess_lab ;;
     publish) phase_publish ;;
     foundation) phase_foundation ;;
     test) phase_test ;;

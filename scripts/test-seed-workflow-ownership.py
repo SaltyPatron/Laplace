@@ -47,7 +47,7 @@ class WorkflowOwnership(unittest.TestCase):
     def test_manual_product_surface_exposes_only_meaningful_operator_operations(self):
         text = (WORKFLOWS / "product-operator.yml").read_text(encoding="utf-8")
         self.assertTrue(text.startswith("name: Product — maintenance"))
-        self.assertIn("options: [reconcile, deploy]", text)
+        self.assertIn("options: [verify, reconcile, chess-lab, deploy]", text)
         for internal in ("test-dev", "test-db", "test-live", "applications", "install", "check", "provision"):
             self.assertNotIn(f", {internal}", text)
 

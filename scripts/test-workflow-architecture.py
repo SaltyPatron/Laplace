@@ -76,6 +76,7 @@ class WorkflowArchitecture(unittest.TestCase):
             "laplace.yml": "name: Product — main delivery",
             "product-operator.yml": "name: Product — maintenance",
             "product-stage.yml": "name: Internal — product stage",
+            "runner-environment.yml": "name: Host — runner environment",
             "seed.yml": "name: Internal — substrate ingest",
             "seed-foundation.yml": "name: Data — foundation ingest",
             "seed-knowledge.yml": "name: Data — knowledge ingest",
@@ -95,10 +96,11 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn('LAPLACE_CHESS_PGN_CACHE="$LAPLACE_WORK_ROOT/chess-pgn-validation"', checks)
         self.assertIn('mkdir -p "$ci_tmp" "$LAPLACE_WORK_ROOT" "$LAPLACE_CHESS_PGN_CACHE"', checks)
 
-    def test_ci_contract_has_a_lightweight_hosted_lane(self):
+    def test_ci_contract_is_an_explicit_lightweight_hosted_lane(self):
         text = (WORKFLOWS / "ci-contract.yml").read_text(encoding="utf-8")
-        self.assertIn("pull_request:", text)
-        self.assertIn("push:", text)
+        self.assertIn("workflow_dispatch:", text)
+        self.assertNotIn("pull_request:", text)
+        self.assertNotIn("\n  push:\n", text)
         self.assertIn("runs-on: ubuntu-24.04", text)
         self.assertNotIn("self-hosted", text)
         self.assertIn("bash scripts/product-ci.sh check", text)
@@ -401,14 +403,8 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn('LAPLACE_BUILD_COMPONENTS="managed"', fallback)
         self.assertIn('Laplace.Endpoints.OpenAICompat.csproj', fallback)
         self.assertIn('LAPLACE_DB_SUITES=""', fallback)
-        self.assertIn(
-            'LAPLACE_LIVE_SUITES="live-floor,live-api,managed-live,generation-eval,chess-provider-live"',
-            fallback,
-        )
-        self.assertIn(
-            'LAPLACE_DELIVERY_ACTIONS="publish,live"',
-            fallback,
-        )
+        self.assertIn('LAPLACE_LIVE_SUITES=""', fallback)
+        self.assertIn('LAPLACE_DELIVERY_ACTIONS="publish"', fallback)
         self.assertIn('LAPLACE_PUBLISH_SCOPE="full"', fallback)
         self.assertNotIn("LAPLACE_DEV_SUITES", fallback)
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
@@ -430,7 +426,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertIn('run_release_mutation_window "$actions"', automatic)
         for selector in ("install", "database"):
             self.assertIn(f'csv_selected "$actions" {selector}', mutation)
-        for selector in ("reconcile", "publish", "live"):
+        for selector in ("reconcile", "publish"):
             self.assertIn(f'csv_selected "$actions" {selector}', automatic)
         self.assertIn("run_install", mutation)
         self.assertIn("run_database_maintenance --prepare", mutation)
@@ -438,7 +434,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertNotIn('run_release_mutation_window "$actions"', mutation)
         self.assertIn("run_publish", automatic)
         self.assertIn("verify_installed_product", automatic)
-        self.assertIn("run_live_tests", automatic)
+        self.assertNotIn("run_live_tests", automatic)
         self.assertNotIn("run_release_activation", automatic)
 
     def test_manual_product_operations_are_outside_main_delivery_graph(self):
@@ -449,6 +445,7 @@ class WorkflowArchitecture(unittest.TestCase):
         self.assertEqual(1, manual.count("uses: ./.github/workflows/product-stage.yml"))
         self.assertIn("stage: ${{ inputs.operation }}", manual)
         self.assertIn("normal main delivery is automatic", manual)
+        self.assertIn("options: [verify, reconcile, chess-lab, deploy]", manual)
 
     def test_competitive_proof_remains_explicit_and_composed(self):
         proof = (WORKFLOWS / "competitive-proof.yml").read_text(encoding="utf-8")

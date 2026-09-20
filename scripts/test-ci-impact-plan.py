@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -20,6 +22,39 @@ def plan(*paths: str) -> dict:
 
 
 class ImpactPlanTests(unittest.TestCase):
+    def test_native_suite_executes_ctest_with_planned_case_filter(self):
+        with tempfile.TemporaryDirectory(prefix="native-filter-") as tmp:
+            tools = Path(tmp)
+            log = tools / "calls.json"
+            python = tools / "python3"
+            python.write_text(
+                "#!/usr/bin/python3\n"
+                "import json,os,sys\n"
+                "open(os.environ['CALL_LOG'],'w').write(json.dumps(sys.argv[1:]))\n"
+            )
+            python.chmod(0o755)
+            planned = r"LaplaceDynamicsProcrustes\.RecoversScale"
+            env = dict(
+                os.environ,
+                PATH=str(tools) + os.pathsep + os.environ["PATH"],
+                CALL_LOG=str(log),
+                LAPLACE_NATIVE_TEST_FILTER=planned,
+                LAPLACE_WORK_ROOT=str(tools / "work"),
+            )
+            result = subprocess.run(
+                ["bash", "scripts/test-suites/native-dev.sh"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=10,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            command = json.loads(log.read_text())
+            self.assertEqual(command[command.index("-R") + 1], planned)
+            self.assertIn("-LE", command)
+            self.assertNotIn("regress_laplace_substrate", command)
+
     def test_web_only_change_qualifies_and_publishes_without_native_or_database_mutation(self):
         value = plan("web/src/App.tsx")
         self.assertEqual(value["components"], ["web"])
@@ -29,9 +64,9 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["managed_test_filter"], "")
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
-        self.assertEqual(value["delivery_actions"], ["publish", "live"])
+        self.assertEqual(value["delivery_actions"], ["publish"])
         self.assertEqual(value["publish_scope"], "web")
-        self.assertEqual(value["live_suites"], ["live-floor", "live-api"])
+        self.assertEqual(value["live_suites"], [])
         self.assertFalse(value["full_qualification"])
 
     def test_native_change_invalidates_native_managed_db_and_full_live(self):
@@ -49,11 +84,22 @@ class ImpactPlanTests(unittest.TestCase):
             self.assertIn(project, value["managed_build_projects"])
         self.assertEqual(
             value["managed_test_projects"],
-            ["app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"],
+            [
+                "app/Laplace.Chess.Tests/Laplace.Chess.Tests.csproj",
+                "app/Laplace.Core.Tests/Laplace.Core.Tests.csproj",
+                "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj",
+            ],
         )
         self.assertNotEqual(value["managed_test_projects"], ["all"])
-        self.assertEqual(value["managed_db_test_projects"], ["all"])
-        self.assertEqual(value["managed_live_test_projects"], ["all"])
+        self.assertEqual(
+            value["managed_db_test_projects"],
+            [
+                "app/Laplace.Chess.Tests/Laplace.Chess.Tests.csproj",
+                "app/Laplace.Core.Tests/Laplace.Core.Tests.csproj",
+                "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj",
+            ],
+        )
+        self.assertEqual(value["managed_live_test_projects"], [])
         self.assertEqual(
             value["dev_suites"], ["native-dev", "managed-dev", "uci-dev"]
         )
@@ -62,13 +108,10 @@ class ImpactPlanTests(unittest.TestCase):
         )
         self.assertEqual(
             value["delivery_actions"],
-            ["install", "database", "reconcile", "publish", "live"],
+            ["install", "database", "reconcile", "publish"],
         )
         self.assertEqual(value["publish_scope"], "full")
-        self.assertEqual(
-            value["live_suites"],
-            ["live-floor", "live-api", "managed-live", "generation-eval"],
-        )
+        self.assertEqual(value["live_suites"], [])
         self.assertFalse(value["full_qualification"])
 
     def test_managed_api_change_avoids_native_install_but_runs_product_live_checks(self):
@@ -83,12 +126,9 @@ class ImpactPlanTests(unittest.TestCase):
             ["app/Laplace.Endpoints.OpenAICompat.Tests/Laplace.Endpoints.OpenAICompat.Tests.csproj"],
         )
         self.assertEqual(value["db_suites"], [])
-        self.assertEqual(value["delivery_actions"], ["publish", "live"])
+        self.assertEqual(value["delivery_actions"], ["publish"])
         self.assertEqual(value["publish_scope"], "api")
-        self.assertEqual(
-            value["live_suites"],
-            ["live-floor", "live-api", "managed-live", "generation-eval"],
-        )
+        self.assertEqual(value["live_suites"], [])
 
     def test_substrate_managed_change_adds_database_prepare_and_regression_without_native_install(self):
         value = plan("app/Laplace.Substrate/Crud/Npgsql/Foo.cs")
@@ -97,7 +137,7 @@ class ImpactPlanTests(unittest.TestCase):
             value["db_suites"], ["db-health", "managed-db"]
         )
         self.assertEqual(
-            value["delivery_actions"], ["database", "reconcile", "publish", "live"]
+            value["delivery_actions"], ["database", "reconcile", "publish"]
         )
         self.assertNotIn("install", value["delivery_actions"])
         self.assertEqual(value["publish_scope"], "full")
@@ -115,7 +155,7 @@ class ImpactPlanTests(unittest.TestCase):
             value["managed_build_projects"],
         )
         self.assertEqual(value["publish_scope"], "full")
-        self.assertEqual(value["delivery_actions"], ["publish", "live"])
+        self.assertEqual(value["delivery_actions"], ["publish"])
 
     def test_uci_executable_change_isolated_from_api_database_and_live_matrix(self):
         value = plan("app/Laplace.Chess.Uci/Program.cs")
@@ -145,7 +185,7 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertIn("uci-dev", value["dev_suites"])
         self.assertEqual(value["publish_scope"], "full")
         self.assertNotIn("native-dev", value["dev_suites"])
-        self.assertIn("chess-provider-live", value["live_suites"])
+        self.assertEqual(value["live_suites"], [])
 
     def test_database_sql_change_skips_native_install_but_runs_db_and_full_live(self):
         value = plan("db/migrations/example.sql")
@@ -160,7 +200,7 @@ class ImpactPlanTests(unittest.TestCase):
             value["managed_build_projects"],
         )
         self.assertEqual(
-            value["delivery_actions"], ["database", "reconcile", "publish", "live"]
+            value["delivery_actions"], ["database", "reconcile", "publish"]
         )
         self.assertEqual(value["publish_scope"], "api")
 
@@ -174,18 +214,15 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["managed_build_projects"], ["all"])
         self.assertEqual(value["managed_test_projects"], ["all"])
         self.assertEqual(value["managed_db_test_projects"], ["all"])
-        self.assertEqual(value["managed_live_test_projects"], ["all"])
+        self.assertEqual(value["managed_live_test_projects"], [])
         self.assertEqual(
             value["db_suites"], ["db-health", "native-db", "managed-db"]
         )
         self.assertEqual(
             value["delivery_actions"],
-            ["install", "database", "reconcile", "publish", "live"],
+            ["install", "database", "reconcile", "publish"],
         )
-        self.assertEqual(
-            value["live_suites"],
-            ["live-floor", "live-api", "managed-live", "generation-eval"],
-        )
+        self.assertEqual(value["live_suites"], [])
         self.assertEqual(value["publish_scope"], "full")
         self.assertTrue(value["full_qualification"])
         self.assertEqual(value["unknown_paths"], ["mystery/runtime.dat"])
@@ -222,9 +259,11 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertFalse(value["full_qualification"])
         self.assertEqual(value["ignored_paths"], ["scripts/test-parallel.sh"])
 
-    def test_pipeline_sh_schedules_install_not_the_managed_ocean(self):
+    def test_pipeline_and_delivery_control_changes_create_no_product_work(self):
         for path in (
             "scripts/pipeline.sh",
+            "scripts/bootstrap-chess-lab.sh",
+            "scripts/verify-application-release.py",
             "scripts/ingest-source.sh",
             "scripts/check-substrate-floor.sh",
             "scripts/ensure-foundation.sh",
@@ -233,10 +272,18 @@ class ImpactPlanTests(unittest.TestCase):
                 value = plan(path)
                 self.assertEqual(value["managed_test_projects"], [])
                 self.assertEqual(value["managed_build_projects"], [])
-                self.assertEqual(value["delivery_actions"], ["install", "live"])
+                if path in (
+                    "scripts/pipeline.sh",
+                    "scripts/bootstrap-chess-lab.sh",
+                    "scripts/verify-application-release.py",
+                ):
+                    self.assertEqual(value["delivery_actions"], [])
+                    self.assertIn(path, value["ignored_paths"])
+                else:
+                    self.assertEqual(value["delivery_actions"], ["install"])
                 self.assertNotIn("publish", value["delivery_actions"])
                 self.assertNotIn("managed-dev", value["dev_suites"])
-                self.assertEqual(value["live_suites"], ["live-api"])
+                self.assertEqual(value["live_suites"], [])
                 self.assertFalse(value["full_qualification"])
 
         value = plan("scripts/check-deployed-revision.sh")
@@ -271,6 +318,29 @@ class ImpactPlanTests(unittest.TestCase):
                 self.assertEqual(value["delivery_actions"], [])
                 self.assertEqual(value["managed_build_projects"], [])
                 self.assertFalse(value["full_qualification"])
+                self.assertTrue(value["native_test_filter"])
+
+    def test_native_component_change_selects_only_that_components_ctest_cases(self):
+        value = plan("engine/dynamics/src/procrustes.cpp")
+        selected = value["native_test_filter"]
+        self.assertIn("LaplaceDynamicsProcrustes", selected)
+        self.assertNotIn("LaplaceSynthesis", selected)
+        self.assertNotIn("Hash128", selected)
+
+    def test_extension_change_selects_only_its_regression_suite(self):
+        value = plan("extension/laplace_geom/src/laplace_geom.c")
+        self.assertEqual(value["native_db_test_filter"], "^(?:regress_laplace_geom)$")
+
+    def test_db_tier_test_change_selects_exact_project_and_class(self):
+        path = "app/Laplace.Substrate.Tests/Ingestion/SyntheticDecomposerTests.cs"
+        value = plan(path)
+        self.assertEqual(value["dev_suites"], [])
+        self.assertEqual(value["db_suites"], ["managed-db"])
+        self.assertEqual(
+            value["managed_db_test_projects"],
+            ["app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"],
+        )
+        self.assertIn("SyntheticDecomposerTests", value["managed_db_test_filter"])
 
     def test_test_project_change_qualifies_only_that_managed_project(self):
         target = "app/Laplace.Substrate.Tests/Laplace.Substrate.Tests.csproj"
@@ -297,7 +367,7 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["managed_build_projects"], [])
         self.assertEqual(value["dev_suites"], ["browser-dev"])
         self.assertEqual(value["db_suites"], [])
-        self.assertEqual(value["delivery_actions"], ["publish", "live"])
+        self.assertEqual(value["delivery_actions"], ["publish"])
         self.assertEqual(value["publish_scope"], "web")
         self.assertIn("scripts/ci-impact-plan.py", value["ignored_paths"])
 
