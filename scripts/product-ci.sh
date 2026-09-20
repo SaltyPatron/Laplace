@@ -150,8 +150,12 @@ run_build() {
 
   local phases=()
   if (( need_native == 1 )); then
-    [[ ! -L build/engine ]] || rm -f build/engine
-    phases+=(build-native)
+    if reuse_qualified_native_build; then
+      need_native=0
+    else
+      [[ ! -L build/engine ]] || rm -f build/engine
+      phases+=(build-native)
+    fi
   fi
   (( need_managed == 0 )) || phases+=(build-app)
   (( need_web == 0 )) || phases+=(build-web)
