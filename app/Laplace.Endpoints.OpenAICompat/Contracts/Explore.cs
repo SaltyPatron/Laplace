@@ -345,6 +345,12 @@ public sealed record StorageProofNodeRow(
     [property: JsonPropertyName("packed_vertices")] IReadOnlyList<StorageProofPackedVertexRow> PackedVertices,
     [property: JsonPropertyName("realized_vertices")] IReadOnlyList<StorageProofRealizedVertexRow> RealizedVertices);
 
+public sealed record StorageProofInvariantRow(
+    [property: JsonPropertyName("key")] string Key,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("passed")] bool Passed,
+    [property: JsonPropertyName("observed")] string Observed);
+
 public sealed record StorageProofResponse(
     [property: JsonPropertyName("text")] string Text,
     [property: JsonPropertyName("root_id_hex")] string RootIdHex,
@@ -354,7 +360,27 @@ public sealed record StorageProofResponse(
     [property: JsonPropertyName("database_perfcache_receipt_hex")] string? DatabasePerfcacheReceiptHex,
     [property: JsonPropertyName("database_perfcache_error")] string? DatabasePerfcacheError,
     [property: JsonPropertyName("perfcache_aligned")] bool? PerfcacheAligned,
+    [property: JsonPropertyName("invariants")] IReadOnlyList<StorageProofInvariantRow> Invariants,
     [property: JsonPropertyName("nodes")] IReadOnlyList<StorageProofNodeRow> Nodes);
+
+public sealed record UnicodeCloudResponse(
+    [property: JsonPropertyName("count")] int Count,
+    [property: JsonPropertyName("perfcache_receipt_hex")] string PerfcacheReceiptHex,
+    [property: JsonPropertyName("uca_order_u32_base64")] string UcaOrderU32Base64,
+    [property: JsonPropertyName("hash128_base64")] string Hash128Base64);
+
+public sealed record UnicodePointResponse(
+    [property: JsonPropertyName("codepoint")] uint Codepoint,
+    [property: JsonPropertyName("display")] string Display,
+    [property: JsonPropertyName("id_hex")] string IdHex,
+    [property: JsonPropertyName("uca_order")] uint UcaOrder,
+    [property: JsonPropertyName("x")] double X,
+    [property: JsonPropertyName("y")] double Y,
+    [property: JsonPropertyName("z")] double Z,
+    [property: JsonPropertyName("m")] double M,
+    [property: JsonPropertyName("radius")] double Radius,
+    [property: JsonPropertyName("hilbert_hex")] string HilbertHex,
+    [property: JsonPropertyName("flags")] uint Flags);
 
 public sealed record DecomposeRequest(
     [property: JsonPropertyName("text")] string? Text);

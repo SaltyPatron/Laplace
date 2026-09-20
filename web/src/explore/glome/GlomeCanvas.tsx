@@ -36,6 +36,7 @@ interface GlomePalette {
   packedLine: string;
   placementLine: string;
   wireframe: string;
+  reference: string;
 }
 
 function glomePalette(shared: VisualizationPalette): GlomePalette {
@@ -51,6 +52,7 @@ function glomePalette(shared: VisualizationPalette): GlomePalette {
     packedLine: visible(lerpColor(shared.steel, shared.signal, 0.5)),
     placementLine: visible(shared.steel),
     wireframe: visible(shared.muted),
+    reference: visible(shared.primary),
   };
 }
 
@@ -265,6 +267,21 @@ function GlomeScene({
           opacity={0.82}
         />
       ) : null}
+      {[
+        [[1, 0, 0], '+X'], [[-1, 0, 0], '−X'],
+        [[0, 1, 0], '+Y'], [[0, -1, 0], '−Y'],
+        [[0, 0, 1], '+Z'], [[0, 0, -1], '−Z'],
+      ].map(([position, label]) => (
+        <group key={label as string} position={position as [number, number, number]}>
+          <mesh>
+            <sphereGeometry args={[0.032, 12, 12]} />
+            <meshBasicMaterial color={palette.reference} toneMapped={false} />
+          </mesh>
+          <Html center distanceFactor={7}>
+            <span className={styles.referenceLabel}>{label as string}</span>
+          </Html>
+        </group>
+      ))}
       <mesh>
         <sphereGeometry args={[1, 28, 28]} />
         <meshBasicMaterial

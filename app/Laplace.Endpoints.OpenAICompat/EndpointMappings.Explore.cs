@@ -206,6 +206,19 @@ internal static class ExploreEndpoints
         .Produces<DecomposeResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/v1/explore/unicode/cloud", (ExploreDecomposeService decompose) =>
+        {
+            try { return Results.Json(decompose.UnicodeCloud()); }
+            catch (InvalidOperationException ex) { return EndpointJson.ServiceUnavailable("unicode_cloud_unavailable", ex.Message); }
+        }).WithTags("explore").Produces<UnicodeCloudResponse>();
+
+        app.MapGet("/v1/explore/unicode/{codepoint:uint}", (uint codepoint, ExploreDecomposeService decompose) =>
+        {
+            try { return Results.Json(decompose.UnicodePoint(codepoint)); }
+            catch (ArgumentOutOfRangeException) { return EndpointJson.NotFound("unicode_codepoint_not_found", $"U+{codepoint:X} is outside the selected Unicode window."); }
+            catch (InvalidOperationException ex) { return EndpointJson.ServiceUnavailable("unicode_point_unavailable", ex.Message); }
+        }).WithTags("explore").Produces<UnicodePointResponse>();
+
         app.MapPost("/v1/explore/storage-proof", async (
             HttpRequest request,
             ExploreDecomposeService decompose,

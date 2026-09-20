@@ -11,6 +11,7 @@ import { LabView } from './chess/lab/LabView';
 import { ChessDbView } from './chess/db/ChessDbView';
 import { ExploreView } from './explore/ExploreView';
 import { StorageProofView } from './explore/proof/StorageProofView';
+import { UnicodeGlomeView } from './explore/unicode/UnicodeGlomeView';
 import { AdminView } from './admin/AdminView';
 import { DataView } from './data/DataView';
 import { DataActivity, UploadProvider } from './data/UploadProvider';
@@ -30,6 +31,7 @@ const TABS: { id: string; label: string; path: string }[] = [
   { id: 'query', label: 'Query', path: '/query' },
   { id: 'explore', label: 'Explore', path: '/explore' },
   { id: 'proof', label: 'Storage Proof', path: '/proof' },
+  { id: 'unicode', label: 'Unicode Glome', path: '/unicode' },
   { id: 'data', label: 'Data', path: '/data' },
   { id: 'chess', label: 'Chess', path: '/chess' },
   { id: 'play', label: 'Play', path: '/play' },
@@ -77,6 +79,7 @@ function Shell() {
           <Route path="/topic/:ref" element={<TopicView />} />
           <Route path="/explore/*" element={<ExploreView />} />
           <Route path="/proof" element={<StorageProofView />} />
+          <Route path="/unicode" element={<UnicodeGlomeView />} />
           <Route path="/chess/*" element={<ChessDbView />} />
           <Route path="/play" element={<ChessView />} />
           <Route path="/lab/*" element={<LabView />} />

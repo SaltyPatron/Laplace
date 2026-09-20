@@ -37,6 +37,20 @@
     flex: 0 0 auto;
   }
 
+  .referenceLabel {
+    display: inline-block;
+    padding: 0.12rem 0.28rem;
+    border: 1px solid var(--color-text-primary);
+    border-radius: 999px;
+    background: var(--color-bg-panel);
+    color: var(--color-text-primary);
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+    box-shadow: var(--shadow-instrument);
+  }
+
   .tooltip {
     background: var(--color-bg-panel);
     color: var(--color-text-primary);
