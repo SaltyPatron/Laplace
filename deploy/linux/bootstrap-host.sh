@@ -6,6 +6,7 @@ APP_DIR=/opt/laplace/app
 RUN_USER=laplace-runner
 RUN_GROUP=laplace-runner
 API_PORT="${API_PORT:-8080}"
+TLS_PORT="${TLS_PORT:-8443}"
 LAN_CIDR="${LAN_CIDR:-}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -43,7 +44,7 @@ fi
 echo "==> systemd unit: /etc/systemd/system/laplace-api.service"
 install -m 0644 "$HERE/laplace-api.service" /etc/systemd/system/laplace-api.service
 
-echo "==> nginx vhost: /etc/nginx/sites-available/laplace (port 8080)"
+echo "==> nginx redirect: /etc/nginx/sites-available/laplace (port $API_PORT -> TLS $TLS_PORT)"
 install -m 0644 "$HERE/nginx-laplace.conf" /etc/nginx/sites-available/laplace
 ln -sfn /etc/nginx/sites-available/laplace /etc/nginx/sites-enabled/laplace
 
@@ -83,7 +84,7 @@ else
   systemctl start nginx
 fi
 
-echo "==> firewall: allow API port $API_PORT from the LAN if ufw is active"
+echo "==> firewall: allow HTTP redirect and HTTPS from the LAN if ufw is active"
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
   if [[ -z "$LAN_CIDR" ]]; then
     def_if=$(ip route show default | awk '{print $5; exit}')
@@ -92,8 +93,9 @@ if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active
   if [[ -z "$LAN_CIDR" ]]; then
     echo "   ✗ could not derive LAN subnet; re-run with LAN_CIDR=x.x.x.x/yy. Skipping."
   else
-    ufw allow from "$LAN_CIDR" to any port "$API_PORT" proto tcp comment "laplace-api LAN" >/dev/null
-    echo "   ufw rule ensured: $API_PORT/tcp from $LAN_CIDR"
+    ufw allow from "$LAN_CIDR" to any port "$API_PORT" proto tcp comment "laplace-http-redirect LAN" >/dev/null
+    ufw allow from "$LAN_CIDR" to any port "$TLS_PORT" proto tcp comment "laplace-https LAN" >/dev/null
+    echo "   ufw rules ensured: $API_PORT/tcp and $TLS_PORT/tcp from $LAN_CIDR"
   fi
 else
   echo "   ufw not active — nothing to do"
