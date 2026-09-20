@@ -72,6 +72,13 @@ internal sealed class DocumentCommand : ForwardCommand<DocumentCommand.Settings>
         => DocumentCommands.RunAsync(Raw(ctx));
 }
 
+[Description("Inspect source recipes, materialize native tuples, or ingest through the shared substrate writer. Subcommands: inspect, materialize, ingest.")]
+internal sealed class CookbookCommand : ForwardCommand<TailSettings>
+{
+    protected override Task<int> ExecuteAsync(CommandContext ctx, TailSettings s, CancellationToken ct) =>
+        Task.FromResult(CookbookCommands.Run(Raw(ctx)));
+}
+
 [Description("Mold a runnable transformer from consensus+geometry. Subcommand: substrate. Flags incl. --scope-source, --recipe-from, --native-vocab/--dim/--layers/--heads/--kv-heads/--ffn, --tokenizer, --crawl/--hops/--fanout.")]
 internal sealed class SynthesizeCommand : ForwardCommand<TailSettings>
 {

@@ -29,6 +29,7 @@ set(LAPLACE_CORE_HEADERS
     include/laplace/core/grammar_registry.h
     include/laplace/core/grammar_decomposer.h
     include/laplace/core/xml_stream.h
+    include/laplace/core/recipe_stream.h
     include/laplace/core/fide_xml.h
     include/laplace/core/grammar_compose.h
     include/laplace/core/grammar_tags.h
@@ -94,6 +95,7 @@ set(LAPLACE_CORE_SOURCES
     src/grammar_registry.c
     src/grammar_decomposer.c
     src/xml_stream.c
+    src/recipe_stream.cpp
     src/fide_xml.c
     src/grammar_compose.cpp
     src/grammar_source_compose.c

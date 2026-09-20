@@ -83,6 +83,7 @@ internal static class Program
 
             config.AddCommand<IngestCommand>("ingest");
             config.AddCommand<DocumentCommand>("document");
+            config.AddCommand<CookbookCommand>("cookbook");
             config.AddCommand<SynthesizeCommand>("synthesize");
             config.AddCommand<DecomposeCommand>("decompose");
             config.AddCommand<InspectCommand>("inspect");

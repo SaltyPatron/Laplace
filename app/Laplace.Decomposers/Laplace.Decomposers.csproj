@@ -25,6 +25,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="../../recipes/**/*.json"
+             Link="recipes/%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Copy the selected authority artifacts themselves. No generated lexical or ISA summaries. -->
     <Content Include="../../docs/INVENTION.md;../../docs/INVENTIONS.md"
              Link="seeds/operational/docs/%(Filename)%(Extension)"

@@ -886,7 +886,12 @@ internal static partial class IngestCommands
         NpgsqlDataSource ds, IDecomposer decomposer)
     {
         var names = new HashSet<string>(decomposer.CanonicalNamesForReadback, StringComparer.Ordinal);
-        names.Add($"substrate/source/{decomposer.SourceName}/v1");
+        // An explicitly supplied witness id need not use the conventional source
+        // namespace. Register only names whose canonical identity is that witness.
+        if (SubstrateCanonicalIds.Source(decomposer.SourceName) == decomposer.SourceId)
+            names.Add($"substrate/source/{decomposer.SourceName}/v1");
+        else if (Hash128.OfCanonical(decomposer.SourceName) == decomposer.SourceId)
+            names.Add(decomposer.SourceName);
         if (names.Count == 0) return;
         await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(ds, names);
         Console.WriteLine($"registered {names.Count:N0} canonical names");

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Laplace.Decomposers.Abstractions;
+using Laplace.Decomposers.Structured;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using TC = Laplace.Decomposers.Abstractions.SourceTrust;
@@ -29,7 +30,7 @@ public sealed class UnicodeDecomposer
     private readonly ConcurrentIdSet _ucdPropertyTypes = new();
     private readonly ConcurrentIdSet _ucdPropertyDeclarations = new();
     private readonly LaplaceCookbook _cookbook = LaplaceCookbook.Shared;
-    private UcdXmlRecipe? _ucdXmlRecipe;
+    private InstalledSourceGeneration? _ucdXmlRecipe;
 
     public UnicodeDecomposer(string? ucdxmlZip = null, string? ducet = null)
     {
@@ -87,7 +88,8 @@ public sealed class UnicodeDecomposer
             throw new InvalidOperationException(
                 "The Unicode UCDXML recipe requires exactly one PropertyAliases.txt sidecar; "
                 + $"selected aliases={propertyAliases.Length}.");
-        _ucdXmlRecipe = UcdXmlRecipe.Load(propertyAliases[0].Path);
+        _ucdXmlRecipe = InstalledSourceGeneration.Load(
+            "recipes/unicode/UCD/17.0.0/ucd.all.flat.recipe.json");
         _cookbook.Register(_ucdXmlRecipe.Recipe);
         SemanticSourceRecipe selectedRecipe = _cookbook.Resolve(
             _ucdXmlRecipe.Recipe.RecipeId);
@@ -113,7 +115,7 @@ public sealed class UnicodeDecomposer
         {
             UnicodeSeedSnapshot snapshot = floor.Snapshot
                 ?? throw new InvalidOperationException("Unicode source snapshot was not retained.");
-            var semanticPhase = new UcdXmlSemanticPhase(this, snapshot, _ucdXmlRecipe, batch);
+            var semanticPhase = new UcdXmlSemanticPhase(snapshot, _ucdXmlRecipe);
             await foreach (SubstrateChange original in base.RunPhaseAsync(
                                semanticPhase, context, options, ct).ConfigureAwait(false))
             {
@@ -266,13 +268,6 @@ public sealed class UnicodeDecomposer
             SourceName, floor.DucetLabel, IngestBatchPipeline.TryFileBytes(floor.Ducet.Path));
 
         floor.Snapshot = UnicodeSeed.OpenSnapshot(floor.Xml.Path, floor.Ducet.Path);
-        if (options.MaxInputUnits == 0)
-        {
-            UcdXmlRecipe recipe = _ucdXmlRecipe
-                ?? throw new InvalidOperationException("UCDXML recipe was not selected.");
-            await using Stream schemaStream = floor.Snapshot.OpenUcdXmlStream();
-            await recipe.ValidateProviderAsync(schemaStream, ct).ConfigureAwait(false);
-        }
         var phase = new UnicodeFloorPhase(floor.Snapshot, batch);
         await foreach (SubstrateChange original in base.RunPhaseAsync(
                            phase, context, options, ct).ConfigureAwait(false))
@@ -815,16 +810,8 @@ public sealed class UnicodeDecomposer
                 this, job.Path, batch),
             ArtifactKind.CjkRadicals => new CjkRadicalPhase(this, job.Path, batch),
             ArtifactKind.DoNotEmit => new DoNotEmitPhase(this, job.Path, batch),
-            ArtifactKind.PropertyAliases => new PropertyAliasPhase(
-                this,
-                _ucdXmlRecipe?.PropertyAliasRows
-                    ?? throw new InvalidOperationException("UCDXML recipe aliases were not loaded."),
-                batch),
-            ArtifactKind.PropertyValueAliases => new PropertyValueAliasPhase(
-                this,
-                _ucdXmlRecipe?.PropertyValueAliasRows
-                    ?? throw new InvalidOperationException("UCDXML recipe value aliases were not loaded."),
-                batch),
+            ArtifactKind.PropertyAliases => new PropertyAliasPhase(this, job.Path, batch),
+            ArtifactKind.PropertyValueAliases => new PropertyValueAliasPhase(this, job.Path, batch),
             ArtifactKind.IndexTerms => new IndexTermPhase(this, job.Path, batch),
             ArtifactKind.USourceData => new USourceDataPhase(this, job.Path, batch),
             ArtifactKind.EmojiSequences => new SequenceMetadataPhase(
@@ -1471,450 +1458,47 @@ public sealed class UnicodeDecomposer
         }
     }
 
-    private enum UcdXmlSemanticKind
+    private sealed class UcdXmlSemanticPhase : IDecomposer
     {
-        Repertoire,
-        Block,
-        NamedSequence,
-        StandardizedVariant,
-        CjkRadical,
-        DoNotEmit,
-    }
-
-    private readonly record struct UcdXmlSemanticRecord(
-        XmlRecordNode Node,
-        UcdXmlSemanticKind Kind,
-        uint Start,
-        uint End,
-        bool CountsSourceRow,
-        long EstimatedRows);
-
-    private sealed class UcdXmlSemanticPhase : UnicodeComposePhase<UcdXmlSemanticRecord>
-    {
-        private readonly UnicodeDecomposer _owner;
         private readonly UnicodeSeedSnapshot _snapshot;
-        private readonly UcdXmlRecipe _recipe;
-        private readonly LaplaceRecipeInterpreter<UcdXmlSemanticRecord> _interpreter;
-        private bool _ownsSnapshot = true;
+        private readonly NativeXmlRecipe _runtime;
 
         public UcdXmlSemanticPhase(
-            UnicodeDecomposer owner,
             UnicodeSeedSnapshot snapshot,
-            UcdXmlRecipe recipe,
-            int batch)
-            : base(batch, commitEpoch: 1)
+            InstalledSourceGeneration recipe)
         {
-            _owner = owner;
             _snapshot = snapshot;
-            _recipe = recipe;
-            _interpreter = new LaplaceRecipeInterpreter<UcdXmlSemanticRecord>(recipe.Recipe);
+            _runtime = new NativeXmlRecipe(recipe.Recipe);
         }
 
-        protected override string PhaseLabel => "ucdxml/uax42";
+        public Hash128 SourceId => Source;
+        public string SourceName => "UnicodeDecomposer";
+        public int LayerOrder => 0;
+        public Hash128 TrustClassId => TrustClass;
+        public Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.CompletedTask;
+        public Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
+            => Task.FromResult<long?>(null);
 
-        protected override long UnitsPerRecord(UcdXmlSemanticRecord row) =>
-            row.CountsSourceRow ? 1 : 0;
-
-        protected override long EstimatedOutputRows(UcdXmlSemanticRecord row) =>
-            row.EstimatedRows;
-
-        protected override void Compose(
-            UcdXmlSemanticRecord row,
-            SubstrateChangeBuilder builder)
-        {
-            if (row.Kind != UcdXmlSemanticKind.Repertoire)
-            {
-                ComposeStructure(row, builder);
-                return;
-            }
-
-            var target = new UcdXmlLoweringTarget(_owner, builder);
-            foreach (XmlRecordAttribute attribute in row.Node.Attributes)
-            {
-                if (attribute.Name is "cp" or "first-cp" or "last-cp") continue;
-                _interpreter.Lower(
-                    new SourceRecipeAssertion<UcdXmlSemanticRecord>(
-                        row, $"repertoire/*/@{attribute.Name}", attribute.Value),
-                    target);
-            }
-
-            foreach (XmlRecordNode alias in row.Node.ChildrenNamed("name-alias"))
-            {
-                string value = alias.Attribute("alias");
-                if (value.Length == 0) continue;
-                Hash128? aliasId = ContentEmitter.Emit(builder, value, Source);
-                if (aliasId is null) continue;
-                string aliasType = alias.Attribute("type", "unknown");
-                Hash128 context = _owner.ClassifierEntity(
-                    builder, "unicode/name_alias_type", aliasType);
-                target.Add(
-                    RelationTypeRegistry.RelationTypeId("HAS_NAME_ALIAS"),
-                    aliasId.Value, context);
-            }
-            target.Flush(row.Start, row.End);
-        }
-
-        private void ComposeStructure(
-            UcdXmlSemanticRecord row,
-            SubstrateChangeBuilder builder)
-        {
-            string identity = row.Kind switch
-            {
-                UcdXmlSemanticKind.Block => row.Node.Attribute("name"),
-                UcdXmlSemanticKind.NamedSequence => row.Node.Attribute("cps"),
-                UcdXmlSemanticKind.StandardizedVariant => row.Node.Attribute("cps"),
-                UcdXmlSemanticKind.CjkRadical => row.Node.Attribute("number"),
-                UcdXmlSemanticKind.DoNotEmit => row.Node.Attribute("of"),
-                _ => throw new InvalidOperationException($"Unexpected UCDXML structure {row.Kind}."),
-            };
-            if (identity.Length == 0)
-                throw new InvalidDataException(
-                    $"UCDXML {row.Node.Name} record is missing its recipe identity field.");
-
-            Hash128? subject = row.Kind switch
-            {
-                UcdXmlSemanticKind.Block => _owner.ClassifierEntity(
-                    builder, "unicode/block",
-                    _recipe.CanonicalValue("Block", identity)),
-                UcdXmlSemanticKind.NamedSequence or UcdXmlSemanticKind.StandardizedVariant
-                    or UcdXmlSemanticKind.DoNotEmit => EmitXmlCodepointSequence(builder, identity),
-                UcdXmlSemanticKind.CjkRadical => _owner.ClassifierEntity(
-                    builder, "unicode/cjk_radical", identity),
-                _ => null,
-            };
-            if (subject is null) return;
-
-            string prefix = row.Kind switch
-            {
-                UcdXmlSemanticKind.Block => "blocks/block",
-                UcdXmlSemanticKind.NamedSequence => "named-sequences/named-sequence",
-                UcdXmlSemanticKind.StandardizedVariant =>
-                    "standardized-variants/standardized-variant",
-                UcdXmlSemanticKind.CjkRadical => "cjk-radicals/cjk-radical",
-                UcdXmlSemanticKind.DoNotEmit => "do-not-emit/instead",
-                _ => throw new InvalidOperationException($"Unexpected UCDXML structure {row.Kind}."),
-            };
-            var target = new UcdXmlEntityLoweringTarget(_owner, builder, subject.Value);
-            foreach (XmlRecordAttribute attribute in row.Node.Attributes)
-                _interpreter.Lower(
-                    new SourceRecipeAssertion<UcdXmlSemanticRecord>(
-                        row, $"{prefix}/@{attribute.Name}", attribute.Value),
-                    target);
-
-            if (row.Kind == UcdXmlSemanticKind.Block)
-            {
-                RelationTypeRegistry.RelationTypeResolution relation =
-                    _owner.PropertyRelation(builder, "Block");
-                NativeAttestation.AddCodepointRange(
-                    builder.ContentStage, row.Start, row.End, relation.Id,
-                    subject.Value, Source, contextId: null,
-                    sourceTrust: TC.StandardsDerived);
-            }
-        }
-
-        protected override async IAsyncEnumerable<UcdXmlSemanticRecord> ExtractRecordsAsync(
-            string ecosystemPath,
+        public async IAsyncEnumerable<SubstrateChange> DecomposeAsync(
+            IDecomposerContext context,
             DecomposerOptions options,
-            [EnumeratorCancellation] CancellationToken ct)
+            [EnumeratorCancellation] CancellationToken ct = default)
         {
             await using Stream xml = _snapshot.OpenUcdXmlStream();
-            await foreach (XmlRecordFrame frame in XmlRecordReader.ReadAsync(
-                               xml, recordDepth: 2, ct: ct).ConfigureAwait(false))
-            {
-                if (frame.Kind != XmlRecordFrameKind.Record) continue;
-                UcdXmlSemanticKind? kind = frame.Node.Name switch
-                {
-                    "char" or "reserved" or "noncharacter" or "surrogate" =>
-                        UcdXmlSemanticKind.Repertoire,
-                    "block" => UcdXmlSemanticKind.Block,
-                    "named-sequence" => UcdXmlSemanticKind.NamedSequence,
-                    "standardized-variant" => UcdXmlSemanticKind.StandardizedVariant,
-                    "cjk-radical" => UcdXmlSemanticKind.CjkRadical,
-                    "instead" => UcdXmlSemanticKind.DoNotEmit,
-                    _ => null,
-                };
-                if (kind is null) continue;
-
-                if (kind != UcdXmlSemanticKind.Repertoire)
-                {
-                    uint structureStart = 0;
-                    uint structureEnd = 0;
-                    if (kind == UcdXmlSemanticKind.Block
-                        && !TryRange(frame.Node, out structureStart, out structureEnd))
-                        throw new InvalidDataException(
-                            "UCDXML block has no valid first-cp/last-cp identity.");
-                    yield return new UcdXmlSemanticRecord(
-                        frame.Node, kind.Value, structureStart, structureEnd,
-                        CountsSourceRow: true,
-                        EstimatedRows: EstimateStructureRows(frame.Node));
-                    continue;
-                }
-
-                if (!TryRange(frame.Node, out uint start, out uint end))
-                    throw new InvalidDataException(
-                        $"UCDXML {frame.Node.Name} record has no valid cp or first-cp/last-cp identity.");
-
-                long rowsPerCodepoint = EstimateRowsPerCodepoint(frame.Node, _recipe.Recipe);
-                int transactionRows = IngestSizing.ResolveApplyTransactionRows();
-                uint window = checked((uint)Math.Max(
-                    1L, (transactionRows - Math.Min(transactionRows - 1L, rowsPerCodepoint))
-                        / Math.Max(1L, rowsPerCodepoint)));
-                bool first = true;
-                for (uint cursor = start; cursor <= end;)
-                {
-                    uint chunkEnd = (uint)Math.Min(
-                        (ulong)end, (ulong)cursor + window - 1UL);
-                    long estimated = checked(
-                        ((long)chunkEnd - cursor + 1L) * rowsPerCodepoint);
-                    yield return new UcdXmlSemanticRecord(
-                        frame.Node, kind.Value, cursor, chunkEnd, first, estimated);
-                    first = false;
-                    if (chunkEnd == uint.MaxValue) break;
-                    cursor = chunkEnd + 1;
-                }
-            }
+            await foreach (SubstrateChange change in _runtime.ReadChangesAsync(
+                               xml, Source, TC.StandardsDerived, "ucdxml/uax42",
+                               IngestSizing.ResolveApplyTransactionRows(),
+                               IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
+                               IngestSizing.ResolveSequentialIoBufferBytes(),
+                               commitEpoch: 1, ct: ct).ConfigureAwait(false))
+                yield return change;
         }
 
-        public override ValueTask DisposeAsync()
+        public ValueTask DisposeAsync()
         {
-            if (_ownsSnapshot)
-            {
-                _ownsSnapshot = false;
-                _snapshot.Dispose();
-            }
+            _snapshot.Dispose();
             return ValueTask.CompletedTask;
-        }
-
-        private static bool TryRange(XmlRecordNode node, out uint start, out uint end)
-        {
-            start = 0;
-            end = 0;
-            string cp = node.Attribute("cp");
-            if (uint.TryParse(cp, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out start))
-            {
-                end = start;
-                return end <= 0x10FFFFu;
-            }
-            return uint.TryParse(
-                       node.Attribute("first-cp"), NumberStyles.HexNumber,
-                       CultureInfo.InvariantCulture, out start)
-                && uint.TryParse(
-                       node.Attribute("last-cp"), NumberStyles.HexNumber,
-                       CultureInfo.InvariantCulture, out end)
-                && start <= end && end <= 0x10FFFFu;
-        }
-
-        private static long EstimateRowsPerCodepoint(
-            XmlRecordNode node,
-            SemanticSourceRecipe recipe)
-        {
-            long rows = 0;
-            foreach (XmlRecordAttribute attribute in node.Attributes)
-            {
-                if (attribute.Name is "cp" or "first-cp" or "last-cp") continue;
-                SourceRecipeField field = recipe.Field($"repertoire/*/@{attribute.Name}");
-                if (!field.Disposition.HasFlag(SourceFieldDisposition.Testimony)
-                    || (field.AbsentSentinel is not null
-                        && attribute.Value.Equals(field.AbsentSentinel, StringComparison.Ordinal)))
-                    continue;
-                long valueRows = field.ValueKind switch
-                {
-                    SourceValueKind.CodepointSequence or SourceValueKind.EnumeratedSequence =>
-                        Math.Max(1, attribute.Value.Split(
-                            field.SequenceSeparator ?? " ",
-                            StringSplitOptions.RemoveEmptyEntries).LongLength),
-                    SourceValueKind.Text or SourceValueKind.StructuredText =>
-                        Math.Max(1, Encoding.UTF8.GetByteCount(attribute.Value) * 4L),
-                    _ => 2,
-                };
-                rows = checked(rows + valueRows);
-            }
-            foreach (XmlRecordNode alias in node.ChildrenNamed("name-alias"))
-                rows = checked(rows + Math.Max(2, Encoding.UTF8.GetByteCount(alias.Attribute("alias")) * 4L));
-            return Math.Max(1, rows);
-        }
-
-        private static long EstimateStructureRows(XmlRecordNode node)
-        {
-            long rows = 1;
-            foreach (XmlRecordAttribute attribute in node.Attributes)
-                rows = checked(rows + Math.Max(
-                    2L, Encoding.UTF8.GetByteCount(attribute.Value) * 4L));
-            return rows;
-        }
-    }
-
-    private static Hash128? EmitXmlCodepointSequence(
-        SubstrateChangeBuilder builder,
-        string raw)
-    {
-        string[] tokens = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var text = new StringBuilder(tokens.Length);
-        foreach (string token in tokens)
-        {
-            if (!uint.TryParse(
-                    token, NumberStyles.HexNumber, CultureInfo.InvariantCulture,
-                    out uint codepoint)
-                || !Rune.TryCreate(codepoint, out Rune rune))
-                throw new InvalidDataException(
-                    $"UCDXML has invalid sequence codepoint '{token}' in '{raw}'.");
-            text.Append(rune.ToString());
-        }
-        return ContentEmitter.Emit(builder, text.ToString(), Source);
-    }
-
-    private sealed class UcdXmlEntityLoweringTarget(
-        UnicodeDecomposer owner,
-        SubstrateChangeBuilder builder,
-        Hash128 subjectId)
-        : ILaplaceRecipeLoweringTarget<UcdXmlSemanticRecord>
-    {
-        public void Lower(
-            in SourceRecipeAssertion<UcdXmlSemanticRecord> assertion,
-            SourceRecipeField field,
-            in SourceRecipeValue value)
-        {
-            if (value.IsAbsent || value.Raw.Length == 0
-                || !field.Disposition.HasFlag(SourceFieldDisposition.Testimony))
-                return;
-
-            RelationTypeRegistry.RelationTypeResolution relation =
-                owner.PropertyRelation(builder, field.PropertyName);
-            if (field.ValueKind == SourceValueKind.Boolean)
-            {
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    subjectId, relation.Id, obj: null, Source, contextId: null,
-                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived,
-                    confirm: value.Boolean
-                        ?? throw new InvalidDataException(
-                            $"Boolean recipe value missing for {field.SyntaxPath}.")));
-                return;
-            }
-
-            if (field.ValueKind == SourceValueKind.EnumeratedSequence)
-            {
-                foreach (string item in value.Sequence)
-                    Emit(owner.PropertyValueEntity(builder, field.PropertyName, item));
-                return;
-            }
-
-            Hash128? objectId = field.ValueKind switch
-            {
-                SourceValueKind.Codepoint => ParseXmlCodepoint(field, value.Raw),
-                SourceValueKind.CodepointSequence => EmitXmlCodepointSequence(builder, value.Raw),
-                SourceValueKind.Text or SourceValueKind.StructuredText =>
-                    ContentEmitter.Emit(builder, value.Raw, Source),
-                _ => owner.PropertyValueEntity(builder, field.PropertyName, value.Raw),
-            };
-            if (objectId is { } resolved) Emit(resolved);
-
-            void Emit(Hash128 resolved) =>
-                builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                    subjectId, relation.Id, resolved, Source, contextId: null,
-                    witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
-        }
-    }
-
-    private static Hash128 ParseXmlCodepoint(SourceRecipeField field, string raw)
-    {
-        if (!uint.TryParse(
-                raw, NumberStyles.HexNumber, CultureInfo.InvariantCulture,
-                out uint codepoint) || codepoint > 0x10FFFFu)
-            throw new InvalidDataException(
-                $"UCDXML field '{field.SyntaxPath}' has invalid codepoint '{raw}'.");
-        return CodepointId(codepoint);
-    }
-
-    private sealed class UcdXmlLoweringTarget(
-        UnicodeDecomposer owner,
-        SubstrateChangeBuilder builder)
-        : ILaplaceRecipeLoweringTarget<UcdXmlSemanticRecord>
-    {
-        private readonly List<NativeAttestation.CodepointRangeRelation> _relations = [];
-
-        internal void Add(
-            Hash128 typeId,
-            Hash128? objectId,
-            Hash128? contextId = null,
-            bool confirm = true) =>
-            _relations.Add(new NativeAttestation.CodepointRangeRelation(
-                typeId, objectId, contextId, confirm));
-
-        internal void Flush(uint start, uint end)
-        {
-            NativeAttestation.AddCodepointRangeRelations(
-                builder.ContentStage, start, end,
-                System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_relations),
-                Source, TC.StandardsDerived);
-            _relations.Clear();
-        }
-
-        public void Lower(
-            in SourceRecipeAssertion<UcdXmlSemanticRecord> assertion,
-            SourceRecipeField field,
-            in SourceRecipeValue value)
-        {
-            if (value.IsAbsent || value.Raw.Length == 0) return;
-            RelationTypeRegistry.RelationTypeResolution relation =
-                owner.PropertyRelation(builder, field.PropertyName);
-            UcdXmlSemanticRecord subject = assertion.Subject;
-            string rawValue = value.Raw;
-
-            if (field.ValueKind == SourceValueKind.Boolean)
-            {
-                Add(
-                    relation.Id, objectId: null, contextId: null,
-                    confirm: value.Boolean
-                        ?? throw new InvalidDataException($"Boolean recipe value missing for {field.SyntaxPath}."));
-                return;
-            }
-
-            if (field.ValueKind == SourceValueKind.StructuredText
-                && field.Disposition.HasFlag(SourceFieldDisposition.Reference))
-            {
-                EmitStructuredReferences();
-                return;
-            }
-
-            if (field.ValueKind == SourceValueKind.EnumeratedSequence)
-            {
-                foreach (string item in value.Sequence)
-                    EmitObject(owner.PropertyValueEntity(builder, field.PropertyName, item));
-                return;
-            }
-
-            Hash128? objectId = field.ValueKind switch
-            {
-                SourceValueKind.Codepoint => ParseXmlCodepoint(field, value.Raw),
-                SourceValueKind.CodepointSequence => EmitXmlCodepointSequence(builder, value.Raw),
-                SourceValueKind.Text or SourceValueKind.StructuredText =>
-                    ContentEmitter.Emit(builder, value.Raw, Source),
-                _ => owner.PropertyValueEntity(builder, field.PropertyName, value.Raw),
-            };
-            if (objectId is { } resolved) EmitObject(resolved);
-
-            void EmitStructuredReferences()
-            {
-                Hash128? exact = ContentEmitter.Emit(builder, rawValue, Source);
-                if (exact is { } exactId)
-                {
-                    RelationTypeRegistry.RelationTypeResolution lexical =
-                        owner.PropertyRelation(builder, $"{field.PropertyName}_Source_Text");
-                    Add(lexical.Id, exactId);
-                }
-
-                foreach (UcdXmlRecipe.StructuredCodepointReference reference
-                         in UcdXmlRecipe.ParseStructuredReferences(field.SyntaxPath, rawValue))
-                {
-                    Hash128? context = reference.Qualifier is null
-                        ? null
-                        : ContentEmitter.Emit(builder, reference.Qualifier, Source);
-                    Add(relation.Id, CodepointId(reference.Codepoint), context);
-                }
-            }
-
-            void EmitObject(Hash128 resolved) => Add(relation.Id, resolved);
-
         }
     }
 
@@ -2507,13 +2091,10 @@ public sealed class UnicodeDecomposer
         : UnicodeComposePhase<UnicodePhysicalArtifactParser.PropertyAliasRow>
     {
         private readonly UnicodeDecomposer _owner;
-        private readonly IReadOnlyList<UnicodePhysicalArtifactParser.PropertyAliasRow> _rows;
+        private readonly string _path;
 
-        public PropertyAliasPhase(
-            UnicodeDecomposer owner,
-            IReadOnlyList<UnicodePhysicalArtifactParser.PropertyAliasRow> rows,
-            int batch)
-            : base(batch, commitEpoch: 1) => (_owner, _rows) = (owner, rows);
+        public PropertyAliasPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
 
         protected override string PhaseLabel => "property-aliases";
 
@@ -2535,32 +2116,20 @@ public sealed class UnicodeDecomposer
                 witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
 
-        protected override async IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyAliasRow>
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyAliasRow>
             ExtractRecordsAsync(
-                string ecosystemPath,
-                DecomposerOptions options,
-                [EnumeratorCancellation] CancellationToken ct)
-        {
-            foreach (UnicodePhysicalArtifactParser.PropertyAliasRow row in _rows)
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return row;
-            }
-            await Task.CompletedTask;
-        }
+                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.PropertyAliasesAsync(_path, ct);
     }
 
     private sealed class PropertyValueAliasPhase
         : UnicodeComposePhase<UnicodePhysicalArtifactParser.PropertyValueAliasRow>
     {
         private readonly UnicodeDecomposer _owner;
-        private readonly IReadOnlyList<UnicodePhysicalArtifactParser.PropertyValueAliasRow> _rows;
+        private readonly string _path;
 
-        public PropertyValueAliasPhase(
-            UnicodeDecomposer owner,
-            IReadOnlyList<UnicodePhysicalArtifactParser.PropertyValueAliasRow> rows,
-            int batch)
-            : base(batch, commitEpoch: 1) => (_owner, _rows) = (owner, rows);
+        public PropertyValueAliasPhase(UnicodeDecomposer owner, string path, int batch)
+            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
 
         protected override string PhaseLabel => "property-value-aliases";
 
@@ -2589,19 +2158,10 @@ public sealed class UnicodeDecomposer
                 aliasId.Value, Source, contextId: null, witnessWeight: weight));
         }
 
-        protected override async IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyValueAliasRow>
+        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyValueAliasRow>
             ExtractRecordsAsync(
-                string ecosystemPath,
-                DecomposerOptions options,
-                [EnumeratorCancellation] CancellationToken ct)
-        {
-            foreach (UnicodePhysicalArtifactParser.PropertyValueAliasRow row in _rows)
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return row;
-            }
-            await Task.CompletedTask;
-        }
+                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
+            UnicodePhysicalArtifactParser.PropertyValueAliasesAsync(_path, ct);
     }
 
     private sealed class IndexTermPhase

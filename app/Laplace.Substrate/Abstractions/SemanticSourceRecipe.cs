@@ -36,6 +36,14 @@ public enum SourceValueKind
     StructuredText,
 }
 
+public enum SourceReferenceCodec
+{
+    None,
+    UnicodeCodepoint,
+    UnicodeCodepointSequence,
+    UPlusCodepointWithQualifier,
+}
+
 /// <summary>
 /// Declarative lowering of one concrete syntax field into the universal substrate.
 /// PropertyName is the canonical semantic identity after source alias resolution;
@@ -48,12 +56,70 @@ public sealed record SourceRecipeField(
     SourceValueKind ValueKind,
     SourceFieldDisposition Disposition,
     string? AbsentSentinel = null,
-    string? SequenceSeparator = null);
+    string? SequenceSeparator = null,
+    string? RelationName = null,
+    string? ObjectNamespace = null,
+    string ObjectEntityType = "Recipe_Value",
+    SourceReferenceCodec ReferenceCodec = SourceReferenceCodec.None,
+    bool PreserveLexicalValue = false,
+    string? RelationParent = null,
+    double? RelationRank = null,
+    string? LexicalRelationName = null,
+    string? ValueAliasProperty = null);
 
 public sealed record SourceRecipeStructure(
     string SyntaxPath,
     string SemanticType,
     SourceFieldDisposition Disposition);
+
+public enum SourceSubjectBindingKind
+{
+    CodepointRange,
+    ContentField,
+    ClassifierField,
+}
+
+public sealed record SourceRecipeSubjectBinding(
+    SourceSubjectBindingKind Kind,
+    string IdentityField,
+    string? RangeStartField = null,
+    string? LastField = null,
+    string? EntityNamespace = null,
+    string EntityType = "Recipe_Subject",
+    string? SequenceSeparator = null);
+
+public sealed record SourceRecipeProviderRoute(
+    string RecordName,
+    string NamespaceUri,
+    string FieldPrefix,
+    SourceRecipeSubjectBinding Subject,
+    IReadOnlyList<string> StructurePaths,
+    IReadOnlyDictionary<string, string>? ChildFieldPrefixes = null,
+    string? RangeRelationProperty = null,
+    string? RangeRelationName = null,
+    string? RangeStartField = null,
+    string? RangeEndField = null);
+
+public enum SourceArtifactDisposition
+{
+    Admitted,
+    EquivalentPackaging,
+    Superseded,
+    Excluded,
+    Unsupported,
+    Absent,
+}
+
+/// <summary>One member of the complete physical artifact graph bound by a source generation.</summary>
+public sealed record SourceRecipeArtifact(
+    string Selector,
+    string Provider,
+    string Syntax,
+    SourceArtifactDisposition Disposition,
+    bool Required,
+    string? Reason = null,
+    IReadOnlyList<string>? DependsOn = null,
+    IReadOnlyList<string>? ProviderRoutes = null);
 
 /// <summary>
 /// Versioned, deterministic semantic recipe.  It is independent of batching,
@@ -64,6 +130,10 @@ public sealed class SemanticSourceRecipe
     private readonly IReadOnlyDictionary<string, SourceRecipeField> _fields;
     private readonly IReadOnlyList<SourceRecipeField> _fieldList;
     private readonly IReadOnlyDictionary<string, SourceRecipeStructure> _structures;
+    private readonly IReadOnlyDictionary<string, string> _valueAliases;
+    private readonly IReadOnlyDictionary<string, SourceRecipeProviderRoute> _providerRoutes;
+    private readonly IReadOnlyDictionary<string, string> _propertyAliases;
+    private readonly IReadOnlyDictionary<string, SourceRecipeArtifact> _artifacts;
 
     public SemanticSourceRecipe(
         string authority,
@@ -71,7 +141,10 @@ public sealed class SemanticSourceRecipe
         string provider,
         string syntax,
         IEnumerable<SourceRecipeField> fields,
-        IEnumerable<SourceRecipeStructure>? structures = null)
+        IEnumerable<SourceRecipeStructure>? structures = null,
+        IReadOnlyDictionary<string, string>? valueAliases = null,
+        IEnumerable<SourceRecipeProviderRoute>? providerRoutes = null,
+        IEnumerable<SourceRecipeArtifact>? artifacts = null)
     {
         Authority = Required(authority, nameof(authority));
         Release = Required(release, nameof(release));
@@ -92,6 +165,18 @@ public sealed class SemanticSourceRecipe
         }
         _fields = map;
         _fieldList = fieldArray.OrderBy(static f => f.SyntaxPath, StringComparer.Ordinal).ToArray();
+        var propertyAliases = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (SourceRecipeField field in fieldArray)
+        {
+            int attribute = field.SyntaxPath.LastIndexOf("/@", StringComparison.Ordinal);
+            if (attribute < 0) continue;
+            string alias = field.SyntaxPath[(attribute + 2)..];
+            if (propertyAliases.TryGetValue(alias, out string? existing)
+                && existing != field.PropertyName)
+                continue;
+            propertyAliases[alias] = field.PropertyName;
+        }
+        _propertyAliases = propertyAliases;
 
         Structures = (structures ?? []).OrderBy(static s => s.SyntaxPath, StringComparer.Ordinal).ToArray();
         var structureMap = new Dictionary<string, SourceRecipeStructure>(StringComparer.Ordinal);
@@ -106,7 +191,35 @@ public sealed class SemanticSourceRecipe
         }
         _structures = structureMap;
 
-        CanonicalForm = BuildCanonicalForm(fieldArray, Structures);
+        _valueAliases = valueAliases is null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(valueAliases, StringComparer.Ordinal);
+
+        ProviderRoutes = (providerRoutes ?? []).OrderBy(
+            static route => route.RecordName, StringComparer.Ordinal).ToArray();
+        _providerRoutes = ProviderRoutes.ToDictionary(
+            static route => route.RecordName, StringComparer.Ordinal);
+
+        Artifacts = (artifacts ?? []).OrderBy(
+            static artifact => artifact.Selector, StringComparer.Ordinal).ToArray();
+        _artifacts = Artifacts.ToDictionary(
+            static artifact => artifact.Selector, StringComparer.Ordinal);
+        foreach (SourceRecipeArtifact artifact in Artifacts)
+        {
+            Required(artifact.Selector, nameof(artifacts));
+            Required(artifact.Provider, nameof(artifacts));
+            Required(artifact.Syntax, nameof(artifacts));
+            if (artifact.Disposition is SourceArtifactDisposition.Excluded
+                or SourceArtifactDisposition.Unsupported
+                or SourceArtifactDisposition.Absent
+                && string.IsNullOrWhiteSpace(artifact.Reason))
+                throw new ArgumentException(
+                    $"Artifact '{artifact.Selector}' requires an explicit disposition reason.",
+                    nameof(artifacts));
+        }
+
+        CanonicalForm = BuildCanonicalForm(
+            fieldArray, Structures, _valueAliases, ProviderRoutes, Artifacts);
         RecipeId = Hash128.OfCanonical(CanonicalForm);
     }
 
@@ -116,6 +229,9 @@ public sealed class SemanticSourceRecipe
     public string Syntax { get; }
     public IReadOnlyList<SourceRecipeField> Fields => _fieldList;
     public IReadOnlyList<SourceRecipeStructure> Structures { get; }
+    public IReadOnlyDictionary<string, string> ValueAliases => _valueAliases;
+    public IReadOnlyList<SourceRecipeProviderRoute> ProviderRoutes { get; }
+    public IReadOnlyList<SourceRecipeArtifact> Artifacts { get; }
     public string CanonicalForm { get; }
     public Hash128 RecipeId { get; }
 
@@ -137,9 +253,32 @@ public sealed class SemanticSourceRecipe
     public bool TryStructure(string syntaxPath, out SourceRecipeStructure structure) =>
         _structures.TryGetValue(syntaxPath, out structure!);
 
+    public string CanonicalValue(string propertyName, string value) =>
+        _valueAliases.TryGetValue(ValueAliasKey(propertyName, value), out string? canonical)
+            ? canonical
+            : value;
+
+    public string CanonicalProperty(string alias) =>
+        _propertyAliases.TryGetValue(alias, out string? canonical) ? canonical : alias;
+
+    public SourceRecipeProviderRoute ProviderRoute(string recordName) =>
+        _providerRoutes.TryGetValue(recordName, out SourceRecipeProviderRoute? route)
+            ? route
+            : throw new KeyNotFoundException(
+                $"Recipe {Authority}/{Release} has no provider route for record '{recordName}'.");
+
+    public SourceRecipeArtifact Artifact(string selector) =>
+        _artifacts.TryGetValue(selector, out SourceRecipeArtifact? artifact)
+            ? artifact
+            : throw new KeyNotFoundException(
+                $"Recipe {Authority}/{Release} has no artifact disposition for '{selector}'.");
+
     private string BuildCanonicalForm(
         IEnumerable<SourceRecipeField> fields,
-        IEnumerable<SourceRecipeStructure> structures)
+        IEnumerable<SourceRecipeStructure> structures,
+        IReadOnlyDictionary<string, string> valueAliases,
+        IEnumerable<SourceRecipeProviderRoute> providerRoutes,
+        IEnumerable<SourceRecipeArtifact> artifacts)
     {
         var canonical = new StringBuilder("laplace/source-recipe/v1");
         Append(canonical, Authority);
@@ -155,6 +294,15 @@ public sealed class SemanticSourceRecipe
             Append(canonical, ((int)field.Disposition).ToString(System.Globalization.CultureInfo.InvariantCulture));
             Append(canonical, field.AbsentSentinel ?? "");
             Append(canonical, field.SequenceSeparator ?? "");
+            Append(canonical, field.RelationName ?? "");
+            Append(canonical, field.ObjectNamespace ?? "");
+            Append(canonical, field.ObjectEntityType);
+            Append(canonical, field.ReferenceCodec.ToString());
+            Append(canonical, field.PreserveLexicalValue ? "1" : "0");
+            Append(canonical, field.RelationParent ?? "");
+            Append(canonical, field.RelationRank?.ToString("R", CultureInfo.InvariantCulture) ?? "");
+            Append(canonical, field.LexicalRelationName ?? "");
+            Append(canonical, field.ValueAliasProperty ?? "");
         }
         foreach (SourceRecipeStructure structure in structures)
         {
@@ -162,6 +310,51 @@ public sealed class SemanticSourceRecipe
             Append(canonical, structure.SyntaxPath);
             Append(canonical, structure.SemanticType);
             Append(canonical, ((int)structure.Disposition).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        foreach ((string key, string value) in valueAliases.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            canonical.Append("|a");
+            Append(canonical, key);
+            Append(canonical, value);
+        }
+        foreach (SourceRecipeProviderRoute route in providerRoutes)
+        {
+            canonical.Append("|r");
+            Append(canonical, route.RecordName);
+            Append(canonical, route.NamespaceUri);
+            Append(canonical, route.FieldPrefix);
+            Append(canonical, route.Subject.Kind.ToString());
+            Append(canonical, route.Subject.IdentityField);
+            Append(canonical, route.Subject.RangeStartField ?? "");
+            Append(canonical, route.Subject.LastField ?? "");
+            Append(canonical, route.Subject.EntityNamespace ?? "");
+            Append(canonical, route.Subject.EntityType);
+            Append(canonical, route.Subject.SequenceSeparator ?? "");
+            Append(canonical, route.RangeRelationProperty ?? "");
+            Append(canonical, route.RangeRelationName ?? "");
+            Append(canonical, route.RangeStartField ?? "");
+            Append(canonical, route.RangeEndField ?? "");
+            foreach (string path in route.StructurePaths.Order(StringComparer.Ordinal)) Append(canonical, path);
+            foreach ((string child, string prefix) in (route.ChildFieldPrefixes
+                         ?? new Dictionary<string, string>()).OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+            {
+                Append(canonical, child);
+                Append(canonical, prefix);
+            }
+        }
+        foreach (SourceRecipeArtifact artifact in artifacts)
+        {
+            canonical.Append("|g");
+            Append(canonical, artifact.Selector);
+            Append(canonical, artifact.Provider);
+            Append(canonical, artifact.Syntax);
+            Append(canonical, artifact.Disposition.ToString());
+            Append(canonical, artifact.Required ? "1" : "0");
+            Append(canonical, artifact.Reason ?? "");
+            foreach (string dependency in (artifact.DependsOn ?? []).Order(StringComparer.Ordinal))
+                Append(canonical, dependency);
+            foreach (string route in (artifact.ProviderRoutes ?? []).Order(StringComparer.Ordinal))
+                Append(canonical, route);
         }
         return canonical.ToString();
     }
@@ -192,6 +385,15 @@ public sealed class SemanticSourceRecipe
     {
         if (disposition == SourceFieldDisposition.None)
             throw new ArgumentException($"Field or structure '{syntaxPath}' has no disposition.");
+    }
+
+    public static string ValueAliasKey(string propertyName, string value)
+    {
+        var normalized = new StringBuilder(value.Length);
+        foreach (char c in value)
+            if (c is not ('_' or '-' or ' ' or '\t'))
+                normalized.Append(char.ToUpperInvariant(c));
+        return $"{propertyName}\0{normalized}";
     }
 }
 
