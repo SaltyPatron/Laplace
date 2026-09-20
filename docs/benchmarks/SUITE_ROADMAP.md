@@ -53,4 +53,4 @@ Receipts separate structural construction from O(output-bytes) realization:
 - realization/filesystem/verification time and physical work;
 - complete result fingerprint/parity.
 
-A roughly four-second end-to-end realization for a repository on the scale of Laplace is an **engineering goal to measure/falsify**, not a current performance claim. The benchmark must not obtain that number by copying an existing checkout or bypassing canonical reconstruction.
+A roughly four-second end-to-end realization for a repository on the scale of Laplace is an **engineering goal to measure/falsify**, not a current performance claim. GitHub issue #1710 owns the executable benchmark. The benchmark must not obtain that number by copying an existing checkout or bypassing canonical reconstruction.
