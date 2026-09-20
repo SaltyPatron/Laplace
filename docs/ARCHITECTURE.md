@@ -362,6 +362,22 @@ Export/reconstruction remains subject to the same universal execution-grain law:
 
 ## Compound capability architecture
 
+### Multiscale image DAG versus scratch tier tree
+
+The current `tier_tree_t` is a construction structure with one `parent_idx`. That is suitable for one selected decomposition but cannot itself be the durable ontology for overlapping image windows.
+
+A canonical 2×2 subpatch can belong to many 3×3, 4×4 and 8×8 occurrences simultaneously. The persistent model is therefore:
+
+~~~text
+canonical subpatch entity P
++ one Content physicality/trajectory describing P's ordered constituents
++ many parent/container occurrences/trajectory references to P
+~~~
+
+not one copied P per parent.
+
+The current fixed 8×8 image tree only materializes one partition hierarchy and is therefore incomplete relative to the multiscale law. #1711 owns a separate canonical subpatch/cache DAG path rather than overloading `parent_idx` with multiple parents.
+
 ### Compositional perfcache lattice
 
 Current source has several separately wired cache families: T0/codepoint, highway,
