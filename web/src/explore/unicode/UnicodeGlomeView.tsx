@@ -4,7 +4,7 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { ErrorText, LoadingText } from '@ui';
 import { exploreUnicodeCloud, exploreUnicodePoint, exploreUnicodePositions } from '../api';
-import { clientArtifactGet, clientArtifactPut, clientStorageEstimate } from '../../storage/clientArtifactCache';
+import { clientArtifactGetOrLoad, clientStorageEstimate } from '../../storage/clientArtifactCache';
 import type { UnicodeCloudResponse, UnicodePointResponse } from '../types';
 import styles from './UnicodeGlomeView.module.css';
 
@@ -16,18 +16,12 @@ export function UnicodeGlomeView(){
  useEffect(()=>{const controller=new AbortController();void (async()=>{try{
    const meta=await exploreUnicodeCloud({signal:controller.signal}); if(controller.signal.aborted)return; setCloud(meta);
    const kind=`unicode-cloud:${meta.positions_format}`;
-   let data:ArrayBuffer|null=null;
-   try {
-     data=await clientArtifactGet(kind,meta.perfcache_receipt_hex);
-     if(data && data.byteLength===meta.positions_bytes) setCacheState('hit'); else data=null;
-   } catch { setCacheState('unavailable'); }
-   if(!data){
-     data=await exploreUnicodePositions({signal:controller.signal});
-     if(data.byteLength!==meta.positions_bytes) throw new Error(`Unicode GPU artifact size mismatch: expected ${meta.positions_bytes}, received ${data.byteLength}`);
-     try { await clientArtifactPut(kind,meta.perfcache_receipt_hex,data); setCacheState('stored'); }
-     catch { setCacheState('unavailable'); }
-   }
-   if(!controller.signal.aborted){ setBuffer(data); setStorage(await clientStorageEstimate()); }
+   const artifact=await clientArtifactGetOrLoad(
+     kind, meta.perfcache_receipt_hex, meta.positions_bytes,
+     () => exploreUnicodePositions({signal:controller.signal}),
+   );
+   setCacheState(artifact.source==='cache'?'hit':'stored');
+   if(!controller.signal.aborted){ setBuffer(artifact.value); setStorage(await clientStorageEstimate()); }
  }catch(e){if(!controller.signal.aborted)setErr(e instanceof Error?e.message:String(e));}})();return()=>controller.abort();},[]);
  const pos=useMemo(()=>{if(!cloud||!buffer)return null;const floats=new Float32Array(buffer),lane=cloud.count*3,offset=mode==='real'?0:lane;return floats.subarray(offset,offset+lane);},[cloud,buffer,mode]);
  const pick=(cp:number)=>void exploreUnicodePoint(cp).then(setPoint).catch(e=>setErr(e instanceof Error?e.message:String(e)));

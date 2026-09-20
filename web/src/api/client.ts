@@ -95,6 +95,40 @@ function getRequestKey(path: string, opts: ApiOptions): string {
     opts.session ?? null, opts.operatorToken ?? null]);
 }
 
+const completedGets = new Map<string, { value: unknown; expiresAt: number }>();
+const MAX_COMPLETED_GETS = 128;
+
+function pruneCompletedGets(now = Date.now()): void {
+  for (const [key, entry] of completedGets) if (entry.expiresAt <= now) completedGets.delete(key);
+  while (completedGets.size > MAX_COMPLETED_GETS) {
+    const oldest = completedGets.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    completedGets.delete(oldest);
+  }
+}
+
+export async function apiGetCached<T>(
+  path: string,
+  ttlMs: number,
+  opts: ApiOptions = {},
+): Promise<T> {
+  if (ttlMs <= 0) return apiGet<T>(path, opts);
+  const key = getRequestKey(path, opts);
+  const now = Date.now();
+  const hit = completedGets.get(key);
+  if (hit && hit.expiresAt > now) return hit.value as T;
+  if (hit) completedGets.delete(key);
+  const value = await apiGet<T>(path, opts);
+  completedGets.set(key, { value, expiresAt: Date.now() + ttlMs });
+  pruneCompletedGets();
+  return value;
+}
+
+export function invalidateApiGetCache(pathPrefix?: string): void {
+  if (!pathPrefix) { completedGets.clear(); return; }
+  for (const key of completedGets.keys()) if (key.includes(pathPrefix)) completedGets.delete(key);
+}
+
 export function apiGet<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   // A caller-owned AbortSignal has its own cancellation lifetime and therefore
   // cannot safely share transport ownership. Signal-free duplicate reads can.

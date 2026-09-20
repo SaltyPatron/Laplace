@@ -1,4 +1,4 @@
-import { apiGet, type ApiOptions } from '../api/client';
+import { apiGetCached, type ApiOptions } from '../api/client';
 import type { OperationParameter } from '../ui/lib/operationFields';
 
 export interface OperationDescription {
@@ -14,5 +14,5 @@ export interface OperationCatalog { object: string; operations: OperationDescrip
 export function readOperationCatalog(like: string, opts: ApiOptions = {}) {
   const query = new URLSearchParams({ max_rows: '2000' });
   if (like.length > 0) query.set('like', like);
-  return apiGet<OperationCatalog>(`/v1/ops/catalog?${query}`, opts);
+  return apiGetCached<OperationCatalog>(`/v1/ops/catalog?${query}`, 60_000, opts);
 }

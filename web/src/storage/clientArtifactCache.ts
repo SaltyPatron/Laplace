@@ -102,3 +102,50 @@ export async function clientStorageEstimate(): Promise<{ usage: number; quota: n
     return null;
   }
 }
+
+
+export interface ClientArtifactLoadResult {
+  value: ArrayBuffer;
+  source: 'cache' | 'network';
+}
+
+export async function clientArtifactGetOrLoad(
+  kind: string,
+  receipt: string,
+  expectedBytes: number,
+  loader: () => Promise<ArrayBuffer>,
+): Promise<ClientArtifactLoadResult> {
+  const readValid = async (): Promise<ArrayBuffer | null> => {
+    const cached = await clientArtifactGet(kind, receipt);
+    return cached && cached.byteLength === expectedBytes ? cached : null;
+  };
+
+  try {
+    const hit = await readValid();
+    if (hit) return { value: hit, source: 'cache' };
+  } catch {
+    // Storage is an accelerator; network correctness remains available.
+  }
+
+  const loadAndStore = async (): Promise<ClientArtifactLoadResult> => {
+    try {
+      const secondHit = await readValid();
+      if (secondHit) return { value: secondHit, source: 'cache' };
+    } catch { /* fall through */ }
+
+    const value = await loader();
+    if (value.byteLength !== expectedBytes) {
+      throw new Error(`Artifact size mismatch for ${kind}: expected ${expectedBytes}, received ${value.byteLength}`);
+    }
+    try { await clientArtifactPut(kind, receipt, value); } catch { /* network result remains valid */ }
+    return { value, source: 'network' };
+  };
+
+  const nav = navigator as Navigator & {
+    locks?: { request<T>(name: string, callback: () => Promise<T>): Promise<T> };
+  };
+  if (nav.locks?.request) {
+    return await nav.locks.request(`laplace:${kind}:${receipt.toLowerCase()}`, loadAndStore);
+  }
+  return await loadAndStore();
+}

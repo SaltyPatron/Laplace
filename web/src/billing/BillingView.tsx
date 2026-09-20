@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Banner, Button, ErrorText, Muted, ReadStatus, Table, TableScroll, Td, Th, useReadResource } from '@ui';
 import {
-  apiGet, apiPost, type BillingCatalogResponse, type BillingPlansResponse,
+  apiGet, apiGetCached, apiPost, type BillingCatalogResponse, type BillingPlansResponse,
   type EntitlementsResponse, type PlanSubscribeResponse, type UsageResponse,
 } from '../api/client';
 import { AccountControls } from '../auth/AccountControls';
@@ -22,11 +22,11 @@ function BillingWorkspace({ tenant }: { tenant: string }) {
   const signedIn = authReady && !!authUser;
   const plansRead = useReadResource({
     key: JSON.stringify(['billing-plans', tenant]),
-    read: (signal) => apiGet<BillingPlansResponse>('/v1/billing/plans', { tenant, signal }),
+    read: (signal) => apiGetCached<BillingPlansResponse>('/v1/billing/plans', 60_000, { tenant, signal }),
   });
   const servicesRead = useReadResource({
     key: JSON.stringify(['billing-catalog', tenant]),
-    read: (signal) => apiGet<BillingCatalogResponse>('/v1/billing/catalog', { tenant, signal }),
+    read: (signal) => apiGetCached<BillingCatalogResponse>('/v1/billing/catalog', 60_000, { tenant, signal }),
   });
   const usageRead = useReadResource({
     key: JSON.stringify(['billing-usage', tenant, authUser?.id]),

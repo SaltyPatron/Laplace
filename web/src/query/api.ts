@@ -1,12 +1,12 @@
-import { apiGet, apiPost, type ApiOptions } from '../api/client';
+import { apiGet, apiGetCached, apiPost, type ApiOptions } from '../api/client';
 import type { QueryResult, QueryShape, RelationBand } from './types';
 
 export function queryShapes(opts?: ApiOptions) {
-  return apiGet<{ shapes: QueryShape[] }>('/v1/query/shapes', opts);
+  return apiGetCached<{ shapes: QueryShape[] }>('/v1/query/shapes', 5 * 60_000, opts);
 }
 
 export function relationBands(opts?: ApiOptions) {
-  return apiGet<{ bands: RelationBand[] }>('/v1/query/bands', opts);
+  return apiGetCached<{ bands: RelationBand[] }>('/v1/query/bands', 5 * 60_000, opts);
 }
 
 export interface QueryBody {
