@@ -306,6 +306,8 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
     private readonly IBillingCatalog _catalog;
     private readonly IStripePriceMap _map;
     private readonly StripeBillingOptions _options;
+    private readonly ConcurrentDictionary<string, string> _productIds = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _productGate = new(1, 1);
 
     public StripeCatalogSync(IBillingCatalog catalog, IStripePriceMap map, IOptions<StripeBillingOptions> options)
     {
@@ -397,13 +399,27 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
                 ["laplace_service_id"] = price.ServiceId,
                 ["laplace_unit"] = price.UnitName
             }
-        }, cancellationToken: ct);
+        }, new RequestOptions { IdempotencyKey = $"laplace-price:{price.LookupKey}" }, ct);
 
         await _map.SetAsync(price.LookupKey, created.Id, ct);
         return (created.Id, productId, "created");
     }
 
     private async Task<string> EnsureProductAsync(string productKey, CancellationToken ct)
+    {
+        if (_productIds.TryGetValue(productKey, out var cached)) return cached;
+        await _productGate.WaitAsync(ct);
+        try
+        {
+            if (_productIds.TryGetValue(productKey, out cached)) return cached;
+            var resolved = await EnsureProductCoreAsync(productKey, ct);
+            _productIds[productKey] = resolved;
+            return resolved;
+        }
+        finally { _productGate.Release(); }
+    }
+
+    private async Task<string> EnsureProductCoreAsync(string productKey, CancellationToken ct)
     {
         _catalog.TryGetProduct(productKey, out var product);
         var productService = new ProductService();
@@ -431,7 +447,7 @@ internal sealed class StripeCatalogSync : IStripeCatalogSync
                 ["laplace_product_id"] = productKey,
                 ["laplace_category"] = product?.Category ?? "inference"
             }
-        }, cancellationToken: ct);
+        }, new RequestOptions { IdempotencyKey = $"laplace-product:{productKey}" }, ct);
 
         return createdProduct.Id;
     }
