@@ -357,7 +357,7 @@ public sealed class UnicodeDecomposerTests
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
         ZipArchiveEntry entry = Assert.Single(archive.Entries);
         await using Stream xml = entry.Open();
-        var runtime = new NativeSourceRecipe(recipe.Recipe);
+        var runtime = new NativeSourceRecipe(recipe.Recipe, recordDepth: 3);
         long records = 0;
         await foreach (var change in runtime.ReadChangesAsync(xml, UnicodeDecomposer.Source, 1,
                            "complete-ucd", 32768, 32L * 1024 * 1024, 64 * 1024))
@@ -415,13 +415,15 @@ public sealed class UnicodeDecomposerTests
     public void Ucd_structured_references_preserve_every_target_and_source_qualifier()
     {
         var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.grouped.xml");
-        byte[] program = NativeRecipeCompiler.Compile(recipe.Recipe);
+        byte[] program = NativeRecipeCompiler.Compile(recipe.Recipe, recordDepth: 3);
         List<AttestationRow> Parse(string value)
         {
             using var stream = NativeRecipeStream.Open(program, UnicodeDecomposer.Source, 1);
             string xml = "<ucd xmlns=\"http://www.unicode.org/ns/2003/ucd/1.0\"><repertoire>"
+                + "<group gc=\"Lo\" Alpha=\"Y\">"
                 + "<char cp=\"4E00\" kSemanticVariant=\"" + value.Replace("<", "&lt;")
-                + "\" kCompatibilityVariant=\"U+7471\"/></repertoire></ucd>";
+                + "\" kCompatibilityVariant=\"U+7471\"/>"
+                + "</group></repertoire></ucd>";
             stream.Feed(Encoding.UTF8.GetBytes(xml), final: true);
             var rows = new List<AttestationRow>();
             while (true)
@@ -521,15 +523,16 @@ public sealed class UnicodeDecomposerTests
             Assert.True(field.OmitDefaultTestimony);
         });
 
-        byte[] program = NativeRecipeCompiler.Compile(recipe.Recipe);
+        byte[] program = NativeRecipeCompiler.Compile(recipe.Recipe, recordDepth: 3);
         List<AttestationRow> Parse(string value)
         {
             using var stream = NativeRecipeStream.Open(
                 program, UnicodeDecomposer.Source, 1);
             string xml =
                 "<ucd xmlns=\"http://www.unicode.org/ns/2003/ucd/1.0\"><repertoire>"
-                + "<char cp=\"0041\" Alpha=\"" + value + "\"/>"
-                + "</repertoire></ucd>";
+                + "<group Alpha=\"" + value + "\">"
+                + "<char cp=\"0041\"/>"
+                + "</group></repertoire></ucd>";
             stream.Feed(Encoding.UTF8.GetBytes(xml), final: true);
             var rows = new List<AttestationRow>();
             while (true)
