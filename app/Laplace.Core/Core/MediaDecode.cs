@@ -4,10 +4,10 @@ namespace Laplace.Engine.Core;
 
 /// <summary>
 /// Managed face of <c>laplace_media_decode_*</c> — packaging unpack only.
-/// Returns planar RGBA / mono int16 recovery buffers. These buffers are source
-/// recovery state, not semantic identity by themselves. The current downstream
-/// codepoint/decimal media ladder is a legacy implementation owned for repair by
-/// GH #1134; docs/invention/modality-ladder-law.md defines the current law.
+/// Returns planar RGBA / mono int16 recovery buffers. The buffers are source
+/// recovery state, not identity by themselves. Their exact numeric values compose
+/// through reusable canonical scalar roots; channel/sample ordinals plus shape/rate/
+/// precision/provenance remain occurrence/reconstruction state (GH #1134).
 /// </summary>
 public static class MediaDecode
 {
