@@ -282,7 +282,7 @@ Code construction uses the same forward program but binds an exact target langua
 ```text
 requirement / obligation
 -> resolve exact target grammar + runtime/toolchain
--> COUPLE against canonical AST / repository / call / dependency state
+-> COUPLE against canonical tier/trajectory / repository / call / dependency state; derive/project AST/CST only where the selected toolchain requires it
 -> reuse exact canonical structure where possible
 -> compose known structures where possible
 -> minimally adapt the closest lawful subtree where possible
