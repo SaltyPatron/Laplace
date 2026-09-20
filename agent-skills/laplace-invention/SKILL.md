@@ -69,6 +69,7 @@ The primitive laws compose into binding product consequences documented in `docs
 - Packed ordinal/run widths are local fields, not composition limits. Logical position
   and split RLE support wider sequences; current tests cover 70,000 constituents.
 - Perfcaches are a compositional lattice, not one blob per modality: dense finite tiers may be complete direct-address ROMs; huge tiers may mmap the admitted/hot canonical estate. Numbers can feed pixels/samples; pixels feed patches/regions/images; image+audio caches are reused by video. Cache request-side keys so database indexes remain usable instead of applying per-row functions to indexed columns.
+- Cache modules can be selector-scoped (range/ASCII, explicit color palette, finite-format domain, speech-frequency/filter-bank band, hot/admitted set, dependency closure) and combined into deployment profiles. Subsets preserve global canonical ids/coords and are acceleration state, not knowledge authorization.
 - Admission builds one native tier tree, deduplicates equal working-set content, probes
   existence in set-sized batches per tier, and emits missing structure plus every
   occurrence/physicality. Database crossings are O(tiers), not O(nodes/atoms/records).
