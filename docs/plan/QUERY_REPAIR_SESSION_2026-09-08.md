@@ -1,5 +1,8 @@
 # Query, trajectory, and chess repair — 2026-09-08
 
+> **Dated-file authority notice.** This file records a scoped observation, repair, audit, acceptance campaign, or plan at the date in its name. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
+
 > Historical execution record. Do not reuse its generic open/remaining/delivery wording as current project status. Re-check current `main`, installed artifacts and runtime evidence for the exact mechanism being discussed.
 
 This checklist preserves the accepted session scope and the evidence observed on that date. A checked diagnostic records that observation; runtime changes are established by the applicable current main/install/readback evidence. Existing owners: #588/#429
