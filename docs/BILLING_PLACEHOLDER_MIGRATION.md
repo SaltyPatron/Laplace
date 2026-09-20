@@ -78,6 +78,28 @@ The cheaper product tier is **not** a deliberately less knowledgeable Laplace mo
 
 A token count may be useful for external comparison. It is not the native unit of Laplace work.
 
+## Knowledge entitlement is separate from compute entitlement
+
+"One knowledge world, variable compute" forbids selling a deliberately dumber model as the cheap tier. It does **not** mean every principal automatically has authority over every private/licensed/restricted portion of that world.
+
+Keep two independent entitlement axes:
+
+```text
+KNOWLEDGE / CAPABILITY ENTITLEMENT
+  which scopes/packages the principal may DISCOVER/INSPECT/COUPLE/TRAVERSE/
+  DERIVE/REALIZE/PERSIST/EXPORT/EXECUTE/DELEGATE
+
+COMPUTE ENTITLEMENT
+  how much hop/fanout/provider/candidate/trajectory/geometry/CPU/memory/I/O/output
+  work this request may consume
+```
+
+A knowledge package is an authority manifest over shared canonical state, not a separately trained or copied model. Packages may be purchased, granted by a school/employer, inherited through an explicit role/relationship, or temporarily activated for a task.
+
+Stripe/Patreon/contracts are evidence that an external commercial event occurred. They do not become semantic authority; the canonical Laplace entitlement/grant is the authority object.
+
+This makes the product economically honest: a customer may ask a sophisticated question cheaply when it resolves near the surface, or spend heavily on a simple question by demanding exhaustive depth/breadth. Billing follows admitted/actual cognition work, not a "smarter model" brand.
+
 ## Serviceable capacity, not benchmark self-destruction
 
 Customer/service limits must calibrate against **serviceable** capacity, not the largest point a benchmark can print while starving the host.
