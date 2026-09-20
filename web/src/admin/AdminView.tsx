@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Banner, SegmentedControl } from '@ui';
-import { Activity } from './Activity';
-import { Agents } from './Agents';
-import { IngestControl } from './IngestControl';
-import { IngestJournal } from './IngestJournal';
-import { OpConsole } from './OpConsole';
-import { Repair } from './Repair';
+import { Banner, LoadingText, SegmentedControl } from '@ui';
 import { useSectionParam } from '../layout/useSectionParam';
 import styles from './Admin.module.css';
+
+const IngestControl = lazy(() => import('./IngestControl').then((m) => ({ default: m.IngestControl })));
+const IngestJournal = lazy(() => import('./IngestJournal').then((m) => ({ default: m.IngestJournal })));
+const Activity = lazy(() => import('./Activity').then((m) => ({ default: m.Activity })));
+const OpConsole = lazy(() => import('./OpConsole').then((m) => ({ default: m.OpConsole })));
+const Repair = lazy(() => import('./Repair').then((m) => ({ default: m.Repair })));
+const Agents = lazy(() => import('./Agents').then((m) => ({ default: m.Agents })));
 
 type Section = 'ingest' | 'activity' | 'ops' | 'repair' | 'agents';
 const SECTIONS: Section[] = ['ingest', 'activity', 'ops', 'repair', 'agents'];
@@ -25,7 +26,9 @@ export function AdminView() {
     <Banner variant="warning">
       Operator actions may affect shared database state. Authentication mode controls access; tenant headers are not an operator-role boundary.
     </Banner>
-    {section === 'ingest' ? <><IngestControl onStarted={refreshIngest} /><IngestJournal refreshSignal={ingestRefreshSignal} /></> : section === 'activity' ? <Activity />
-      : section === 'ops' ? <OpConsole /> : section === 'repair' ? <Repair /> : <Agents />}
+    <Suspense fallback={<LoadingText>Loading operator tool…</LoadingText>}>
+      {section === 'ingest' ? <><IngestControl onStarted={refreshIngest} /><IngestJournal refreshSignal={ingestRefreshSignal} /></> : section === 'activity' ? <Activity />
+        : section === 'ops' ? <OpConsole /> : section === 'repair' ? <Repair /> : <Agents />}
+    </Suspense>
   </div>;
 }

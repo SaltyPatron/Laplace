@@ -1,10 +1,24 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { Muted, NavTabs } from '@ui';
-import { ExperimentRunner } from './ExperimentRunner';
-import { GauntletView } from './gauntlet/GauntletView';
-import { LichessPanel } from './LichessPanel';
-import { CalibrationPanel } from './gauntlet/CalibrationPanel';
+import { LoadingText, Muted, NavTabs } from '@ui';
 import styles from './LabView.module.css';
+
+const loadExperiments = () => import('./ExperimentRunner');
+const loadGauntlet = () => import('./gauntlet/GauntletView');
+const loadLichess = () => import('./LichessPanel');
+const loadCalibration = () => import('./gauntlet/CalibrationPanel');
+
+const ExperimentRunner = lazy(() => loadExperiments().then((m) => ({ default: m.ExperimentRunner })));
+const GauntletView = lazy(() => loadGauntlet().then((m) => ({ default: m.GauntletView })));
+const LichessPanel = lazy(() => loadLichess().then((m) => ({ default: m.LichessPanel })));
+const CalibrationPanel = lazy(() => loadCalibration().then((m) => ({ default: m.CalibrationPanel })));
+
+const LAB_PREFETCH: Record<string, () => Promise<unknown>> = {
+  experiments: loadExperiments,
+  gauntlet: loadGauntlet,
+  calibration: loadCalibration,
+  import: async () => { await Promise.all([loadExperiments(), loadLichess()]); },
+};
 
 /** Chess experiments, measured machine calibration, external matches and imports. */
 const TABS: { id: string; label: string; path: string; blurb: string }[] = [
@@ -52,12 +66,14 @@ export function LabView() {
             id: t.id,
             label: t.label,
             active: t.id === activeTab.id,
+            onIntent: () => { void LAB_PREFETCH[t.id]?.(); },
             onClick: () => nav(t.path),
           }))}
         />
       </header>
 
       <div className={styles.body}>
+        <Suspense fallback={<LoadingText>Loading Lab tool…</LoadingText>}>
         <Routes>
           <Route
             index
@@ -76,6 +92,7 @@ export function LabView() {
           />
           <Route path="lichess" element={<Navigate to="/lab/import" replace />} />
         </Routes>
+        </Suspense>
       </div>
     </div>
   );
