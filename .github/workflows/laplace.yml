@@ -47,8 +47,8 @@ on:
 permissions:
   contents: read
 
-# A main push is one product story. Read-only qualification is cancellable inside
-# the reusable stage owner; once delivery starts its own concurrency group is
+# A main push is one product story. Read-only qualifications finish in dispatch
+# order so a newer commit cannot repeatedly discard nearly-complete work. Delivery is
 # non-preemptible. There is deliberately no workflow-level concurrency here,
 # because workflow-level cancellation would also kill a delivery already mutating
 # the installed product.
@@ -102,7 +102,7 @@ jobs:
     needs: plan
     concurrency:
       group: ${{ needs.plan.outputs.delivery_actions != '' && 'laplace-main-product-qualification-dispatch' || format('laplace-main-test-qualification-{0}-{1}', needs.plan.outputs.dev_suites, needs.plan.outputs.managed_test_projects) }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: release-qualification
