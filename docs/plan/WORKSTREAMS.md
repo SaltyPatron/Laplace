@@ -27,7 +27,7 @@ Represent work, edition, document/package, content, titles, authorship, licensin
 
 ## W3 — Self-ingest / code call graph
 
-Witness repository definitions, AST/code structure and calls through the ordinary ingest/composition/evidence spine so code becomes queryable canonical structure rather than filename/text coincidence. Repeated parsing/composition runs obey the same coarse native/set execution law. Historical owner: #765.
+Witness repository definitions, canonical code structure and calls through the ordinary ingest/composition/evidence spine so code becomes queryable canonical structure rather than filename/text coincidence. Repeated parsing/composition runs obey the same coarse native/set execution law. Historical owner: #765.
 
 ## W4 — Query-relative interpretation ground
 
