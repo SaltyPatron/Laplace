@@ -17,8 +17,8 @@ immediately; do not perform ceremonial re-onboarding.
 
 The primitive laws compose into binding product consequences documented in `docs/CAPABILITIES.md`. Do not re-derive them from scratch or narrow them away when working locally.
 
-- Code is grammar-derived recursive structure. Prefer canonical reuse/composition/minimal AST mutation; realize source after structure is selected.
-- Exact duplicate AST structure converges by identity. Normalized AST, control/data flow, algebraic form, behavioral evidence and trajectories can expose deeper duplicate implementations.
+- Code is grammar-constrained recursive composition. Prefer canonical reuse/composition/minimal structural mutation; derive AST/CST/IR only when a target toolchain requires that projection.
+- Exact duplicate canonical code structure converges by identity. Normalized structural/AST projections, control/data flow, algebraic form, behavioral evidence and trajectories can expose deeper duplicate implementations.
 - Compiler/test/runtime failures and successful fixes are witnessed development trajectories. They should affect later repair and can be compared against other authorized repositories.
 - A repository root is the complete application state. Small changes remint only changed ancestry; unchanged subtrees are shared. Checkout/patch artifacts are realizations of root transitions.
 - Source/bytecode/executable/container decomposition may continue to control/data/dependency structure and target-machine cycle derivation under explicit ISA/microarchitecture/state assumptions.
