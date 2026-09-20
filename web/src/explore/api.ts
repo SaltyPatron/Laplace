@@ -1,4 +1,4 @@
-import { apiGet, apiPost, type ApiOptions, type PreflightQuoteResponse } from '../api/client';
+import { apiGet, apiGetArrayBuffer, apiPost, type ApiOptions, type PreflightQuoteResponse } from '../api/client';
 import type {
   BillingReceipt,
   ExploreCatalogResponse,
@@ -171,3 +171,5 @@ export function exploreSourceRoster(idHex: string, limit = 40, opts?: ApiOptions
 
 export function exploreUnicodeCloud(opts: ApiOptions = {}) { return apiGet<UnicodeCloudResponse>('/v1/explore/unicode/cloud', opts); }
 export function exploreUnicodePoint(codepoint: number, opts: ApiOptions = {}) { return apiGet<UnicodePointResponse>(`/v1/explore/unicode/${codepoint}`, opts); }
+
+export function exploreUnicodePositions(opts: ApiOptions = {}) { return apiGetArrayBuffer('/v1/explore/unicode/positions.bin', opts); }

@@ -82,6 +82,12 @@ async function request<T>(path: string, init: RequestInit, opts: ApiOptions): Pr
   return await res.json() as T;
 }
 
+export async function apiGetArrayBuffer(path: string, opts: ApiOptions = {}): Promise<ArrayBuffer> {
+  const res = await fetch(path, { headers: laplaceHeaders(opts), signal: opts.signal, credentials: 'same-origin' });
+  if (!res.ok) await parseError(res);
+  return await res.arrayBuffer();
+}
+
 export function apiGet<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   return request<T>(path, {}, opts);
 }

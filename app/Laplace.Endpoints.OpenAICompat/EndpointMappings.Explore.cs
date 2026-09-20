@@ -212,6 +212,12 @@ internal static class ExploreEndpoints
             catch (InvalidOperationException ex) { return EndpointJson.ServiceUnavailable("unicode_cloud_unavailable", ex.Message); }
         }).WithTags("explore").Produces<UnicodeCloudResponse>();
 
+        app.MapGet("/v1/explore/unicode/positions.bin", (ExploreDecomposeService decompose) =>
+        {
+            try { return Results.Bytes(decompose.UnicodeCloudPositions(), "application/octet-stream"); }
+            catch (InvalidOperationException ex) { return EndpointJson.ServiceUnavailable("unicode_cloud_unavailable", ex.Message); }
+        }).WithTags("explore").Produces(StatusCodes.Status200OK, contentType: "application/octet-stream");
+
         app.MapGet("/v1/explore/unicode/{codepoint:min(0):max(1114111)}", (uint codepoint, ExploreDecomposeService decompose) =>
         {
             try { return Results.Json(decompose.UnicodePoint(codepoint)); }

@@ -59,6 +59,31 @@ internal sealed class ExploreDecomposeService
             Convert.ToBase64String(orders), Convert.ToBase64String(hashes));
     }
 
+    public byte[] UnicodeCloudPositions()
+    {
+        EnsurePerfcache();
+        var records = CodepointPerfcache.Records;
+        var payload = new byte[checked(records.Length * 3 * sizeof(float) * 2)];
+        var values = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(payload);
+        const ulong Mask53 = (1UL << 53) - 1, Mask42 = (1UL << 42) - 1, Mask22 = (1UL << 22) - 1;
+        for (var i = 0; i < records.Length; i++)
+        {
+            ref readonly var r = ref records[i];
+            double len = Math.Sqrt(r.CoordX*r.CoordX + r.CoordY*r.CoordY + r.CoordZ*r.CoordZ);
+            if (len <= double.Epsilon) len = 1;
+            int p = i * 3;
+            values[p] = (float)(r.CoordX / len); values[p+1] = (float)(r.CoordY / len); values[p+2] = (float)(r.CoordZ / len);
+            ulong hi=r.Hash.Hi, lo=r.Hash.Lo;
+            double hx=((lo&Mask53)/(double)Mask53)*2-1;
+            ulong ybits=((hi&Mask42)<<11)|((lo>>53)&0x7ffUL);
+            double hy=((ybits&Mask53)/(double)Mask53)*2-1, hz=(((hi>>42)&Mask22)/(double)Mask22)*2-1;
+            double hlen=Math.Sqrt(hx*hx+hy*hy+hz*hz); if(hlen<=double.Epsilon) hlen=1;
+            int h=records.Length*3+p;
+            values[h]=(float)(hx/hlen); values[h+1]=(float)(hy/hlen); values[h+2]=(float)(hz/hlen);
+        }
+        return payload;
+    }
+
     public UnicodePointResponse UnicodePoint(uint codepoint)
     {
         EnsurePerfcache();
