@@ -680,7 +680,7 @@ def firewall_active():
 
 def firewall_rule_present(status, network, port):
     return any(
-        re.match(r"^" + str(port) + r"/tcp\s+ALLOW IN\s+" + re.escape(network) + r"(?:\s|$)", line)
+        re.match(r"^" + str(port) + r"/tcp\s+ALLOW(?: IN)?\s+" + re.escape(network) + r"(?:\s|$)", line)
         for line in status.splitlines()
     )
 

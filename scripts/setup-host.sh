@@ -49,6 +49,7 @@ Usage: sudo bash $0
 
   setup                    (default) Full host bring-up, including managed services.
   storage                  Repair shared storage and runner environment; verify both writers.
+  shared-workspace         Repair operator/runner checkout ownership only; no build or restart.
   managed-services         Reconcile managed host policy only; no DB rebuild or app restart.
   managed-services-status  Read-only managed host configuration/drift report.
   cutechess-session        Prepare and start the persistent operator Qt session over SSH.
@@ -87,6 +88,16 @@ managed_services_status() {
         return 1
     fi
     /usr/local/libexec/laplace-managed-deploy host-status
+}
+
+shared_workspace_setup() {
+    if [ "$(id -u)" -ne 0 ]; then
+        red "shared workspace repair needs root — run: sudo bash scripts/setup-host.sh shared-workspace"
+        return 1
+    fi
+    say "Shared workspace — operator and runner checkout ownership"
+    layer1_clean_foreign_build_artifacts
+    green "✓ Checkout and generated outputs are writable by $LAPLACE_OPERATOR and $RUNNER_USER"
 }
 
 # Optional local convenience only — NOT the deploy path.
@@ -382,6 +393,7 @@ case "$MODE" in
         sudo LAPLACE_OPERATOR="$LAPLACE_OPERATOR" bash "$SCRIPT_DIR/setup-storage.sh"
         sudo systemctl restart actions.runner.SaltyPatron-Laplace.hart-server.service
         ;;
+    shared-workspace) shared_workspace_setup ;;
     managed-services) managed_services_setup "${@:2}" ;;
     managed-services-status) managed_services_status ;;
     cutechess-session)
@@ -393,7 +405,7 @@ case "$MODE" in
     stripe)         do_stripe ;;
     -h|--help|help) usage ;;
     *)
-        red "Unknown mode: $MODE — use setup/managed-services/managed-services-status/cutechess-session/status/reset"
+        red "Unknown mode: $MODE — use setup/storage/shared-workspace/managed-services/managed-services-status/cutechess-session/status/reset"
         usage
         exit 64
         ;;
