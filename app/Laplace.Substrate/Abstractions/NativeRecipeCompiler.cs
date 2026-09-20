@@ -13,6 +13,7 @@ public static class NativeRecipeCompiler
     private const uint Rcp1 = 0x31504352u;
     private const uint Rcp2 = 0x32504352u;
     private const uint Rcp3 = 0x33504352u;
+    private const uint Rcp4 = 0x34504352u;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     public static byte[] Compile(SemanticSourceRecipe recipe, int recordDepth = 2)
@@ -39,7 +40,9 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(field => field.ContextField is not null);
         bool hasDefaultSemantics = recipe.Fields.Any(
             field => field.DefaultValue is not null || field.OmitDefaultTestimony);
-        uint version = hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
+        bool hasStructures = recipe.Structures.Count != 0
+            || recipe.ProviderRoutes.Any(route => route.StructurePaths.Count != 0);
+        uint version = hasStructures ? Rcp4 : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
         writer.Write(version);
         writer.Write((uint)recordDepth);
@@ -100,13 +103,24 @@ public static class NativeRecipeCompiler
             WriteHash(writer, lexical);
             writer.Write(rank);
             WriteAliases(writer, aliases, field.ValueAliasProperty ?? field.PropertyName);
-            if (version == Rcp3)
+            if (version is Rcp3 or Rcp4)
             {
                 writer.Write(field.DefaultValue is null ? 0u : 1u);
                 WriteText(writer, field.DefaultValue);
                 writer.Write(field.OmitDefaultTestimony ? 1u : 0u);
             }
             if (hasExtendedHeader) WriteText(writer, field.ContextField);
+        }
+
+        if (version == Rcp4)
+        {
+            writer.Write(checked((uint)recipe.Structures.Count));
+            foreach (SourceRecipeStructure structure in recipe.Structures)
+            {
+                WriteText(writer, structure.SyntaxPath);
+                WriteText(writer, structure.SemanticType);
+                writer.Write((uint)structure.Disposition);
+            }
         }
 
         writer.Write(checked((uint)recipe.ProviderRoutes.Count));
@@ -165,6 +179,17 @@ public static class NativeRecipeCompiler
                 ? identity.ValueAliasProperty ?? identity.PropertyName
                 : recipe.CanonicalProperty(subject.IdentityField);
             WriteAliases(writer, aliases, property);
+            if (version == Rcp4)
+            {
+                writer.Write(checked((uint)route.StructurePaths.Count));
+                foreach (string structurePath in route.StructurePaths)
+                {
+                    if (!recipe.TryStructure(structurePath, out _))
+                        throw new InvalidDataException(
+                            $"Route '{route.RecordName}' references unknown structure '{structurePath}'.");
+                    WriteText(writer, structurePath);
+                }
+            }
         }
 
         writer.Flush();
