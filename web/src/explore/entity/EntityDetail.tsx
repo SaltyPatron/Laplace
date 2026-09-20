@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ErrorText,
@@ -28,14 +28,33 @@ import { useExploreStore } from '../store';
 import type { BillingReceipt, ExploreEntityPreviewResponse, ExploreEntityResponse } from '../types';
 import styles from './EntityDetail.module.css';
 import { EntityHeader } from './EntityHeader';
-import { ExportTab } from './tabs/ExportTab';
-import { GlomeTab } from './tabs/GlomeTab';
-import { GraphTab } from './tabs/GraphTab';
-import { LinksTab } from './tabs/LinksTab';
-import { OverviewTab } from './tabs/OverviewTab';
-import { ProvenanceTab } from './tabs/ProvenanceTab';
-import { StructureTab } from './tabs/StructureTab';
 import type { EntityTab, NeighborMode } from './tabs/types';
+
+const loadOverviewTab = () => import('./tabs/OverviewTab');
+const loadGraphTab = () => import('./tabs/GraphTab');
+const loadGlomeTab = () => import('./tabs/GlomeTab');
+const loadStructureTab = () => import('./tabs/StructureTab');
+const loadLinksTab = () => import('./tabs/LinksTab');
+const loadProvenanceTab = () => import('./tabs/ProvenanceTab');
+const loadExportTab = () => import('./tabs/ExportTab');
+
+const OverviewTab = lazy(() => loadOverviewTab().then((m) => ({ default: m.OverviewTab })));
+const GraphTab = lazy(() => loadGraphTab().then((m) => ({ default: m.GraphTab })));
+const GlomeTab = lazy(() => loadGlomeTab().then((m) => ({ default: m.GlomeTab })));
+const StructureTab = lazy(() => loadStructureTab().then((m) => ({ default: m.StructureTab })));
+const LinksTab = lazy(() => loadLinksTab().then((m) => ({ default: m.LinksTab })));
+const ProvenanceTab = lazy(() => loadProvenanceTab().then((m) => ({ default: m.ProvenanceTab })));
+const ExportTab = lazy(() => loadExportTab().then((m) => ({ default: m.ExportTab })));
+
+const TAB_PREFETCH: Record<EntityTab, () => Promise<unknown>> = {
+  overview: loadOverviewTab,
+  graph: loadGraphTab,
+  glome: loadGlomeTab,
+  structure: loadStructureTab,
+  links: loadLinksTab,
+  provenance: loadProvenanceTab,
+  export: loadExportTab,
+};
 
 const TAB_IDS: EntityTab[] = ['overview', 'graph', 'glome', 'structure', 'links', 'provenance', 'export'];
 
@@ -282,11 +301,13 @@ export function EntityDetail() {
               id: t,
               label: t,
               active: tab === t,
+              onIntent: () => { void TAB_PREFETCH[t](); },
               onClick: () => setTab(t),
             }))}
           />
 
           <div className={fillTab ? styles.tabFill : undefined}>
+            <Suspense fallback={<LoadingText>Loading entity workspace…</LoadingText>}>
             {tab === 'overview' ? <OverviewTab entity={show} /> : null}
             {tab === 'graph' ? (
               <GraphTab
@@ -339,6 +360,7 @@ export function EntityDetail() {
                 consensusRows={show.consensus_out.length + show.consensus_in.length}
               />
             ) : null}
+            </Suspense>
           </div>
         </>
       ) : null}
