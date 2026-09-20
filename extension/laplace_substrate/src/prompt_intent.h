@@ -356,10 +356,11 @@ laplace_prompt_geometry_append(LaplacePromptIntent *intent,
         memcpy(target->hilbert_delta, hilbert_delta, sizeof(target->hilbert_delta));
 }
 
-/* One active prompt source at a time, never one SPI call per candidate.  The
- * angular plan is the exact indexed S3 KNN used by generation.nearest_entity.
- * The Hilbert plan reads at most fanout equal/predecessor/successor keys from
- * the btree and C ranks their exact unsigned 128-bit scalar deltas. */
+/* The whole admitted observation is one geometric source.  The angular plan
+ * is the exact indexed S3 KNN used by generation.nearest_entity. The Hilbert
+ * plan reads at most fanout equal/predecessor/successor keys from the btree and
+ * C ranks their exact unsigned 128-bit scalar deltas. No candidate causes an
+ * additional SPI operation. */
 static inline void
 laplace_prompt_geometry_scan_anchor(
     LaplacePromptIntent *intent, const hash128_t *source, uint32 node,
@@ -535,10 +536,7 @@ laplace_prompt_geometry_shape(LaplacePromptIntent *intent, int fanout,
 }
 
 static inline void
-laplace_prompt_geometry_couple(LaplacePromptIntent *intent,
-                               Datum *values, bool *nulls,
-                               Datum *nodes, bool *node_nulls,
-                               int count, int fanout)
+laplace_prompt_geometry_couple(LaplacePromptIntent *intent, int fanout)
 {
     MemoryContext previous = MemoryContextSwitchTo(intent->owner);
     intent->geometry_frontier = construct_empty_array(BYTEAOID);
@@ -607,12 +605,6 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent,
         elog(ERROR, "prompt geometry: indexed response plan preparation failed: %s",
              SPI_result_code_string(SPI_result));
 
-    HASHCTL ctl = {0};
-    ctl.keysize = sizeof(hash128_t);
-    ctl.entrysize = sizeof(hash128_t);
-    ctl.hcxt = intent->owner;
-    HTAB *anchors = hash_create("prompt geometry anchors", Max(count + 1, 16),
-                                &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     size_t tree_nodes = tier_tree_node_count(intent->input->tree);
     const hash128_t *tree_ids = tier_tree_id_array(intent->input->tree);
     uint32 root_node = TIER_TREE_INVALID;
@@ -625,28 +617,15 @@ laplace_prompt_geometry_couple(LaplacePromptIntent *intent,
     if (root_node == TIER_TREE_INVALID)
         elog(ERROR, "prompt geometry: admitted root is absent from canonical tree");
 
+    /* Geometry is a whole-observation operator.  The canonical root already
+     * carries every exact current occurrence as provenance, so one indexed read
+     * per metric plane preserves the complete prompt without RBAR SPI over its
+     * codepoints/graphemes/tokens. */
     hash128_t *root_angular = palloc(sizeof(hash128_t) * (Size) fanout);
     int root_angular_count = 0;
-    bool found;
-    hash_search(anchors, &intent->root, HASH_ENTER, &found);
     laplace_prompt_geometry_scan_anchor(
         intent, &intent->root, root_node, fanout, angular_plan, hilbert_plan,
         root_angular, &root_angular_count);
-
-    for (int i = 0; i < count; ++i)
-    {
-        if (nulls[i] || node_nulls[i]) continue;
-        int node = DatumGetInt32(nodes[i]);
-        if (node < 0 || (size_t) node >= tree_nodes)
-            elog(ERROR, "prompt geometry: occurrence outside admitted tree");
-        hash128_t source = datum_to_hash128(values[i]);
-        hash_search(anchors, &source, HASH_ENTER, &found);
-        if (found) continue;
-        laplace_prompt_geometry_scan_anchor(
-            intent, &source, (uint32) node, fanout, angular_plan, hilbert_plan,
-            NULL, NULL);
-    }
-    hash_destroy(anchors);
 
     /* Shape refinement is deliberately over the declared root angular KNN
      * population: no hidden 500-row probe and never packed trajectory bits. */
@@ -949,8 +928,7 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
     /* Geometry also responds before ORIENT, but after exact physicality routes
      * have retained their own frontier.  This ordering prevents one plane from
      * suppressing the other when both reach the same canonical identity. */
-    laplace_prompt_geometry_couple(
-        &result, values, nulls, nodes, node_nulls, count, fanout);
+    laplace_prompt_geometry_couple(&result, fanout);
 
     if (count > 0) { pfree(values); pfree(nulls); }
     if (node_count > 0) { pfree(nodes); pfree(node_nulls); }
