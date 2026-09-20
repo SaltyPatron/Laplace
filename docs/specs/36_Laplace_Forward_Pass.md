@@ -16,7 +16,7 @@ The stages are semantic contracts, not an instruction to introduce eleven SQL/cl
 
 ### RESOLVE
 
-Admit/resolve the exact current observation/root, constituent occurrences, session/context identities, prior discourse bindings, world/time/source boundary, open obligations and requested output contract.
+Admit/resolve the exact current observation/root, constituent occurrences, session/context identities, prior discourse bindings, world/time/source boundary, open obligations and requested output contract. Resolve the principal/tenant plus principal/role/relationship authority, granted knowledge packages/capabilities, active caller-selected scope and kernel governance that define the effective operation boundary.
 
 Unicode/grammar decomposition and tier ascent/descent recover structure. They do not privilege one token, noun, regex, topic word or renderable label as the interpretation root.
 
@@ -24,7 +24,7 @@ The prompt/request is first one exact observation/trunk with ordered constituent
 
 ### COUPLE
 
-Compute the **query-relative coupling/response field** of the admitted observation against every eligible indexed plane under the caller's hard scope/resource boundary.
+Compute the **query-relative coupling/response field** of the admitted observation against every eligible indexed plane under the caller's hard authority/scope/resource boundary. A plane/entity/source outside the effective COUPLE capability is not allowed to influence cognition and then be hidden afterward.
 
 The whole active state participates:
 
@@ -116,7 +116,7 @@ Conversely, an explicitly selected typed result does not require a text physical
 
 ### STEER
 
-Apply the oriented task, discourse state, source/world scope, hop/fanout/resource limits, ordinal continuity, standing/uncertainty, observed outcomes, obligations and current residual/frontier state to the proposal set.
+Apply the oriented task, discourse state, source/world scope, principal authority/capabilities, kernel governance, hop/fanout/resource limits, ordinal continuity, standing/uncertainty, observed outcomes, obligations and current residual/frontier state to the proposal set.
 
 STEER is query-relative. It must not silently reintroduce a global popularity score or a preselected semantic interpretation discarded by COUPLE/ORIENT.
 
@@ -124,13 +124,13 @@ STEER is query-relative. It must not silently reintroduce a global popularity sc
 
 Select under the declared deterministic or stochastic policy.
 
-The selected item/act must be supported by the admitted evidence and constraints, and selection must retain enough receipt state to explain which routes/standing/obligations determined eligibility.
+The selected item/act must be supported by the admitted evidence and constraints, and selection must retain enough receipt state to explain which routes/standing/obligations determined eligibility. Authority is checked again at the requested act: permission to inspect/couple knowledge does not automatically grant DERIVE, REALIZE, PERSIST, EXPORT, EXECUTE or DELEGATE.
 
 Pooled model consensus is consumed as witnessed standing/state. N external model answers are not adjudicated here by a hidden judge.
 
 ### REALIZE
 
-Render the selected semantic act/entity/action into the requested surface without using rendering to reclassify it.
+Render the selected semantic act/entity/action into the requested surface without using rendering to reclassify it. REALIZE is itself an authority boundary: an operation may know that relevant knowledge exists yet honestly abstain from revealing operational detail when the principal lacks realization authority. Even disclosure that a restricted scope exists may require DISCOVER.
 
 Realization is bulk/batchable and preserves exact identity. It is subject to the same native execution-grain law as the rest of Laplace; one selected structure must not become thousands of avoidable SQL/PInvoke/high-level per-constituent crossings.
 
@@ -229,7 +229,7 @@ plan / EXPLAIN
 -> reconcile/refund unused reserve
 ```
 
-For a fully specified artifact/program, executed path/counts, target ISA and microarchitecture, scheduling/memory model, initial machine state and clock, preflight may calculate elapsed cycles and corresponding machine time directly. If path counts, cache state, scheduler interference, I/O service time or concurrent load are not fixed, retain those terms as symbolic, conditional or distributional state rather than collapsing them into a benchmark average. Empirical measurements validate/calibrate incomplete physical or environmental models and compare calculated versus observed receipts; they do not define cost when the required machine semantics are already known.
+For a fully specified artifact/program, executed path/counts, target ISA and microarchitecture, scheduling/memory model, initial machine state and clock, preflight may calculate elapsed cycles and corresponding machine time directly. The target-machine derivation may originate from source AST, bytecode, object/container or decoded machine instructions lowered into control/data/dependency structure; it is not limited to timing Laplace's own native operators. If path counts, cache state, scheduler interference, I/O service time or concurrent load are not fixed, retain those terms as symbolic, conditional or distributional state rather than collapsing them into a benchmark average. Empirical measurements validate/calibrate incomplete physical or environmental models and compare calculated versus observed receipts; they do not define cost when the required machine semantics are already known.
 
 ## Native execution grain
 
@@ -250,6 +250,31 @@ Repeated per-candidate SQL functions, recursive CTEs as the inner cognition engi
 
 Checkpoint sources, corpora, tools, user feedback and domain observations meet through canonical content and typed evidence. A pass may explicitly scope source A, source B or pooled A+B for diagnosis. Pooled mode produces one path/act from the admitted evidence; it is not runtime majority voting or a hidden judge.
 
+## Software construction / repair lane
+
+Code generation is structural construction under a declared target grammar/toolchain, not unconstrained source-token prediction.
+
+A code operation should:
+
+```text
+resolve requirement + target language/grammar/toolchain
+→ couple against existing canonical code/AST/call/dependency structure
+→ reuse exact structure where possible
+→ compose known structures where possible
+→ minimally adapt the closest lawful structure where possible
+→ construct only genuinely novel AST nodes
+→ satisfy grammar/type/name/API/dependency obligations
+→ realize source
+→ compile/link/test/analyze/simulate/run
+→ witness typed outcomes
+→ repair the smallest divergent subtree
+→ repeat until obligations close or WHY_NOT remains
+```
+
+Exact duplicate AST subtrees converge by identity. Normalized AST, control/data-flow, algebraic/behavioral evidence and ordered trajectory/Fréchet comparisons may identify deeper duplicate implementations or related defects.
+
+A repository is a recursive application root. One bounded edit should remint only the changed subtree and ancestry; unchanged canonical structure remains shared. Full checkout/export is realization of the resulting root. Development attempts therefore form witnessed root/failure/repair trajectories that can be coupled against other authorized repositories.
+
 ## Code lane
 
 Code generation uses the same program with grammar/AST trajectories and toolchain operations. Generated code is staged as content, compiled/tested under declared tools and the outcomes are witnessed before a subsequent decision can learn from them.
@@ -261,6 +286,7 @@ Each pass exposes a bounded typed trace/receipt sufficient to audit at least:
 ```text
 resolved root / occurrence ids
 active scope + hard caller constraints
+authority roots / capability grants / governance disposition
 coupling channels / responding route families
 surviving interpretations / ambiguity disposition
 compiled provider/operator program
@@ -283,6 +309,8 @@ MCP, HTTP, CLI/SQL inspection, streaming and export adapters must agree at this 
 - Default relation/provider masks do not choose the interpretation before query-relative response is computed.
 - Multiple independent routes converging on one candidate are visible in the trace; dependence/provenance prevents duplicate roots from masquerading as independent support.
 - Hop/fanout/resource ceilings bound actual work over the same substrate and appear in preflight + execution receipts.
+- Effective knowledge/capability authority is resolved explicitly; unauthorized knowledge cannot influence cognition merely because final output would later be redacted.
+- Honest abstention/WHY_NOT can distinguish unknown, unsupported, resource-exhausted and known-but-not-authorized-to-realize states.
 - Multi-turn correction, anaphora, topic return and abstention work after restart.
 - Each emitted constituent changes the next-step coupling/frontier state.
 - Equivalent MCP/OpenAI/CLI operation requests share semantic traces.
