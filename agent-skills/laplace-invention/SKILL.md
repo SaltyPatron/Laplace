@@ -49,13 +49,15 @@ The primitive laws compose into binding product consequences documented in `docs
   retaining different canonical ids and trajectories. Geometry is one response plane, not a
   uniqueness allocator; dense shared regions are usable state, not an identity failure.
 
-## Universal syntax and AST
+## Universal tiered structure and syntax projections
 
-- AST is universal Laplace structure, not a programming-language feature. Qualified syntax providers — Tree-sitter grammars, Laplace-native grammars, standards parsers, codecs and decoders — recover exact concrete nodes/records, fields, spans, order, errors and ambiguity.
-- A versioned recipe lowers provider-specific concrete syntax into one universal typed AST. Documents, utterances, lexical resources, tables, code/binaries, games, media, model/container formats and future digital modalities use the same structural contract.
-- Provider output is not truth and is not canonical content by default. The recipe explicitly dispositions each field/role into canonical content/physicality, occurrence, typed reference, provenance, attributed testimony, deterministic calculation, packaging/reconstruction or unresolved state.
+- Canonical Laplace structure is recursive entity composition plus typed physicality trajectories, not an AST object model. The trajectory owns exact constituent identity/order; roles/grammar constraints remain typed knowledge.
+- UAX #29 is the concrete text segmentation case of the tier law. Other modalities use their own deterministic boundary/composition rules over the same tier machinery.
+- Qualified Tree-sitter grammars, native parsers, standards readers, codecs and decoders are providers when needed. Their CST/AST/record output is evidence or an external projection, not a second ontology.
+- Grammar productions, precedence, associativity, delimiter rules, fields and queries may themselves be ingested as entities/relations/attestations and used to derive higher-tier composition.
+- Prefer streaming/native standards readers for large shallow structured sources when they preserve the same facts more directly. Tree-sitter remains valuable for grammar knowledge, compatibility parsing, validation and realization.
+- Recipes disposition recovered facts into canonical content/physicality, occurrence, typed reference, provenance, testimony, calculation, packaging/reconstruction or unresolved state. AST/CST/IR may be derived/exported when an external consumer requires them.
 - The same recovered value may participate in multiple classes: e.g. a definition sentence is canonical content with physicality while `sense HAS_DEFINITION sentence` is separately attributed testimony.
-- Prefer recipe + universal-AST lowering over source-named emitters and private semantic object models. Tree-sitter is here to supply reusable concrete syntax across a large grammar estate; non-Tree-sitter providers must still lower through the same AST/substrate law.
 
 ## Physicality, trajectory, and O(tiers)
 
