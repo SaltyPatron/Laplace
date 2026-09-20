@@ -156,6 +156,25 @@ public static class ContentTierSpine
         out Hash128 rootId) =>
         stage.EmitContentTree(tree, sourceId, existenceBitmap, out rootId);
 
+    /// <summary>
+    /// Stage authored source bytes through the source-preserving tier ladder.
+    /// This is the source analogue of <see cref="TryStageIntoBuilder"/>: the
+    /// constituent/trajectory law is shared, while NFC normalization is intentionally
+    /// disabled so exact source representation remains reconstructable.
+    /// </summary>
+    public static bool TryStageSourceIntoBuilder(
+        SubstrateChangeBuilder builder,
+        ReadOnlySpan<byte> sourceUtf8,
+        Hash128 sourceId,
+        out Hash128 rootId)
+    {
+        rootId = default;
+        if (sourceUtf8.IsEmpty) return false;
+        using var tree = BuildSourceTree(sourceUtf8);
+        return tree is not null
+            && EmitTree(builder, tree, sourceId, ReadOnlySpan<byte>.Empty, out rootId);
+    }
+
     public static bool TryStageIntoBuilder(
         SubstrateChangeBuilder builder,
         ReadOnlySpan<byte> canonicalUtf8,
