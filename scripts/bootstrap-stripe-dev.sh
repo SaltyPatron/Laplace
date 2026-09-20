@@ -46,7 +46,8 @@ Recommended flow:
   2) Or run this script and enter sk_test_... when prompted
   3) source ~/.config/laplace/stripe-dev.env
   4) On Windows: scripts\win\install-stripe-listen.cmd (NSSM) for webhook forwarding
-  5) Call /v1/billing/catalog/sync then preflight with LAPLACE_BILLING_BYPASS=false
+  5) Call /v1/billing/catalog/sync. Development remains non-gating; use
+     LAPLACE_BILLING_BYPASS=false only for an intentional enforcement exercise.
 EOF
 }
 

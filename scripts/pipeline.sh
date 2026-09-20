@@ -647,7 +647,7 @@ phase_perfcache_guc() {
 
 phase_api_env() {
   echo "===== PHASE — API ENV ====="
-  local env_file="$LAPLACE_INSTALL_PREFIX/app/laplace-api.env" bin example ops_log_dir
+  local env_file="$LAPLACE_INSTALL_PREFIX/app/laplace-api.env" bin example ops_log_dir billing_bypass
   set_api_env() {
     local key="$1" value="$2"
     if grep -q "^${key}=" "$env_file"; then
@@ -676,7 +676,16 @@ phase_api_env() {
     }
     set_api_env LAPLACE_AUTH_MODE identity
     set_api_env LAPLACE_BILLING_STORE postgres
-    set_api_env LAPLACE_BILLING_BYPASS false
+    billing_bypass="${LAPLACE_BILLING_BYPASS:-true}"
+    case "${billing_bypass,,}" in
+      true|1) billing_bypass=true ;;
+      false|0) billing_bypass=false ;;
+      *)
+        echo "::error::LAPLACE_BILLING_BYPASS must be true, false, 1, or 0" >&2
+        return 1
+        ;;
+    esac
+    set_api_env LAPLACE_BILLING_BYPASS "$billing_bypass"
     set_api_env LAPLACE_PUBLIC_BASE_URL "${LAPLACE_PUBLIC_BASE_URL%/}"
     set_api_env LAPLACE_DATA_PROTECTION_KEYS "$LAPLACE_INSTALL_PREFIX/secrets/data-protection"
   fi

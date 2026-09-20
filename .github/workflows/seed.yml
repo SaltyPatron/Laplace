@@ -131,6 +131,7 @@ jobs:
           # never invalidate a usable runtime or force another full product build.
           export LAPLACE_SETUP_USE_CMAKE=false
           export LAPLACE_SETUP_REQUIRE_BUILT_REVISION=false
+          export LAPLACE_CLI_BIN=/opt/laplace/bin/laplace
           source scripts/ci-environment.sh
 
           # Operator execution must not depend on presentation/help rendering.

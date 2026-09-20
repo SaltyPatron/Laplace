@@ -155,7 +155,11 @@ internal static class AppComposition
                 ?? $"{externalBase}/billing/cancel";
             options.Bypass = FirstConfig("LAPLACE_BILLING_BYPASS")?.ToLowerInvariant() switch
             {
-                null => string.IsNullOrWhiteSpace(options.ApiKey),
+                // Configuring Stripe activates the real catalog, checkout,
+                // webhook, portal and entitlement integrations. It must not
+                // silently turn a development installation into a paywall.
+                // Enforcement is a separate, explicit deployment decision.
+                null => true,
                 "true" or "1" => true,
                 "false" or "0" => false,
                 _ => throw new InvalidOperationException("LAPLACE_BILLING_BYPASS must be true, false, 1, or 0.")

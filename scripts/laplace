@@ -2,6 +2,21 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+
+# Data-operation workflows intentionally consume the already-published CLI.
+# They do not own a product build, and a source-only checkout should not force
+# one merely to invoke the deployed ingestion surface.
+native_candidates=(
+  "${LAPLACE_CLI_BIN:-}"
+  "/opt/laplace/bin/laplace"
+)
+for candidate in "${native_candidates[@]}"; do
+  [[ -n "$candidate" && -x "$candidate" ]] || continue
+  [[ "$(readlink -f "$candidate")" != "$SELF" ]] || continue
+  export LAPLACE_DB="${LAPLACE_DB:-Host=/var/run/postgresql;Username=laplace_admin;Database=${PGDATABASE:-laplace}}"
+  exec "$candidate" "$@"
+done
 
 candidates=()
 if [[ -n "${LAPLACE_BUILD_ROOT:-}" ]]; then
@@ -24,7 +39,7 @@ for candidate in "${candidates[@]}"; do
 done
 
 [[ -n "$DLL" ]] || {
-  echo "laplace: CLI not built — run: bash $ROOT/scripts/pipeline.sh build" >&2
+  echo "laplace: neither deployed nor checkout CLI is available" >&2
   exit 1
 }
 
