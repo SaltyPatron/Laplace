@@ -1,15 +1,13 @@
 #pragma once
 
 /*
- * Modality number perfcache v1 — a derived ROM for the CURRENT LEGACY
- * decimal-number media recipe. See docs/specs/33_Perfcache_Blob_Law.md.
+ * Modality number perfcache v1 — derived ROM for common canonical scalar roots.
+ * See docs/specs/33_Perfcache_Blob_Law.md and modality-ladder-law.md.
  *
- * v1 materializes unsigned decimal integer roots 0..255 for O(1) lookup.
- * That fact does NOT define the ontology of image/audio physical samples and
- * does not require future media recipes to identify a sample with its decimal
- * Unicode spelling. docs/invention/modality-ladder-law.md and GH #1134 own the
- * corrected media representation. Regenerate/re-scope/retire this blob rather
- * than forcing a new recipe to preserve its legacy semantics.
+ * v1 materializes unsigned decimal integer roots 0..255 for O(1) lookup:
+ * 255 is the ordered content ['2','5','5'], not a private channel/amplitude atom.
+ * The ordinary content path defines identity; this ROM only accelerates common
+ * values. Fractional/wider scalars compose normally when absent from the ROM.
  *
  * Never seed DB semantic authority from this file; it is rebuildable derived state.
  */
