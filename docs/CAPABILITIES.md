@@ -119,6 +119,20 @@ request
 
 Semantic work and implementation waste remain distinguishable. An inefficient implementation that burns excess SQL/SPI/PInvoke cycles is a defect, not permanent pricing authority.
 
+## Reusable numeric/scalar structure
+
+Numeric values follow the same content-addressed reuse law as words, AST subtrees and chess positions.
+
+~~~text
+0.34567
+-> ['0','.','3','4','5','6','7']
+-> canonical scalar composition/root
+~~~
+
+The root is created/reused as content. Audio samples, image channels, model coordinates, measurements and other uses add typed occurrences around that root. Repeating an exact amplitude a million times does not record the scalar a million times.
+
+The current dense 0..255 number perfcache is only an accelerator for common integer roots; it is not the numeric universe. Long finite constants such as pi prefixes are just wider ordered compositions.
+
 ## Deterministic machine-cost derivation
 
 Laplace's decomposition law applies to programs and machines as well as documents.
