@@ -1,6 +1,6 @@
 # Structural software construction
 
-This guide explains the software-development consequence of Laplace's universal typed AST, canonical identity, trajectories, witnessing, query-relative coupling and forward program.
+This guide explains the software-development consequence of Laplace's canonical tiered compositions, physicality trajectories, grammar/rule knowledge, witnessing, query-relative coupling and forward program. AST/CST/IR are derived projections for external toolchains, not a parallel canonical ontology.
 
 It is a product/implementation guide under docs/INVENTION.md, docs/CAPABILITIES.md, and specs 36/37. It does not define a private code-generation architecture.
 
@@ -12,12 +12,12 @@ Laplace constructs software structure. It does not primarily predict source text
 requirement / obligation
 -> exact target language + grammar + runtime/toolchain generation
 -> canonical repository/application state
--> COUPLE against known AST/call/dependency/repair state
+-> COUPLE against known canonical composition/trajectory/call/dependency/repair state
 -> reuse
 -> compose
 -> minimally adapt
--> construct novel AST only where necessary
--> REALIZE source
+-> construct novel canonical composition only where necessary
+-> REALIZE AST/CST/source/IR as required by the target
 -> compile / link / test / analyze / simulate / run
 -> WITNESS outcomes
 -> repair smallest divergent subtree
