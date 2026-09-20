@@ -161,6 +161,7 @@ class ProductStageOwnershipContract(unittest.TestCase):
             "require_built_revision",
             "release_candidate_current_before_mutation",
             'run_release_mutation_window "install,database"',
+            "run_db_tests",
             "run_publish",
         ]
         positions = [candidate.index(token) for token in mutation]
@@ -175,10 +176,10 @@ class ProductStageOwnershipContract(unittest.TestCase):
             "run_install",
             'csv_selected "$actions" database',
             "run_database_maintenance --prepare",
-            "run_db_tests",
         ]
         positions = [mutation_window.index(token) for token in mutation]
         self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("run_db_tests", mutation_window)
         self.assertNotIn('run_release_mutation_window "$actions"', mutation_window)
 
         activation = function("run_release_activation")
@@ -203,7 +204,12 @@ class ProductStageOwnershipContract(unittest.TestCase):
         self.assertNotIn('csv_selected "$actions" live', delivery)
         self.assertNotIn("run_install", delivery)
         self.assertNotIn("run_database_maintenance --prepare", delivery)
-        self.assertNotIn("run_db_tests", delivery)
+        self.assertIn("run_db_tests", delivery)
+        self.assertLess(
+            delivery.index('run_release_mutation_window "$actions"'),
+            delivery.index("run_db_tests"),
+        )
+        self.assertLess(delivery.index("run_db_tests"), delivery.index("run_publish"))
         self.assertIn("run_publish", delivery)
         self.assertIn("verify_installed_product", delivery)
         self.assertIn("reconcile_installed_product", delivery)
