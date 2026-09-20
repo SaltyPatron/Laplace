@@ -113,7 +113,7 @@ Code construction is not a private model path and is not unconstrained text gene
 
 ```text
 resolve exact target language / grammar / runtime / toolchain
--> couple requirement against canonical AST/repository/call/dependency state
+-> couple requirement against canonical tier/trajectory/repository/call/dependency state; derive/project AST/CST only for the selected consumer/toolchain
 -> reuse exact canonical structures first
 -> compose known structures next
 -> minimally adapt close lawful subtrees
