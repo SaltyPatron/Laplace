@@ -52,7 +52,7 @@ peer=$("$PG_PREFIX/bin/psql" -X -w -h /var/run/postgresql -U laplace_admin -d po
 [[ "$peer" == "laplace_admin on postgres" ]] || { echo "::error::PostgreSQL peer auth failed: $peer" >&2; exit 1; }
 
 ucd_root="${LAPLACE_UCD_PATH:-${LAPLACE_DATA_ROOT:-/vault/Data}/UCD/Public/UCD/latest}"
-ucd="$ucd_root/ucdxml/ucd.all.flat.zip"
+ucd="$ucd_root/ucdxml/ucd.all.grouped.zip"
 [[ -f "$ucd" ]] || { echo "::error::UCD input missing: $ucd" >&2; exit 1; }
 [[ -f "$ucd_root/ReadMe.txt" ]] || { echo "::error::UCD release identity missing: $ucd_root/ReadMe.txt" >&2; exit 1; }
 ucd_version=$(sed -n 's/^set(LAPLACE_UNICODE_VERSION "\([^"]*\)".*/\1/p' engine/CMakeLists.txt | head -1)
