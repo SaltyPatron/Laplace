@@ -50,6 +50,7 @@ Usage: sudo bash $0
   setup                    (default) Full host bring-up, including managed services.
   storage                  Repair shared storage and runner environment; verify both writers.
   shared-workspace         Repair operator/runner checkout ownership only; no build or restart.
+  migrations               Apply database migrations only; reuse the completed build.
   managed-services         Reconcile managed host policy only; no DB rebuild or app restart.
   managed-services-status  Read-only managed host configuration/drift report.
   cutechess-session        Prepare and start the persistent operator Qt session over SSH.
@@ -394,6 +395,7 @@ case "$MODE" in
         sudo systemctl restart actions.runner.SaltyPatron-Laplace.hart-server.service
         ;;
     shared-workspace) shared_workspace_setup ;;
+    migrations)      layer1_up ;;
     managed-services) managed_services_setup "${@:2}" ;;
     managed-services-status) managed_services_status ;;
     cutechess-session)
@@ -405,7 +407,7 @@ case "$MODE" in
     stripe)         do_stripe ;;
     -h|--help|help) usage ;;
     *)
-        red "Unknown mode: $MODE — use setup/storage/shared-workspace/managed-services/managed-services-status/cutechess-session/status/reset"
+        red "Unknown mode: $MODE — use setup/storage/shared-workspace/migrations/managed-services/managed-services-status/cutechess-session/status/reset"
         usage
         exit 64
         ;;
