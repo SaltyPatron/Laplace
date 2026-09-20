@@ -94,6 +94,28 @@ The current GeometryZM trajectory carrier is exact serialization. Four binary64 
 
 Never run geometric path metrics over packed hash carriers and call the result semantic geometry. Never interpret a 16-bit packed ordinal/run field as a global composition-size ceiling when the trajectory implementation supplies logical order/RLE semantics beyond that field width.
 
+### Reusable scalar trajectories
+
+Finite digital scalars are compositions, not atom-allocation events. Do not mint a new
+Tier-0 entity for an amplitude, color channel, tensor value, measurement, or other
+ordinary numeric value.
+
+Under the declared exact scalar recipe:
+
+```text
+0.34567 -> ['0','.','3','4','5','6','7'] -> one canonical scalar root
+255     -> ['2','5','5']                 -> one canonical number root
+```
+
+Repeated occurrences reuse that root. Their sample/channel/pixel/tensor ordinal, time,
+precision, source and modality role remain separate occurrence/physicality state.
+
+A finite prefix of pi is the same mechanism at larger width. The repository benchmark
+explicitly notes that pi's million digits compose as one word, and the trajectory core
+proves compositions wider than the local 16-bit packed ordinal field round-trip. Never
+interpret the open Tier-0 address law as permission to allocate arbitrary media values
+into new atom ranks.
+
 ### One structure, many overlapping webs
 
 The substrate is not adequately modeled as a flat `node -> edge -> node` graph. Canonical entities simultaneously participate in recursive composition DAGs, containing trajectories, occurrences, typed attestations, consensus relations, contexts, sources, semantic neighborhoods and structural/geometric neighborhoods. These structures overlap because they reuse the same identities.
