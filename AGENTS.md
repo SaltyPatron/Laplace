@@ -25,6 +25,24 @@ Load these sources before selecting or changing work:
 
 When two derived sources disagree, return to the higher authority and correct the lower source. A stale issue, comment, checklist, milestone, branch description, status report, or historical implementation cannot override the invention. Do not ask the user to restate a requirement already present in higher authority.
 
+## Compound-capability preservation
+
+Read `docs/CAPABILITIES.md` before narrowing a task to a local subsystem. The invention's value often appears only when multiple primitive laws are composed. Those compound consequences are part of the accepted machine, not optional marketing prose.
+
+In particular, preserve these consequences when relevant:
+
+- grammar/typed-AST code construction with reuse and minimal structural mutation rather than token-ish source generation;
+- exact/normalized/semantic duplicate-code convergence and consolidation as part of construction;
+- compile/test/simulation/runtime failures as witnessed repair trajectories that affect later construction;
+- cross-repository structural/trajectory comparison, including Fréchet where order/curve shape is relevant;
+- repository root as the complete application object, with structural sharing and checkout/export as realization;
+- verified root-transition patch/deployment rather than file-diff ceremony as semantic authority;
+- exact/symbolic machine-cost derivation from artifacts, execution counts, ISA, microarchitecture, machine state and clock;
+- knowledge grants/capabilities and governance as explicit authority over one shared knowledge world;
+- hops/fanout/provider/resource budgets as compute-depth/breadth economics over that same world.
+
+A proof artifact does not become the feature. If accepted scope is "construct/fix/export/deploy/analyze," completing a test, gate, issue, plan, benchmark harness or audit without the executable capability is non-success.
+
 ## The invention model agents must preserve
 
 ## Invention-first execution and anti-status-theater law
