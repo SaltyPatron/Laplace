@@ -87,6 +87,7 @@ Examples:
 - [Structural software construction](guides/software-construction.md) — grammar/AST construction, canonical reuse, duplicate convergence, witnessed repairs, cross-repository maintenance and root-transition deployment.
 - [Knowledge authority, governance and security](guides/knowledge-authority.md) — knowledge packages, capabilities, honest abstention, Red Spear / Blue Shield / White Judge and effective-mind composition.
 - [Machine-cost analysis and measured cognition](guides/machine-cost-analysis.md) — artifact→ISA/microarchitecture cycle derivation and compute-depth billing.
+- [Compositional perfcache lattice](guides/compositional-perfcache.md) — dense/sparse mmap ROMs for reusable scalar/pixel/patch/region/image/audio/chess/code structures and cross-modality cache reuse.
 - Knowledge Arena — pinned-world games exposing paths, evidence, hops/fanout and receipts.
 - Name Game — human-vs-Laplace resolution/identity/event latency proof.
 - Chess Forward Pass — chess as a cross-modal proving domain using the same coupling/ISA program.
