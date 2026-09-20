@@ -32,11 +32,12 @@ public static class NativeRecipeCompiler
 
         using var image = new MemoryStream();
         using var writer = new BinaryWriter(image, Utf8, leaveOpen: true);
-        writer.Write(recipe.DelimitedSyntax is null ? 0x31504352u : 0x32504352u);
+        bool extended = recipe.DelimitedSyntax is not null || recipe.Fields.Any(field => field.ContextField is not null);
+        writer.Write(extended ? 0x32504352u : 0x31504352u);
         writer.Write((uint)recordDepth);
+        if (extended) writer.Write(recipe.DelimitedSyntax is null ? 0u : 1u);
         if (recipe.DelimitedSyntax is { } syntax)
         {
-            writer.Write(1u); // Native delimited provider; shared field/route instructions follow.
             WriteText(writer, syntax.RecordName);
             WriteText(writer, syntax.NamespaceUri);
             WriteText(writer, syntax.Separator);
@@ -91,6 +92,7 @@ public static class NativeRecipeCompiler
             WriteHash(writer, lexical);
             writer.Write(rank);
             WriteAliases(writer, aliases, field.ValueAliasProperty ?? field.PropertyName);
+            if (extended) WriteText(writer, field.ContextField);
         }
 
         writer.Write(checked((uint)recipe.ProviderRoutes.Count));

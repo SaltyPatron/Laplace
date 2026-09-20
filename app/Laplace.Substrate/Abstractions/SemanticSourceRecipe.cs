@@ -65,7 +65,8 @@ public sealed record SourceRecipeField(
     string? RelationParent = null,
     double? RelationRank = null,
     string? LexicalRelationName = null,
-    string? ValueAliasProperty = null);
+    string? ValueAliasProperty = null,
+    string? ContextField = null);
 
 public sealed record SourceRecipeStructure(
     string SyntaxPath,
@@ -290,10 +291,14 @@ public sealed class SemanticSourceRecipe
     public bool TryStructure(string syntaxPath, out SourceRecipeStructure structure) =>
         _structures.TryGetValue(syntaxPath, out structure!);
 
-    public string CanonicalValue(string propertyName, string value) =>
-        _valueAliases.TryGetValue(ValueAliasKey(propertyName, value), out string? canonical)
-            ? canonical
-            : value;
+    public string CanonicalValue(string propertyName, string value)
+    {
+        string aliasProperty = Fields.FirstOrDefault(field =>
+            field.PropertyName == propertyName && field.ValueAliasProperty is not null)
+            ?.ValueAliasProperty ?? propertyName;
+        return _valueAliases.TryGetValue(ValueAliasKey(aliasProperty, value), out string? canonical)
+            ? canonical : value;
+    }
 
     public string CanonicalProperty(string alias) =>
         _propertyAliases.TryGetValue(alias, out string? canonical) ? canonical : alias;
@@ -361,6 +366,11 @@ public sealed class SemanticSourceRecipe
             Append(canonical, field.RelationRank?.ToString("R", CultureInfo.InvariantCulture) ?? "");
             Append(canonical, field.LexicalRelationName ?? "");
             Append(canonical, field.ValueAliasProperty ?? "");
+            if (field.ContextField is not null)
+            {
+                canonical.Append("|context");
+                Append(canonical, field.ContextField);
+            }
         }
         foreach (SourceRecipeStructure structure in structures)
         {

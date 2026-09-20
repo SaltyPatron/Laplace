@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
+using Laplace.Decomposers.Structured;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Decomposers.ISO;
 using Laplace.Decomposers.Tests;
@@ -326,36 +328,18 @@ public sealed class UnicodeDecomposerTests
     [Fact]
     public void Ucdxml_recipe_accounts_for_binary_reference_content_and_top_level_structures()
     {
-        string file = Path.Combine(
-            Path.GetTempPath(), "laplace-property-aliases-" + Guid.NewGuid().ToString("N") + ".txt");
-        try
-        {
-            File.WriteAllText(file,
-                "gc ; General_Category\n"
-                + "WSpace ; White_Space\n"
-                + "kDefinition ; kDefinition\n");
-
-            UcdXmlRecipe recipe = UcdXmlRecipe.Load(file);
-            SourceRecipeField gc = recipe.Recipe.Field("repertoire/*/@gc");
-            SourceRecipeField whiteSpace = recipe.Recipe.Field("repertoire/*/@WSpace");
-            SourceRecipeField definition = recipe.Recipe.Field("repertoire/*/@kDefinition");
-
-            Assert.Equal("General_Category", gc.PropertyName);
-            Assert.Equal(SourceValueKind.Enumerated, gc.ValueKind);
-            Assert.Equal(SourceValueKind.Boolean, whiteSpace.ValueKind);
-            Assert.Equal("White_Space", whiteSpace.PropertyName);
-            Assert.Equal(SourceValueKind.Text, definition.ValueKind);
-            Assert.True(definition.Disposition.HasFlag(SourceFieldDisposition.Content));
-            Assert.Contains(recipe.Recipe.Structures,
-                static s => s.SyntaxPath == "named-sequences");
-            Assert.Contains(recipe.Recipe.Structures,
-                static s => s.SyntaxPath == "do-not-emit");
-            Assert.Equal(UcdXmlRecipe.RepertoireAttributes.Length + 16, recipe.Recipe.Fields.Count);
-        }
-        finally
-        {
-            File.Delete(file);
-        }
+        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
+        SourceRecipeField gc = recipe.Recipe.Field("repertoire/*/@gc");
+        SourceRecipeField whiteSpace = recipe.Recipe.Field("repertoire/*/@WSpace");
+        SourceRecipeField definition = recipe.Recipe.Field("repertoire/*/@kDefinition");
+        Assert.Equal("General_Category", gc.PropertyName);
+        Assert.Equal(SourceValueKind.Enumerated, gc.ValueKind);
+        Assert.Equal(SourceValueKind.Boolean, whiteSpace.ValueKind);
+        Assert.Equal("White_Space", whiteSpace.PropertyName);
+        Assert.Equal(SourceValueKind.Text, definition.ValueKind);
+        Assert.True(definition.Disposition.HasFlag(SourceFieldDisposition.Content));
+        Assert.Contains(recipe.Recipe.Structures, static s => s.SyntaxPath == "named-sequences");
+        Assert.Contains(recipe.Recipe.Structures, static s => s.SyntaxPath == "do-not-emit");
     }
 
     [SkippableFact]
@@ -369,11 +353,19 @@ public sealed class UnicodeDecomposerTests
         Skip.IfNot(File.Exists(aliases) && File.Exists(archivePath),
             $"selected UCD generation is not present at {TestIngestPaths.UcdLatest}");
 
-        UcdXmlRecipe recipe = UcdXmlRecipe.Load(aliases);
+        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
         ZipArchiveEntry entry = Assert.Single(archive.Entries);
         await using Stream xml = entry.Open();
-        await recipe.ValidateProviderAsync(xml);
+        var runtime = new NativeSourceRecipe(recipe.Recipe);
+        long records = 0;
+        await foreach (var change in runtime.ReadChangesAsync(xml, UnicodeDecomposer.Source, 1,
+                           "complete-ucd", 32768, 32L * 1024 * 1024, 64 * 1024))
+        {
+            records += change.Metadata.InputUnitsConsumed;
+            foreach (var stage in change.IntentStages) stage.Dispose();
+        }
+        Assert.True(records > 0);
     }
 
     [SkippableFact]
@@ -412,47 +404,47 @@ public sealed class UnicodeDecomposerTests
     [Fact]
     public void Ucd_recipe_reuses_iso15924_script_identity()
     {
-        string root = Path.Combine(
-            Path.GetTempPath(), "laplace-ucd-aliases-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            string properties = Path.Combine(root, "PropertyAliases.txt");
-            File.WriteAllText(properties, "sc ; Script\nscx ; Script_Extensions\nblk ; Block\n");
-            File.WriteAllText(
-                Path.Combine(root, "PropertyValueAliases.txt"),
-                "sc ; Latn ; Latin\nblk ; ASCII ; Basic_Latin\n");
-
-            UcdXmlRecipe recipe = UcdXmlRecipe.Load(properties);
-            Assert.Equal("Latin", recipe.CanonicalValue("Script", "Latn"));
-            Assert.Equal("Latin", recipe.CanonicalValue("Script_Extensions", "Latn"));
-            Assert.Equal("Basic_Latin", recipe.CanonicalValue("Block", "Basic Latin"));
-            Assert.Equal(
-                LanguageGraph.ScriptEntityId("Latin"),
-                Hash128.OfCanonical("unicode/script/Latin/v1"));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
+        Assert.Equal("Latin", recipe.CanonicalValue("Script", "Latn"));
+        Assert.Equal("Latin", recipe.CanonicalValue("Script_Extensions", "Latn"));
+        Assert.Equal("Basic_Latin", recipe.CanonicalValue("Block", "Basic Latin"));
+        Assert.Equal(LanguageGraph.ScriptEntityId("Latin"), Hash128.OfCanonical("unicode/script/Latin/v1"));
     }
 
     [Fact]
     public void Ucd_structured_references_preserve_every_target_and_source_qualifier()
     {
-        IReadOnlyList<UcdXmlRecipe.StructuredCodepointReference> references =
-            UcdXmlRecipe.ParseStructuredReferences(
-                "repertoire/*/@kSemanticVariant",
-                "U+5EDD<kMatthews U+53AE<kFenn,kMatthews");
-
-        Assert.Equal(2, references.Count);
-        Assert.Equal(0x5EDDu, references[0].Codepoint);
-        Assert.Equal("kMatthews", references[0].Qualifier);
-        Assert.Equal(0x53AEu, references[1].Codepoint);
-        Assert.Equal("kFenn,kMatthews", references[1].Qualifier);
-        Assert.Throws<InvalidDataException>(() =>
-            UcdXmlRecipe.ParseStructuredReferences(
-                "repertoire/*/@kSemanticVariant", "kMatthews"));
+        var recipe = InstalledSourceGeneration.Load("Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
+        byte[] program = NativeRecipeCompiler.Compile(recipe.Recipe);
+        List<AttestationRow> Parse(string value)
+        {
+            using var stream = NativeRecipeStream.Open(program, UnicodeDecomposer.Source, 1);
+            string xml = "<ucd xmlns=\"http://www.unicode.org/ns/2003/ucd/1.0\"><repertoire>"
+                + "<char cp=\"4E00\" kSemanticVariant=\"" + value.Replace("<", "&lt;")
+                + "\" kCompatibilityVariant=\"U+7471\"/></repertoire></ucd>";
+            stream.Feed(Encoding.UTF8.GetBytes(xml), final: true);
+            var rows = new List<AttestationRow>();
+            while (true)
+            {
+                using var stage = stream.Drain(32768, 32L * 1024 * 1024, out _);
+                if (stage is null) return rows;
+                CopyTupleParser.DecodeAttestations([stage.TupleBuffer(IntentStageTable.Attestations)], rows);
+            }
+        }
+        var rows = Parse("U+5EDD<kMatthews U+53AE<kFenn,kMatthews");
+        var relation = RelationTypeRegistry.RelationTypeId("UCD_KSEMANTICVARIANT");
+        var references = rows.Where(row => row.TypeId == relation).ToArray();
+        Assert.Equal(2, references.Length);
+        using var expected = new SubstrateChangeBuilder(UnicodeDecomposer.Source, "reference-contexts");
+        Assert.Contains(references, row => row.ObjectId is { } id
+            && CodepointPerfcache.TryLookupCodepoint(id, out uint cp) && cp == 0x5EDD
+            && row.ContextId == ContentEmitter.Emit(expected, "kMatthews", UnicodeDecomposer.Source));
+        Assert.Contains(references, row => row.ObjectId is { } id
+            && CodepointPerfcache.TryLookupCodepoint(id, out uint cp) && cp == 0x53AE
+            && row.ContextId == ContentEmitter.Emit(expected, "kFenn,kMatthews", UnicodeDecomposer.Source));
+        Assert.Contains(rows, row => row.TypeId == RelationTypeRegistry.RelationTypeId("UCD_KCOMPATIBILITYVARIANT")
+            && row.ObjectId is { } id && CodepointPerfcache.TryLookupCodepoint(id, out uint cp) && cp == 0x7471);
+        Assert.Throws<InvalidDataException>(() => Parse("kMatthews"));
     }
 
     [Fact]

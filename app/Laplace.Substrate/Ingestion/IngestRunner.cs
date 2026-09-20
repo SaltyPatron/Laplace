@@ -662,14 +662,16 @@ public sealed class IngestRunner
             }
         }
 
-        string status = explained is { } exp
-            ? exp.Status
-            : DeriveRunStatus(
-                result.UnitsFailed,
-                emptySourceNoOp,
-                capped: options.DecomposerOptions.MaxInputUnits > 0,
-                filesDone: counters.FilesDone,
-                filesTotal: declaredFiles);
+        string status = DeriveRunStatus(
+            result.UnitsFailed,
+            emptySourceNoOp,
+            capped: options.DecomposerOptions.MaxInputUnits > 0,
+            filesDone: counters.FilesDone,
+            filesTotal: declaredFiles);
+        // An explanation may name an otherwise complete no-op. It cannot
+        // override failed units, unfinished files, or an explicit input cap.
+        if (status == "ok" && explained is { } exp)
+            status = exp.Status;
         log.LogInformation(
             "INGEST_COMPLETE source={Source} layer={Layer} input_done={InputDone} input_total={InputTotal} "
             + "files_done={FilesDone} files_total={FilesTotal} files_reused_complete={FilesReusedComplete} "
