@@ -175,6 +175,25 @@ Likewise, a Laplace “layer” is a routed processing/fold round over extensibl
 
 Laplace is not required to reproduce transformer mathematics in order to reproduce useful AI functions.
 
+### Perfcache composition and cross-modality reuse
+
+Perfcaches form a compositional lattice over deterministic reusable structure; they are not one blob per modality.
+
+A complete finite tier may be a dense direct-address ROM. A huge possible tier may cache the finite admitted/hot canonical estate with an explicit deterministic sparse lookup. Higher-tier caches are lawful.
+
+Examples:
+
+```text
+numbers -> pixels -> patches -> regions -> images
+numbers -> samples -> windows -> segments -> tracks
+images + audio -> video timing/synchronization
+piece/square -> chess positions -> transitions/lines
+```
+
+Video must reuse image/audio caches rather than creating video-private copies of their lower structures. The same image root may be referenced by many files/documents/videos while existing once as canonical content/cache state.
+
+Prefer cache lookup on the request side to produce ids/coords/Hilbert/ranges that feed normal indexed PostgreSQL/SPI probes. Do not hide indexed columns behind per-row cache functions and destroy index eligibility. If an expression-index function reads mmap state, its immutability/generation contract must make PostgreSQL's IMMUTABLE promise truthful.
+
 ### Content novelty is not observation volume
 
 Same canonical content converges. Re-observing `king`, a sentence, a chess line, an AST subtree or another exact composition does not require a duplicate canonical structure. New observations may add occurrences, provenance, testimony, statistics and standing around already-existing structure.
