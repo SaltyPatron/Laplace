@@ -236,3 +236,8 @@ That principle compounds upward.
 If every frame of a video is already a known image root, video construction should not recompute every pixel/patch/region. It should mostly compose/reuse frame roots plus the genuinely new timing/sequence structure.
 
 This is the same structural-sharing principle used for repositories and software patches.
+
+
+## Current implementation owner
+
+#1711 owns the common cache registry/dependency manifest, dense/sparse lookup framework, image/audio higher-tier cache generations, video reuse and index-preserving integration.
