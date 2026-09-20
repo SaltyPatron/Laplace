@@ -84,9 +84,9 @@ TEST(LaplaceCoreHash128, MerkleComposesChildrenDeterministically) {
 
 TEST(LaplaceCoreHash128, MerkleIsTierBlind) {
     // CONTENT-ADDRESSING LAW: same content = same hash. The id is a function
-    // of the child-id sequence only — tier is not identity. Disambiguating
-    // the same content observed at different tiers is a schema-level compound
-    // key (id, tier), never part of the id.
+    // of the child-id sequence only — tier is not identity. The canonical entity
+    // is one id/row; tier/type multiplicity is retained separately as structural
+    // interpretation/physicality/occurrence state, never as another entity key.
     const uint8_t a_in[] = "child_a";
     hash128_t a;
     hash128_blake3(a_in, sizeof(a_in) - 1, &a);
