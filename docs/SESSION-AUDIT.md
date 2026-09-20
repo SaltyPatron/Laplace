@@ -9,7 +9,7 @@ That record remains in Git history for accountability and archaeology. It is int
 Use instead:
 
 - [`README.md`](README.md) — documentation authority map;
-- [`INVENTION.md`](INVENTION.md) / [`INVENTIONS.md`](INVENTIONS.md) — invention;
+- [`INVENTION.md`](INVENTION.md) / [`CAPABILITIES.md`](CAPABILITIES.md) / [`INVENTIONS.md`](INVENTIONS.md) — invention plus binding compound-capability synthesis;
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current as-built architecture/divergences;
 - [`../TASKS.md`](../TASKS.md) — current task/status navigation;
 - current GitHub issues/PRs — acceptance/ownership;
