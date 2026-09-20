@@ -42,3 +42,8 @@ A larger future numeric perfcache may accelerate a selected finite hot set, but 
 - cache generation is deterministic/rebuildable;
 - changing a scalar canonicalization recipe requires a new cache generation;
 - source occurrence roles/precision/channel/time are not stored in the scalar ROM merely because they reference the scalar.
+
+
+## Higher-tier reuse
+
+This scalar ROM is a dependency, not the end of the cache hierarchy. #1711 generalizes the same deterministic mmap pattern upward into pixel/patch/region/image and audio sample/window/track cache generations. Video reuses those image/audio generations rather than creating a private numeric or frame identity cache.
