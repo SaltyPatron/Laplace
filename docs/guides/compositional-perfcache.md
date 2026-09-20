@@ -286,6 +286,22 @@ pixels
 
 The basis is not limited to powers of two and is not a learned receptive field. It is exact source structure under the declared image recipe.
 
+### The 2x2 inside the 8x8 is not an 8x8-owned record
+
+Suppose four ordered pixel entities compose to P:
+
+~~~text
+P = compose([p0,p1,p2,p3])
+~~~
+
+If that exact ordered composition occurs inside 8x8 A, 8x8 B, frame C, image D, or standalone in a query, there is still one canonical P.
+
+The higher structures carry occurrences/references to P in their trajectories. They do not mint P-at-parent, P-at-tier, or P-at-frame variants as content identities.
+
+This is exactly the same as king: once [k,i,n,g] exists, every use points at the same entity and adds role/context/evidence around it.
+
+Therefore the 204 square occurrences in an 8x8 region are references into the global canonical content world. The region may introduce some previously unseen square compositions, but every already-known 2x2/3x3/... root is simply reused.
+
 ### Why this compounds
 
 A larger region is described in terms of many already-known smaller canonical structures.
