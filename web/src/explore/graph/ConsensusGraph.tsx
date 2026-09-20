@@ -127,7 +127,7 @@ export function graphForDimension(base: GraphData, dim: Dim, centerId: string): 
  * once zoomed in. Names are drawn for real so the web is legible on arrival.
  */
 const LABEL_FONT_PX = 44;
-const labelCache = new Map<string, Sprite>();
+const MAX_VISIBLE_LABELS = 128;
 const nodeSphereGeometry = new SphereGeometry(NODE_REL_SIZE, 12, 12);
 const nodeMaterialCache = new Map<string, MeshBasicMaterial>();
 
@@ -139,9 +139,15 @@ function nodeMaterial(color: string): MeshBasicMaterial {
   return material;
 }
 
-function labelSprite(text: string, color: string, background: string): Sprite | null {
+function labelSprite(
+  text: string,
+  color: string,
+  background: string,
+  cache: Map<string, Sprite>,
+  materials: Set<SpriteMaterial>,
+): Sprite | null {
   const key = `${text}\0${color}\0${background}`;
-  const hit = labelCache.get(key);
+  const hit = cache.get(key);
   if (hit) return hit.clone() as Sprite;
 
   const canvas = document.createElement('canvas');
@@ -152,8 +158,6 @@ function labelSprite(text: string, color: string, background: string): Sprite | 
   const width = Math.ceil(ctx.measureText(text).width) + 16;
   canvas.width = width;
   canvas.height = Math.ceil(LABEL_FONT_PX * 1.4);
-
-  // Re-set after the resize — sizing a canvas resets its 2-D state.
   ctx.font = font;
   ctx.textBaseline = 'middle';
   ctx.fillStyle = rgba(background, 0.78);
@@ -163,13 +167,12 @@ function labelSprite(text: string, color: string, background: string): Sprite | 
 
   const texture = new CanvasTexture(canvas);
   texture.minFilter = LinearFilter;
-  const sprite = new Sprite(new SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
-  // World units per canvas pixel. Sized against SHELL_RADIUS (78) rather than
-  // by eye: at 0.09 a name rendered ~4 world units tall against a ~160-unit
-  // span and was unreadable at the fitted camera distance.
+  const material = new SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  materials.add(material);
+  const sprite = new Sprite(material);
   const scale = 0.22;
   sprite.scale.set(canvas.width * scale, canvas.height * scale, 1);
-  labelCache.set(key, sprite);
+  cache.set(key, sprite);
   return sprite.clone() as Sprite;
 }
 
@@ -250,6 +253,21 @@ export function ConsensusGraph({
   const fittedKey = useRef<string>('');
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const palette = useVisualizationPalette();
+  const labelCache = useRef(new Map<string, Sprite>());
+  const labelMaterials = useRef(new Set<SpriteMaterial>());
+
+  useEffect(() => {
+    const cache = labelCache.current;
+    const materials = labelMaterials.current;
+    return () => {
+      cache.clear();
+      for (const material of materials) {
+        material.map?.dispose();
+        material.dispose();
+      }
+      materials.clear();
+    };
+  }, [centerId]);
 
   useGraphFlyControls(shellRef, ref3d, dim === '3d' && size.width > 0);
   const webGlReady = useDeferredWebGlMount(dim === '3d' && size.width > 0 && size.height > 0);
@@ -289,6 +307,15 @@ export function ConsensusGraph({
   );
 
   const expanded = web != null && web.nodes.length > 0;
+  const labelledIds = useMemo(() => {
+    if (data.nodes.length <= MAX_VISIBLE_LABELS) return new Set(data.nodes.map((node) => node.id));
+    const ordered = data.nodes.slice().sort((a, b) => {
+      const ap = a.id === centerId ? -3 : a.walk ? -2 : a.hop;
+      const bp = b.id === centerId ? -3 : b.walk ? -2 : b.hop;
+      return ap - bp || a.id.localeCompare(b.id);
+    });
+    return new Set(ordered.slice(0, MAX_VISIBLE_LABELS).map((node) => node.id));
+  }, [data.nodes, centerId]);
 
   useEffect(() => {
     const el = shellRef.current;
@@ -516,15 +543,19 @@ export function ConsensusGraph({
               const color = hopColor(n.hop, n.walk || n.id === centerId, palette);
               root.add(new Mesh(nodeSphereGeometry, nodeMaterial(color)));
 
-              const label = n.label.length > 22 ? `${n.label.slice(0, 21)}…` : n.label;
-              const sprite = labelSprite(
-                label,
-                n.id === centerId ? palette.primary : palette.muted,
-                palette.background,
-              );
-              if (sprite) {
-                sprite.position.set(0, NODE_REL_SIZE * 3.2, 0);
-                root.add(sprite);
+              if (labelledIds.has(n.id)) {
+                const label = n.label.length > 22 ? `${n.label.slice(0, 21)}…` : n.label;
+                const sprite = labelSprite(
+                  label,
+                  n.id === centerId ? palette.primary : palette.muted,
+                  palette.background,
+                  labelCache.current,
+                  labelMaterials.current,
+                );
+                if (sprite) {
+                  sprite.position.set(0, NODE_REL_SIZE * 3.2, 0);
+                  root.add(sprite);
+                }
               }
               return root;
             }}
