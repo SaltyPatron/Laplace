@@ -16,13 +16,6 @@
 #include "laplace/core/modality_number_table.h"
 #include "laplace/core/trajectory.h"
 
-/* LEGACY MEDIA RECIPE NOTICE
- * This translation unit currently implements the retired decimal/codepoint
- * image/audio recipe. It remains executable until GH #1134 replaces the
- * representation with the corrected typed provider/recipe/physicality law.
- * Do not cite these local implementation choices as invention authority.
- */
-
 /* Parse ASCII digit bytes to 0..255 for modality_number_perfcache O(1). */
 static int parse_u8_digits(const uint8_t* buf, size_t n, uint32_t* out) {
     if (!buf || !out || n == 0 || n > 3u) return -1;
@@ -59,7 +52,7 @@ static int resolve_number_id(
     return 0;
 }
 
-/* Under the current legacy recipe, signed scalars reuse text content. Its UAX ladder may have an
+/* Signed scalar content reuses the shared canonical content ladder. Its UAX ladder may have an
  * intermediate digit word, so both identity and placement come from the exact
  * natural content node rather than a flat sign/digit centroid. */
 static int resolve_scalar_content_node(
@@ -115,12 +108,12 @@ int laplace_modality_hash_composer_resolver(
     uint32_t atom, void* user_data,
     hash128_t* out_id, double out_coord[4], hilbert128_t* out_hilbert) {
     (void)user_data;
-    /* Current legacy media recipe resolves leaves as Unicode codepoints. GH #1134 owns correction. */
+    /* Numeric media leaves are canonical codepoint constituents, never private amplitude/color atoms. */
     return codepoint_table_resolve_atom(atom, out_id, out_coord, out_hilbert);
 }
 
 /*
- * CURRENT LEGACY image compose: T0 via codepoint_table; Number id = text content root of the
+ * Image compose: T0 via codepoint_table; Number id = reusable text/content root of the
  * digit string (ScalarId / laplace_content_root_id); Channel+ via merkle/centroid.
  */
 static int compose_image_tree(tier_tree_t* tree) {
@@ -189,7 +182,7 @@ static int compose_image_tree(tier_tree_t* tree) {
 }
 
 /*
- * CURRENT LEGACY audio compose: T0 via codepoint_table; Sample (Number) id = text content root
+ * Audio compose: T0 via codepoint_table; Sample (Number) id = reusable content root
  * of the decimal digit string (same ScalarId law as image Number; signed may
  * prefix U+002D); Window+ via merkle/centroid.
  */
