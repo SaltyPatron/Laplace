@@ -119,3 +119,10 @@ If a bad implementation performs thousands of avoidable SQL/SPI/PInvoke crossing
 A serious machine-cost claim binds exact source/artifact, analyzer/toolchain generation, target ISA, target CPU/microarchitecture, control-flow/count assumptions, memory/cache/initial-state assumptions, clock/frequency assumptions, exact/symbolic output expression, calculated receipt identity, and observed host/provider receipt when calibration is performed.
 
 This makes the estimate inspectable and reproducible within the declared boundary.
+
+
+## Current implementation owners
+
+- #1709 — control/data/dependency-aware dynamic execution counts and target-microarchitecture cycle derivation.
+- #1431 — calculated-versus-observed execution/resource receipts and calibration evidence.
+- #1561 — query/cognition preflight-versus-actual work receipts for billing/capacity.
