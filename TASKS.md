@@ -14,7 +14,7 @@ The numbered items below preserve cross-cutting machine constraints discovered d
 2. **Live host is the evidence.** Web/API/MCP/OpenAI, Postgres, `pg_stat_statements`, ingest journals, `/opt/laplace`, `/vault`. Status prose and GitHub titles are not truth.
 3. **One deployed revision.** Application DLLs, prefix native libs, PostgreSQL `laplace_execution_*` MODULE, T0 LPRF v4, extension catalog (including `physicality_observations`) are one build. `check-deployed-revision.sh` exits 0. CI *installs*; skip-success and qualify-cancel are not delivery. Do not race a live prefix hack against an in-flight deliver.
 4. **Honest surfaces.** Health/capabilities/docs/issues match as-built. No scaffold stream. Ready means this process loaded T0.
-5. **Perfcache is used.** T0 `records[cp]`; no Unicode re-record; highway/numbers/chess actually called; missing Factor/GenCorpus/separator stay explicit. The 0..255 number ROM accelerates canonical number roots; it is not the numeric universe. `0.34567` still composes as `0 . 3 4 5 6 7`, and a finite π prefix is the same wide reusable composition. Repeated equal scalar values add occurrences, not new scalar content.
+5. **Perfcache is used compositionally.** T0 `records[cp]`; no Unicode re-record; highway/numbers/chess actually called; missing Factor/GenCorpus/separator stay explicit. The 0..255 number ROM accelerates canonical number roots; it is not the numeric universe. `0.34567` still composes as `0 . 3 4 5 6 7`, and a finite π prefix is the same wide reusable composition. Repeated equal scalar values add occurrences, not new scalar content. Higher deterministic tiers may also be mmap ROMs: pixels → patches → regions → images; samples → windows → tracks. Video reuses image/audio caches. #1711 owns the common cache registry/lattice.
 
     Unicode sequence (generate then execute, like EF/SSIS): (1) decomposer/tool reads UCD source, (2) emit native tables + persist T0 perfcache blob, (3) install those artifacts when UCD actually changed — isolated `ninja laplace_t0_perfcache`, not every product SHA, (4) execute native admission so T0 entities/physicalities are **in Postgres** as the FK anchor. The blob is ROM for `records[cp]`. It is not the populate path. T0 belongs in the database because everything else references it.
 
@@ -103,7 +103,8 @@ Current bounded implementation owners created from this synthesis:
 
 - #1708 — knowledge packages/capabilities/effective-mind authority plus Red Spear / Blue Shield / White Judge enforcement;
 - #1709 — control/data-flow-aware program-to-microarchitecture cycle derivation;
-- #1710 — complete application-root mutation and exact full-repository realization benchmark.
+- #1710 — complete application-root mutation and exact full-repository realization benchmark;
+- #1711 — compositional perfcache lattice for dense/sparse higher-tier ROMs and cross-modality reuse.
 
 ### 10. Forward-pass implementation owner
 
