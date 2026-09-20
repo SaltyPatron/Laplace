@@ -838,6 +838,10 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         native_root.mkdir(parents=True)
         for name in self.api.REQUIRED[3:]:
             (native_root / name).write_bytes(("authoritative-prefix:" + name).encode())
+        versioned_core = native_root / "liblaplace_core.so.1"
+        versioned_core.write_bytes(b"authoritative-prefix:liblaplace_core.so.1")
+        (native_root / "liblaplace_core.so").unlink()
+        (native_root / "liblaplace_core.so").symlink_to(versioned_core.name)
         (app / "laplace-api.env").write_text("private configuration")
         (app / "managed-services").mkdir()
         (app / "managed-services/unit").write_text("preserved")
@@ -861,6 +865,9 @@ class ApiPayloadVerificationTests(unittest.TestCase):
         self.assertEqual("preserved-installed-native", self.api.read_manifest(manifest)["provenance"])
         for name in self.api.REQUIRED[3:]:
             self.assertEqual((native_root / name).read_bytes(), (app / name).read_bytes())
+            self.assertFalse((app / name).is_symlink())
+        self.assertEqual(versioned_core.read_bytes(), (app / versioned_core.name).read_bytes())
+        self.assertFalse((app / versioned_core.name).is_symlink())
         self.assertEqual('<div id="root">fresh web</div>', (app / "wwwroot/index.html").read_text())
         self.assertEqual("private configuration", (app / "laplace-api.env").read_text())
         self.assertEqual("preserved", (app / "managed-services/unit").read_text())
