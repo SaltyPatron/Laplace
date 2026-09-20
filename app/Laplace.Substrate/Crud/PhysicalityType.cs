@@ -40,6 +40,12 @@ public enum PhysicalityType : short
     // referenced entities; a selected view has its own recipe and receipt.
     DescriptorRetention = 9,
 
+    // Closed contiguous interval over an ordered canonical domain. The trajectory carries
+    // only [first,last]; membership is derived from the domain's admitted ordinal law rather
+    // than expanded into one vertex/edge per member. Distinct from Content so range manifests
+    // never enter text-continuation indexes.
+    Range = 10,
+
     // Sparse, ordinal-aligned chess source annotations. These are parallel sequences on
     // the PLAYING, not per-ply testimony rows and not part of move/position identity.
     ChessComment = 6,
