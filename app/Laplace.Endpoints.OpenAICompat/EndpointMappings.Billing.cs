@@ -1,5 +1,6 @@
 using Laplace.Api.Contracts;
 using Laplace.Endpoints.OpenAICompat.Auth;
+using Microsoft.Extensions.Options;
 
 namespace Laplace.Endpoints.OpenAICompat;
 
@@ -50,8 +51,8 @@ internal static class BillingEndpoints
                             RecurringInterval: s.RecurringInterval)).ToArray())).ToArray())))
             .WithTags("billing").Produces<BillingProductsResponse>();
 
-        app.MapGet("/v1/billing/plans", (IBillingCatalog catalog) =>
-            Results.Json(new BillingPlansResponse("list",
+        app.MapGet("/v1/billing/plans", (IBillingCatalog catalog, IOptions<StripeBillingOptions> stripe) =>
+            Results.Json(new BillingPlansResponse("list", !stripe.Value.Bypass,
                 catalog.ListPlans().Select(p => new PlanView(
                     PlanId: p.PlanId,
                     ServiceId: p.ServiceId,
