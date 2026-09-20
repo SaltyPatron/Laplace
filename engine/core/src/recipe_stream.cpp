@@ -199,8 +199,7 @@ struct laplace_recipe_stream {
         std::string canonical = ns + "/" + value + "/v1";
         hash128_t id; hash128_blake3_str(canonical.c_str(), &id); entity(stage, id, type); return id;
     }
-    void attest(intent_stage_t* stage, hash128_t subj, const fact& f) {
-        laplace_attestation_staged_t row{};
+    void build_attestation(hash128_t subj, const fact& f, laplace_attestation_staged_t& row) {
         const laplace_relation_def_t* definition = nullptr;
         double weight = laplace_relation_lookup(&f.relation, &definition) == 0 && definition
             ? trust : trust * f.rank;
@@ -215,7 +214,26 @@ struct laplace_recipe_stream {
             row.opponent_rd_fp1e9 = static_cast<int64_t>(laplace_attestation_witness_phi(declared_weight) * LAPLACE_GLICKO2_FP_SCALE);
             row.opponent_rating_fp1e9 = static_cast<int64_t>(laplace_attestation_witness_opponent_rating(declared_weight) * LAPLACE_GLICKO2_FP_SCALE);
         }
+    }
+    void attest(intent_stage_t* stage, hash128_t subj, const fact& f) {
+        laplace_attestation_staged_t row{};
+        build_attestation(subj, f, row);
         check(laplace_attestation_staged_batch_add(stage, &row, 1, nullptr), "testimony admission");
+    }
+    size_t attest_facts(intent_stage_t* stage, hash128_t subj, size_t offset, size_t count) {
+        constexpr size_t chunk = 256;
+        laplace_attestation_staged_t staged[chunk];
+        size_t emitted = 0;
+        while (emitted < count) {
+            const size_t n = std::min(chunk, count - emitted);
+            for (size_t i = 0; i < n; ++i) {
+                staged[i] = {};
+                build_attestation(subj, facts[offset + emitted + i], staged[i]);
+            }
+            check(laplace_attestation_staged_batch_add(stage, staged, n, nullptr), "testimony admission");
+            emitted += n;
+        }
+        return emitted;
     }
     void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
         bool subject_binding, const std::map<std::string, std::string>& attributes) {
@@ -661,8 +679,12 @@ extern "C" int laplace_recipe_stream_drain(laplace_recipe_stream_t* s, size_t ma
                     while (rows(s->ready.get()) < capacity) {
                         if (!s->record_facts_done) {
                             const hash128_t subj = s->range ? point_id(s->cursor) : s->subject;
-                            while (s->fact_offset < s->facts.size() && rows(s->ready.get()) < capacity)
-                                s->attest(s->ready.get(), subj, s->facts[s->fact_offset++]);
+                            const size_t available = capacity - rows(s->ready.get());
+                            const size_t remaining = s->facts.size() - s->fact_offset;
+                            const size_t emit = std::min(available, remaining);
+                            if (emit)
+                                s->fact_offset += s->attest_facts(
+                                    s->ready.get(), subj, s->fact_offset, emit);
                             if (s->fact_offset != s->facts.size()) break;
                             s->fact_offset = 0;
                             if (s->range && s->cursor != s->end) {
