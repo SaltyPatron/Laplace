@@ -89,16 +89,22 @@ internal sealed class UcdXmlRecipe
     private UcdXmlRecipe(
         SemanticSourceRecipe recipe,
         IReadOnlyDictionary<string, string> aliases,
-        IReadOnlyDictionary<string, string> valueAliases)
+        IReadOnlyDictionary<string, string> valueAliases,
+        IReadOnlyList<UnicodePhysicalArtifactParser.PropertyAliasRow> propertyAliasRows,
+        IReadOnlyList<UnicodePhysicalArtifactParser.PropertyValueAliasRow> propertyValueAliasRows)
     {
         Recipe = recipe;
         Aliases = aliases;
         ValueAliases = valueAliases;
+        PropertyAliasRows = propertyAliasRows;
+        PropertyValueAliasRows = propertyValueAliasRows;
     }
 
     internal SemanticSourceRecipe Recipe { get; }
     internal IReadOnlyDictionary<string, string> Aliases { get; }
     internal IReadOnlyDictionary<string, string> ValueAliases { get; }
+    internal IReadOnlyList<UnicodePhysicalArtifactParser.PropertyAliasRow> PropertyAliasRows { get; }
+    internal IReadOnlyList<UnicodePhysicalArtifactParser.PropertyValueAliasRow> PropertyValueAliasRows { get; }
 
     internal string CanonicalProperty(string alias) =>
         Aliases.TryGetValue(alias, out string? canonical) ? canonical : alias;
@@ -224,13 +230,22 @@ internal sealed class UcdXmlRecipe
 
     internal static UcdXmlRecipe Load(string propertyAliasesPath)
     {
-        IReadOnlyDictionary<string, string> aliases = LoadPropertyAliases(propertyAliasesPath);
+        (IReadOnlyDictionary<string, string> aliases,
+            IReadOnlyList<UnicodePhysicalArtifactParser.PropertyAliasRow> propertyAliasRows) =
+            LoadPropertyAliases(propertyAliasesPath);
         string? directory = Path.GetDirectoryName(propertyAliasesPath);
         string valueAliasesPath = Path.Combine(
             directory ?? string.Empty, "PropertyValueAliases.txt");
-        IReadOnlyDictionary<string, string> valueAliases = File.Exists(valueAliasesPath)
-            ? LoadPropertyValueAliases(valueAliasesPath, aliases)
-            : new Dictionary<string, string>(StringComparer.Ordinal);
+        IReadOnlyDictionary<string, string> valueAliases;
+        IReadOnlyList<UnicodePhysicalArtifactParser.PropertyValueAliasRow> propertyValueAliasRows;
+        if (File.Exists(valueAliasesPath))
+            (valueAliases, propertyValueAliasRows) =
+                LoadPropertyValueAliases(valueAliasesPath, aliases);
+        else
+        {
+            valueAliases = new Dictionary<string, string>(StringComparer.Ordinal);
+            propertyValueAliasRows = [];
+        }
         var fields = new List<SourceRecipeField>(RepertoireAttributes.Length + 24);
         foreach (string attribute in RepertoireAttributes)
         {
@@ -318,7 +333,9 @@ internal sealed class UcdXmlRecipe
                 fields,
                 structures),
             aliases,
-            valueAliases);
+            valueAliases,
+            propertyAliasRows,
+            propertyValueAliasRows);
     }
 
     private static SourceRecipeField F(
@@ -343,51 +360,84 @@ internal sealed class UcdXmlRecipe
         return attribute.StartsWith('k') ? SourceValueKind.StructuredText : SourceValueKind.Enumerated;
     }
 
-    private static IReadOnlyDictionary<string, string> LoadPropertyAliases(string path)
+    private static (
+        IReadOnlyDictionary<string, string> Aliases,
+        IReadOnlyList<UnicodePhysicalArtifactParser.PropertyAliasRow> Rows)
+        LoadPropertyAliases(string path)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        var rows = new List<UnicodePhysicalArtifactParser.PropertyAliasRow>();
         foreach (string raw in File.ReadLines(path))
         {
             string line = raw;
             int comment = line.IndexOf('#');
             if (comment >= 0) line = line[..comment];
-            string[] parts = line.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 2) continue;
-            string canonical = parts[1];
-            foreach (string alias in parts)
+            string[] fields = line.Split(';');
+            if (fields.Length < 2) continue;
+            string shortName = fields[0].Trim();
+            string canonical = fields[1].Trim();
+            if (canonical.Length == 0) continue;
+
+            result[canonical] = canonical;
+            bool first = true;
+            if (shortName.Length > 0)
+            {
+                result[shortName] = canonical;
+                rows.Add(new(canonical, shortName, first));
+                first = false;
+            }
+            for (int i = 2; i < fields.Length; ++i)
+            {
+                string alias = fields[i].Trim();
+                if (alias.Length == 0) continue;
                 result[alias] = canonical;
+                rows.Add(new(canonical, alias, first));
+                first = false;
+            }
         }
-        return result;
+        return (result, rows);
     }
 
-    private static IReadOnlyDictionary<string, string> LoadPropertyValueAliases(
+    private static (
+        IReadOnlyDictionary<string, string> Aliases,
+        IReadOnlyList<UnicodePhysicalArtifactParser.PropertyValueAliasRow> Rows)
+        LoadPropertyValueAliases(
         string path,
         IReadOnlyDictionary<string, string> propertyAliases)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        var rows = new List<UnicodePhysicalArtifactParser.PropertyValueAliasRow>();
         foreach (string raw in File.ReadLines(path))
         {
             string line = raw;
             int comment = line.IndexOf('#');
             if (comment >= 0) line = line[..comment];
-            string[] fields = line.Split(
-                ';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            string[] fields = line.Split(';');
             if (fields.Length < 3) continue;
-            string property = propertyAliases.TryGetValue(fields[0], out string? canonicalProperty)
+            string sourceProperty = fields[0].Trim();
+            if (sourceProperty.Length == 0) continue;
+            string property = propertyAliases.TryGetValue(sourceProperty, out string? canonicalProperty)
                 ? canonicalProperty
-                : fields[0];
+                : sourceProperty;
             int canonicalIndex = property == "Canonical_Combining_Class" && fields.Length >= 4
                 ? 3
                 : 2;
-            string canonical = fields[canonicalIndex];
-            foreach (string alias in fields)
+            string canonical = fields[canonicalIndex].Trim();
+            if (canonical.Length == 0) continue;
+
+            bool first = true;
+            for (int i = 1; i < fields.Length; ++i)
             {
-                if (alias == fields[0]) continue;
+                string alias = fields[i].Trim();
+                if (alias.Length == 0) continue;
                 result[ValueKey(property, alias)] = canonical;
+                if (i == canonicalIndex) continue;
+                rows.Add(new(sourceProperty, canonical, alias, first));
+                first = false;
             }
             result[ValueKey(property, canonical)] = canonical;
         }
-        return result;
+        return (result, rows);
     }
 
     private static string ValueKey(string property, string value)

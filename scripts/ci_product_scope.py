@@ -59,6 +59,7 @@ PRODUCT_IGNORED_EXACT = frozenset({
     "scripts/laplace",
     "deploy/linux/laplace-api.env.example",
     "deploy/linux/managed-services/laplace-stripe.service",
+    "config/agents.json",
 })
 
 PRODUCT_IGNORED_GLOBS = (
@@ -121,6 +122,7 @@ GITHUB_PATH_IGNORES = (
     "scripts/laplace",
     "deploy/linux/laplace-api.env.example",
     "deploy/linux/managed-services/laplace-stripe.service",
+    "config/agents.json",
 )
 
 

@@ -3,7 +3,7 @@
   "agents": {
     "gemini": {
       "provider": "google",
-      "model": "gemini-3.8-flash",
+      "model": "gemini-3.5-flash-lite",
       "max_tokens": 8192
     },
     "openai": {

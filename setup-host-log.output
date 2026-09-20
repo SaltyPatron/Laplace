@@ -1,0 +1,13 @@
+
+============================================================
+  Layer 0a — account, apt (incl. nginx/stockfish/Qt), /opt/laplace
+============================================================
+
+=== Ensure system account: laplace-runner ===
+[0;32m✓ User laplace-runner exists (UID 994)[0m
+[0;32m✓ /var/lib/agents/laplace-runner owned by laplace-runner:laplace-runner (mode 2770)[0m
+[0;32m✓ ahart already in laplace-runner group[0m
+PASS: ahart and laplace-runner created, modified, renamed and removed each other's output
+Shared directory and runner configuration repaired; runner restarts load the new environment.
+
+=== Build environment: apt build-deps + /opt/laplace prefix ===

@@ -815,8 +815,16 @@ public sealed class UnicodeDecomposer
                 this, job.Path, batch),
             ArtifactKind.CjkRadicals => new CjkRadicalPhase(this, job.Path, batch),
             ArtifactKind.DoNotEmit => new DoNotEmitPhase(this, job.Path, batch),
-            ArtifactKind.PropertyAliases => new PropertyAliasPhase(this, job.Path, batch),
-            ArtifactKind.PropertyValueAliases => new PropertyValueAliasPhase(this, job.Path, batch),
+            ArtifactKind.PropertyAliases => new PropertyAliasPhase(
+                this,
+                _ucdXmlRecipe?.PropertyAliasRows
+                    ?? throw new InvalidOperationException("UCDXML recipe aliases were not loaded."),
+                batch),
+            ArtifactKind.PropertyValueAliases => new PropertyValueAliasPhase(
+                this,
+                _ucdXmlRecipe?.PropertyValueAliasRows
+                    ?? throw new InvalidOperationException("UCDXML recipe value aliases were not loaded."),
+                batch),
             ArtifactKind.IndexTerms => new IndexTermPhase(this, job.Path, batch),
             ArtifactKind.USourceData => new USourceDataPhase(this, job.Path, batch),
             ArtifactKind.EmojiSequences => new SequenceMetadataPhase(
@@ -2499,10 +2507,13 @@ public sealed class UnicodeDecomposer
         : UnicodeComposePhase<UnicodePhysicalArtifactParser.PropertyAliasRow>
     {
         private readonly UnicodeDecomposer _owner;
-        private readonly string _path;
+        private readonly IReadOnlyList<UnicodePhysicalArtifactParser.PropertyAliasRow> _rows;
 
-        public PropertyAliasPhase(UnicodeDecomposer owner, string path, int batch)
-            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
+        public PropertyAliasPhase(
+            UnicodeDecomposer owner,
+            IReadOnlyList<UnicodePhysicalArtifactParser.PropertyAliasRow> rows,
+            int batch)
+            : base(batch, commitEpoch: 1) => (_owner, _rows) = (owner, rows);
 
         protected override string PhaseLabel => "property-aliases";
 
@@ -2524,20 +2535,32 @@ public sealed class UnicodeDecomposer
                 witnessWeight: RelationTypeRank.StandardsStructural * TC.StandardsDerived));
         }
 
-        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyAliasRow>
+        protected override async IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyAliasRow>
             ExtractRecordsAsync(
-                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.PropertyAliasesAsync(_path, ct);
+                string ecosystemPath,
+                DecomposerOptions options,
+                [EnumeratorCancellation] CancellationToken ct)
+        {
+            foreach (UnicodePhysicalArtifactParser.PropertyAliasRow row in _rows)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return row;
+            }
+            await Task.CompletedTask;
+        }
     }
 
     private sealed class PropertyValueAliasPhase
         : UnicodeComposePhase<UnicodePhysicalArtifactParser.PropertyValueAliasRow>
     {
         private readonly UnicodeDecomposer _owner;
-        private readonly string _path;
+        private readonly IReadOnlyList<UnicodePhysicalArtifactParser.PropertyValueAliasRow> _rows;
 
-        public PropertyValueAliasPhase(UnicodeDecomposer owner, string path, int batch)
-            : base(batch, commitEpoch: 1) => (_owner, _path) = (owner, path);
+        public PropertyValueAliasPhase(
+            UnicodeDecomposer owner,
+            IReadOnlyList<UnicodePhysicalArtifactParser.PropertyValueAliasRow> rows,
+            int batch)
+            : base(batch, commitEpoch: 1) => (_owner, _rows) = (owner, rows);
 
         protected override string PhaseLabel => "property-value-aliases";
 
@@ -2566,10 +2589,19 @@ public sealed class UnicodeDecomposer
                 aliasId.Value, Source, contextId: null, witnessWeight: weight));
         }
 
-        protected override IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyValueAliasRow>
+        protected override async IAsyncEnumerable<UnicodePhysicalArtifactParser.PropertyValueAliasRow>
             ExtractRecordsAsync(
-                string ecosystemPath, DecomposerOptions options, CancellationToken ct) =>
-            UnicodePhysicalArtifactParser.PropertyValueAliasesAsync(_path, ct);
+                string ecosystemPath,
+                DecomposerOptions options,
+                [EnumeratorCancellation] CancellationToken ct)
+        {
+            foreach (UnicodePhysicalArtifactParser.PropertyValueAliasRow row in _rows)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return row;
+            }
+            await Task.CompletedTask;
+        }
     }
 
     private sealed class IndexTermPhase
