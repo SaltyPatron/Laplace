@@ -178,6 +178,47 @@ public sealed class SubstrateChangeBuilder : IDisposable
     }
 
     /// <summary>
+    /// Stage one closed contiguous range as the native ordered composition [first,last].
+    /// The range identity uses the shared composition kernel; its physicality is typed Range
+    /// and carries only the two endpoints. Membership is derived from the endpoint domain law,
+    /// never expanded into one stored edge or trajectory vertex per member.
+    /// </summary>
+    public Hash128 StageRange(
+        OrderedCompositionComponent first,
+        OrderedCompositionComponent last,
+        Hash128 sourceId,
+        long observedAtUnixUs = 0)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (first.Id == last.Id) return first.Id;
+
+        OrderedCompositionResult result = OrderedComposition.ComposeBatch(
+        [
+            new OrderedCompositionRequest(
+                [first, last], EntityTypeRegistry.Range, sourceId, observedAtUnixUs)
+        ])[0];
+
+        AddEntity(result.Id, result.Tier, EntityTypeRegistry.Range, sourceId);
+        Span<Hash128> endpoints = stackalloc Hash128[2] { first.Id, last.Id };
+        AddPhysicality(new PhysicalityRow(
+            Id: PhysicalityId.Compute(result.Id, PhysicalityType.Range),
+            EntityId: result.Id,
+            SourceId: sourceId,
+            Type: PhysicalityType.Range,
+            CoordX: result.CoordX,
+            CoordY: result.CoordY,
+            CoordZ: result.CoordZ,
+            CoordM: result.CoordM,
+            HilbertIndex: result.Hilbert,
+            TrajectoryXyzm: Trajectory.Build(endpoints),
+            NConstituents: 2,
+            AlignmentResidual: null,
+            SourceDim: null,
+            ObservedAtUnixUs: observedAtUnixUs));
+        return result.Id;
+    }
+
+    /// <summary>
     /// Stage the composition entity for an unordered SET of member ids and return the id a
     /// set-valued attribute should point at, so the attribute costs ONE attestation rather than
     /// one per member.
