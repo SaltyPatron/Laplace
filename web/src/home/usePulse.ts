@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { apiGet } from '../api/client';
+import { useVisiblePolling } from '@ui';
 
 export interface Pulse {
   at: number;
@@ -31,35 +32,23 @@ export function usePulse(intervalMs = 4000): PulseState {
   const [reachable, setReachable] = useState(true);
   const prev = useRef<Pulse | null>(null);
 
-  useEffect(() => {
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-
-    const tick = async () => {
-      try {
-        const next = await apiGet<Pulse>('/v1/pulse');
-        if (stopped) return;
-        setReachable(true);
-        const p = prev.current;
-        if (p && next.at > p.at) {
-          const dAtt = next.attestations - p.attestations;
-          const dt = next.at - p.at;
-          // Estimate counts can jitter down slightly; a negative delta is noise,
-          // not a fold, so it floors at zero.
-          setRate(dAtt > 0 ? dAtt / dt : 0);
-        }
-        prev.current = next;
-        setPulse(next);
-      } catch {
-        if (!stopped) setReachable(false);
-      } finally {
-        if (!stopped) timer = setTimeout(tick, intervalMs);
+  useVisiblePolling(async () => {
+    try {
+      const next = await apiGet<Pulse>('/v1/pulse');
+      setReachable(true);
+      const p = prev.current;
+      if (p && next.at > p.at) {
+        const dAtt = next.attestations - p.attestations;
+        const dt = next.at - p.at;
+        setRate(dAtt > 0 ? dAtt / dt : 0);
       }
-    };
+      prev.current = next;
+      setPulse(next);
+    } catch {
+      setReachable(false);
+    }
+  }, { intervalMs });
 
-    void tick();
-    return () => { stopped = true; clearTimeout(timer); };
-  }, [intervalMs]);
 
   return { pulse, ratePerSec, reachable };
 }

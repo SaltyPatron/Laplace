@@ -26,39 +26,56 @@ export function SubstrateStatusBanner() {
 
   useEffect(() => {
     let alive = true;
+    let timer: number | undefined;
+    let controller: AbortController | null = null;
+
+    const schedule = () => {
+      if (!alive || document.hidden) return;
+      timer = window.setTimeout(() => void poll(), 30_000);
+    };
 
     const poll = async () => {
+      if (!alive || document.hidden || controller) return;
+      controller = new AbortController();
       try {
-        const res = await fetch('/health/status');
+        const res = await fetch('/health/status', { signal: controller.signal, credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
         const data = (await res.json()) as Readiness;
-        if (!alive) return;
-        setReport(data.ready ? null : data);
-      } catch {
-        if (!alive) return;
-        setReport({
-          ready: false,
-          substrate_reachable: false,
-          entities: 0,
-          consensus_relations: 0,
-          perfcache_ready: false,
-          detail: 'Could not reach /health/status.',
-        });
+        if (alive) setReport(data.ready ? null : data);
+      } catch (error) {
+        if (alive && !(error instanceof DOMException && error.name === 'AbortError')) {
+          setReport({
+            ready: false,
+            substrate_reachable: false,
+            entities: 0,
+            consensus_relations: 0,
+            perfcache_ready: false,
+            detail: 'Could not reach /health/status.',
+          });
+        }
+      } finally {
+        controller = null;
+        schedule();
       }
     };
 
+    const visibility = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = undefined;
+      if (document.hidden) controller?.abort();
+      else void poll();
+    };
+
     void poll();
-    const id = window.setInterval(poll, 30_000);
+    document.addEventListener('visibilitychange', visibility);
     return () => {
       alive = false;
-      window.clearInterval(id);
+      if (timer) window.clearTimeout(timer);
+      controller?.abort();
+      document.removeEventListener('visibilitychange', visibility);
     };
   }, []);
 
   if (!report) return null;
-
-  return (
-    <Banner variant="warning">
-      <strong>{statusTitle(report)}</strong> {defaultDetail(report)}
-    </Banner>
-  );
+  return <Banner variant="warning"><strong>{statusTitle(report)}</strong> {defaultDetail(report)}</Banner>;
 }

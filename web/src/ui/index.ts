@@ -3,6 +3,7 @@ export { TooltipProvider, type TooltipProviderProps } from './providers/TooltipP
 export { cn } from './lib/cn';
 export { useControllableState } from './hooks/useControllableState';
 export { useReadResource, type ReadResourceOptions } from './hooks/useReadResource';
+export { useVisiblePolling, type VisiblePollingOptions } from './hooks/useVisiblePolling';
 export { ReadResource, type ReadLoader, type ReadSnapshot } from './lib/readResource';
 
 // Tier 1 — Primitives

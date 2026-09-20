@@ -29,7 +29,7 @@ export function GatePrompt({
   const [bypassed, setBypassed] = useState(false);
 
   useEffect(() => {
-    apiGet<{ data?: { monthly_credits?: Record<string, number> }[] }>('/v1/billing/plans')
+    apiGetCached<{ data?: { monthly_credits?: Record<string, number> }[] }>('/v1/billing/plans', 60_000)
       .then((r) => {
         let max = 0;
         for (const plan of r.data ?? []) {

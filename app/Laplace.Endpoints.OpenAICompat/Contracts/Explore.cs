@@ -366,8 +366,8 @@ public sealed record StorageProofResponse(
 public sealed record UnicodeCloudResponse(
     [property: JsonPropertyName("count")] int Count,
     [property: JsonPropertyName("perfcache_receipt_hex")] string PerfcacheReceiptHex,
-    [property: JsonPropertyName("uca_order_u32_base64")] string UcaOrderU32Base64,
-    [property: JsonPropertyName("hash128_base64")] string Hash128Base64);
+    [property: JsonPropertyName("positions_format")] string PositionsFormat,
+    [property: JsonPropertyName("positions_bytes")] int PositionsBytes);
 
 public sealed record UnicodePointResponse(
     [property: JsonPropertyName("codepoint")] uint Codepoint,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPost } from '../../api/client';
-import { Alert, Chip, Field, Input, Muted, Panel, Toggle } from '@ui';
+import { Alert, Chip, Field, Input, Muted, Panel, Toggle, useVisiblePolling } from '@ui';
 import styles from './LichessPanel.module.css';
 
 export interface LichessStatus {
@@ -49,22 +49,21 @@ export function LichessPanel() {
     }
   }, []);
 
-  useEffect(() => {
-    void refresh();
-    const t = setInterval(() => void refresh(), status?.connected ? 2000 : 8000);
-    return () => clearInterval(t);
-  }, [refresh, status?.connected]);
-
-  useEffect(() => {
+  useEffect(() => { void refresh(); }, [refresh]);
+  useVisiblePolling(refresh, {
+    intervalMs: status?.connected ? 2000 : 8000,
+    immediate: false,
+  });
+  useVisiblePolling(async () => {
     if (!activeGameId || !status?.connected) return;
-    const poll = setInterval(async () => {
-      try {
-        const lines = await apiGet<ChatLine[]>(`/chess/lichess/games/${activeGameId}/chat`);
-        setChat(lines);
-      } catch { /* ignore */ }
-    }, 2500);
-    return () => clearInterval(poll);
-  }, [activeGameId, status?.connected]);
+    try {
+      const lines = await apiGet<ChatLine[]>(`/chess/lichess/games/${activeGameId}/chat`);
+      setChat(lines);
+    } catch { /* keep the last chat body */ }
+  }, {
+    intervalMs: 2500,
+    enabled: !!activeGameId && !!status?.connected,
+  });
 
   const setConnected = async (on: boolean) => {
     if (busy) return;

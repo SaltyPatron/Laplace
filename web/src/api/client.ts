@@ -82,8 +82,66 @@ async function request<T>(path: string, init: RequestInit, opts: ApiOptions): Pr
   return await res.json() as T;
 }
 
+export async function apiGetArrayBuffer(path: string, opts: ApiOptions = {}): Promise<ArrayBuffer> {
+  const res = await fetch(path, { headers: laplaceHeaders(opts), signal: opts.signal, credentials: 'same-origin' });
+  if (!res.ok) await parseError(res);
+  return await res.arrayBuffer();
+}
+
+const inflightGets = new Map<string, Promise<unknown>>();
+
+function getRequestKey(path: string, opts: ApiOptions): string {
+  return JSON.stringify([path, browserWorkspace, opts.tenant ?? null, opts.quoteId ?? null,
+    opts.session ?? null, opts.operatorToken ?? null]);
+}
+
+const completedGets = new Map<string, { value: unknown; expiresAt: number }>();
+const MAX_COMPLETED_GETS = 128;
+
+function pruneCompletedGets(now = Date.now()): void {
+  for (const [key, entry] of completedGets) if (entry.expiresAt <= now) completedGets.delete(key);
+  while (completedGets.size > MAX_COMPLETED_GETS) {
+    const oldest = completedGets.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    completedGets.delete(oldest);
+  }
+}
+
+export async function apiGetCached<T>(
+  path: string,
+  ttlMs: number,
+  opts: ApiOptions = {},
+): Promise<T> {
+  if (ttlMs <= 0) return apiGet<T>(path, opts);
+  const key = getRequestKey(path, opts);
+  const now = Date.now();
+  const hit = completedGets.get(key);
+  if (hit && hit.expiresAt > now) return hit.value as T;
+  if (hit) completedGets.delete(key);
+  const value = await apiGet<T>(path, opts);
+  completedGets.set(key, { value, expiresAt: Date.now() + ttlMs });
+  pruneCompletedGets();
+  return value;
+}
+
+export function invalidateApiGetCache(pathPrefix?: string): void {
+  if (!pathPrefix) { completedGets.clear(); return; }
+  for (const key of completedGets.keys()) if (key.includes(pathPrefix)) completedGets.delete(key);
+}
+
 export function apiGet<T>(path: string, opts: ApiOptions = {}): Promise<T> {
-  return request<T>(path, {}, opts);
+  // A caller-owned AbortSignal has its own cancellation lifetime and therefore
+  // cannot safely share transport ownership. Signal-free duplicate reads can.
+  if (opts.signal) return request<T>(path, {}, opts);
+  const key = getRequestKey(path, opts);
+  const existing = inflightGets.get(key);
+  if (existing) return existing as Promise<T>;
+  const pending = request<T>(path, {}, opts);
+  inflightGets.set(key, pending);
+  void pending.finally(() => {
+    if (inflightGets.get(key) === pending) inflightGets.delete(key);
+  });
+  return pending;
 }
 
 /** Preserve authored text byte-for-byte; the server owns its validation. */
