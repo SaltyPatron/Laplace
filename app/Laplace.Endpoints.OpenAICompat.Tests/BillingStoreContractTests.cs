@@ -98,13 +98,17 @@ public abstract class BillingStoreContractTests
         try
         {
             var now = DateTimeOffset.UtcNow;
-            await Ledger.RecordAsync(new BillingUsageRecord("q_1", tenant, "completions", 1, 2, now.AddMinutes(-2)), CancellationToken.None);
-            await Ledger.RecordAsync(new BillingUsageRecord("q_2", tenant, "completions", 1, 2, now.AddMinutes(-1)), CancellationToken.None);
+            var first = NewQuote(tenant) with { QuoteId = $"q_{Guid.NewGuid():N}", CreatedAt = now.AddMinutes(-3) };
+            var second = NewQuote(tenant) with { QuoteId = $"q_{Guid.NewGuid():N}", CreatedAt = now.AddMinutes(-2) };
+            await Quotes.PutAsync(first, CancellationToken.None);
+            await Quotes.PutAsync(second, CancellationToken.None);
+            await Ledger.RecordAsync(new BillingUsageRecord(first.QuoteId, tenant, "completions", 1, 2, now.AddMinutes(-2)), CancellationToken.None);
+            await Ledger.RecordAsync(new BillingUsageRecord(second.QuoteId, tenant, "completions", 1, 2, now.AddMinutes(-1)), CancellationToken.None);
 
             var usage = await Ledger.GetByTenantAsync(tenant, CancellationToken.None);
             Assert.Equal(2, usage.Count);
-            Assert.Equal("q_2", usage[0].QuoteId);
-            Assert.Equal("q_1", usage[1].QuoteId);
+            Assert.Equal(second.QuoteId, usage[0].QuoteId);
+            Assert.Equal(first.QuoteId, usage[1].QuoteId);
 
             Assert.Empty(await Ledger.GetByTenantAsync($"t-none-{Guid.NewGuid():N}", CancellationToken.None));
         }
