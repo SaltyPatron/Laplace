@@ -209,59 +209,70 @@ same ordered canonical constituent content
 -> many physicality/trajectory/occurrence references
 ~~~
 
-### Universal typed AST: structure for all digital knowledge
+### Universal tiered composition: structure for all digital knowledge
 
-Laplace treats syntax and structure as a universal knowledge problem, not a programming-language-only feature.
+Laplace treats syntax and structure as a universal knowledge problem, but its canonical structural form is **entity composition plus typed physicality trajectory**, not a provider-owned AST object model.
 
-Every admitted digital artifact is recovered through a qualified **syntax provider** appropriate to its physical format: Tree-sitter grammars, Laplace-native grammars, standards parsers, container readers, codecs, protocol decoders or other exact structural providers. The provider exposes the concrete source structure — nodes/records, fields, ordering, spans, missing/error state, ambiguity and reconstruction information.
-
-That provider-specific concrete syntax is then lowered by a versioned recipe into a **universal typed AST**. The AST is the recursively composable structural form used across:
-
-- natural-language documents and utterances;
-- lexical/semantic standards and dictionaries;
-- tables, graphs and structured corpora;
-- source code, binaries and executable formats;
-- chess/game records and state transitions;
-- images, audio and video after codec/format decomposition;
-- model/checkpoint/container structure;
-- tool calls, programs, traces and future digital modalities.
-
-Tree-sitter is important because it provides a large, replaceable grammar estate for exact concrete syntax. It is one syntax-provider family, not a code-only side system and not the semantic authority. A CSV/XML/PGN/media/ELF/Unicode provider may not use Tree-sitter internally, but it participates in the same provider -> recipe -> universal-AST contract.
-
-The universal AST does not collapse epistemic classes. A recipe may lower one recovered source object into several substrate roles at once:
+The same law applies across modalities. A lower tier supplies ordered constituents; admitted boundary/composition rules determine higher-tier physicalities; the resulting canonical composition reuses the same global entity wherever it occurs.
 
 ```text
-typed AST node/value
-  -> canonical content/composition + physicality/trajectory
-  -> occurrence/span/order/provenance
-  -> typed external reference
-  -> attributed testimony about canonical endpoints
-  -> deterministic calculation/derived state
-  -> packaging/reconstruction state
-  -> explicit unresolved meaning
+Tier N ordered physicalities
+-> boundary / composition / role / constraint rules
+-> Tier N+1 canonical composition
+-> physicality trajectory retaining exact constituent identity and order
 ```
 
-For example, a definition sentence is ordinary canonical content with its own physicality/trajectory, while a lexicon's statement that a particular sense `HAS_DEFINITION` that sentence is separate source-attributed testimony pointing at the same content entity.
+UAX #29 is a concrete text instance of this law: code points compose into grapheme/word/sentence-scale observations under deterministic boundary rules. The mechanism generalizes rather than making Unicode segmentation the ceiling:
 
-This is the sense in which Laplace unlocks AST for all knowledge: exact recursive structure becomes a common executable substrate rather than being discarded after parsing or confined to code tooling. AST structure can itself be indexed, compared, traversed, witnessed, transformed and reused by the same forward program as every other substrate plane.
+- text: code points -> graphemes -> lexical units -> phrases/sentences/documents;
+- code: code points/graphemes -> tokens -> expressions -> statements/functions/repositories;
+- images: canonical numbers -> pixels -> patches -> regions -> images;
+- audio: canonical numbers -> samples -> windows -> segments/tracks;
+- games, tables, models, binaries and other formats use their own admitted composition/role rules over the same canonical machinery.
 
-Where the recipe declares exact reconstruction, the persisted typed AST plus retained provider facts must be sufficient to reproduce the admitted source bytes/structure. Intentional transformations produce new content and an explicit structural edit/derivation receipt rather than silently mutating the observation.
+Sequence is already knowledge. The physicality trajectory preserves exactly which constituents occurred and in what logical order. Grammar productions, precedence, associativity, delimiters, arity, field/role names and similar rules are themselves ordinary entities/relations/attestations. They constrain which higher-tier composition is applicable; they do not require a second semantic universe of parser enums.
 
-### Software construction from typed AST
+For example, `[m,u,l,t,i,p,l,i,c,a,t,i,o,n]` is the canonical entity for the observed word "multiplication". A source may attest `multiplication IS_SYNONYM *` in a mathematical/programming context, while other contexts can attest other meanings for `*`. PEMDAS/precedence/associativity knowledge and the observed trajectory determine lawful composition. A parser-specific `MultiplicationOperator` node is therefore optional derived structure, not the meaning itself.
 
-The universal AST is not only an ingest representation. It is also the construction space for software.
+Qualified parsers, standards readers, codecs and decoders remain useful when a physical format requires recovery that cannot be obtained from raw tier segmentation alone. Their output is **provider evidence**, not canonical ontology. Exact fields/spans/errors/ambiguity/reconstruction facts may be retained as occurrences, references, testimony, calculation or packaging state according to the recipe.
 
-A code-producing operation should bind an exact target language/grammar/toolchain generation, search known canonical structures before inventing new ones, compose reusable structures where possible, and construct only the smallest genuinely novel subtree required by the active obligations. Source text is realized from the selected structure after grammar/type/API/dependency constraints have been applied.
+Tree-sitter is valuable primarily as a large grammar estate and compatibility parser/validator. Laplace may ingest its grammar productions, queries, precedence/conflict declarations and test corpora as knowledge, and may use Tree-sitter to verify or realize a requested external syntax. It is not required in the hot path merely because a grammar exists. Large shallow XML/CSV/table sources should use streaming standards readers when that preserves the source facts without materializing a redundant CST.
 
-This makes syntactically invalid token guessing unnecessary. A Bash request is constructed under the admitted Bash grammar/runtime contract; a Zsh request requires a qualified Zsh provider rather than silently substituting Bash because the surfaces look similar.
+AST/CST remains a lawful **projection/export**:
 
-Exact duplicate AST subtrees converge by identity. Deeper duplication can be calculated through normalized AST, control/data-flow, algebraic and behavioral equivalence under declared contracts. Generation and duplicate elimination are therefore the same optimization pressure: reuse or compose existing canonical structure before minting another implementation.
+```text
+canonical entity + trajectory + applicable grammar/role knowledge
+-> AST / CST / compiler IR / source map / external syntax
+```
 
-Compile, link, test, static-analysis, simulation and runtime results are witnessed outcomes on exact candidate structures/toolchains/environments. A failed attempt remains reusable negative evidence; a successful repair establishes an explicit repair trajectory that later construction can couple against.
+Likewise, importing a provider AST can be a convenient bootstrap path, but its nodes must converge into the same canonical tier/trajectory representation rather than creating a permanent parallel ontology.
+
+Where a recipe declares exact reconstruction, canonical trajectories plus retained provider/packaging facts must be sufficient to reproduce the admitted source bytes/structure. Intentional transformations create new canonical compositions and explicit derivation/witness receipts rather than silently mutating the observation.
+
+### Software construction from tier/trajectory structure
+
+The canonical composition world is also the construction space for software.
+
+A code-producing operation binds an exact target language/grammar/toolchain generation, couples against known canonical structures and rule knowledge, reuses or minimally mutates existing compositions, then realizes the selected structure into source/AST/IR only as required by the target toolchain.
+
+```text
+requirement / obligation
+-> target grammar/toolchain knowledge
+-> couple against canonical tier/trajectory structures
+-> reuse / compose / minimally mutate
+-> realize AST/CST/source/IR as required
+-> compile / link / analyze / simulate / run
+-> witness outcome
+-> repair the smallest divergent composition
+```
+
+This makes syntactically invalid token guessing unnecessary without making AST the substrate ontology. A Bash request is constrained by the admitted Bash grammar/runtime knowledge; a Zsh request requires its own qualified grammar knowledge rather than silently borrowing Bash.
+
+Exact duplicate compositions converge by identity. Deeper duplication can be calculated through normalized structural projections, control/data flow, algebraic and behavioral equivalence, trajectory geometry and witnessed outcomes. Compile, link, test, static-analysis, simulation and runtime results become evidence attached to the exact canonical structures/toolchains/environments that produced them.
 
 ### Content novelty and observation volume are different
 
-If the same word, AST subtree, chess line, sentence or other canonical composition is observed repeatedly, the structure should converge rather than be minted repeatedly.
+If the same word, code composition, chess line, sentence or other canonical composition is observed repeatedly, the structure should converge rather than be minted repeatedly.
 
 Later observations may still add:
 
