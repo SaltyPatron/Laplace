@@ -1,5 +1,8 @@
 # Command honesty audit — what the shapes claim vs. what they do
 
+> **Status: dated measured evidence, not current invention/design authority.** This record preserves a 2026-08 observation/audit. Current architecture and product semantics are governed by `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, binding specs and `AGENTS.md`. Reproduce any claimed defect/state against current main/runtime before using it to choose implementation.
+
+
 Recorded 2026-08-10 against the live endpoint (`hart-server:8080`) while the
 substrate was mid-seed. Every number below was measured, not inferred.
 
