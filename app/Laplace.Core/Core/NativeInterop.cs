@@ -703,6 +703,9 @@ public static unsafe partial class NativeInterop
     // --- Modality ladders above shared codepoint T0 (packaging buffers in, compose out) ---
     // Identity is digit→number→… trajectories (docs/invention/modality-ladder-law.md).
     // RGBA / PCM16 here are recovery inputs only — never forged T0 leaf mints.
+    // #1711 generalizes runtime acceleration beyond the current scalar ROM: compatible
+    // pixel/patch/region/image and audio cache modules can short-circuit lower compose,
+    // and video reuses those same modules rather than owning private cache identities.
 
     [LibraryImport(Library, EntryPoint = "laplace_image_tree_build")]
     internal static partial int ImageTreeBuild(
