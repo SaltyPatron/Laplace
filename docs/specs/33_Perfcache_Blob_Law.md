@@ -30,6 +30,46 @@ A green CI job, a file on disk, or a PostgreSQL GUC pointing at a path is not pr
 that the serving process can load the blob. Process-local native loaders, PostgreSQL
 `MODULE` bindings, and prefix libraries must identify the same build.
 
+## Compositional cache lattice
+
+A perfcache is not scoped by a top-level modality name. It accelerates a deterministic reusable canonical substructure or deterministic calculation.
+
+Higher structures may depend on lower caches:
+
+~~~text
+T0/codepoints
+-> scalar/number roots
+-> channel/sample roots
+-> pixel / audio-window roots
+-> patch / segment roots
+-> region / track roots
+-> image / frame roots
+-> video timing/synchronization composition
+~~~
+
+Chess similarly layers piece/square vocabularies, positions, transitions and lines. Software/model domains may publish their own finite or admitted deterministic structural ROMs.
+
+When a legal state space is finite and serviceable, a cache may cover the entire domain and use direct addressing. When the possible universe is too large, a cache may cover the finite admitted/hot canonical estate with a declared deterministic lookup structure. Higher-tier caches are lawful; Tier-0 is not the only thing worth mmapping.
+
+Cross-modality consumers reuse lower caches. Video does not need a private copy of image pixels/patches/images or audio samples/windows/tracks. Its video-specific work composes those already-canonical roots with timing and synchronization state.
+
+Every higher cache binds the exact generations/recipes it depends on. A dependency change invalidates affected descendants, not unrelated caches.
+
+### Index-friendly lookup law
+
+Cache lookup should normally transform request/input state into canonical keys **before** indexed SQL/SPI access:
+
+~~~text
+request value
+-> mmap/native lookup
+-> id / coord / Hilbert / range / typed key
+-> prepared indexed database probe
+~~~
+
+Do not wrap indexed database columns in a cache/function call per row when the request-side transform can be performed once. A cache-backed function must not claim PostgreSQL IMMUTABLE semantics unless its mapped generation truly makes that promise valid for the lifetime of the index.
+
+See `docs/guides/compositional-perfcache.md`.
+
 ## Roster
 
 This table is the current blob catalog. It is law for *what exists as a
@@ -45,9 +85,11 @@ codepoint ids.
 |---|---|---|---|---|
 | `laplace_t0_perfcache_<ucd>.bin` | Unicode 0..0x10FFFF: id, UCA order, PointZM, Hilbert, UAX flags, NFC compose/decomp | `records[cp]` | UCD emit (`codepoint_table` / Unicode decomposer) | Format v4 (`LPRF`). Legacy v3/banded geometry is rejected. |
 | `laplace_highway_perfcache.bin` | Relation-law bit plane: canonical name, band, bit, rank | bit test / 256-bit mask | relation-manifest codegen | Does not populate live consensus band counts. |
-| `laplace_modality_number_perfcache.bin` | Decimal content roots for integers 0..255 | `records[value]` | `modality_number_tables_emit` from T0 | Image channel bytes; in-range audio magnitudes. No PostgreSQL GUC as of 2026-09-19. |
+| `laplace_modality_number_perfcache.bin` | Canonical integer roots 0..255 | `records[value]` direct index | `modality_number_tables_emit` from T0 | Shared by image/audio/video and any other exact integer consumer. This is the first higher-tier shared scalar ROM, not a modality-private cache. |
 | `laplace_chess_position_perfcache.bin` | Piece×square vocab and catalog boards | id → coord/hilbert/tier | recorded-floor export | GUC `laplace_substrate.chess_position_perfcache_path`. |
-| `laplace_chess_transition_perfcache.bin` | Deterministic `(from, move) → to` | mmap search | recorded-floor export | Not a Glicko dump. App-side today; no PostgreSQL GUC. |
+| `laplace_chess_transition_perfcache.bin` | Deterministic `(from, move) → to` | mmap search | recorded-floor export | Reused by replay/line consumers; not a Glicko dump. |
+| Pixel / patch / region / image ROMs | Deterministic image compositions at successively higher reusable tiers | direct index where dense; deterministic sparse lookup where admitted/hot | image recipe + lower cache generations | Prescribed by compositional cache law; image records are reusable by video/document/multimodal consumers. |
+| Audio sample/window/segment/track ROMs | Deterministic audio scalar/composition tiers | direct index where dense; deterministic sparse lookup where admitted/hot | audio recipe + lower cache generations | Prescribed by compositional cache law; reusable by video and other multimodal consumers. |
 | Factor ROM | Versioned model-factor trajectories | pointer arithmetic | deposited factor physicalities | Designed (#526). Not installed. |
 | Generation-corpus ROM | Cold `walk_text` / generation lane | mmap | generation corpus | Prescribed (#409). Not installed. |
 | Separator-id ROM | Alphabet-bounded separator atoms/clusters | compiled set | T0 + grapheme law | Named in `docs/sql-cascade.md`; still a scan. |
