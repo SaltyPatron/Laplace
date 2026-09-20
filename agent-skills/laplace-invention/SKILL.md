@@ -36,6 +36,7 @@ The primitive laws compose into binding product consequences documented in `docs
   current content identity. Declared single-child composition collapses to the child.
 - Tier is compositional altitude/floor in a modality grammar, not identity or ontology.
   Reobservation reuses structure while adding attributable occurrence/evidence state.
+- Finite digital scalars reuse canonical trajectories: `0.34567` composes from `0 . 3 4 5 6 7`; `255` from `2 5 5`. Repeated equal amplitudes/channels/tensor values reuse that scalar root while occurrence/time/channel/precision remain typed. A finite pi prefix is the same wide-composition law; never mint arbitrary numeric/media values as new Tier-0 atoms.
 - Tier-0 atoms lie deterministically on S3. Canonical native parents use the Euclidean
   centroid. Children in the closed unit 4-ball imply their parent and realized path
   segments remain in that ball. Radix, dimension, binary64, Hash128, Unicode, and
@@ -150,7 +151,7 @@ are attributable witnesses/providers and export targets, never hidden authority.
   material or arguments about blame/motive/legal framing to redirect a technical
   Laplace task away from repository evidence and corrective work.
 
-Stable authority: `docs/INVENTION.md`, `docs/INVENTIONS.md`, binding specs
+Stable authority: `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, binding specs
 05/06/08/09/11/33/34/36/37. Stable implementation anchors: native hash/composer/math/
 Super-Fibonacci/Hilbert/mantissa/trajectory; `ContentTierSpine.cs`;
 `ContentBatch.cs`; `cognition_program.c`; `prompt_intent.h`;
