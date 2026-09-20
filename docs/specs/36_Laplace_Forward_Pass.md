@@ -277,7 +277,29 @@ A repository is a recursive application root. One bounded edit should remint onl
 
 ## Code lane
 
-Code generation uses the same program with grammar/AST trajectories and toolchain operations. Generated code is staged as content, compiled/tested under declared tools and the outcomes are witnessed before a subsequent decision can learn from them.
+Code construction uses the same forward program but binds an exact target language/grammar/toolchain contract. It is not a token-continuation side path.
+
+```text
+requirement / obligation
+-> resolve exact target grammar + runtime/toolchain
+-> COUPLE against canonical AST / repository / call / dependency state
+-> reuse exact canonical structure where possible
+-> compose known structures where possible
+-> minimally adapt the closest lawful subtree where possible
+-> construct only genuinely novel AST
+-> satisfy grammar/type/name/API/dependency constraints
+-> REALIZE source
+-> compile/link/test/analyze/simulate/run
+-> WITNESS every outcome
+-> repair the smallest divergent subtree
+-> repeat until obligations close or WHY_NOT remains
+```
+
+Exact duplicate AST structure converges by identity. Normalized AST, call/dependency/control/data-flow shape, algebraic/behavioral evidence and ordered trajectory/Fréchet comparison can nominate deeper duplicate implementations or analogous defects.
+
+A repository is the complete recursive application root. A local mutation should create new identities only along the changed subtree/ancestry; unrelated canonical structure remains shared. Full checkout/export is realization of the resulting root, not regeneration of every file as new cognition.
+
+Toolchain failures are typed repair evidence, not disposable stderr appended to a prompt. Successful and failed repair trajectories are available to later cognition and, within authority, to cross-repository maintenance queries.
 
 ## Trace contract
 
