@@ -2,13 +2,13 @@
 
 This file is a navigation/status index. It is **not** invention authority and it does not impose a fixed global execution order.
 
-Authority is defined by `AGENTS.md`, `docs/README.md`, `docs/INVENTION.md`, `docs/INVENTIONS.md`, the binding specs, and the current inventor request. GitHub issues own bounded implementation/acceptance work; code/runtime/CI prove implementation state.
+Authority is defined by `AGENTS.md`, `docs/README.md`, `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and the current inventor request. GitHub issues own bounded implementation/acceptance work; code/runtime/CI prove implementation state.
 
 Historical recovery diaries, database snapshots, old branch state, and cross-repository coordination plans must not be treated as current truth merely because they once appeared in this file.
 
-## Total order of operations (binding)
+## Whole-machine invariants (not a scheduling order)
 
-A later prompt does **not** replace earlier ones. Do not jump to a newly mentioned subsystem because it is locally easier. Execution is this order. Invention notes below are constraints on *how* each step is done, not permission to skip ahead.
+The numbered items below preserve cross-cutting machine constraints discovered during active work. They are **not** a global backlog, finish-line sequence, or permission to ignore the current accepted user scope. Current inventor instruction and explicit ordering select the work; these invariants constrain how that work is implemented. Do not pick an earlier number merely because it is easier to turn into a test/gate.
 
 1. **Hold the whole machine.** ISA / OODA / Gödel; personality firmware ≠ knowledge; kernel governance; seeded vs user vs snapshot export; Mold-A-Model realizes Q/K/V/O/gate/up/down/norm/embed from substrate; Laplace-builds-Laplace is the closed loop — not a side quest.
 2. **Live host is the evidence.** Web/API/MCP/OpenAI, Postgres, `pg_stat_statements`, ingest journals, `/opt/laplace`, `/vault`. Status prose and GitHub titles are not truth.
@@ -99,6 +99,13 @@ For software work this means: a repository is a recursive application root; gene
 For product/security/billing this means: knowledge remains one shared world; explicit knowledge grants/capabilities govern what a principal may discover/couple/traverse/derive/realize/export/execute; firmware/governance does not erase facts; hops/fanout and physical work govern compute depth/breadth; machine-cost derivation remains exact/symbolic where possible and measurements are witnesses/calibration.
 
 Tests and gates prove those behaviors. They are not permission to stop before the behaviors exist.
+
+
+Current bounded implementation owners created from this synthesis:
+
+- #1708 — knowledge packages/capabilities/effective-mind authority plus Red Spear / Blue Shield / White Judge enforcement;
+- #1709 — control/data-flow-aware program-to-microarchitecture cycle derivation;
+- #1710 — complete application-root mutation and exact full-repository realization benchmark.
 
 ### 10. Forward-pass actually firing on this host
 
