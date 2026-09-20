@@ -12,20 +12,40 @@ import { apiGet, setApiWorkspace } from './api/client';
 import type { AuthProvider, AuthUser } from './store';
 import styles from './App.module.css';
 
-const ChatView = lazy(() => import('./chat/ChatView').then((m) => ({ default: m.ChatView })));
-const QueryConsole = lazy(() => import('./query/QueryConsole').then((m) => ({ default: m.QueryConsole })));
-const TopicView = lazy(() => import('./topic/TopicView').then((m) => ({ default: m.TopicView })));
-const BillingView = lazy(() => import('./billing/BillingView').then((m) => ({ default: m.BillingView })));
-const BillingReturnView = lazy(() => import('./auth/SettingsView').then((m) => ({ default: m.BillingReturnView })));
-const SettingsView = lazy(() => import('./auth/SettingsView').then((m) => ({ default: m.SettingsView })));
-const ChessView = lazy(() => import('./chess/ChessView').then((m) => ({ default: m.ChessView })));
-const LabView = lazy(() => import('./chess/lab/LabView').then((m) => ({ default: m.LabView })));
-const ChessDbView = lazy(() => import('./chess/db/ChessDbView').then((m) => ({ default: m.ChessDbView })));
-const ExploreView = lazy(() => import('./explore/ExploreView').then((m) => ({ default: m.ExploreView })));
-const StorageProofView = lazy(() => import('./explore/proof/StorageProofView').then((m) => ({ default: m.StorageProofView })));
-const UnicodeGlomeView = lazy(() => import('./explore/unicode/UnicodeGlomeView').then((m) => ({ default: m.UnicodeGlomeView })));
-const AdminView = lazy(() => import('./admin/AdminView').then((m) => ({ default: m.AdminView })));
-const DataView = lazy(() => import('./data/DataView').then((m) => ({ default: m.DataView })));
+const loadChat = () => import('./chat/ChatView');
+const loadQuery = () => import('./query/QueryConsole');
+const loadTopic = () => import('./topic/TopicView');
+const loadBilling = () => import('./billing/BillingView');
+const loadSettings = () => import('./auth/SettingsView');
+const loadPlay = () => import('./chess/ChessView');
+const loadLab = () => import('./chess/lab/LabView');
+const loadChess = () => import('./chess/db/ChessDbView');
+const loadExplore = () => import('./explore/ExploreView');
+const loadProof = () => import('./explore/proof/StorageProofView');
+const loadUnicode = () => import('./explore/unicode/UnicodeGlomeView');
+const loadOperator = () => import('./admin/AdminView');
+const loadData = () => import('./data/DataView');
+
+const ChatView = lazy(() => loadChat().then((m) => ({ default: m.ChatView })));
+const QueryConsole = lazy(() => loadQuery().then((m) => ({ default: m.QueryConsole })));
+const TopicView = lazy(() => loadTopic().then((m) => ({ default: m.TopicView })));
+const BillingView = lazy(() => loadBilling().then((m) => ({ default: m.BillingView })));
+const BillingReturnView = lazy(() => loadSettings().then((m) => ({ default: m.BillingReturnView })));
+const SettingsView = lazy(() => loadSettings().then((m) => ({ default: m.SettingsView })));
+const ChessView = lazy(() => loadPlay().then((m) => ({ default: m.ChessView })));
+const LabView = lazy(() => loadLab().then((m) => ({ default: m.LabView })));
+const ChessDbView = lazy(() => loadChess().then((m) => ({ default: m.ChessDbView })));
+const ExploreView = lazy(() => loadExplore().then((m) => ({ default: m.ExploreView })));
+const StorageProofView = lazy(() => loadProof().then((m) => ({ default: m.StorageProofView })));
+const UnicodeGlomeView = lazy(() => loadUnicode().then((m) => ({ default: m.UnicodeGlomeView })));
+const AdminView = lazy(() => loadOperator().then((m) => ({ default: m.AdminView })));
+const DataView = lazy(() => loadData().then((m) => ({ default: m.DataView })));
+
+const WORKSPACE_PREFETCH: Partial<Record<string, () => Promise<unknown>>> = {
+  chat: loadChat, query: loadQuery, explore: loadExplore, proof: loadProof, unicode: loadUnicode,
+  data: loadData, chess: loadChess, play: loadPlay, lab: loadLab, billing: loadBilling,
+  settings: loadSettings, operator: loadOperator,
+};
 
 const TABS: { id: string; label: string; path: string }[] = [
   { id: 'home', label: 'Home', path: '/' },
@@ -64,7 +84,7 @@ function Shell() {
   return <UploadProvider><div className={styles.shell}>
     <a className={styles.skipLink} href="#main-content">Skip to workspace</a>
     <AppHeader title={<RouterLink to="/" className={styles.title}>Laplace</RouterLink>} tagline="witnessed consensus, not weights"
-      nav={<NavTabs tabs={TABS.map((tab) => ({ id: tab.id, label: tab.label, href: tab.path, active: isActive(location.pathname, tab.path), onClick: () => navigate(tab.path) }))} />}
+      nav={<NavTabs tabs={TABS.map((tab) => ({ id: tab.id, label: tab.label, href: tab.path, active: isActive(location.pathname, tab.path), onClick: () => navigate(tab.path), onIntent: () => { void WORKSPACE_PREFETCH[tab.id]?.(); } }))} />}
       tenant={authReady && (authUser || authProviders.length > 0)
         ? <AccountControls user={authUser} providers={authProviders} returnUrl={`${location.pathname}${location.search}${location.hash}`} />
         : <TenantField value={tenant} onChange={setTenant} />} />

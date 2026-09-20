@@ -13,6 +13,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  useVisiblePolling,
 } from '@ui';
 import { apiGet, apiPost } from '../../../api/client';
 import { LiveBoard, type LabBoardState } from '../LiveBoard';
@@ -124,11 +125,7 @@ export function GauntletView() {
   // A run outlives any one SSE connection: the job record is the source of truth for state
   // and score, so poll it while something is in flight rather than trusting the stream to
   // stay up for an hour.
-  useEffect(() => {
-    if (!running) return;
-    const t = setInterval(() => void refresh(), 4000);
-    return () => clearInterval(t);
-  }, [running, refresh]);
+  useVisiblePolling(refresh, { intervalMs: 4000, enabled: running, immediate: false });
 
   // The command preview comes from the server so it shows resolved binary paths and cannot
   // drift from CutechessRunner.BuildArguments. Debounced — the sliders move continuously.

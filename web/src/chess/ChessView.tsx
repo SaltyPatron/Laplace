@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Button, Modal } from '@ui';
+import { Button, Modal, useVisiblePolling } from '@ui';
 
 import { apiGet, apiPost } from '../api/client';
 import { useAppStore } from '../store';
@@ -314,15 +314,11 @@ export function ChessView() {
 
   useEffect(() => { void fetchTrain(); }, [fetchTrain]);
 
-  useEffect(() => {
-
-    if (!train?.running) return;
-
-    const h = setInterval(fetchTrain, 1500);
-
-    return () => clearInterval(h);
-
-  }, [train?.running, fetchTrain]);
+  useVisiblePolling(fetchTrain, {
+    intervalMs: 1500,
+    enabled: !!train?.running,
+    immediate: false,
+  });
 
 
 
