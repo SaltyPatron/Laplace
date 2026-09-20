@@ -126,14 +126,14 @@ if(_laplace_ucd_release_match EQUAL -1)
         "but ${LAPLACE_UCD_RELEASE_README} does not declare that release.\n"
         "Do not let a moving 'latest' alias change content identity.")
 endif()
-set(LAPLACE_UCDXML_ZIP "${LAPLACE_UCD_PATH}/ucdxml/ucd.all.flat.zip"
-    CACHE FILEPATH "Complete UCDXML flat zip (CJK + non-CJK); canonical Unicode property authority for engine codegen.")
+set(LAPLACE_UCDXML_ZIP "${LAPLACE_UCD_PATH}/ucdxml/ucd.all.grouped.zip"
+    CACHE FILEPATH "Complete UCDXML grouped zip (CJK + non-CJK); canonical Unicode property authority for engine codegen.")
 if(NOT EXISTS "${LAPLACE_UCDXML_ZIP}")
     message(FATAL_ERROR
         "LAPLACE_UCDXML_ZIP not found:\n"
         "  ${LAPLACE_UCDXML_ZIP}\n"
         "Override -DLAPLACE_UCDXML_ZIP=... to the path of\n"
-        "ucd.all.flat.zip (download from https://www.unicode.org/Public/${LAPLACE_UNICODE_VERSION}/ucdxml/).")
+        "ucd.all.grouped.zip (download from https://www.unicode.org/Public/${LAPLACE_UNICODE_VERSION}/ucdxml/).")
 endif()
 set(LAPLACE_UCD_CONFORMANCE_DIR "${LAPLACE_UCD_PATH}/ucd"
     CACHE PATH "Directory holding the UAX#29/UAX#15 conformance test .txt files (auxiliary/Grapheme/Word/SentenceBreakTest.txt + NormalizationTest.txt)")
