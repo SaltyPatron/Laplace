@@ -1,23 +1,17 @@
 #pragma once
 
 /*
- * Modality number compose-floor blob — docs/specs/33_Perfcache_Blob_Law.md
- * + docs/invention/modality-ladder-law.md (codepoint floor).
+ * Modality number perfcache v1 — a derived ROM for the CURRENT LEGACY
+ * decimal-number media recipe. See docs/specs/33_Perfcache_Blob_Law.md.
  *
- * Shared ROM ABOVE tier 0 (codepoints stay t0 only). Peer of
- * laplace_chess_position_perfcache.bin: load t0 → compose → mmap lookup.
+ * v1 materializes unsigned decimal integer roots 0..255 for O(1) lookup.
+ * That fact does NOT define the ontology of image/audio physical samples and
+ * does not require future media recipes to identify a sample with its decimal
+ * Unicode spelling. docs/invention/modality-ladder-law.md and GH #1134 own the
+ * corrected media representation. Regenerate/re-scope/retire this blob rather
+ * than forcing a new recipe to preserve its legacy semantics.
  *
- * v1 scope = unsigned decimal integers 0..255 (channel bytes). Why:
- *   - Image packaging recovers per-channel uint8 intensities; the ladder
- *     encodes each as digit codepoints → number (operator white: 255 → 2,5,5).
- *   - Dense 256 keys ⇒ true O(1) index (records[value]), no binary search,
- *     no Postgres round-trip per channel.
- *   - Audio reuses the same number law; full signed PCM range (−32768..32767)
- *     is a later scope/extension — not a private int16 tier-0 alphabet.
- *
- * Identity = text content root of the invariant-culture decimal digit string
- * (ModelCoordinates.ScalarId / laplace_content_root_id). Single digits collapse
- * to codepoint ids. NOT blake3 of packed RGBA / PCM. Never seed DB from this file.
+ * Never seed DB semantic authority from this file; it is rebuildable derived state.
  */
 
 #include <stdint.h>
