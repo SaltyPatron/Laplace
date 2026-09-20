@@ -27,6 +27,44 @@ A package may contain other declared scopes/packages. Inheritance follows explic
 
 Buying Formula 1 knowledge must not accidentally grant unrelated restricted aerospace knowledge merely because both domains connect through fluid dynamics.
 
+## Knowledge package versus cache profile
+
+A knowledge package may ship or recommend a matching perfcache deployment profile, but the two objects are intentionally different.
+
+~~~text
+knowledge grant:
+  what this principal may use
+
+cache profile:
+  what this device/process keeps resident or precomputed
+~~~
+
+Examples:
+
+~~~text
+Grade 7 package
+  may recommend:
+    unicode/basic-text
+    number/common
+    curriculum/hot-concepts
+
+Formula 1 package
+  may recommend:
+    engineering/hot-structures
+    image/team-palette
+    telemetry/hot-numerics
+
+speech assistant deployment
+  may map:
+    unicode/ascii-or-selected-script
+    audio/speech-band
+    hot audio windows/phrases
+~~~
+
+Removing a cache module does not revoke knowledge. Revoking a knowledge grant does not require rewriting the canonical cache identity of shared public structures, though runtime enforcement must ensure unauthorized cached records cannot enter COUPLE.
+
+This separation lets deployment/storage economics be optimized independently of authorization.
+
 ## Capabilities
 
 Scope and operation rights are independent.
