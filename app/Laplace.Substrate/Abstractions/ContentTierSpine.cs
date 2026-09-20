@@ -37,6 +37,27 @@ public static class ContentTierSpine
         return IntentStage.BuildContentTree(canonicalUtf8);
     }
 
+    /// <summary>
+    /// Leaf-to-trunk source compose. The tier law is unchanged; only Unicode
+    /// normalization is disabled so authored source can round-trip byte-exactly.
+    /// Parser/grammar structure is separate evidence over this canonical trajectory.
+    /// </summary>
+    public static TierTree? BuildSourceTree(ReadOnlySpan<byte> sourceUtf8)
+    {
+        CodepointPerfcache.LoadDefault();
+        return IntentStage.BuildSourceContentTree(sourceUtf8);
+    }
+
+    /// <summary>
+    /// Canonical root for authored source bytes, independent of the parser or grammar provider.
+    /// </summary>
+    public static Hash128? ResolveSourceRoot(ReadOnlySpan<byte> sourceUtf8)
+    {
+        if (sourceUtf8.IsEmpty) return null;
+        CodepointPerfcache.LoadDefault();
+        return TextDecomposer.SourceRootId(sourceUtf8);
+    }
+
     /// <summary>Root id without building a full tree when the native fast path applies.</summary>
     /// <remarks>
     /// Contract is nullable success — never throw for content the native path rejects
