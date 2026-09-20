@@ -13,31 +13,33 @@ extern "C" {
 #endif
 
 /*
- * Modality entity-type floor labels (blake3 of the name), sibling of
- * laplace_content_tier_type_id. Tier 0 is always "Codepoint" (shared T0 floor).
- * Image: 0 Codepoint, 1 Number, 2 Channel, 3 Pixel, 4 Patch, 5 Region, 6 Image.
- * Audio: 0 Codepoint, 1 Sample, 2 Window, 3 OnsetSegment, 4 Phrase, 5 Track.
- * Leaf atoms are Unicode codepoints; compose uses codepoint_table_resolve_atom.
- * Sample/Number ids: modality_number_perfcache O(1) for 0..255 when loaded,
- * else laplace_content_root_id of the decimal digit UTF-8 (ScalarId law).
- * Not merkle of child ids; not packed-RGBA/PCM blake3.
+ * Entity-type labels for the CURRENT legacy image/audio ladder.
+ * Image currently labels Codepoint/Number/Channel/Pixel/Patch/Region/Image;
+ * audio labels Codepoint/Sample/Window/OnsetSegment/Phrase/Track.
+ *
+ * The decimal/codepoint leaf representation and modality-number ROM are
+ * implementation state, not the universal modality identity law. The corrected
+ * provider/recipe/physicality contract is docs/invention/modality-ladder-law.md
+ * and GH #1134. Do not preserve these labels/tiers merely to protect this ABI.
  */
 hash128_t laplace_modality_tier_type_id(laplace_modality_t modality, uint8_t tier);
 
-/* hash_composer atom resolver — atom is a Unicode codepoint (user_data unused). */
+/* Legacy media-recipe resolver: current atoms are Unicode codepoints.
+ * GH #1134 owns replacement; this signature is not invention authority. */
 int laplace_modality_hash_composer_resolver(
     uint32_t atom, void* user_data,
     hash128_t* out_id, double out_coord[4], hilbert128_t* out_hilbert);
 
-/* Compose: decomposer tree + codepoint/number compose paths. */
+/* Compose under the currently installed legacy codepoint/number media recipe. */
 int laplace_image_tree_build(
     const uint8_t* rgba, uint32_t width, uint32_t height, tier_tree_t** out_tree);
 int laplace_audio_tree_build(
     const int16_t* pcm, size_t n_samples, tier_tree_t** out_tree);
 
 /*
- * Emit a composed modality tree into intent_stage.
- * Tier-0 Codepoint leaves are NOT emitted (shared T0 perfcache). Higher tiers emit.
+ * Emit a composed modality tree into intent_stage under the current recipe.
+ * Current Codepoint leaves are not emitted because they reuse the Unicode perfcache.
+ * The corrected recipe may change this shape; see GH #1134.
  */
 int laplace_modality_witness_emit_tree(
     intent_stage_t*       stage,
