@@ -39,7 +39,7 @@ cmake -B "%LAPLACE_ENGINE_BUILD%" -S engine -G Ninja ^
   -DLAPLACE_REQUIRE_MKL=ON ^
   -DLAPLACE_SYNTHESIS_REQUIRE_MKL=ON ^
   "-DLAPLACE_UCD_PATH=%LAPLACE_UCD%" ^
-  "-DLAPLACE_UCDXML_ZIP=%LAPLACE_UCD%\ucdxml\ucd.all.flat.zip" ^
+  "-DLAPLACE_UCDXML_ZIP=%LAPLACE_UCD%\ucdxml\ucd.all.grouped.zip" ^
   "-DLAPLACE_DUCET_FILE=%LAPLACE_UCD%\uca\allkeys.txt" ^
   "-DLAPLACE_UCD_CONFORMANCE_DIR=%LAPLACE_UCD%\ucd"
 if errorlevel 1 goto fail
