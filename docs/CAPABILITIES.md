@@ -144,6 +144,8 @@ This means the benefits compound upward: once pixels/patches/images are cached, 
 
 Cache lookup should produce canonical keys for indexed database/native operations rather than hide indexed columns behind per-row functions.
 
+Cache profiles can be intentionally narrow without creating smaller knowledge worlds. A device may map ASCII rather than all Unicode, a selected color palette rather than every pixel value, or a declared speech-frequency/filter-bank segment rather than every audio calculation. Members retain their global canonical identity. Missing cache entries fall back to canonical execution when available; authorization remains a separate knowledge/governance axis.
+
 ## Reusable numeric/scalar structure
 
 Numeric values follow the same content-addressed reuse law as words, AST subtrees and chess positions.
