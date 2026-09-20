@@ -845,12 +845,6 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
         root_binding->origins = bms_add_member(root_binding->origins, i);
     }
 
-    /* Geometry responds before ORIENT from the canonical in-memory prompt tree.
-     * The anchor therefore exists even when the prompt has never been witnessed.
-     * Its results remain deterministic locality/shape state, not semantic truth. */
-    laplace_prompt_geometry_couple(
-        &result, values, nulls, nodes, node_nulls, count, fanout);
-
     /* Physicality participates in COUPLE before ORIENT. The native scope is the
      * same one later used for ordered continuation, so containment, membership,
      * predecessor/successor, co-occurrence and exact whole-observation
@@ -944,6 +938,12 @@ laplace_prompt_intent_begin(const LaplacePromptInput *input, MemoryContext owner
             }
         }
     }
+
+    /* Geometry also responds before ORIENT, but after exact physicality routes
+     * have retained their own frontier.  This ordering prevents one plane from
+     * suppressing the other when both reach the same canonical identity. */
+    laplace_prompt_geometry_couple(
+        &result, values, nulls, nodes, node_nulls, count, fanout);
 
     if (count > 0) { pfree(values); pfree(nulls); }
     if (node_count > 0) { pfree(nodes); pfree(node_nulls); }
