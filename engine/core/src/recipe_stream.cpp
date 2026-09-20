@@ -64,6 +64,8 @@ struct route_rule {
     uint32_t kind, subject_codec;
     hash128_t entity_type;
     std::unordered_map<std::string, std::string> children;
+    std::vector<std::string> structures;
+    bool inherit_parent_attributes = false;
 };
 struct node {
     std::string name, ns;
@@ -155,6 +157,8 @@ struct laplace_recipe_stream {
     std::unordered_map<std::string, structure_rule> structures;
     std::unordered_map<std::string, route_rule> routes;
     std::vector<node> stack;
+    node parent_scope{};
+    bool parent_scope_active = false;
     std::deque<node> pending;
     uint32_t cursor = 0, end = 0;
     bool range = false, membership = false, record_facts_done = false;
@@ -435,7 +439,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
         image_reader r{program,n};
         const uint32_t version = r.number();
         const bool rcp2_or_later = version == 0x32504352u || version == 0x33504352u
-            || version == 0x34504352u;
+            || version == 0x34504352u || version == 0x35504352u;
         if (version != 0x31504352u && !rcp2_or_later)
             throw std::runtime_error("unsupported recipe instruction version");
         s->depth = int(r.number());
@@ -473,7 +477,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             f.relation = r.hash(); f.parent = r.hash(); f.entity_type = r.hash(); f.lexical_relation = r.hash(); f.rank = r.real();
             uint32_t aliases = r.number();
             for (uint32_t a = 0; a < aliases; ++a) { auto k = r.text(); auto v = r.text(); if (!f.aliases.emplace(alias_key(k),v).second) throw std::runtime_error("duplicate value alias instruction"); }
-            if (version == 0x33504352u || version == 0x34504352u) {
+            if (version == 0x33504352u || version == 0x34504352u || version == 0x35504352u) {
                 const uint32_t has_default = r.number();
                 if (has_default > 1) throw std::runtime_error("invalid semantic-default instruction");
                 f.has_default = has_default != 0;
@@ -491,7 +495,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             std::string key = f.path;
             if (!s->fields.emplace(key,std::move(f)).second) throw std::runtime_error("duplicate field instruction");
         }
-        if (version == 0x34504352u) {
+        if (version == 0x34504352u || version == 0x35504352u) {
             count = r.number();
             for (uint32_t j = 0; j < count; ++j) {
                 structure_rule structure;
@@ -518,7 +522,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if (!route.aliases.emplace(key, value).second)
                     throw std::runtime_error("duplicate subject alias instruction");
             }
-            if (version == 0x34504352u) {
+            if (version == 0x34504352u || version == 0x35504352u) {
                 const uint32_t structures = r.number();
                 route.structures.reserve(structures);
                 for (uint32_t k = 0; k < structures; ++k) {
@@ -526,6 +530,11 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     if (s->structures.find(path) == s->structures.end())
                         throw std::runtime_error("route references unknown structure " + path);
                     route.structures.push_back(std::move(path));
+                }
+                if (version == 0x35504352u) {
+                    const uint32_t inherit = r.number();
+                    if (inherit > 1) throw std::runtime_error("invalid parent-attribute inheritance instruction");
+                    route.inherit_parent_attributes = inherit != 0;
                 }
             }
             if (route.kind > 2 || route.subject_codec > 2 || (route.range_first.empty() != route.range_last.empty()) ||
@@ -559,6 +568,22 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
             throw std::runtime_error(laplace_xml_stream_error(s->parser));
         for (size_t i = 0; i < count; ++i) {
             const auto& e = events[i];
+            if (e.depth + 1 == s->depth) {
+                if (e.kind == 1) {
+                    s->parent_scope = node{e.name, e.namespace_uri ? e.namespace_uri : "", {}, {}};
+                    s->parent_scope_active = true;
+                } else if (e.kind == 4 && s->parent_scope_active) {
+                    if (e.namespace_uri && *e.namespace_uri)
+                        throw std::runtime_error("recipe has no namespaced parent attribute disposition");
+                    if (!s->parent_scope.attributes.emplace(
+                            e.name, std::string(e.value, e.value_len)).second)
+                        throw std::runtime_error("duplicate parent record attribute");
+                } else if (e.kind == 2) {
+                    s->parent_scope = {};
+                    s->parent_scope_active = false;
+                }
+                continue;
+            }
             if (e.depth < s->depth) continue;
             if (e.kind == 1) s->stack.push_back(node{e.name,e.namespace_uri ? e.namespace_uri : "",{}, {}});
             else if (e.kind == 4) {
@@ -570,8 +595,18 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
             } else if (e.kind == 2) {
                 if (s->stack.empty()) throw std::runtime_error("unbalanced record");
                 node done = std::move(s->stack.back()); s->stack.pop_back();
-                if (s->stack.empty()) s->pending.push_back(std::move(done));
-                else s->stack.back().children.push_back(std::move(done));
+                if (s->stack.empty()) {
+                    auto route = s->routes.find(done.name);
+                    if (route != s->routes.end() && route->second.inherit_parent_attributes) {
+                        if (!s->parent_scope_active)
+                            throw std::runtime_error("record requires inherited parent attributes");
+                        if (done.ns != s->parent_scope.ns)
+                            throw std::runtime_error("record/parent namespace mismatch");
+                        for (const auto& a : s->parent_scope.attributes)
+                            done.attributes.try_emplace(a.first, a.second);
+                    }
+                    s->pending.push_back(std::move(done));
+                } else s->stack.back().children.push_back(std::move(done));
             } else if (e.kind == 3) {
                 for (size_t b = 0; b < e.value_len; ++b)
                     if (e.value[b] != ' ' && e.value[b] != '\r' && e.value[b] != '\n' && e.value[b] != '\t')
