@@ -1,28 +1,44 @@
-# Modality number perfcache — current implementation note, not identity law
+# Modality number perfcache — acceleration for canonical scalar roots
 
-This file describes a finite derived accelerator that exists in the current implementation. It is subordinate to docs/specs/33_Perfcache_Blob_Law.md and modality-ladder-law.md.
+The modality-number perfcache is derived ROM for common scalar compositions. It is subordinate to docs/specs/33_Perfcache_Blob_Law.md and modality-ladder-law.md.
 
-The historical version of this note treated decimal Unicode spelling (255 → 2,5,5) as the universal identity route for image/audio scalar values. That is no longer a binding invention law.
+## What v1 accelerates
 
-## Current implementation surface
+v1 precomputes canonical integer content roots for 0..255:
 
-| Piece | Path |
-|---|---|
-| Format | engine/core/include/laplace/core/modality_number_perfcache_format.h |
-| Load / lookup | modality_number_table_* |
-| Emit | modality_number_tables_emit → laplace_modality_number_perfcache.bin |
-| CMake | laplace_modality_number_perfcache |
+~~~text
+0   -> ['0']
+42  -> ['4','2']
+255 -> ['2','5','5']
+~~~
 
-Where a currently selected recipe genuinely uses the existing canonical numeric/text representation, this table may accelerate it.
+This is useful for byte-valued image channels and any other source that lawfully uses the same exact abstract integer values.
 
-It must not be used to conclude that every sample/channel/tensor value is semantic content, every modality scalar must be converted to a decimal string, numeric display spelling is the identity of physical source data, or a perfcache owns the semantic representation.
+The cache does not invent those identities. The ordinary content composer does.
 
-## Required preservation
+## What it does not mean
 
-- the blob remains deterministic, versioned and rebuildable;
-- lookup matches the canonical/reference recipe it accelerates;
-- missing blob falls back to canonical calculation rather than changing identity;
-- expanding scalar coverage is an explicit recipe/perfcache generation change;
-- source precision/physicality semantics stay outside the cache when the cache does not encode them.
+The cache does not mean:
 
-If the selected modality recipe changes away from the historical decimal-number composition, this cache must be regenerated/replaced/retired rather than forcing the new recipe to preserve the cache's old semantics.
+- 0..255 is the numeric universe;
+- audio values must be uint8;
+- fractional values need new Tier-0 atoms;
+- every number must have a ROM entry.
+
+For example:
+
+~~~text
+0.34567 -> ['0','.','3','4','5','6','7']
+~~~
+
+can be composed through the ordinary content/trajectory path. Once its scalar root exists, repeated occurrences reuse it exactly like a cached integer root.
+
+A larger future numeric perfcache may accelerate a selected finite hot set, but cache coverage is never semantic coverage.
+
+## Correctness
+
+- cache records must equal ordinary canonical composition for the same scalar;
+- missing cache entries fall back to canonical composition;
+- cache generation is deterministic/rebuildable;
+- changing a scalar canonicalization recipe requires a new cache generation;
+- source occurrence roles/precision/channel/time are not stored in the scalar ROM merely because they reference the scalar.
