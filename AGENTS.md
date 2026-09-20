@@ -25,6 +25,47 @@ Load these sources before selecting or changing work:
 
 When two derived sources disagree, return to the higher authority and correct the lower source. A stale issue, comment, checklist, milestone, branch description, status report, or historical implementation cannot override the invention. Do not ask the user to restate a requirement already present in higher authority.
 
+## Host storage placement and cleanup
+
+Before allocating builds, database fixtures, caches or deployment copies, inspect
+the actual host with `lsblk`, `findmnt`, `df`, CPU/memory inventory and PostgreSQL
+data-directory/tablespace queries. A pathname beneath `/opt/laplace` does not prove
+that it shares the installed-prefix filesystem. Account for the peak overlap of
+old, staged and replacement bytes on each destination; free space on another
+volume is irrelevant. Reuse the existing storage owners in `scripts/lib/storage.sh`
+and the deployment scripts rather than creating another private layout.
+
+Observed hart-server layout on 2026-09-20 (recheck before changing it):
+
+| Purpose | Mount and capacity | Physical backing |
+| --- | --- | --- |
+| Installed runtime | `/opt/laplace`, 16 GiB XFS | Samsung 970 EVO Plus NVMe |
+| PostgreSQL data | `/opt/laplace/pgdata`, 740 GiB XFS | Separate LV on the same Samsung NVMe |
+| PostgreSQL WAL | `/var/lib/pgwal`, 128 GiB XFS | Intel SSDPEKKW256G7 NVMe |
+| Build/work files | `/build`, 256 GiB XFS | RAID0 over two Intel SSDSC2BW48 SATA SSDs |
+| PostgreSQL temporary work | `/pgtemp`, 128 GiB XFS | Same SATA SSD RAID0, separate LV |
+| Source estate | `/vault`, 3.6 TiB XFS | WDC WD4005FZBX rotating USB drive |
+
+The host has six physical CPU cores/twelve threads and approximately 126 GiB RAM.
+Do not treat source-estate disks, the OS filesystem, or the small installed-prefix
+volume as interchangeable build or database scratch space.
+
+The 2026-09-20 failure filled the installed-prefix volume with retained runtime
+copies. Pre-install deletion then left T0 truncated and extension files missing.
+Native/managed install preparation belongs on `/build`; preserve the serving files
+until replacement copying succeeds. Preserve library symlinks, share unchanged
+immutable payloads, and retain runtimes while a process lifetime lease is held.
+Do not delete versioned PostgreSQL modules that databases may still reference.
+
+Do not create another PostgreSQL server for an ordinary query/ingest repair.
+Reuse the configured server with an explicitly owned disposable database when
+isolation is necessary; remove that database after its work completes. A separate
+cluster needs a concrete server-level requirement, a designated location, and
+cleanup covering success, failure and interruption. Inventory abandoned fixtures
+and their ownership; names alone never authorize deleting another session's data.
+Report servers, backends, databases and cluster directories separately. Use `df`
+for reclaimed filesystem space: `du` can count shared XFS extents more than once.
+
 ## Compound-capability preservation
 
 Read `docs/CAPABILITIES.md` before narrowing a task to a local subsystem. The invention's value often appears only when multiple primitive laws are composed. Those compound consequences are part of the accepted machine, not optional marketing prose.
