@@ -45,8 +45,9 @@ struct image_reader {
     }
 };
 struct field_rule {
-    std::string path, absent, separator, object_namespace, context_field;
+    std::string path, absent, separator, object_namespace, context_field, default_value;
     uint32_t kind, disposition, codec;
+    bool has_default = false, omit_default_testimony = false;
     hash128_t relation, parent, entity_type, lexical_relation;
     double rank;
     std::unordered_map<std::string, std::string> aliases;
@@ -239,14 +240,17 @@ struct laplace_recipe_stream {
         if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
         const bool testimony = (rule.disposition & (1u << 6)) != 0;
         const bool ordinary_content = (rule.disposition & (1u << 1)) != 0;
-        if (!testimony && !ordinary_content) {
+        const bool default_value = rule.has_default && raw == rule.default_value;
+        const bool emitted_testimony = testimony && !(default_value && rule.omit_default_testimony);
+        if (!emitted_testimony && !ordinary_content) {
+            if (testimony && default_value && rule.omit_default_testimony) return;
             if ((rule.disposition & (1u << 9)) || ((rule.disposition & 1u) && subject_binding)) return;
             throw std::runtime_error("field disposition has no executable lowering");
         }
-        auto emit_fact = [&](const fact& value) { if (testimony) facts.push_back(value); };
+        auto emit_fact = [&](const fact& value) { if (emitted_testimony) facts.push_back(value); };
         hash128_t relation_type; hash128_blake3_str("RelationType", &relation_type);
-        if (testimony) entity(stage, rule.relation, relation_type);
-        if (testimony && nonzero(rule.parent)) {
+        if (emitted_testimony) entity(stage, rule.relation, relation_type);
+        if (emitted_testimony && nonzero(rule.parent)) {
             std::string declaration(reinterpret_cast<const char*>(&rule.relation), sizeof(rule.relation));
             declaration.append(reinterpret_cast<const char*>(&rule.parent), sizeof(rule.parent));
             if (declared_parents.find(declaration) == declared_parents.end()) {
@@ -270,7 +274,7 @@ struct laplace_recipe_stream {
             if (ordinary_content) content(stage, raw);
             emit_fact(f); return;
         }
-        if (testimony && nonzero(rule.lexical_relation)) {
+        if (emitted_testimony && nonzero(rule.lexical_relation)) {
             entity(stage, rule.lexical_relation, relation_type);
             fact lexical = f; lexical.relation = rule.lexical_relation; lexical.explicit_rank = false;
             lexical.object = content(stage, raw); lexical.has_object = true; emit_fact(lexical);
@@ -381,12 +385,13 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
         s = std::make_unique<laplace_recipe_stream>(); s->witness = *witness; s->trust = trust;
         image_reader r{program,n};
         const uint32_t version = r.number();
-        if (version != 0x31504352u && version != 0x32504352u)
+        const bool rcp2_or_later = version == 0x32504352u || version == 0x33504352u;
+        if (version != 0x31504352u && !rcp2_or_later)
             throw std::runtime_error("unsupported recipe instruction version");
         s->depth = int(r.number());
         if (s->depth < 0 || s->depth > 128) throw std::runtime_error("invalid record depth");
         uint32_t provider_kind = 0;
-        if (version == 0x32504352u) {
+        if (rcp2_or_later) {
             provider_kind = r.number();
             if (provider_kind > 1) throw std::runtime_error("unsupported recipe syntax provider");
             if (provider_kind == 1) {
@@ -418,7 +423,19 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             f.relation = r.hash(); f.parent = r.hash(); f.entity_type = r.hash(); f.lexical_relation = r.hash(); f.rank = r.real();
             uint32_t aliases = r.number();
             for (uint32_t a = 0; a < aliases; ++a) { auto k = r.text(); auto v = r.text(); if (!f.aliases.emplace(alias_key(k),v).second) throw std::runtime_error("duplicate value alias instruction"); }
-            if (version == 0x32504352u) f.context_field = r.text();
+            if (version == 0x33504352u) {
+                const uint32_t has_default = r.number();
+                if (has_default > 1) throw std::runtime_error("invalid semantic-default instruction");
+                f.has_default = has_default != 0;
+                f.default_value = r.text();
+                const uint32_t omit_default_testimony = r.number();
+                if (omit_default_testimony > 1)
+                    throw std::runtime_error("invalid default-testimony instruction");
+                f.omit_default_testimony = omit_default_testimony != 0;
+                if (f.omit_default_testimony && !f.has_default)
+                    throw std::runtime_error("default testimony omission requires a semantic default");
+            }
+            if (rcp2_or_later) f.context_field = r.text();
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
             std::string key = f.path;

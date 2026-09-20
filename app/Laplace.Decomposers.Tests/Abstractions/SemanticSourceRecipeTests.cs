@@ -41,6 +41,38 @@ public sealed class SemanticSourceRecipeTests
     }
 
     [Fact]
+    public void Semantic_default_is_distinct_from_absence_and_changes_recipe_identity()
+    {
+        SourceRecipeField compacted = new(
+            "row/@enabled", "Enabled", SourceValueKind.Boolean,
+            SourceFieldDisposition.Testimony,
+            AbsentSentinel: "#",
+            DefaultValue: "N",
+            OmitDefaultTestimony: true);
+        SourceRecipeField ordinary = compacted with
+        {
+            DefaultValue = null,
+            OmitDefaultTestimony = false,
+        };
+
+        var sparse = new SemanticSourceRecipe(
+            "fixture", "1", "provider", "syntax", [compacted]);
+        var dense = new SemanticSourceRecipe(
+            "fixture", "1", "provider", "syntax", [ordinary]);
+        Assert.NotEqual(sparse.RecipeId, dense.RecipeId);
+
+        var target = new CapturingTarget();
+        var interpreter = new LaplaceRecipeInterpreter<string>(sparse);
+        interpreter.Lower(
+            new SourceRecipeAssertion<string>("subject", "row/@enabled", "N"),
+            target);
+        SourceRecipeValue value = Assert.Single(target.Values);
+        Assert.False(value.IsAbsent);
+        Assert.True(value.IsDefault);
+        Assert.False(value.Boolean);
+    }
+
+    [Fact]
     public void Cookbook_resolves_exact_generations_and_reports_schema_drift()
     {
         var v1 = new SemanticSourceRecipe(

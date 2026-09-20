@@ -4,12 +4,15 @@ using Laplace.Engine.Core;
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Lowers one immutable semantic recipe to the native streaming engine's RCP1
-/// instruction image. Resolution happens once per recipe, before any source records
+/// Lowers one immutable semantic recipe to the native streaming engine's versioned
+/// RCP instruction image. Resolution happens once per recipe, before any source records
 /// cross the native boundary.
 /// </summary>
 public static class NativeRecipeCompiler
 {
+    private const uint Rcp1 = 0x31504352u;
+    private const uint Rcp2 = 0x32504352u;
+    private const uint Rcp3 = 0x33504352u;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     public static byte[] Compile(SemanticSourceRecipe recipe, int recordDepth = 2)
@@ -32,10 +35,15 @@ public static class NativeRecipeCompiler
 
         using var image = new MemoryStream();
         using var writer = new BinaryWriter(image, Utf8, leaveOpen: true);
-        bool extended = recipe.DelimitedSyntax is not null || recipe.Fields.Any(field => field.ContextField is not null);
-        writer.Write(extended ? 0x32504352u : 0x31504352u);
+        bool extended = recipe.DelimitedSyntax is not null
+            || recipe.Fields.Any(field => field.ContextField is not null);
+        bool hasDefaultSemantics = recipe.Fields.Any(
+            field => field.DefaultValue is not null || field.OmitDefaultTestimony);
+        uint version = hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
+        bool hasExtendedHeader = version != Rcp1;
+        writer.Write(version);
         writer.Write((uint)recordDepth);
-        if (extended) writer.Write(recipe.DelimitedSyntax is null ? 0u : 1u);
+        if (hasExtendedHeader) writer.Write(recipe.DelimitedSyntax is null ? 0u : 1u);
         if (recipe.DelimitedSyntax is { } syntax)
         {
             WriteText(writer, syntax.RecordName);
@@ -92,7 +100,13 @@ public static class NativeRecipeCompiler
             WriteHash(writer, lexical);
             writer.Write(rank);
             WriteAliases(writer, aliases, field.ValueAliasProperty ?? field.PropertyName);
-            if (extended) WriteText(writer, field.ContextField);
+            if (version == Rcp3)
+            {
+                writer.Write(field.DefaultValue is null ? 0u : 1u);
+                WriteText(writer, field.DefaultValue);
+                writer.Write(field.OmitDefaultTestimony ? 1u : 0u);
+            }
+            if (hasExtendedHeader) WriteText(writer, field.ContextField);
         }
 
         writer.Write(checked((uint)recipe.ProviderRoutes.Count));

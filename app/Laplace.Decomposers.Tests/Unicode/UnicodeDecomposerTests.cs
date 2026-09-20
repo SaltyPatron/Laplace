@@ -507,6 +507,49 @@ public sealed class UnicodeDecomposerTests
     }
 
     [Fact]
+    public void Ucdxml_binary_defaults_are_declared_and_do_not_expand_into_refuting_rows()
+    {
+        var recipe = InstalledSourceGeneration.Load(
+            "Unicode/UCD", "17.0.0", "UAX42/ucd.all.flat.xml");
+        SourceRecipeField[] binary = recipe.Recipe.Fields
+            .Where(static field => field.ValueKind == SourceValueKind.Boolean)
+            .ToArray();
+        Assert.NotEmpty(binary);
+        Assert.All(binary, static field =>
+        {
+            Assert.Equal("N", field.DefaultValue);
+            Assert.True(field.OmitDefaultTestimony);
+        });
+
+        byte[] program = NativeRecipeCompiler.Compile(recipe.Recipe);
+        List<AttestationRow> Parse(string value)
+        {
+            using var stream = NativeRecipeStream.Open(
+                program, UnicodeDecomposer.Source, 1);
+            string xml =
+                "<ucd xmlns=\"http://www.unicode.org/ns/2003/ucd/1.0\"><repertoire>"
+                + "<char cp=\"0041\" Alpha=\"" + value + "\"/>"
+                + "</repertoire></ucd>";
+            stream.Feed(Encoding.UTF8.GetBytes(xml), final: true);
+            var rows = new List<AttestationRow>();
+            while (true)
+            {
+                using var stage = stream.Drain(
+                    32768, 32L * 1024 * 1024, out _);
+                if (stage is null) return rows;
+                CopyTupleParser.DecodeAttestations(
+                    [stage.TupleBuffer(IntentStageTable.Attestations)], rows);
+            }
+        }
+
+        Hash128 relation = RelationTypeRegistry.RelationTypeId("UCD_ALPHABETIC");
+        Assert.DoesNotContain(Parse("N"), row => row.TypeId == relation);
+        AttestationRow positive = Assert.Single(
+            Parse("Y").Where(row => row.TypeId == relation));
+        Assert.Equal(AttestationOutcome.Confirm, positive.Outcome);
+    }
+
+    [Fact]
     public void Binary_property_negative_is_refuting_testimony_on_the_same_typed_cell()
     {
         Hash128 source = Hash128.OfCanonical("test/unicode/source");

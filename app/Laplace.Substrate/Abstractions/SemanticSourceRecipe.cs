@@ -66,7 +66,9 @@ public sealed record SourceRecipeField(
     double? RelationRank = null,
     string? LexicalRelationName = null,
     string? ValueAliasProperty = null,
-    string? ContextField = null);
+    string? ContextField = null,
+    string? DefaultValue = null,
+    bool OmitDefaultTestimony = false);
 
 public sealed record SourceRecipeStructure(
     string SyntaxPath,
@@ -371,6 +373,12 @@ public sealed class SemanticSourceRecipe
                 canonical.Append("|context");
                 Append(canonical, field.ContextField);
             }
+            if (field.DefaultValue is not null || field.OmitDefaultTestimony)
+            {
+                canonical.Append("|default");
+                Append(canonical, field.DefaultValue ?? "");
+                Append(canonical, field.OmitDefaultTestimony ? "1" : "0");
+            }
         }
         foreach (SourceRecipeStructure structure in structures)
         {
@@ -447,6 +455,20 @@ public sealed class SemanticSourceRecipe
             && field.Disposition != SourceFieldDisposition.Excluded)
             throw new ArgumentException(
                 $"Excluded field '{field.SyntaxPath}' cannot also be admitted.", nameof(field));
+        if (field.OmitDefaultTestimony && field.DefaultValue is null)
+            throw new ArgumentException(
+                $"Field '{field.SyntaxPath}' cannot omit default testimony without declaring its semantic default.",
+                nameof(field));
+        if (field.OmitDefaultTestimony
+            && !field.Disposition.HasFlag(SourceFieldDisposition.Testimony))
+            throw new ArgumentException(
+                $"Field '{field.SyntaxPath}' cannot omit default testimony when it is not testimony.",
+                nameof(field));
+        if (field.DefaultValue is not null && field.AbsentSentinel is not null
+            && string.Equals(field.DefaultValue, field.AbsentSentinel, StringComparison.Ordinal))
+            throw new ArgumentException(
+                $"Field '{field.SyntaxPath}' cannot use the same lexical value for absence and semantic default.",
+                nameof(field));
     }
 
     private static void ValidateDisposition(SourceFieldDisposition disposition, string syntaxPath)
@@ -617,7 +639,8 @@ public readonly record struct SourceRecipeValue(
     bool IsAbsent,
     bool? Boolean,
     BigInteger? Integer,
-    IReadOnlyList<string> Sequence);
+    IReadOnlyList<string> Sequence,
+    bool IsDefault);
 
 public interface ILaplaceRecipeLoweringTarget<TSubject>
 {
@@ -664,6 +687,8 @@ public sealed class LaplaceRecipeInterpreter<TSubject>
         raw ??= string.Empty;
         bool absent = field.AbsentSentinel is not null
             && string.Equals(raw, field.AbsentSentinel, StringComparison.Ordinal);
+        bool isDefault = field.DefaultValue is not null
+            && string.Equals(raw, field.DefaultValue, StringComparison.Ordinal);
         bool? boolean = null;
         BigInteger? integer = null;
         IReadOnlyList<string> sequence = [];
@@ -696,6 +721,6 @@ public sealed class LaplaceRecipeInterpreter<TSubject>
                     separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             }
         }
-        return new SourceRecipeValue(raw, absent, boolean, integer, sequence);
+        return new SourceRecipeValue(raw, absent, boolean, integer, sequence, isDefault);
     }
 }
