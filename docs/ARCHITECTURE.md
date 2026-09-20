@@ -360,6 +360,32 @@ Export/reconstruction remains subject to the same universal execution-grain law:
 
 ---
 
+## Compound capability architecture
+
+The as-built architecture must be read together with `docs/CAPABILITIES.md`. Several product capabilities arise only by composing existing substrate mechanisms; they must not be dismissed because no single table/function is named after the product verb.
+
+### Software construction and reuse
+
+Code/repository admission already uses grammar-derived structure. The intended construction direction is the inverse: bind an exact target grammar/toolchain, couple the requirement against known canonical code, reuse/compose existing subtrees where possible, minimally mutate close structures, realize source, run toolchains/tests, witness outcomes, and iterate on the smallest divergent subtree.
+
+Exact canonical AST duplication is identity reuse. Deeper normalized/algebraic/behavioral duplication is calculated evidence for consolidation.
+
+### Application roots and repair trajectories
+
+A repository root is the complete application object. A local code mutation should create new structure only along the changed ancestry; unchanged files/subtrees remain shared canonical state. Full checkout/export is realization of the resulting root.
+
+Compiler/test/runtime failures and fixes are first-class ordered observations. Their AST/dependency/diagnostic/trajectory shapes can be queried against other authorized repositories to surface related defects or already-known repairs.
+
+### Authority and compute
+
+Tenant isolation, knowledge grants/capabilities, active scope, governance and compute envelope are separate inputs to execution. Unauthorized state must not merely be redacted after influencing cognition; COUPLE/ROUTE/REALIZE/EXPORT/EXECUTE eligibility must honor the effective authority boundary.
+
+Hops/fanout/resources determine cognition depth/breadth over the allowed world. Knowledge entitlement does not imply unlimited compute, and compute allowance does not grant forbidden knowledge.
+
+### Machine-cost lane
+
+The current machine-cost analyzer is an implementation foothold, not the architectural limit. The full contract lowers source/bytecode/object/executable state into control/data/dependency structure, binds explicit execution counts plus target ISA/microarchitecture/memory/clock, and derives exact/symbolic cycles/time. Linearized scheduling without control-flow weighting is a bounded partial calculation and must remain labeled as such.
+
 ## 12. Build, install and runtime boundaries
 
 Linux delivery is driven by `.github/workflows/laplace.yml` and `scripts/pipeline.sh`; host reconciliation/bootstrap lives in `scripts/setup-host.sh`. Windows entry points live under `scripts/win/`.
