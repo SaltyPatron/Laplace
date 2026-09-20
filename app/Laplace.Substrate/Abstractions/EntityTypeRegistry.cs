@@ -72,6 +72,7 @@ public static class EntityTypeRegistry
     public static readonly Hash128 PropBankRole = Id("PropBank_Role");
     public static readonly Hash128 PropBankRoleset = Id("PropBank_Roleset");
     public static readonly Hash128 Region = Id("Region");
+    public static readonly Hash128 Range = Id("Range");
     public static readonly Hash128 RepoRoot = Id("RepoRoot");
     public static readonly Hash128 Sample = Id("Sample");
     public static readonly Hash128 Scalar = Id("Scalar");
