@@ -3,10 +3,15 @@ export type UploadStatus = 'queued' | 'reading' | 'submitting' | 'admitted' | 'i
 export interface UploadItem {
   id: string; name: string; path: string; mode: ContentMode; bytes: number;
   status: UploadStatus; error?: string; receipt?: ContentReceipt;
-  read: () => Promise<Uint8Array>; modifiedAt?: string;
+  read: () => Promise<Uint8Array>; body?: () => BodyInit | Promise<BodyInit>; modifiedAt?: string;
 }
 export interface UploadSnapshot { items: readonly UploadItem[]; running: boolean; stopping: boolean }
 export type SubmitContent = (mode: ContentMode, payload: ContentPayload) => Promise<ContentReceipt>;
+export type SubmitRawContent = (
+  mode: ContentMode,
+  meta: { name: string; path: string; modified_at?: string },
+  body: BodyInit,
+) => Promise<ContentReceipt>;
 let sequence = 0;
 /** Explicit, selected-file HTTP admissions. No automatic retries or browser semantic engine. */
 export class UploadQueue {
@@ -38,6 +43,49 @@ export class UploadQueue {
     this.patch(id, { status: 'queued', error: undefined });
   }
   stop = () => { if (this.state.running) this.publish({ stopping: true }); };
+  async startRaw(submit: SubmitRawContent): Promise<void> {
+    if (this.state.running) return;
+    const selected = this.state.items.filter((item) => item.status === 'queued');
+    if (selected.length === 0) return;
+    this.publish({ running: true, stopping: false });
+    try {
+      for (const candidate of selected) {
+        if (this.state.stopping) break;
+        const item = this.state.items.find((value) => value.id === candidate.id);
+        if (!item || item.status !== 'queued') continue;
+        this.patch(item.id, { status: 'reading', error: undefined });
+
+        let body: BodyInit;
+        try {
+          body = item.body ? await item.body() : await item.read();
+          if (!item.name.trim()) throw new Error('Give the artifact a name.');
+          const normalized = item.path.replace(/\\/g, '/');
+          if (!normalized || normalized.startsWith('/') || /^[a-z]:/i.test(normalized) ||
+              normalized.split('/').some((part) => part === '..' || part === ''))
+            throw new Error('Use a relative artifact path with no empty or parent-directory segments.');
+          if (item.bytes <= 0) throw new Error('This content endpoint does not accept an empty artifact.');
+        } catch (failure) {
+          this.patch(item.id, { status: 'invalid', error: failure instanceof Error ? failure.message : String(failure) });
+          continue;
+        }
+
+        if (this.state.stopping) { this.patch(item.id, { status: 'queued' }); break; }
+        this.patch(item.id, { status: 'submitting' });
+        try {
+          const receipt = await submit(item.mode, {
+            name: item.name,
+            path: item.path,
+            ...(item.modifiedAt ? { modified_at: item.modifiedAt } : {}),
+          }, body);
+          this.patch(item.id, { status: 'admitted', receipt });
+        } catch (failure) {
+          this.patch(item.id, { status: 'unconfirmed', error: `${failure instanceof Error ? failure.message : String(failure)}. No automatic retry was made. Inspect server state before resubmitting this artifact.` });
+          this.publish({ stopping: true });
+        }
+      }
+    } finally { this.publish({ running: false, stopping: false }); }
+  }
+
   async start(submit: SubmitContent): Promise<void> {
     if (this.state.running) return;
     // Freeze the explicit selection for this run. Files added later are not silently admitted.

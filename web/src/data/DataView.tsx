@@ -3,14 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Button, ErrorText, Field, Input, Modal, Muted, Panel, ReadStatus, Select, TextArea, useReadResource } from '@ui';
 import { ResultWorkspace, type ResultColumn } from '../ui/composites/ResultWorkspace/ResultWorkspace';
 import { captureRows } from '../ui/lib/resultRows';
-import { admitContent, readContent } from './api';
+import { admitContentRaw, readContent } from './api';
 import { useAppStore } from '../store';
 import { decodeContent, textBytes, type ContentMode } from './content';
 import { type UploadItem } from './uploadQueue';
 import { useUploadQueue } from './UploadProvider';
 import styles from './DataView.module.css';
 
-type VisibleItem = Omit<UploadItem, 'read' | 'receipt'> & { file_id?: string; content_id?: string; source?: string; modality?: string | null };
+type VisibleItem = Omit<UploadItem, 'read' | 'body' | 'receipt'> & { file_id?: string; content_id?: string; source?: string; modality?: string | null };
 export function DataView() {
   const { tenant, authUser } = useAppStore();
   return <DataWorkspace key={JSON.stringify([tenant, authUser?.id])} tenant={tenant} />;
@@ -61,17 +61,19 @@ function DataWorkspace({ tenant }: { tenant: string }) {
         <Field label="Files" help="Selection does not upload anything. Original UTF-8 bytes, including line endings and a byte-order mark, are sent only when you start admission.">
           <Input type="file" multiple onChange={(event) => {
             for (const file of Array.from(event.target.files ?? [])) queue.add({ name: file.name, path: file.webkitRelativePath || file.name, mode,
-              bytes: file.size, modifiedAt: new Date(file.lastModified).toISOString(), read: async () => new Uint8Array(await file.arrayBuffer()) });
+              bytes: file.size, modifiedAt: new Date(file.lastModified).toISOString(),
+              body: () => file, read: async () => new Uint8Array(await file.arrayBuffer()) });
             event.target.value = '';
           }} />
         </Field>
-        <Muted>Files are read and sent one at a time. No hidden retry, text normalization, repository crawl or seed-manifest execution occurs.</Muted>
+        <Muted>Files are streamed by the browser as raw request bodies one at a time—no base64/JSON expansion. No hidden retry, text normalization, repository crawl or seed-manifest execution occurs.</Muted>
       </div></Panel>
       <Panel title="Author an artifact"><form className={styles.stack} onSubmit={(event) => {
         event.preventDefault();
         try {
           const bytes = textBytes(text);
-          queue.add({ name, path: path || name, mode, bytes: bytes.length, read: async () => bytes }); setError(null);
+          queue.add({ name, path: path || name, mode, bytes: bytes.length,
+            body: () => new Blob([bytes], { type: 'text/plain;charset=utf-8' }), read: async () => bytes }); setError(null);
         } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
       }}>
         <Field label="Artifact name"><Input required value={name} onChange={(event) => setName(event.target.value)} placeholder="notes.md" /></Field>
@@ -82,10 +84,10 @@ function DataWorkspace({ tenant }: { tenant: string }) {
     </div>
     <Panel title="Selected artifacts" expandable>
       <p>Starting admission sends the selected bytes to this server under tenant <strong>{tenant}</strong>. Removing a selection does not retract or delete admitted data.</p>
-      <div className={styles.toolbar}><Button disabled={queued === 0 || state.running} onClick={() => void queue.start((kind, payload) => {
+      <div className={styles.toolbar}><Button disabled={queued === 0 || state.running} onClick={() => void queue.startRaw((kind, meta, body) => {
           const current = useAppStore.getState();
           if (JSON.stringify([current.tenant, current.authUser?.id]) !== scope) throw new Error('The account or tenant changed before submission');
-          return admitContent(kind, payload, { tenant });
+          return admitContentRaw(kind, meta, body, { tenant });
         })}>Ingest {queued} queued artifact{queued === 1 ? '' : 's'}</Button>
         <Button variant="ghost" disabled={!state.running || state.stopping} onClick={queue.stop}>{state.stopping ? 'Stopping after current request' : 'Stop after current request'}</Button>
         <span role="status">{admitted} admitted · {queued} queued{state.running ? ' · admission active' : ''}</span></div>
