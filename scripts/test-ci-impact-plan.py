@@ -137,10 +137,11 @@ class ImpactPlanTests(unittest.TestCase):
             ["app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj"],
         )
 
-    def test_substrate_managed_change_publishes_without_database_mutation(self):
+    def test_substrate_managed_change_publishes_without_database_or_db_matrix(self):
         value = plan("app/Laplace.Substrate/Crud/Npgsql/Foo.cs")
         self.assertIn("managed-dev", value["dev_suites"])
-        self.assertEqual(value["db_suites"], ["managed-db"])
+        self.assertEqual(value["db_suites"], [])
+        self.assertEqual(value["managed_db_test_projects"], [])
         self.assertEqual(value["delivery_actions"], ["publish"])
         self.assertNotIn("install", value["delivery_actions"])
         self.assertNotIn("database", value["delivery_actions"])

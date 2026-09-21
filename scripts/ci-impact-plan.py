@@ -386,14 +386,10 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 invalidate(("uci-dev",), path)
 
             if path.startswith("app/Laplace.Substrate"):
-                # Managed substrate orchestration/CRUD code changes the shipped managed
-                # binaries, not the installed PostgreSQL schema or native extension.
-                # Keep DB-facing managed qualification available to explicit audits,
-                # but do not run migrations, restart/reconcile the database, or scan
-                # historical consensus on every C# edit.
+                # Managed substrate orchestration/CRUD changes the shipped managed
+                # binaries only. Automatic main delivery compiles and publishes that
+                # closure; explicit audit/test-db operations own the Tier=db matrix.
                 components.add("database")
-                db_suites.add("managed-db")
-                invalidate(("managed-db",), path)
             elif path.startswith("app/Laplace.Migrations"):
                 components.add("database")
                 db_suites.update(("db-health", "managed-db"))
