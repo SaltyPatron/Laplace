@@ -1,9 +1,10 @@
--- An entity's verdict record: its edges grouped by the canonical epistemic_status
--- verdict rule — confirmed / contested / refuted / thin. The rule lives in
--- converse.epistemic_status_core; this only counts, and no client re-derives it
--- from raw mu. Counts read the CORE, not the rendering wrapper: the wrapper also
--- renders + realizes up to 500 object texts a counter throws away — MEASURED
--- 2026-08-21 on a hot entity: 1,984 ms wrapped, 308 ms core, identical counts.
+-- An EXACT entity's verdict record: direct subject-side consensus cells grouped
+-- by the canonical confirmed / contested / refuted / thin law. This deliberately
+-- does not call converse.epistemic_status_core: that operation is a lexical summary
+-- which expands a word through its elected senses and accepts a caller limit.
+-- Explore's entity header is an identity inspection surface, so it must be both
+-- subject-exact and uncapped. The verdict thresholds remain byte-identical to the
+-- lexical operation below; only the operand set differs.
 DROP FUNCTION IF EXISTS laplace.entity_record(bytea);
 
 CREATE OR REPLACE FUNCTION ops.entity_record(p_id bytea)
