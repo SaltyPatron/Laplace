@@ -389,6 +389,20 @@ class WorkflowArchitecture(unittest.TestCase):
         lifecycle = (WORKFLOWS / "laplace.yml").read_text(encoding="utf-8")
         self.assertIn('- "scripts/product-ci.sh"', lifecycle)
 
+    def test_mainline_builds_before_waiting_for_installed_host(self):
+        reusable = (WORKFLOWS / "product-stage.yml").read_text(encoding="utf-8")
+        stage_body = reusable.split('case "$LAPLACE_STAGE" in', 1)[1].split("esac", 1)[0]
+        self.assertIn("release-qualification|mainline|build|test-dev|check)", stage_body)
+
+        product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
+        mainline = product.split("run_mainline() {", 1)[1].split(
+            "\n}\n\nrelease_selected_revision_current()", 1)[0]
+        self.assertIn("run_build", mainline)
+        self.assertIn("host-resource.lock", mainline)
+        self.assertIn("run_release_delivery", mainline)
+        self.assertLess(mainline.index("run_build"), mainline.index("host-resource.lock"))
+        self.assertLess(mainline.index("host-resource.lock"), mainline.index("run_release_delivery"))
+
     def test_main_delivery_crosses_mutation_boundary_once_and_executes_impact_plan(self):
         product = (ROOT / "scripts/product-ci.sh").read_text(encoding="utf-8")
         qualification = product.split("run_release_qualification() {", 1)[1].split("\n}", 1)[0]

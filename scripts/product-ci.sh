@@ -930,7 +930,17 @@ run_mainline() {
 
   run_build
   require_built_revision
-  run_release_delivery
+
+  # Building the candidate is isolated by product-$TARGET_SHA.lock and never needs
+  # the installed host/database. Wait for an ingest/maintenance owner only AFTER
+  # compilation, at the delivery boundary that can mutate or publish installed state.
+  (
+    local work_root="${LAPLACE_WORK_ROOT:-/build/laplace/work}"
+    mkdir -p "$work_root"
+    exec 9>"$work_root/host-resource.lock"
+    flock 9
+    run_release_delivery
+  )
 }
 
 release_selected_revision_current() {

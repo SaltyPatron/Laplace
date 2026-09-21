@@ -434,10 +434,12 @@ jobs:
           git diff --cached --quiet
 
           # Serialize only jobs touching the SAME candidate build tree. Different
-          # revisions have independent source/build trees. Stateful operations also
-          # reserve the installed host/database, while read-only qualification does not.
+          # revisions have independent source/build trees. Mainline owns two phases:
+          # candidate compilation is isolated and must not wait behind a long ingest;
+          # product-ci.sh acquires host-resource.lock only when that built candidate
+          # reaches the installed-host mutation/publication boundary.
           case "$LAPLACE_STAGE" in
-            release-qualification|build|test-dev|check)
+            release-qualification|mainline|build|test-dev|check)
               ;;
             *)
               exec 9>"$work_root/host-resource.lock"
