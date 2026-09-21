@@ -6112,7 +6112,7 @@
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "repertoire/*",
       "subject": {
-        "kind": "CodepointRange",
+        "kind": "CodepointInterval",
         "identityField": "cp",
         "rangeStartField": "first-cp",
         "lastField": "last-cp",
@@ -6133,7 +6133,7 @@
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "repertoire/*",
       "subject": {
-        "kind": "CodepointRange",
+        "kind": "CodepointInterval",
         "identityField": "cp",
         "rangeStartField": "first-cp",
         "lastField": "last-cp",
@@ -6154,7 +6154,7 @@
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "repertoire/*",
       "subject": {
-        "kind": "CodepointRange",
+        "kind": "CodepointInterval",
         "identityField": "cp",
         "rangeStartField": "first-cp",
         "lastField": "last-cp",
@@ -6175,7 +6175,7 @@
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "repertoire/*",
       "subject": {
-        "kind": "CodepointRange",
+        "kind": "CodepointInterval",
         "identityField": "cp",
         "rangeStartField": "first-cp",
         "lastField": "last-cp",
