@@ -124,13 +124,13 @@ function RunWorkspace({ tenant, refreshSignal }: { tenant: string; refreshSignal
     { key: 'input_units_done', label: 'Progress', render: (run) => <RunProgress run={run} /> },
     {
       key: 'entities',
-      label: 'Staged output',
+      label: 'New rows',
       render: (run) => (
         <div className={styles.outputCounts}>
-          <span><strong>{countText(run.entities)}</strong><small>entities</small></span>
-          <span><strong>{countText(run.physicalities)}</strong><small>physicalities</small></span>
-          <span><strong>{countText(run.attestations)}</strong><small>attestations</small></span>
-          {run.entities === 0 && run.physicalities === 0 && run.attestations === 0 && <em>No staged writes reported</em>}
+          <span><strong>{countText(run.entities)}</strong><small>entities inserted</small></span>
+          <span><strong>{countText(run.physicalities)}</strong><small>physicalities inserted</small></span>
+          <span><strong>{countText(run.attestations)}</strong><small>attestations inserted</small></span>
+          {run.entities === 0 && run.physicalities === 0 && run.attestations === 0 && <em>No new rows reported</em>}
         </div>
       ),
     },
@@ -210,7 +210,7 @@ function RunWorkspace({ tenant, refreshSignal }: { tenant: string; refreshSignal
             compact
           />
         )}
-        <Muted>Run receipts report execution state. File receipts show per-file dispositions, including already-complete files.</Muted>
+        <Muted>Run row counts are committed inserts after presence/dedup checks. File receipts report composed/staged per-file output and dispositions, including already-complete files.</Muted>
       </Panel>
 
       {expandedRun && (
