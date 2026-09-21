@@ -88,13 +88,12 @@ public sealed class UnicodeDecomposer
             throw new InvalidOperationException(
                 "The Unicode UCDXML recipe requires exactly one PropertyAliases.txt sidecar; "
                 + $"selected aliases={propertyAliases.Length}.");
-        (string ucdXmlSyntax, int ucdXmlRecordDepth) = UcdXmlRecipeSelection(xml[0].Path);
         _ucdXmlRecipe = InstalledSourceGeneration.Load(
             "Unicode/UCD",
             context.HasArtifactGraph
                 ? context.SelectedArtifacts.First(a => Path.GetFullPath(a.Path) == Path.GetFullPath(xml[0].Path)).Release
                 : null,
-            ucdXmlSyntax);
+            "UAX42/ucd.all.grouped.xml");
         _cookbook.Register(_ucdXmlRecipe.Recipe);
         SemanticSourceRecipe selectedRecipe = _cookbook.Resolve(
             _ucdXmlRecipe.Recipe.RecipeId);
@@ -120,8 +119,7 @@ public sealed class UnicodeDecomposer
         {
             UnicodeSeedSnapshot snapshot = floor.Snapshot
                 ?? throw new InvalidOperationException("Unicode source snapshot was not retained.");
-            var semanticPhase = new UcdXmlSemanticPhase(
-                snapshot, _ucdXmlRecipe, ucdXmlRecordDepth);
+            var semanticPhase = new UcdXmlSemanticPhase(snapshot, _ucdXmlRecipe);
             await foreach (SubstrateChange original in base.RunPhaseAsync(
                                semanticPhase, context, options, ct).ConfigureAwait(false))
             {
@@ -439,7 +437,7 @@ public sealed class UnicodeDecomposer
 
         string root = Path.GetFullPath(ecosystemPath);
         string xml = Path.GetFullPath(
-            _ucdxmlZip ?? Path.Combine(root, "ucdxml", "ucd.all.flat.zip"));
+            _ucdxmlZip ?? Path.Combine(root, "ucdxml", "ucd.all.grouped.zip"));
         string ducet = Path.GetFullPath(
             _ducet ?? Path.Combine(root, "uca", "allkeys.txt"));
         bool hasCanonicalXml = File.Exists(xml);
@@ -465,7 +463,7 @@ public sealed class UnicodeDecomposer
                     ? IngestArtifactDisposition.Superseded
                     : IngestArtifactDisposition.Admitted;
                 notes = hasCanonicalXml && IsRepertoireCompensation(kind)
-                    ? "semantic fields are admitted from the selected complete UCD XML recipe; retained as a conformance/packaging oracle, not duplicate testimony"
+                    ? "semantic fields are admitted from the selected ucd.all.grouped.xml recipe; retained as a conformance/packaging oracle, not duplicate testimony"
                     : "";
             }
             else if (IsUnicodeControlArtifact(relative))
@@ -853,7 +851,7 @@ public sealed class UnicodeDecomposer
     {
         string baseDir = Path.GetFullPath(context.EcosystemPath);
         string xml = Path.GetFullPath(
-            _ucdxmlZip ?? Path.Combine(baseDir, "ucdxml", "ucd.all.flat.zip"));
+            _ucdxmlZip ?? Path.Combine(baseDir, "ucdxml", "ucd.all.grouped.zip"));
         string ducet = Path.GetFullPath(
             _ducet ?? Path.Combine(baseDir, "uca", "allkeys.txt"));
 
@@ -871,7 +869,7 @@ public sealed class UnicodeDecomposer
                 if (selectedCanonicalXml && IsRepertoireCompensation(kind))
                     throw new InvalidOperationException(
                         $"Unicode artifact graph admits '{artifact.Id}' even though its semantic fields "
-                        + "are owned by the selected complete UCD XML recipe. Mark the artifact "
+                        + "are owned by the selected ucd.all.grouped.xml recipe. Mark the artifact "
                         + "superseded (or select a source generation whose recipe does not cover it); "
                         + "duplicate Unicode testimony is not admitted.");
                 if (IsSingletonArtifactRole(kind) && !singletonKinds.Add(kind))
@@ -886,7 +884,7 @@ public sealed class UnicodeDecomposer
 
         var legacy = new List<ArtifactJob>();
         AddIfPresent(legacy, ArtifactKind.Ducet, ducet, "uca/allkeys.txt");
-        AddIfPresent(legacy, ArtifactKind.UcdXml, xml, "ucdxml/ucd.all.flat.zip");
+        AddIfPresent(legacy, ArtifactKind.UcdXml, xml, "ucdxml/ucd.all.grouped.zip");
         AddIfPresent(legacy, ArtifactKind.UnicodeData,
             Path.Combine(baseDir, "ucd", "UnicodeData.txt"), "ucd/UnicodeData.txt");
         AddIfPresent(legacy, ArtifactKind.Scripts,
@@ -1043,17 +1041,6 @@ public sealed class UnicodeDecomposer
         return legacy;
     }
 
-    private static (string Syntax, int RecordDepth) UcdXmlRecipeSelection(string path)
-    {
-        string fileName = Path.GetFileName(path);
-        if (fileName.Contains(".flat.", StringComparison.Ordinal))
-            return ("UAX42/ucd.all.flat.xml", 3);
-        if (fileName.Contains(".grouped.", StringComparison.Ordinal))
-            return ("UAX42/ucd.all.grouped.xml", 3);
-        throw new InvalidOperationException(
-            $"Selected UCD XML artifact does not declare flat/grouped UAX42 packaging: '{path}'.");
-    }
-
     private static ArtifactKind ClassifyArtifact(
         string fullPath,
         string baseDir,
@@ -1088,9 +1075,7 @@ public sealed class UnicodeDecomposer
         kind = relative switch
         {
             "uca/allkeys.txt" => ArtifactKind.Ducet,
-            "ucdxml/ucd.all.flat.zip" or "ucdxml/ucd.all.flat.xml"
-                or "ucdxml/ucd.all.grouped.zip" or "ucdxml/ucd.all.grouped.xml"
-                => ArtifactKind.UcdXml,
+            "ucdxml/ucd.all.grouped.zip" or "ucdxml/ucd.all.grouped.xml" => ArtifactKind.UcdXml,
             "ucd/UnicodeData.txt" => ArtifactKind.UnicodeData,
             "ucd/Scripts.txt" => ArtifactKind.Scripts,
             "ucd/Blocks.txt" => ArtifactKind.Blocks,
@@ -1484,11 +1469,10 @@ public sealed class UnicodeDecomposer
 
         public UcdXmlSemanticPhase(
             UnicodeSeedSnapshot snapshot,
-            InstalledSourceGeneration recipe,
-            int recordDepth)
+            InstalledSourceGeneration recipe)
         {
             _snapshot = snapshot;
-            _runtime = new NativeSourceRecipe(recipe.Recipe, recordDepth);
+            _runtime = new NativeSourceRecipe(recipe.Recipe, recordDepth: 3);
         }
 
         public Hash128 SourceId => Source;

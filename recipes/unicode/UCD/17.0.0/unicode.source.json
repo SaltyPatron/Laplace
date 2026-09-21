@@ -783,17 +783,17 @@
     {
       "selector": "ucdxml/ucd.all.flat.zip",
       "required": true,
-      "disposition": "Admitted",
-      "provider": "laplace/native-streaming-xml-recipe/v1",
-      "syntax": "UAX42/ucd.all.flat.xml",
-      "recipePath": "ucd.all.flat.recipe.json",
-      "recordDepth": 3
+      "disposition": "EquivalentPackaging",
+      "reason": "Compressed ungrouped UAX42 serialization retained as equivalent packaging; grouped XML is the canonical semantic source."
     },
     {
       "selector": "ucdxml/ucd.all.grouped.zip",
       "required": true,
-      "disposition": "EquivalentPackaging",
-      "reason": "Grouped UAX42 serialization retained as equivalent packaging; complete flat XML is the canonical semantic source."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "UAX42/ucd.all.grouped.xml",
+      "recipePath": "ucd.all.grouped.recipe.json",
+      "recordDepth": 3
     },
     {
       "selector": "ucdxml/ucd.nounihan.flat.zip",
