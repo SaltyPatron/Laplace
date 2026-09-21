@@ -159,6 +159,9 @@ run_build() {
   fi
   (( need_managed == 0 )) || phases+=(build-app)
   (( need_web == 0 )) || phases+=(build-web)
+  if (( need_native == 0 )) && csv_selected "${LAPLACE_DELIVERY_ACTIONS:-}" install; then
+    phases+=(build-extension-sql)
+  fi
 
   if (( ${#phases[@]} == 0 )); then
     echo "::notice::candidate requires no native/managed compilation"
@@ -268,7 +271,13 @@ run_dev_tests() {
 
 run_install() {
   require_built_revision
-  bash scripts/pipeline.sh install
+  if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" native; then
+    bash scripts/pipeline.sh install
+  else
+    # SQL/control-only extension delivery must not require or replace a native
+    # build tree. run_build prepared only the generated extension payload.
+    bash scripts/pipeline.sh install-extension-sql
+  fi
 }
 
 run_database_maintenance() {

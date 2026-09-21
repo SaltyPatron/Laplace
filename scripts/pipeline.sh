@@ -64,7 +64,7 @@ usage() {
   cat <<'EOF'
 Usage: pipeline.sh <phase> [<phase> ...] [options]
 
-Phases: clean codegen build build-native build-app build-web install activate-postgres migrate sync-extension tune-pg tune-laplace
+Phases: clean codegen build build-native build-extension-sql build-app build-web install install-extension-sql activate-postgres migrate sync-extension tune-pg tune-laplace
         perfcache-guc api-env publish foundation test
 Options:
   --fresh-db --force --force-codegen --clean-first --force-rebuild --serial-tests
@@ -315,19 +315,13 @@ phase_build_web() {
     --root "$ROOT" --manifest "$ROOT/build/.laplace-web-artifact.json"
 }
 
-phase_build_native() {
-  "$PYTHON" "$ROOT/scripts/postgresql-release.py" build-inputs --prefix "$LAPLACE_PG_PREFIX" || return $?
-  [[ "$FORCE_REBUILD" != 1 ]] || phase_clean
-  [[ "$FORCE_CODEGEN" != 1 ]] || phase_codegen
-  echo "===== PHASE — BUILD ENGINE + EXTENSIONS ====="
+configure_native_build_tree() {
   local data_root="${LAPLACE_DATA_ROOT:-/vault/Data}"
   local ucd="${LAPLACE_UCD_PATH:-$data_root/UCD/Public/UCD/latest}"
   local chess_openings chess_corpus_export
   chess_openings=$(chess_openings_path)
   chess_corpus_export=$("$PYTHON" "$ROOT/scripts/chess-floor-artifacts.py" selected-export \
     --prefix "$LAPLACE_INSTALL_PREFIX" --path-only)
-  local build_flags=()
-  [[ "$CLEAN_FIRST" != 1 ]] || build_flags+=(--clean-first)
   cmake -S "$ROOT" -B "$LAPLACE_BUILD_DIRECTORY" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/intel-oneapi.cmake \
     -DLAPLACE_REQUIRE_MKL=ON \
@@ -341,6 +335,28 @@ phase_build_native() {
     -DLAPLACE_UCD_CONFORMANCE_DIR="$ucd/ucd" \
     -DLAPLACE_CHESS_OPENINGS="$chess_openings" \
     -DLAPLACE_CHESS_CORPUS_EXPORT="$chess_corpus_export"
+}
+
+phase_build_extension_sql() {
+  echo "===== PHASE — BUILD EXTENSION SQL ====="
+  "$PYTHON" "$ROOT/scripts/postgresql-release.py" build-inputs --prefix "$LAPLACE_PG_PREFIX" || return $?
+  [[ "$FORCE_REBUILD" != 1 ]] || phase_clean
+  [[ "$FORCE_CODEGEN" != 1 ]] || phase_codegen
+  configure_native_build_tree
+  # These targets preprocess/version the shipped SQL/control artifacts only.
+  # They do not compile laplace_substrate.so, laplace_geom.so, execution modules,
+  # core/dynamics, or perfcaches.
+  cmake --build "$LAPLACE_BUILD_DIRECTORY" --target laplace_substrate_sql laplace_geom_sql
+}
+
+phase_build_native() {
+  "$PYTHON" "$ROOT/scripts/postgresql-release.py" build-inputs --prefix "$LAPLACE_PG_PREFIX" || return $?
+  [[ "$FORCE_REBUILD" != 1 ]] || phase_clean
+  [[ "$FORCE_CODEGEN" != 1 ]] || phase_codegen
+  echo "===== PHASE — BUILD ENGINE + EXTENSIONS ====="
+  local build_flags=()
+  [[ "$CLEAN_FIRST" != 1 ]] || build_flags+=(--clean-first)
+  configure_native_build_tree
   LD_LIBRARY_PATH="$ROOT/build/engine/core:$ROOT/build/engine/dynamics:$ROOT/build/engine/synthesis:${LD_LIBRARY_PATH:-}" \
     cmake --build "$LAPLACE_BUILD_DIRECTORY" "${build_flags[@]}" --target \
       all \
@@ -418,6 +434,39 @@ reclaim_install_headroom() {
     fi
   done < <(find "$ingest_root" -mindepth 1 -maxdepth 1 -xdev -type d -print0)
 }
+
+phase_install_extension_sql() (
+  echo "===== PHASE — INSTALL EXTENSION SQL ====="
+  [[ -f "$LAPLACE_BUILD_DIRECTORY/build.ninja" ]] || {
+    echo "::error::extension SQL build tree missing; run pipeline.sh build-extension-sql first" >&2
+    exit 1
+  }
+
+  install_sql_extension() {
+    local ext="$1" build_dir="$LAPLACE_BUILD_DIRECTORY/extension/$ext"
+    local control="$build_dir/$ext.control" version versioned upgrade execution_module
+    [[ -f "$control" ]] || { echo "::error::$ext generated control file missing" >&2; return 1; }
+    version="$(sed -nE "s/^default_version[[:space:]]*=[[:space:]]*'([^']+)'.*/\1/p" "$control" | head -1)"
+    [[ -n "$version" ]] || { echo "::error::$ext generated control has no default_version" >&2; return 1; }
+    versioned="$build_dir/$ext--$version.sql"
+    upgrade="$build_dir/${ext}_upgrade.sql"
+    [[ -f "$versioned" && -f "$upgrade" ]] || {
+      echo "::error::$ext generated SQL payload incomplete for version $version" >&2
+      return 1
+    }
+
+    install -m 0664 "$control" "$LAPLACE_EXT_SHAREDIR/$ext.control"
+    install -m 0664 "$versioned" "$LAPLACE_EXT_SHAREDIR/$ext--$version.sql"
+    install -m 0664 "$upgrade" "$LAPLACE_EXT_SHAREDIR/${ext}_upgrade.sql"
+    if [[ -f "$build_dir/laplace_execution_module.txt" ]]; then
+      install -m 0664 "$build_dir/laplace_execution_module.txt"         "$LAPLACE_EXT_SHAREDIR/laplace_execution_module.txt"
+    fi
+    echo "::notice::installed $ext SQL/control version $version without replacing native libraries"
+  }
+
+  install_sql_extension laplace_geom
+  install_sql_extension laplace_substrate
+)
 
 phase_install() (
   echo "===== PHASE — INSTALL ====="
@@ -852,7 +901,7 @@ while [[ $# -gt 0 ]]; do
     --serial-tests) SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
     --force-all) shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|build-native|build-app|build-web|install|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|chess-lab|publish|foundation|test)
+    clean|codegen|build|build-native|build-extension-sql|build-app|build-web|install|install-extension-sql|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|chess-lab|publish|foundation|test)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -865,9 +914,11 @@ for phase in "${PHASES[@]}"; do
     codegen) phase_codegen ;;
     build) phase_build ;;
     build-native) phase_build_native ;;
+    build-extension-sql) phase_build_extension_sql ;;
     build-app) phase_build_app ;;
     build-web) phase_build_web ;;
     install) phase_install ;;
+    install-extension-sql) phase_install_extension_sql ;;
     activate-postgres) phase_activate_postgres ;;
     migrate) phase_migrate ;;
     sync-extension) phase_sync_extension ;;
