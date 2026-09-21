@@ -133,8 +133,8 @@ jobs:
       db_suites: ${{ needs.plan.outputs.db_suites }}
       live_suites: ${{ needs.plan.outputs.live_suites }}
       publish_scope: ${{ needs.plan.outputs.publish_scope }}
-      # Push plans are parent-relative. Until the planner resolves the installed
-      # product revision as its base, superseding an undelivered run would lose
-      # that run's product delta. Serialize every planned delivery instead.
-      skip_if_superseded: false
+      # The stage reconciles installed->target before build/delivery, so an older
+      # queued main revision can be rejected safely: the newest candidate carries
+      # every still-undelivered product change forward from the installed receipt.
+      skip_if_superseded: true
     secrets: inherit
