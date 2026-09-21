@@ -28,6 +28,49 @@ laplace_sync_payload() {
     "$source_dir/" "$destination_dir/"
 }
 
+# Share byte-identical immutable payloads when the filesystem permits it, while
+# remaining correct when protected_hardlinks rejects a donor owned by another
+# service identity. The fallback pass omits only --link-dest arguments: files
+# already linked by the first pass remain unchanged, and denied entries become
+# private copies.
+laplace_sync_link_deduplicated_payload() {
+  local source_dir="$1"
+  local destination_dir="$2"
+  shift 2
+  local arg rc=0 skip_link_dest_value=0 has_link_dest=0
+  local -a first_pass=("$@") fallback=()
+
+  for arg in "$@"; do
+    if ((skip_link_dest_value)); then
+      skip_link_dest_value=0
+      continue
+    fi
+    case "$arg" in
+      --link-dest)
+        has_link_dest=1
+        skip_link_dest_value=1
+        ;;
+      --link-dest=*)
+        has_link_dest=1
+        ;;
+      *) fallback+=("$arg") ;;
+    esac
+  done
+
+  if ((has_link_dest == 0)); then
+    rsync "${first_pass[@]}" "$source_dir/" "$destination_dir/"
+    return
+  fi
+
+  rsync "${first_pass[@]}" "$source_dir/" "$destination_dir/" || rc=$?
+  if ((rc == 0)); then
+    return 0
+  fi
+
+  echo "::notice::hardlink payload staging was incomplete (rsync=$rc); completing denied entries with private copies"
+  rsync "${fallback[@]}" "$source_dir/" "$destination_dir/"
+}
+
 # One API publication changes only the flat API/SPA payload. These paths are
 # owned by configuration, user data, or independently leased service releases.
 # Snapshot, install, and rollback must use the exact same exclusion set.

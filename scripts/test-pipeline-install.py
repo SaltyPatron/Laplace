@@ -101,6 +101,8 @@ phase_publish
         self.assertIn('mv "$ingest_stage" "$ingest_runtime"', install)
         self.assertIn('ln -s "runtimes/$ingest_revision" "$ingest_link_tmp"', install)
         self.assertIn('mv -Tf "$ingest_link_tmp" "$ingest_dir/current"', install)
+        self.assertIn('laplace_sync_link_deduplicated_payload "$ingest_build" "$ingest_stage"', install)
+        self.assertNotIn('rsync -rl --checksum --no-times --no-perms --executability "${ingest_links[@]}"', install)
         self.assertNotIn('chgrp laplace-runner "$ingest_dir"', install)
         self.assertIn('[[ "$ingest_group" != laplace-runner ]]', install)
 

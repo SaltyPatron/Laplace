@@ -498,10 +498,10 @@ phase_install() (
     # Immutable releases share identical payload files with the active runtime.
     # Build on the build volume, then copy only new bytes onto the install volume.
     ingest_reference="$(readlink -f "$ingest_dir/current" 2>/dev/null || true)"
-    local -a ingest_links=()
-    [[ ! -d "$ingest_reference" ]] || ingest_links+=("--link-dest=$ingest_reference")
-    rsync -rl --checksum --no-times --no-perms --executability "${ingest_links[@]}" \
-      "$ingest_build/" "$ingest_stage/"
+    local -a ingest_sync=(-rl --checksum --no-times --no-perms --executability)
+    [[ ! -d "$ingest_reference" ]] || ingest_sync+=("--link-dest=$ingest_reference")
+    laplace_sync_link_deduplicated_payload "$ingest_build" "$ingest_stage" \
+      "${ingest_sync[@]}"
     printf '%s\n' "$ingest_revision" > "$ingest_stage/.laplace-source-revision"
     [[ -f "$ingest_stage/Laplace.Cli.dll" && -f "$ingest_stage/liblaplace_core.so" ]] || {
       echo "::error::ingest runtime missing after staged install: $ingest_stage" >&2
