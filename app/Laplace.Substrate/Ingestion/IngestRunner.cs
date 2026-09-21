@@ -618,6 +618,13 @@ public sealed class IngestRunner
             }
         }
 
+        // File progress is a durability statement, not a compose statement.
+        // Pipelined consensus may finish after its evidence apply returned; every
+        // terminal observer above was registered without blocking the apply lane.
+        // By run completion the writer has drained those continuations, so join the
+        // counter/observability tasks before deciding filesComplete/source completion.
+        await counters.DrainPendingFileCompletionsAsync().ConfigureAwait(false);
+
         unitsAttempted = counters.UnitsAttempted;
         unitsApplied = counters.UnitsApplied;
         unitsFailed = counters.UnitsFailed;
@@ -832,6 +839,37 @@ public sealed class IngestRunner
                 p.Relation, p.Rows, p.PctOfDefault, p.Relation);
     }
 
+    private void TrackTerminalWhenDurable(
+        RunCounters counters,
+        SubstrateChange intent,
+        List<IngestFailure> failures)
+    {
+        if (intent.Metadata.FileLabel is not { Length: > 0 } fileLabel)
+        {
+            TrackIntent(counters, intent, failures);
+            return;
+        }
+
+        // CompleteFileAsync is a durability observer. For ordinary pipelined bulk
+        // ingest it waits for the already-dispatched consensus/mask continuation
+        // that owns this file's completion marker. Do not await it on the apply
+        // lane: doing so would serialize the next working set behind every refold.
+        Task durable = _writer.CompleteFileAsync(fileLabel, CancellationToken.None);
+        if (durable.IsCompletedSuccessfully)
+        {
+            TrackIntent(counters, intent, failures);
+            return;
+        }
+
+        async Task ObserveAsync()
+        {
+            await durable.ConfigureAwait(false);
+            TrackIntent(counters, intent, failures);
+        }
+
+        counters.TrackPendingFileCompletion(ObserveAsync());
+    }
+
     private async Task ProcessOwnedIntentAsync(
         SubstrateChange intent,
         IDecomposer decomposer,
@@ -889,9 +927,10 @@ public sealed class IngestRunner
                 Interlocked.Add(ref counters._roundTrips, apply.RoundTrips);
 
                 if (IsFileTerminalIntent(intent)
-                    && intent.Metadata.FileLabel is { Length: > 0 } fileLabel)
-                    await _writer.CompleteFileAsync(fileLabel, ct).ConfigureAwait(false);
-                TrackIntent(counters, intent, failures);
+                    && intent.Metadata.FileLabel is { Length: > 0 })
+                    TrackTerminalWhenDurable(counters, intent, failures);
+                else
+                    TrackIntent(counters, intent, failures);
 
                 _obs.OnIntentApplied(decomposer.SourceName, apply);
                 var progress = MakeProgress(counters);
@@ -1010,13 +1049,12 @@ public sealed class IngestRunner
                 double secs = Math.Max(1e-3, apply.WallClock.TotalSeconds);
                 foreach (var intent in batch)
                 {
-                    string unit = intent.Metadata.SourceContentUnitName;
                     if (IsFileTerminalIntent(intent)
-                        && intent.Metadata.FileLabel is { Length: > 0 } fileLabel)
-                        await _writer.CompleteFileAsync(fileLabel, ct).ConfigureAwait(false);
+                        && intent.Metadata.FileLabel is { Length: > 0 })
+                        TrackTerminalWhenDurable(counters, intent, failures);
+                    else
+                        TrackIntent(counters, intent, failures);
                 }
-                foreach (var intent in batch)
-                    TrackIntent(counters, intent, failures);
 
                 log.LogInformation(
                     "INGEST_BATCH source={Source} intents={Intents} rows={Rows} "
@@ -1407,6 +1445,25 @@ public sealed class IngestRunner
         internal int _filesSkippedComplete;
         internal string? _currentFile;
         internal EntityAdmissionTracker EntityAdmission { get; } = new();
+        private readonly object _fileCompletionGate = new();
+        private readonly List<Task> _pendingFileCompletions = [];
+
+        internal void TrackPendingFileCompletion(Task task)
+        {
+            ArgumentNullException.ThrowIfNull(task);
+            lock (_fileCompletionGate)
+                _pendingFileCompletions.Add(task);
+        }
+
+        internal async Task DrainPendingFileCompletionsAsync()
+        {
+            Task[] pending;
+            lock (_fileCompletionGate)
+                pending = _pendingFileCompletions.ToArray();
+            if (pending.Length > 0)
+                await Task.WhenAll(pending).ConfigureAwait(false);
+        }
+
         internal Stopwatch? Sw;
         internal string? SourceName;
         internal int LayerOrder;

@@ -119,7 +119,23 @@ public sealed partial class ConsensusAccumulatingWriter
 
         Task tracked = ReleaseAsync();
         lock (_foldChainLock)
+        {
             _outstanding.Add(tracked);
+            // A file boundary is not durable until this continuation publishes its
+            // completion marker after consensus + masks. Register the SAME batch task
+            // under every represented file so the runner can observe durability
+            // asynchronously without turning file boundaries back into apply barriers.
+            foreach (string owner in completionChanges
+                         .Select(static change => change.Metadata.FileLabel)
+                         .Where(static label => !string.IsNullOrWhiteSpace(label))
+                         .Select(static label => label!)
+                         .Distinct(StringComparer.Ordinal))
+            {
+                if (!_fileFolds.TryGetValue(owner, out var owned))
+                    _fileFolds.Add(owner, owned = []);
+                owned.Add(tracked);
+            }
+        }
     }
 
     private Task DispatchEvidenceRefoldAsync(
