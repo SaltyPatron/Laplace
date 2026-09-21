@@ -9,6 +9,7 @@
 #include "recipe_delimited.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <limits>
@@ -77,6 +78,9 @@ struct node {
         auto i = attributes.find(key); return i == attributes.end() ? "" : i->second;
     }
 };
+struct ordinal_span {
+    uint32_t first = 0, last = 0;
+};
 struct fact {
     hash128_t relation{}, object{}, context{};
     bool has_object = false, has_context = false, confirm = true, explicit_rank = false;
@@ -104,6 +108,13 @@ static uint32_t point(const std::string& s) {
         value = value * 16 + d;
     }
     return value;
+}
+static std::string point_text(uint32_t cp) {
+    char text[7]{};
+    const int n = std::snprintf(text, sizeof(text), "%04X", cp);
+    if (n <= 0 || static_cast<size_t>(n) >= sizeof(text))
+        throw std::runtime_error("ordinal formatting failed");
+    return std::string(text, static_cast<size_t>(n));
 }
 static hash128_t point_id(uint32_t cp) {
     if (const auto* entry = codepoint_table_lookup(cp)) return entry->hash;
@@ -160,6 +171,7 @@ struct laplace_recipe_stream {
     std::unordered_map<std::string, route_rule> routes;
     std::vector<node> stack;
     node parent_scope{};
+    std::vector<ordinal_span> parent_spans;
     bool parent_scope_active = false;
     std::deque<node> pending;
     uint32_t cursor = 0, end = 0;
@@ -625,6 +637,7 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
             if (e.depth + 1 == s->depth) {
                 if (e.kind == 1) {
                     s->parent_scope = node{e.name, e.namespace_uri ? e.namespace_uri : "", {}, {}};
+                    s->parent_spans.clear();
                     s->parent_scope_active = true;
                 } else if (e.kind == 4 && s->parent_scope_active) {
                     if (e.namespace_uri && *e.namespace_uri)
@@ -635,10 +648,43 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                 } else if (e.kind == 2) {
                     if (s->parent_scope_active) {
                         auto route = s->routes.find(s->parent_scope.name);
-                        if (route != s->routes.end())
-                            s->pending.push_back(std::move(s->parent_scope));
+                        if (route != s->routes.end()) {
+                            const bool explicit_subject =
+                                !s->parent_scope.get(route->second.identity).empty()
+                                || !s->parent_scope.get(route->second.first).empty()
+                                || !s->parent_scope.get(route->second.last).empty();
+                            if (route->second.kind == 3 && !explicit_subject
+                                && !s->parent_spans.empty()) {
+                                std::sort(s->parent_spans.begin(), s->parent_spans.end(),
+                                    [](const ordinal_span& a, const ordinal_span& b) {
+                                        return a.first != b.first ? a.first < b.first : a.last < b.last;
+                                    });
+                                std::vector<ordinal_span> merged;
+                                merged.reserve(s->parent_spans.size());
+                                for (const ordinal_span span : s->parent_spans) {
+                                    if (span.first > span.last)
+                                        throw std::runtime_error("inverted parent coverage span");
+                                    if (merged.empty()
+                                        || static_cast<uint64_t>(span.first)
+                                            > static_cast<uint64_t>(merged.back().last) + 1) {
+                                        merged.push_back(span);
+                                    } else if (span.last > merged.back().last) {
+                                        merged.back().last = span.last;
+                                    }
+                                }
+                                for (const ordinal_span span : merged) {
+                                    node projected = s->parent_scope;
+                                    projected.attributes[route->second.first] = point_text(span.first);
+                                    projected.attributes[route->second.last] = point_text(span.last);
+                                    s->pending.push_back(std::move(projected));
+                                }
+                            } else {
+                                s->pending.push_back(std::move(s->parent_scope));
+                            }
+                        }
                     }
                     s->parent_scope = {};
+                    s->parent_spans.clear();
                     s->parent_scope_active = false;
                 }
                 continue;
@@ -656,23 +702,21 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                 node done = std::move(s->stack.back()); s->stack.pop_back();
                 if (s->stack.empty()) {
                     auto route = s->routes.find(done.name);
-                    if (s->parent_scope_active && s->parent_scope.name == "group") {
-                        auto cp = done.attributes.find("cp");
-                        auto first = done.attributes.find("first-cp");
-                        auto last = done.attributes.find("last-cp");
-                        const std::string* lo = cp != done.attributes.end() ? &cp->second
-                            : first != done.attributes.end() ? &first->second : nullptr;
-                        const std::string* hi = cp != done.attributes.end() ? &cp->second
-                            : last != done.attributes.end() ? &last->second : nullptr;
-                        if (lo && hi) {
-                            auto current_first = s->parent_scope.attributes.find("first-cp");
-                            if (current_first == s->parent_scope.attributes.end()
-                                || point(*lo) < point(current_first->second))
-                                s->parent_scope.attributes["first-cp"] = *lo;
-                            auto current_last = s->parent_scope.attributes.find("last-cp");
-                            if (current_last == s->parent_scope.attributes.end()
-                                || point(*hi) > point(current_last->second))
-                                s->parent_scope.attributes["last-cp"] = *hi;
+                    if (s->parent_scope_active) {
+                        auto parent_route = s->routes.find(s->parent_scope.name);
+                        if (parent_route != s->routes.end() && parent_route->second.kind == 3
+                            && route != s->routes.end() && route->second.kind == 3) {
+                            const std::string single = done.get(route->second.identity);
+                            const std::string first = single.empty()
+                                ? done.get(route->second.first) : single;
+                            const std::string last = single.empty()
+                                ? done.get(route->second.last) : single;
+                            if (!first.empty() && !last.empty()) {
+                                const uint32_t lo = point(first), hi = point(last);
+                                if (lo > hi)
+                                    throw std::runtime_error("inverted child coverage span");
+                                s->parent_spans.push_back({lo, hi});
+                            }
                         }
                     }
                     if (route != s->routes.end() && route->second.inherit_parent_attributes) {

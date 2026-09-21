@@ -509,6 +509,40 @@ public sealed class UnicodeDecomposerTests
     }
 
     [Fact]
+    public void Grouped_ucd_parent_properties_split_discontiguous_child_coverage()
+    {
+        var recipe = InstalledSourceGeneration.Load(
+            "Unicode/UCD", "17.0.0", "UAX42/ucd.all.grouped.xml");
+        byte[] program = NativeRecipeCompiler.Compile(recipe.Recipe, recordDepth: 3);
+        using var stream = NativeRecipeStream.Open(
+            program, UnicodeDecomposer.Source, SourceTrust.StandardsDerived);
+
+        const string xml =
+            "<ucd xmlns=\"http://www.unicode.org/ns/2003/ucd/1.0\"><repertoire>"
+            + "<group Alpha=\"Y\">"
+            + "<char cp=\"0041\"/><char cp=\"0043\"/>"
+            + "</group></repertoire></ucd>";
+        stream.Feed(Encoding.UTF8.GetBytes(xml), final: true);
+
+        var rows = new List<AttestationRow>();
+        while (true)
+        {
+            using var stage = stream.Drain(
+                32768, 32L * 1024 * 1024, out _);
+            if (stage is null) break;
+            CopyTupleParser.DecodeAttestations(
+                [stage.TupleBuffer(IntentStageTable.Attestations)], rows);
+        }
+
+        Hash128 relation = RelationTypeRegistry.RelationTypeId("UCD_ALPHABETIC");
+        AttestationRow[] alphabetic = rows.Where(row => row.TypeId == relation).ToArray();
+        Assert.Equal(2, alphabetic.Length);
+        Assert.Contains(alphabetic, row => row.SubjectId == CodepointPerfcache.Records[0x41].Hash);
+        Assert.Contains(alphabetic, row => row.SubjectId == CodepointPerfcache.Records[0x43].Hash);
+        Assert.DoesNotContain(alphabetic, row => row.SubjectId == CodepointPerfcache.Records[0x42].Hash);
+    }
+
+    [Fact]
     public void Ucdxml_binary_defaults_are_declared_and_do_not_expand_into_refuting_rows()
     {
         var recipe = InstalledSourceGeneration.Load(
