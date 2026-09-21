@@ -117,7 +117,7 @@ public static class ReferenceAnchor
         ValidateKind(kind);
         if (normalizedKey.IsEmpty) return null;
         OrderedCompositionComponent? component =
-            ContentEmitter.StageComponent(builder, normalizedKey.ToArray(), source);
+            ContentEmitter.StageComponent(builder, normalizedKey, source);
         if (component is not { } realized) return null;
         builder.AddEntityInterpretation(new EntityInterpretationRow(
             realized.Id, realized.Tier, entityTypeId, source));

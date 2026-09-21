@@ -32,10 +32,14 @@ public static class ContentEmitter
         return StageComponent(b, Encoding.UTF8.GetBytes(surface), sourceId);
     }
 
+    public static OrderedCompositionComponent? StageComponent(
+        SubstrateChangeBuilder b, byte[] canonical, Hash128 sourceId) =>
+        StageComponent(b, canonical.AsSpan(), sourceId);
+
     public static unsafe OrderedCompositionComponent? StageComponent(
-        SubstrateChangeBuilder b, byte[] canonical, Hash128 sourceId)
+        SubstrateChangeBuilder b, ReadOnlySpan<byte> canonical, Hash128 sourceId)
     {
-        if (canonical.Length == 0) return null;
+        if (canonical.IsEmpty) return null;
         if (!ContentTierSpine.TryStageIntoBuilder(b, canonical, sourceId, out Hash128 root))
             return null;
         using TierTree tree = ContentTierSpine.BuildTree(canonical)
