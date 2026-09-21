@@ -1,6 +1,7 @@
 using global::Npgsql;
 using NpgsqlTypes;
 using Laplace.Engine.Core;
+using Laplace.Decomposers.Abstractions;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
@@ -224,10 +225,18 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         for (int i = 0; i < typeIds.Count; i++) rawTypes[i] = typeIds[i].ToBytes();
 
         await using var cmd = _ds.CreateCommand(
-            "WITH governed AS MATERIALIZED ("
+            "WITH touched AS MATERIALIZED ("
+            + " SELECT a.subject_id AS entity_id FROM laplace.attestations a WHERE a.source_id = $1"
+            + " UNION SELECT a.object_id FROM laplace.attestations a"
+            + "       WHERE a.source_id = $1 AND a.object_id IS NOT NULL"
+            + " UNION SELECT a.context_id FROM laplace.attestations a"
+            + "       WHERE a.source_id = $1 AND a.context_id IS NOT NULL"
+            + "), governed AS MATERIALIZED ("
             + " SELECT DISTINCT ei.entity_id"
             + " FROM laplace.entity_interpretations ei"
-            + " WHERE ei.first_observed_by = $1 AND ei.type_id = ANY($2)"
+            + " LEFT JOIN touched t ON t.entity_id = ei.entity_id"
+            + " WHERE ei.type_id = ANY($2)"
+            + "   AND (ei.first_observed_by = $1 OR t.entity_id IS NOT NULL)"
             + ")"
             + " SELECT count(*)::bigint,"
             + "        count(*) FILTER (WHERE EXISTS ("
