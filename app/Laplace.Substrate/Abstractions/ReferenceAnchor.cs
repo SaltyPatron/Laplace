@@ -1,14 +1,13 @@
-using System.Buffers;
-using System.Buffers.Binary;
-using System.Text;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
 /// <summary>
-/// Identity domains for opaque catalog keys. These values are persisted as part of the
-/// identity preimage; append only and never renumber them.
+/// Identity domains retained for source-format normalization and call-site compatibility.
+/// The domain is NOT a second identity universe: the canonical serialization is ordinary
+/// content, so the same bytes converge on the same entity and physicality everywhere.
+/// Source/version/domain meaning belongs in type interpretations, relations, and context.
 /// </summary>
 public enum ReferenceIdentityKind : ushort
 {
@@ -35,47 +34,32 @@ public enum ReferenceIdentityKind : ushort
 }
 
 /// <summary>
-/// Admission path for opaque references. A reference is a governed identity, not literal
-/// content: emitting one stages exactly one typed entity and never runs its serialization
-/// through the Unicode/content DAG.
+/// Admission path for source/catalog references.
+///
+/// A reference serialization is still content. Emitting one stages the normal Unicode/content
+/// trajectory and records the requested semantic/source-reference type as an interpretation.
+/// This preserves Laplace's global convergence law:
+///
+/// same canonical content -> same entity -> same physicality/trajectory
+///
+/// Version, source system, and proposition role remain explicit state around that entity.
 /// </summary>
 public static class ReferenceAnchor
 {
-    private static ReadOnlySpan<byte> Domain => "laplace/reference-anchor/v1\0"u8;
-
     public static Hash128? Id(ReferenceIdentityKind kind, string? rawKey)
     {
+        ValidateKind(kind);
         string? key = Normalize(rawKey);
-        return key is null ? null : IdUtf8(kind, Encoding.UTF8.GetBytes(key));
+        return key is null ? null : ContentEmitter.RootId(key);
     }
 
     public static Hash128 IdUtf8(ReferenceIdentityKind kind, ReadOnlySpan<byte> normalizedKey)
     {
-        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.WordNetVerbSentence)
-            throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown reference identity domain");
+        ValidateKind(kind);
         if (normalizedKey.IsEmpty)
             throw new ArgumentException("reference key must not be empty", nameof(normalizedKey));
-
-        int length = Domain.Length + sizeof(ushort) + sizeof(int) + normalizedKey.Length;
-        byte[]? rented = null;
-        Span<byte> preimage = length <= 512
-            ? stackalloc byte[length]
-            : (rented = ArrayPool<byte>.Shared.Rent(length)).AsSpan(0, length);
-        try
-        {
-            Domain.CopyTo(preimage);
-            int cursor = Domain.Length;
-            BinaryPrimitives.WriteUInt16LittleEndian(preimage[cursor..], (ushort)kind);
-            cursor += sizeof(ushort);
-            BinaryPrimitives.WriteInt32LittleEndian(preimage[cursor..], normalizedKey.Length);
-            cursor += sizeof(int);
-            normalizedKey.CopyTo(preimage[cursor..]);
-            return Hash128.Blake3(preimage);
-        }
-        finally
-        {
-            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
-        }
+        return ContentEmitter.RootId(normalizedKey)
+            ?? throw new InvalidOperationException("reference key could not be composed as canonical content");
     }
 
     public static Hash128? Emit(
@@ -99,10 +83,14 @@ public static class ReferenceAnchor
         Hash128 entityTypeId,
         Hash128 source)
     {
-        Hash128? id = Id(kind, rawKey);
-        if (id is null) return null;
-        builder.AddEntity(id.Value, EntityTier.Word, entityTypeId, source);
-        return id;
+        ValidateKind(kind);
+        string? key = Normalize(rawKey);
+        if (key is null) return null;
+        OrderedCompositionComponent? component = ContentEmitter.StageComponent(builder, key, source);
+        if (component is not { } realized) return null;
+        builder.AddEntityInterpretation(new EntityInterpretationRow(
+            realized.Id, realized.Tier, entityTypeId, source));
+        return realized.Id;
     }
 
     public static Hash128? EmitUtf8(
@@ -113,9 +101,9 @@ public static class ReferenceAnchor
         Hash128 source,
         double trust)
     {
-        if (normalizedKey.IsEmpty) return null;
-        Hash128 id = DeclareUtf8(builder, kind, normalizedKey, entityTypeId, source)!.Value;
-        CategoryAnchor.AttestCategory(builder, id, entityTypeId, source, trust);
+        Hash128? id = DeclareUtf8(builder, kind, normalizedKey, entityTypeId, source);
+        if (id is null) return null;
+        CategoryAnchor.AttestCategory(builder, id.Value, entityTypeId, source, trust);
         return id;
     }
 
@@ -126,34 +114,50 @@ public static class ReferenceAnchor
         Hash128 entityTypeId,
         Hash128 source)
     {
+        ValidateKind(kind);
         if (normalizedKey.IsEmpty) return null;
-        Hash128 id = IdUtf8(kind, normalizedKey);
-        builder.AddEntity(id, EntityTier.Word, entityTypeId, source);
-        return id;
+        OrderedCompositionComponent? component =
+            ContentEmitter.StageComponent(builder, normalizedKey.ToArray(), source);
+        if (component is not { } realized) return null;
+        builder.AddEntityInterpretation(new EntityInterpretationRow(
+            realized.Id, realized.Tier, entityTypeId, source));
+        return realized.Id;
     }
 
-    public static Hash128? WordNetSynsetKeyId(string version, string key) =>
-        Id(ReferenceIdentityKind.WordNetSynsetKey, VersionedKey(version, key));
+    /// <summary>
+    /// The offset/POS serialization is content. WordNet generation is proposition context,
+    /// not part of the content identity. A pwn30 and pwn31 row with the same exact key
+    /// therefore converge on one key entity while HAS_SYNSET_KEY keeps the version context.
+    /// </summary>
+    public static Hash128? WordNetSynsetKeyId(string version, string key)
+    {
+        RequireVersion(version);
+        return Id(ReferenceIdentityKind.WordNetSynsetKey, key);
+    }
 
     public static Hash128? DeclareWordNetSynsetKey(
         SubstrateChangeBuilder builder,
         string version,
         string key,
-        Hash128 source) =>
-        Declare(builder, ReferenceIdentityKind.WordNetSynsetKey, VersionedKey(version, key),
+        Hash128 source)
+    {
+        RequireVersion(version);
+        return Declare(builder, ReferenceIdentityKind.WordNetSynsetKey, key,
             EntityTypeRegistry.SourceReference, source);
+    }
+
+    private static void ValidateKind(ReferenceIdentityKind kind)
+    {
+        if (kind is < ReferenceIdentityKind.CiliIli or > ReferenceIdentityKind.WordNetVerbSentence)
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown reference identity domain");
+    }
+
+    private static void RequireVersion(string version)
+    {
+        if (Normalize(version) is null)
+            throw new ArgumentException("reference version must not be empty", nameof(version));
+    }
 
     private static string? Normalize(string? rawKey) =>
         string.IsNullOrWhiteSpace(rawKey) ? null : rawKey.Trim();
-
-    private static string VersionedKey(string version, string key)
-    {
-        string? normalizedVersion = Normalize(version);
-        string? normalizedKey = Normalize(key);
-        if (normalizedVersion is null)
-            throw new ArgumentException("reference version must not be empty", nameof(version));
-        if (normalizedKey is null)
-            throw new ArgumentException("reference key must not be empty", nameof(key));
-        return $"{normalizedVersion}\0{normalizedKey}";
-    }
 }

@@ -16,7 +16,7 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public class ConceptAnchorTests
 {
     [SkippableFact]
-    public void EmitSynset_ProducesGovernedSemanticAnchorWithoutContentTree()
+    public void EmitSynset_UsesCanonicalContentTrajectory()
     {
         string cili = TestPathHelpers.CiliOrFallback();
         Skip.IfNot(File.Exists(Path.Combine(cili, IliMap.MapFileName)), "CILI map not present");
@@ -36,14 +36,12 @@ public class ConceptAnchorTests
 
 
 
-        Assert.Equal(0, b.ContentStage.EntityCount);
+        Assert.True(b.ContentStage.EntityCount > 0);\n        Assert.True(b.ContentStage.PhysicalityCount > 0);
 
         var change = b.Build();
-        var entity = Assert.Single(change.Entities);
-        Assert.Equal(id, entity.Id);
-        Assert.Equal(EntityTypeRegistry.WordNetSynset, entity.TypeId);
-        Assert.Empty(change.Physicalities);
-        Assert.False(EntityIdentityPolicy.RequiresPhysicality(entity.TypeId));
+        Assert.Contains(change.Physicalities, p => p.EntityId == id);
+        Assert.Contains(change.EntityInterpretations, e =>
+            e.EntityId == id && e.TypeId == EntityTypeRegistry.WordNetSynset);
         var typedAs = RelationTypeRegistry.RelationTypeId("IS_TYPED_AS");
         Assert.Contains(change.Attestations, a =>
             a.SubjectId == id!.Value && a.TypeId == typedAs && a.ObjectId == EntityTypeRegistry.WordNetSynset);

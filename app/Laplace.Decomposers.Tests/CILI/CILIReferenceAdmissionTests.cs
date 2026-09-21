@@ -11,7 +11,7 @@ public sealed class CILIReferenceAdmissionTests
     static CILIReferenceAdmissionTests() => CodepointPerfcache.LoadDefault();
 
     [Fact]
-    public async Task Ili_MapKeys_AndVersion_AreGovernedReferences_NotTextContent()
+    public async Task Ili_MapKeys_AndVersion_UseCanonicalContentTrajectories()
     {
         string dir = Path.Combine(Path.GetTempPath(), "cili-ref-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -41,7 +41,7 @@ public sealed class CILIReferenceAdmissionTests
         {
             var entities = new Dictionary<Hash128, EntityRow>();
             var physicalEntities = new HashSet<Hash128>();
-            var attestations = new List<AttestationRow>();
+            var attestations = new List<AttestationRow>();\n            var interpretations = new List<EntityInterpretationRow>();
             var decomposer = new CILIDecomposer();
             var context = new FakeContext(new NullWriter()) { EcosystemPath = dir };
 
@@ -50,7 +50,7 @@ public sealed class CILIReferenceAdmissionTests
                 foreach (var entity in change.Entities) entities[entity.Id] = entity;
                 foreach (var physicality in change.Physicalities)
                     physicalEntities.Add(physicality.EntityId);
-                attestations.AddRange(change.Attestations);
+                attestations.AddRange(change.Attestations);\n                interpretations.AddRange(change.EntityInterpretations);
             }
 
             Hash128 ili = ReferenceAnchor.Id(ReferenceIdentityKind.CiliIli, "i35545")!.Value;
@@ -62,18 +62,23 @@ public sealed class CILIReferenceAdmissionTests
             Hash128 pwn31Version = ReferenceAnchor.Id(
                 ReferenceIdentityKind.CiliMapVersion, "pwn31")!.Value;
 
-            Assert.Equal(EntityTypeRegistry.WordNetSynset, entities[ili].TypeId);
-            Assert.Equal(EntityTypeRegistry.SourceReference, entities[key].TypeId);
-            Assert.Equal(EntityTypeRegistry.SourceVersion, entities[version].TypeId);
-            Assert.Equal(EntityTypeRegistry.SourceReference, entities[pwn31Key].TypeId);
-            Assert.Equal(EntityTypeRegistry.SourceVersion, entities[pwn31Version].TypeId);
-            Assert.DoesNotContain(ili, physicalEntities);
-            Assert.DoesNotContain(key, physicalEntities);
-            Assert.DoesNotContain(version, physicalEntities);
+            Assert.Equal(key, pwn31Key);
+            Assert.Contains(interpretations, e =>
+                e.EntityId == ili && e.TypeId == EntityTypeRegistry.WordNetSynset);
+            Assert.Contains(interpretations, e =>
+                e.EntityId == key && e.TypeId == EntityTypeRegistry.SourceReference);
+            Assert.Contains(interpretations, e =>
+                e.EntityId == version && e.TypeId == EntityTypeRegistry.SourceVersion);
+            Assert.Contains(interpretations, e =>
+                e.EntityId == pwn31Version && e.TypeId == EntityTypeRegistry.SourceVersion);
+            Assert.Contains(ili, physicalEntities);
+            Assert.Contains(key, physicalEntities);
+            Assert.Contains(version, physicalEntities);
+            Assert.Contains(pwn31Version, physicalEntities);
 
-            Assert.DoesNotContain(ContentEmitter.RootId("i35545")!.Value, entities.Keys);
-            Assert.DoesNotContain(ContentEmitter.RootId("02084071-n")!.Value, entities.Keys);
-            Assert.DoesNotContain(ContentEmitter.RootId("pwn30")!.Value, entities.Keys);
+            Assert.Equal(ContentEmitter.RootId("i35545")!.Value, ili);
+            Assert.Equal(ContentEmitter.RootId("02084071-n")!.Value, key);
+            Assert.Equal(ContentEmitter.RootId("pwn30")!.Value, version);
 
             Hash128 hasSynsetKey = RelationTypeRegistry.RelationTypeId("HAS_SYNSET_KEY");
             Assert.Single(attestations, a =>

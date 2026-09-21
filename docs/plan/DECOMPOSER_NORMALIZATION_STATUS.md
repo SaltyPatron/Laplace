@@ -68,7 +68,7 @@ source generations.
 | Admission gates | #1146 splits applies at witness-source boundaries, fixes record/file accounting grain, and distinguishes physical content from lawful governed identities. |
 | Fresh seed lifecycle | #1147 makes deferred-index recovery run for every fresh foundation build. |
 | Initial LapSight accounting | #1148 persists exact terminal input/file counters and exposes raw per-source row amplification in the admin ingest view; #1183 separates consensus drain from writer/index maintenance; #1184 fixes aggregate multi-file denominator refinement. |
-| Reference admission | #1149 introduces typed reference identities across the foundation lexical resources instead of text-composing opaque IDs. |
+| Reference admission | The former #1149 opaque-reference split is superseded: foundation lexical identifiers now re-enter the canonical content DAG and retain source/release/type meaning as explicit interpretations and attestation context. |
 | Partition count visibility | #1150 fixes partitioned estimates and includes physicalities in terminal `ANALYZE`. |
 | ISA ratchet repair | #1151 restores the merged-main gate after the reference cleanup without relaxing the policy. |
 | Proposition identity | #1152 binds PropBank, VerbNet, FrameNet, SemLink, and PredicateMatrix roles/predicates to their owning semantic structures instead of context or global labels. |

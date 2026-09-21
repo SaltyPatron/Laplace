@@ -8,8 +8,9 @@ namespace Laplace.Decomposers.Abstractions.Tests;
 public sealed class CompoundIdentifierDecompositionTests
 {
     [Fact]
-    public void OpaqueRoleset_IsOneGovernedIdentity_NotAContentTree()
+    public void Roleset_IsCanonicalContent_WithSemanticInterpretation()
     {
+        CodepointPerfcache.LoadDefault();
         var source = SubstrateCanonicalIds.Source("reference-admission-test");
         var builder = new SubstrateChangeBuilder(source, "propbank/abandon.01");
 
@@ -22,23 +23,28 @@ public sealed class CompoundIdentifierDecompositionTests
             SourceTrust.AcademicCurated);
 
         Assert.NotNull(id);
-        Assert.Equal(0, builder.ContentStage.EntityCount);
+        Assert.Equal(ContentEmitter.RootId("abandon.01"), id);
+        Assert.True(builder.ContentStage.EntityCount > 0);
+        Assert.True(builder.ContentStage.PhysicalityCount > 0);
+
         var change = builder.Build();
-        var entity = Assert.Single(change.Entities);
-        Assert.Equal(id, entity.Id);
-        Assert.Equal(EntityTypeRegistry.PropBankRoleset, entity.TypeId);
-        Assert.Empty(change.Physicalities);
-        Assert.False(EntityIdentityPolicy.RequiresPhysicality(entity.TypeId));
+        Assert.Contains(change.Physicalities, p => p.EntityId == id);
+        Assert.Contains(change.EntityInterpretations, e =>
+            e.EntityId == id && e.TypeId == EntityTypeRegistry.PropBankRoleset);
+        Assert.Contains(change.Attestations, a =>
+            a.SubjectId == id
+            && a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")
+            && a.ObjectId == EntityTypeRegistry.PropBankRoleset);
     }
 
     [Fact]
-    public void ReferenceDomains_KeepIdenticalSerializationsDistinct()
+    public void ReferenceDomains_ConvergeOnIdenticalCanonicalContent()
     {
         const string key = "13.1-1";
-        Assert.NotEqual(
+        Assert.Equal(
             ReferenceAnchor.Id(ReferenceIdentityKind.PropBankRoleset, key),
             ReferenceAnchor.Id(ReferenceIdentityKind.VerbNetClass, key));
-        Assert.NotEqual(
+        Assert.Equal(
             ReferenceAnchor.Id(ReferenceIdentityKind.VerbNetClass, key),
             ContentEmitter.RootId(key));
     }
@@ -55,9 +61,9 @@ public sealed class CompoundIdentifierDecompositionTests
     }
 
     [Fact]
-    public void WordNetSynsetKey_IsVersionScopedInPropositionIdentity()
+    public void WordNetSynsetKey_VersionIsContext_NotASecondContentIdentity()
     {
-        Assert.NotEqual(
+        Assert.Equal(
             ReferenceAnchor.WordNetSynsetKeyId("pwn30", "02084071-n"),
             ReferenceAnchor.WordNetSynsetKeyId("pwn16", "02084071-n"));
     }
