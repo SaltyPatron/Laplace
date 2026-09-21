@@ -50,17 +50,14 @@ def psql(database: str, sql: str, timeout: int) -> object:
 
 
 def session_id(database: str, tenant: str, key: str, timeout: int) -> str:
-    # Same server-side identity law used by ConversationContent.SessionId: ask the
-    # installed database for the already witnessed session by observing the HTTP turn,
-    # rather than accepting caller-supplied raw id bytes. The first HTTP request creates
-    # the manifest; session snapshots below resolve the unique session whose new turns
-    # belong to this proof key by using converse.session_turn_ids over the key-derived id
-    # exposed by the operational catalog.
+    # Same canonical key law used by ConversationContent.SessionId:
+    # substrate/conversation/session/{tenant}/{sessionKey}/v1. Resolve it through the
+    # installed native canonical-id function; do not hand-hash it in the proof harness.
     sql = f"""
-SELECT to_json(encode(converse.session_id({json.dumps(tenant)}::text,{json.dumps(key)}::text),'hex'));
+SELECT to_json(encode(realize.canonical_id({json.dumps("substrate/conversation/session/"+tenant+"/"+key+"/v1")}::text),'hex'));
 """
     result = psql(database, sql, timeout)
-    require(isinstance(result, str) and len(result) == 32, "installed converse.session_id did not return a 128-bit id")
+    require(isinstance(result, str) and len(result) == 32, "installed canonical-id resolver did not return a 128-bit session id")
     return result
 
 
