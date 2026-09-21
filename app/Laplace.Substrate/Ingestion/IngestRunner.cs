@@ -425,11 +425,11 @@ public sealed class IngestRunner
                 // into a normal working-set transaction. File labels remain on every change
                 // for resume, observability, and fold ownership; only the apply accumulator
                 // is shared across files of the same source.
-                var buckets = new Dictionary<string, ApplyBatchBucket>(StringComparer.Ordinal);
+                var buckets = new Dictionary<Hash128, ApplyBatchBucket>();
 
                 ApplyBatchBucket BucketFor(SubstrateChange intent)
                 {
-                    string owner = intent.Metadata.SourceId.ToString();
+                    Hash128 owner = intent.Metadata.SourceId;
                     if (!buckets.TryGetValue(owner, out var bucket))
                     {
                         bucket = new ApplyBatchBucket(batchSize, applyEnvelope);
@@ -1296,7 +1296,7 @@ public sealed class IngestRunner
     private sealed class ApplyPipelineCleanup(
         CancellationTokenSource cancellation,
         Task producer,
-        IReadOnlyDictionary<string, ApplyBatchBucket> buckets,
+        IReadOnlyDictionary<Hash128, ApplyBatchBucket> buckets,
         ChannelReader<QueuedIntent> reader) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()

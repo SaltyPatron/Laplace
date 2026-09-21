@@ -65,8 +65,8 @@ public sealed class IngestWorkingSetBatchingGateTests
         var source = File.ReadAllText(Path.Combine(
             root, "app", "Laplace.Substrate", "Ingestion", "IngestRunner.cs"));
 
-        Assert.Contains("Dictionary<string, ApplyBatchBucket>", source);
-        Assert.Contains("intent.Metadata.SourceId.ToString()", source);
+        Assert.Contains("Dictionary<Hash128, ApplyBatchBucket>", source);
+        Assert.Contains("Hash128 owner = intent.Metadata.SourceId", source);
         Assert.DoesNotContain("if (terminal && bucket.Batch.Count > 0)", source);
         Assert.DoesNotContain("|| IsPeriodBoundaryIntent(intent)", source);
         Assert.Contains("await _writer.CompleteFileAsync(fileLabel", source);
