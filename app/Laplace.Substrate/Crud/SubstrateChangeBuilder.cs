@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.Ingestion;
 
