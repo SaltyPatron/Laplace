@@ -37,9 +37,6 @@ public sealed class PropBankDecomposer
     // can yield exactly one record; the runner coalesces finalized files downstream.
     protected override int? MaxRecordsPerFile => 1;
 
-
-    private const long EstimatedFramesets = 7_567L;
-
     private static readonly ConcurrentDictionary<string, byte> _canonicalNames = new(StringComparer.Ordinal);
 
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames.Keys.ToArray();
@@ -70,7 +67,11 @@ public sealed class PropBankDecomposer
     protected override void Compose(XmlElement root, SubstrateChangeBuilder b) => ComposeFrameset(root, b);
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(EstimatedFramesets);
+    {
+        ct.ThrowIfCancellationRequested();
+        long count = ListFiles(context.EcosystemPath, DecomposerOptions.Default).Count;
+        return Task.FromResult<long?>(count > 0 ? count : null);
+    }
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)

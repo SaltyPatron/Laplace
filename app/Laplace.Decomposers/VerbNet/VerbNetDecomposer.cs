@@ -22,10 +22,6 @@ public sealed class VerbNetDecomposer
 
     private static readonly Hash128 ClassTypeId = EntityTypeRegistry.VerbNetClass;
 
-
-
-    private const long EstimatedClasses = 329L;
-
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "verbnet";
@@ -57,7 +53,11 @@ public sealed class VerbNetDecomposer
         EmitClass(b, root, parentClassId: null);
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
-        => Task.FromResult<long?>(EstimatedClasses);
+    {
+        ct.ThrowIfCancellationRequested();
+        long count = ListFiles(context.EcosystemPath, DecomposerOptions.Default).Count;
+        return Task.FromResult<long?>(count > 0 ? count : null);
+    }
 
     public Task<IngestInventory?> DescribeInputAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct = default)
