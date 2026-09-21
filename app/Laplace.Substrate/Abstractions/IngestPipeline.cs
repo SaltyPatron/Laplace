@@ -426,9 +426,14 @@ public sealed class IngestBatchConfig
     internal (int Entities, int Physicalities, int Attestations) ResolveBuilderCapacities()
     {
         int batchRecords = Math.Max(1, BatchSize);
-        int residentRecords = WorkingSet
-            ? Math.Min(batchRecords, Math.Max(1, EffectiveWorkingSetRecordCap))
-            : batchRecords;
+        // Capacity is an INITIAL allocation, not the working-set limit. Preallocating
+        // the full machine-sized record cap in every concurrently-open file made physical
+        // source sharding dictate resident memory (thousands of one-record files each
+        // received a batch-sized builder). Start a working-set builder at one record's
+        // modeled row width and let the immutable builders grow geometrically as real rows
+        // arrive. The actual close/probe limits remain EffectiveWorkingSetRecordCap and the
+        // byte envelope; only speculative empty capacity disappears.
+        int residentRecords = WorkingSet ? 1 : batchRecords;
 
         return (
             ScaleInitialCapacity(EntityCapacity ?? batchRecords, batchRecords, residentRecords),
@@ -456,8 +461,7 @@ public sealed class IngestBatchConfig
         long? maxInputUnits = null,
         int? concurrentWorkingSets = null,
         Func<int>? activeWorkingSetCount = null,
-        Func<IReadOnlyCollection<string>>? canonicalNamesProvider = null,
-        int? workingSetRecordCap = null) =>
+        Func<IReadOnlyCollection<string>>? canonicalNamesProvider = null) =>
         new()
         {
             SourceId = SourceId,
@@ -476,7 +480,7 @@ public sealed class IngestBatchConfig
             MaxOutputRows = MaxOutputRows,
             WorkingSet = WorkingSet,
             WorkingSetProbeInterval = WorkingSetProbeInterval,
-            WorkingSetRecordCap = workingSetRecordCap ?? WorkingSetRecordCap,
+            WorkingSetRecordCap = WorkingSetRecordCap,
             WorkingSetProfile = WorkingSetProfile,
             ConcurrentWorkingSets = concurrentWorkingSets ?? ConcurrentWorkingSets,
             ActiveWorkingSetCount = activeWorkingSetCount ?? ActiveWorkingSetCount,
@@ -485,19 +489,6 @@ public sealed class IngestBatchConfig
 
     public IngestBatchConfig WithMaxInputUnits(long max) => Copy(maxInputUnits: max);
 
-    /// <summary>
-    /// Tighten the resident record bound when the physical source format proves a
-    /// smaller per-file population than the machine-wide source profile. This changes
-    /// allocation/probe sizing only; it never changes the file's semantic/journal grain.
-    /// </summary>
-    public IngestBatchConfig WithWorkingSetRecordCap(int maxRecords)
-    {
-        if (maxRecords <= 0) throw new ArgumentOutOfRangeException(nameof(maxRecords));
-        int tightened = WorkingSetRecordCap is { } existing
-            ? Math.Min(existing, maxRecords)
-            : maxRecords;
-        return Copy(workingSetRecordCap: tightened);
-    }
 
     public IngestBatchConfig WithWorkingSetConcurrency(int concurrentWorkingSets)
     {

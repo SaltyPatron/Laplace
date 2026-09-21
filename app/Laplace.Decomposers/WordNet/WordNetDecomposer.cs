@@ -38,7 +38,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
         "adj.ppl",
     };
 
-    private const long EstimatedSynsets = 117_700L;
 
     public override int LayerOrder => 2;
 
@@ -249,7 +248,7 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
     public override async Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
     {
         var inv = await DescribeInputAsync(context, DecomposerOptions.Default, ct);
-        return inv?.TotalInputUnits ?? EstimatedSynsets;
+        return inv?.TotalInputUnits;
     }
 
     private static void EmitSynsetEntities(SubstrateChangeBuilder b, WnSynset syn)

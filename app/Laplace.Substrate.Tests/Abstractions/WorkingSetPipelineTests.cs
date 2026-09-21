@@ -208,18 +208,17 @@ public sealed class WorkingSetPipelineTests
         Assert.Equal(24576, shared.WorkingSetRecordCap);
         Assert.Equal(24576, config.WorkingSetRecordCap);
 
-        int residentRecords = Math.Min(config.BatchSize, expected);
+        // The cap controls when the working set closes; it no longer preallocates
+        // that whole population into every file-local builder.
         var capacities = shared.ResolveBuilderCapacities();
-        Assert.Equal(residentRecords * 40, capacities.Entities);
-        Assert.Equal(residentRecords * 32, capacities.Physicalities);
-        Assert.Equal(residentRecords * 8, capacities.Attestations);
+        Assert.Equal(40, capacities.Entities);
+        Assert.Equal(32, capacities.Physicalities);
+        Assert.Equal(8, capacities.Attestations);
 
-        int originalResidentRecords = Math.Min(
-            config.BatchSize, config.EffectiveWorkingSetRecordCap);
         var originalCapacities = config.ResolveBuilderCapacities();
-        Assert.Equal(originalResidentRecords * 40, originalCapacities.Entities);
-        Assert.Equal(originalResidentRecords * 32, originalCapacities.Physicalities);
-        Assert.Equal(originalResidentRecords * 8, originalCapacities.Attestations);
+        Assert.Equal(40, originalCapacities.Entities);
+        Assert.Equal(32, originalCapacities.Physicalities);
+        Assert.Equal(8, originalCapacities.Attestations);
     }
 
     [Fact]
@@ -241,7 +240,7 @@ public sealed class WorkingSetPipelineTests
 
         Assert.Equal(1, capacities.Entities);
         Assert.Equal(0, capacities.Physicalities);
-        Assert.Equal(16 * 8, capacities.Attestations);
+        Assert.Equal(8, capacities.Attestations);
     }
 
     [Fact]

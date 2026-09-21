@@ -512,12 +512,6 @@ public abstract class ComposeDecomposerMultiFile<TRecord> : DecomposerMultiFile<
 {
     protected abstract void Compose(TRecord record, SubstrateChangeBuilder builder);
 
-    /// <summary>
-    /// Optional source-format upper bound for records emitted by one physical file.
-    /// It sizes the per-file builder only; finalized file changes are still coalesced
-    /// by the runner into source-sized database transactions.
-    /// </summary>
-    protected virtual int? MaxRecordsPerFile => null;
 
     protected sealed override IIngestRecordHandler<TRecord> CreateHandlerForFile(
         string fileLabel, DecomposerOptions options) =>
@@ -526,14 +520,9 @@ public abstract class ComposeDecomposerMultiFile<TRecord> : DecomposerMultiFile<
     // Per-FILE label, not BatchLabelPrefix: with workers running concurrently the batch label is
     // the only thing attributing a batch to its input file in the run journal.
     protected override IngestBatchConfig ConfigForFile(
-        string fileLabel, ISubstrateReader? reader, DecomposerOptions options)
-    {
-        var config = IngestPipelineDefaults.Compose(
+        string fileLabel, ISubstrateReader? reader, DecomposerOptions options) =>
+        IngestPipelineDefaults.Compose(
             SourceId, fileLabel, options, reader, PipelineProfile);
-        return MaxRecordsPerFile is { } cap
-            ? config.WithWorkingSetRecordCap(cap)
-            : config;
-    }
 }
 
 /// <summary>Whole-file grammar compose on the generic multi-file scheduler.</summary>
