@@ -11,11 +11,39 @@ CREATE OR REPLACE FUNCTION ops.entity_record(p_id bytea)
     LANGUAGE sql STABLE
 
 BEGIN ATOMIC
-
-    SELECT count(*) FILTER (WHERE s.status = 'confirmed'),
-           count(*) FILTER (WHERE s.status = 'contested'),
-           count(*) FILTER (WHERE s.status = 'refuted'),
-           count(*) FILTER (WHERE s.status = 'thin')
-    FROM converse.epistemic_status_core(p_id, 500) s
+    -- Exact entity record. The old implementation called
+    -- epistemic_status_core(p_id, 500), which intentionally expands a lexical word
+    -- through lexical.senses() and then truncates the result. The Explore header
+    -- therefore reported a sense-expanded TOP-500 sample as if it were this
+    -- entity's complete verdict record (for sell: 16 confirmed + 484 thin = 500).
+    --
+    -- Keep the same verdict law and the same non-verdict structural exclusions,
+    -- but count every direct consensus cell owned by p_id and nothing owned by a
+    -- sense/synset reached from it.
+    WITH direct AS (
+        SELECT c.rating, c.rd, c.volatility
+        FROM laplace.consensus c
+        WHERE c.subject_id = p_id
+          AND c.object_id IS NOT NULL
+          AND c.type_id NOT IN (
+              laplace.relation_type_id('HAS_SENSE'),
+              laplace.relation_type_id('IS_SENSE_OF'),
+              laplace.relation_type_id('HAS_LANGUAGE'))
+    ), verdicts AS (
+        SELECT CASE
+            WHEN consensus.refuted(d.rating, d.rd) THEN 'refuted'
+            WHEN consensus.eff_mu(d.rating, d.rd) > consensus.glicko2_neutral_mu()
+                THEN 'confirmed'
+            WHEN d.volatility::numeric > consensus.glicko2_initial_volatility() * 1.5
+                THEN 'contested'
+            ELSE 'thin'
+        END AS status
+        FROM direct d
+    )
+    SELECT count(*) FILTER (WHERE v.status = 'confirmed'),
+           count(*) FILTER (WHERE v.status = 'contested'),
+           count(*) FILTER (WHERE v.status = 'refuted'),
+           count(*) FILTER (WHERE v.status = 'thin')
+    FROM verdicts v
 ;
 END;
