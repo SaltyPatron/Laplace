@@ -12,15 +12,14 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
 /// Consensus accumulation is attached to every accepted working set. Online and
-/// transient-score writes fold atomically with evidence. Replayable BULK ingest persists
-/// the exact accepted per-cell delta in the same evidence transaction, then immediately
-/// drains that durable continuation on per-type FIFO fold lanes while the next working
-/// set composes/applies. This is not a source-end fold: every working set owns its own
-/// recoverable consensus + highway-mask work, and ingest completion still waits for all
-/// such work to commit. Storage flush boundaries are transport only; durable replayable
-/// testimony forms one canonical rating period per typed cell.
+/// transient-score writes fold atomically with evidence. Replayable BULK ingest commits
+/// evidence, immediately dispatches an idempotent evidence-backed refold for the touched
+/// cells, and lets the next working set compose/apply while that refold runs. There is no
+/// persistent fold queue and no source-end recomputation: completion only waits for work
+/// that was already launched per working set. Storage flush boundaries remain transport
+/// only; durable replayable testimony forms one canonical rating period per typed cell.
 /// </summary>
-public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFoldMetrics, IAsyncDisposable
+public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFoldMetrics, IAsyncDisposable
 {
     public const string PeriodBoundaryUnitPrefix = IngestBatchPipeline.PeriodBoundaryUnitPrefix;
 
@@ -1507,8 +1506,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             if (t.IsFaulted || t.IsCanceled) await t;
     }
 
-    /// <summary>Final safety drain for anonymous work and abnormal teardown.
-    /// Normal file-backed ingest closes folds through CompleteFileAsync.</summary>
+    /// <summary>
+    /// Await only consensus work already dispatched by the per-working-set ETL pipeline.
+    /// This method does not discover, batch, queue, or start additional folds.
+    /// </summary>
     public async Task DrainFoldsAsync()
     {
         // Re-snapshot until quiet: awaiting a lane can let a queued delta dispatch
@@ -1628,7 +1629,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "dispose: queued consensus fold failed");
+            _log.LogError(ex, "dispose: active consensus fold failed");
         }
         _foldDepth.Dispose();
         _foldConnections.Dispose();

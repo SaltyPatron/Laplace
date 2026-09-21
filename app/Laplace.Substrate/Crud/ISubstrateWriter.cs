@@ -26,23 +26,17 @@ public enum BulkRunCompletionPhase
 public interface ISubstrateWriter
 {
     /// <summary>
-    /// Awaits every fold this writer has queued. Default no-op: only the
-    /// consensus-accumulating writer defers work past the apply call.
+    /// Await semantic work that was already launched by apply. Default no-op.
+    /// The replayable bulk path starts each refold immediately after that working set's
+    /// evidence commit; this barrier only waits for those active tasks before declaring
+    /// the source complete.
     /// </summary>
-    /// <remarks>
-    /// On the interface because the RUNNER has to drain before it cancels the run
-    /// token. That token is what the fold lanes hold, so cancelling it while a fold
-    /// is mid-statement sends a Postgres cancel into it — measured as 57014 inside
-    /// consensus.highway_mask_deposit, at the end of a fully successful decompose.
-    /// A completed decompose owes its folds a drain; cancellation must mean abnormal
-    /// teardown and nothing else.
-    /// </remarks>
     Task DrainFoldsAsync() => Task.CompletedTask;
 
     /// <summary>
-    /// Close non-durable semantic work owned by one file before files_done advances.
-    /// Replayable bulk folds are already a durable per-working-set continuation and are
-    /// drained by the run-level completion barrier instead of serializing every file.
+    /// Compatibility hook for writers that still own file-scoped work. The production
+    /// replayable bulk path withholds file-completion markers until its already-running
+    /// evidence refold finishes, so a file boundary never forces an apply/fold wait.
     /// </summary>
     Task CompleteFileAsync(string fileLabel, CancellationToken ct = default)
         => Task.CompletedTask;
