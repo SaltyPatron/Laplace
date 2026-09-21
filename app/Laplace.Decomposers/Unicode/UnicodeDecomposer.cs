@@ -1047,7 +1047,7 @@ public sealed class UnicodeDecomposer
     {
         string fileName = Path.GetFileName(path);
         if (fileName.Contains(".flat.", StringComparison.Ordinal))
-            return ("UAX42/ucd.all.flat.xml", 2);
+            return ("UAX42/ucd.all.flat.xml", 3);
         if (fileName.Contains(".grouped.", StringComparison.Ordinal))
             return ("UAX42/ucd.all.grouped.xml", 3);
         throw new InvalidOperationException(

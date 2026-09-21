@@ -787,7 +787,7 @@
       "provider": "laplace/native-streaming-xml-recipe/v1",
       "syntax": "UAX42/ucd.all.flat.xml",
       "recipePath": "ucd.all.flat.recipe.json",
-      "recordDepth": 2
+      "recordDepth": 3
     },
     {
       "selector": "ucdxml/ucd.all.grouped.zip",
