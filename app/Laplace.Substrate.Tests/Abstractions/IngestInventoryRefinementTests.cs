@@ -5,10 +5,9 @@ using Xunit;
 namespace Laplace.Decomposers.Abstractions.Tests;
 
 /// <summary>
-/// The progress denominator self-corrects: a sampled estimate stands until a
-/// background exact count publishes, after which every reader sees the exact
-/// total. Guards the contract that made input_pct read 111% on the 2026-08-13
-/// wiktionary run impossible to reintroduce silently.
+/// The progress denominator self-corrects from observed ingest work and the exact
+/// successful-run total. Inventory itself stays read-bounded and never performs a
+/// competing full-corpus pass just to improve progress reporting.
 /// </summary>
 public sealed class IngestInventoryRefinementTests
 {
@@ -225,24 +224,4 @@ public sealed class IngestInventoryRefinementTests
         finally { File.Delete(path); }
     }
 
-    [Fact]
-    public void ManyIndividuallySmallFiles_StillRefineWhenCorpusExceedsSharedBudget()
-    {
-        string dir = Directory.CreateDirectory(
-            Path.Combine(Path.GetTempPath(), $"laplace-inv-refine-{Guid.NewGuid():N}"))
-            .FullName;
-        try
-        {
-            string a = Path.Combine(dir, "a.tab");
-            string b = Path.Combine(dir, "b.tab");
-            long each = EtlInventory.MultiFileInventoryBudgetBytes / 2 + 1;
-            using (var stream = File.Create(a)) stream.SetLength(each);
-            using (var stream = File.Create(b)) stream.SetLength(each);
-
-            Assert.All(new[] { a, b }, path =>
-                Assert.True(new FileInfo(path).Length < EtlInventory.ExactScanThresholdBytes));
-            Assert.True(IngestInventory.NeedsBackgroundRefinement([a, b]));
-        }
-        finally { Directory.Delete(dir, recursive: true); }
-    }
 }

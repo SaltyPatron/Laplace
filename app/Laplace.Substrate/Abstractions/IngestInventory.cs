@@ -289,60 +289,12 @@ public sealed record IngestInventory(
         }
     }
 
-    /// <summary>
-    /// Kick an exact count on a worker thread when the estimate may be sampled
-    /// (any file over the exact-scan threshold). Never blocks INGEST_START, never
-    /// fails a run — an IO error just leaves the estimate standing.
-    /// </summary>
-    private static void RefineInBackground(
-        IngestInventory inventory,
-        IReadOnlyList<string> paths,
-        Func<string, CancellationToken, long> exactCount,
-        CancellationToken ct)
-    {
-        if (!NeedsBackgroundRefinement(paths)) return;
-
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                long total = 0;
-                foreach (var p in paths)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    if (File.Exists(p)) total += exactCount(p, ct);
-                }
-                inventory.PublishExactTotal(total);
-            }
-            catch
-            {
-                // Best-effort refinement: the sampled estimate stands.
-            }
-        }, ct);
-    }
-
-    internal static bool NeedsBackgroundRefinement(IReadOnlyList<string> paths)
-    {
-        long totalBytes = 0;
-        bool anySampled = false;
-        foreach (var p in paths)
-        {
-            if (!File.Exists(p)) continue;
-            long bytes = new FileInfo(p).Length;
-            totalBytes = totalBytes > long.MaxValue - bytes ? long.MaxValue : totalBytes + bytes;
-            if (bytes > EtlInventory.ExactScanThresholdBytes)
-            {
-                anySampled = true;
-                break;
-            }
-        }
-        // The multi-file estimator also samples when the CORPUS exceeds its shared
-        // budget even if every individual file is small. OMW is exactly that shape:
-        // 1,226 files / 138 MiB, largest 32 MiB. Testing only the per-file threshold
-        // meant refinement never ran and live progress reached 114.9%.
-        anySampled |= totalBytes > EtlInventory.MultiFileInventoryBudgetBytes;
-        return anySampled;
-    }
+    // Inventory is deliberately read-bounded. Large-corpus estimates are corrected by
+    // the units the ingest is already extracting (PublishObservedFloor) and, after a
+    // successful uncapped full run, by IngestRunner.PublishExactTotal(InputUnitsDone).
+    // Do NOT launch a second full-file counter beside the real ingest: that used to
+    // reread ConceptNet/Wiktionary and every sampled multi-file corpus concurrently,
+    // doubling storage traffic just to improve a progress denominator.
 
     public static IngestInventory Single(long units, string unitType = "units") =>
         new(unitType, units, Array.Empty<IngestFileSpec>());
@@ -362,10 +314,8 @@ public sealed record IngestInventory(
                 [new IngestFileSpec(Path.GetFileName(filePath), filePath, maxInputUnits)]);
         }
         long n = EtlInventory.EstimateNewlineCount(filePath, ct);
-        var single = new IngestInventory(
+        return new IngestInventory(
             unitType, n, [new IngestFileSpec(Path.GetFileName(filePath), filePath, n)]);
-        RefineInBackground(single, [filePath], EtlInventory.CountNewlinesExactFor, ct);
-        return single;
     }
 
     /// <param name="tracksFileCompletion">
@@ -393,9 +343,7 @@ public sealed record IngestInventory(
             files.Add(new IngestFileSpec(Path.GetFileName(paths[i]), paths[i], units[i]));
             total += units[i];
         }
-        var inv = new IngestInventory(unitType, total, files, tracksFileCompletion);
-        RefineInBackground(inv, paths, EtlInventory.CountNewlinesExactFor, ct);
-        return inv;
+        return new IngestInventory(unitType, total, files, tracksFileCompletion);
     }
 
     /// <summary>
@@ -472,9 +420,7 @@ public sealed record IngestInventory(
                 Path.GetFileNameWithoutExtension(paths[i]), paths[i], units[i]));
             total += units[i];
         }
-        var inv = new IngestInventory(unitType, total, files, tracksFileCompletion);
-        RefineInBackground(inv, paths, EtlInventory.CountConlluSentencesFor, ct);
-        return inv;
+        return new IngestInventory(unitType, total, files, tracksFileCompletion);
     }
 }
 
