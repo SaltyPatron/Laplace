@@ -162,13 +162,19 @@ internal static class SemLinkInstanceIngest
             ? EmitReference(builder, $"ontonotes-sense\0{record.Lemma}\0{group}")
             : null;
 
-        if (lemma is { } predicate)
-        {
-            Add(builder, predicate, MemberOfVerbNet, vnClass, occurrence);
-            Add(builder, predicate, EvokesFrame, frame, occurrence);
-            Add(builder, predicate, HasSense, roleset, occurrence);
-            Add(builder, predicate, HasSense, onSense, occurrence);
-        }
+        // These fields annotate THIS predicate occurrence. Writing them onto the
+        // shared lemma and using the occurrence only as context projected corpus
+        // occurrences into global word-type testimony: a frequent lemma accumulated
+        // thousands of direct HAS_SENSE/EVOKES_FRAME/class evidence rows even though
+        // the source names sentence/token coordinates explicitly.
+        //
+        // Keep lemma -> APPEARS_IN -> occurrence for lexical discovery; semantic
+        // annotation belongs to the occurrence identity itself. Word-level promotion,
+        // when wanted, is a derived/elected operation rather than ingest-time spray.
+        Add(builder, occurrence, MemberOfVerbNet, vnClass, occurrence);
+        Add(builder, occurrence, EvokesFrame, frame, occurrence);
+        Add(builder, occurrence, HasSense, roleset, occurrence);
+        Add(builder, occurrence, HasSense, onSense, occurrence);
 
         for (int i = 0; i < record.Dependencies.Length; i++)
         {
