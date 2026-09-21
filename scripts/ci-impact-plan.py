@@ -225,6 +225,18 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
         matched = False
 
+        if path == "scripts/reconcile-highway-masks.sh":
+            # This is a database-maintenance delivery owner, not product source.
+            # Changing its orchestration must not classify as unknown and drag
+            # browser/UCI/all-managed qualification into an otherwise bounded fix.
+            matched = product_change = True
+            publish_required = False
+            components.update(("database", "deployment"))
+            db_suites.add("db-health")
+            delivery_actions.add("reconcile")
+            invalidate(("db-health",), path)
+            continue
+
         if path in (
             "scripts/pipeline.sh",
             "scripts/check-deployed-revision.sh",

@@ -272,6 +272,20 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertFalse(value["full_qualification"])
         self.assertEqual(value["ignored_paths"], ["scripts/test-parallel.sh"])
 
+    def test_highway_reconcile_script_is_owned_database_delivery_not_unknown_product(self):
+        value = plan("scripts/reconcile-highway-masks.sh")
+        self.assertEqual(value["components"], ["database", "deployment"])
+        self.assertEqual(value["build_components"], [])
+        self.assertEqual(value["dev_suites"], [])
+        self.assertEqual(value["db_suites"], ["db-health"])
+        self.assertEqual(value["browser_test_suites"], [])
+        self.assertEqual(value["managed_build_projects"], [])
+        self.assertEqual(value["managed_test_projects"], [])
+        self.assertEqual(value["managed_db_test_projects"], [])
+        self.assertEqual(value["delivery_actions"], ["reconcile"])
+        self.assertEqual(value["unknown_paths"], [])
+        self.assertFalse(value["full_qualification"])
+
     def test_pipeline_and_delivery_control_changes_create_no_product_work(self):
         for path in (
             "scripts/pipeline.sh",
