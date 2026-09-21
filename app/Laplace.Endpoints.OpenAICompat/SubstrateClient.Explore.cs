@@ -343,7 +343,6 @@ internal sealed partial class SubstrateClient
             }
 
             var physicalitiesTask = OnConn(c => ReadPhysicalitiesAsync(c, id, ct));
-            var factsTask = OnConn(c => ReadSalientFactsAsync(c, id, 24, ct));
             var consensusOutTask = OnConn(c => ReadConsensusAsync(c, id, "out", consensusLimit, ct));
             var consensusInTask = OnConn(c => ReadConsensusAsync(c, id, "in", consensusLimit, ct));
             var sensesTask = OnConn(c => ReadSensesAsync(c, id, ct));
@@ -353,8 +352,15 @@ internal sealed partial class SubstrateClient
             var evidenceTask = OnConn(c => ReadEvidenceItemsAsync(c, id, evidenceLimit, ct));
 
             await Task.WhenAll(
-                physicalitiesTask, factsTask, consensusOutTask, consensusInTask,
+                physicalitiesTask, consensusOutTask, consensusInTask,
                 sensesTask, constituentsTask, packedTask, realizedTask, evidenceTask);
+
+            var consensusOut = await consensusOutTask;
+            IReadOnlyList<SalientFactRow> exactFacts =
+            [
+                .. consensusOut.Take(24).Select(c =>
+                    new SalientFactRow(c.Type, c.EntityLabel, c.EffMu, c.Witnesses))
+            ];
 
             return new ExploreEntityResponse(
                 IdHex: idHex.ToLowerInvariant(),
@@ -364,8 +370,8 @@ internal sealed partial class SubstrateClient
                 Exists: exists,
                 EvidenceCount: evidenceCount,
                 Physicalities: await physicalitiesTask,
-                SalientFacts: await factsTask,
-                ConsensusOut: await consensusOutTask,
+                SalientFacts: exactFacts,
+                ConsensusOut: consensusOut,
                 ConsensusIn: await consensusInTask,
                 Senses: await sensesTask,
                 Constituents: await constituentsTask,
@@ -400,8 +406,10 @@ internal sealed partial class SubstrateClient
             peers = p?.Peers ?? Array.Empty<ExplorePeerRow>();
         }
 
-        var witnessRows = entity.EvidenceCount
-            + entity.Evidence.Sum(e => e.ObservationCount);
+        // EvidenceCount is the exact number of attestation rows owned by this
+        // entity. ObservationCount is multiplicity carried by those rows, not a
+        // second set of rows to add back on top of EvidenceCount.
+        var witnessRows = entity.EvidenceCount;
         var consensusRows = entity.ConsensusOut.Count + entity.ConsensusIn.Count;
 
         return new ExploreTrainingExportResponse(
