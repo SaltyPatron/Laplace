@@ -809,6 +809,30 @@ internal sealed partial class SubstrateClient
         return IdentityDisplayLabel(idHex);
     }
 
+    private static HashSet<string> AmbiguousDisplayLabels<T>(
+        IEnumerable<T> rows,
+        Func<T, string> label,
+        Func<T, string> id)
+    {
+        return rows
+            .GroupBy(label, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Select(id)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(2)
+                .Count() > 1)
+            .Select(g => g.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string DisambiguateDisplayLabel(
+        string label, string idHex, IReadOnlySet<string> ambiguous)
+    {
+        if (!ambiguous.Contains(label)) return label;
+        var normalized = idHex.Trim().ToLowerInvariant();
+        var shortId = normalized[..Math.Min(12, normalized.Length)];
+        return $"{label} · {shortId}";
+    }
+
     private static string TrimGraphLabel(string label, string? idHex = null)
     {
         // Display labels are Unicode surfaces, not byte strings. Collapse UI-only
@@ -911,6 +935,21 @@ internal sealed partial class SubstrateClient
                 r.EffMu, r.Witnesses);
         }
 
+        var ambiguous = AmbiguousDisplayLabels(
+            rows, r => r.EntityLabel, r => r.EntityIdHex);
+        if (ambiguous.Count > 0)
+        {
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
+                rows[i] = r with
+                {
+                    EntityLabel = DisambiguateDisplayLabel(
+                        r.EntityLabel, r.EntityIdHex, ambiguous)
+                };
+            }
+        }
+
         return rows;
     }
 
@@ -920,12 +959,19 @@ internal sealed partial class SubstrateClient
         var rows = await NpgsqlSubstrateReads.SensesAsync(conn, id, ct);
         var labels = await ReadDisplayLabelsAsync(
             conn, rows.Select(r => r.SynsetIdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
-        return [.. rows.Select(s => new ExploreSenseRow(
+        var result = rows.Select(s => new ExploreSenseRow(
             SenseIdHex: s.SenseIdHex,
             SynsetIdHex: s.SynsetIdHex,
             SynsetLabel: DisplayLabel(labels, s.SynsetIdHex, s.SynsetLabel),
             EffMu: s.EffMu,
-            Witnesses: s.Witnesses))];
+            Witnesses: s.Witnesses)).ToList();
+        var ambiguous = AmbiguousDisplayLabels(
+            result, r => r.SynsetLabel, r => r.SynsetIdHex);
+        return [.. result.Select(r => ambiguous.Count == 0 ? r : r with
+        {
+            SynsetLabel = DisambiguateDisplayLabel(
+                r.SynsetLabel, r.SynsetIdHex, ambiguous)
+        })];
     }
 
     private static async Task<IReadOnlyList<ExploreConstituentRow>> ReadConstituentsAsync(
@@ -964,7 +1010,7 @@ internal sealed partial class SubstrateClient
         var rows = await NpgsqlSubstrateReads.EvidenceReceiptAsync(conn, id, limit, ct);
         var labels = await ReadDisplayLabelsAsync(
             conn, rows.Select(r => r.ObjectIdHex).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), ct);
-        return [.. rows.Select(e => new LabeledEvidenceItem(
+        var result = rows.Select(e => new LabeledEvidenceItem(
             TypeId: e.TypeIdHex,
             TypeLabel: e.TypeLabel,
             ObjectId: e.ObjectIdHex,
@@ -974,6 +1020,13 @@ internal sealed partial class SubstrateClient
             ContextId: null,
             Outcome: 2,
             ObservationCount: e.WitnessCount,
-            EffMu: e.EffMu))];
+            EffMu: e.EffMu)).ToList();
+        var ambiguous = AmbiguousDisplayLabels(
+            result, r => r.ObjectLabel, r => r.ObjectId);
+        return [.. result.Select(r => ambiguous.Count == 0 ? r : r with
+        {
+            ObjectLabel = DisambiguateDisplayLabel(
+                r.ObjectLabel, r.ObjectId, ambiguous)
+        })];
     }
 }
