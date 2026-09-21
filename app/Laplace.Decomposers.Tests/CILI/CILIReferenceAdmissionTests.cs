@@ -41,7 +41,8 @@ public sealed class CILIReferenceAdmissionTests
         {
             var entities = new Dictionary<Hash128, EntityRow>();
             var physicalEntities = new HashSet<Hash128>();
-            var attestations = new List<AttestationRow>();\n            var interpretations = new List<EntityInterpretationRow>();
+            var attestations = new List<AttestationRow>();
+            var interpretations = new List<EntityInterpretationRow>();
             var decomposer = new CILIDecomposer();
             var context = new FakeContext(new NullWriter()) { EcosystemPath = dir };
 
@@ -50,7 +51,8 @@ public sealed class CILIReferenceAdmissionTests
                 foreach (var entity in change.Entities) entities[entity.Id] = entity;
                 foreach (var physicality in change.Physicalities)
                     physicalEntities.Add(physicality.EntityId);
-                attestations.AddRange(change.Attestations);\n                interpretations.AddRange(change.EntityInterpretations);
+                attestations.AddRange(change.Attestations);
+                interpretations.AddRange(change.EntityInterpretations);
             }
 
             Hash128 ili = ReferenceAnchor.Id(ReferenceIdentityKind.CiliIli, "i35545")!.Value;

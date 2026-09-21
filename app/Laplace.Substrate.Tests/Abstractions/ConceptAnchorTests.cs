@@ -36,7 +36,8 @@ public class ConceptAnchorTests
 
 
 
-        Assert.True(b.ContentStage.EntityCount > 0);\n        Assert.True(b.ContentStage.PhysicalityCount > 0);
+        Assert.True(b.ContentStage.EntityCount > 0);
+        Assert.True(b.ContentStage.PhysicalityCount > 0);
 
         var change = b.Build();
         Assert.Contains(change.Physicalities, p => p.EntityId == id);
