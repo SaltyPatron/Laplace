@@ -29,6 +29,12 @@ public sealed class PropBankDecomposer
     internal static Hash128 OrdinalId(string n) => Hash128.OfCanonical($"ordinal/{n}/v1");
 
     public override int LayerOrder => 2;
+
+    public override IReadOnlyList<Hash128> RequiredPhysicalityTypeIds { get; } =
+    [
+        EntityTypeRegistry.PropBankRoleset,
+        EntityTypeRegistry.PropBankRole,
+    ];
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "propbank";
 

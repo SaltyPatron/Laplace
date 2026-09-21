@@ -23,6 +23,12 @@ public sealed class WiktionaryDecomposer
     public static readonly Hash128 TrustClass = WiktionarySource.TrustClass;
 
     public override int LayerOrder => 2;
+
+    public override IReadOnlyList<Hash128> RequiredPhysicalityTypeIds { get; } =
+    [
+        EntityTypeRegistry.WiktionarySense,
+        EntityTypeRegistry.WikidataItem,
+    ];
     protected override double SourceTrust => TC.AcademicCuratedUserInput;
 
     internal static readonly ConcurrentDictionary<string, byte> VocabularyNames = new(StringComparer.Ordinal);

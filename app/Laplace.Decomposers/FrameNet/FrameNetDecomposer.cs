@@ -48,6 +48,12 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
     private const string Ns = "http://framenet.icsi.berkeley.edu";
 
     public override int LayerOrder => 3;
+
+    public override IReadOnlyList<Hash128> RequiredPhysicalityTypeIds { get; } =
+    [
+        EntityTypeRegistry.FrameNetLu,
+        EntityTypeRegistry.FrameNetFe,
+    ];
     public override bool PerFileCompletion => true;
     protected override double SourceTrust => TC.AcademicCurated;
 
