@@ -875,6 +875,13 @@ geometry_summary_compare(const GeometrySummary *a, const GeometrySummary *b)
     return 0;
 }
 
+static bool
+geometry_summary_present(const GeometrySummary *summary)
+{
+    return summary &&
+           (summary->has_angular || summary->has_frechet || summary->has_hilbert);
+}
+
 static int
 candidate_compare(const void *left, const void *right)
 {
@@ -896,6 +903,8 @@ candidate_compare(const void *left, const void *right)
     if (a->sequence_occurrences != b->sequence_occurrences)
         return a->sequence_occurrences > b->sequence_occurrences ? -1 : 1;
     cmp = opposition_summary_compare(&a->query, &b->query);
+    if (cmp != 0) return cmp > 0 ? -1 : 1;
+    cmp = opposition_summary_compare(&a->query_traversal, &b->query_traversal);
     if (cmp != 0) return cmp > 0 ? -1 : 1;
     cmp = opposition_summary_compare(&a->projection, &b->projection);
     if (cmp != 0) return cmp > 0 ? -1 : 1;
@@ -1062,6 +1071,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     LaplaceCognitionProgram *cognition = NULL;
     LaplacePromptIntent coupled_intent = {0};
     HTAB *route_seen;
+    HTAB *geometry_routed;
     HTAB *origins;
     int next_origin = 0;
     int semantic_hops = 0;
@@ -1142,6 +1152,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     origins = new_id_index("forward occurrence provenance", 128, walk_context, sizeof(OriginEntry));
     route_seen = new_id_index("forward admitted routing identities", 128,
                               walk_context, sizeof(hash128_t));
+    geometry_routed = new_id_index("forward geometry promoted routes", 128,
+                                   walk_context, sizeof(hash128_t));
     ArrayIterator route_iterator = array_create_iterator(operands, 0, NULL);
     Datum route_value;
     bool route_null;
@@ -1459,6 +1471,27 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             }
         }
 
+        /* Geometry is allowed to discover a route without becoming testimony.
+         * A responder is nominated at most once as geometry-only working state.
+         * It cannot be emitted directly; if ROUTE is required, promotion to the
+         * ordinary WORKING role makes its actual stored relations eligible on
+         * the next round while the original GEOMETRY role remains receipted. */
+        if (input && intent && intent->geometry_count > 0)
+        {
+            HASH_SEQ_STATUS geometry_scan;
+            GeometryEntry *geometry;
+            hash_seq_init(&geometry_scan, geometry_table);
+            while ((geometry = hash_seq_search(&geometry_scan)) != NULL)
+            {
+                if (hash_search(geometry_routed, &geometry->id, HASH_FIND, NULL))
+                    continue;
+                int index = candidate_add(
+                    &candidates, &candidate_count, &candidate_capacity,
+                    candidate_index, &geometry->id, 0, 0);
+                candidates[index].geometry = geometry->summary;
+            }
+        }
+
         /* Q->K proposal is bounded per active occurrence. It may nominate a
          * candidate, but it is not the final evidence field used to elect it. */
         query_proposals = evidence_summaries(query_state, false, origins, step_context);
@@ -1604,7 +1637,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
              * independently witnessed observation plane. */
             if (candidates[i].sequence_occurrences == 0 &&
                 !candidates[i].projection.has_positive &&
-                !(input && candidates[i].query_traversal.has_positive))
+                !(input && candidates[i].query_traversal.has_positive) &&
+                !geometry_summary_present(&candidates[i].geometry))
                 continue;
             candidates[kept++] = candidates[i];
         }
@@ -1677,7 +1711,11 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                                 query_channel_count, true, semantic_hops, cognition);
             MemoryContextSwitchTo(walk_context);
             for (int i = 0; i < candidate_count; ++i)
+            {
                 hash_search(route_seen, &candidates[i].id, HASH_ENTER, NULL);
+                if (geometry_summary_present(&candidates[i].geometry))
+                    hash_search(geometry_routed, &candidates[i].id, HASH_ENTER, NULL);
+            }
             laplace_query_state_extend_batch(query_state, routed, NULL);
             if (output_state)
                 laplace_query_state_extend_batch(output_state, routed, NULL);
