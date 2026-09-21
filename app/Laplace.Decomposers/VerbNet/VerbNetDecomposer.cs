@@ -220,8 +220,10 @@ public sealed class VerbNetDecomposer
                     int currentPredicateOrdinal = predicateOrdinal++;
                     string predVal = pred.GetAttribute("value").Trim();
                     if (predVal.Length == 0) continue;
-                    var predLabelId = ContentEmitter.Emit(b, predVal, Source);
-                    if (predLabelId is null) continue;
+                    OrderedCompositionComponent? predLabel =
+                        ContentEmitter.StageComponent(b, predVal, Source);
+                    if (predLabel is not { } predLabelComponent) continue;
+                    Hash128 predLabelId = predLabelComponent.Id;
                     var arguments = new List<SemanticPredicateArgument>();
                     var roleValues = new List<string>();
                     foreach (XmlNode argNode in pred.GetElementsByTagName("ARG"))
@@ -261,7 +263,7 @@ public sealed class VerbNetDecomposer
 
                     Hash128 predicateId = SemanticPredicateAnchor.Declare(
                         b, SemanticPredicateIdentityKind.VerbNet, classEntity,
-                        frameOrdinal, currentPredicateOrdinal, predLabelId.Value, arguments,
+                        frameOrdinal, currentPredicateOrdinal, predLabelComponent, arguments,
                         EntityTypeRegistry.VerbNetPredicate, Source);
                     CategoryAnchor.AttestCategory(
                         b, predicateId, EntityTypeRegistry.VerbNetPredicate,
@@ -275,7 +277,7 @@ public sealed class VerbNetDecomposer
                             classEntity, VerbNetSource.EntailsTypeId, predicateId,
                             Source, null, TC.AcademicCurated, confirm: !negated));
                     b.AddAttestation(NativeAttestation.CategoricalResolved(
-                        predicateId, VerbNetSource.HasNameAliasTypeId, predLabelId.Value,
+                        predicateId, VerbNetSource.HasNameAliasTypeId, predLabelId,
                         Source, null, TC.AcademicCurated));
                     foreach (string roleVal in roleValues)
                     {

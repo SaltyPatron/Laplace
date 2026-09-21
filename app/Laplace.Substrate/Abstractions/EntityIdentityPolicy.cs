@@ -46,6 +46,7 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.PredicateMatrixRole,
         EntityTypeRegistry.EsoRole,
         EntityTypeRegistry.VerbNetMember,
+        EntityTypeRegistry.VerbNetPredicate,
     ];
 
     /// <summary>

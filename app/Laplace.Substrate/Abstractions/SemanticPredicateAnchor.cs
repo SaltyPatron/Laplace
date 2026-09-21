@@ -1,5 +1,4 @@
-using System.Buffers;
-using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
@@ -14,13 +13,15 @@ public enum SemanticPredicateIdentityKind : ushort
 public readonly record struct SemanticPredicateArgument(string Type, string Value);
 
 /// <summary>
-/// Identity for one predicate occurrence inside an owning semantic frame. The globally shared
-/// predicate label remains content; its argument binding and source position identify the
-/// occurrence whose roles the source actually described.
+/// One predicate occurrence is an exact ordered structure over its owner, frame/predicate
+/// ordinals, predicate label and argument bindings. Identity is the shared Merkle
+/// composition of those constituents and the stored ParseStructure physicality retains
+/// the same trajectory.
 /// </summary>
 public static class SemanticPredicateAnchor
 {
-    private static ReadOnlySpan<byte> Domain => "laplace/semantic-predicate-anchor/v1\0"u8;
+    private static readonly Hash128 Schema =
+        Hash128.OfCanonical("semantic-predicate/structure/v2");
 
     public static Hash128 Id(
         SemanticPredicateIdentityKind kind,
@@ -30,55 +31,23 @@ public static class SemanticPredicateAnchor
         Hash128 labelId,
         IReadOnlyList<SemanticPredicateArgument> arguments)
     {
-        if (kind != SemanticPredicateIdentityKind.VerbNet)
-            throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown predicate identity domain");
-        if (ownerId == default) throw new ArgumentException("predicate owner must not be empty", nameof(ownerId));
-        if (labelId == default) throw new ArgumentException("predicate label must not be empty", nameof(labelId));
-        if (frameOrdinal < 0) throw new ArgumentOutOfRangeException(nameof(frameOrdinal));
-        if (predicateOrdinal < 0) throw new ArgumentOutOfRangeException(nameof(predicateOrdinal));
-        ArgumentNullException.ThrowIfNull(arguments);
-
-        var encoded = new (byte[] Type, byte[] Value)[arguments.Count];
-        int length = Domain.Length + sizeof(ushort) + 16 + sizeof(int) + sizeof(int) + 16 + sizeof(int);
-        for (int i = 0; i < arguments.Count; i++)
+        Validate(kind, ownerId, frameOrdinal, predicateOrdinal, labelId, arguments);
+        Hash128 frame = RequiredRoot(frameOrdinal.ToString(CultureInfo.InvariantCulture));
+        Hash128 predicate = RequiredRoot(predicateOrdinal.ToString(CultureInfo.InvariantCulture));
+        var flat = new Hash128[6 + arguments.Count * 2];
+        flat[0] = Schema;
+        flat[1] = KindMarker(kind);
+        flat[2] = ownerId;
+        flat[3] = frame;
+        flat[4] = predicate;
+        flat[5] = labelId;
+        int cursor = 6;
+        foreach (SemanticPredicateArgument argument in arguments)
         {
-            string type = Normalize(arguments[i].Type);
-            string value = Normalize(arguments[i].Value);
-            encoded[i] = (Encoding.UTF8.GetBytes(type), Encoding.UTF8.GetBytes(value));
-            length = checked(length + sizeof(int) + encoded[i].Type.Length
-                + sizeof(int) + encoded[i].Value.Length);
+            flat[cursor++] = RequiredRoot(Normalize(argument.Type));
+            flat[cursor++] = RequiredRoot(Normalize(argument.Value));
         }
-
-        byte[]? rented = null;
-        Span<byte> preimage = length <= 1024
-            ? stackalloc byte[length]
-            : (rented = ArrayPool<byte>.Shared.Rent(length)).AsSpan(0, length);
-        try
-        {
-            int cursor = 0;
-            Domain.CopyTo(preimage);
-            cursor += Domain.Length;
-            BinaryPrimitives.WriteUInt16LittleEndian(preimage[cursor..], (ushort)kind);
-            cursor += sizeof(ushort);
-            WriteHash(preimage, ref cursor, ownerId);
-            BinaryPrimitives.WriteInt32LittleEndian(preimage[cursor..], frameOrdinal);
-            cursor += sizeof(int);
-            BinaryPrimitives.WriteInt32LittleEndian(preimage[cursor..], predicateOrdinal);
-            cursor += sizeof(int);
-            WriteHash(preimage, ref cursor, labelId);
-            BinaryPrimitives.WriteInt32LittleEndian(preimage[cursor..], encoded.Length);
-            cursor += sizeof(int);
-            foreach (var (type, value) in encoded)
-            {
-                WriteBytes(preimage, ref cursor, type);
-                WriteBytes(preimage, ref cursor, value);
-            }
-            return Hash128.Blake3(preimage);
-        }
-        finally
-        {
-            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
-        }
+        return Hash128.Merkle(EntityTier.Word, flat);
     }
 
     public static Hash128 Declare(
@@ -87,32 +56,96 @@ public static class SemanticPredicateAnchor
         Hash128 ownerId,
         int frameOrdinal,
         int predicateOrdinal,
-        Hash128 labelId,
+        OrderedCompositionComponent label,
         IReadOnlyList<SemanticPredicateArgument> arguments,
         Hash128 entityTypeId,
         Hash128 source)
     {
-        Hash128 id = Id(kind, ownerId, frameOrdinal, predicateOrdinal, labelId, arguments);
+        ArgumentNullException.ThrowIfNull(builder);
+        Validate(kind, ownerId, frameOrdinal, predicateOrdinal, label.Id, arguments);
+
+        OrderedCompositionComponent frame = RequiredComponent(
+            builder, frameOrdinal.ToString(CultureInfo.InvariantCulture), source);
+        OrderedCompositionComponent predicate = RequiredComponent(
+            builder, predicateOrdinal.ToString(CultureInfo.InvariantCulture), source);
+
+        var flat = new Hash128[6 + arguments.Count * 2];
+        flat[0] = Schema;
+        flat[1] = KindMarker(kind);
+        flat[2] = ownerId;
+        flat[3] = frame.Id;
+        flat[4] = predicate.Id;
+        flat[5] = label.Id;
+
+        var placed = new List<OrderedCompositionComponent>(3 + arguments.Count * 2)
+        {
+            frame, predicate, label
+        };
+        int cursor = 6;
+        foreach (SemanticPredicateArgument argument in arguments)
+        {
+            OrderedCompositionComponent type = RequiredComponent(
+                builder, Normalize(argument.Type), source);
+            OrderedCompositionComponent value = RequiredComponent(
+                builder, Normalize(argument.Value), source);
+            flat[cursor++] = type.Id;
+            flat[cursor++] = value.Id;
+            placed.Add(type);
+            placed.Add(value);
+        }
+
+        Hash128 id = Hash128.Merkle(EntityTier.Word, flat);
         builder.AddEntity(id, EntityTier.Word, entityTypeId, source);
+
+        var coords = new double[placed.Count * 4];
+        for (int i = 0; i < placed.Count; i++)
+        {
+            OrderedCompositionComponent component = placed[i];
+            coords[i * 4 + 0] = component.CoordX;
+            coords[i * 4 + 1] = component.CoordY;
+            coords[i * 4 + 2] = component.CoordZ;
+            coords[i * 4 + 3] = component.CoordM;
+        }
+        double[] coord = Math4d.KarcherMean(coords);
+        builder.AddPhysicality(new PhysicalityRow(
+            PhysicalityId.Compute(id, PhysicalityType.ParseStructure),
+            id, source, PhysicalityType.ParseStructure,
+            coord[0], coord[1], coord[2], coord[3], Hilbert128.Encode(coord),
+            Trajectory.Build(flat), flat.Length, null, null, 0));
         return id;
     }
 
+    private static void Validate(
+        SemanticPredicateIdentityKind kind,
+        Hash128 ownerId,
+        int frameOrdinal,
+        int predicateOrdinal,
+        Hash128 labelId,
+        IReadOnlyList<SemanticPredicateArgument> arguments)
+    {
+        if (kind != SemanticPredicateIdentityKind.VerbNet)
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown predicate identity domain");
+        if (ownerId == default)
+            throw new ArgumentException("predicate owner must not be empty", nameof(ownerId));
+        if (labelId == default)
+            throw new ArgumentException("predicate label must not be empty", nameof(labelId));
+        if (frameOrdinal < 0) throw new ArgumentOutOfRangeException(nameof(frameOrdinal));
+        if (predicateOrdinal < 0) throw new ArgumentOutOfRangeException(nameof(predicateOrdinal));
+        ArgumentNullException.ThrowIfNull(arguments);
+    }
+
+    private static Hash128 KindMarker(SemanticPredicateIdentityKind kind) =>
+        Hash128.OfCanonical($"semantic-predicate/system/{(ushort)kind}/v1");
+
+    private static Hash128 RequiredRoot(string value) =>
+        ContentEmitter.RootId(value)
+        ?? throw new InvalidOperationException("semantic predicate constituent has no content root");
+
+    private static OrderedCompositionComponent RequiredComponent(
+        SubstrateChangeBuilder builder, string value, Hash128 source) =>
+        ContentEmitter.StageComponent(builder, value, source)
+        ?? throw new InvalidOperationException("semantic predicate constituent could not be staged");
+
     private static string Normalize(string value) =>
         (value ?? string.Empty).Trim().Normalize(NormalizationForm.FormC);
-
-    private static void WriteHash(Span<byte> target, ref int cursor, Hash128 value)
-    {
-        BinaryPrimitives.WriteUInt64LittleEndian(target[cursor..], value.Hi);
-        cursor += sizeof(ulong);
-        BinaryPrimitives.WriteUInt64LittleEndian(target[cursor..], value.Lo);
-        cursor += sizeof(ulong);
-    }
-
-    private static void WriteBytes(Span<byte> target, ref int cursor, byte[] value)
-    {
-        BinaryPrimitives.WriteInt32LittleEndian(target[cursor..], value.Length);
-        cursor += sizeof(int);
-        value.CopyTo(target[cursor..]);
-        cursor += value.Length;
-    }
 }
