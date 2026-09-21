@@ -86,8 +86,9 @@ public interface ISubstrateWriter
     /// <summary>
     /// Applies a group of changes as ONE working set — one transaction, one
     /// verification pass, one idempotency token derived from every member's
-    /// intent hash. File-backed runners keep one accumulator per file so a
-    /// working set never makes one file own another file's completion.
+    /// intent hash. Physical file ownership stays on each change for resume and
+    /// observability; the runner is free to coalesce multiple files from the same
+    /// source until the real row/byte/admission envelope closes.
     /// </summary>
     Task<ApplyResult> ApplyWorkingSetAsync(IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         => ApplyManyAsync(changes, ct);
