@@ -105,19 +105,24 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
                     id, CILISource.IsTypedAsTypeId, typeId,
                     Source, null, TC.AcademicCurated));
 
-            // CILI asserts a DEFINITION for the ILI concept — only that. The old
-            // duplicate HAS_NAME_ALIAS emission of the same text made resolve_name's
-            // authoritative-name arm serve the gloss as every synset's NAME,
-            // outranking the synset-lemma path substrate-wide (record what the
-            // source asserts, at the relation it asserts it).
-            if (rec.Definition is { Length: > 0 } def
+            // A CILI-native concept owns its own gloss. But ili.ttl also republishes
+            // Princeton WordNet concepts with dc:source pwn30:/pwn31:. Those glosses
+            // are packaging of the same PWN authority that WordNetDecomposer admits
+            // onto this exact ILI/synset identity. Counting the copied serialization
+            // as a second CILI witness makes one source corroborate itself.
+            //
+            // Keep the ILI<->PWN mapping below, but let WordNet own the PWN gloss.
+            // Native CILI-only records still contribute their definition normally.
+            bool pwnBacked = rec.SourceKey is { Length: > 0 }
+                && rec.SourceVersion is "pwn30" or "pwn31";
+            if (!pwnBacked
+                && rec.Definition is { Length: > 0 } def
                 && ContentEmitter.Emit(b, def, Source) is { } dId)
             {
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     id, CILISource.HasDefinitionTypeId, dId,
                     Source, EngLang, TC.AcademicCurated));
             }
-
 
             if (rec.SourceVersion is { Length: > 0 } version
                 && rec.SourceKey is { Length: > 0 } sourceKey)

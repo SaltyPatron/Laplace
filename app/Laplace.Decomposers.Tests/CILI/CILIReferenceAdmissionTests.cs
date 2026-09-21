@@ -21,7 +21,9 @@ public sealed class CILIReferenceAdmissionTests
             + "  dc:source pwn30:02084071-n .\n"
             + "<i35546> a <Concept> ;\n"
             + "  skos:definition \"a governed semantic concept\"@en ;\n"
-            + "  dc:source pwn30:02084072-n .\n");
+            + "  dc:source pwn30:02084072-n .\n"
+            + "<i35547> a <Concept> ;\n"
+            + "  skos:definition \"a native CILI definition\"@en .\n");
         // Three serializations of the same PWN 3.0 mapping are packaging, not
         // three witnesses. The native dc:source row is authoritative when ili.ttl exists.
         await File.WriteAllTextAsync(Path.Combine(dir, "ili-map-pwn30.tab"),
@@ -93,6 +95,21 @@ public sealed class CILIReferenceAdmissionTests
             Assert.DoesNotContain(attestations, a =>
                 a.SubjectId == ili && a.TypeId == typedAs
                 && a.ObjectId == EntityTypeRegistry.WordNetSynset);
+
+            // PWN-backed ili.ttl glosses are the same authority later admitted by
+            // WordNetDecomposer, not an independent CILI vote. The mapping survives;
+            // a native CILI-only concept still owns and emits its definition.
+            Hash128 hasDefinition = RelationTypeRegistry.RelationTypeId("HAS_DEFINITION");
+            Assert.DoesNotContain(attestations, a =>
+                a.SubjectId == ili && a.TypeId == hasDefinition);
+            Assert.DoesNotContain(attestations, a =>
+                a.SubjectId == concept && a.TypeId == hasDefinition);
+
+            Hash128 nativeConcept = ReferenceAnchor.Id(
+                ReferenceIdentityKind.CiliIli, "i35547")!.Value;
+            Assert.Contains(attestations, a =>
+                a.SubjectId == nativeConcept && a.TypeId == hasDefinition
+                && a.SourceId == CILIDecomposer.Source);
         }
         finally
         {
