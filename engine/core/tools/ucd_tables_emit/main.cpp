@@ -100,29 +100,45 @@ static const char* attr(const char** a, const char* n) {
     return nullptr;
 }
 
-struct SaxCtx { UcdCompositionData* d; bool in_rep = false; };
+struct SaxCtx {
+    UcdCompositionData* d;
+    bool in_rep = false;
+    std::unordered_map<std::string, std::string> group_attrs;
+};
 
 extern "C" void on_start(void* u, const char* name, const char** a) {
     auto* ctx = (SaxCtx*)u;
     if (std::strcmp(name, "repertoire") == 0) { ctx->in_rep = true; return; }
     if (!ctx->in_rep) return;
+    if (std::strcmp(name, "group") == 0) {
+        ctx->group_attrs.clear();
+        if (a) for (int i = 0; a[i]; i += 2)
+            ctx->group_attrs.emplace(a[i], a[i + 1]);
+        return;
+    }
     if (std::strcmp(name,"char") && std::strcmp(name,"reserved")
      && std::strcmp(name,"noncharacter") && std::strcmp(name,"surrogate")) return;
 
+    auto inherited = [&](const char* key) -> const char* {
+        if (const char* direct = attr(a, key)) return direct;
+        auto it = ctx->group_attrs.find(key);
+        return it == ctx->group_attrs.end() ? nullptr : it->second.c_str();
+    };
+
     uint32_t first, last;
-    auto cp = attr(a, "cp");
+    auto cp = inherited("cp");
     if (cp) { first = last = (uint32_t)std::stoul(cp, nullptr, 16); }
     else {
-        auto f = attr(a, "first-cp"); auto l = attr(a, "last-cp");
+        auto f = inherited("first-cp"); auto l = inherited("last-cp");
         if (!f || !l) return;
         first = (uint32_t)std::stoul(f, nullptr, 16);
         last  = (uint32_t)std::stoul(l, nullptr, 16);
     }
     if (last >= CP_FULL) return;
 
-    auto dt = attr(a,"dt");
-    auto dm = attr(a,"dm");
-    auto cex = attr(a,"Comp_Ex");
+    auto dt = inherited("dt");
+    auto dm = inherited("dm");
+    auto cex = inherited("Comp_Ex");
     const uint8_t cxv = (cex && std::strcmp(cex,"Y") == 0) ? 1u : 0u;
     for (uint32_t c = first; c <= last; ++c) ctx->d->comp_ex[c] = cxv;
 
@@ -143,7 +159,14 @@ extern "C" void on_start(void* u, const char* name, const char** a) {
 
 extern "C" void on_end(void* u, const char* name) {
     auto* ctx = (SaxCtx*)u;
-    if (std::strcmp(name,"repertoire") == 0) ctx->in_rep = false;
+    if (std::strcmp(name, "group") == 0) {
+        ctx->group_attrs.clear();
+        return;
+    }
+    if (std::strcmp(name,"repertoire") == 0) {
+        ctx->group_attrs.clear();
+        ctx->in_rep = false;
+    }
 }
 
 static void put_u32(std::vector<uint8_t>& b, uint32_t v) { for(int i=0;i<4;++i) b.push_back((uint8_t)(v>>(i*8))); }
