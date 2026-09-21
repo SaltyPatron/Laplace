@@ -80,6 +80,7 @@ jobs:
       components: ${{ steps.plan.outputs.components }}
       build_components: ${{ steps.plan.outputs.build_components }}
       managed_build_projects: ${{ steps.plan.outputs.managed_build_projects }}
+      managed_delivery_build_projects: ${{ steps.plan.outputs.managed_delivery_build_projects }}
       managed_test_projects: ${{ steps.plan.outputs.managed_test_projects }}
       browser_test_suites: ${{ steps.plan.outputs.browser_test_suites }}
       managed_test_filter: ${{ steps.plan.outputs.managed_test_filter }}
@@ -123,7 +124,7 @@ jobs:
       stage: mainline
       target_sha: ${{ github.sha }}
       build_components: ${{ needs.plan.outputs.build_components }}
-      managed_build_projects: ${{ needs.plan.outputs.managed_build_projects }}
+      managed_build_projects: ${{ needs.plan.outputs.managed_delivery_build_projects }}
       managed_db_test_projects: ${{ needs.plan.outputs.managed_db_test_projects }}
       managed_db_test_filter: ${{ needs.plan.outputs.managed_db_test_filter }}
       managed_live_test_projects: ${{ needs.plan.outputs.managed_live_test_projects }}

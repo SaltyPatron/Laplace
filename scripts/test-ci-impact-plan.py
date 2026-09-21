@@ -132,18 +132,25 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["delivery_actions"], ["publish"])
         self.assertEqual(value["publish_scope"], "api")
         self.assertEqual(value["live_suites"], [])
+        self.assertEqual(
+            value["managed_delivery_build_projects"],
+            ["app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj"],
+        )
 
-    def test_substrate_managed_change_adds_database_prepare_and_regression_without_native_install(self):
+    def test_substrate_managed_change_publishes_without_database_mutation(self):
         value = plan("app/Laplace.Substrate/Crud/Npgsql/Foo.cs")
         self.assertIn("managed-dev", value["dev_suites"])
-        self.assertEqual(
-            value["db_suites"], ["db-health", "managed-db"]
-        )
-        self.assertEqual(
-            value["delivery_actions"], ["database", "reconcile", "publish"]
-        )
+        self.assertEqual(value["db_suites"], ["managed-db"])
+        self.assertEqual(value["delivery_actions"], ["publish"])
         self.assertNotIn("install", value["delivery_actions"])
+        self.assertNotIn("database", value["delivery_actions"])
+        self.assertNotIn("reconcile", value["delivery_actions"])
         self.assertEqual(value["publish_scope"], "full")
+        self.assertTrue(value["managed_delivery_build_projects"])
+        self.assertFalse(any(".Tests/" in p or p.endswith(".Tests.csproj")
+                             for p in value["managed_delivery_build_projects"]))
+        self.assertTrue(any(".Tests/" in p or p.endswith(".Tests.csproj")
+                            for p in value["managed_build_projects"]))
 
     def test_shared_managed_library_requires_full_publication(self):
         value = plan("app/Laplace.Core/Core/Foo.cs")

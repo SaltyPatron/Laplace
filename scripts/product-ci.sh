@@ -436,8 +436,13 @@ for env_name, (field, order) in orders.items():
         value = ",".join(item for item in order if item in selected)
     print(f"export {env_name}={shlex.quote(value)}")
 
+stage = os.environ.get("LAPLACE_STAGE", "")
 project_fields = {
-    "LAPLACE_MANAGED_BUILD_PROJECTS": "managed_build_projects",
+    "LAPLACE_MANAGED_BUILD_PROJECTS": (
+        "managed_delivery_build_projects"
+        if stage in {"mainline", "release-delivery", "release-candidate", "release-activation"}
+        else "managed_build_projects"
+    ),
     "LAPLACE_MANAGED_TEST_PROJECTS": "managed_test_projects",
     "LAPLACE_MANAGED_DB_TEST_PROJECTS": "managed_db_test_projects",
     "LAPLACE_MANAGED_LIVE_TEST_PROJECTS": "managed_live_test_projects",

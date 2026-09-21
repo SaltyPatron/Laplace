@@ -368,10 +368,16 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 dev_suites.add("uci-dev")
                 invalidate(("uci-dev",), path)
 
-            if (
-                path.startswith("app/Laplace.Substrate")
-                or path.startswith("app/Laplace.Migrations")
-            ):
+            if path.startswith("app/Laplace.Substrate"):
+                # Managed substrate orchestration/CRUD code changes the shipped managed
+                # binaries, not the installed PostgreSQL schema or native extension.
+                # Keep DB-facing managed qualification available to explicit audits,
+                # but do not run migrations, restart/reconcile the database, or scan
+                # historical consensus on every C# edit.
+                components.add("database")
+                db_suites.add("managed-db")
+                invalidate(("managed-db",), path)
+            elif path.startswith("app/Laplace.Migrations"):
                 components.add("database")
                 db_suites.update(("db-health", "managed-db"))
                 delivery_actions.update(("database", "reconcile"))
@@ -504,21 +510,28 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
 
     if "managed" not in build_components:
         managed_build_projects: list[str] = []
+        managed_delivery_build_projects: list[str] = []
     elif managed_build_force_all or managed_impact["full"]:
         managed_build_projects = ["all"]
+        # Automatic delivery never executes the broad development matrix. Build
+        # production projects only; full qualification keeps the complete solution.
+        managed_delivery_build_projects = sorted(
+            path for path, project in managed_projects.items() if not project.is_test
+        )
     else:
         build_roots = set(managed_impact["build_projects"])
         build_roots.update(managed_build_required)
         all_tests = {
             path for path, project in managed_projects.items() if project.is_test
         }
+        # The main delivery lane compiles only shippable/referenced production roots.
+        # Test projects remain in the qualification closure below, where --no-build
+        # actually requires their binaries.
+        managed_delivery_build_projects = sorted(build_roots - all_tests)
         selected_tests = set(managed_test_projects)
         selected_tests.update(managed_db_test_projects)
         selected_tests.update(managed_live_test_projects)
         build_roots.update(selected_tests)
-        # dotnet test runs with --no-build, so every selected test project must
-        # be built in the candidate graph. Unselected reverse-reference tests
-        # remain excluded from ordinary publication builds.
         build_roots.difference_update(all_tests - selected_tests)
         managed_build_projects = sorted(build_roots)
 
@@ -544,6 +557,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         "components": sorted(components),
         "build_components": sorted(build_components),
         "managed_build_projects": managed_build_projects,
+        "managed_delivery_build_projects": managed_delivery_build_projects,
         "managed_test_projects": managed_test_projects,
         "browser_test_suites": [suite for suite in BROWSER_TEST_SUITES if suite in browser_test_suites],
         "managed_test_filter": managed_test_filter,
@@ -607,6 +621,7 @@ def force_full_plan(plan: dict) -> None:
     plan["components"] = list(ALL_COMPONENTS)
     plan["build_components"] = ["native", "managed", "web"]
     plan["managed_build_projects"] = ["all"]
+    plan["managed_delivery_build_projects"] = ["all"]
     plan["managed_test_projects"] = ["all"]
     plan["browser_test_suites"] = list(BROWSER_TEST_SUITES)
     plan["managed_test_filter"] = ""
@@ -640,6 +655,7 @@ def write_github_outputs(path: Path, plan: dict) -> None:
             "components",
             "build_components",
             "managed_build_projects",
+            "managed_delivery_build_projects",
             "managed_test_projects",
             "browser_test_suites",
             "managed_db_test_projects",
@@ -667,7 +683,8 @@ def write_summary(path: Path, plan: dict) -> None:
         stream.write(f"- Changed files: {len(plan['changed_files'])}\n")
         stream.write(f"- Affected components: {joined('components')}\n")
         stream.write(f"- Candidate build components: {joined('build_components')}\n")
-        stream.write(f"- Managed build projects: {joined('managed_build_projects')}\n")
+        stream.write(f"- Managed qualification build projects: {joined('managed_build_projects')}\n")
+        stream.write(f"- Managed delivery build projects: {joined('managed_delivery_build_projects')}\n")
         stream.write(f"- Managed unit-test projects: {joined('managed_test_projects')}\n")
         stream.write(f"- Browser test suites: {joined('browser_test_suites')}\n")
         stream.write(f"- Managed test filter: {plan.get('managed_test_filter') or 'none'}\n")
