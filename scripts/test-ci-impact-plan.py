@@ -337,16 +337,16 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertEqual(value["build_components"], [])
         self.assertIn("scripts/check-deployed-revision.sh", value["ignored_paths"])
 
-    def test_extension_sql_does_not_schedule_the_managed_ocean(self):
+    def test_extension_sql_installs_without_rebuilding_native(self):
         value = plan(
             "extension/laplace_substrate/sql/functions/ops/ingest_run_close.sql.in"
         )
-        self.assertEqual(value["dev_suites"], ["native-dev"])
+        self.assertEqual(value["dev_suites"], [])
         self.assertEqual(value["managed_test_projects"], [])
         self.assertEqual(value["managed_test_filter"], "")
-        self.assertIn("native", value["build_components"])
-        self.assertNotIn("managed-dev", value["dev_suites"])
-        self.assertIn("install", value["delivery_actions"])
+        self.assertNotIn("native", value["build_components"])
+        self.assertEqual(value["db_suites"], ["db-health"])
+        self.assertEqual(value["delivery_actions"], ["database", "install"])
         self.assertFalse(value["full_qualification"])
 
     def test_native_test_change_runs_native_qualification_without_delivery(self):

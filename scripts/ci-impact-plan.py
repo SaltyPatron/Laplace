@@ -265,11 +265,28 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             continue
 
         if path.startswith("extension/"):
-            # Native/SQL is proved by native-dev and native-db. Forcing every
-            # managed test project here is the "ocean, one drop at a time"
-            # qualification that dies at the 15-minute packed deadline.
             matched = product_change = True
             publish_scope = "full"
+
+            # SQL/control assets change the installed extension schema, not the C/C++
+            # shared object. Rebuilding native binaries and running the full native
+            # developer/regression lane for a .sql.in edit is pure latency. Install the
+            # changed SQL, run bounded DB health, and leave the existing .so untouched.
+            extension_sql_only = (
+                "/sql/" in path
+                or path.endswith(".sql")
+                or path.endswith(".sql.in")
+                or path.endswith(".control")
+            )
+            if extension_sql_only:
+                publish_required = False
+                components.add("database")
+                db_suites.add("db-health")
+                delivery_actions.update(("install", "database"))
+                invalidate(("db-health",), path)
+                continue
+
+            # Native extension source/build changes retain native qualification.
             components.update(("native", "database"))
             build_components.add("native")
             dev_suites.add("native-dev")
