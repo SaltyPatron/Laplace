@@ -32,6 +32,11 @@ public sealed class PropBankDecomposer
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "propbank";
 
+    // The upstream frames repository is physically sharded one frameset root per
+    // XML file. Do not allocate a machine-wide working-set builder for a file that
+    // can yield exactly one record; the runner coalesces finalized files downstream.
+    protected override int? MaxRecordsPerFile => 1;
+
 
     private const long EstimatedFramesets = 7_567L;
 

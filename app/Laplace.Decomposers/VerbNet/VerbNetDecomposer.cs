@@ -30,6 +30,9 @@ public sealed class VerbNetDecomposer
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "verbnet";
 
+    // One VNCLASS root per physical XML file.
+    protected override int? MaxRecordsPerFile => 1;
+
     protected override IReadOnlyList<(string Path, string Label)> ListFiles(
         string ecosystemPath, DecomposerOptions options)
     {

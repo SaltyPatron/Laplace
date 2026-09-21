@@ -456,7 +456,8 @@ public sealed class IngestBatchConfig
         long? maxInputUnits = null,
         int? concurrentWorkingSets = null,
         Func<int>? activeWorkingSetCount = null,
-        Func<IReadOnlyCollection<string>>? canonicalNamesProvider = null) =>
+        Func<IReadOnlyCollection<string>>? canonicalNamesProvider = null,
+        int? workingSetRecordCap = null) =>
         new()
         {
             SourceId = SourceId,
@@ -475,7 +476,7 @@ public sealed class IngestBatchConfig
             MaxOutputRows = MaxOutputRows,
             WorkingSet = WorkingSet,
             WorkingSetProbeInterval = WorkingSetProbeInterval,
-            WorkingSetRecordCap = WorkingSetRecordCap,
+            WorkingSetRecordCap = workingSetRecordCap ?? WorkingSetRecordCap,
             WorkingSetProfile = WorkingSetProfile,
             ConcurrentWorkingSets = concurrentWorkingSets ?? ConcurrentWorkingSets,
             ActiveWorkingSetCount = activeWorkingSetCount ?? ActiveWorkingSetCount,
@@ -483,6 +484,20 @@ public sealed class IngestBatchConfig
         };
 
     public IngestBatchConfig WithMaxInputUnits(long max) => Copy(maxInputUnits: max);
+
+    /// <summary>
+    /// Tighten the resident record bound when the physical source format proves a
+    /// smaller per-file population than the machine-wide source profile. This changes
+    /// allocation/probe sizing only; it never changes the file's semantic/journal grain.
+    /// </summary>
+    public IngestBatchConfig WithWorkingSetRecordCap(int maxRecords)
+    {
+        if (maxRecords <= 0) throw new ArgumentOutOfRangeException(nameof(maxRecords));
+        int tightened = WorkingSetRecordCap is { } existing
+            ? Math.Min(existing, maxRecords)
+            : maxRecords;
+        return Copy(workingSetRecordCap: tightened);
+    }
 
     public IngestBatchConfig WithWorkingSetConcurrency(int concurrentWorkingSets)
     {
