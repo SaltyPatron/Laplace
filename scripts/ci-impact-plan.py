@@ -552,10 +552,11 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         all_tests = {
             path for path, project in managed_projects.items() if project.is_test
         }
-        # The main delivery lane compiles only shippable/referenced production roots.
-        # Test projects remain in the qualification closure below, where --no-build
-        # actually requires their binaries.
-        managed_delivery_build_projects = sorted(build_roots - all_tests)
+        # Delivery compiles exactly the payload roots selected above (API/UCI/MCP/
+        # Lichess/Migrations and, when its dependency closure changed, the ingest
+        # CLI). Reverse-dependent developer tools such as ChessComposeBench and
+        # ChessCatalogSurfaces are qualification leaves, not deployed payloads.
+        managed_delivery_build_projects = sorted(managed_build_required)
         selected_tests = set(managed_test_projects)
         selected_tests.update(managed_db_test_projects)
         selected_tests.update(managed_live_test_projects)

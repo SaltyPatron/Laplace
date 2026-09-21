@@ -147,9 +147,20 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertNotIn("database", value["delivery_actions"])
         self.assertNotIn("reconcile", value["delivery_actions"])
         self.assertEqual(value["publish_scope"], "full")
-        self.assertTrue(value["managed_delivery_build_projects"])
+        self.assertIn(
+            "app/Laplace.Cli/Laplace.Cli.csproj",
+            value["managed_delivery_build_projects"],
+        )
         self.assertFalse(any(".Tests/" in p or p.endswith(".Tests.csproj")
                              for p in value["managed_delivery_build_projects"]))
+        self.assertNotIn(
+            "app/ChessComposeBench/ChessComposeBench.csproj",
+            value["managed_delivery_build_projects"],
+        )
+        self.assertNotIn(
+            "app/ChessCatalogSurfaces/ChessCatalogSurfaces.csproj",
+            value["managed_delivery_build_projects"],
+        )
         self.assertTrue(any(".Tests/" in p or p.endswith(".Tests.csproj")
                             for p in value["managed_build_projects"]))
 
@@ -166,7 +177,19 @@ class ImpactPlanTests(unittest.TestCase):
             value["managed_build_projects"],
         )
         self.assertEqual(value["publish_scope"], "full")
-        self.assertEqual(value["delivery_actions"], ["publish"])
+        self.assertEqual(value["delivery_actions"], ["ingest-runtime", "publish"])
+        self.assertIn(
+            "app/Laplace.Cli/Laplace.Cli.csproj",
+            value["managed_delivery_build_projects"],
+        )
+        self.assertNotIn(
+            "app/ChessComposeBench/ChessComposeBench.csproj",
+            value["managed_delivery_build_projects"],
+        )
+        self.assertNotIn(
+            "app/ChessCatalogSurfaces/ChessCatalogSurfaces.csproj",
+            value["managed_delivery_build_projects"],
+        )
 
     def test_uci_executable_change_isolated_from_api_database_and_live_matrix(self):
         value = plan("app/Laplace.Chess.Uci/Program.cs")
