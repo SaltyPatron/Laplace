@@ -338,8 +338,14 @@ public sealed class IngestRunner
                     sbatchSource ??= intent.Metadata.SourceId;
                     sbatchRows += RowsOf(intent);
                     wsBytes += sib;
-                    if (ShouldFlushWithCap(sbatch.Count, sbatchRows)
-                        || IsPeriodBoundaryIntent(intent))
+                    // File boundaries are semantic/journal markers, not transaction-size
+                    // boundaries. Tiny-file estates such as PropBank can contain thousands
+                    // of one-record XML files; flushing on every boundary turns the source
+                    // layout into thousands of database transactions. Keep the boundary in
+                    // the same capacity-governed batch as its file data (and neighboring
+                    // files). The marker is applied atomically with the batch, and
+                    // CompleteFileAsync below still closes each file only after that apply.
+                    if (ShouldFlushWithCap(sbatch.Count, sbatchRows))
                     {
                         LogAdmissionWindow(sbatch.Count);
                         await ProcessOwnedBatchAsync(sbatch, decomposer, options, rng,
@@ -413,11 +419,17 @@ public sealed class IngestRunner
                     }
                 }, "ingest-decompose-pcore", pipelineCts.Token);
 
+                // Apply batching is source-owned, not file-owned. The previous file-label
+                // bucket made the physical source packaging dictate the database cadence:
+                // a corpus with 7,567 one-record XML files could never coalesce those rows
+                // into a normal working-set transaction. File labels remain on every change
+                // for resume, observability, and fold ownership; only the apply accumulator
+                // is shared across files of the same source.
                 var buckets = new Dictionary<string, ApplyBatchBucket>(StringComparer.Ordinal);
 
                 ApplyBatchBucket BucketFor(SubstrateChange intent)
                 {
-                    string owner = intent.Metadata.FileLabel ?? string.Empty;
+                    string owner = intent.Metadata.SourceId.ToString();
                     if (!buckets.TryGetValue(owner, out var bucket))
                     {
                         bucket = new ApplyBatchBucket(batchSize, applyEnvelope);
@@ -484,17 +496,15 @@ public sealed class IngestRunner
                             continue;
                         }
 
-                        string owner = intent.Metadata.FileLabel ?? string.Empty;
                         var bucket = BucketFor(intent);
-                        bool terminal = IsFileTerminalIntent(intent);
                         long ib = queued.SerializedBytes;
                         var admission = queued.Admission;
 
-                        // A file's terminal marker is never coalesced with its data. Its
-                        // preceding data batches are applied first; then the terminal marker
-                        // is applied and CompleteFileAsync closes only that file's fold tasks.
-                        if (terminal && bucket.Batch.Count > 0)
-                            await FlushBucketAsync(bucket);
+                        // A terminal marker is ordinary zero/small-row control state for
+                        // batching purposes. It stays behind that file's already-produced
+                        // data in the stream and can share a transaction with other files.
+                        // ProcessBatchAsync calls CompleteFileAsync only after the atomic
+                        // apply returns, so files_done cannot outrun their durable rows.
 
                         if (workingSet && ShouldFlushWorkingSetSourceBoundary(
                                 bucket.Source, intent.Metadata.SourceId))
@@ -520,12 +530,8 @@ public sealed class IngestRunner
                             : ShouldFlush(bucket.Batch.Count, bucket.Rows)
                                 || bucket.Batch.Count >= maxIntentsPerCommit;
 
-                        if (terminal || capacityReached)
-                        {
+                        if (capacityReached)
                             await FlushBucketAsync(bucket);
-                            if (terminal)
-                                buckets.Remove(owner);
-                        }
                     }
                 }
 
