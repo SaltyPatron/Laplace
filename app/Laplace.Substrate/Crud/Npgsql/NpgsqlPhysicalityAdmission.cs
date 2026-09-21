@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 internal sealed record WorkingSetAcceptedEvidence(
+    Hash128 WorkingSetToken,
     IReadOnlySet<Hash128> AttestationIds,
     bool OriginalReplay);
 

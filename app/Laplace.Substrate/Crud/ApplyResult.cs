@@ -16,14 +16,16 @@ public sealed record ApplyResult(
     long EntitiesSkippedAtMerge = 0,
     long PhysicalitiesSkippedAtMerge = 0,
     /// <summary>True iff the working set's flush-journal token was already
-    /// claimed by a prior committed apply — the whole batch (evidence AND
-    /// any dependent fold) already landed; every layer must treat the
-    /// replay as a no-op.</summary>
+    /// claimed by a prior committed evidence apply. Replayable bulk consensus may
+    /// still have a durable fold-queue continuation; the accumulating writer owns
+    /// draining that continuation exactly once before ingest completion.</summary>
     bool JournalReplayHit = false)
 {
     /// <summary>Actual PostgreSQL transaction settings and acknowledgement for this apply.
     /// Null means the writer did not establish this PostgreSQL-specific contract.</summary>
     public PostgresCommitReceipt? PostgresCommit { get; init; }
+    /// <summary>Exact V2 working-set receipt claimed by the evidence transaction.</summary>
+    public Hash128? WorkingSetToken { get; init; }
     public PhysicalityAdmissionReceipt? PhysicalityAdmission { get; init; }
     /// <summary>Actual transactions containing COPY, counted once per transaction.
     /// These are not estimates of physical network round trips.</summary>

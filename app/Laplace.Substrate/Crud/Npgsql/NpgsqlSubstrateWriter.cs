@@ -344,6 +344,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             JournalReplayHit: journalReplayHit)
         {
             PostgresCommit = postgresCommit,
+            WorkingSetToken = workingSetToken,
             PhysicalityAdmission = physicalityAdmission?.Receipt,
             CopyTransactionsStarted = copyTransactionsStarted,
             CopyTransactionsCommitted = copyTransactionsCommitted,

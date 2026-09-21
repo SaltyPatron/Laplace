@@ -356,6 +356,13 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             bool atomicWorkingSet = _persistEvidence && _inner is NpgsqlSubstrateWriter;
             var delta = atomicWorkingSet ? null : BuildDelta(changes);
             bool hasEphemeralFolds = changes.Any(c => !c.EphemeralFoldInputs.IsDefaultOrEmpty);
+            // Bulk replayable evidence must not serialize its consensus + highway projection
+            // on the control transaction. The evidence transaction persists an exact,
+            // crash-recoverable fold queue; the queue drains on the fold fan while the next
+            // working set composes/applies. Transient continuous scores keep the atomic path.
+            bool deferReplayableBulkFold =
+                atomicWorkingSet && _bulkRun && !hasEphemeralFolds && appendConversation is null;
+            bool durableFoldQueued = false;
 
             // A fold that already failed in the background poisons the run
             // NOW, before any more evidence lands.
@@ -400,8 +407,15 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                             acceptance.OriginalReplay ? [] : changes,
                             acceptance.AttestationIds);
                         if (acceptedDelta is { Count: > 0 })
-                            atomicStats = await UpsertDeltaInTransactionAsync(
-                                acceptedDelta, connection, transaction, token).ConfigureAwait(false);
+                        {
+                            if (deferReplayableBulkFold)
+                                durableFoldQueued = await PersistDurableFoldWorkAsync(
+                                    connection, transaction, acceptance.WorkingSetToken,
+                                    acceptedDelta, token).ConfigureAwait(false);
+                            else
+                                atomicStats = await UpsertDeltaInTransactionAsync(
+                                    acceptedDelta, connection, transaction, token).ConfigureAwait(false);
+                        }
                         if (!acceptance.OriginalReplay && appendConversation is not null)
                             await appendConversation(connection, transaction, token).ConfigureAwait(false);
                         // A descriptor backfill is a new commit and must still
@@ -412,7 +426,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     reconciliation,
                     ct).ConfigureAwait(false);
 
-                if (!result.JournalReplayHit)
+                if (!result.JournalReplayHit && !deferReplayableBulkFold)
                 {
                     Interlocked.Add(ref _cellsFolded, atomicStats.Cells);
                     Interlocked.Add(ref _consensusBackendTicks, atomicStats.ConsensusBackendTicks);
@@ -421,6 +435,11 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     Interlocked.Add(ref _highwayMaskCalls, atomicStats.MaskCalls);
                     Interlocked.Add(ref _highwayMaskPairs, atomicStats.MaskPairs);
                 }
+                if (deferReplayableBulkFold
+                    && result.WorkingSetToken is { } durableToken
+                    && (durableFoldQueued || result.JournalReplayHit))
+                    await EnqueueDurableFoldWorkAsync(
+                        durableToken, CancellationToken.None).ConfigureAwait(false);
             }
             else
             {
@@ -1515,7 +1534,7 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         return await _inner.FinalizeSourceAsync(sourceId, ct);
     }
 
-    public Task BeginBulkRunAsync(CancellationToken ct = default)
+    public async Task BeginBulkRunAsync(CancellationToken ct = default)
     {
         Interlocked.Exchange(ref _consensusBackendTicks, 0);
         Interlocked.Exchange(ref _highwayMaskBackendTicks, 0);
@@ -1528,7 +1547,8 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         Interlocked.Exchange(ref _foldSpanStarted, 0);
         _bulkRun = true;
         FoldSizing.Log();
-        return _inner.BeginBulkRunAsync(ct);
+        await _inner.BeginBulkRunAsync(ct).ConfigureAwait(false);
+        await RecoverDurableFoldWorkAsync(ct).ConfigureAwait(false);
     }
 
     public Task CompleteBulkRunAsync(CancellationToken ct = default)

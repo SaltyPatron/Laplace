@@ -56,3 +56,39 @@ ON CONFLICT DO NOTHING;
 
 CREATE INDEX IF NOT EXISTS ingest_flush_journal_sources_source
     ON ingest_flush_journal_sources (source_id);
+
+
+-- Replayable bulk consensus continuation. Evidence admission and these queue rows
+-- commit together. Each chunk is deleted in the SAME transaction that applies its
+-- consensus delta and highway-mask projection, so a crash can replay only chunks
+-- that never committed and can never double-fold a committed chunk.
+CREATE TABLE IF NOT EXISTS ingest_fold_work (
+    working_set_id bytea PRIMARY KEY
+        REFERENCES ingest_flush_journal(working_set_id) ON DELETE CASCADE,
+    work_sequence  bigserial UNIQUE,
+    queued_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS ingest_fold_chunk (
+    working_set_id bytea NOT NULL
+        REFERENCES ingest_fold_work(working_set_id) ON DELETE CASCADE,
+    ordinal        int NOT NULL CHECK (ordinal >= 0),
+    type_id        bytea NOT NULL CHECK (octet_length(type_id) = 16),
+    subjects       bytea[] NOT NULL,
+    objects        bytea[] NOT NULL,
+    object_nulls   boolean[] NOT NULL,
+    phis           bigint[] NOT NULL,
+    games          bigint[] NOT NULL,
+    sums           bigint[] NOT NULL,
+    observed_at    timestamptz[] NOT NULL,
+    opponents      bigint[] NOT NULL,
+    period_offsets bigint[] NOT NULL,
+    period_opponents bigint[] NOT NULL,
+    period_phis    bigint[] NOT NULL,
+    period_games   bigint[] NOT NULL,
+    period_sums    bigint[] NOT NULL,
+    PRIMARY KEY (working_set_id, ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS ingest_fold_work_sequence
+    ON ingest_fold_work (work_sequence);
