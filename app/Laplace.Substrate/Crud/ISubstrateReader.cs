@@ -11,6 +11,14 @@ public readonly struct PresenceCacheScope
 
 
 
+public readonly record struct PhysicalityCoverage(
+    long GovernedEntities,
+    long PlacedEntities)
+{
+    public long MissingEntities => Math.Max(0, GovernedEntities - PlacedEntities);
+    public bool Complete => MissingEntities == 0;
+}
+
 public readonly record struct CircuitRelation(
     Hash128 Subject, Hash128 Object, Hash128 TypeId, double EffMu, long Witnesses);
 
@@ -93,6 +101,29 @@ public interface ISubstrateReader
         HasSourcesCompletedAsync(fileIds, layerOrder, ct);
 
     Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Count source-owned semantic interpretations that require a physical realization and
+    /// how many of those identities currently have at least one durable physicality.
+    /// Implementations without durable interpretation storage return an empty contract.
+    /// </summary>
+    Task<PhysicalityCoverage> PhysicalityCoverageAsync(
+        Hash128 sourceId,
+        IReadOnlyList<Hash128> typeIds,
+        CancellationToken ct = default) =>
+        Task.FromResult(new PhysicalityCoverage(0, 0));
+
+    /// <summary>
+    /// Lawful source retraction used when a durable completion marker belongs to an older
+    /// physicality contract. Production stores override this; the default fails explicitly
+    /// so a reader cannot pretend it repaired stale testimony.
+    /// </summary>
+    Task EvictSourceAsync(
+        Hash128 sourceId,
+        IReadOnlyList<Hash128>? relationIds,
+        IReadOnlyList<Hash128>? markerTypeIds,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("reader does not support lawful source eviction");
 
     Task<byte[]> EntitiesExistBitmapAsync(IReadOnlyList<Hash128> candidates, CancellationToken ct = default);
 

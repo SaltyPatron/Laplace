@@ -212,6 +212,42 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         return result is long l ? l : 0L;
     }
 
+    public async Task<PhysicalityCoverage> PhysicalityCoverageAsync(
+        Hash128 sourceId,
+        IReadOnlyList<Hash128> typeIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(typeIds);
+        if (typeIds.Count == 0) return new PhysicalityCoverage(0, 0);
+
+        var rawTypes = new byte[typeIds.Count][];
+        for (int i = 0; i < typeIds.Count; i++) rawTypes[i] = typeIds[i].ToBytes();
+
+        await using var cmd = _ds.CreateCommand(
+            "WITH governed AS MATERIALIZED ("
+            + " SELECT DISTINCT ei.entity_id"
+            + " FROM laplace.entity_interpretations ei"
+            + " WHERE ei.first_observed_by = $1 AND ei.type_id = ANY($2)"
+            + ")"
+            + " SELECT count(*)::bigint,"
+            + "        count(*) FILTER (WHERE EXISTS ("
+            + "          SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = g.entity_id"
+            + "        ))::bigint"
+            + " FROM governed g");
+        cmd.CommandTimeout = 0;
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
+        cmd.Parameters.Add(new NpgsqlParameter
+        {
+            Value = rawTypes,
+            NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+        });
+
+        await using var result = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await result.ReadAsync(ct).ConfigureAwait(false))
+            return new PhysicalityCoverage(0, 0);
+        return new PhysicalityCoverage(result.GetInt64(0), result.GetInt64(1));
+    }
+
 
 
 
@@ -664,6 +700,53 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
                 ? DBNull.Value
                 : (object)markerTypeIds.Select(m => m.ToBytes()).ToArray());
         await cmd.ExecuteNonQueryAsync(ct);
+
+        // Retire legacy semantic interpretations that claimed a source-owned identity
+        // without the physicality today's admission law requires. Evidence and operational
+        // completion receipts were already retracted by ops.evict_source above. Keep any
+        // canonical entity still referenced elsewhere; only its invalid source interpretation
+        // is removed. Unreferenced, unplaced entity shells are then deleted as debris.
+        var physicalized = EntityIdentityPolicy.PhysicalizedTypeIds.ToArray();
+        if (physicalized.Length != 0)
+        {
+            var typeBytes = new byte[physicalized.Length][];
+            for (int i = 0; i < physicalized.Length; i++)
+                typeBytes[i] = physicalized[i].ToBytes();
+
+            await using var cleanup = _ds.CreateCommand(
+                "WITH invalid AS MATERIALIZED ("
+                + " SELECT ei.entity_id, ei.tier, ei.type_id"
+                + " FROM laplace.entity_interpretations ei"
+                + " WHERE ei.first_observed_by = $1 AND ei.type_id = ANY($2)"
+                + "   AND NOT EXISTS (SELECT 1 FROM laplace.physicalities p"
+                + "                   WHERE p.entity_id = ei.entity_id)"
+                + "), removed AS ("
+                + " DELETE FROM laplace.entity_interpretations ei USING invalid i"
+                + " WHERE ei.entity_id = i.entity_id AND ei.tier = i.tier"
+                + "   AND ei.type_id = i.type_id"
+                + " RETURNING ei.entity_id"
+                + "), orphan_ids AS MATERIALIZED ("
+                + " SELECT DISTINCT r.entity_id FROM removed r"
+                + " WHERE NOT EXISTS (SELECT 1 FROM laplace.entity_interpretations ei"
+                + "                   WHERE ei.entity_id = r.entity_id)"
+                + "   AND NOT EXISTS (SELECT 1 FROM laplace.physicalities p"
+                + "                   WHERE p.entity_id = r.entity_id)"
+                + "   AND NOT EXISTS (SELECT 1 FROM laplace.attestations a"
+                + "                   WHERE a.subject_id = r.entity_id"
+                + "                      OR a.object_id = r.entity_id"
+                + "                      OR a.context_id = r.entity_id)"
+                + ")"
+                + " DELETE FROM laplace.entities e USING orphan_ids o"
+                + " WHERE e.id = o.entity_id");
+            cleanup.CommandTimeout = 0;
+            cleanup.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
+            cleanup.Parameters.Add(new NpgsqlParameter
+            {
+                Value = typeBytes,
+                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+            });
+            await cleanup.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

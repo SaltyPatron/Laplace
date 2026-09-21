@@ -23,6 +23,13 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
 
     public override int LayerOrder => 2;
 
+    public override IReadOnlyList<Hash128> RequiredPhysicalityTypeIds { get; } =
+    [
+        EntityTypeRegistry.WordNetSynset,
+        EntityTypeRegistry.SourceReference,
+        EntityTypeRegistry.SourceVersion,
+    ];
+
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context,
         DecomposerOptions options,

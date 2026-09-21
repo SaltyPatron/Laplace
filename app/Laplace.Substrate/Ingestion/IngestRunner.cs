@@ -90,15 +90,45 @@ public sealed class IngestRunner
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
 
+        IReadOnlyList<Hash128> requiredPhysicalityTypes = decomposer.RequiredPhysicalityTypeIds;
+        if (requiredPhysicalityTypes.Count > 0)
+        {
+            PhysicalityCoverage existingCoverage = await _reader.PhysicalityCoverageAsync(
+                decomposer.SourceId, requiredPhysicalityTypes, ct).ConfigureAwait(false);
+            if (!existingCoverage.Complete)
+            {
+                log.LogWarning(
+                    "INGEST_STALE_PHYSICALITY_CONTRACT source={Source} governed={Governed} placed={Placed} "
+                    + "missing={Missing} action=evict-and-rederive",
+                    decomposer.SourceName,
+                    existingCoverage.GovernedEntities,
+                    existingCoverage.PlacedEntities,
+                    existingCoverage.MissingEntities);
+
+                await _reader.EvictSourceAsync(
+                    decomposer.SourceId,
+                    relationIds: null,
+                    markerTypeIds: null,
+                    ct).ConfigureAwait(false);
+
+                PhysicalityCoverage afterEviction = await _reader.PhysicalityCoverageAsync(
+                    decomposer.SourceId, requiredPhysicalityTypes, ct).ConfigureAwait(false);
+                if (!afterEviction.Complete)
+                    throw new InvalidOperationException(
+                        $"{decomposer.SourceName}: stale physicality repair left "
+                        + $"{afterEviction.MissingEntities} governed unplaced identities; "
+                        + "refusing to reuse completion markers or add testimony on top of them");
+            }
+        }
+
         if (!options.SkipSourceCompletion
             && !options.BypassSourceCompletionGuard
             && !decomposer.PerFileCompletion
             && await _reader.HasSourceCompletedAsync(decomposer.SourceId, decomposer.LayerOrder, ct))
         {
             log.LogInformation(
-                "{Source}: already ingested (completion marker present) — short-circuiting; "
-                + "a re-ingest would double-count testimony into consensus. "
-                + "To re-run: per-source eviction first.",
+                "{Source}: already ingested (completion marker present and physicality contract satisfied) — "
+                + "short-circuiting; a re-ingest would double-count testimony into consensus.",
                 decomposer.SourceName);
             _obs.OnRunSkipped(decomposer.SourceName, decomposer.LayerOrder);
             sw.Stop();
@@ -618,6 +648,24 @@ public sealed class IngestRunner
             && counters.InputUnitsDone > 0
             && counters.FilesSkippedComplete == 0)
             inventory.PublishExactTotal(counters.InputUnitsDone);
+
+        if (fullSuccessfulExtraction && requiredPhysicalityTypes.Count > 0)
+        {
+            PhysicalityCoverage committedCoverage = await _reader.PhysicalityCoverageAsync(
+                decomposer.SourceId, requiredPhysicalityTypes, ct).ConfigureAwait(false);
+            if (!committedCoverage.Complete)
+                throw new InvalidOperationException(
+                    $"{decomposer.SourceName}: physicality coverage failed after ingest: "
+                    + $"{committedCoverage.PlacedEntities}/{committedCoverage.GovernedEntities} "
+                    + "governed semantic identities are physically realized; "
+                    + $"{committedCoverage.MissingEntities} remain unplaced. "
+                    + "No completion marker will be written.");
+            log.LogInformation(
+                "INGEST_PHYSICALITY_COVERAGE source={Source} governed={Governed} placed={Placed} missing=0 status=ok",
+                decomposer.SourceName,
+                committedCoverage.GovernedEntities,
+                committedCoverage.PlacedEntities);
+        }
 
         if (!options.SkipSourceCompletion
             && fullSuccessfulExtraction

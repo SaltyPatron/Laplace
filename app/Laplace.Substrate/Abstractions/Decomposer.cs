@@ -222,6 +222,8 @@ public abstract class Decomposer<TRecord> : IDecomposer
 
     public virtual IReadOnlyList<string> DeclaredRelations => Array.Empty<string>();
 
+    public virtual IReadOnlyList<Hash128> RequiredPhysicalityTypeIds => Array.Empty<Hash128>();
+
     protected IngestSourceProfile PipelineProfile => SizingProfile;
 
     protected abstract IIngestRecordHandler<TRecord> CreateHandler();
@@ -667,6 +669,8 @@ public abstract class DecomposerMultiPhase : IDecomposer
     public virtual IReadOnlyCollection<string> CanonicalNamesForReadback => Array.Empty<string>();
 
     public virtual IReadOnlyList<string> DeclaredRelations => Array.Empty<string>();
+
+    public virtual IReadOnlyList<Hash128> RequiredPhysicalityTypeIds => Array.Empty<Hash128>();
 
     protected abstract IAsyncEnumerable<SubstrateChange> RunIngestAsync(
         IDecomposerContext context, DecomposerOptions options, CancellationToken ct);

@@ -47,6 +47,18 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.EsoRole,
         EntityTypeRegistry.VerbNetMember,
         EntityTypeRegistry.VerbNetPredicate,
+        // Source/catalog references are canonical content with semantic interpretations.
+        // They therefore owe the same content physicality as the bytes that identify them.
+        EntityTypeRegistry.SourceReference,
+        EntityTypeRegistry.SourceVersion,
+        EntityTypeRegistry.WordNetSynset,
+        EntityTypeRegistry.WordNetSense,
+        EntityTypeRegistry.PropBankRoleset,
+        EntityTypeRegistry.VerbNetClass,
+        EntityTypeRegistry.FrameNetLu,
+        EntityTypeRegistry.WikidataItem,
+        EntityTypeRegistry.PredicateMatrixPredicate,
+        EntityTypeRegistry.PredicateMatrixAnnotationValue,
     ];
 
     /// <summary>
@@ -56,4 +68,10 @@ public static class EntityIdentityPolicy
     /// </summary>
     public static bool RequiresPhysicality(Hash128 typeId) =>
         PhysicalizedTypes.Contains(typeId);
+
+    /// <summary>
+    /// Complete immutable roster used by source-eviction repair to remove legacy
+    /// source interpretations that violated today's physicality contract.
+    /// </summary>
+    public static IReadOnlyCollection<Hash128> PhysicalizedTypeIds => PhysicalizedTypes;
 }
