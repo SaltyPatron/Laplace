@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DB="${1:-${PGDATABASE:-laplace}}"
-BATCH="${LAPLACE_HIGHWAY_RECONCILE_BATCH:-500000}"
+BATCH="${LAPLACE_HIGHWAY_RECONCILE_BATCH:-50000}"
 
 # One connection, set-sized commands and top-level CALLs. Never a per-entity
 # application loop, and never a full historical scan after population completes.

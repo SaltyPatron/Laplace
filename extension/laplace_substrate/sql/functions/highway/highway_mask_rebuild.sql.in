@@ -48,7 +48,7 @@ END $$;
 -- Full historical population. New ingest never invokes this scan: it already
 -- owns every exact pair. Include existing masks so removed relations can clear
 -- stale bits; include zero-valued identities rather than skipping the first key.
-CREATE OR REPLACE PROCEDURE laplace.highway_mask_rebuild(p_batch int DEFAULT 500000)
+CREATE OR REPLACE PROCEDURE laplace.highway_mask_rebuild(p_batch int DEFAULT 50000)
     LANGUAGE plpgsql AS $$
 DECLARE
     last_id bytea := NULL;
@@ -56,7 +56,6 @@ DECLARE
     n bigint;
     total bigint := 0;
     scanned bigint := 0;
-    candidates bigint;
     t0 timestamptz := clock_timestamp();
 BEGIN
     IF p_batch IS NULL OR p_batch < 1 THEN
@@ -70,36 +69,34 @@ BEGIN
     CALL laplace.highway_mask_pending_drain(p_batch);
     UPDATE laplace.highway_mask_population_state
        SET complete=false, completed_at=NULL WHERE singleton;
-
-    DROP TABLE IF EXISTS pg_temp._hmr_candidates;
-    CREATE TEMP TABLE _hmr_candidates (id bytea PRIMARY KEY);
-    INSERT INTO pg_temp._hmr_candidates(id)
-    SELECT c.subject_id FROM laplace.consensus c
-    UNION
-    SELECT c.object_id FROM laplace.consensus c WHERE c.object_id IS NOT NULL
-    UNION
-    SELECT e.id FROM laplace.entities e WHERE e.highway_mask IS NOT NULL;
-    GET DIAGNOSTICS candidates = ROW_COUNT;
-    RAISE LOG 'highway_mask_rebuild: start — % mask candidates', candidates;
     COMMIT;
 
+    -- Every consensus endpoint is a canonical entity, and refresh deliberately
+    -- accepts entities with no remaining incident edges so stale masks can clear.
+    -- Walk the entity PK directly. The previous implementation first UNION-sorted
+    -- every consensus subject/object into one temporary candidate table, making
+    -- the supposedly batched recovery perform an unbounded global dedup before
+    -- the first batch. On the live estate PostgreSQL died in that materialization.
+    RAISE LOG 'highway_mask_rebuild: start — bounded canonical entity walk';
     LOOP
         IF NOT consensus.highway_ready() THEN
             RAISE LOG 'highway_mask_rebuild: registry unavailable; population remains pending';
-            DROP TABLE IF EXISTS pg_temp._hmr_candidates;
             RETURN;
         END IF;
         SELECT array_agg(s.id ORDER BY s.id) INTO ids FROM (
-            SELECT id FROM pg_temp._hmr_candidates
-            WHERE last_id IS NULL OR id > last_id ORDER BY id LIMIT p_batch
+            SELECT e.id
+            FROM laplace.entities e
+            WHERE last_id IS NULL OR e.id > last_id
+            ORDER BY e.id
+            LIMIT p_batch
         ) s;
         EXIT WHEN ids IS NULL;
         n := consensus.highway_mask_refresh(ids);
         total := total + n;
         scanned := scanned + cardinality(ids);
         last_id := ids[cardinality(ids)];
-        RAISE LOG 'highway_mask_rebuild: % masks written / % of % candidates — %s elapsed',
-            total, scanned, candidates,
+        RAISE LOG 'highway_mask_rebuild: % masks written / % entities scanned — %s elapsed',
+            total, scanned,
             round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
         COMMIT;
     END LOOP;
@@ -107,7 +104,6 @@ BEGIN
     UPDATE laplace.highway_mask_population_state
        SET complete=true, completed_at=clock_timestamp() WHERE singleton;
     COMMIT;
-    RAISE LOG 'highway_mask_rebuild: done — % masks written / % candidates in %s',
+    RAISE LOG 'highway_mask_rebuild: done — % masks written / % entities scanned in %s',
         total, scanned, round(extract(epoch FROM clock_timestamp() - t0)::numeric, 1);
-    DROP TABLE IF EXISTS pg_temp._hmr_candidates;
 END $$;
