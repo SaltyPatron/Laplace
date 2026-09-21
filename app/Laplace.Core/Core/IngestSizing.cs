@@ -65,6 +65,19 @@ public static class IngestSizing
     public const int ApplyTupleByteEstimate = 152;
 
     /// <summary>
+    /// Wire ceiling for one array-carrying statement (bytea[]/int8[] parameters
+    /// marshalled in a single Bind message). PostgreSQL's frontend protocol rejects
+    /// a message whose declared length reaches ~1 GiB — the server logs
+    /// "invalid message length" and resets the connection, which the ingest runner
+    /// then misreads as a transient batch failure and retries from scratch. Half
+    /// the ceiling leaves headroom for protocol framing plus the server-side
+    /// unnest/hash of one chunk under typical tune-pg work_mem. Statements whose
+    /// parameters exceed this MUST chunk and loop inside the caller's transaction;
+    /// chunking changes transport grain only, never the admitted set.
+    /// </summary>
+    public const long MaxArrayStatementWireBytes = 256L * 1024 * 1024;
+
+    /// <summary>
     /// Extra apply-cost billed per attestation on top of staged/COPY tuple bytes.
     ///
     /// MUST stay 0 for chess-shaped traffic. MEASURED 2026-08-04: surcharge 2048

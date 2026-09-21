@@ -18,6 +18,12 @@ internal readonly record struct PhysicalityObservationRow(
     Hash128 SourceUnitId,
     long ObservedAtUnixUs);
 
+internal readonly record struct ObservationKey(
+    Hash128 EntityId,
+    Hash128 PhysicalityId,
+    Hash128 SourceId,
+    Hash128 SourceUnitId);
+
 public sealed partial class NpgsqlSubstrateWriter
 {
     internal sealed class PhysicalityAdmissionBatch : IDisposable
@@ -32,6 +38,15 @@ public sealed partial class NpgsqlSubstrateWriter
         internal readonly List<Hash128> ObservationUnits = [];
         internal readonly List<long> ObservationTimesUnixUs = [];
         internal readonly List<PhysicalityObservationRow> StructuralObservations = [];
+        // An observation observed before is REFERENCED, not re-recorded: within one
+        // admission, repeated (entity, physicality, source, unit) tuples are the same
+        // occurrence key — the publish statement's own GROUP BY e,p,s,u max(t) — held
+        // client-side so the transported set is the distinct observation set. Chess
+        // composes one intent whose per-ply occurrence staging revisits the same
+        // positions and moves across games; carrying 23.2M rows that collapse to
+        // 623K distinct keys blew both the transport envelope (a >1 GiB Bind message
+        // the server rejects with "invalid message length") and the resident grant.
+        private readonly Dictionary<ObservationKey, int> _observationIndex = [];
         internal readonly long MaximumBytes = IngestSizing.ResolveWorkingSetBudgetBytes();
         internal long OwnedRawBytes;
         internal long ObservationPayloadBytes;
@@ -84,13 +99,10 @@ public sealed partial class NpgsqlSubstrateWriter
                 // the native typed realization of canonical Merkle content; no
                 // second descriptor tree is constructed from these fields.
                 result.ObservationPayloadBytes = checked(count * 72L);
-                if (count > Array.MaxLength || result.ObservationPayloadBytes > result.MaximumBytes)
+                // The occurrence walk itself must stay enumerable; the admitted
+                // (deduplicated) payload grant is checked after the walk below.
+                if (count > Array.MaxLength)
                     throw new InvalidOperationException("physicality source capture exceeds its aggregate allocation grant");
-                result.ObservationPhysicalityIds.Capacity = checked((int)count);
-                result.ObservationEntities.Capacity = checked((int)count);
-                result.ObservationSources.Capacity = checked((int)count);
-                result.ObservationUnits.Capacity = checked((int)count);
-                result.ObservationTimesUnixUs.Capacity = checked((int)count);
                 foreach (var change in changes)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -143,6 +155,8 @@ public sealed partial class NpgsqlSubstrateWriter
                     // checks happen before allocation. Once reference overlap is known,
                     // retain the bytes for the rows that actually cross into PostgreSQL.
                     result.ObservationPayloadBytes = checked(result.ObservationSources.Count * 72L);
+                    if (result.ObservationPayloadBytes > result.MaximumBytes)
+                        throw new InvalidOperationException("physicality source capture exceeds its aggregate allocation grant");
                     return result;
                 }
                 result.Dispose();
@@ -198,6 +212,19 @@ public sealed partial class NpgsqlSubstrateWriter
         private void AddObservation(
             Hash128 physicality, Hash128 entity, Hash128 source, Hash128 unit, long observedAtUnixUs)
         {
+            // Same occurrence key as the publish statement's dedup: first sighting
+            // owns the row, later sightings only advance the observed time to its
+            // max — exactly the server's GROUP BY e,p,s,u + GREATEST semantics, so
+            // the persisted state is byte-for-byte what an unchunked occurrence
+            // stream would have produced.
+            var key = new ObservationKey(entity, physicality, source, unit);
+            if (_observationIndex.TryGetValue(key, out int index))
+            {
+                if (observedAtUnixUs > ObservationTimesUnixUs[index])
+                    ObservationTimesUnixUs[index] = observedAtUnixUs;
+                return;
+            }
+            _observationIndex.Add(key, ObservationPhysicalityIds.Count);
             ObservationPhysicalityIds.Add(physicality);
             ObservationEntities.Add(entity);
             ObservationSources.Add(source);
@@ -550,25 +577,54 @@ public sealed partial class NpgsqlSubstrateWriter
         NpgsqlConnection connection, NpgsqlTransaction transaction,
         PhysicalityAdmissionBatch admission, CancellationToken ct)
     {
-        if (admission.StructuralObservations.Count == 0) return 0;
         var rows = admission.StructuralObservations;
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = SqlCatalog.Get("ingest.physicality_observations").Text;
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            rows.Select(static r => r.EntityId.ToBytes()).ToArray());
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            rows.Select(static r => r.PhysicalityId.ToBytes()).ToArray());
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            rows.Select(static r => r.SourceId.ToBytes()).ToArray());
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
-            rows.Select(static r => r.SourceUnitId.ToBytes()).ToArray());
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint,
-            rows.Select(static r => r.ObservedAtUnixUs).ToArray());
-        long writes = (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+        if (rows.Count == 0) return 0;
+        // One observation row marshals 4×(4B length + 16B id) bytea elements plus
+        // an int8 — 88B on the wire before array framing; 96B adds the framing.
+        // PostgreSQL rejects a Bind message at ~1 GiB ("invalid message length")
+        // and resets the connection, so the distinct observation set crosses in
+        // bounded statements inside the caller's transaction. Chunking changes
+        // transport grain only: the client-side occurrence dedup guarantees the
+        // (entity, physicality, source, unit) keys are disjoint across chunks, so
+        // the server's GROUP BY/GREATEST result is identical to one statement.
+        const long wireBytesPerRow = 96;
+        int chunkRows = (int)Math.Clamp(
+            IngestSizing.MaxArrayStatementWireBytes / wireBytesPerRow, 1, rows.Count);
+        long writes = 0;
+        int roundTrips = 0;
+        for (int start = 0; start < rows.Count; start += chunkRows)
+        {
+            ct.ThrowIfCancellationRequested();
+            int n = Math.Min(chunkRows, rows.Count - start);
+            var entities = new byte[n][];
+            var physicalities = new byte[n][];
+            var sources = new byte[n][];
+            var units = new byte[n][];
+            var times = new long[n];
+            for (int i = 0; i < n; i++)
+            {
+                var row = rows[start + i];
+                entities[i] = row.EntityId.ToBytes();
+                physicalities[i] = row.PhysicalityId.ToBytes();
+                sources[i] = row.SourceId.ToBytes();
+                units[i] = row.SourceUnitId.ToBytes();
+                times[i] = row.ObservedAtUnixUs;
+            }
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandTimeout = 0;
+            command.CommandText = SqlCatalog.Get("ingest.physicality_observations").Text;
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, entities);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, physicalities);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, sources);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, units);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bigint, times);
+            writes += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+            roundTrips++;
+        }
         if (admission.Receipt is { } receipt)
             admission.Receipt = receipt with { PhysicalityObservationWrites = writes };
-        return 1;
+        return roundTrips;
     }
 
     private void PrepareCanonicalPhysicalityObservations(
