@@ -1171,7 +1171,6 @@ public sealed partial class NpgsqlSubstrateWriter
                 using var participantDiagnostic = MeasureApplyPhase("consensus-acceptance-participant");
                 await transactionParticipant(conn, tx,
                     new WorkingSetAcceptedEvidence(
-                        workingSetToken.Value,
                         novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(),
                         physicalityAdmission?.OriginalReplay ?? originalReceiptPresent), ct);
                 participantDiagnostic?.Complete();

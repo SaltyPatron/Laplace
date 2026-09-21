@@ -345,36 +345,39 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         {
             if (_disposing) throw new ObjectDisposedException(nameof(ConsensusAccumulatingWriter));
 
-            // All durable scalar, batch, append and ingest calls use the same
-            // atomic acceptance boundary. Folding the proposed rows before the
-            // writer's identity probe counted replays as fresh testimony.
             bool atomicWorkingSet = _persistEvidence && _inner is NpgsqlSubstrateWriter;
-            var delta = atomicWorkingSet ? null : BuildDelta(changes);
             bool hasEphemeralFolds = changes.Any(c => !c.EphemeralFoldInputs.IsDefaultOrEmpty);
-            // Bulk replayable evidence must not serialize its consensus + highway projection
-            // on the control transaction. The evidence transaction persists an exact,
-            // crash-recoverable fold queue; the queue drains on the fold fan while the next
-            // working set composes/applies. Transient continuous scores keep the atomic path.
             bool singleSourceWorkingSet = changes.Count == 0
                 || changes.All(change => change.Metadata.SourceId == changes[0].Metadata.SourceId);
-            bool deferReplayableBulkFold =
+
+            // Replayable corpus testimony has a stronger operation than additive delta
+            // replay: consensus.refold_evidence_type derives the complete typed-cell state
+            // from the durable evidence already accepted for that cell. That makes the
+            // per-working-set fold idempotent and lets it pipeline immediately behind the
+            // evidence commit without a second persistent queue or an end-of-run bulk fold.
+            EvidenceRefoldPlan? evidenceRefold = null;
+            bool pipelineReplayableBulk =
                 atomicWorkingSet
                 && _bulkRun
                 && !hasEphemeralFolds
                 && appendConversation is null
-                && precommitVerifier is null
                 && reconciliation is null
-                && singleSourceWorkingSet;
-            bool durableFoldQueued = false;
+                && singleSourceWorkingSet
+                && TryBuildEvidenceRefoldPlan(changes, out evidenceRefold);
 
-            // A fold that already failed in the background poisons the run
-            // NOW, before any more evidence lands.
-            await ObserveFoldFailureAsync();
+            IReadOnlyList<SubstrateChange> completionChanges = pipelineReplayableBulk
+                ? changes.Where(IsFileCompletionChange).Select(RetainCompletionChange).ToArray()
+                : Array.Empty<SubstrateChange>();
+            IReadOnlyList<SubstrateChange> evidenceChanges = pipelineReplayableBulk
+                ? changes.Where(static change => !IsFileCompletionChange(change)).ToArray()
+                : changes;
 
-            // Evidence lands FIRST; the fold runs only after it succeeds, so a
-            // retried batch folds exactly once (a throw below leaves consensus
-            // untouched for this batch).
-            var forwarded = ForwardChanges(changes);
+            // A fold that already failed in the background poisons the run before any
+            // more evidence lands. This is observation of already-running ETL work, not
+            // a terminal deferred phase.
+            await ObserveFoldFailureAsync().ConfigureAwait(false);
+
+            var forwarded = ForwardChanges(evidenceChanges);
             if (precommitVerifier is not null && !atomicWorkingSet)
                 throw new InvalidOperationException(
                     "source integrity verification requires the atomic evidence-and-consensus writer");
@@ -385,51 +388,44 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                 throw new InvalidOperationException(
                     "ephemeral fold inputs require the journaled atomic writer; "
                     + "a categorical receipt cannot be score-replayed after a separate commit");
+
+            var delta = atomicWorkingSet ? null : BuildDelta(changes);
             AtomicFoldStats atomicStats = default;
             ApplyResult result;
             if (atomicWorkingSet)
             {
-                // Artifact workers retain independent atomic transactions. The
-                // native evidence merge acquires every canonical target in the
-                // same (type, id, subject) order and reconstructs replayable state
-                // from the fresh durable evidence snapshot after that lock. A
-                // process-wide gate here only converted parallel parsing/apply
-                // into one serial queue.
                 result = await ((NpgsqlSubstrateWriter)_inner).ApplyWorkingSetAtomicAsync(
                     forwarded,
                     async (connection, transaction, acceptance, token) =>
                     {
                         if (_bulkRun)
-                        {
                             Interlocked.CompareExchange(
                                 ref _foldSpanStarted,
                                 System.Diagnostics.Stopwatch.GetTimestamp(),
                                 comparand: 0);
-                        }
-                        var acceptedDelta = BuildDelta(
-                            acceptance.OriginalReplay ? [] : changes,
-                            acceptance.AttestationIds);
-                        if (acceptedDelta is { Count: > 0 })
+
+                        if (!pipelineReplayableBulk)
                         {
-                            if (deferReplayableBulkFold)
-                                durableFoldQueued = await PersistDurableFoldWorkAsync(
-                                    connection, transaction, acceptance.WorkingSetToken,
-                                    acceptedDelta, token).ConfigureAwait(false);
-                            else
+                            var acceptedDelta = BuildDelta(
+                                acceptance.OriginalReplay ? [] : changes,
+                                acceptance.AttestationIds);
+                            if (acceptedDelta is { Count: > 0 })
                                 atomicStats = await UpsertDeltaInTransactionAsync(
                                     acceptedDelta, connection, transaction, token).ConfigureAwait(false);
                         }
+
                         if (!acceptance.OriginalReplay && appendConversation is not null)
                             await appendConversation(connection, transaction, token).ConfigureAwait(false);
-                        // A descriptor backfill is a new commit and must still
-                        // verify its captured source before accepting evidence.
+
+                        // Source-integrity verification remains on the evidence transaction.
+                        // Only the replayable consensus projection leaves that transaction.
                         if (precommitVerifier is not null)
                             await precommitVerifier(token).ConfigureAwait(false);
                     },
                     reconciliation,
                     ct).ConfigureAwait(false);
 
-                if (!result.JournalReplayHit && !deferReplayableBulkFold)
+                if (!result.JournalReplayHit && !pipelineReplayableBulk)
                 {
                     Interlocked.Add(ref _cellsFolded, atomicStats.Cells);
                     Interlocked.Add(ref _consensusBackendTicks, atomicStats.ConsensusBackendTicks);
@@ -438,11 +434,20 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                     Interlocked.Add(ref _highwayMaskCalls, atomicStats.MaskCalls);
                     Interlocked.Add(ref _highwayMaskPairs, atomicStats.MaskPairs);
                 }
-                if (deferReplayableBulkFold
-                    && result.WorkingSetToken is { } durableToken
-                    && (durableFoldQueued || result.JournalReplayHit))
-                    await EnqueueDurableFoldWorkAsync(
-                        durableToken, CancellationToken.None).ConfigureAwait(false);
+
+                if (pipelineReplayableBulk && evidenceRefold is { } refold)
+                {
+                    if (!result.JournalReplayHit)
+                        Interlocked.Add(ref _observations, refold.ObservationCount);
+
+                    // Dispatch NOW. The next source working set can proceed while this one
+                    // refolds from durable evidence. File-completion markers are withheld
+                    // from the evidence commit and published by this same continuation only
+                    // after its cells and masks are current, so a crash cannot leave a
+                    // marker-complete file with unfinished consensus.
+                    await EnqueueEvidenceRefoldAsync(
+                        refold, completionChanges, CancellationToken.None).ConfigureAwait(false);
+                }
             }
             else
             {
@@ -453,19 +458,10 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
                         : await _inner.ApplyManyAsync(forwarded, ct);
             }
 
-            // INVARIANT: one fold per claimed flush-journal token. A journal
-            // hit means a prior apply of this exact working set committed —
-            // and that apply's own flow folded this same delta right after its
-            // evidence landed. The fold is additive, not idempotent, so
-            // folding a replay would double-count the batch's testimony in
-            // consensus; a journal hit must no-op evidence AND fold. The
-            // guard sits OUTSIDE the bulk/inline split: an enqueued fold is
-            // still a fold, so a replay must not reach the queue either.
+            // Non-Npgsql / non-atomic bulk ownership retains the historical additive
+            // lane. Production corpus ingest takes the evidence-refold path above.
             if (!atomicWorkingSet && delta is { Count: > 0 } && !result.JournalReplayHit)
             {
-                // Evidence has committed and its replay journal will suppress this delta
-                // forever. From here the fold is an owed continuation, not cancellable
-                // speculative work; completion/drain owns surfacing any failure.
                 if (_bulkRun) await EnqueueFoldAsync(delta, changes, CancellationToken.None);
                 else await UpsertDeltaAsync(delta, CancellationToken.None);
             }
@@ -1551,7 +1547,6 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
         _bulkRun = true;
         FoldSizing.Log();
         await _inner.BeginBulkRunAsync(ct).ConfigureAwait(false);
-        await RecoverDurableFoldWorkAsync(ct).ConfigureAwait(false);
     }
 
     public Task CompleteBulkRunAsync(CancellationToken ct = default)
