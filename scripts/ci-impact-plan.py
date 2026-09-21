@@ -22,7 +22,8 @@ DB_SUITES = ("db-health", "native-db", "managed-db")
 STANDARD_LIVE_SUITES = ("live-floor", "live-api", "managed-live", "generation-eval")
 CHESS_PROVIDER_LIVE_SUITE = "chess-provider-live"
 LIVE_SUITES = (*STANDARD_LIVE_SUITES, CHESS_PROVIDER_LIVE_SUITE)
-DELIVERY_ACTIONS = ("install", "database", "reconcile", "publish", "live")
+FULL_DELIVERY_ACTIONS = ("install", "database", "reconcile", "publish", "live")
+DELIVERY_ACTIONS = ("install", "extension-sql", "ingest-runtime", "database", "reconcile", "publish", "live")
 BASE_LIVE_SUITES = ("live-floor", "live-api")
 ALL_DEV_COMPONENTS = ("native", "managed", "uci", "web")
 ALL_COMPONENTS = ("native", "managed", "uci", "web", "database", "deployment")
@@ -31,6 +32,7 @@ UCI_PUBLISH_PROJECT = "app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj"
 MCP_PUBLISH_PROJECT = "app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj"
 LICHESS_PUBLISH_PROJECT = "app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj"
 MIGRATIONS_PUBLISH_PROJECT = "app/Laplace.Migrations/Laplace.Migrations.csproj"
+CLI_INGEST_PROJECT = "app/Laplace.Cli/Laplace.Cli.csproj"
 FULL_PUBLISH_PROJECTS = (
     API_PUBLISH_PROJECT,
     UCI_PUBLISH_PROJECT,
@@ -209,7 +211,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         browser_test_suites.update(BROWSER_TEST_SUITES)
         db_suites.update(DB_SUITES)
         live_suites.update(STANDARD_LIVE_SUITES)
-        delivery_actions.update(DELIVERY_ACTIONS)
+        delivery_actions.update(FULL_DELIVERY_ACTIONS)
         invalidate(DEV_SUITES, path)
         invalidate(DB_SUITES, path)
         invalidate(STANDARD_LIVE_SUITES, path)
@@ -282,7 +284,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 publish_required = False
                 components.add("database")
                 db_suites.add("db-health")
-                delivery_actions.update(("install", "database"))
+                delivery_actions.update(("extension-sql", "database"))
                 invalidate(("db-health",), path)
                 continue
 
@@ -367,6 +369,19 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 managed_build_required.update(FULL_PUBLISH_PROJECTS)
             components.add("managed")
             build_components.add("managed")
+
+            ingest_runtime_scoped = path.startswith((
+                "app/Laplace.Cli/",
+                "app/Laplace.Core/",
+                "app/Laplace.Decomposers/",
+                "app/Laplace.Substrate/",
+                "app/Laplace.Ops/",
+                "app/Laplace.Chess/",
+            ))
+            if ingest_runtime_scoped:
+                managed_build_required.add(CLI_INGEST_PROJECT)
+                delivery_actions.add("ingest-runtime")
+
             if not isolated_uci:
                 dev_suites.add("managed-dev")
                 live_suites.update(STANDARD_LIVE_SUITES)
@@ -648,7 +663,7 @@ def force_full_plan(plan: dict) -> None:
     plan["db_suites"] = list(DB_SUITES)
     plan["live_suites"] = []
     plan["delivery_actions"] = [
-        action for action in DELIVERY_ACTIONS if action != "live"
+        action for action in FULL_DELIVERY_ACTIONS if action != "live"
     ]
     plan["publish_scope"] = "full"
     plan["unknown_paths"] = ["<unable-to-resolve-base>"]

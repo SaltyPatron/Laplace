@@ -142,7 +142,7 @@ class ImpactPlanTests(unittest.TestCase):
         self.assertIn("managed-dev", value["dev_suites"])
         self.assertEqual(value["db_suites"], [])
         self.assertEqual(value["managed_db_test_projects"], [])
-        self.assertEqual(value["delivery_actions"], ["publish"])
+        self.assertEqual(value["delivery_actions"], ["ingest-runtime", "publish"])
         self.assertNotIn("install", value["delivery_actions"])
         self.assertNotIn("database", value["delivery_actions"])
         self.assertNotIn("reconcile", value["delivery_actions"])

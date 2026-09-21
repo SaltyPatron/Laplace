@@ -159,7 +159,7 @@ run_build() {
   fi
   (( need_managed == 0 )) || phases+=(build-app)
   (( need_web == 0 )) || phases+=(build-web)
-  if (( need_native == 0 )) && csv_selected "${LAPLACE_DELIVERY_ACTIONS:-}" install; then
+  if csv_selected "${LAPLACE_DELIVERY_ACTIONS:-}" extension-sql; then
     phases+=(build-extension-sql)
   fi
 
@@ -271,13 +271,17 @@ run_dev_tests() {
 
 run_install() {
   require_built_revision
-  if csv_selected "${LAPLACE_BUILD_COMPONENTS:-}" native; then
-    bash scripts/pipeline.sh install
-  else
-    # SQL/control-only extension delivery must not require or replace a native
-    # build tree. run_build prepared only the generated extension payload.
-    bash scripts/pipeline.sh install-extension-sql
-  fi
+  bash scripts/pipeline.sh install
+}
+
+run_install_extension_sql() {
+  require_built_revision
+  bash scripts/pipeline.sh install-extension-sql
+}
+
+run_install_ingest_runtime() {
+  require_built_revision
+  bash scripts/pipeline.sh install-ingest-runtime
 }
 
 run_database_maintenance() {
@@ -432,7 +436,7 @@ orders = {
     "LAPLACE_DEV_SUITES": ("dev_suites", ("native-dev", "managed-dev", "uci-dev", "browser-dev")),
     "LAPLACE_DB_SUITES": ("db_suites", ("db-health", "native-db", "managed-db")),
     "LAPLACE_LIVE_SUITES": ("live_suites", ("live-floor", "live-api", "managed-live", "generation-eval", "chess-provider-live")),
-    "LAPLACE_DELIVERY_ACTIONS": ("delivery_actions", ("install", "database", "reconcile", "publish", "live")),
+    "LAPLACE_DELIVERY_ACTIONS": ("delivery_actions", ("install", "extension-sql", "ingest-runtime", "database", "reconcile", "publish", "live")),
 }
 
 for env_name, (field, order) in orders.items():
@@ -1008,13 +1012,28 @@ release_candidate_current_before_mutation() {
 run_release_mutation_window() (
   local actions="$1"
   local api_was_active=0 mutation_rc=0
+  local requires_quiet=0
 
-  bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+  if csv_selected "$actions" install \
+     || csv_selected "$actions" extension-sql \
+     || csv_selected "$actions" database; then
+    requires_quiet=1
+    bash scripts/wait-for-quiet-substrate.sh "${PGDATABASE:-laplace}"
+  fi
 
-  # Keep the user-facing API down only for the mutations that can invalidate its
-  # loaded native/SQL contract. Qualification reads do not belong in this outage:
-  # a retained DB suite can take minutes and previously left nginx returning 502
-  # for that entire interval even though install/ALTER EXTENSION had already ended.
+  # An immutable ingest-runtime publication only creates a revision-addressed
+  # directory and atomically advances ingest/current. A running ingest retains a
+  # shared lease on its old directory, so this operation neither stops it nor
+  # requires an API outage.
+  if csv_selected "$actions" ingest-runtime && ! csv_selected "$actions" install; then
+    run_install_ingest_runtime
+  fi
+
+  if (( requires_quiet == 0 )); then
+    echo "::notice::no installed database/native mutation required"
+    return 0
+  fi
+
   systemctl is-active --quiet laplace-api 2>/dev/null && api_was_active=1 || true
   cleanup_release_mutation_window() {
     mutation_rc=$?
@@ -1031,6 +1050,12 @@ run_release_mutation_window() (
     run_install
   else
     echo "::notice::native installation remains valid; install skipped"
+  fi
+
+  if csv_selected "$actions" extension-sql; then
+    run_install_extension_sql
+  else
+    echo "::notice::extension SQL/control installation remains valid; SQL install skipped"
   fi
 
   if csv_selected "$actions" database; then

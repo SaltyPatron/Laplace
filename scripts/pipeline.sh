@@ -64,7 +64,7 @@ usage() {
   cat <<'EOF'
 Usage: pipeline.sh <phase> [<phase> ...] [options]
 
-Phases: clean codegen build build-native build-extension-sql build-app build-web install install-extension-sql activate-postgres migrate sync-extension tune-pg tune-laplace
+Phases: clean codegen build build-native build-extension-sql build-app build-web install install-extension-sql install-ingest-runtime activate-postgres migrate sync-extension tune-pg tune-laplace
         perfcache-guc api-env publish foundation test
 Options:
   --fresh-db --force --force-codegen --clean-first --force-rebuild --serial-tests
@@ -434,6 +434,76 @@ reclaim_install_headroom() {
     fi
   done < <(find "$ingest_root" -mindepth 1 -maxdepth 1 -xdev -type d -print0)
 }
+
+phase_install_ingest_runtime() (
+  echo "===== PHASE — INSTALL INGEST RUNTIME ====="
+  local ingest_dir="$LAPLACE_INSTALL_PREFIX/ingest"
+  local runtime_root="$ingest_dir/runtimes"
+  local revision runtime stage build reference link_tmp
+  revision="$(git -C "$ROOT" rev-parse HEAD)"
+  runtime="$runtime_root/$revision"
+  stage="$runtime_root/.stage-$revision-${GITHUB_RUN_ID:-$}"
+  build="$LAPLACE_BUILD_DIRECTORY/ingest-managed-$revision"
+
+  mkdir -p "$ingest_dir" "$ingest_dir/logs" "$runtime_root"
+  if getent group laplace-runner >/dev/null; then
+    local path owner group mode
+    for path in "$ingest_dir" "$ingest_dir/logs" "$runtime_root"; do
+      owner="$(stat -c '%U' "$path")"
+      group="$(stat -c '%G' "$path")"
+      mode="$(stat -c '%a' "$path")"
+      if [[ "$group" != laplace-runner ]]; then
+        echo "::error::$path permissions drifted: ${owner}:${group} mode ${mode}; expected shared group laplace-runner" >&2
+        exit 1
+      fi
+      if [[ "$mode" != 2775 ]]; then
+        [[ -O "$path" ]] || { echo "::error::$path mode drift cannot be repaired by this runner" >&2; exit 1; }
+        chmod 2775 "$path"
+      fi
+    done
+  fi
+
+  if [[ ! -d "$runtime" ]]; then
+    rm -rf "$stage" "$build"
+    mkdir -p "$stage" "$build"
+    dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj"       -c Release -o "$build" --no-build --no-self-contained -v q
+
+    shopt -s nullglob
+    local native=("$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so*)
+    (( ${#native[@]} > 0 )) || {
+      echo "::error::installed native closure is missing under $LAPLACE_INSTALL_PREFIX/lib" >&2
+      exit 1
+    }
+    cp -Pf "${native[@]}" "$build/"
+    shopt -u nullglob
+
+    touch "$build/.runtime-lease"
+    source "$ROOT/deploy/linux/payload-sync.sh"
+    laplace_wrap_runtime_lease "$build/Laplace.Cli"
+    reference="$(readlink -f "$ingest_dir/current" 2>/dev/null || true)"
+    local -a sync=(-rl --checksum --no-times --no-perms --executability)
+    [[ ! -d "$reference" ]] || sync+=("--link-dest=$reference")
+    laplace_sync_link_deduplicated_payload "$build" "$stage" "${sync[@]}"
+    printf '%s\n' "$revision" > "$stage/.laplace-source-revision"
+    [[ -f "$stage/Laplace.Cli.dll" && -f "$stage/liblaplace_core.so" ]] || {
+      echo "::error::managed ingest runtime staging is incomplete: $stage" >&2
+      exit 1
+    }
+    mv "$stage" "$runtime"
+  fi
+
+  [[ "$(cat "$runtime/.laplace-source-revision" 2>/dev/null || true)" == "$revision" &&
+     -f "$runtime/Laplace.Cli.dll" && -f "$runtime/liblaplace_core.so" ]] || {
+    echo "::error::immutable ingest runtime is incomplete: $runtime" >&2
+    exit 1
+  }
+
+  link_tmp="$ingest_dir/.current-$revision-$"
+  rm -f "$link_tmp"
+  ln -s "runtimes/$revision" "$link_tmp"
+  mv -Tf "$link_tmp" "$ingest_dir/current"
+  echo "::notice::published managed ingest runtime $runtime; active=$ingest_dir/current"
+)
 
 phase_install_extension_sql() (
   echo "===== PHASE — INSTALL EXTENSION SQL ====="
@@ -901,7 +971,7 @@ while [[ $# -gt 0 ]]; do
     --serial-tests) SERIAL_TESTS=1; export LAPLACE_TEST_SERIAL=1; shift ;;
     --force-all) shift ;;
     -h|--help) usage ;;
-    clean|codegen|build|build-native|build-extension-sql|build-app|build-web|install|install-extension-sql|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|chess-lab|publish|foundation|test)
+    clean|codegen|build|build-native|build-extension-sql|build-app|build-web|install|install-extension-sql|install-ingest-runtime|activate-postgres|migrate|sync-extension|tune-pg|tune-laplace|perfcache-guc|api-env|chess-lab|publish|foundation|test)
       PHASES+=("$1"); shift ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -919,6 +989,7 @@ for phase in "${PHASES[@]}"; do
     build-web) phase_build_web ;;
     install) phase_install ;;
     install-extension-sql) phase_install_extension_sql ;;
+    install-ingest-runtime) phase_install_ingest_runtime ;;
     activate-postgres) phase_activate_postgres ;;
     migrate) phase_migrate ;;
     sync-extension) phase_sync_extension ;;
