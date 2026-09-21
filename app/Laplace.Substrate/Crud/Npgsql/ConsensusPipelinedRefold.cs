@@ -1,6 +1,7 @@
 using global::Npgsql;
 using NpgsqlTypes;
 using Laplace.Engine.Core;
+using Microsoft.Extensions.Logging;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
