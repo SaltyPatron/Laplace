@@ -171,10 +171,14 @@ internal static class SemLinkInstanceIngest
         // Keep lemma -> APPEARS_IN -> occurrence for lexical discovery; semantic
         // annotation belongs to the occurrence identity itself. Word-level promotion,
         // when wanted, is a derived/elected operation rather than ingest-time spray.
-        Add(builder, occurrence, MemberOfVerbNet, vnClass, occurrence);
-        Add(builder, occurrence, EvokesFrame, frame, occurrence);
-        Add(builder, occurrence, HasSense, roleset, occurrence);
-        Add(builder, occurrence, HasSense, onSense, occurrence);
+        if (vnClass is { } verbNetClass)
+            Add(builder, occurrence, MemberOfVerbNet, verbNetClass, occurrence);
+        if (frame is { } frameId)
+            Add(builder, occurrence, EvokesFrame, frameId, occurrence);
+        if (roleset is { } rolesetId)
+            Add(builder, occurrence, HasSense, rolesetId, occurrence);
+        if (onSense is { } ontoNotesSenseId)
+            Add(builder, occurrence, HasSense, ontoNotesSenseId, occurrence);
 
         for (int i = 0; i < record.Dependencies.Length; i++)
         {
