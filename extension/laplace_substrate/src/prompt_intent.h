@@ -432,7 +432,8 @@ laplace_prompt_geometry_scan_anchor(
             hilberts[node].bytes, (const uint8 *) VARDATA_ANY(key),
             ordered[row].delta);
     }
-    qsort(ordered, hilbert_count, sizeof(*ordered), laplace_prompt_hilbert_compare);
+    if (hilbert_count > 1)
+        qsort(ordered, hilbert_count, sizeof(*ordered), laplace_prompt_hilbert_compare);
     for (int row = 0; row < Min(hilbert_count, fanout); ++row)
         laplace_prompt_geometry_append(
             intent, source, &ordered[row].id, LAPLACE_PROMPT_GEOMETRY_HILBERT,
