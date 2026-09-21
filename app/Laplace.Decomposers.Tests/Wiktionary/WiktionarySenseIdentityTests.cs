@@ -113,9 +113,9 @@ public sealed class WiktionarySenseIdentityTests
             Assert.Single(change.Entities, e => e.Id == financeSense).TypeId);
         Assert.Equal(EntityTypeRegistry.WiktionarySense,
             Assert.Single(change.Entities, e => e.Id == riverSense).TypeId);
-        Assert.DoesNotContain(change.Physicalities,
-            p => p.EntityId == financeSense || p.EntityId == riverSense);
-        Assert.False(EntityIdentityPolicy.RequiresPhysicality(EntityTypeRegistry.WiktionarySense));
+        Assert.Contains(change.Physicalities, p => p.EntityId == financeSense);
+        Assert.Contains(change.Physicalities, p => p.EntityId == riverSense);
+        Assert.True(EntityIdentityPolicy.RequiresPhysicality(EntityTypeRegistry.WiktionarySense));
         Assert.Contains(memberships, a => a.ObjectId == financeSense);
         Assert.Contains(memberships, a => a.ObjectId == riverSense);
         Assert.Contains(change.Attestations,
@@ -217,10 +217,9 @@ public sealed class WiktionarySenseIdentityTests
         });
 
         Hash128 item = ReferenceAnchor.Id(ReferenceIdentityKind.WikidataItem, "Q22687")!.Value;
-        EntityRow entity = Assert.Single(change.Entities, e => e.Id == item);
-        Assert.Equal(EntityTypeRegistry.WikidataItem, entity.TypeId);
-        Assert.False(EntityIdentityPolicy.RequiresPhysicality(EntityTypeRegistry.WikidataItem));
-        Assert.DoesNotContain(change.Physicalities, p => p.EntityId == item);
+        Assert.Contains(change.EntityInterpretations, e =>
+            e.EntityId == item && e.TypeId == EntityTypeRegistry.WikidataItem);
+        Assert.Contains(change.Physicalities, p => p.EntityId == item);
         Hash128 sense = Assert.Single(change.Attestations, a => a.TypeId == HasSense).ObjectId!.Value;
         Assert.Contains(change.Attestations, a =>
             a.TypeId == CorrespondsTo

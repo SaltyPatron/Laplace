@@ -48,7 +48,16 @@ internal static class WiktionaryEmit
             {
                 AddAll(into, s.Glosses);
                 AddAll(into, s.Examples);
+                AddAll(into, s.SenseIds);
                 CollectRelations(into, in s.Relations);
+                bool hasSourceSenseId = s.SenseIds is { Count: > 0 }
+                    && s.SenseIds.Any(static id => !string.IsNullOrWhiteSpace(id));
+                if (!hasSourceSenseId)
+                {
+                    AddAll(into, s.Tags);
+                    AddAll(into, s.LinkTargets);
+                    AddAll(into, s.WikidataIds);
+                }
                 if (s.Tags is { } tags)
                     foreach (var tag in tags)
                         if (RegisterTags.Contains(tag))
@@ -172,7 +181,8 @@ internal static class WiktionaryEmit
             foreach (var s in senses)
             {
                 if (WiktionarySenseAnchor.Declare(
-                        b, wordId, langCtx, posId, s, WiktionaryDecomposer.Source) is not { } senseId)
+                        b, e.Word, wordId, langCtx, posId, s, WiktionaryDecomposer.Source,
+                        roots, coords) is not { } senseId)
                     continue;
 
                 AttestResolved(b, wordId, WiktionarySource.HasSenseTypeId, senseId, langCtx);
