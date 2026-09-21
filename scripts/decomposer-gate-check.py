@@ -191,6 +191,53 @@ def check_source(
         except Exception as e:
             record("layer_complete", False, str(e))
 
+    physicality_types = src.get("physicality_types", [])
+    if physicality_types:
+        try:
+            type_array = "ARRAY[" + ",".join(
+                f"laplace.entity_type_id('{name}')" for name in physicality_types
+            ) + "]::bytea[]"
+            row = psql(
+                dbname,
+                "WITH touched AS MATERIALIZED ("
+                f" SELECT subject_id AS entity_id FROM laplace.attestations WHERE source_id=laplace.source_id('{decomposer}')"
+                " UNION SELECT object_id FROM laplace.attestations"
+                f" WHERE source_id=laplace.source_id('{decomposer}') AND object_id IS NOT NULL"
+                " UNION SELECT context_id FROM laplace.attestations"
+                f" WHERE source_id=laplace.source_id('{decomposer}') AND context_id IS NOT NULL"
+                "), governed AS MATERIALIZED ("
+                " SELECT DISTINCT ei.entity_id FROM laplace.entity_interpretations ei"
+                " LEFT JOIN touched t ON t.entity_id=ei.entity_id"
+                f" WHERE ei.type_id=ANY({type_array})"
+                f" AND (ei.first_observed_by=laplace.source_id('{decomposer}') OR t.entity_id IS NOT NULL)"
+                ") SELECT count(*)::text || ' ' ||"
+                " count(*) FILTER (WHERE EXISTS (SELECT 1 FROM laplace.physicalities p"
+                " WHERE p.entity_id=governed.entity_id))::text FROM governed;",
+                host=host,
+                user=user,
+            ).split()
+            governed, placed = int(row[0]), int(row[1])
+            missing = governed - placed
+            record(
+                "physicality_coverage",
+                missing == 0 and governed > 0,
+                f"governed={governed:,} placed={placed:,} missing={missing:,} types={physicality_types}",
+                governed=governed,
+                placed=placed,
+                missing=missing,
+                types=physicality_types,
+            )
+        except Exception as e:
+            record(
+                "physicality_coverage",
+                False,
+                str(e),
+                governed=0,
+                placed=0,
+                missing=0,
+                types=physicality_types,
+            )
+
     for gate in src.get("consensus_gates", []):
         rel = gate["relation"]
         minimum = int(gate.get("min", 0))

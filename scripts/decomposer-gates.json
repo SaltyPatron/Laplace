@@ -75,7 +75,10 @@
     "operational": {
       "decomposer": "OperationalDecomposer",
       "layer": 2,
-      "prerequisites": ["unicode", "iso639"],
+      "prerequisites": [
+        "unicode",
+        "iso639"
+      ],
       "consensus_gates": []
     },
     "cili": {
@@ -93,6 +96,11 @@
           "relation": "IS_TYPED_AS",
           "min": 1
         }
+      ],
+      "physicality_types": [
+        "WordNet_Synset",
+        "Source_Reference",
+        "Source_Version"
       ]
     },
     "document": {
@@ -128,6 +136,11 @@
           "relation": "HAS_VERB_FRAME",
           "min": 1
         }
+      ],
+      "physicality_types": [
+        "WordNet_Synset",
+        "WordNet_Sense",
+        "Source_Reference"
       ]
     },
     "omw": {
@@ -141,6 +154,9 @@
           "relation": "HAS_LANGUAGE",
           "min": 1
         }
+      ],
+      "physicality_types": [
+        "WordNet_Sense"
       ]
     },
     "verbnet": {
@@ -158,6 +174,13 @@
           "relation": "HAS_VERB_FRAME",
           "min": 1000
         }
+      ],
+      "physicality_types": [
+        "VerbNet_Class",
+        "VerbNet_Member",
+        "VerbNet_Role",
+        "VerbNet_Predicate",
+        "PropBank_Roleset"
       ]
     },
     "propbank": {
@@ -175,6 +198,10 @@
           "relation": "HAS_SENSE",
           "min": 5000
         }
+      ],
+      "physicality_types": [
+        "PropBank_Roleset",
+        "PropBank_Role"
       ]
     },
     "framenet": {
@@ -192,6 +219,10 @@
           "relation": "HAS_FRAME_ELEMENT",
           "min": 5000
         }
+      ],
+      "physicality_types": [
+        "FrameNet_LU",
+        "FrameNet_FE"
       ]
     },
     "mapnet": {
@@ -315,6 +346,10 @@
           "relation": "HAS_USAGE_REGISTER",
           "min": 1
         }
+      ],
+      "physicality_types": [
+        "Wiktionary_Sense",
+        "Wikidata_Item"
       ]
     },
     "tatoeba": {
