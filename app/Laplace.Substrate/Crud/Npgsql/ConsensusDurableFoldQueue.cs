@@ -7,7 +7,6 @@ namespace Laplace.SubstrateCRUD.Npgsql;
 public sealed partial class ConsensusAccumulatingWriter
 {
     private readonly object _durableFoldScheduleLock = new();
-    private Task _durableFoldTail = Task.CompletedTask;
     private readonly HashSet<Hash128> _durableFoldScheduled = [];
 
     /// <summary>
@@ -157,20 +156,88 @@ public sealed partial class ConsensusAccumulatingWriter
                 return;
 
         await _foldDepth.WaitAsync(ct).ConfigureAwait(false);
-        lock (_durableFoldScheduleLock)
+        bool ownsDepth = true;
+        bool scheduled = false;
+        try
         {
-            if (!_durableFoldScheduled.Add(token))
+            lock (_durableFoldScheduleLock)
             {
+                if (!_durableFoldScheduled.Add(token))
+                {
+                    _foldDepth.Release();
+                    ownsDepth = false;
+                    return;
+                }
+                scheduled = true;
+            }
+
+            var chunks = new List<(int Ordinal, Hash128 Type)>();
+            await using (var command = _ds.CreateCommand(
+                "SELECT ordinal,type_id FROM laplace.ingest_fold_chunk "
+                + "WHERE working_set_id=$1 ORDER BY ordinal"))
+            {
+                command.Parameters.Add(new NpgsqlParameter
+                { Value = token.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                    chunks.Add((reader.GetInt32(0), Hash128.FromBytes(reader.GetFieldValue<byte[]>(1))));
+            }
+
+            if (chunks.Count == 0)
+            {
+                await CleanupDurableFoldWorkAsync(token, ct).ConfigureAwait(false);
+                lock (_durableFoldScheduleLock) _durableFoldScheduled.Remove(token);
+                scheduled = false;
                 _foldDepth.Release();
+                ownsDepth = false;
                 return;
             }
-            Task prior = _durableFoldTail;
-            Task next = Task.Run(async () =>
+
+            Interlocked.CompareExchange(
+                ref _foldSpanStarted,
+                System.Diagnostics.Stopwatch.GetTimestamp(),
+                comparand: 0);
+
+            var completions = new List<Task>();
+            foreach (var typeGroup in chunks
+                         .GroupBy(static chunk => chunk.Type)
+                         .OrderBy(static group => group.Key, Hash128BytewiseComparer.Instance))
+            {
+                Hash128 type = typeGroup.Key;
+                int[] ordinals = typeGroup.Select(static chunk => chunk.Ordinal)
+                    .OrderBy(static ordinal => ordinal)
+                    .ToArray();
+
+                Task next;
+                lock (_laneLock)
+                {
+                    Task prior = _typeLanes.TryGetValue(type, out var existing)
+                        ? existing : Task.CompletedTask;
+                    next = Task.Run(async () =>
+                    {
+                        await prior.ConfigureAwait(false);
+                        await Parallel.ForEachAsync(
+                            ordinals,
+                            new ParallelOptions
+                            {
+                                MaxDegreeOfParallelism = Math.Min(FoldConnections, ordinals.Length),
+                                CancellationToken = CancellationToken.None,
+                            },
+                            async (ordinal, tokenCt) =>
+                                await ProcessDurableFoldChunkAsync(token, ordinal, tokenCt)
+                                    .ConfigureAwait(false)).ConfigureAwait(false);
+                    }, CancellationToken.None);
+                    _typeLanes[type] = next;
+                }
+                completions.Add(next);
+            }
+
+            Task tracked = Task.Run(async () =>
             {
                 try
                 {
-                    await prior.ConfigureAwait(false);
-                    await ProcessDurableFoldWorkAsync(token, CancellationToken.None)
+                    await Task.WhenAll(completions).ConfigureAwait(false);
+                    await CleanupDurableFoldWorkAsync(token, CancellationToken.None)
                         .ConfigureAwait(false);
                 }
                 finally
@@ -180,44 +247,23 @@ public sealed partial class ConsensusAccumulatingWriter
                     _foldDepth.Release();
                 }
             }, CancellationToken.None);
-            _durableFoldTail = next;
+
             lock (_foldChainLock)
-                _outstanding.Add(next);
+                _outstanding.Add(tracked);
+            ownsDepth = false;
+            scheduled = false; // tracked task owns both cleanup responsibilities now.
+        }
+        catch
+        {
+            if (scheduled)
+                lock (_durableFoldScheduleLock) _durableFoldScheduled.Remove(token);
+            if (ownsDepth) _foldDepth.Release();
+            throw;
         }
     }
 
-    private async Task ProcessDurableFoldWorkAsync(Hash128 token, CancellationToken ct)
+    private async Task CleanupDurableFoldWorkAsync(Hash128 token, CancellationToken ct)
     {
-        var ordinals = new List<int>();
-        await using (var command = _ds.CreateCommand(
-            "SELECT ordinal FROM laplace.ingest_fold_chunk "
-            + "WHERE working_set_id=$1 ORDER BY ordinal"))
-        {
-            command.Parameters.Add(new NpgsqlParameter
-            { Value = token.ToBytes(), NpgsqlDbType = NpgsqlDbType.Bytea });
-            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-                ordinals.Add(reader.GetInt32(0));
-        }
-
-        if (ordinals.Count > 0)
-        {
-            Interlocked.CompareExchange(
-                ref _foldSpanStarted,
-                System.Diagnostics.Stopwatch.GetTimestamp(),
-                comparand: 0);
-            await Parallel.ForEachAsync(
-                ordinals,
-                new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = FoldConnections,
-                    CancellationToken = ct,
-                },
-                async (ordinal, tokenCt) =>
-                    await ProcessDurableFoldChunkAsync(token, ordinal, tokenCt)
-                        .ConfigureAwait(false)).ConfigureAwait(false);
-        }
-
         await using var cleanup = _ds.CreateCommand(
             "DELETE FROM laplace.ingest_fold_work w WHERE w.working_set_id=$1 "
             + "AND NOT EXISTS (SELECT 1 FROM laplace.ingest_fold_chunk c "
@@ -228,6 +274,34 @@ public sealed partial class ConsensusAccumulatingWriter
     }
 
     private async Task ProcessDurableFoldChunkAsync(
+        Hash128 token, int ordinal, CancellationToken ct)
+    {
+        var retry = Laplace.Ingestion.TransientErrorRetryPolicy.ConcurrencyRetry;
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await ProcessDurableFoldChunkAttemptAsync(token, ordinal, ct)
+                    .ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex) when (
+                ex is not OperationCanceledException
+                && attempt + 1 < retry.MaxAttempts
+                && retry.IsTransient(ex))
+            {
+                TimeSpan delay = retry.DelayBeforeAttempt(attempt, Random.Shared);
+                _log.LogWarning(
+                    ex,
+                    "durable fold token={Token} chunk={Ordinal} transient failure attempt={Attempt}; retrying",
+                    token, ordinal, attempt + 1);
+                if (delay > TimeSpan.Zero)
+                    await Task.Delay(delay, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task ProcessDurableFoldChunkAttemptAsync(
         Hash128 token, int ordinal, CancellationToken ct)
     {
         await _foldConnections.WaitAsync(ct).ConfigureAwait(false);

@@ -22,11 +22,18 @@ BEGIN ATOMIC
       -- journal alone under-reports a slow-flush ingest mid-working-set.
       -- pg_backend_pid() is excluded: this query's own text contains the
       -- pattern strings and would otherwise match itself forever.
-      (SELECT (SELECT max(applied_at) FROM laplace.ingest_flush_journal) > now() - interval '20 seconds')
+      EXISTS (SELECT 1 FROM laplace.ingest_fold_work)
+        OR (SELECT (SELECT max(applied_at) FROM laplace.ingest_flush_journal) > now() - interval '20 seconds')
         OR EXISTS (
           SELECT 1 FROM pg_stat_activity a
           WHERE a.datname = current_database()
             AND a.state = 'active'
             AND a.pid <> pg_backend_pid()
-            AND a.query ILIKE ANY (ARRAY['%attestation_merge%', '%consensus_upsert%', '%COPY %laplace.%']));
+            AND a.query ILIKE ANY (ARRAY[
+              '%attestation_merge%',
+              '%consensus_upsert%',
+              '%consensus.upsert_type%',
+              '%highway_mask_deposit%',
+              '%COPY %laplace.%'
+            ]));
 END;

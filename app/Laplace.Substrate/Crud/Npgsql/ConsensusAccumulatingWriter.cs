@@ -11,19 +11,14 @@ using Laplace.Engine.Core;
 namespace Laplace.SubstrateCRUD.Npgsql;
 
 /// <summary>
-/// Inline consensus fold: every apply batch writes its evidence AND folds its
-/// consensus delta in the same flow — consensus is the fourth table of the
-/// batched apply, not a deferred phase. Per batch: client-dedup the cell deltas
-/// (already merged in RAM), forward evidence to the inner writer, then dispatch
-/// the delta onto the per-type fold lanes — each running consensus_upsert
-/// (server-side native Glicko fold inside each row's lock window, ordered by
-/// partition keys) — plus the mask lane running consensus.highway_mask_deposit(bits OR'd
-/// in from the pairs this batch touched).
-/// Ingest completion IS fold completion — no accumulator epochs, no staging
-/// tables, no walk journal, no terminal fold, no advisory-lock wall.
-/// Durable replayable testimony forms one canonical rating period per typed cell;
-/// storage flush boundaries do not define semantic periods. Cells containing
-/// transient continuous scores retain their exact atomic delta path.
+/// Consensus accumulation is attached to every accepted working set. Online and
+/// transient-score writes fold atomically with evidence. Replayable BULK ingest persists
+/// the exact accepted per-cell delta in the same evidence transaction, then immediately
+/// drains that durable continuation on per-type FIFO fold lanes while the next working
+/// set composes/applies. This is not a source-end fold: every working set owns its own
+/// recoverable consensus + highway-mask work, and ingest completion still waits for all
+/// such work to commit. Storage flush boundaries are transport only; durable replayable
+/// testimony forms one canonical rating period per typed cell.
 /// </summary>
 public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFoldMetrics, IAsyncDisposable
 {
@@ -360,8 +355,16 @@ public sealed class ConsensusAccumulatingWriter : ISubstrateWriter, IConsensusFo
             // on the control transaction. The evidence transaction persists an exact,
             // crash-recoverable fold queue; the queue drains on the fold fan while the next
             // working set composes/applies. Transient continuous scores keep the atomic path.
+            bool singleSourceWorkingSet = changes.Count == 0
+                || changes.All(change => change.Metadata.SourceId == changes[0].Metadata.SourceId);
             bool deferReplayableBulkFold =
-                atomicWorkingSet && _bulkRun && !hasEphemeralFolds && appendConversation is null;
+                atomicWorkingSet
+                && _bulkRun
+                && !hasEphemeralFolds
+                && appendConversation is null
+                && precommitVerifier is null
+                && reconciliation is null
+                && singleSourceWorkingSet;
             bool durableFoldQueued = false;
 
             // A fold that already failed in the background poisons the run

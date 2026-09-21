@@ -39,7 +39,11 @@ public interface ISubstrateWriter
     /// </remarks>
     Task DrainFoldsAsync() => Task.CompletedTask;
 
-    /// <summary>Close semantic work owned by one file before files_done advances.</summary>
+    /// <summary>
+    /// Close non-durable semantic work owned by one file before files_done advances.
+    /// Replayable bulk folds are already a durable per-working-set continuation and are
+    /// drained by the run-level completion barrier instead of serializing every file.
+    /// </summary>
     Task CompleteFileAsync(string fileLabel, CancellationToken ct = default)
         => Task.CompletedTask;
 
