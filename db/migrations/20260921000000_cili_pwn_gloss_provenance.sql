@@ -38,6 +38,19 @@ BEGIN
             AND m.subject_id = d.subject_id
       );
 
+    IF EXISTS (
+        SELECT 1
+        FROM laplace.attestations a
+        JOIN _cili_pwn_gloss_cells t
+          ON t.subject_id = a.subject_id
+         AND t.object_id = a.object_id
+        WHERE a.type_id = v_definition
+          AND a.fold_replayable = false
+    ) THEN
+        RAISE EXCEPTION
+            'CILI PWN gloss provenance repair touches non-replayable evidence; refusing lossy refold';
+    END IF;
+
     DELETE FROM laplace.attestations d
     USING _cili_pwn_gloss_cells t
     WHERE d.type_id = v_definition
@@ -89,6 +102,12 @@ BEGIN
 
     -- Unsupported cells are claims nobody makes after retraction: delete them,
     -- never retain a zero-witness consensus row.
+    CREATE TEMP TABLE _cili_pwn_gloss_culled (
+        subject_id bytea NOT NULL,
+        object_id bytea,
+        PRIMARY KEY (subject_id, object_id)
+    ) ON COMMIT DROP;
+
     WITH deleted AS (
         DELETE FROM laplace.consensus c
         USING _cili_pwn_gloss_cells t
@@ -103,15 +122,21 @@ BEGIN
                 AND a.object_id = t.object_id
           )
         RETURNING c.subject_id, c.object_id
-    ), dirty AS (
-        INSERT INTO laplace.highway_mask_dirty(id)
-        SELECT d.subject_id FROM deleted d
-        UNION
-        SELECT d.object_id FROM deleted d WHERE d.object_id IS NOT NULL
-        ON CONFLICT (id) DO NOTHING
-        RETURNING 1
     )
-    SELECT count(*) INTO v_culled FROM deleted;
+    INSERT INTO _cili_pwn_gloss_culled(subject_id, object_id)
+    SELECT d.subject_id, d.object_id FROM deleted d;
+
+    SELECT count(*) INTO v_culled FROM _cili_pwn_gloss_culled;
+
+    INSERT INTO laplace.highway_mask_dirty(id)
+    SELECT u.id
+    FROM (
+        SELECT c.subject_id AS id FROM _cili_pwn_gloss_culled c
+        UNION
+        SELECT c.object_id FROM _cili_pwn_gloss_culled c
+        WHERE c.object_id IS NOT NULL
+    ) u
+    ON CONFLICT (id) DO NOTHING;
 
     RAISE NOTICE
         'CILI PWN gloss provenance repair: % packaged evidence row(s) removed, % cell(s) refolded, % unsupported cell(s) culled',
