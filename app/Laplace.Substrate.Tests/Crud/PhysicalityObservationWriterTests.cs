@@ -172,14 +172,14 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         var receipt = Assert.IsType<PhysicalityAdmissionReceipt>(
             first.PhysicalityAdmission);
 
-        Assert.Equal(2, receipt.SourceForms);
-        Assert.Equal(2, receipt.PhysicalityObservationRows);
+        Assert.Equal(1, receipt.SourceForms);
+        Assert.Equal(1, receipt.PhysicalityObservationRows);
         Assert.Equal(1L, receipt.PhysicalityObservationWrites);
         Assert.Equal(0, receipt.GeneratedEntityRows);
         Assert.Equal(0, receipt.GeneratedPhysicalityRows);
         Assert.Equal(0, first.AttestationsInserted);
         Assert.Equal("canonical-merkle-physicality/v1", receipt.SnapshotReceipt);
-        Assert.Equal(2, receipt.Forms.Length);
+        Assert.Single(receipt.Forms);
         Assert.All(receipt.Forms, form =>
         {
             Assert.Equal(selected.Id, form.PhysicalityId);
@@ -260,8 +260,8 @@ public sealed class PhysicalityObservationWriterTests(LocalPgFixture pg)
         var receipt = Assert.IsType<PhysicalityAdmissionReceipt>(
             applied.PhysicalityAdmission);
 
-        Assert.Equal(2, receipt.SourceForms);
-        Assert.Equal(2, receipt.PhysicalityObservationRows);
+        Assert.Equal(1, receipt.SourceForms);
+        Assert.Equal(1, receipt.PhysicalityObservationRows);
         Assert.Equal(1L, receipt.PhysicalityObservationWrites);
         Assert.Equal(0, receipt.GeneratedEntityRows);
         Assert.Equal(0, receipt.GeneratedPhysicalityRows);

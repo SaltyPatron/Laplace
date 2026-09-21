@@ -26,17 +26,6 @@ typedef struct MaskTarget
     int16 tier;
     Oid relation;
     ItemPointerData tid;
-    /* Accretion-only precheck: the target read already carries highway_mask, so
-     * a delta whose bits are all present is provably a lock-path no-op. Skipping
-     * it before the tuple lock removes the dominant re-ingest cost — shared
-     * positions and players re-observed by every window deposit the same bits
-     * again, and each one paid a full tuple lock + identity verify (~117µs,
-     * measured 2026-09-21: 100K distinct already-masked entities, 11.7s of the
-     * 12.7s deposit was this loop) while the OR could never change a byte.
-     * Highway masks are rebuildable acceleration, never semantic authority: a
-     * concurrent authoritative refresh that clears a bit after this read is
-     * reconciled by the same dirty/recompute lane as any post-deposit clear. */
-    bool already_set;
 } MaskTarget;
 
 typedef struct MaskRelation
@@ -223,29 +212,6 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
         MaskTarget *target=&targets[n++];
         target->delta=(int)(delta-deltas);
         target->tier=DatumGetInt16(SPI_getbinval(tuple,desc,2,&isnull));
-        /* The accretion precheck: highway_mask (column 3) is already in this
-         * row. A delta fully contained by the stored mask can never change a
-         * byte, so it never reaches the tuple lock. The replace/refresh path
-         * always locks its captured target set and is unaffected. */
-        {
-            bool mask_is_null;
-            Datum mask_val=SPI_getbinval(tuple,desc,3,&mask_is_null);
-            bool already_set=false;
-            if(!replace && !mask_is_null)
-            {
-                bytea *stored=DatumGetByteaPP(mask_val);
-                if(VARSIZE_ANY_EXHDR(stored)==sizeof(laplace_mask256_t))
-                {
-                    const laplace_mask256_t *current=
-                        (const laplace_mask256_t *)VARDATA_ANY(stored);
-                    bool missing=false;
-                    for(int w=0;w<4 && !missing;++w)
-                        missing=(delta->mask.w[w] & ~current->w[w])!=0;
-                    already_set=!missing;
-                }
-            }
-            target->already_set=already_set;
-        }
         target->relation=DatumGetObjectId(SPI_getbinval(tuple,desc,4,&isnull));
         target->tid=*(ItemPointer)DatumGetPointer(SPI_getbinval(tuple,desc,5,&isnull));
     }
@@ -276,7 +242,6 @@ static int64 entity_masks_write(const LaplaceEntityMaskDelta *deltas, int count,
     {
         CHECK_FOR_INTERRUPTS();
         MaskTarget *target=&targets[i]; bool isnull;
-        if(target->already_set) continue;
         if(!OidIsValid(target->relation)) continue;
         const LaplaceEntityMaskDelta *delta=&deltas[target->delta];
         MaskRelation *entry=mask_relation(relations,target->relation);
