@@ -51,7 +51,14 @@ The fix already exists as an installed operation and is not called:
 `The → the (406)`, `Water → water (2,545)` in ~0.3 s. `prompt_words` is SQL, so
 this is a one-place change the whole conversational path inherits.
 
-STATUS: NOT FIXED.
+STATUS (re-verified 2026-09-21 against source): the demanded change is present on current
+main and went further — `converse.prompt_words` now delegates to native
+`converse.word_segment_resolved` (`converse/prompt_words.sql.in:18-25`), and
+`lexical.word_case_variants_batch` is wired into the election path via
+`taxonomy/bubble_up_batch.sql.in:62` and `converse/compile_prompt.sql.in:38`. The
+remaining per-row scalar call site (`generation/pos_class_transitions.sql.in:47`) and the
+dual native bodies in `lexical_case.c` are tracked in #1712. Live behavioral re-proof of
+the What/what election is separate from this source-level re-verification.
 
 ## D2 — the one content word is tagged a foreign language, and loses for it
 
@@ -71,8 +78,10 @@ attested it is". With the prompt electing English and `glacier` tagged French, t
 correct topic is demoted by the very axis meant to protect addressing. This is W14's
 "addressing failure" firing against the content word instead of for it.
 
-STATUS: NOT FIXED. Note `docs/read-path.md:160-165` already records that
-`attested_language` and `word_language` disagree (lobo → Spanish vs Portuguese).
+STATUS: NOT FIXED. Note (recorded 2026-08-23): `docs/read-path.md` then recorded that
+`attested_language` and `word_language` disagree (lobo → Spanish vs Portuguese). That
+passage no longer exists in the current `read-path.md`; this pointer rotted and must not
+be treated as a live reference.
 
 ## D3 — realization emits an unbounded translation family
 

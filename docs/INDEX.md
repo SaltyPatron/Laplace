@@ -1,7 +1,5 @@
 # Documentation index
 
-
-- [`CAPABILITIES.md`](CAPABILITIES.md) — binding synthesis of what the primitive invention laws enable together: knowledge authority/governance, measured cognition, grammar/AST software construction, duplicate-code convergence, repair trajectories, machine-cost derivation, repository-root mutation and proven root-transition deployment.
 The canonical documentation map is now [`README.md`](README.md).
 
 This file remains as a compatibility entry point for links/bookmarks that historically targeted `docs/INDEX.md`. It does **not** define an independent priority or authority order.
@@ -11,6 +9,7 @@ Start here:
 - [`README.md`](README.md) — documentation authority/read order;
 - [`INVENTION.md`](INVENTION.md) — intended invention and proof boundaries;
 - [`INVENTIONS.md`](INVENTIONS.md) — mechanism/capability catalog;
+- [`CAPABILITIES.md`](CAPABILITIES.md) — binding synthesis of what the primitive invention laws enable together;
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — architecture as currently built, including explicit divergences;
 - [`audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md`](audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md) — evidence-bound deviation ledger separating current gaps from repaired historical damage;
 - [`../AGENTS.md`](../AGENTS.md) — implementation/delivery/execution-grain contract;
@@ -44,6 +43,5 @@ The specs are read under `INVENTION.md`; they do not override a later explicit i
 ## Historical material
 
 - [`archive/`](archive/) — explicitly non-authoritative historical reports/specs/plans/prompts/catalogs.
-- [`.scratchpad/`](../.scratchpad/README.md) — historical session/audit records where retained.
 
 If two current-facing documents disagree, do not pick the smaller/easier interpretation. Follow the authority order and correct the lower document.

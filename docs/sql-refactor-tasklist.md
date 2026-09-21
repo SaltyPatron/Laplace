@@ -1,5 +1,7 @@
 # SQL refactor task list
 
+> **Dated-file authority notice.** This file records a scoped measurement at 2026-08-15. It is not current invention authority, a global scheduling order, or proof that the measured implementation/runtime state still exists. Current interpretation begins with `docs/INVENTION.md`, `docs/CAPABILITIES.md`, `docs/INVENTIONS.md`, the binding specs, and `AGENTS.md`; re-verify current code, issues, deployment and live receipts before treating dated present-tense claims as current.
+
 **Measured 2026-08-15.** "This session" below means that
 date. Item state is not tracked here — re-verify each class against HEAD.
 

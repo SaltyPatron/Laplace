@@ -18,7 +18,7 @@ Conversation uses the same representation as every other domain:
 
 - admitted atomic/typed structure composes recursively into exact finite higher structures;
 - canonical executable identity is derived under a declared recipe; source/provenance/worker/batch facts do not silently remint equal content;
-- current native multi-child Merkle composition includes its declared tier in the executable recipe; single-child composition preserves the child id;
+- canonical executable identity is the Merkle hash over the ordered child-id sequence; the current `hash128_merkle` discards its tier argument, so tier is altitude/occurrence metadata and is not part of content identity; single-child composition preserves the child id;
 - current Tier-0 text generation uses deterministic S³/Super-Fibonacci placement inside the common 4D frame;
 - parent physicality `coord`, packed trajectory carrier and realized child-coordinate curve are different state;
 - a packed GeometryZM trajectory vertex carries the complete 128-bit constituent id plus ordinal/run/typed flags and is not a child spatial position;

@@ -243,7 +243,7 @@ codepoint ids.
 | Audio sample/window/segment/track ROMs | Deterministic audio scalar/composition tiers | direct index where dense; deterministic sparse lookup where admitted/hot | audio recipe + lower cache generations | Prescribed by compositional cache law; reusable by video and other multimodal consumers. |
 | Factor ROM | Versioned model-factor trajectories | pointer arithmetic | deposited factor physicalities | Designed (#526). Not installed. |
 | Generation-corpus ROM | Cold `walk_text` / generation lane | mmap | generation corpus | Prescribed (#409). Not installed. |
-| Separator-id ROM | Alphabet-bounded separator atoms/clusters | compiled set | T0 + grapheme law | Named in `docs/sql-cascade.md`; still a scan. |
+| Separator-id ROM | Alphabet-bounded separator atoms/clusters | compiled set | T0 + grapheme law | Named in the dated audit `docs/sql-cascade.md` (2026-08-15); re-verify before reuse. |
 
 New blobs land only with: a row here, a one-way rebuild path (blob never seeds
 Postgres), determinism/staleness gates, a loader that refuses unknown versions,
