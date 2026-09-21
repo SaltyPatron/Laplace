@@ -1,64 +1,37 @@
-using System.Buffers;
-using System.Buffers.Binary;
 using System.Text;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Abstractions;
 
-/// <summary>
-/// Source lexical-member systems whose entries are scoped by an owning class.
-/// Values are persisted in the identity preimage; append only and never renumber.
-/// </summary>
 public enum LexicalMemberIdentityKind : ushort
 {
     VerbNet = 1,
 }
 
 /// <summary>
-/// Identity for a source member under its proposition-defining owner. The same
-/// spelling or source key can occur in more than one class; the human-readable
-/// lemma remains content connected through HAS_NAME_ALIAS.
+/// A source lexical member is the witnessed structure [member-schema, system, owner,
+/// source-member-key]. The key itself is canonical content and supplies the placement;
+/// the owner/system remain exact trajectory constituents.
 /// </summary>
 public static class LexicalMemberAnchor
 {
-    private static ReadOnlySpan<byte> Domain => "laplace/lexical-member-anchor/v1\0"u8;
+    private static readonly Hash128 Schema =
+        Hash128.OfCanonical("lexical-member/structure/v2");
 
     public static Hash128? Id(
         LexicalMemberIdentityKind kind, Hash128 ownerId, string? rawMemberKey)
     {
+        Validate(kind, ownerId);
         string? key = Normalize(rawMemberKey);
         if (key is null) return null;
-        if (ownerId == default)
-            throw new ArgumentException("member owner must not be empty", nameof(ownerId));
-        if (kind != LexicalMemberIdentityKind.VerbNet)
-            throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown member identity domain");
-
-        byte[] keyUtf8 = Encoding.UTF8.GetBytes(key);
-        int length = Domain.Length + sizeof(ushort) + 16 + sizeof(int) + keyUtf8.Length;
-        byte[]? rented = null;
-        Span<byte> preimage = length <= 512
-            ? stackalloc byte[length]
-            : (rented = ArrayPool<byte>.Shared.Rent(length)).AsSpan(0, length);
-        try
+        Hash128? member = ContentEmitter.RootId(key);
+        if (member is null) return null;
+        Span<Hash128> constituents = stackalloc Hash128[4]
         {
-            Domain.CopyTo(preimage);
-            int cursor = Domain.Length;
-            BinaryPrimitives.WriteUInt16LittleEndian(preimage[cursor..], (ushort)kind);
-            cursor += sizeof(ushort);
-            BinaryPrimitives.WriteUInt64LittleEndian(preimage[cursor..], ownerId.Hi);
-            cursor += sizeof(ulong);
-            BinaryPrimitives.WriteUInt64LittleEndian(preimage[cursor..], ownerId.Lo);
-            cursor += sizeof(ulong);
-            BinaryPrimitives.WriteInt32LittleEndian(preimage[cursor..], keyUtf8.Length);
-            cursor += sizeof(int);
-            keyUtf8.CopyTo(preimage[cursor..]);
-            return Hash128.Blake3(preimage);
-        }
-        finally
-        {
-            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
-        }
+            Schema, KindMarker(kind), ownerId, member.Value
+        };
+        return Hash128.Merkle(EntityTier.Word, constituents);
     }
 
     public static Hash128? Emit(
@@ -70,12 +43,44 @@ public static class LexicalMemberAnchor
         Hash128 source,
         double trust)
     {
-        Hash128? id = Id(kind, ownerId, memberKey);
-        if (id is null) return null;
-        builder.AddEntity(id.Value, EntityTier.Word, entityTypeId, source);
-        CategoryAnchor.AttestCategory(builder, id.Value, entityTypeId, source, trust);
+        Validate(kind, ownerId);
+        string? key = Normalize(memberKey);
+        if (key is null) return null;
+        OrderedCompositionComponent? member =
+            ContentEmitter.StageComponent(builder, key, source);
+        if (member is not { } component) return null;
+
+        Span<Hash128> constituents = stackalloc Hash128[4]
+        {
+            Schema, KindMarker(kind), ownerId, component.Id
+        };
+        Hash128 id = Hash128.Merkle(EntityTier.Word, constituents);
+        builder.AddEntity(id, EntityTier.Word, entityTypeId, source);
+
+        Span<double> coord = stackalloc double[4]
+        {
+            component.CoordX, component.CoordY, component.CoordZ, component.CoordM
+        };
+        builder.AddPhysicality(new PhysicalityRow(
+            PhysicalityId.Compute(id, PhysicalityType.ParseStructure),
+            id, source, PhysicalityType.ParseStructure,
+            coord[0], coord[1], coord[2], coord[3], Hilbert128.Encode(coord),
+            Trajectory.Build(constituents), constituents.Length,
+            null, null, 0));
+        CategoryAnchor.AttestCategory(builder, id, entityTypeId, source, trust);
         return id;
     }
+
+    private static void Validate(LexicalMemberIdentityKind kind, Hash128 ownerId)
+    {
+        if (ownerId == default)
+            throw new ArgumentException("member owner must not be empty", nameof(ownerId));
+        if (kind != LexicalMemberIdentityKind.VerbNet)
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown member identity domain");
+    }
+
+    private static Hash128 KindMarker(LexicalMemberIdentityKind kind) =>
+        Hash128.OfCanonical($"lexical-member/system/{(ushort)kind}/v1");
 
     private static string? Normalize(string? rawMemberKey) =>
         string.IsNullOrWhiteSpace(rawMemberKey)

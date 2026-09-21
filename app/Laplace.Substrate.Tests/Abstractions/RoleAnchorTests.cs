@@ -24,7 +24,7 @@ public sealed class RoleAnchorTests
     }
 
     [Fact]
-    public void Emit_DeclaresOneGovernedRole_WithoutContentGeometry()
+    public void Emit_DeclaresOneGovernedRole_WithStructuralPhysicality()
     {
         Hash128 source = Hash128.OfCanonical("fixture/source");
         Hash128 parent = Hash128.OfCanonical("fixture/roleset");
@@ -37,8 +37,9 @@ public sealed class RoleAnchorTests
 
         EntityRow entity = Assert.Single(change.Entities, e => e.Id == role);
         Assert.Equal(EntityTypeRegistry.PropBankRole, entity.TypeId);
-        Assert.DoesNotContain(change.Physicalities, p => p.EntityId == role);
-        Assert.False(EntityIdentityPolicy.RequiresPhysicality(entity.TypeId));
+        PhysicalityRow physicality = Assert.Single(change.Physicalities, p => p.EntityId == role);
+        Assert.Equal(PhysicalityType.ParseStructure, physicality.Type);
+        Assert.True(EntityIdentityPolicy.RequiresPhysicality(entity.TypeId));
         Assert.Contains(change.Attestations, a =>
             a.SubjectId == role
             && a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")

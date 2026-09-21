@@ -40,6 +40,12 @@ public static class EntityIdentityPolicy
         EntityTypeRegistry.OnsetSegment,
         EntityTypeRegistry.UdParse,
         EntityTypeRegistry.WiktionarySense,
+        EntityTypeRegistry.PropBankRole,
+        EntityTypeRegistry.VerbNetRole,
+        EntityTypeRegistry.FrameNetFe,
+        EntityTypeRegistry.PredicateMatrixRole,
+        EntityTypeRegistry.EsoRole,
+        EntityTypeRegistry.VerbNetMember,
     ];
 
     /// <summary>
