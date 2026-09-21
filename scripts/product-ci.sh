@@ -370,11 +370,13 @@ PY
 
 carry_forward_undelivered_impact() {
   # Automatic main qualification/delivery must converge from the ACTUALLY installed
-  # revision, not only from this commit's parent. A test-only successor can be the
-  # first revision that survives qualification after several product candidates were
-  # superseded; skipping carry-forward here strands those product changes forever.
-  # Manual/operator stages deliberately keep the scope they were dispatched with.
-  [[ "${LAPLACE_SKIP_IF_SUPERSEDED:-0}" == 1 ]] || return 0
+  # revision, not only from this commit's parent. This is independent of whether
+  # newer pushes are allowed to supersede an older candidate: a failed predecessor
+  # is just as capable of leaving product work undelivered as a superseded one.
+  #
+  # Mainline is serialized, so recomputing installed->target here is both exact and
+  # bounded to the real missing closure. Manual/operator stages deliberately keep
+  # the scope they were dispatched with.
   case "${LAPLACE_STAGE:-}" in
     mainline|release-qualification|release-delivery) ;;
     *) return 0 ;;
