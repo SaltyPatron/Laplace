@@ -24,6 +24,14 @@ on:
         description: "Ladder only: re-ingest every rung instead of completing only missing work"
         type: boolean
         default: false
+      replace_existing:
+        description: "Single source only: lawfully evict that source's existing testimony before re-ingest"
+        type: boolean
+        default: false
+      confirm_replace:
+        description: "Single source only: second explicit confirmation for destructive source replacement"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -37,6 +45,8 @@ jobs:
       source: ${{ inputs.source }}
       path: ${{ inputs.advanced_path_override }}
       database: ${{ inputs.database }}
+      evict_before_ingest: ${{ inputs.replace_existing }}
+      confirm_evict: ${{ inputs.confirm_replace }}
 
   ladder:
     if: inputs.source == 'ladder'
