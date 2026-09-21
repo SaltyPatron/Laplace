@@ -3,7 +3,9 @@
 CREATE OR REPLACE FUNCTION laplace.entities_present_ordinals(p_ids bytea[])
     RETURNS TABLE(idx int)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_entities_present_ordinals'
-    LANGUAGE C STABLE PARALLEL RESTRICTED;
+    LANGUAGE C STABLE PARALLEL RESTRICTED
+    SUPPORT @extschema@.array_length_rows_support
+    ROWS 100;
 
 -- The old (ids,tiers) plpgsql overload materialized a temp table, built an index,
 -- looped tiers, and dynamically relied on per-iteration planning. It has no caller:

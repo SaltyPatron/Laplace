@@ -58,4 +58,6 @@ END;
 CREATE OR REPLACE FUNCTION realize.display_label_batch(p_ids bytea[])
     RETURNS TABLE(id bytea, label text, tier smallint)
     AS 'EXECUTION_LIBRARY', 'pg_laplace_display_label_batch'
-    LANGUAGE C STABLE STRICT;
+    LANGUAGE C STABLE STRICT
+    SUPPORT @extschema@.array_length_rows_support
+    ROWS 100;

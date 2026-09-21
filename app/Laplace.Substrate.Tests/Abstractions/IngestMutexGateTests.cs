@@ -354,6 +354,8 @@ public sealed class IngestMutexGateTests
             "Npgsql", "ConsensusAccumulatingWriter.cs"));
         var installer = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
             "sql", "functions", "highway", "highway_mask_deposit.sql.in"));
+        var refresher = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
+            "sql", "functions", "highway", "highway_mask_refresh.sql.in"));
         var native = File.ReadAllText(Path.Combine(repoRoot, "extension", "laplace_substrate",
             "src", "highway_mask.c"));
 
@@ -375,6 +377,10 @@ public sealed class IngestMutexGateTests
         Assert.Contains("AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_deposit'", installer,
             StringComparison.Ordinal);
         Assert.Contains("LANGUAGE C VOLATILE", installer,
+            StringComparison.Ordinal);
+        Assert.Contains("SET plan_cache_mode = force_custom_plan", installer,
+            StringComparison.Ordinal);
+        Assert.Contains("SET plan_cache_mode = force_custom_plan", refresher,
             StringComparison.Ordinal);
         Assert.DoesNotContain("LANGUAGE plpgsql", installer,
             StringComparison.OrdinalIgnoreCase);

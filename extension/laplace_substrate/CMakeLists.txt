@@ -8,6 +8,8 @@ set(EXT_EXECUTION_SOURCES
     src/execution_module.c
     src/presence.c
     src/descent_probe.c
+    src/entity_interpretations_publish.c
+    src/planner_support.c
     src/fold_route.c
     src/consensus_bulk_write.c
     ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.c

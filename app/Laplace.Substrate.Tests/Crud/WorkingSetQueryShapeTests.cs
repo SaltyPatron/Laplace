@@ -8,6 +8,32 @@ namespace Laplace.Ingestion.Tests;
 public sealed class WorkingSetQueryShapeTests
 {
     [Fact]
+    public void ArraySizedSrfs_ExposePlannerRowSupport()
+    {
+        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
+        string support = File.ReadAllText(Path.Combine(
+            repoRoot, "extension", "laplace_substrate", "sql", "functions",
+            "planner", "array_length_rows_support.sql.in"));
+        Assert.Contains("pg_laplace_array_length_rows_support", support, StringComparison.Ordinal);
+
+        foreach (string relative in new[]
+        {
+            "sql/probes/entities_present_ordinals.sql.in",
+            "sql/probes/physicalities_present_ordinals.sql.in",
+            "sql/probes/attestations_present_ordinals.sql.in",
+            "sql/functions/converse/label.sql.in"
+        })
+        {
+            string sql = File.ReadAllText(Path.Combine(
+                repoRoot, "extension", "laplace_substrate",
+                relative.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.Contains("SUPPORT @extschema@.array_length_rows_support", sql,
+                StringComparison.Ordinal);
+            Assert.Contains("ROWS 100", sql, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void EntityVerify_DoesNotRunAFullTierRosterBeforeTheBoundedProbe()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
@@ -35,18 +61,14 @@ public sealed class WorkingSetQueryShapeTests
         var retry = File.ReadAllText(Path.Combine(
             repoRoot, "app", "Laplace.Substrate", "Ingestion",
             "TransientErrorRetryPolicy.cs"));
+        string publication = publisher.Split(
+            "-- Ordinary ad-hoc INSERT/COPY", StringSplitOptions.None)[0];
 
-        Assert.DoesNotContain("FOR UPDATE", publisher, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("ON CONFLICT", publisher, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(2, publisher.Split("input AS MATERIALIZED", StringSplitOptions.None).Length);
-        Assert.DoesNotContain("JOIN touched", publisher, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(
-            "FROM @extschema@.entity_interpretations i\n        JOIN",
-            publisher, StringComparison.Ordinal);
-        Assert.Contains("entities_stored_bitmap(p_entity_ids)", publisher, StringComparison.Ordinal);
-        Assert.Contains("MERGE INTO @extschema@.entity_interpretations", publisher, StringComparison.Ordinal);
-        Assert.Contains("WHEN NOT MATCHED THEN INSERT", publisher, StringComparison.Ordinal);
-        Assert.Contains("incoming_summary AS MATERIALIZED", publisher, StringComparison.Ordinal);
+        Assert.Contains("pg_laplace_entity_interpretations_publish", publication, StringComparison.Ordinal);
+        Assert.Contains("LANGUAGE C VOLATILE PARALLEL UNSAFE", publication, StringComparison.Ordinal);
+        Assert.DoesNotContain("LANGUAGE plpgsql", publication, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("MATERIALIZED", publication, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("array_agg", publication, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("sqlState is \"23505\" or", retry, StringComparison.Ordinal);
     }
 

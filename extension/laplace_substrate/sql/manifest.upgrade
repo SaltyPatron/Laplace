@@ -1,6 +1,7 @@
 schema/purpose_schemas.sql.in
 schema/purpose_relocate.sql.in
 schema/laplace_substrate_version.sql.in
+functions/planner/array_length_rows_support.sql.in
 schema/tables/physicality_observations.sql.in
 schema/tables/attestation_witness_columns.sql.in
 schema/tables/ingest_flush_journal.sql.in

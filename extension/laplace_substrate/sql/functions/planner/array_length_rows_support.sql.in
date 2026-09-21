@@ -1,0 +1,9 @@
+-- Exact or upper-bounded array-batch SRFs must expose their caller-owned work
+-- to PostgreSQL's join planner. A fixed ROWS estimate turns one-id probes into
+-- 1,000-row relations and large batches into the same lie. The support request
+-- uses PostgreSQL's own array-expression estimator and is shared only by SRFs
+-- whose output cannot exceed the cardinality of their first array argument.
+CREATE OR REPLACE FUNCTION @extschema@.array_length_rows_support(internal)
+RETURNS internal
+AS 'EXECUTION_LIBRARY', 'pg_laplace_array_length_rows_support'
+LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;

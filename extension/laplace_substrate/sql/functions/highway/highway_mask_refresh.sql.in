@@ -11,4 +11,5 @@ DROP FUNCTION IF EXISTS laplace.highway_mask_refresh(bytea[]);
 CREATE OR REPLACE FUNCTION consensus.highway_mask_refresh(p_ids bytea[])
     RETURNS bigint
     AS 'MODULE_PATHNAME', 'pg_laplace_highway_mask_refresh'
-    LANGUAGE C VOLATILE;
+    LANGUAGE C VOLATILE
+    SET plan_cache_mode = force_custom_plan;
