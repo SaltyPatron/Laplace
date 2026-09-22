@@ -19,7 +19,5 @@ RETURNS SETOF laplace.entities
 LANGUAGE sql STABLE
 BEGIN ATOMIC
     SELECT e.* FROM laplace.entities e
-    WHERE EXISTS (
-        SELECT 1 FROM laplace.entity_interpretations i
-        WHERE i.entity_id = e.id AND i.tier = p_depth);
+    WHERE e.tier = p_depth;
 END;
