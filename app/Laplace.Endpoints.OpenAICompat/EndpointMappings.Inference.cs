@@ -185,6 +185,67 @@ internal static class InferenceEndpoints
                 await ServerSentEvents.WriteDoneAsync(response, ct);
                 return Results.Empty;
             }
+            // Non-streamed ordinary Chat (including paid retry) must expose proof from
+            // the SAME native invocation that produced the response. Do not fall back to
+            // ConverseAsync here: that would make the proof disappear on a second Chat
+            // transport path and would force any inspector to replay the prompt.
+            if (!payload.Stream && !inspection && !tenantScoped)
+            {
+                var forwardEvents = new List<ForwardObservedEvent>();
+                var text = new StringBuilder();
+                var substrateClock = new Stopwatch();
+                double? firstResultMs = null;
+                int emitted = 0;
+
+                await using (var stream = substrate.ForwardTurnObservedStreamAsync(
+                    prompt, scope.SessionId.ToBytes(), converseOptions, ct).GetAsyncEnumerator(ct))
+                {
+                    while (true)
+                    {
+                        bool hasNext;
+                        substrateClock.Start();
+                        try { hasNext = await stream.MoveNextAsync(); }
+                        finally { substrateClock.Stop(); }
+                        if (!hasNext) break;
+
+                        var observed = stream.Current;
+                        forwardEvents.Add(observed);
+                        if (!string.Equals(observed.Event, "emit", StringComparison.Ordinal)
+                            || observed.Surface is null)
+                            continue;
+
+                        firstResultMs ??= totalClock.Elapsed.TotalMilliseconds;
+                        emitted++;
+                        text.Append(observed.Surface);
+                    }
+                }
+
+                var content = text.ToString();
+                await turnWitness.RecordResponseAsync(
+                    scope.Tenant, scope.UserKey, scope.SessionId,
+                    prompt, content.Length == 0 ? null : content, occurrenceKey, ct);
+
+                var forwardProof = BuildForwardProof(
+                    forwardEvents, scope.SessionKey, occurrenceKey, responseWitnessed: true);
+                var performance = BuildPerformance(
+                    content, substrateClock, totalClock, firstResultMs, emitted);
+
+                return Results.Json(new ChatCompletionResponse(
+                    Id: $"chatcmpl-{Guid.NewGuid():N}",
+                    Object: "chat.completion",
+                    Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    Model: payload.Model,
+                    Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", content), "stop")],
+                    Billing: null,
+                    Metadata: new ChatMetadata(
+                        Witnesses: null,
+                        ReplyRows: emitted,
+                        Session: scope.SessionKey,
+                        Laplace: new LaplaceChatMetadata(
+                            Array.Empty<ProvenanceLine>(), forwardProof),
+                        Performance: performance)));
+            }
+
             var converseSubstrateClock = Stopwatch.StartNew();
             var rows = tenantScoped
                 ? await substrate.ConverseTenantScopedAsync(prompt, scope.SessionId.ToBytes(),

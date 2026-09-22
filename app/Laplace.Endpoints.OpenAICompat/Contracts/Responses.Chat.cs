@@ -47,7 +47,8 @@ public sealed record ChatPerformance(
 
 
 public sealed record LaplaceChatMetadata(
-    [property: JsonPropertyName("provenance")] IReadOnlyList<ProvenanceLine> Provenance);
+    [property: JsonPropertyName("provenance")] IReadOnlyList<ProvenanceLine> Provenance,
+    [property: JsonPropertyName("forward_proof"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ForwardPassProof? ForwardProof = null);
 
 public sealed record ProvenanceLine(
     [property: JsonPropertyName("reply")] string Reply,

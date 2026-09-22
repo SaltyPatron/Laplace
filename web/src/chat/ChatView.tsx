@@ -13,6 +13,7 @@ import { apiGet, apiPost, PaymentRequiredError, type PreflightQuoteResponse, typ
 import { streamChat } from '../api/sse';
 
 import { asNum, provenanceFromMetadata, useAppStore, type ChatPerformance, type ProvenanceEntry } from '../store';
+import type { ForwardPassProof } from '../api/forwardProof';
 
 import { ReceiptPanel } from './ReceiptPanel';
 import { ForwardPassProofPanel } from './ForwardPassProofPanel';
@@ -305,6 +306,9 @@ export function ChatView() {
       const content = response.choices?.[0]?.message?.content ?? '';
 
       const provenance = provenanceFromMetadata(response.metadata?.laplace?.provenance ?? undefined);
+      const forwardProof = (response.metadata?.laplace as
+        | { forward_proof?: ForwardPassProof }
+        | undefined)?.forward_proof;
 
       const sessionKey = (response.metadata as { session?: string } | undefined)?.session;
 
@@ -332,7 +336,9 @@ export function ChatView() {
 
       if (sessionKey) useAppStore.getState().setSession(sessionKey);
 
-      updateLastAssistant((m) => ({ ...m, content, provenance, performance, streaming: false }));
+      updateLastAssistant((m) => ({
+        ...m, content, provenance, performance, forwardProof, streaming: false,
+      }));
 
     } catch (e) {
 
