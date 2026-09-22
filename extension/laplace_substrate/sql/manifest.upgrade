@@ -319,6 +319,7 @@ functions/ingest/drop_apply_batch_merge_attestations.sql.in
 functions/consensus/consensus_walk_edges.sql.in
 functions/consensus/consensus_neighbors_directed.sql.in
 functions/consensus/consensus_neighbors_undirected.sql.in
+functions/consensus/entity_has_type.sql.in
 functions/consensus/foundry_crawl_neighbors.sql.in
 functions/highway/relation_highway.sql.in
 functions/converse/relation_bands.sql.in
