@@ -1,5 +1,4 @@
 using System.Text;
-using Laplace.Engine.Core;
 using Laplace.Decomposers.Abstractions;
 using Xunit;
 
@@ -14,10 +13,8 @@ namespace Laplace.Decomposers.Atomic2020.Tests;
 /// </summary>
 public sealed class Atomic2020NoneTailTests
 {
-    private static Hash128 Split => Hash128.OfCanonical("atomic/split/test");
-
     private static bool Extract(string line, out RelationTripleRecord record)
-        => Atomic2020Decomposer.TryExtract(Encoding.UTF8.GetBytes(line), Split, out record);
+        => Atomic2020Decomposer.TryExtract(Encoding.UTF8.GetBytes(line), "test", out record);
 
     [Fact]
     public void None_Tail_Carries_A_Null_Object_So_The_Spine_Folds_A_Refute()
