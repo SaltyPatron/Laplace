@@ -404,7 +404,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             elif path.startswith("app/Laplace.Migrations"):
                 components.add("database")
                 db_suites.update(("db-health", "managed-db"))
-                delivery_actions.update(("database", "reconcile"))
+                delivery_actions.add("database")
                 invalidate(("db-health", "managed-db"), path)
 
             if (
