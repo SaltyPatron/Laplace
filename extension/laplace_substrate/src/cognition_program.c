@@ -10,6 +10,7 @@
 
 #include "laplace/core/hash128.h"
 #include "laplace/core/relation_law.h"
+#include "laplace/core/attestation_engine.h"
 
 #include "cognition_program.h"
 #include "prompt_intent.h"
@@ -619,6 +620,61 @@ record_semantic_channel(LaplaceCognitionProgram *program,
     }
 }
 
+/*
+ * Default conversation obligations are semantic-content coordinates, not every
+ * surface/function-word occurrence. The whole prompt/parse/binding field still
+ * participates in COUPLE/ORIENT and in the program fingerprint; this function
+ * only says which current occurrences an ordinary semantic act must actually
+ * ground before completion.
+ *
+ * Source-declared task/invocation contracts do not use this reduction: their
+ * explicit operand obligations retain the existing stricter whole-prompt law.
+ * With no supported aligned parse, return NULL and preserve the conservative
+ * all-semantic-occurrence requirement.
+ */
+static bool
+program_content_upos(const hash128_t *upos)
+{
+    static const char *const content_tags[] = {
+        "NOUN", "PROPN", "VERB", "ADJ", "ADV", "NUM", "INTJ"
+    };
+    for (size_t i = 0; i < sizeof(content_tags) / sizeof(content_tags[0]); ++i)
+    {
+        hash128_t id;
+        if (laplace_pos_resolve_entity(
+                content_tags[i], LAPLACE_POS_TAGSET_UPOS, &id) == 0 &&
+            hash128_eq(upos, &id))
+            return true;
+    }
+    return false;
+}
+
+static Bitmapset *
+program_content_origins(const LaplacePromptIntent *intent, int prompt_origin_count)
+{
+    Bitmapset *required = NULL;
+    bool supported = false;
+
+    if (!intent || !intent->structure)
+        return NULL;
+    for (int p = 0; p < intent->structure->count; ++p)
+    {
+        const LaplacePromptParse *parse = intent->structure->parses[p];
+        if (!parse || !parse->supported || !parse->aligned)
+            continue;
+        supported = true;
+        for (size_t t = 0; t < parse->decoded.token_count; ++t)
+        {
+            int origin = parse->token_origins[t];
+            if (origin < 0 || origin >= prompt_origin_count)
+                continue;
+            if (program_content_upos(&parse->decoded.tokens[t].upos_id))
+                required = bms_add_member(required, origin);
+        }
+    }
+    return supported && required ? required : NULL;
+}
+
 LaplaceCognitionProgram *
 laplace_cognition_program_create(const LaplacePromptInput *input,
                                  int prompt_origin_count,
@@ -640,6 +696,7 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     const uint8_t *tiers;
     size_t tree_nodes;
     Bitmapset *eligible = NULL;
+    Bitmapset *content_required = NULL;
     Bitmapset *compiled_required = NULL;
 
     if (!input || !input->tree || !input->context || !input->nodes ||
@@ -673,6 +730,13 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
             eligible = bms_add_member(eligible, i);
     }
 
+    /* For ordinary, uncontracted conversation, grammar distinguishes the
+     * semantic content coordinates from determiners/auxiliaries/punctuation.
+     * Every parse and binding still shapes the program; only obligation
+     * closure is narrowed. Declared operations retain their exact contract. */
+    if (operation_count == 0)
+        content_required = program_content_origins(intent, prompt_origin_count);
+
     /* An explicit whole-root contract binds exact input occurrences. Lexical
      * naming paths never assign request roles or erase other obligations. */
     for (int i = 0; i < operation_count; ++i)
@@ -694,9 +758,13 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     program->explicit_invocation = intent && intent->explicit_invocation;
     if (program->explicit_invocation) program->active_context = intent->active_context;
     program->disposition = LAPLACE_COGNITION_OPEN;
-    /* The whole-root obligation closes only after every declared input has an
-     * actual selected result from the called operation. */
-    program->required = bms_add_members(bms_copy(eligible), compiled_required);
+    /* A declared task keeps the existing whole-prompt + exact-input closure.
+     * Ordinary conversation instead requires the supported parse's semantic
+     * content occurrences. The exact whole observation still controls coupling,
+     * orientation and the program fingerprint. */
+    program->required = operation_count == 0 && content_required
+        ? bms_copy(content_required)
+        : bms_add_members(bms_copy(eligible), compiled_required);
     program->semantic_origins = semantic_origin_index(
         owner, prompt_origin_count + initial_channel_count + 1);
     program->invocation_results = semantic_origin_index(owner, initial_channel_count + 1);
@@ -805,6 +873,7 @@ laplace_cognition_program_create(const LaplacePromptInput *input,
     MemoryContextSwitchTo(previous);
 
     bms_free(compiled_required);
+    bms_free(content_required);
     bms_free(eligible);
     if (node_value_count > 0)
     {
