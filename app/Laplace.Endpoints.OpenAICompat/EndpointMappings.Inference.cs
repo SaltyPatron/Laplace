@@ -592,7 +592,10 @@ internal static class InferenceEndpoints
             return null;
 
         var events = rows
-            .Where(static row => row.Event is "route" or "emit")
+            .Where(static row => row.Event is
+                "resolve" or "couple" or "orient" or
+                "route" or "propose" or "scan" or "compose" or
+                "steer" or "select" or "emit" or "realize")
             .Select(static row => new ForwardTraceStep(
                 Step: row.Step,
                 EntityIdHex: row.EntityIdHex,
@@ -620,7 +623,36 @@ internal static class InferenceEndpoints
                 DeclaredResult: row.DeclaredResult,
                 Event: row.Event,
                 RoutingRound: row.RoutingRound))
-            .ToArray();
+            .ToList();
+
+        if (responseWitnessed)
+            events.Add(new ForwardTraceStep(
+                Step: terminal.Step,
+                EntityIdHex: string.Empty,
+                Entity: string.Empty,
+                StrideUsed: 0,
+                RootIdHex: terminal.RootIdHex,
+                CandidateCount: terminal.CandidateCount,
+                OrderedContextCount: terminal.OrderedContextCount,
+                ProposalChannelCount: terminal.ProposalChannelCount,
+                ExactChannelCount: terminal.ExactChannelCount,
+                SequenceOccurrences: 0,
+                CoveredOccurrences: 0,
+                RelationFamilies: 0,
+                OpposedOccurrences: 0,
+                SupportAnchorIdHex: null,
+                SupportAnchor: null,
+                SupportRelationIdHex: null,
+                SupportRelation: null,
+                SupportOutbound: null,
+                SupportRating: null,
+                SupportRd: null,
+                SupportWitnesses: null,
+                SupportSources: 0,
+                SupportContexts: 0,
+                DeclaredResult: false,
+                Event: "witness",
+                RoutingRound: terminal.RoutingRound));
 
         return new ForwardPassProof(
             Session: sessionKey,
@@ -636,7 +668,7 @@ internal static class InferenceEndpoints
             RemainingRequired: terminal.RemainingRequired,
             OutputCount: terminal.OutputCount,
             PriorDiscourseIds: terminal.PriorDiscourseIds ?? Array.Empty<string>(),
-            Events: events);
+            Events: events.ToArray());
     }
 
     private static ChatPerformance BuildPerformance(
