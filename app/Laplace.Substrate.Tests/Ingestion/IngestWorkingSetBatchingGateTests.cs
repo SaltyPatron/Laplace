@@ -37,7 +37,7 @@ public sealed class IngestWorkingSetBatchingGateTests
     }
 
     [Fact]
-    public void EntityAdmission_SeparatesComposedContentFromGovernedIdentity()
+    public void EntityAdmission_TracksEveryUnplacedEntity()
     {
         var source = Hash128.Blake3("admission-test-source"u8);
         var word = Hash128.Blake3("missing-placement"u8);
@@ -51,13 +51,13 @@ public sealed class IngestWorkingSetBatchingGateTests
             .AddEntity(pos, EntityTier.Word, EntityTypeRegistry.Pos, source)
             .Build());
 
-        var pending = Assert.Single(tracker.SnapshotPendingContent());
-        Assert.Equal(word, pending.Id);
-        Assert.Equal(1, tracker.GovernedWithoutPhysicalityCount);
-        Assert.True(EntityIdentityPolicy.RequiresPhysicality(EntityTypeRegistry.Word));
-        Assert.False(EntityIdentityPolicy.RequiresPhysicality(EntityTypeRegistry.Pos));
-        Assert.False(EntityIdentityPolicy.RequiresPhysicality(EntityTypeRegistry.Ordinal));
+        var pending = tracker.SnapshotPendingContent().Select(static item => item.Id).ToHashSet();
+        Assert.Equal(2, pending.Count);
+        Assert.Contains(word, pending);
+        Assert.Contains(pos, pending);
+        Assert.Equal(0, tracker.GovernedWithoutPhysicalityCount);
     }
+
     [Fact]
     public void FileBackedApply_CoalescesTinyFilesBySourceUntilCapacity()
     {

@@ -23,15 +23,6 @@ public sealed class VerbNetDecomposer
     private static readonly Hash128 ClassTypeId = EntityTypeRegistry.VerbNetClass;
 
     public override int LayerOrder => 2;
-
-    public override IReadOnlyList<Hash128> RequiredPhysicalityTypeIds { get; } =
-    [
-        EntityTypeRegistry.VerbNetClass,
-        EntityTypeRegistry.VerbNetMember,
-        EntityTypeRegistry.VerbNetRole,
-        EntityTypeRegistry.VerbNetPredicate,
-        EntityTypeRegistry.PropBankRoleset,
-    ];
     protected override double SourceTrust => TC.AcademicCurated;
     protected override string BatchLabelPrefix => "verbnet";
 

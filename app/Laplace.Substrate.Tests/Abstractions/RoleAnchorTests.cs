@@ -39,7 +39,6 @@ public sealed class RoleAnchorTests
         Assert.Equal(EntityTypeRegistry.PropBankRole, entity.TypeId);
         PhysicalityRow physicality = Assert.Single(change.Physicalities, p => p.EntityId == role);
         Assert.Equal(PhysicalityType.ParseStructure, physicality.Type);
-        Assert.True(EntityIdentityPolicy.RequiresPhysicality(entity.TypeId));
         Assert.Contains(change.Attestations, a =>
             a.SubjectId == role
             && a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")

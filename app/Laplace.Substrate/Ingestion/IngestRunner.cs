@@ -633,10 +633,7 @@ public sealed class IngestRunner
         attestationsInserted = counters.AttestationsInserted;
         totalRoundTrips = counters.RoundTrips;
 
-        bool enforceEntityAdmission = options.DecomposerOptions.MaxInputUnits <= 0
-            && counters.UnitsFailed == 0
-            && failures.Count == 0;
-        int governedWithoutPhysicality = ValidateEntityAdmission(counters, log, enforceEntityAdmission);
+        ReportStagedEntityAdmission(counters, log);
 
         long filesTotalForMarker = inventory?.FileCount ?? 0;
         bool filesComplete = filesTotalForMarker <= 0
@@ -696,7 +693,7 @@ public sealed class IngestRunner
             FilesDone: counters.FilesDone,
             InputUnitsDone: counters.InputUnitsDone,
             InputUnitsTotal: inventory?.EffectiveTotalInputUnits ?? 0,
-            GovernedIdentitiesWithoutPhysicality: governedWithoutPhysicality,
+            GovernedIdentitiesWithoutPhysicality: 0,
             BootstrapEntitiesInserted: counters.BootstrapEntitiesInserted,
             BootstrapPhysicalitiesInserted: counters.BootstrapPhysicalitiesInserted,
             BootstrapAttestationsInserted: counters.BootstrapAttestationsInserted,
@@ -1217,35 +1214,28 @@ public sealed class IngestRunner
         return null;
     }
 
-    private static int ValidateEntityAdmission(
+    private static void ReportStagedEntityAdmission(
         RunCounters counters,
-        ILogger log,
-        bool enforce)
+        ILogger log)
     {
         var pending = counters.EntityAdmission.SnapshotPendingContent();
         if (pending.Length == 0)
         {
             log.LogInformation(
-                "INGEST_IDENTITY_ADMISSION source={Source} unplaced=0 status=ok",
+                "INGEST_IDENTITY_ADMISSION source={Source} staged_unpaired=0 status=ok",
                 counters.SourceName);
-            return 0;
+            return;
         }
 
-        string examples = string.Join(", ", pending.Take(8).Select(static e =>
-            $"{e.Id}:{e.TypeId}@{e.UnitName}"));
-        if (!enforce)
-        {
-            log.LogWarning(
-                "INGEST_IDENTITY_ADMISSION source={Source} unplaced={Unplaced} "
-                + "status=partial detail={Examples}",
-                counters.SourceName, pending.Length, examples);
-            return 0;
-        }
-        throw new InvalidOperationException(
-            $"entity admission failed for {counters.SourceName}: {pending.Length} entity "
-            + "identity/identities were emitted without physicality in the complete source stream; "
-            + "existing database state cannot make incomplete recipe output lawful. "
-            + $"First: {examples}");
+        // The stream is diagnostic: a source may reuse an entity whose physicality
+        // was committed by an earlier source/run. Durable source closure below is
+        // the authority and blocks completion when an identity is truly unplaced.
+        string examples = string.Join(", ", pending.Take(8).Select(static item =>
+            $"{item.Id}:{item.TypeId}@{item.UnitName}"));
+        log.LogWarning(
+            "INGEST_IDENTITY_ADMISSION source={Source} staged_unpaired={Unplaced} "
+            + "status=diagnostic detail={Examples}",
+            counters.SourceName, pending.Length, examples);
     }
 
     private static IngestInventory ApplyInputCap(IngestInventory inv, long cap) =>

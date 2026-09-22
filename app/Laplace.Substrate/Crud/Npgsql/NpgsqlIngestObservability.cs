@@ -489,7 +489,7 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
                 });
 
         ReportThroughputVerdict(sourceName);
-        WarnIfPlacementsExceedEntities(sourceName, result);
+        ReportEntityPhysicalityInsertDelta(sourceName, result);
         ReleaseLivenessLock();
     }
 
@@ -550,73 +550,18 @@ public sealed class NpgsqlIngestObservability : IIngestObservability
     }
 
     /// <summary>
-    /// EVERY PLACEMENT NEEDS AN ENTITY, and this row already held the proof.
-    ///
-    /// physicalities.entity_id has no foreign key — only NOT NULL and an
-    /// octet_length CHECK — so a run may write a placement for an entity it never
-    /// declares and nothing objects. The two counts sat in this very UPDATE, one
-    /// column apart, and were never compared.
-    ///
-    /// MEASURED 2026-08-12: 899,179 physicalities in the substrate referencing an
-    /// entity id with no entity row, all type=Content, all composed (avg 30
-    /// constituents), and participating in ZERO attestations — inert placements
-    /// pointing at nothing. The journal had recorded the split per run all along:
-    /// SemLinkDecomposer 7,060 entities against 11,626 physicalities (+4,566),
-    /// OMWDecomposer 5,111,969 against 6,006,582 (+894,613). Those two sum to
-    /// exactly 899,179. FrameNet, MapNet and WordFrameNet came out balanced.
-    ///
-    /// Warn rather than throw: the run's rows are already committed by the time
-    /// this executes, so failing here would report a completed ingest as failed
-    /// and tell the operator nothing they can act on. The point is that the next
-    /// occurrence is loud on the first run instead of found by hand-joining two
-    /// tables months later. GH #1027.
-    ///
-    /// A surplus of ENTITIES is reported too (INGEST_ENTITY_SURPLUS), with the
-    /// one benign reading named in the message: entities COPY before
-    /// physicalities, so a run interrupted between the two phases legitimately
-    /// shows one. Any other cause is entities minted outside the compose DAG
-    /// with no coordinate. GH #1038.
+    /// Per-run insert counts are operational telemetry, not a closure proof: an
+    /// entity or physicality may already exist globally and therefore insert zero
+    /// rows in this run. The runner's committed source-closure check is authoritative.
     /// </summary>
-    private void WarnIfPlacementsExceedEntities(string sourceName, IngestRunResult result)
+    private void ReportEntityPhysicalityInsertDelta(string sourceName, IngestRunResult result)
     {
         long delta = result.PhysicalitiesInserted - result.EntitiesInserted;
         if (delta == 0) return;
-
-        // Console.Error, matching INGEST_RUN_JOURNAL_WRITE_FAILED above: this class
-        // takes no logger, and ingest logs are scraped for these tokens.
-        if (delta > 0)
-        {
-            Console.Error.WriteLine(
-                $"INGEST_PLACEMENT_SURPLUS source={sourceName} run={_runId} "
-                + $"entities={result.EntitiesInserted} physicalities={result.PhysicalitiesInserted} "
-                + $"surplus={delta} — this run inserted {delta} more placement(s) than entities. "
-                + "That can be legitimate (placements added to entities declared by an earlier "
-                + "run), but physicalities.entity_id has no FK, so any placement whose entity was "
-                + "never declared is dangling and invisible to the database. See GH #1027.");
-            return;
-        }
-
-        long entitySurplus = -delta;
-        long unexplained = Math.Max(
-            0, entitySurplus - result.GovernedIdentitiesWithoutPhysicality);
-        if (unexplained == 0)
-        {
-            Console.Error.WriteLine(
-                $"INGEST_GOVERNED_IDENTITY_DELTA source={sourceName} run={_runId} "
-                + $"entities={result.EntitiesInserted} physicalities={result.PhysicalitiesInserted} "
-                + $"delta={entitySurplus} governed_nonphysical={result.GovernedIdentitiesWithoutPhysicality} "
-                + "unexplained=0 — non-content identities were admitted by explicit entity type; "
-                + "content/composition placement was validated separately.");
-            return;
-        }
-
         Console.Error.WriteLine(
-            $"INGEST_ENTITY_SURPLUS source={sourceName} run={_runId} "
+            $"INGEST_ENTITY_PHYSICALITY_INSERT_DELTA source={sourceName} run={_runId} "
             + $"entities={result.EntitiesInserted} physicalities={result.PhysicalitiesInserted} "
-            + $"surplus={entitySurplus} governed_nonphysical={result.GovernedIdentitiesWithoutPhysicality} "
-            + $"unexplained={unexplained} — the run-level admission gate should have rejected "
-            + "unplaced content; inspect interrupted COPY state or an unclassified identity type. "
-            + "See GH #1038.");
+            + $"delta={delta} diagnostic_only=1");
     }
 
     public void OnRunFailed(string sourceName, string status, string error)

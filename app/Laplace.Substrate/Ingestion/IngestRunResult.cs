@@ -24,9 +24,8 @@ public sealed record IngestRunResult(
     // journal. The result is the authoritative handoff from the runner to LapSight.
     long InputUnitsDone = 0,
     long InputUnitsTotal = 0,
-    // Managed structural identities deliberately admitted without content geometry.
-    // Kept separate from the entity/physicality delta: POS, ordinals and source keys
-    // are not off-DAG content merely because they are substrate entities.
+    // Retired compatibility field. Entity identity has no physicality opt-out;
+    // generic committed source closure is authoritative. Always zero.
     int GovernedIdentitiesWithoutPhysicality = 0,
     // Initialization rows are included in the totals above, but split out so LapSight
     // can distinguish fixed vocabulary/bootstrap overhead from input amplification.

@@ -115,7 +115,6 @@ public sealed class WiktionarySenseIdentityTests
             Assert.Single(change.Entities, e => e.Id == riverSense).TypeId);
         Assert.Contains(change.Physicalities, p => p.EntityId == financeSense);
         Assert.Contains(change.Physicalities, p => p.EntityId == riverSense);
-        Assert.True(EntityIdentityPolicy.RequiresPhysicality(EntityTypeRegistry.WiktionarySense));
         Assert.Contains(memberships, a => a.ObjectId == financeSense);
         Assert.Contains(memberships, a => a.ObjectId == riverSense);
         Assert.Contains(change.Attestations,

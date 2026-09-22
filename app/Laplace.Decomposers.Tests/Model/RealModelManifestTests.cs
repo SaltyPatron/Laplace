@@ -74,7 +74,6 @@ public class RealModelManifestTests
         var change = builder.Build();
         var placed = change.Physicalities.Select(p => p.EntityId).ToHashSet();
         var pending = change.Entities
-            .Where(e => EntityIdentityPolicy.RequiresPhysicality(e.TypeId))
             .Where(e => !placed.Contains(e.Id))
             .Select(e => e.Id)
             .Distinct()

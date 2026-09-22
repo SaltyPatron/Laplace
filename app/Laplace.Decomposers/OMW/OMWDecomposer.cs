@@ -19,12 +19,6 @@ public sealed class OMWDecomposer : DecomposerMultiFile<OmwIngestRecord, OMWSour
     public static readonly Hash128 TrustClass = OMWSource.TrustClass;
 
     public override int LayerOrder => 3;
-
-    public override IReadOnlyList<Hash128> RequiredPhysicalityTypeIds { get; } =
-    [
-        EntityTypeRegistry.WordNetSense,
-    ];
-
     protected override double SourceTrust => TC.AcademicCurated;
 
     internal static readonly ConcurrentDictionary<string, byte> LanguageNames = new(StringComparer.Ordinal);

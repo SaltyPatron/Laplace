@@ -40,14 +40,6 @@ public sealed class WordNetDecomposer : DecomposerMultiPhase<WordNetSource, Full
 
 
     public override int LayerOrder => 2;
-
-    public override IReadOnlyList<Hash128> RequiredPhysicalityTypeIds { get; } =
-    [
-        EntityTypeRegistry.WordNetSynset,
-        EntityTypeRegistry.WordNetSense,
-        EntityTypeRegistry.SourceReference,
-    ];
-
     private static readonly ConcurrentDictionary<string, byte> _vocabularyNames = new(StringComparer.Ordinal);
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _vocabularyNames.Keys.ToArray();
 

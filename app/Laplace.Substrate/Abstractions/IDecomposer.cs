@@ -50,11 +50,4 @@ public interface IDecomposer : IAsyncDisposable
     /// it must come from the same source manifest that Initialize registers.</summary>
     IReadOnlyList<string> DeclaredRelations => Array.Empty<string>();
 
-    /// <summary>
-    /// Semantic/entity interpretations emitted by this source that are required to resolve
-    /// to at least one durable physicality. The runner verifies this against committed state
-    /// before accepting a completion marker and uses it to invalidate stale pre-contract
-    /// source deposits rather than silently reusing them.
-    /// </summary>
-    IReadOnlyList<Hash128> RequiredPhysicalityTypeIds => Array.Empty<Hash128>();
 }
