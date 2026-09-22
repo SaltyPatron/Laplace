@@ -129,6 +129,7 @@ case "${1:-}" in
     # completeness has one owner in payload-sync.sh; deploy must not carry a
     # second, drifting garbage-collection implementation.
     laplace_prune_managed_backups "$BACKUP_ROOT"
+    sudo -n "$HELPER" prune-releases
     laplace_prune_unreferenced_releases "$APP_DIR"
     mkdir -p "$ROOT/build" "$BACKUP_ROOT"
     backup="$(mktemp -d "$BACKUP_ROOT/managed.XXXXXX")"
