@@ -14,6 +14,14 @@ export interface RelationBand {
   consensus_rows: number;
 }
 
+export interface HighwayPopulationStatus {
+  registry_ready: boolean;
+  historical_population_complete: boolean;
+  completed_at?: string | null;
+  pending_pairs: number;
+  pending_refreshes: number;
+}
+
 export interface QueryRow {
   reply: string;
   eff_mu?: number | null;
