@@ -6,12 +6,9 @@ CREATE OR REPLACE FUNCTION ops.entity_count(p_type bytea)
     RETURNS bigint
     LANGUAGE sql STABLE
 BEGIN ATOMIC
-    -- Type is an observed interpretation, not the singular compatibility type
-    -- on the canonical identity row. Count each content id once for the requested
-    -- type even when several source/tier observations witness it.
-    SELECT count(DISTINCT i.entity_id)
-    FROM laplace.entity_interpretations i
-    WHERE i.type_id = p_type;
+    SELECT count(*)::bigint
+    FROM laplace.entities e
+    WHERE e.type_id = p_type;
 END;
 
 CREATE OR REPLACE FUNCTION ops.entity_counts_by_types(p_types bytea[])
@@ -22,10 +19,10 @@ BEGIN ATOMIC
         SELECT DISTINCT t.type_id
         FROM unnest(COALESCE(p_types, '{}'::bytea[])) AS t(type_id)
     ), counted AS (
-        SELECT i.type_id, count(DISTINCT i.entity_id)::bigint AS entities
-        FROM laplace.entity_interpretations i
-        WHERE i.type_id = ANY(COALESCE(p_types, '{}'::bytea[]))
-        GROUP BY i.type_id
+        SELECT e.type_id, count(*)::bigint AS entities
+        FROM laplace.entities e
+        WHERE e.type_id = ANY(COALESCE(p_types, '{}'::bytea[]))
+        GROUP BY e.type_id
     )
     SELECT r.type_id, COALESCE(c.entities, 0)::bigint
     FROM requested r
