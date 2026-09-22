@@ -332,8 +332,11 @@ internal static class PredicateMatrixIngest
                 builder);
             if (predicateId is null) return default;
 
-            Hash128 languageId = LanguageReference.Resolve(record.Language);
-            Hash128 posId = PosReference.Resolve(record.Pos, PosReference.PosTagset.WordNet);
+            Hash128 languageId = LanguageReference.Emit(
+                builder, record.Language, _sourceId, _trust);
+            Hash128 posId = PosReference.Emit(
+                builder, record.Pos, PosReference.PosTagset.WordNet,
+                _sourceId, _trust);
             AddRelation(predicateId.Value, PredicateMatrixSource.HasLanguageTypeId, languageId, builder);
             AddRelation(predicateId.Value, PredicateMatrixSource.HasPosTypeId, posId, builder);
 
