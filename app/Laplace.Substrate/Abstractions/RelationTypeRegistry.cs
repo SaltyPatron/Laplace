@@ -191,7 +191,9 @@ public static class RelationTypeRegistry
     {
         var all = new List<RelationTypeResolution>(AllCanonical());
         foreach (var k in all)
-            builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
+            CanonicalNamedIdentity.Declare(
+                builder, k.Id, EntityTier.Word,
+                BootstrapIntentBuilder.RelationTypeMetaTypeId, k.Canonical, sourceId);
 
         // The parent relation is governed by the native manifest. It is structural
         // vocabulary, not testimony by each vendor that happens to initialize. The
