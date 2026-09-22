@@ -15,6 +15,7 @@ import { streamChat } from '../api/sse';
 import { asNum, provenanceFromMetadata, useAppStore, type ChatPerformance, type ProvenanceEntry } from '../store';
 
 import { ReceiptPanel } from './ReceiptPanel';
+import { ForwardPassProofPanel } from './ForwardPassProofPanel';
 
 import styles from './ChatView.module.css';
 
@@ -192,6 +193,10 @@ export function ChatView() {
               generatedTokensPerSecond: asOptionalNum(p.generated_tokens_per_second),
             },
           }));
+        }
+
+        if (lap?.forward_proof) {
+          updateLastAssistant((m) => ({ ...m, forwardProof: lap.forward_proof }));
         }
 
         if (delta?.content !== undefined || lap) {
@@ -456,6 +461,10 @@ export function ChatView() {
 
                 </Muted>
 
+              )}
+
+              {m.forwardProof && (
+                <ForwardPassProofPanel proof={m.forwardProof} />
               )}
 
               {m.performance && (
