@@ -9,7 +9,7 @@ on:
         type: choice
         required: true
         default: verify
-        options: [verify, reconcile, chess-lab, deploy]
+        options: [verify, forward-chat-proof, reconcile, chess-lab, deploy]
       full_clean:
         description: "Deploy only: discard candidate build outputs before rebuilding"
         type: boolean
@@ -37,3 +37,53 @@ jobs:
       force_codegen: ${{ inputs.force_codegen }}
       serial_tests: ${{ inputs.serial_tests }}
     secrets: inherit
+
+  forward-chat-proof:
+    if: inputs.operation == 'forward-chat-proof'
+    needs: operator
+    name: Capture forward chat lifecycle receipt
+    runs-on: [self-hosted, laplace]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      PGHOST: /var/run/postgresql
+      PGPORT: 5432
+      PGUSER: laplace_admin
+      PGDATABASE: laplace
+      LAPLACE_API_BASE: ${{ vars.LAPLACE_DEPLOYED_API_BASE || 'http://127.0.0.1:5187' }}
+      LAPLACE_PROOF_TENANT: ci
+      LAPLACE_API_KEY: ${{ secrets.LAPLACE_API_KEY }}
+      LAPLACE_QUOTE_ID: ${{ secrets.LAPLACE_QUOTE_ID }}
+    steps:
+      - name: Checkout exact proof revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Execute ordinary two-turn chat and capture substrate/native lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/forward-chat-lifecycle
+          python3 scripts/verify-forward-chat-lifecycle.py \
+            --receipt artifacts/forward-chat-lifecycle/receipt.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/forward-chat-lifecycle/receipt.json").read_text())
+          assert r["disposition"] == "verified", r.get("error")
+          print("session:", r["session"])
+          print("session_id:", r["session_id"])
+          print("proof_fingerprint_sha256:", r["proof_fingerprint_sha256"])
+          print("turns_after_first:", len(r["after_first"]["turns"]))
+          print("turns_after_second:", len(r["after_second"]["turns"]))
+          print("turn_two_native_events:", len(r["turn_two_native_receipt"]["execution"]))
+          PY
+      - name: Publish lifecycle proof receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forward-chat-lifecycle-${{ github.run_id }}
+          path: artifacts/forward-chat-lifecycle/
+          if-no-files-found: error
+          retention-days: 90
