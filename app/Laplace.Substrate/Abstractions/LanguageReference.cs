@@ -83,6 +83,38 @@ public static class LanguageReference
         return IdByCode.GetOrAdd(code, static c => LanguageEntityId.FromIso639_3(c));
     }
 
+    public static Hash128 Emit(
+        SubstrateChangeBuilder builder,
+        string? input,
+        Hash128 sourceId,
+        double sourceTrust)
+    {
+        string? code = ResolveCode(input);
+        return EmitResolvedCode(builder, code, sourceId, sourceTrust);
+    }
+
+    public static Hash128 EmitResolvedCode(
+        SubstrateChangeBuilder builder,
+        string? code,
+        Hash128 sourceId,
+        double sourceTrust)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        if (code is null)
+        {
+            Interlocked.Increment(ref _resolveMisses);
+            code = "und";
+        }
+        string normalized = code.Trim().ToLowerInvariant();
+        Hash128 id = ContentEmitter.Emit(builder, normalized, sourceId)
+            ?? throw new InvalidOperationException(
+                $"language code could not be admitted as content: {normalized}");
+        CategoryAnchor.AttestCategory(
+            builder, id, EntityTypeRegistry.Language, sourceId, sourceTrust);
+        IdByCode.TryAdd(normalized, id);
+        return id;
+    }
+
     private static Dictionary<string, string> Build(string dir)
     {
         if (!Directory.Exists(dir))
