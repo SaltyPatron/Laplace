@@ -39,6 +39,12 @@ internal static class QueryEndpoints
         .Produces<RelationBandsResponse>()
         .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/v1/query/highway-status", async (ISubstrateClient substrate, CancellationToken ct) =>
+            Results.Json(await substrate.HighwayPopulationAsync(ct)))
+        .WithTags("query")
+        .Produces<HighwayPopulationStatus>()
+        .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
         // The home preview has a fixed server-owned shape. Query-string inputs
         // cannot expand its band set or page size.
         app.MapGet("/v1/query/leaders/home", async (ISubstrateClient substrate, CancellationToken ct) =>
