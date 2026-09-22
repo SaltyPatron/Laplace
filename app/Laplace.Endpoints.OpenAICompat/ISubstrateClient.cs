@@ -104,6 +104,10 @@ internal interface ISubstrateClient
         string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
         throw new NotSupportedException("This adapter does not implement session-aware forward-turn streaming.");
 
+    IAsyncEnumerable<ForwardObservedEvent> ForwardTurnObservedStreamAsync(
+        string prompt, byte[]? session, ConverseOptions options, CancellationToken ct) =>
+        throw new NotSupportedException("This adapter does not expose receipts from the ordinary forward turn.");
+
     Task<IReadOnlyList<CompletionRow>> CompletionsAsync(string prompt, int limit, CancellationToken ct);
 
     Task<SubstrateAuditReport> AuditReportAsync(
