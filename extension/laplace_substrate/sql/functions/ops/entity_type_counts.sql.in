@@ -1,15 +1,13 @@
--- BEGIN ATOMIC: GH #764/#1008. Full scan — serving path should use
--- entity_type_counts_approx. A content id can lawfully have several observed
--- tier/type interpretations; count each id once per (type,tier) projection.
+-- BEGIN ATOMIC: full scan over canonical entity structural floors.
 DROP FUNCTION IF EXISTS laplace.entity_type_counts();
 CREATE OR REPLACE FUNCTION ops.entity_type_counts()
     RETURNS TABLE(type text, type_id bytea, tier smallint, entities bigint)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH raw AS MATERIALIZED (
-      SELECT i.type_id, i.tier, count(DISTINCT i.entity_id)::bigint AS entities
-      FROM @extschema@.entity_interpretations i
-      GROUP BY i.type_id, i.tier
+      SELECT e.type_id, e.tier, count(*)::bigint AS entities
+      FROM @extschema@.entities e
+      GROUP BY e.type_id, e.tier
     ), numbered AS MATERIALIZED (
       SELECT r.*, row_number() OVER (ORDER BY entities DESC, type_id, tier) AS rn FROM raw r
     ), batch AS MATERIALIZED (
