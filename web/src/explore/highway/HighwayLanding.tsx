@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Muted } from '@ui';
-import { relationBands } from '../../query/api';
-import type { RelationBand } from '../../query/types';
+import { highwayPopulation, relationBands } from '../../query/api';
+import type { HighwayPopulationStatus, RelationBand } from '../../query/types';
 import { HIGHWAY_LAYERS } from './layers';
 import styles from './Highway.module.css';
 
@@ -17,12 +17,17 @@ import styles from './Highway.module.css';
  */
 export function HighwayLanding() {
   const [bands, setBands] = useState<RelationBand[] | null>(null);
+  const [highway, setHighway] = useState<HighwayPopulationStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [highwayError, setHighwayError] = useState<string | null>(null);
 
   useEffect(() => {
     relationBands()
       .then((b) => setBands(b.bands ?? []))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    highwayPopulation()
+      .then(setHighway)
+      .catch((e) => setHighwayError(e instanceof Error ? e.message : String(e)));
   }, []);
 
   const rowsFor = (band?: number) =>
@@ -38,6 +43,24 @@ export function HighwayLanding() {
           carries signal rather than merely existing.
         </p>
       </header>
+
+      <section className={styles.population} aria-label="Highway accelerator population">
+        <strong>Stored entity-mask accelerator</strong>
+        {highwayError ? (
+          <span className={styles.err}>status unavailable — {highwayError}</span>
+        ) : highway == null ? (
+          <span className={styles.empty}>reading live population state…</span>
+        ) : (
+          <>
+            <span className={highway.historical_population_complete ? styles.live : styles.missing}>
+              {highway.historical_population_complete ? 'historical population complete' : 'historical population incomplete'}
+            </span>
+            <span>{highway.registry_ready ? 'registry ready' : 'registry unavailable'}</span>
+            <span>{highway.pending_pairs.toLocaleString()} pending pairs</span>
+            <span>{highway.pending_refreshes.toLocaleString()} pending refreshes</span>
+          </>
+        )}
+      </section>
 
       {error && <Muted className={styles.err}>Band volumes unavailable — {error}</Muted>}
 
@@ -98,9 +121,10 @@ export function HighwayLanding() {
       </table>
 
       <Muted className={styles.foot}>
-        Volume is the salience band carrying each layer&rsquo;s edges, read live from
-        <code> /v1/query/bands</code>. Divisions marked &ldquo;not readable yet&rdquo; have no API
-        read — they say so rather than showing an empty roster.
+        Band volume and stored Highway-mask population are separate live facts.
+        <code> /v1/query/bands</code> reports consensus by salience band;
+        <code> /v1/query/highway-status</code> reports whether the entity-mask accelerator is actually complete.
+        Divisions marked &ldquo;not readable yet&rdquo; have no API read.
       </Muted>
     </div>
   );
