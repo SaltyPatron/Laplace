@@ -22,6 +22,7 @@ const loadLab = () => import('./chess/lab/LabView');
 const loadChess = () => import('./chess/db/ChessDbView');
 const loadExplore = () => import('./explore/ExploreView');
 const loadProof = () => import('./explore/proof/StorageProofView');
+const loadForwardProof = () => import('./forward/ForwardProofView');
 const loadUnicode = () => import('./explore/unicode/UnicodeGlomeView');
 const loadOperator = () => import('./admin/AdminView');
 const loadData = () => import('./data/DataView');
@@ -37,12 +38,13 @@ const LabView = lazy(() => loadLab().then((m) => ({ default: m.LabView })));
 const ChessDbView = lazy(() => loadChess().then((m) => ({ default: m.ChessDbView })));
 const ExploreView = lazy(() => loadExplore().then((m) => ({ default: m.ExploreView })));
 const StorageProofView = lazy(() => loadProof().then((m) => ({ default: m.StorageProofView })));
+const ForwardProofView = lazy(() => loadForwardProof().then((m) => ({ default: m.ForwardProofView })));
 const UnicodeGlomeView = lazy(() => loadUnicode().then((m) => ({ default: m.UnicodeGlomeView })));
 const AdminView = lazy(() => loadOperator().then((m) => ({ default: m.AdminView })));
 const DataView = lazy(() => loadData().then((m) => ({ default: m.DataView })));
 
 const WORKSPACE_PREFETCH: Partial<Record<string, () => Promise<unknown>>> = {
-  chat: loadChat, query: loadQuery, explore: loadExplore, proof: loadProof, unicode: loadUnicode,
+  chat: loadChat, query: loadQuery, explore: loadExplore, proof: loadProof, forwardProof: loadForwardProof, unicode: loadUnicode,
   data: loadData, chess: loadChess, play: loadPlay, lab: loadLab, billing: loadBilling,
   settings: loadSettings, operator: loadOperator,
 };
@@ -53,6 +55,7 @@ const TABS: { id: string; label: string; path: string }[] = [
   { id: 'query', label: 'Query', path: '/query' },
   { id: 'explore', label: 'Explore', path: '/explore' },
   { id: 'proof', label: 'Storage Proof', path: '/proof' },
+  { id: 'forwardProof', label: 'Forward Pass Proof', path: '/forward-proof' },
   { id: 'unicode', label: 'Unicode Glome', path: '/unicode' },
   { id: 'data', label: 'Data', path: '/data' },
   { id: 'chess', label: 'Chess', path: '/chess' },
@@ -102,6 +105,7 @@ function Shell() {
           <Route path="/topic/:ref" element={<TopicView />} />
           <Route path="/explore/*" element={<ExploreView />} />
           <Route path="/proof" element={<StorageProofView />} />
+          <Route path="/forward-proof" element={<ForwardProofView />} />
           <Route path="/unicode" element={<UnicodeGlomeView />} />
           <Route path="/chess/*" element={<ChessDbView />} />
           <Route path="/play" element={<ChessView />} />
