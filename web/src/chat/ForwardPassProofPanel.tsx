@@ -13,7 +13,7 @@ function fp1e9(value: number | undefined): string {
 
 export function ForwardPassProofPanel({ proof }: { proof: ForwardPassProof }) {
   return (
-    <details className={styles.proof}>
+    <details className={styles.proof} data-forward-pass-proof="ordinary-chat-turn">
       <summary>
         Forward pass proof
         <span>{proof.completion ? 'complete' : proof.disposition}</span>

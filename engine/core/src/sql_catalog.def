@@ -204,7 +204,7 @@ SQL_QUERY("conversation.resolve_ref_with_label", "text",
     "FROM resolved AS r WHERE r.id IS NOT NULL")
 SQL_QUERY("conversation.forward_turn", "text,bytea,int4,int4,float8,int4",
     "SELECT step,entity,stride_used FROM converse.forward_turn($1,$2,$3,$4,$5,$6) ORDER BY step")
-SQL_QUERY("conversation.forward_turn_observed", "text,bytea,int4,int4,float8,int4",
+/* The ordinary Chat turn consumes this catalog entry directly. It is not the\n * /v1/explain/report replay/inspection lane. */\nSQL_QUERY("conversation.forward_turn_observed", "text,bytea,int4,int4,float8,int4",
     "SELECT t.step,t.event,t.routing_round,"
     "CASE WHEN t.entity IS NULL THEN NULL ELSE encode(t.entity,'hex') END,"
     "CASE WHEN t.entity IS NULL THEN NULL ELSE converse.label_or_hex(t.entity) END,"
