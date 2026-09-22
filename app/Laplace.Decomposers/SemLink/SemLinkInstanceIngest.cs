@@ -235,9 +235,12 @@ internal static class SemLinkInstanceIngest
 
     private static Hash128? EmitReference(SubstrateChangeBuilder builder, string key)
     {
-        Hash128 id = Hash128.OfCanonical($"semlink/reference/{Hex(key)}/v1");
-        builder.AddEntity(
-            id, EntityTier.Word, EntityTypeRegistry.SourceReference, SemLinkDecomposer.Source);
+        if (string.IsNullOrEmpty(key)) return null;
+        Hash128? id = ContentEmitter.Emit(builder, key, SemLinkDecomposer.Source);
+        if (id is { } value)
+            CategoryAnchor.AttestCategory(
+                builder, value, EntityTypeRegistry.SourceReference,
+                SemLinkDecomposer.Source, TC.AcademicCurated);
         return id;
     }
 
