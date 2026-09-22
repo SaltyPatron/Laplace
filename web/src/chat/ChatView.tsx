@@ -195,8 +195,9 @@ export function ChatView() {
           }));
         }
 
-        if (lap?.forward_proof) {
-          updateLastAssistant((m) => ({ ...m, forwardProof: lap.forward_proof }));
+        const forwardProof = lap?.forward_proof;
+        if (forwardProof) {
+          updateLastAssistant((m) => ({ ...m, forwardProof }));
         }
 
         if (delta?.content !== undefined || lap) {
