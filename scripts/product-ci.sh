@@ -294,22 +294,20 @@ csv_selected() {
 }
 
 force_full_carry_forward_impact() {
-  # A missing application receipt says nothing about the independently receipted
-  # native prefix, database, or SPA. Recover only the managed application
-  # surface and preserve those independent components byte-for-byte.
-  export LAPLACE_BUILD_COMPONENTS="managed"
-  export LAPLACE_MANAGED_BUILD_PROJECTS="app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj,app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj,app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj,app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj,app/Laplace.Migrations/Laplace.Migrations.csproj"
-  export LAPLACE_DB_SUITES=""
-  export LAPLACE_MANAGED_DB_TEST_PROJECTS=""
-  export LAPLACE_MANAGED_TEST_FILTER=""
-  export LAPLACE_NATIVE_TEST_FILTER=""
-  export LAPLACE_MANAGED_DB_TEST_FILTER=""
-  export LAPLACE_MANAGED_LIVE_TEST_FILTER=""
-  export LAPLACE_NATIVE_DB_TEST_FILTER=""
-  export LAPLACE_LIVE_SUITES=""
-  export LAPLACE_MANAGED_LIVE_TEST_PROJECTS=""
-  export LAPLACE_DELIVERY_ACTIONS="publish"
-  export LAPLACE_PUBLISH_SCOPE="full"
+  # The application receipt owns only the managed application publication.
+  # Missing app provenance must not erase already-selected web/native work or
+  # manufacture database work from an unrelated stale receipt.
+  append_csv_env LAPLACE_BUILD_COMPONENTS managed
+  for project in \
+    app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj \
+    app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj \
+    app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj \
+    app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj \
+    app/Laplace.Migrations/Laplace.Migrations.csproj; do
+    append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS "$project"
+  done
+  append_csv_env LAPLACE_DELIVERY_ACTIONS publish
+  merge_publish_scope full
 }
 
 append_csv_env() {
@@ -321,6 +319,33 @@ append_csv_env() {
     printf -v "$name" '%s' "$current"
     export "$name"
   }
+}
+
+merge_publish_scope() {
+  local incoming="$1" current="${LAPLACE_PUBLISH_SCOPE:-}"
+  [[ -n "$incoming" ]] || return 0
+  if [[ -z "$current" ]]; then
+    export LAPLACE_PUBLISH_SCOPE="$incoming"
+    return 0
+  fi
+  [[ "$current" != "$incoming" ]] || return 0
+  case "$current:$incoming" in
+    full:*|all:*|*:full|*:all|uci:*|*:uci)
+      export LAPLACE_PUBLISH_SCOPE=full
+      ;;
+    api:web|web:api|api-web:*|*:api-web)
+      export LAPLACE_PUBLISH_SCOPE=api-web
+      ;;
+    *)
+      export LAPLACE_PUBLISH_SCOPE=full
+      ;;
+  esac
+}
+
+ensure_revision_available() {
+  local revision="$1"
+  git cat-file -e "$revision^{commit}" 2>/dev/null \
+    || git fetch --no-tags --depth=1 origin "$revision"
 }
 
 force_web_carry_forward_impact() {
@@ -381,109 +406,188 @@ PY
   fi
 }
 
+carry_forward_installed_native_impact() {
+  local target="$1" prefix="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+  local receipt="$prefix/lib/.laplace-source-revision"
+  local deployed plan flags needs_native needs_database needs_reconcile needs_publish
+
+  deployed="$(cat "$receipt" 2>/dev/null || true)"
+  if [[ ! "$deployed" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "::warning::native prefix revision receipt is unavailable; carrying only native install forward"
+    append_csv_env LAPLACE_BUILD_COMPONENTS native
+    append_csv_env LAPLACE_DELIVERY_ACTIONS install
+    return 0
+  fi
+  [[ "$deployed" != "$target" ]] || return 0
+  ensure_revision_available "$deployed" || {
+    echo "::warning::could not resolve installed native revision $deployed; carrying native install forward"
+    append_csv_env LAPLACE_BUILD_COMPONENTS native
+    append_csv_env LAPLACE_DELIVERY_ACTIONS install
+    return 0
+  }
+
+  plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")" || return 1
+  flags="$(CARRY_NATIVE_PLAN_JSON="$plan" python3 - <<'PY'
+import json, os
+p=json.loads(os.environ["CARRY_NATIVE_PLAN_JSON"])
+native="native" in p.get("build_components", [])
+a=set(p.get("delivery_actions", []))
+print("1" if native else "0", "1" if native and "database" in a else "0",
+      "1" if native and "reconcile" in a else "0", "1" if native and "publish" in a else "0")
+PY
+)"
+  read -r needs_native needs_database needs_reconcile needs_publish <<< "$flags"
+  [[ "$needs_native" == 1 ]] || return 0
+
+  append_csv_env LAPLACE_BUILD_COMPONENTS native
+  append_csv_env LAPLACE_DELIVERY_ACTIONS install
+  [[ "$needs_database" != 1 ]] || append_csv_env LAPLACE_DELIVERY_ACTIONS database
+  [[ "$needs_reconcile" != 1 ]] || append_csv_env LAPLACE_DELIVERY_ACTIONS reconcile
+  if [[ "$needs_publish" == 1 ]]; then
+    append_csv_env LAPLACE_DELIVERY_ACTIONS publish
+    merge_publish_scope full
+  fi
+  echo "::notice::native carry-forward uses native receipt $deployed, not the application receipt"
+}
+
+carry_forward_installed_ingest_runtime_impact() {
+  local target="$1" prefix="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+  local receipt="$prefix/ingest/current/.laplace-source-revision"
+  local deployed plan needs_ingest
+
+  deployed="$(cat "$receipt" 2>/dev/null || true)"
+  if [[ ! "$deployed" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "::warning::ingest runtime revision receipt is unavailable; carrying its bounded managed owner forward"
+    append_csv_env LAPLACE_BUILD_COMPONENTS managed
+    append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Cli/Laplace.Cli.csproj
+    append_csv_env LAPLACE_DELIVERY_ACTIONS ingest-runtime
+    return 0
+  fi
+  [[ "$deployed" != "$target" ]] || return 0
+  ensure_revision_available "$deployed" || return 1
+  plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")" || return 1
+  needs_ingest="$(CARRY_INGEST_PLAN_JSON="$plan" python3 - <<'PY'
+import json, os
+p=json.loads(os.environ["CARRY_INGEST_PLAN_JSON"])
+print("1" if "ingest-runtime" in p.get("delivery_actions", []) else "0")
+PY
+)"
+  [[ "$needs_ingest" == 1 ]] || return 0
+  append_csv_env LAPLACE_BUILD_COMPONENTS managed
+  append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Cli/Laplace.Cli.csproj
+  append_csv_env LAPLACE_DELIVERY_ACTIONS ingest-runtime
+  echo "::notice::ingest-runtime carry-forward uses its immutable runtime receipt $deployed"
+}
+
+carry_forward_installed_extension_impact() {
+  local prefix="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
+  local manifest="$prefix/share/postgresql/18/extension/laplace_execution_module.txt"
+  local rc=0
+
+  python3 scripts/check-installed-extension-current.py \
+    --execution-module-file "$manifest" >/dev/null 2>&1 || rc=$?
+  if (( rc == 0 )); then
+    return 0
+  fi
+
+  # rc=1 is known stale; rc=2 means provenance cannot be established. Both
+  # require only extension SQL/database convergence, never an invented native rebuild.
+  append_csv_env LAPLACE_DELIVERY_ACTIONS extension-sql
+  append_csv_env LAPLACE_DELIVERY_ACTIONS database
+  echo "::notice::extension SQL carry-forward selected from installed extension parity (status=$rc)"
+}
+
+carry_forward_installed_application_impact() {
+  local target="$1" app_dir="${LAPLACE_APP_DIR:-/opt/laplace/app}"
+  local receipt="$app_dir/.laplace-source-revision"
+  local deployed plan
+
+  deployed="$(cat "$receipt" 2>/dev/null || true)"
+  if [[ ! "$deployed" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "::warning::installed application revision receipt is unavailable; carrying only managed application publication forward"
+    force_full_carry_forward_impact
+    return 0
+  fi
+  [[ "$deployed" != "$target" ]] || return 0
+  ensure_revision_available "$deployed" || {
+    echo "::warning::could not resolve installed application revision $deployed; carrying managed application publication forward"
+    force_full_carry_forward_impact
+    return 0
+  }
+  plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")" || {
+    force_full_carry_forward_impact
+    return 0
+  }
+
+  eval "$(CARRY_APP_PLAN_JSON="$plan" python3 - <<'PY'
+import json, os, shlex
+p=json.loads(os.environ["CARRY_APP_PLAN_JSON"])
+if "managed" not in p.get("build_components", []):
+    raise SystemExit(0)
+
+def merge_csv(name, incoming, order=None):
+    current=os.environ.get(name, "")
+    if current == "all" or "all" in incoming:
+        value="all"
+    else:
+        values={x for x in current.split(",") if x}
+        values.update(incoming)
+        if order:
+            value=",".join(x for x in order if x in values)
+        else:
+            value=",".join(sorted(values))
+    print(f"export {name}={shlex.quote(value)}")
+
+merge_csv("LAPLACE_BUILD_COMPONENTS", ["managed"], ("native","managed","web"))
+field=("managed_delivery_build_projects"
+       if os.environ.get("LAPLACE_STAGE","") in {"mainline","release-delivery","release-candidate","release-activation"}
+       else "managed_build_projects")
+merge_csv("LAPLACE_MANAGED_BUILD_PROJECTS", p.get(field, []))
+
+actions=[]
+if "publish" in p.get("delivery_actions", []):
+    actions.append("publish")
+changed=p.get("changed_files", [])
+if any(x.startswith("db/") or x.startswith("app/Laplace.Migrations/") for x in changed):
+    actions.extend(["database","reconcile"])
+merge_csv("LAPLACE_DELIVERY_ACTIONS", actions,
+          ("install","extension-sql","ingest-runtime","database","reconcile","publish","live"))
+
+scope=os.environ.get("LAPLACE_PUBLISH_SCOPE","")
+incoming=p.get("publish_scope","api")
+if "publish" in actions:
+    if not scope:
+        scope=incoming
+    elif scope != incoming:
+        if "full" in (scope,incoming) or "all" in (scope,incoming) or "uci" in (scope,incoming):
+            scope="full"
+        elif "api-web" in (scope,incoming) or {scope,incoming}=={"api","web"}:
+            scope="api-web"
+        else:
+            scope="full"
+    print(f"export LAPLACE_PUBLISH_SCOPE={shlex.quote(scope)}")
+PY
+)"
+  echo "::notice::application carry-forward uses application receipt $deployed and cannot manufacture native/extension/web work"
+}
+
 carry_forward_undelivered_impact() {
-  # Automatic main qualification/delivery must converge from the ACTUALLY installed
-  # revision, not only from this commit's parent. This is independent of whether
-  # newer pushes are allowed to supersede an older candidate: a failed predecessor
-  # is just as capable of leaving product work undelivered as a superseded one.
-  #
-  # Mainline is serialized, so recomputing installed->target here is both exact and
-  # bounded to the real missing closure. Manual/operator stages deliberately keep
-  # the scope they were dispatched with.
+  # Each installed component owns its own clock. A failed API publication must
+  # not make a completed native/extension/database mutation look undelivered.
   case "${LAPLACE_STAGE:-}" in
     mainline|release-qualification|release-delivery) ;;
     *) return 0 ;;
   esac
 
-  local target deployed receipt plan
+  local target
   target="$(git rev-parse HEAD)"
   carry_forward_installed_web_impact "$target"
-  receipt="${LAPLACE_APP_DIR:-/opt/laplace/app}/.laplace-source-revision"
-  deployed="$(cat "$receipt" 2>/dev/null || true)"
+  carry_forward_installed_native_impact "$target"
+  carry_forward_installed_ingest_runtime_impact "$target"
+  carry_forward_installed_extension_impact
+  carry_forward_installed_application_impact "$target"
 
-  if [[ ! "$deployed" =~ ^[0-9a-fA-F]{40}$ ]]; then
-    echo "::warning::installed application revision receipt is unavailable; carrying the managed application closure forward without rebuilding native, database, or web components"
-    force_full_carry_forward_impact
-    return 0
-  fi
-  if [[ "$deployed" == "$target" ]]; then
-    return 0
-  fi
-
-  if ! git cat-file -e "$deployed^{commit}" 2>/dev/null; then
-    if ! git fetch --no-tags --depth=1 origin "$deployed"; then
-      echo "::warning::could not resolve deployed revision $deployed; carrying full build/delivery closure forward without widening dev tests"
-      force_full_carry_forward_impact
-      return 0
-    fi
-  fi
-
-  if ! plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")"; then
-    echo "::warning::could not compute deployed-to-target impact; carrying full build/delivery closure forward without widening dev tests"
-    force_full_carry_forward_impact
-    return 0
-  fi
-
-  eval "$(CARRY_PLAN_JSON="$plan" python3 - <<'PY'
-import json
-import os
-import shlex
-
-plan = json.loads(os.environ["CARRY_PLAN_JSON"])
-
-# Carry-forward converges what is still UNDELIVERED, not every historical
-# qualification suite between the installed application receipt and HEAD.
-# Mainline qualification is owned by the direct impact plan; replaying old
-# dev/DB/live matrices here makes a failed publication turn into a growing test
-# gate and can prevent the already-built product from ever being published.
-orders = {
-    "LAPLACE_BUILD_COMPONENTS": ("build_components", ("native", "managed", "web")),
-    "LAPLACE_DELIVERY_ACTIONS": ("delivery_actions", ("install", "extension-sql", "ingest-runtime", "database", "reconcile", "publish", "live")),
-}
-
-for env_name, (field, order) in orders.items():
-    current = os.environ.get(env_name, "")
-    if current == "all":
-        value = "all"
-    else:
-        selected = {item for item in current.split(",") if item}
-        selected.update(plan.get(field, []))
-        value = ",".join(item for item in order if item in selected)
-    print(f"export {env_name}={shlex.quote(value)}")
-
-stage = os.environ.get("LAPLACE_STAGE", "")
-project_fields = {
-    "LAPLACE_MANAGED_BUILD_PROJECTS": (
-        "managed_delivery_build_projects"
-        if stage in {"mainline", "release-delivery", "release-candidate", "release-activation"}
-        else "managed_build_projects"
-    ),
-}
-for env_name, field in project_fields.items():
-    current = os.environ.get(env_name, "")
-    incoming = plan.get(field, [])
-    if current == "all" or "all" in incoming:
-        value = "all"
-    else:
-        selected = {item for item in current.split(",") if item}
-        selected.update(incoming)
-        value = ",".join(sorted(selected))
-    print(f"export {env_name}={shlex.quote(value)}")
-
-# Qualification selectors and filters remain exactly those of the direct
-# revision impact. Carry-forward is a delivery-reconciliation operation.
-
-scope = os.environ.get("LAPLACE_PUBLISH_SCOPE", "api")
-incoming_scope = plan.get("publish_scope", "api")
-if scope == "full" or incoming_scope == "full":
-    scope = "full"
-elif {scope, incoming_scope} == {"api", "web"} or "api-web" in (scope, incoming_scope):
-    scope = "api-web"
-print(f"export LAPLACE_PUBLISH_SCOPE={shlex.quote(scope)}")
-PY
-)"
-
-  echo "::notice::carried forward undelivered impact from $deployed to $target: build=$LAPLACE_BUILD_COMPONENTS managed_build=$LAPLACE_MANAGED_BUILD_PROJECTS managed_tests=$LAPLACE_MANAGED_TEST_PROJECTS dev=$LAPLACE_DEV_SUITES db=$LAPLACE_DB_SUITES delivery=$LAPLACE_DELIVERY_ACTIONS publish=$LAPLACE_PUBLISH_SCOPE live=$LAPLACE_LIVE_SUITES"
+  echo "::notice::component carry-forward target=$target build=${LAPLACE_BUILD_COMPONENTS:-} managed_build=${LAPLACE_MANAGED_BUILD_PROJECTS:-} delivery=${LAPLACE_DELIVERY_ACTIONS:-} publish=${LAPLACE_PUBLISH_SCOPE:-}"
 }
 
 run_db_tests() {

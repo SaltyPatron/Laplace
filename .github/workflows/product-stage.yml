@@ -209,7 +209,7 @@ jobs:
       # stage unique per invocation so it cannot cross-cancel an unrelated test.
       # Delivery remains non-preemptibly serialized at the installed-host boundary.
       group: ${{ inputs.skip_if_superseded && (inputs.stage == 'mainline' || inputs.stage == 'release-delivery') && 'laplace-main-delivery' || format('laplace-product-stage-{0}-{1}', inputs.stage, github.run_id) }}
-      cancel-in-progress: false
+      cancel-in-progress: ${{ inputs.skip_if_superseded && inputs.stage == 'mainline' && contains(github.event.head_commit.message, '[supersede-stuck-mainline]') }}
     runs-on: [self-hosted, laplace]
     timeout-minutes: 420
     env:
