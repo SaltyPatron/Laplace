@@ -54,12 +54,12 @@ export function ForwardPassProofPanel({ proof }: { proof: ForwardPassProof }) {
         </section>
 
         <section>
-          <h4>Native routing / selection receipts</h4>
+          <h4>Exact producing lifecycle receipts</h4>
           <div className={styles.tableWrap}>
             <table>
               <thead>
                 <tr>
-                  <th>step</th><th>event</th><th>entity</th><th>candidates</th>
+                  <th>step</th><th>stage</th><th>entity</th><th>candidates</th>
                   <th>context</th><th>Q→K</th><th>exact</th><th>trajectory</th>
                   <th>support</th><th>standing</th>
                 </tr>
