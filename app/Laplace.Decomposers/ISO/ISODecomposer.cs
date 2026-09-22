@@ -90,19 +90,21 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
 
     internal void StageIsoTabRecord(IsoRecord rec, SubstrateChangeBuilder b)
     {
-        var langId = LanguageEntityId.FromIso639_3(rec.Id);
-        b.AddEntity(langId, EntityTier.Word, LanguageTypeId, Source);
-        _codeNames.Add(VocabularyNames.LanguageIso639_3(rec.Id));
+        var langId = LanguageReference.EmitResolvedCode(
+            b, rec.Id, Source, TC.StandardsDerived);
+        _codeNames.Add(rec.Id.ToLowerInvariant());
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             langId, RelTypeIsLanguageCode, null, Source, null,
             RelationTypeRank.StandardsStructural * TC.StandardsDerived));
 
         if (rec.Part1.Length > 0)
         {
-            var iso1Name = $"iso639-1:{rec.Part1}";
-            _codeNames.Add(iso1Name);
-            var iso1Id = Hash128.OfCanonical(iso1Name);
-            b.AddEntity(iso1Id, EntityTier.Word, Iso639CodeTypeId, Source);
+            string iso1 = rec.Part1.Trim().ToLowerInvariant();
+            _codeNames.Add(iso1);
+            var iso1Id = ContentEmitter.Emit(b, iso1, Source)
+                ?? throw new InvalidOperationException($"ISO 639-1 code could not be composed: {iso1}");
+            CategoryAnchor.AttestCategory(
+                b, iso1Id, Iso639CodeTypeId, Source, TC.StandardsDerived);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 langId, RelTypeHasIso6391Code, iso1Id, Source, null,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
@@ -111,26 +113,28 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         foreach (var (p2, rel) in new[] { (rec.Part2b, "HAS_ISO639_2B_CODE"), (rec.Part2t, "HAS_ISO639_2T_CODE") })
         {
             if (p2.Length == 0) continue;
-            var iso2Name = $"iso639-2:{p2}";
-            _codeNames.Add(iso2Name);
-            var iso2Id = Hash128.OfCanonical(iso2Name);
-            b.AddEntity(iso2Id, EntityTier.Word, Iso639CodeTypeId, Source);
+            string iso2 = p2.Trim().ToLowerInvariant();
+            _codeNames.Add(iso2);
+            var iso2Id = ContentEmitter.Emit(b, iso2, Source)
+                ?? throw new InvalidOperationException($"ISO 639-2 code could not be composed: {iso2}");
+            CategoryAnchor.AttestCategory(
+                b, iso2Id, Iso639CodeTypeId, Source, TC.StandardsDerived);
             b.AddAttestation(NativeAttestation.Categorical(
                 langId, rel, iso2Id, Source, TC.StandardsDerived));
         }
         if (rec.Scope.Length > 0)
         {
-            var scopeId = Hash128.OfCanonical($"substrate/iso639/scope/{rec.Scope}/v1");
-            _codeNames.Add($"substrate/iso639/scope/{rec.Scope}/v1");
-            b.AddEntity(scopeId, EntityTier.Word, Iso639CodeTypeId, Source);
+            string scope = rec.Scope.Trim();
+            var scopeId = ContentEmitter.Emit(b, scope, Source)
+                ?? throw new InvalidOperationException($"language scope could not be composed: {scope}");
             b.AddAttestation(NativeAttestation.Categorical(
                 langId, "HAS_LANGUAGE_SCOPE", scopeId, Source, TC.StandardsDerived));
         }
         if (rec.Type.Length > 0)
         {
-            var typeId = Hash128.OfCanonical($"substrate/iso639/type/{rec.Type}/v1");
-            _codeNames.Add($"substrate/iso639/type/{rec.Type}/v1");
-            b.AddEntity(typeId, EntityTier.Word, Iso639CodeTypeId, Source);
+            string languageType = rec.Type.Trim();
+            var typeId = ContentEmitter.Emit(b, languageType, Source)
+                ?? throw new InvalidOperationException($"language type could not be composed: {languageType}");
             b.AddAttestation(NativeAttestation.Categorical(
                 langId, LanguageTypeRelation, typeId, Source, TC.StandardsDerived));
         }
@@ -145,11 +149,13 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
 
     internal void StageScriptRecord(ScriptRecord rec, SubstrateChangeBuilder b)
     {
-        var langId = LanguageEntityId.FromIso639_3(rec.LanguageCode);
-        b.AddEntity(langId, EntityTier.Word, LanguageTypeId, Source);
-        _codeNames.Add($"unicode/script/{rec.ScriptName}/v1");
-        var scriptId = LanguageGraph.ScriptEntityId(rec.ScriptName);
-        b.AddEntity(scriptId, EntityTier.Word, UcdClassifierTypeId, Source);
+        var langId = LanguageReference.EmitResolvedCode(
+            b, rec.LanguageCode, Source, TC.StandardsDerived);
+        string script = rec.ScriptName.Trim();
+        var scriptId = ContentEmitter.Emit(b, script, Source)
+            ?? throw new InvalidOperationException($"script name could not be composed: {script}");
+        CategoryAnchor.AttestCategory(
+            b, scriptId, UcdClassifierTypeId, Source, TC.StandardsDerived);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             langId, RelTypeUsesScript, scriptId, Source, null,
             RelationTypeRank.StandardsStructural * TC.StandardsDerived));
@@ -157,11 +163,13 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
 
     internal void StageVariantRecord((string Subtag, string ParentCode) rec, SubstrateChangeBuilder b)
     {
-        var variantId = LanguageGraph.VariantEntityId(rec.Subtag);
-        _codeNames.Add($"substrate/iso639/variant/{rec.Subtag.ToLowerInvariant()}/v1");
-        b.AddEntity(variantId, EntityTier.Word, LanguageVariantTypeId, Source);
-        var parentId = LanguageEntityId.FromIso639_3(rec.ParentCode);
-        b.AddEntity(parentId, EntityTier.Word, LanguageTypeId, Source);
+        string subtag = rec.Subtag.Trim();
+        var variantId = ContentEmitter.Emit(b, subtag, Source)
+            ?? throw new InvalidOperationException($"language variant could not be composed: {subtag}");
+        CategoryAnchor.AttestCategory(
+            b, variantId, LanguageVariantTypeId, Source, TC.StandardsDerived);
+        var parentId = LanguageReference.EmitResolvedCode(
+            b, rec.ParentCode, Source, TC.StandardsDerived);
         b.AddAttestation(NativeAttestation.Categorical(
             variantId, "HAS_VARIANT_OF", parentId, Source, TC.StandardsDerived));
     }
