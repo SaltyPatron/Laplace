@@ -141,7 +141,8 @@ internal static class InferenceEndpoints
                     await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                         completionId, "chat.completion.chunk", created, payload.Model,
                         [new ChatChunkChoice(0, new ChatDelta(Role: "assistant"), null)]), ct);
-                    await using (var stream = substrate.ForwardTurnStreamAsync(
+                    var forwardEvents = new List<ForwardObservedEvent>();
+                    await using (var stream = substrate.ForwardTurnObservedStreamAsync(
                         prompt, scope.SessionId.ToBytes(), converseOptions, ct).GetAsyncEnumerator(ct))
                     {
                         while (true)
@@ -151,23 +152,31 @@ internal static class InferenceEndpoints
                             try { hasNext = await stream.MoveNextAsync(); }
                             finally { substrateClock.Stop(); }
                             if (!hasNext) break;
-                            var token = stream.Current;
+                            var observed = stream.Current;
+                            forwardEvents.Add(observed);
+                            if (!string.Equals(observed.Event, "emit", StringComparison.Ordinal)
+                                || observed.Surface is null)
+                                continue;
                             firstResultMs ??= totalClock.Elapsed.TotalMilliseconds;
                             ++emitted;
-                            text.Append(token.Token);
+                            text.Append(observed.Surface);
                             await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                                 completionId, "chat.completion.chunk", created, payload.Model,
-                                [new ChatChunkChoice(0, new ChatDelta(Content: token.Token), null)],
-                                Laplace: new ChunkProvenance(OrdUsed: (int)token.Mu)), ct);
+                                [new ChatChunkChoice(0, new ChatDelta(Content: observed.Surface), null)],
+                                Laplace: new ChunkProvenance(OrdUsed: observed.StrideUsed)), ct);
                         }
                     }
                     await turnWitness.RecordResponseAsync(scope.Tenant, scope.UserKey, scope.SessionId,
                         prompt, text.ToString(), occurrenceKey, ct);
+                    var forwardProof = BuildForwardProof(
+                        forwardEvents, scope.SessionKey, occurrenceKey, responseWitnessed: true);
                     await ServerSentEvents.WriteJsonAsync(response, new ChatCompletionChunk(
                         completionId, "chat.completion.chunk", created, payload.Model,
                         [new ChatChunkChoice(0, new ChatDelta(), "stop")],
-                        Laplace: new ChunkProvenance(Performance: BuildPerformance(
-                            text.ToString(), substrateClock, totalClock, firstResultMs, emitted))), ct);
+                        Laplace: new ChunkProvenance(
+                            Performance: BuildPerformance(
+                                text.ToString(), substrateClock, totalClock, firstResultMs, emitted),
+                            ForwardProof: forwardProof)), ct);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -509,6 +518,65 @@ internal static class InferenceEndpoints
             ? null
             : EndpointJson.ServiceUnavailable(
                 "witness_unavailable", "Turn witness is unavailable; prompt turns cannot be recorded.");
+
+    private static ForwardPassProof? BuildForwardProof(
+        IReadOnlyList<ForwardObservedEvent> rows,
+        string sessionKey,
+        string occurrenceKey,
+        bool responseWitnessed)
+    {
+        var terminal = rows.LastOrDefault(static row =>
+            row.Event is "complete" or "unresolved" or "ambiguous" or "budget_exhausted");
+        if (terminal is null)
+            return null;
+
+        var events = rows
+            .Where(static row => row.Event is "route" or "emit")
+            .Select(static row => new ForwardTraceStep(
+                Step: row.Step,
+                EntityIdHex: row.EntityIdHex,
+                Entity: row.Entity,
+                StrideUsed: row.StrideUsed,
+                RootIdHex: row.RootIdHex,
+                CandidateCount: row.CandidateCount,
+                OrderedContextCount: row.OrderedContextCount,
+                ProposalChannelCount: row.ProposalChannelCount,
+                ExactChannelCount: row.ExactChannelCount,
+                SequenceOccurrences: row.SequenceOccurrences,
+                CoveredOccurrences: row.CoveredOccurrences,
+                RelationFamilies: row.RelationFamilies,
+                OpposedOccurrences: row.OpposedOccurrences,
+                SupportAnchorIdHex: row.SupportAnchorIdHex,
+                SupportAnchor: row.SupportAnchor,
+                SupportRelationIdHex: row.SupportRelationIdHex,
+                SupportRelation: row.SupportRelation,
+                SupportOutbound: row.SupportOutbound,
+                SupportRating: row.SupportRating,
+                SupportRd: row.SupportRd,
+                SupportWitnesses: row.SupportWitnesses,
+                SupportSources: row.SupportSources,
+                SupportContexts: row.SupportContexts,
+                DeclaredResult: row.DeclaredResult,
+                Event: row.Event,
+                RoutingRound: row.RoutingRound))
+            .ToArray();
+
+        return new ForwardPassProof(
+            Session: sessionKey,
+            PromptOccurrenceKey: occurrenceKey,
+            ResponseWitnessed: responseWitnessed,
+            ProgramId: terminal.ProgramIdHex,
+            SemanticActId: terminal.SemanticActIdHex,
+            OutputFingerprint: terminal.OutputFingerprintHex,
+            Completion: terminal.Completion,
+            Disposition: terminal.Disposition ?? terminal.Event,
+            RequiredObligations: terminal.RequiredObligations,
+            SatisfiedObligations: terminal.SatisfiedObligations,
+            RemainingRequired: terminal.RemainingRequired,
+            OutputCount: terminal.OutputCount,
+            PriorDiscourseIds: terminal.PriorDiscourseIds ?? Array.Empty<string>(),
+            Events: events);
+    }
 
     private static ChatPerformance BuildPerformance(
         string output, Stopwatch substrateClock, Stopwatch totalClock,
