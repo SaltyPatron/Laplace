@@ -43,7 +43,7 @@ public static class ResponseContent
         out Hash128 rootId)
     {
         if (!TextEntityBuilder.TryBuildContentWitness(utf8, Source, WitnessWeight,
-                out var entities, out var physicalities, out var attestations, out rootId, out _, out var interpretations))
+                out var entities, out var physicalities, out var attestations, out rootId, out _, out _))
         {
             change = default!;
             rootId = Hash128.Zero;
@@ -55,7 +55,6 @@ public static class ResponseContent
             attestationCapacity: attestations.Length)
             .DeclareSourcePrior(SourceTrust.Response);
         foreach (var e in entities) b.AddEntity(e);
-        foreach (var interpretation in interpretations) b.AddEntityInterpretation(interpretation);
         foreach (var p in physicalities) b.AddPhysicality(p);
         foreach (var a in attestations) b.AddAttestation(a);
         change = b.Build();
