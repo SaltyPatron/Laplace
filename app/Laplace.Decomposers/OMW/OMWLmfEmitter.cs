@@ -69,15 +69,50 @@ internal static class OMWLmfEmitter
         }
     }
 
-    internal static Hash128 Identity(string kind, string lexicon, string rawId) =>
-        SubstrateCanonicalIds.OfVersioned("omw-lmf", kind, lexicon, rawId);
+    internal static Hash128 Identity(string kind, string lexicon, string rawId)
+    {
+        Hash128 kindId = ContentEmitter.RootId(kind)
+            ?? throw new InvalidOperationException($"OMW kind could not be composed: {kind}");
+        Hash128 lexiconId = ContentEmitter.RootId(lexicon)
+            ?? throw new InvalidOperationException($"OMW lexicon could not be composed: {lexicon}");
+        Hash128 rawIdEntity = ContentEmitter.RootId(rawId)
+            ?? throw new InvalidOperationException($"OMW identifier could not be composed: {rawId}");
+        Span<Hash128> constituents = stackalloc Hash128[3]
+        {
+            kindId, lexiconId, rawIdEntity
+        };
+        return Hash128.Merkle(EntityTier.Word, constituents);
+    }
 
     private static Hash128 Declare(
         SubstrateChangeBuilder b, string kind, string lexicon, string rawId, Hash128 typeId)
     {
-        Hash128 id = Identity(kind, lexicon, rawId);
-        b.AddEntity(id, EntityTier.Word, typeId, OMWDecomposer.Source);
-        CategoryAnchor.AttestCategory(b, id, typeId, OMWDecomposer.Source, TC.AcademicCurated);
+        OrderedCompositionComponent kindComponent =
+            ContentEmitter.StageComponent(b, kind, OMWDecomposer.Source)
+            ?? throw new InvalidOperationException($"OMW kind could not be admitted: {kind}");
+        OrderedCompositionComponent lexiconComponent =
+            ContentEmitter.StageComponent(b, lexicon, OMWDecomposer.Source)
+            ?? throw new InvalidOperationException($"OMW lexicon could not be admitted: {lexicon}");
+        OrderedCompositionComponent rawComponent =
+            ContentEmitter.StageComponent(b, rawId, OMWDecomposer.Source)
+            ?? throw new InvalidOperationException($"OMW identifier could not be admitted: {rawId}");
+
+        Span<OrderedCompositionResult> result = stackalloc OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(
+            b.ContentStage,
+            [new OrderedCompositionRequest(
+                [kindComponent, lexiconComponent, rawComponent],
+                typeId, OMWDecomposer.Source, 0)],
+            result);
+
+        Hash128 id = result[0].Id;
+        Hash128 expected = Identity(kind, lexicon, rawId);
+        if (id != expected)
+            throw new InvalidOperationException(
+                $"OMW identity changed during composition: {kind}/{lexicon}/{rawId}");
+
+        CategoryAnchor.AttestCategory(
+            b, id, typeId, OMWDecomposer.Source, TC.AcademicCurated);
         return id;
     }
 
