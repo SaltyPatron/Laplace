@@ -1,5 +1,5 @@
 import { apiGet, apiGetCached, apiPost, type ApiOptions } from '../api/client';
-import type { QueryResult, QueryShape, RelationBand } from './types';
+import type { HighwayPopulationStatus, QueryResult, QueryShape, RelationBand } from './types';
 
 export function queryShapes(opts?: ApiOptions) {
   return apiGetCached<{ shapes: QueryShape[] }>('/v1/query/shapes', 5 * 60_000, opts);
@@ -7,6 +7,10 @@ export function queryShapes(opts?: ApiOptions) {
 
 export function relationBands(opts?: ApiOptions) {
   return apiGetCached<{ bands: RelationBand[] }>('/v1/query/bands', 5 * 60_000, opts);
+}
+
+export function highwayPopulation(opts?: ApiOptions) {
+  return apiGet<HighwayPopulationStatus>('/v1/query/highway-status', opts);
 }
 
 export interface QueryBody {
