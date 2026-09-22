@@ -499,24 +499,64 @@ BEGIN ATOMIC
         FROM emitted e
         CROSS JOIN txt t
     )
-    SELECT e.step, e.event, e.routing_round,
-           e.entity, r.surface, e.stride_used, e.sep_entity,
-           e.root_id, e.candidate_count, e.ordered_context_count,
-           e.proposal_channel_count, e.exact_channel_count,
-           e.sequence_occurrences, e.covered_occurrences,
-           e.relation_families, e.opposed_occurrences,
-           e.support_anchor, e.support_relation, e.support_outbound,
-           e.support_rating, e.support_rd, e.support_witnesses,
-           e.support_sources, e.support_contexts, e.declared_result,
-           e.program_id, e.required_obligations, e.satisfied_obligations,
-           e.remaining_required, e.completion, e.disposition,
-           e.output_fingerprint, e.semantic_act_id, e.output_count,
-           e.prior_discourse
-    FROM execution e
-    LEFT JOIN realized r
-      ON r.step = e.step AND r.routing_round = e.routing_round
-    ORDER BY e.step, e.routing_round,
-             CASE e.event WHEN 'route' THEN 0 WHEN 'emit' THEN 1 ELSE 2 END;
+    SELECT *
+    FROM (
+        SELECT e.step, e.event, e.routing_round,
+               e.entity, r.surface, e.stride_used, e.sep_entity,
+               e.root_id, e.candidate_count, e.ordered_context_count,
+               e.proposal_channel_count, e.exact_channel_count,
+               e.sequence_occurrences, e.covered_occurrences,
+               e.relation_families, e.opposed_occurrences,
+               e.support_anchor, e.support_relation, e.support_outbound,
+               e.support_rating, e.support_rd, e.support_witnesses,
+               e.support_sources, e.support_contexts, e.declared_result,
+               e.program_id, e.required_obligations, e.satisfied_obligations,
+               e.remaining_required, e.completion, e.disposition,
+               e.output_fingerprint, e.semantic_act_id, e.output_count,
+               e.prior_discourse
+        FROM execution e
+        LEFT JOIN realized r
+          ON r.step = e.step AND r.routing_round = e.routing_round
+
+        UNION ALL
+
+        /* REALIZE is part of this same observed turn: it consumes the exact
+         * emitted identities above and the surface below is the one returned to
+         * the HTTP caller. This is not a second generation/forward invocation. */
+        SELECT e.step, 'realize'::text, e.routing_round,
+               e.entity, r.surface, e.stride_used, e.sep_entity,
+               e.root_id, e.candidate_count, e.ordered_context_count,
+               e.proposal_channel_count, e.exact_channel_count,
+               e.sequence_occurrences, e.covered_occurrences,
+               e.relation_families, e.opposed_occurrences,
+               e.support_anchor, e.support_relation, e.support_outbound,
+               e.support_rating, e.support_rd, e.support_witnesses,
+               e.support_sources, e.support_contexts, e.declared_result,
+               e.program_id, e.required_obligations, e.satisfied_obligations,
+               e.remaining_required, e.completion, e.disposition,
+               e.output_fingerprint, e.semantic_act_id, e.output_count,
+               e.prior_discourse
+        FROM execution e
+        JOIN realized r
+          ON e.event = 'emit'
+         AND r.step = e.step
+         AND r.routing_round = e.routing_round
+    ) observed
+    ORDER BY step, routing_round,
+             CASE event
+               WHEN 'resolve' THEN 0
+               WHEN 'couple' THEN 1
+               WHEN 'orient' THEN 2
+               WHEN 'route' THEN 3
+               WHEN 'propose' THEN 4
+               WHEN 'scan' THEN 5
+               WHEN 'compose' THEN 6
+               WHEN 'steer' THEN 7
+               WHEN 'select' THEN 8
+               WHEN 'emit' THEN 9
+               WHEN 'realize' THEN 10
+               ELSE 11
+             END;
 END;
 
 CREATE OR REPLACE FUNCTION generation.walk_text(
