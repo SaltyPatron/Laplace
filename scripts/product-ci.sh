@@ -442,7 +442,9 @@ PY
   append_csv_env LAPLACE_BUILD_COMPONENTS native
   append_csv_env LAPLACE_DELIVERY_ACTIONS install
   [[ "$needs_database" != 1 ]] || append_csv_env LAPLACE_DELIVERY_ACTIONS database
-  [[ "$needs_reconcile" != 1 ]] || append_csv_env LAPLACE_DELIVERY_ACTIONS reconcile
+  if [[ "$needs_reconcile" == 1 ]]; then
+    echo "::notice::installed native diff requires explicit reconciliation; automatic delivery will not run it"
+  fi
   if [[ "$needs_publish" == 1 ]]; then
     append_csv_env LAPLACE_DELIVERY_ACTIONS publish
     merge_publish_scope full
@@ -549,9 +551,9 @@ if "publish" in p.get("delivery_actions", []):
     actions.append("publish")
 changed=p.get("changed_files", [])
 if any(x.startswith("db/") or x.startswith("app/Laplace.Migrations/") for x in changed):
-    actions.extend(["database","reconcile"])
+    actions.append("database")
 merge_csv("LAPLACE_DELIVERY_ACTIONS", actions,
-          ("install","extension-sql","ingest-runtime","database","reconcile","publish","live"))
+          ("install","extension-sql","ingest-runtime","database","publish","live"))
 
 scope=os.environ.get("LAPLACE_PUBLISH_SCOPE","")
 incoming=p.get("publish_scope","api")

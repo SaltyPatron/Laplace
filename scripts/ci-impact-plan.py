@@ -22,8 +22,8 @@ DB_SUITES = ("db-health", "native-db", "managed-db")
 STANDARD_LIVE_SUITES = ("live-floor", "live-api", "managed-live", "generation-eval")
 CHESS_PROVIDER_LIVE_SUITE = "chess-provider-live"
 LIVE_SUITES = (*STANDARD_LIVE_SUITES, CHESS_PROVIDER_LIVE_SUITE)
-FULL_DELIVERY_ACTIONS = ("install", "database", "reconcile", "publish", "live")
-DELIVERY_ACTIONS = ("install", "extension-sql", "ingest-runtime", "database", "reconcile", "publish", "live")
+FULL_DELIVERY_ACTIONS = ("install", "database", "publish", "live")
+DELIVERY_ACTIONS = ("install", "extension-sql", "ingest-runtime", "database", "publish", "live")
 BASE_LIVE_SUITES = ("live-floor", "live-api")
 ALL_DEV_COMPONENTS = ("native", "managed", "uci", "web")
 ALL_COMPONENTS = ("native", "managed", "uci", "web", "database", "deployment")
@@ -228,15 +228,11 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
         matched = False
 
         if path == "scripts/reconcile-highway-masks.sh":
-            # This is a database-maintenance delivery owner, not product source.
-            # Changing its orchestration must not classify as unknown and drag
-            # browser/UCI/all-managed qualification into an otherwise bounded fix.
-            matched = product_change = True
-            publish_required = False
-            components.update(("database", "deployment"))
-            db_suites.add("db-health")
-            delivery_actions.add("reconcile")
-            invalidate(("db-health",), path)
+            # Explicit maintenance tooling is not a main-delivery product input.
+            # Editing this script must never schedule the historical population
+            # repair from an ordinary push/build/deploy.
+            matched = True
+            ignored.append(path)
             continue
 
         if path in (
@@ -293,7 +289,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
             build_components.add("native")
             dev_suites.add("native-dev")
             db_suites.update(("db-health", "native-db"))
-            delivery_actions.update(("install", "database", "reconcile", "publish", "live"))
+            delivery_actions.update(("install", "database", "publish", "live"))
             invalidate(("native-dev",), path)
             invalidate(("db-health", "native-db"), path)
             continue
@@ -317,7 +313,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 )
                 components.add("database")
                 db_suites.update(DB_SUITES)
-                delivery_actions.update(("database", "reconcile"))
+                delivery_actions.add("database")
                 invalidate(DB_SUITES, path)
             if native_family == "core":
                 managed_changed_paths.append(
@@ -483,7 +479,7 @@ def classify_paths(paths: list[str], root: Path | None = None) -> dict:
                 # deployment into a historical consensus scan.
                 delivery_actions.update(("database", "publish", "live"))
             else:
-                delivery_actions.update(("database", "reconcile", "publish", "live"))
+                delivery_actions.update(("database", "publish", "live"))
             invalidate(STANDARD_LIVE_SUITES, path)
 
         if path.startswith("deploy/"):

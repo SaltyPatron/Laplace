@@ -4,10 +4,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-mode="${1:-all}"
+mode="${1:---prepare}"
 case "$mode" in
-  all|--prepare) ;;
-  *) echo "usage: maintain-installed-database.sh [--prepare]" >&2; exit 2 ;;
+  --prepare|--reconcile) ;;
+  *) echo "usage: maintain-installed-database.sh [--prepare|--reconcile]" >&2; exit 2 ;;
 esac
 [[ "$#" -le 1 ]] || { echo "unexpected database maintenance arguments" >&2; exit 2; }
 
@@ -58,7 +58,7 @@ args=()
 [[ "${LAPLACE_FRESH_DB:-}" != 1 ]] || args+=(--fresh-db)
 bash scripts/pipeline.sh "${args[@]}" migrate sync-extension tune-pg tune-laplace perfcache-guc api-env
 
-if [[ "$mode" == all ]]; then
+if [[ "$mode" == --reconcile ]]; then
   bash scripts/reconcile-highway-masks.sh "$database"
 fi
 bash scripts/check-database-health.sh "$database"
