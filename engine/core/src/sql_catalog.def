@@ -16,15 +16,22 @@ SQL_QUERY("identity.entity_interpretations_merge", "bytea[],int2[],bytea[],bytea
     "WHEN NOT MATCHED THEN INSERT(entity_id,tier,type_id,first_observed_by) "
     "VALUES(i.entity_id,i.tier,i.type_id,CASE WHEN i.source_is_null THEN NULL ELSE i.source_id END)")
 SQL_QUERY("identity.entity_summary_update", "bytea[],int2[],bytea[],bytea[],bool[]",
-    "UPDATE laplace.entities e SET tier=LEAST(e.tier,s.tier), "
-    "type_id=CASE WHEN e.type_id<=s.type_id THEN e.type_id ELSE s.type_id END, "
+    "UPDATE laplace.entities e SET "
+    "tier=LEAST(e.tier,s.tier), "
+    "type_id=CASE "
+    "  WHEN s.tier<e.tier THEN s.type_id "
+    "  WHEN s.tier>e.tier THEN e.type_id "
+    "  WHEN e.type_id<=s.type_id THEN e.type_id ELSE s.type_id END, "
     "first_observed_by=CASE WHEN e.first_observed_by IS NULL THEN "
     "CASE WHEN s.source_is_null THEN NULL ELSE s.source_id END "
     "WHEN s.source_is_null OR e.first_observed_by<=s.source_id THEN e.first_observed_by "
     "ELSE s.source_id END FROM unnest($1,$2,$3,$4,$5) "
     "AS s(entity_id,tier,type_id,source_id,source_is_null) WHERE e.id=s.entity_id AND "
     "(e.tier,e.type_id,e.first_observed_by) IS DISTINCT FROM "
-    "(LEAST(e.tier,s.tier),CASE WHEN e.type_id<=s.type_id THEN e.type_id ELSE s.type_id END, "
+    "(LEAST(e.tier,s.tier),CASE "
+    "  WHEN s.tier<e.tier THEN s.type_id "
+    "  WHEN s.tier>e.tier THEN e.type_id "
+    "  WHEN e.type_id<=s.type_id THEN e.type_id ELSE s.type_id END, "
     "CASE WHEN e.first_observed_by IS NULL THEN CASE WHEN s.source_is_null THEN NULL ELSE s.source_id END "
     "WHEN s.source_is_null OR e.first_observed_by<=s.source_id THEN e.first_observed_by ELSE s.source_id END)")
 SQL_QUERY("attestations.witnesses_selected", "bytea[],bytea[],bytea[],bytea[]",
