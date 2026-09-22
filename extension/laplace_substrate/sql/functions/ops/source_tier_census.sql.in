@@ -1,6 +1,4 @@
--- What structural interpretations did this source witness? (GH #813/#1008).
--- first_observed_by and tier live on the interpretation relation; the canonical
--- entity row carries only a deterministic compatibility summary.
+-- Canonical structural floors first observed by this source.
 DROP FUNCTION IF EXISTS laplace.source_tier_census(bytea);
 
 CREATE OR REPLACE FUNCTION ops.source_tier_census(p_source bytea)
@@ -9,9 +7,9 @@ CREATE OR REPLACE FUNCTION ops.source_tier_census(p_source bytea)
     STABLE
     PARALLEL SAFE
 BEGIN ATOMIC
-    SELECT i.tier, count(DISTINCT i.entity_id)::bigint
-    FROM laplace.entity_interpretations i
-    WHERE i.first_observed_by = p_source
-    GROUP BY i.tier
-    ORDER BY i.tier;
+    SELECT e.tier, count(*)::bigint
+    FROM laplace.entities e
+    WHERE e.first_observed_by = p_source
+    GROUP BY e.tier
+    ORDER BY e.tier;
 END;
