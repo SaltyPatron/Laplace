@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ProvenanceLine, PreflightQuoteResponse } from './api/client';
+import type { ForwardPassProof } from './api/forwardProof';
 
 export interface ProvenanceEntry {
   reply: string;
@@ -15,6 +16,7 @@ export interface ChatMessage {
   streaming?: boolean;
   error?: string;
   performance?: ChatPerformance;
+  forwardProof?: ForwardPassProof;
 }
 
 export interface ChatPerformance {
