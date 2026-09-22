@@ -26,10 +26,7 @@ public static partial class NpgsqlSubstrateReads
                 FROM laplace.attestations a
                 JOIN laplace.entities e
                   ON e.id = a.object_id
-                 AND EXISTS (
-                     SELECT 1 FROM laplace.entity_interpretations ei
-                     WHERE ei.entity_id = e.id AND ei.type_id = @file_type
-                 )
+                 AND e.type_id = @file_type
                 WHERE a.subject_id = @source AND a.source_id = @source
                   AND a.object_id = @file AND a.type_id = @type
                   AND a.outcome = @outcome
