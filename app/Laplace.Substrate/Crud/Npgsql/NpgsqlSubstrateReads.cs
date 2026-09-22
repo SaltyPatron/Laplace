@@ -3229,10 +3229,7 @@ public static partial class NpgsqlSubstrateReads
               ON pl.subject_id = e.id
              AND pl.type_id = @plays
              AND pl.source_id = ANY(@sources)
-            WHERE EXISTS (
-                SELECT 1
-                FROM laplace.entity_interpretations i
-                WHERE i.entity_id = e.id AND i.type_id = @event_type)
+            WHERE e.type_id = @event_type
             """,
             p =>
             {
@@ -3276,10 +3273,7 @@ public static partial class NpgsqlSubstrateReads
               ON pl.subject_id = e.id
              AND pl.type_id = @plays
              AND pl.source_id = ANY(@sources)
-            WHERE EXISTS (
-                SELECT 1
-                FROM laplace.entity_interpretations i
-                WHERE i.entity_id = e.id AND i.type_id = @event_type)
+            WHERE e.type_id = @event_type
               AND (octet_length(@after) = 0 OR e.id > @after)
             ORDER BY e.id
             LIMIT @limit
