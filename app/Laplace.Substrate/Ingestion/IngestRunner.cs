@@ -90,35 +90,35 @@ public sealed class IngestRunner
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
 
-        IReadOnlyList<Hash128> requiredPhysicalityTypes = decomposer.RequiredPhysicalityTypeIds;
-        if (requiredPhysicalityTypes.Count > 0)
+        // Physical realization is a substrate invariant, not a per-decomposer list
+        // of entity types. A source recipe/provider may choose HOW an entity is
+        // realized (Content, Set, ParseStructure, Projection, ...), but it cannot
+        // opt the entity out of physicality closure.
+        PhysicalityCoverage existingCoverage = await _reader.PhysicalityCoverageAsync(
+            decomposer.SourceId, ct).ConfigureAwait(false);
+        if (!existingCoverage.Complete)
         {
-            PhysicalityCoverage existingCoverage = await _reader.PhysicalityCoverageAsync(
-                decomposer.SourceId, requiredPhysicalityTypes, ct).ConfigureAwait(false);
-            if (!existingCoverage.Complete)
-            {
-                log.LogWarning(
-                    "INGEST_STALE_PHYSICALITY_CONTRACT source={Source} governed={Governed} placed={Placed} "
-                    + "missing={Missing} action=evict-and-rederive",
-                    decomposer.SourceName,
-                    existingCoverage.GovernedEntities,
-                    existingCoverage.PlacedEntities,
-                    existingCoverage.MissingEntities);
+            log.LogWarning(
+                "INGEST_STALE_PHYSICALITY_CONTRACT source={Source} entities={Entities} placed={Placed} "
+                + "missing={Missing} action=evict-and-rederive",
+                decomposer.SourceName,
+                existingCoverage.GovernedEntities,
+                existingCoverage.PlacedEntities,
+                existingCoverage.MissingEntities);
 
-                await _reader.EvictSourceAsync(
-                    decomposer.SourceId,
-                    relationIds: null,
-                    markerTypeIds: null,
-                    ct).ConfigureAwait(false);
+            await _reader.EvictSourceAsync(
+                decomposer.SourceId,
+                relationIds: null,
+                markerTypeIds: null,
+                ct).ConfigureAwait(false);
 
-                PhysicalityCoverage afterEviction = await _reader.PhysicalityCoverageAsync(
-                    decomposer.SourceId, requiredPhysicalityTypes, ct).ConfigureAwait(false);
-                if (!afterEviction.Complete)
-                    throw new InvalidOperationException(
-                        $"{decomposer.SourceName}: stale physicality repair left "
-                        + $"{afterEviction.MissingEntities} governed unplaced identities; "
-                        + "refusing to reuse completion markers or add testimony on top of them");
-            }
+            PhysicalityCoverage afterEviction = await _reader.PhysicalityCoverageAsync(
+                decomposer.SourceId, ct).ConfigureAwait(false);
+            if (!afterEviction.Complete)
+                throw new InvalidOperationException(
+                    $"{decomposer.SourceName}: stale physicality repair left "
+                    + $"{afterEviction.MissingEntities} unplaced entity identities; "
+                    + "refusing to reuse completion markers or add testimony on top of them");
         }
 
         if (!options.SkipSourceCompletion
@@ -656,19 +656,19 @@ public sealed class IngestRunner
             && counters.FilesSkippedComplete == 0)
             inventory.PublishExactTotal(counters.InputUnitsDone);
 
-        if (fullSuccessfulExtraction && requiredPhysicalityTypes.Count > 0)
+        if (fullSuccessfulExtraction)
         {
             PhysicalityCoverage committedCoverage = await _reader.PhysicalityCoverageAsync(
-                decomposer.SourceId, requiredPhysicalityTypes, ct).ConfigureAwait(false);
+                decomposer.SourceId, ct).ConfigureAwait(false);
             if (!committedCoverage.Complete)
                 throw new InvalidOperationException(
-                    $"{decomposer.SourceName}: physicality coverage failed after ingest: "
+                    $"{decomposer.SourceName}: physicality closure failed after ingest: "
                     + $"{committedCoverage.PlacedEntities}/{committedCoverage.GovernedEntities} "
-                    + "governed semantic identities are physically realized; "
+                    + "source-owned entity identities are physically realized; "
                     + $"{committedCoverage.MissingEntities} remain unplaced. "
                     + "No completion marker will be written.");
             log.LogInformation(
-                "INGEST_PHYSICALITY_COVERAGE source={Source} governed={Governed} placed={Placed} missing=0 status=ok",
+                "INGEST_PHYSICALITY_COVERAGE source={Source} entities={Entities} placed={Placed} missing=0 status=ok",
                 decomposer.SourceName,
                 committedCoverage.GovernedEntities,
                 committedCoverage.PlacedEntities);
@@ -1225,29 +1225,27 @@ public sealed class IngestRunner
         var pending = counters.EntityAdmission.SnapshotPendingContent();
         if (pending.Length == 0)
         {
-            int governed = counters.EntityAdmission.GovernedWithoutPhysicalityCount;
             log.LogInformation(
-                "INGEST_IDENTITY_ADMISSION source={Source} composed_unplaced=0 governed_nonphysical={Governed} status=ok",
-                counters.SourceName, governed);
-            return governed;
+                "INGEST_IDENTITY_ADMISSION source={Source} unplaced=0 status=ok",
+                counters.SourceName);
+            return 0;
         }
 
-        int governedPending = counters.EntityAdmission.GovernedWithoutPhysicalityCount;
         string examples = string.Join(", ", pending.Take(8).Select(static e =>
             $"{e.Id}:{e.TypeId}@{e.UnitName}"));
         if (!enforce)
         {
             log.LogWarning(
-                "INGEST_IDENTITY_ADMISSION source={Source} composed_unplaced={Unplaced} "
-                + "governed_nonphysical={Governed} status=partial detail={Examples}",
-                counters.SourceName, pending.Length, governedPending, examples);
-            return governedPending;
+                "INGEST_IDENTITY_ADMISSION source={Source} unplaced={Unplaced} "
+                + "status=partial detail={Examples}",
+                counters.SourceName, pending.Length, examples);
+            return 0;
         }
         throw new InvalidOperationException(
-            $"entity admission failed for {counters.SourceName}: {pending.Length} content/composition "
-            + "entity id(s) were emitted without physicality in the complete source stream; "
-            + "existing database state cannot make an incomplete decomposer output lawful. Governed structural "
-            + $"identities are exempt by type. First: {examples}");
+            $"entity admission failed for {counters.SourceName}: {pending.Length} entity "
+            + "identity/identities were emitted without physicality in the complete source stream; "
+            + "existing database state cannot make incomplete recipe output lawful. "
+            + $"First: {examples}");
     }
 
     private static IngestInventory ApplyInputCap(IngestInventory inv, long cap) =>
