@@ -2261,6 +2261,35 @@ public static partial class NpgsqlSubstrateReads
                 r.GetInt32(0), r.GetString(1), r.GetDouble(2), r.GetInt64(3), r.GetInt64(4)),
             ct: ct, label: "relation_bands", onError: onError);
 
+    public readonly record struct HighwayPopulationRow(
+        bool RegistryReady,
+        bool HistoricalPopulationComplete,
+        DateTimeOffset? CompletedAt,
+        long PendingPairs,
+        long PendingRefreshes);
+
+    public static Task<IReadOnlyList<HighwayPopulationRow>> HighwayPopulationAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct,
+        NpgsqlRead.ErrorTranslator? onError = null) =>
+        NpgsqlRead.ReadRowsAsync(dataSource, """
+            SELECT consensus.highway_ready(),
+                   COALESCE((SELECT complete
+                             FROM laplace.highway_mask_population_state
+                             WHERE singleton), false),
+                   (SELECT completed_at
+                    FROM laplace.highway_mask_population_state
+                    WHERE singleton),
+                   (SELECT count(*) FROM laplace.highway_mask_pending),
+                   (SELECT count(*) FROM laplace.highway_mask_dirty)
+            """,
+            static r => new HighwayPopulationRow(
+                r.GetBoolean(0),
+                r.GetBoolean(1),
+                r.IsDBNull(2) ? null : r.GetFieldValue<DateTimeOffset>(2),
+                r.GetInt64(3),
+                r.GetInt64(4)),
+            ct: ct, label: "highway_population", onError: onError);
+
     /// <summary>
     /// Band-gated edges via <c>edges_raw</c> + <c>relation_band_catalog</c> (both directions).
     /// </summary>
