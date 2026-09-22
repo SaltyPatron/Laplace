@@ -32,10 +32,10 @@ internal static class OpenSubtitlesZipIngest
 
         var entA = textEntries[0];
         var entB = textEntries[1];
-        Hash128 langA = LanguageReference.Resolve(LangSuffix(entA.FullName));
-        Hash128 langB = LanguageReference.Resolve(LangSuffix(entB.FullName));
-        VocabularyNames.TrackLanguage(OpenSubtitlesDecomposer.LanguageNames, LangSuffix(entA.FullName));
-        VocabularyNames.TrackLanguage(OpenSubtitlesDecomposer.LanguageNames, LangSuffix(entB.FullName));
+        string langA = LangSuffix(entA.FullName);
+        string langB = LangSuffix(entB.FullName);
+        VocabularyNames.TrackLanguage(OpenSubtitlesDecomposer.LanguageNames, langA);
+        VocabularyNames.TrackLanguage(OpenSubtitlesDecomposer.LanguageNames, langB);
 
         await using var streamA = entA.Open();
         await using var streamB = entB.Open();
@@ -78,7 +78,7 @@ internal static class OpenSubtitlesZipIngest
 
     private static AlignedSubtitleBlock BuildBlock(
         string pairStem, long startOrdinal,
-        List<byte[]> left, List<byte[]> right, Hash128 leftLanguage, Hash128 rightLanguage) =>
+        List<byte[]> left, List<byte[]> right, string leftLanguage, string rightLanguage) =>
         new(pairStem, startOrdinal, left.ToArray(), right.ToArray(), leftLanguage, rightLanguage);
 
     private static int TrimCr(ReadOnlyMemory<byte> line)
