@@ -96,7 +96,8 @@ public static class UdParseStructure
                 continue;
 
             Hash128 lemmaId = content.RootFor(token.LemmaUtf8) ?? formId;
-            Hash128 uposId = ResolveUpos(builder, token.Upos, sourceId, canonicalNames);
+            Hash128 uposId = ResolveUpos(
+                builder, token.Upos, sourceId, canonicalNames, witnessWeight);
             Hash128 xposId = ResolveXpos(
                 builder, token.Xpos, languageCode, uposId, sourceId,
                 seenSourceDeclarations, canonicalNames, witnessWeight, sourceFileContext);
@@ -141,7 +142,7 @@ public static class UdParseStructure
             }
             flat.Add(EnhancedEnd);
 
-            var misc = ResolveMisc(builder, token.Misc, content, sourceId, canonicalNames);
+            var misc = ResolveMisc(builder, token.Misc, content, sourceId, canonicalNames, witnessWeight);
             foreach ((Hash128 keyId, Hash128 valueId) in misc)
             {
                 flat.Add(keyId);
@@ -161,7 +162,7 @@ public static class UdParseStructure
             flat.Add(DeclareTokenRef(builder, mwt.End.ToString(), sourceId, canonicalNames));
             flat.Add(formId);
             foreach ((Hash128 keyId, Hash128 valueId) in
-                     ResolveMisc(builder, mwt.Misc, content, sourceId, canonicalNames))
+                     ResolveMisc(builder, mwt.Misc, content, sourceId, canonicalNames, witnessWeight))
             {
                 flat.Add(keyId);
                 flat.Add(valueId);
@@ -327,14 +328,13 @@ public static class UdParseStructure
         SubstrateChangeBuilder builder,
         string upos,
         Hash128 sourceId,
-        ConcurrentDictionary<string, byte> canonicalNames)
+        ConcurrentDictionary<string, byte> canonicalNames,
+        double witnessWeight)
     {
         if (string.IsNullOrWhiteSpace(upos) || upos == "_") return None;
-        Hash128 id = PosReference.Resolve(upos, PosReference.PosTagset.Upos, out bool probationary);
-        builder.AddEntity(id, EntityTier.Word, PosReference.PosTypeId, sourceId);
-        VocabularyNames.TrackProbationaryPos(
-            canonicalNames, upos, PosReference.PosTagset.Upos, probationary);
-        return id;
+        return PosReference.Emit(
+            builder, upos, PosReference.PosTagset.Upos,
+            sourceId, witnessWeight, canonicalNames);
     }
 
     private static Hash128 ResolveXpos(
@@ -461,7 +461,8 @@ public static class UdParseStructure
         string misc,
         UdSentenceEmitContext content,
         Hash128 sourceId,
-        ConcurrentDictionary<string, byte> canonicalNames)
+        ConcurrentDictionary<string, byte> canonicalNames,
+        double witnessWeight)
     {
         var resolved = new List<(Hash128, Hash128)>();
         if (string.IsNullOrWhiteSpace(misc) || misc == "_") return resolved;
@@ -489,8 +490,8 @@ public static class UdParseStructure
             }
             else if (key.Equals("Lang", StringComparison.OrdinalIgnoreCase))
             {
-                valueId = LanguageReference.Resolve(value);
-                builder.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Language, sourceId);
+                valueId = LanguageReference.Emit(
+                    builder, value, sourceId, witnessWeight);
             }
             else
             {
