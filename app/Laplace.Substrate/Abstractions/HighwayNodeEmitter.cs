@@ -16,27 +16,26 @@ public static class HighwayNodeEmitter
         string parentRelation = "IS_A",
         System.Collections.Concurrent.ConcurrentDictionary<string, byte>? readbackNames = null)
     {
-        var id = HighwayPerfcache.NodeHash(canonicalName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(canonicalName);
+        Hash128 id = ContentEmitter.RootId(canonicalName)
+            ?? throw new InvalidOperationException(
+                $"vocabulary content could not be composed: {canonicalName}");
         if (!seen.Add(id)) return id;
 
-        builder.AddEntity(new EntityRow(id, EntityTier.Word, metaTypeId, sourceId));
+        Hash128 admitted = ContentEmitter.Emit(builder, canonicalName, sourceId)
+            ?? throw new InvalidOperationException(
+                $"vocabulary content could not be admitted: {canonicalName}");
+        if (admitted != id)
+            throw new InvalidOperationException(
+                $"vocabulary identity changed during admission: {canonicalName}");
+
+        CategoryAnchor.AttestCategory(builder, id, metaTypeId, sourceId, trust);
 
         if (parentId is { } parent)
-        {
-            builder.AddEntity(new EntityRow(parent, EntityTier.Word, metaTypeId, sourceId));
             builder.AddAttestation(NativeAttestation.Categorical(
                 id, parentRelation, parent, sourceId, null, trust));
-        }
 
-        // GH #1041: the node's name is VOCABULARY, not content. The old
-        // ContentEmitter.Emit here staged a full text DAG for every tag string
-        // ("NNP" as a word entity, "Number=Sing" as a sentence) — identifiers
-        // minted as prose. The id is blake3(canonicalName), which is exactly
-        // realize.canonical_id(name), so registering the name in
-        // laplace.canonical_names (via the readback set → register_canonicals
-        // at run end) gives realize.render its arm-1 hit with no ladder rows.
         VocabularyNames.Track(readbackNames, canonicalName);
-
         return id;
     }
 }
