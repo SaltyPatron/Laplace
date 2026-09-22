@@ -96,7 +96,7 @@ internal static class SemLinkInstanceIngest
                 dependencies.Add(dependency);
 
         record = new Record(
-            Path.GetFileName(fields[0]), sentence, token, lemma,
+            fields[0].Trim().Normalize(NormalizationForm.FormC), sentence, token, lemma,
             vnClass, frame, roleset, onGroup, dependencies.ToArray());
         return true;
     }
@@ -142,15 +142,36 @@ internal static class SemLinkInstanceIngest
         Record record, SubstrateChangeBuilder builder, Hash128? precomposedLemma = null)
     {
         Hash128 source = SemLinkDecomposer.Source;
-        Hash128 occurrence = OccurrenceId(record);
-        Hash128 sourceFile = SourceFileId(record.SourceFile);
-        builder.AddEntity(occurrence, EntityTier.Document, EntityTypeRegistry.SourceReference, source);
-        builder.AddEntity(sourceFile, EntityTier.Document, EntityTypeRegistry.SourceFile, source);
+        OrderedCompositionComponent sourceFileComponent =
+            RequireContent(builder, record.SourceFile, source);
+        CategoryAnchor.AttestCategory(
+            builder, sourceFileComponent.Id, EntityTypeRegistry.SourceFile,
+            source, TC.AcademicCurated);
+
+        OrderedCompositionComponent sentenceOrdinal =
+            RequireContent(builder,
+                record.SentenceOrdinal.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                source);
+        OrderedCompositionComponent tokenOrdinal =
+            RequireContent(builder,
+                record.TokenOrdinal.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                source);
+        OrderedCompositionComponent lemmaComponent =
+            RequireContent(builder, record.Lemma, source);
+        if (precomposedLemma is { } expectedLemma && expectedLemma != lemmaComponent.Id)
+            throw new InvalidOperationException(
+                $"SemLink lemma identity changed during occurrence composition: {record.Lemma}");
+
+        OrderedCompositionResult occurrenceResult = StageStructure(
+            builder,
+            [sourceFileComponent, sentenceOrdinal, tokenOrdinal, lemmaComponent],
+            EntityTypeRegistry.SourceReference,
+            source);
+        Hash128 occurrence = occurrenceResult.Id;
+        Hash128 sourceFile = sourceFileComponent.Id;
 
         Add(builder, occurrence, AppearsIn, sourceFile, occurrence);
-        Hash128? lemma = precomposedLemma ?? ContentEmitter.Emit(builder, record.Lemma, source);
-        if (lemma is { } lemmaId)
-            Add(builder, lemmaId, AppearsIn, occurrence, occurrence);
+        Add(builder, lemmaComponent.Id, AppearsIn, occurrence, occurrence);
 
         Hash128? vnClass = EmitCategory(
             builder, record.VerbNetClass, EntityTypeRegistry.VerbNetClass);
@@ -180,12 +201,22 @@ internal static class SemLinkInstanceIngest
         if (onSense is { } ontoNotesSenseId)
             Add(builder, occurrence, HasSense, ontoNotesSenseId, occurrence);
 
+        OrderedCompositionComponent occurrenceComponent = Component(occurrenceResult);
         for (int i = 0; i < record.Dependencies.Length; i++)
         {
             Dependency dep = record.Dependencies[i];
-            Hash128 argument = ArgumentOccurrenceId(occurrence, i, dep.Span);
-            builder.AddEntity(
-                argument, EntityTier.Document, EntityTypeRegistry.SourceReference, source);
+            OrderedCompositionComponent argumentOrdinal =
+                RequireContent(builder,
+                    i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    source);
+            OrderedCompositionComponent span =
+                RequireContent(builder, dep.Span, source);
+            OrderedCompositionResult argumentResult = StageStructure(
+                builder,
+                [occurrenceComponent, argumentOrdinal, span],
+                EntityTypeRegistry.SourceReference,
+                source);
+            Hash128 argument = argumentResult.Id;
             Add(builder, argument, AppearsIn, occurrence, occurrence);
 
             Hash128? pbRole = roleset is { } pbParent && dep.PropBankRole is { } pb
@@ -213,18 +244,59 @@ internal static class SemLinkInstanceIngest
         }
     }
 
-    private static Hash128 OccurrenceId(Record record) => Hash128.OfCanonical(
-        $"semlink/annotation-occurrence/{Hex(record.SourceFile)}/"
-        + $"{record.SentenceOrdinal}/{record.TokenOrdinal}/{Hex(record.Lemma)}/v1");
+    private static Hash128 OccurrenceId(Record record)
+    {
+        Span<Hash128> constituents = stackalloc Hash128[4]
+        {
+            RequiredRoot(record.SourceFile),
+            RequiredRoot(record.SentenceOrdinal.ToString(
+                System.Globalization.CultureInfo.InvariantCulture)),
+            RequiredRoot(record.TokenOrdinal.ToString(
+                System.Globalization.CultureInfo.InvariantCulture)),
+            RequiredRoot(record.Lemma),
+        };
+        return Hash128.Merkle(EntityTier.Document, constituents);
+    }
 
-    private static Hash128 SourceFileId(string file) =>
-        Hash128.OfCanonical($"semlink/source-file/{Hex(file)}/v1");
+    private static Hash128 ArgumentOccurrenceId(Hash128 occurrence, int ordinal, string span)
+    {
+        Span<Hash128> constituents = stackalloc Hash128[3]
+        {
+            occurrence,
+            RequiredRoot(ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            RequiredRoot(span),
+        };
+        return Hash128.Merkle(EntityTier.Document, constituents);
+    }
 
-    private static Hash128 ArgumentOccurrenceId(Hash128 occurrence, int ordinal, string span) =>
-        Hash128.OfCanonical($"semlink/argument-occurrence/{occurrence}/{ordinal}/{Hex(span)}/v1");
+    private static OrderedCompositionComponent RequireContent(
+        SubstrateChangeBuilder builder, string value, Hash128 source) =>
+        ContentEmitter.StageComponent(builder, value, source)
+        ?? throw new InvalidOperationException(
+            $"SemLink structural constituent could not be admitted: {value}");
 
-    private static string Hex(string value) =>
-        Convert.ToHexString(Encoding.UTF8.GetBytes(value));
+    private static Hash128 RequiredRoot(string value) =>
+        ContentEmitter.RootId(value)
+        ?? throw new InvalidOperationException(
+            $"SemLink structural constituent could not be composed: {value}");
+
+    private static OrderedCompositionResult StageStructure(
+        SubstrateChangeBuilder builder,
+        OrderedCompositionComponent[] components,
+        Hash128 typeId,
+        Hash128 source)
+    {
+        Span<OrderedCompositionResult> result = stackalloc OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(
+            builder.ContentStage,
+            [new OrderedCompositionRequest(components, typeId, source, 0)],
+            result);
+        return result[0];
+    }
+
+    private static OrderedCompositionComponent Component(OrderedCompositionResult value) =>
+        new(value.Id, value.Tier,
+            value.CoordX, value.CoordY, value.CoordZ, value.CoordM);
 
     private static Hash128? EmitCategory(
         SubstrateChangeBuilder builder, string? value, Hash128 type) =>
