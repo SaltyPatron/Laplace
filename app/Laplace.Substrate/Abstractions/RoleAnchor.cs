@@ -25,8 +25,7 @@ public enum RoleIdentityKind : ushort
 /// </summary>
 public static class RoleAnchor
 {
-    private static readonly Hash128 Schema =
-        Hash128.OfCanonical("semantic-role/structure/v2");
+    private const string SchemaText = "semantic-role/structure/v2";
 
     public static Hash128? Id(RoleIdentityKind kind, Hash128 parentId, string? rawRoleKey)
     {
@@ -37,7 +36,7 @@ public static class RoleAnchor
         if (label is null) return null;
         Span<Hash128> constituents = stackalloc Hash128[4]
         {
-            Schema, KindMarker(kind), parentId, label.Value
+            RequiredRoot(SchemaText), RequiredRoot(KindMarkerText(kind)), parentId, label.Value
         };
         return Hash128.Merkle(EntityTier.Word, constituents);
     }
@@ -53,21 +52,27 @@ public static class RoleAnchor
         Validate(kind, parentId);
         string? key = Normalize(roleKey);
         if (key is null) return null;
+        OrderedCompositionComponent schema =
+            RequiredComponent(builder, SchemaText, source);
+        OrderedCompositionComponent system =
+            RequiredComponent(builder, KindMarkerText(kind), source);
         OrderedCompositionComponent? label =
             ContentEmitter.StageComponent(builder, key, source);
         if (label is not { } component) return null;
 
         Span<Hash128> constituents = stackalloc Hash128[4]
         {
-            Schema, KindMarker(kind), parentId, component.Id
+            schema.Id, system.Id, parentId, component.Id
         };
         Hash128 id = Hash128.Merkle(EntityTier.Word, constituents);
         builder.AddEntity(id, EntityTier.Word, entityTypeId, source);
 
-        Span<double> coord = stackalloc double[4]
-        {
-            component.CoordX, component.CoordY, component.CoordZ, component.CoordM
-        };
+        double[] coord = Math4d.KarcherMean(
+        [
+            schema.CoordX, schema.CoordY, schema.CoordZ, schema.CoordM,
+            system.CoordX, system.CoordY, system.CoordZ, system.CoordM,
+            component.CoordX, component.CoordY, component.CoordZ, component.CoordM,
+        ]);
         builder.AddPhysicality(new PhysicalityRow(
             PhysicalityId.Compute(id, PhysicalityType.ParseStructure),
             id, source, PhysicalityType.ParseStructure,
@@ -121,11 +126,20 @@ public static class RoleAnchor
             throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown role identity domain");
     }
 
-    private static Hash128 KindMarker(RoleIdentityKind kind) =>
-        Hash128.OfCanonical($"semantic-role/system/{(ushort)kind}/v1");
+    private static string KindMarkerText(RoleIdentityKind kind) =>
+        $"semantic-role/system/{(ushort)kind}/v1";
+
+    private static Hash128 RequiredRoot(string value) =>
+        ContentEmitter.RootId(value)
+        ?? throw new InvalidOperationException($"role constituent could not be composed: {value}");
+
+    private static OrderedCompositionComponent RequiredComponent(
+        SubstrateChangeBuilder builder, string value, Hash128 source) =>
+        ContentEmitter.StageComponent(builder, value, source)
+        ?? throw new InvalidOperationException($"role constituent could not be admitted: {value}");
 
     private static string? Normalize(string? rawRoleKey) =>
         string.IsNullOrWhiteSpace(rawRoleKey)
             ? null
-            : rawRoleKey.Trim().Normalize(NormalizationForm.FormC).ToUpperInvariant();
+            : rawRoleKey.Trim().Normalize(NormalizationForm.FormC);
 }
