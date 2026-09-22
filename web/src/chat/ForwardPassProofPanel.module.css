@@ -1,0 +1,20 @@
+@layer components {
+  .proof { margin-top: .65rem; border-top: 1px solid var(--color-border-default); padding-top: .55rem; }
+  .proof summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: .45rem .75rem; align-items: center; font-size: var(--text-xs); font-weight: 650; color: var(--color-text-primary); }
+  .proof summary span { color: var(--color-text-muted); font-weight: 500; }
+  .body { margin-top: .65rem; display: grid; gap: .8rem; }
+  .law { overflow-x: auto; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); }
+  .receipt { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .45rem .8rem; }
+  .receipt div { min-width: 0; }
+  .receipt dt { color: var(--color-text-muted); font-size: var(--text-xs); }
+  .receipt dd { margin: .1rem 0 0; overflow-wrap: anywhere; font-size: var(--text-xs); }
+  .body h4 { margin: 0 0 .35rem; font-size: var(--text-xs); }
+  .ids { display: flex; flex-wrap: wrap; gap: .3rem .5rem; }
+  .ids code { font-size: .68rem; }
+  .empty { margin: 0; color: var(--color-text-muted); font-size: var(--text-xs); }
+  .tableWrap { max-width: 100%; overflow: auto; border: 1px solid var(--color-border-default); border-radius: var(--radius-sm); }
+  .tableWrap table { width: 100%; border-collapse: collapse; font-size: .68rem; white-space: nowrap; }
+  .tableWrap th, .tableWrap td { padding: .28rem .4rem; text-align: left; border-bottom: 1px solid var(--color-border-default); font-variant-numeric: tabular-nums; }
+  .tableWrap th { position: sticky; top: 0; background: var(--color-bg-panel-2); color: var(--color-text-muted); }
+  .tableWrap tr:last-child td { border-bottom: 0; }
+}
