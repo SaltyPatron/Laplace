@@ -23,8 +23,8 @@ public static class SourceArtifactProvenance
         Hash128? exactFingerprint = null)
     {
         ArgumentNullException.ThrowIfNull(artifact);
-        string exact = exactFingerprint is { } fingerprint
-            ? fingerprint.ToString()
+        string exact = exactFingerprint is { } exactHash
+            ? exactHash.ToString()
             : !string.IsNullOrWhiteSpace(artifact.Sha256)
                 ? artifact.Sha256.Trim().ToLowerInvariant()
                 : artifact.Id;
