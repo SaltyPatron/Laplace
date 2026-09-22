@@ -965,6 +965,48 @@ free_cognition_receipt(Datum *values, bool *nulls, int base)
 }
 
 static void
+emit_stage(ReturnSetInfo *result, int32 step, const char *event,
+           const LaplacePromptInput *input, int operand_count,
+           int candidate_count, int proposal_channels, int exact_channels,
+           int routing_round, const LaplaceCognitionProgram *program)
+{
+    Datum values[33] = {0};
+    bool nulls[33];
+
+    for (int i = 0; i < 33; ++i) nulls[i] = true;
+    values[0] = Int32GetDatum(step); nulls[0] = false;
+    if (input)
+    {
+        values[4] = hash128_to_datum(&input->root);
+        nulls[4] = false;
+    }
+    values[5] = Int32GetDatum(candidate_count); nulls[5] = false;
+    values[6] = Int32GetDatum(operand_count); nulls[6] = false;
+    values[7] = Int32GetDatum(proposal_channels); nulls[7] = false;
+    values[8] = Int32GetDatum(exact_channels); nulls[8] = false;
+    values[9] = Int64GetDatum(0); nulls[9] = false;
+    values[10] = Int32GetDatum(0); nulls[10] = false;
+    values[11] = Int32GetDatum(0); nulls[11] = false;
+    values[12] = Int32GetDatum(0); nulls[12] = false;
+    values[19] = Int32GetDatum(0); nulls[19] = false;
+    values[20] = Int32GetDatum(0); nulls[20] = false;
+    values[21] = BoolGetDatum(false); nulls[21] = false;
+    values[22] = CStringGetTextDatum(event); nulls[22] = false;
+    values[23] = Int32GetDatum(routing_round); nulls[23] = false;
+
+    if (program)
+    {
+        for (int i = 24; i < 33; ++i) nulls[i] = false;
+        put_cognition_receipt(values, nulls, 24, program);
+    }
+
+    tuplestore_putvalues(result->setResult, result->setDesc, values, nulls);
+    if (!nulls[4]) pfree(DatumGetPointer(values[4]));
+    pfree(DatumGetPointer(values[22]));
+    if (program) free_cognition_receipt(values, nulls, 24);
+}
+
+static void
 emit_result(ReturnSetInfo *result, int32 step, const Candidate *candidate,
             bool trace, const LaplacePromptInput *input, int candidate_count,
             int operand_count, int query_channels, int exact_channels,
@@ -1210,6 +1252,14 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         laplace_trajectory_scope_bind_input(trajectory_scope, input);
     }
 
+    if (trace && input)
+    {
+        int resolved_channels = 0;
+        (void) laplace_query_state_channels(query_state, &resolved_channels);
+        emit_stage(result, 0, "resolve", input, context_length, 0,
+                   resolved_channels, 0, 0, NULL);
+    }
+
     if (input)
     {
         /* COUPLE is unmasked unless the caller supplied a hard relation scope.
@@ -1321,6 +1371,14 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 pfree(next_ids);
             }
         }
+        if (trace)
+        {
+            int coupled_channels = 0;
+            (void) laplace_query_state_channels(query_state, &coupled_channels);
+            emit_stage(result, 0, "couple", input, context_length, 0,
+                       coupled_channels, 0, coupling_hops, NULL);
+        }
+
         if (invocation_context)
             laplace_prompt_intent_compile(&coupled_intent, invocation_context, fanout);
         else if (!output_relations ||
@@ -1411,6 +1469,9 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             laplace_cognition_program_finalize(cognition, LAPLACE_COGNITION_AMBIGUOUS);
         else if (intent && intent->budget_exhausted)
             laplace_cognition_program_finalize(cognition, LAPLACE_COGNITION_BUDGET_EXHAUSTED);
+        if (trace)
+            emit_stage(result, 0, "orient", input, context_length, 0,
+                       initial_channel_count, 0, routing_hops, cognition);
     }
 
     if (!output_state && !invocation_context && output_relations &&
@@ -1558,6 +1619,14 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
 
         (void) query_proposals;
         (void) projection_proposals;
+        if (trace)
+        {
+            int proposal_channels = 0;
+            (void) laplace_query_state_channels(query_state, &proposal_channels);
+            emit_stage(result, step, "propose", input, context_length,
+                       candidate_count, proposal_channels, 0,
+                       routing_hops, cognition);
+        }
         if (candidate_count == 0)
         {
             exhausted = true;
@@ -1601,6 +1670,15 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 projection_channels, projection_channel_count, true, origins, step_context);
         }
         pfree(candidate_ids);
+        if (trace)
+        {
+            int proposal_channels = 0;
+            (void) laplace_query_state_channels(query_state, &proposal_channels);
+            emit_stage(result, step, "scan", input, context_length,
+                       candidate_count, proposal_channels,
+                       query_channel_count + projection_channel_count,
+                       routing_hops, cognition);
+        }
 
         /* Completion provenance follows only typed semantic transitions. It is
          * folded from the exact candidate evidence for this iteration, before
@@ -1664,6 +1742,15 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             candidates[kept++] = candidates[i];
         }
         candidate_count = kept;
+        if (trace)
+        {
+            int proposal_channels = 0;
+            (void) laplace_query_state_channels(query_state, &proposal_channels);
+            emit_stage(result, step, "compose", input, context_length,
+                       candidate_count, proposal_channels,
+                       query_channel_count + projection_channel_count,
+                       routing_hops, cognition);
+        }
         if (candidate_count == 0)
         {
             exhausted = true;
@@ -1714,6 +1801,11 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         for (int i = 0; i < candidate_count; ++i)
             if (candidate_can_output(&candidates[i], intent))
                 output_count++;
+        if (trace)
+            emit_stage(result, step, "steer", input, context_length,
+                       candidate_count, retained_channel_count,
+                       query_channel_count + projection_channel_count,
+                       routing_hops, cognition);
         if (output_count == 0)
         {
             if (!input ||
@@ -1774,6 +1866,11 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             exhausted = true;
             break;
         }
+        if (trace)
+            emit_stage(result, step, "select", input, context_length,
+                       candidate_count, retained_channel_count,
+                       query_channel_count + projection_channel_count,
+                       routing_hops, cognition);
 
         /* State transition precedes publication of the selected constituent.
          * The trace therefore reports the post-transition completion state and
