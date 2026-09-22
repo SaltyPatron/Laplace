@@ -191,8 +191,18 @@ pg_laplace_entity_interpretations_publish(PG_FUNCTION_ARGS)
                 ++end;
             for (int j = i; j < end; ++j)
             {
-                if (rows[j].tier < min_tier) min_tier = rows[j].tier;
-                if (memcmp(rows[j].type, min_type, 16) < 0) memcpy(min_type, rows[j].type, 16);
+                /*
+                 * Tier is the canonical floor. type_id describes that floor; it
+                 * is not an independent semantic facet. Never combine the lowest
+                 * tier with a type observed only at a higher tier.
+                 *
+                 * rows are sorted by (entity,tier,type,...), so the first tier is
+                 * already the minimum. At that floor only, pick a deterministic
+                 * type when duplicate structural observations disagree.
+                 */
+                if (rows[j].tier == min_tier &&
+                    memcmp(rows[j].type, min_type, 16) < 0)
+                    memcpy(min_type, rows[j].type, 16);
                 if (!rows[j].source_null &&
                     (source_null || memcmp(rows[j].source, min_source, 16) < 0))
                 {
