@@ -230,7 +230,6 @@ static void sink_deduplicate(SinkState *s, unsigned table)
 static void sink_parse(SinkState *s, const intent_stage_t *const *stages, size_t stage_count)
 {
     const unsigned columns[] = {4, 10, 14};
-    size_t entity_stage_first[LAPLACE_GENERATED_STAGE_SINK_MAX_STAGES]={0};
     hash128_t relation;
     if (laplace_relation_resolve("HAS_PHYSICALITY", &relation) != 0)
         sink_invalid("missing governed HAS_PHYSICALITY relation");
@@ -241,7 +240,6 @@ static void sink_parse(SinkState *s, const intent_stage_t *const *stages, size_t
         t->index = sink_alloc(s, sink_multiply(t->count, sizeof(*t->index)));
         size_t at = 0;
         for (size_t stage = 0; stage < stage_count; ++stage) {
-            if (table == 0) entity_stage_first[stage]=at;
             size_t bytes, offset = 0;
             const uint8 *data = intent_stage_tuple_ptr(stages[stage], (intent_stage_table_t)(table + 1), &bytes);
             while (offset < bytes) {
@@ -259,22 +257,16 @@ static void sink_parse(SinkState *s, const intent_stage_t *const *stages, size_t
         sink_deduplicate(s, table);
     }
     SinkTable *facets=&s->interpretations;
-    for (size_t stage=0;stage<stage_count;++stage) {
-        size_t count=intent_stage_entity_interpretations_complete(stages[stage])
-            ? intent_stage_entity_interpretation_count(stages[stage])
-            : intent_stage_entity_count(stages[stage]);
-        facets->count=sink_add(facets->count,count);
-    }
+    for (size_t stage=0;stage<stage_count;++stage)
+        facets->count=sink_add(
+            facets->count,intent_stage_entity_interpretation_count(stages[stage]));
     facets->rows=sink_alloc(s,sink_multiply(facets->count,sizeof(*facets->rows)));
     facets->index=sink_alloc(s,sink_multiply(facets->count,sizeof(*facets->index)));
     size_t at=0;
     for (size_t stage=0;stage<stage_count;++stage) {
         size_t bytes,offset=0;
-        const size_t first=at;
-        const bool complete=intent_stage_entity_interpretations_complete(stages[stage]);
-        const uint8 *data=complete
-            ? intent_stage_entity_interpretation_tuple_ptr(stages[stage],&bytes)
-            : intent_stage_tuple_ptr(stages[stage],INTENT_STAGE_TABLE_ENTITIES,&bytes);
+        const uint8 *data=
+            intent_stage_entity_interpretation_tuple_ptr(stages[stage],&bytes);
         while (offset<bytes) {
             if (at==facets->count) sink_invalid("interpretation tuple count mismatch");
             SinkRow *row=&facets->rows[at];
@@ -282,17 +274,6 @@ static void sink_parse(SinkState *s, const intent_stage_t *const *stages, size_t
             facets->index[at++]=row;
             sink_read_row(data,bytes,&offset,4,row);
             sink_validate_entity(row,true);
-        }
-        SinkTable selected={NULL,facets->index+first,at-first};
-        qsort(selected.index,selected.count,sizeof(*selected.index),sink_compare_ids);
-        if (complete) {
-            size_t end=entity_stage_first[stage]+intent_stage_entity_count(stages[stage]);
-            for (size_t row=entity_stage_first[stage];row<end;++row) {
-                SinkRow *entity=&s->tables[0].rows[row];
-                entity->interpretation=sink_find(&selected,&entity->id);
-                if (entity->interpretation == NULL)
-                    sink_invalid("complete interpretation stream omits staged entity");
-            }
         }
     }
     if (at!=facets->count) sink_invalid("interpretation tuple count mismatch");
@@ -485,9 +466,8 @@ static void sink_insert(SinkState *s, unsigned table)
     sink_clear_result();
 }
 
-/* Complete explicit metadata records actual observations before historical E
- * compatibility edits. Legacy stages fall back to their original E tuples.
- * Neither id dedup nor presence can discard these selected interpretations. */
+/* Compatibility interpretation metadata is explicit-only. Canonical entity rows
+ * are never copied here as a fallback or parallel ontology. */
 static void sink_interpretations(SinkState *s)
 {
     size_t count=s->interpretations.count;
