@@ -363,15 +363,33 @@ BEGIN ATOMIC
         SELECT c.message_id, c.content_id
         FROM (SELECT array_agg(DISTINCT o.turn_id) AS ids FROM occurrences o) batch,
              converse.message_content_ids(batch.ids) c
+    ), prompt_root AS MATERIALIZED (
+        SELECT p.root_id
+        FROM converse.prompt_tree(p_prompt, false) p
+        LIMIT 1
+    ), current_input AS MATERIALIZED (
+        SELECT o.ordinal, o.turn_id
+        FROM occurrences o
+        JOIN content c ON c.message_id = o.turn_id
+        JOIN prompt_root p ON p.root_id = c.content_id
+        ORDER BY o.ordinal DESC
+        LIMIT 1
     ), history AS MATERIALIZED (
         SELECT array_agg(h.id ORDER BY h.ordinal, h.branch) AS ids
         FROM (
-            SELECT o.ordinal, 0 AS branch, o.turn_id AS id FROM occurrences o
+            SELECT o.ordinal, 0 AS branch, o.turn_id AS id
+            FROM occurrences o
+            WHERE NOT EXISTS (
+                SELECT 1 FROM current_input x
+                WHERE x.ordinal = o.ordinal AND x.turn_id = o.turn_id)
             UNION ALL
             SELECT o.ordinal, 1 AS branch, c.content_id AS id
             FROM occurrences o
             JOIN content c ON c.message_id = o.turn_id
             WHERE c.content_id IS NOT NULL AND c.content_id <> o.turn_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM current_input x
+                  WHERE x.ordinal = o.ordinal AND x.turn_id = o.turn_id)
         ) h
     )
     SELECT g.step, g.entity, g.stride_used
@@ -385,8 +403,9 @@ END;
 -- Product observability surface for an ORDINARY conversation turn. This does
 -- not replay or re-run the prompt: one MATERIALIZED native forward_program
 -- invocation owns both the realized answer and every receipt returned here.
--- prior_discourse is the exact ordered substrate state supplied to that native
--- invocation after the prompt occurrence has been witnessed.
+-- prior_discourse is the exact ordered substrate state preceding the current
+-- prompt occurrence. The prompt is witnessed before execution but excluded from
+-- its own DISCOURSE operand, so the request cannot feed itself back as history.
 CREATE OR REPLACE FUNCTION converse.forward_turn_observed(
         p_prompt text, p_session bytea DEFAULT NULL,
         p_steps int DEFAULT 128, p_max_stride int DEFAULT 5,
@@ -416,15 +435,33 @@ BEGIN ATOMIC
         SELECT c.message_id, c.content_id
         FROM (SELECT array_agg(DISTINCT o.turn_id) AS ids FROM occurrences o) batch,
              converse.message_content_ids(batch.ids) c
+    ), prompt_root AS MATERIALIZED (
+        SELECT p.root_id
+        FROM converse.prompt_tree(p_prompt, false) p
+        LIMIT 1
+    ), current_input AS MATERIALIZED (
+        SELECT o.ordinal, o.turn_id
+        FROM occurrences o
+        JOIN content c ON c.message_id = o.turn_id
+        JOIN prompt_root p ON p.root_id = c.content_id
+        ORDER BY o.ordinal DESC
+        LIMIT 1
     ), history AS MATERIALIZED (
         SELECT array_agg(h.id ORDER BY h.ordinal, h.branch) AS ids
         FROM (
-            SELECT o.ordinal, 0 AS branch, o.turn_id AS id FROM occurrences o
+            SELECT o.ordinal, 0 AS branch, o.turn_id AS id
+            FROM occurrences o
+            WHERE NOT EXISTS (
+                SELECT 1 FROM current_input x
+                WHERE x.ordinal = o.ordinal AND x.turn_id = o.turn_id)
             UNION ALL
             SELECT o.ordinal, 1 AS branch, c.content_id AS id
             FROM occurrences o
             JOIN content c ON c.message_id = o.turn_id
             WHERE c.content_id IS NOT NULL AND c.content_id <> o.turn_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM current_input x
+                  WHERE x.ordinal = o.ordinal AND x.turn_id = o.turn_id)
         ) h
     ), execution AS MATERIALIZED (
         SELECT g.*, h.ids AS prior_discourse

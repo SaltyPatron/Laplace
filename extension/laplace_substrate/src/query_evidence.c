@@ -9,6 +9,10 @@
 
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/hash128.h"
+#include "laplace/core/highway_table.h"
+#include "laplace/core/sql_catalog.h"
+
+#include "perfcache_native.h"
 
 #include "consensus_scan.h"
 #include "observation_read.h"
@@ -129,6 +133,119 @@ struct LaplaceQueryState
     int operand_count;
     int fanout;
 };
+
+
+static SPIPlanPtr query_highway_masks_plan = NULL;
+
+/*
+ * The Highway mask is only a physical access accelerator. It may prune named
+ * relation partitions only when the historical population is complete and no
+ * requested identity has pending/dirty mask work. Dynamic relation identities
+ * remain complete through a separate DEFAULT-partition scan.
+ *
+ * If any precondition is not proved, return complete=false and the canonical
+ * unmasked relation scan runs unchanged. Cache state can therefore change the
+ * amount of work, never the answer.
+ */
+static bool
+query_highway_registry_ready(void)
+{
+    volatile bool ready = false;
+    MemoryContext caller = CurrentMemoryContext;
+
+    if (highway_table_is_loaded())
+        return true;
+
+    PG_TRY();
+    {
+        ready = laplace_highway_ready();
+    }
+    PG_CATCH();
+    {
+        MemoryContextSwitchTo(caller);
+        ErrorData *error = CopyErrorData();
+        FlushErrorState();
+        if (error->sqlerrcode != ERRCODE_CONFIG_FILE_ERROR)
+            ReThrowError(error);
+        FreeErrorData(error);
+        ready = false;
+    }
+    PG_END_TRY();
+    return ready;
+}
+
+static ArrayType *
+query_highway_relation_types(ArrayType *operands, int expected_unique,
+                             bool *complete)
+{
+    Oid argtypes[1] = {BYTEAARRAYOID};
+    Datum args[1] = {PointerGetDatum(operands)};
+    laplace_mask256_t union_mask = {0};
+    hash128_t type_ids[256];
+    int type_count = 0;
+
+    if (!complete)
+        ereport(ERROR,
+                (errmsg("query evidence: Highway completeness output is required")));
+    *complete = false;
+    if (!operands || expected_unique <= 0 || !query_highway_registry_ready())
+        return NULL;
+
+    if (!query_highway_masks_plan)
+    {
+        SPIPlanPtr plan = SPI_prepare_cursor(
+            laplace_sql_query_text("entities.complete_highway_masks"),
+            1, argtypes, CURSOR_OPT_PARALLEL_OK);
+        if (!plan || SPI_keepplan(plan) != 0)
+            elog(ERROR, "query evidence: preparing Highway mask probe failed");
+        query_highway_masks_plan = plan;
+    }
+
+    int rc = SPI_execute_plan(query_highway_masks_plan, args, NULL, true, 0);
+    if (rc != SPI_OK_SELECT)
+        elog(ERROR, "query evidence: Highway mask probe failed: %s",
+             SPI_result_code_string(rc));
+    if (SPI_processed != (uint64) expected_unique)
+    {
+        if (SPI_tuptable) SPI_freetuptable(SPI_tuptable);
+        return NULL;
+    }
+
+    for (uint64 row = 0; row < SPI_processed; ++row)
+    {
+        bool isnull;
+        Datum value = SPI_getbinval(
+            SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 2, &isnull);
+        if (isnull)
+            continue; /* Complete NULL mask = no named relation bits. */
+        bytea *mask = DatumGetByteaPP(value);
+        if (VARSIZE_ANY_EXHDR(mask) != sizeof(laplace_mask256_t))
+            ereport(ERROR,
+                    (errmsg("query evidence: entity Highway mask is not 256 bits")));
+        laplace_mask256_t one;
+        memcpy(&one, VARDATA_ANY(mask), sizeof(one));
+        union_mask = highway_table_mask_or(union_mask, one);
+    }
+    if (SPI_tuptable) SPI_freetuptable(SPI_tuptable);
+
+    for (int bit = 0; bit < 256; ++bit)
+    {
+        const char *canonical = NULL;
+        float rank;
+        uint8_t band;
+        hash128_t type_id;
+        if (!highway_table_mask_test(&union_mask, (uint8_t) bit))
+            continue;
+        if (highway_table_relation_by_bit(
+                (uint8_t) bit, &canonical, &rank, &band) != 0 ||
+            !canonical || laplace_relation_type_id(canonical, &type_id) != 0)
+            continue;
+        type_ids[type_count++] = type_id;
+    }
+
+    *complete = true;
+    return hash128_array_from_ids(type_ids, type_count);
+}
 
 static void
 validate_id_array(ArrayType *array, const char *what)
@@ -1035,14 +1152,31 @@ laplace_query_evidence_channels(ArrayType *operands, ArrayType *types,
     }
 
     unique_operands = hash128_array_from_ids(unique, unique_count);
+    ArrayType *scan_types = types;
+    bool highway_scoped = false;
+    if (types == NULL)
+        scan_types = query_highway_relation_types(
+            unique_operands, unique_count, &highway_scoped);
+
     scan.reverse = false;
-    laplace_consensus_scan_ranked_planes(unique_operands, NULL, types, false,
+    laplace_consensus_scan_ranked_planes(unique_operands, NULL, scan_types, false,
         query_consensus_cell, query_consensus_cutoff, &scan,
         stats ? &stats->forward : NULL);
+    if (highway_scoped)
+        laplace_consensus_scan_ranked_planes(unique_operands, NULL, NULL, true,
+            query_consensus_cell, query_consensus_cutoff, &scan,
+            stats ? &stats->forward : NULL);
+
     scan.reverse = true;
-    laplace_consensus_scan_ranked_planes(NULL, unique_operands, types, false,
+    laplace_consensus_scan_ranked_planes(NULL, unique_operands, scan_types, false,
         query_consensus_cell, query_consensus_cutoff, &scan,
         stats ? &stats->reverse : NULL);
+    if (highway_scoped)
+        laplace_consensus_scan_ranked_planes(NULL, unique_operands, NULL, true,
+            query_consensus_cell, query_consensus_cutoff, &scan,
+            stats ? &stats->reverse : NULL);
+    if (highway_scoped && scan_types)
+        pfree(scan_types);
 
     {
         int64 retained = 0;
@@ -1476,14 +1610,31 @@ laplace_query_state_candidate_evidence(const LaplaceQueryState *state,
 
     operand_ids = hash128_array_from_ids(unique_operands, unique_operand_count);
     candidate_ids = hash128_array_from_ids(unique_candidates, unique_candidate_count);
+    ArrayType *scan_types = state->types;
+    bool highway_scoped = false;
+    if (state->types == NULL)
+        scan_types = query_highway_relation_types(
+            operand_ids, unique_operand_count, &highway_scoped);
+
     exact.reverse = false;
-    laplace_consensus_scan(operand_ids, candidate_ids, state->types,
+    laplace_consensus_scan(operand_ids, candidate_ids, scan_types,
                            query_exact_cell, &exact,
                            stats ? &stats->forward : NULL);
+    if (highway_scoped)
+        laplace_consensus_scan_default(
+            operand_ids, candidate_ids, query_exact_cell, &exact,
+            stats ? &stats->forward : NULL);
+
     exact.reverse = true;
-    laplace_consensus_scan(candidate_ids, operand_ids, state->types,
+    laplace_consensus_scan(candidate_ids, operand_ids, scan_types,
                            query_exact_cell, &exact,
                            stats ? &stats->reverse : NULL);
+    if (highway_scoped)
+        laplace_consensus_scan_default(
+            candidate_ids, operand_ids, query_exact_cell, &exact,
+            stats ? &stats->reverse : NULL);
+    if (highway_scoped && scan_types)
+        pfree(scan_types);
 
     if (exact.count > 0)
     {

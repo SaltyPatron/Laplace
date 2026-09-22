@@ -38,6 +38,17 @@ SQL_QUERY("content.carrier_vertices_selected", "bytea[],bytea[]",
     "FROM structural.content_carrier_vertices($1::bytea[],$2::bytea[]) ORDER BY parent_id,ordinal")
 SQL_QUERY("entities.mask_targets", "bytea[]",
     "SELECT id,tier,highway_mask,tableoid,ctid FROM laplace.entities WHERE id=ANY($1)")
+SQL_QUERY("entities.complete_highway_masks", "bytea[]",
+    "WITH requested AS MATERIALIZED ("
+    " SELECT DISTINCT id FROM unnest($1::bytea[]) AS u(id) WHERE id IS NOT NULL"
+    "), population AS MATERIALIZED ("
+    " SELECT complete FROM laplace.highway_mask_population_state WHERE singleton"
+    ") SELECT r.id,e.highway_mask FROM requested r "
+    "JOIN laplace.entities e ON e.id=r.id "
+    "WHERE COALESCE((SELECT complete FROM population),false) "
+    "AND NOT EXISTS(SELECT 1 FROM laplace.highway_mask_dirty d WHERE d.id=r.id) "
+    "AND NOT EXISTS(SELECT 1 FROM laplace.highway_mask_pending p WHERE p.entity_id=r.id) "
+    "ORDER BY r.id")
 SQL_QUERY("entities.mask_families", "bytea[],bytea",
     "SELECT subject_id,object_id FROM laplace.consensus WHERE subject_id=ANY($1) AND type_id=$2")
 SQL_QUERY("entities.mask_pending", "bytea[],bytea[]",
