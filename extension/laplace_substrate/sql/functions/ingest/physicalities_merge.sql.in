@@ -18,6 +18,11 @@ RETURNS bigint
 LANGUAGE SQL
 VOLATILE
 SET enable_material = off
+-- Hash-partitioned INSERT from unnest arrays: a generic plan cannot runtime-
+-- prune by the id parameter and probes all 64 partition indexes per call
+-- (measured 381 vs 74 buffer touches for one novel row). Novel admission is
+-- probe-filtered upstream, so calls are small and custom plans dominate.
+SET plan_cache_mode = force_custom_plan
 AS $$
     WITH admitted AS (
         INSERT INTO laplace.physicalities
