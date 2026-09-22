@@ -18,8 +18,6 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
     public static readonly Hash128 TrustClass = CILISource.TrustClass;
 
     private static readonly Hash128 SynsetTypeId = EntityTypeRegistry.WordNetSynset;
-    private static readonly Hash128 EngLang = LanguageEntityId.FromIso639_3("eng");
-
 
     public override int LayerOrder => 2;
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(
@@ -118,9 +116,11 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
                 && rec.Definition is { Length: > 0 } def
                 && ContentEmitter.Emit(b, def, Source) is { } dId)
             {
+                Hash128 english = LanguageReference.EmitResolvedCode(
+                    b, "eng", Source, TC.AcademicCurated);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     id, CILISource.HasDefinitionTypeId, dId,
-                    Source, EngLang, TC.AcademicCurated));
+                    Source, english, TC.AcademicCurated));
             }
 
             if (rec.SourceVersion is { Length: > 0 } version
@@ -165,11 +165,11 @@ public sealed class CILIDecomposer : DecomposerMultiPhase<CILISource, FullScope>
                 b, ReferenceIdentityKind.CiliMapVersion, rec.Version,
                 EntityTypeRegistry.SourceVersion, Source);
 
-            b.AddEntity(CILISource.IliStatusMetaTypeId, EntityTier.Word,
-                    BootstrapIntentBuilder.RelationTypeMetaTypeId, Source)
-                .AddAttestation(NativeAttestation.CategoricalResolved(
-                    iliId, CILISource.IliStatusMetaTypeId, statusId,
-                    Source, verCtx, TC.AcademicCurated));
+            // The status key is a relation/operator key. It is not content and
+            // must not be materialized as an Entity merely so an attestation can use it.
+            b.AddAttestation(NativeAttestation.CategoricalResolved(
+                iliId, CILISource.IliStatusMetaTypeId, statusId,
+                Source, verCtx, TC.AcademicCurated));
         }
 
         protected override async IAsyncEnumerable<(string Ili, string Status, string Version)> ExtractRecordsAsync(
