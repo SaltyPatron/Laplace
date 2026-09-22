@@ -22,6 +22,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
     private Hash128? _fileId;
 
     private readonly HashSet<Hash128> _seenEntities = new();
+    private readonly Dictionary<Hash128, int> _entityIndex = new();
     private readonly Dictionary<EntityInterpretationKey, int> _seenEntityInterpretations = new();
     private readonly HashSet<Hash128> _seenPhysicalities = new();
     private readonly Dictionary<Hash128, int> _physByEntity = new();
@@ -107,24 +108,49 @@ public sealed class SubstrateChangeBuilder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(row);
-        ObserveEntityInterpretation(row.Id, row.Tier, row.TypeId, row.FirstObservedBy);
-        if (_seenEntities.Add(row.Id)) _entities.Add(row);
+
+        if (_entityIndex.TryGetValue(row.Id, out int existingIndex))
+        {
+            EntityRow prior = _entities[existingIndex];
+            byte tier = Math.Min(prior.Tier, row.Tier);
+            Hash128 typeId =
+                row.Tier < prior.Tier ? row.TypeId :
+                row.Tier > prior.Tier ? prior.TypeId :
+                row.TypeId.CompareToBytewise(prior.TypeId) < 0 ? row.TypeId : prior.TypeId;
+
+            Hash128? firstObservedBy = prior.FirstObservedBy;
+            if (row.FirstObservedBy is { } incoming
+                && (firstObservedBy is not { } current
+                    || incoming.CompareToBytewise(current) < 0))
+                firstObservedBy = incoming;
+
+            if (tier != prior.Tier || typeId != prior.TypeId
+                || firstObservedBy != prior.FirstObservedBy)
+                _entities[existingIndex] = prior with
+                {
+                    Tier = tier,
+                    TypeId = typeId,
+                    FirstObservedBy = firstObservedBy,
+                };
+            return this;
+        }
+
+        // TrySeeEntity is used when a native stage already owns the entity tuple.
+        // In that case do not manufacture a managed duplicate or an interpretation
+        // sidecar merely because a managed caller observes the same identity.
+        if (!_seenEntities.Add(row.Id)) return this;
+
+        _entityIndex[row.Id] = _entities.Count;
+        _entities.Add(row);
         return this;
     }
 
-    // Canonical identity is id-only, but structural interpretations are not. Every
-    // distinct (id,tier,type) observation is retained in the sidecar even when the
-    // canonical entity row was already staged. This keeps the original allocation win:
-    // duplicate identical observations allocate nothing; a genuinely new interpretation
-    // allocates exactly one compact sidecar row rather than a second logical entity.
+    // A managed entity observation converges directly onto the canonical row.
+    // Semantic plurality belongs in attestations; callers that still require the
+    // compatibility interpretation transport must opt into AddEntityInterpretation.
     public SubstrateChangeBuilder AddEntity(
-        Hash128 id, byte tier, Hash128 typeId, Hash128? firstObservedBy = null)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ObserveEntityInterpretation(id, tier, typeId, firstObservedBy);
-        if (_seenEntities.Add(id)) _entities.Add(new EntityRow(id, tier, typeId, firstObservedBy));
-        return this;
-    }
+        Hash128 id, byte tier, Hash128 typeId, Hash128? firstObservedBy = null) =>
+        AddEntity(new EntityRow(id, tier, typeId, firstObservedBy));
 
     /// <summary>Retain an actual observed facet without making its entity eligible
     /// for creation. Admission requires an existing or independently staged E.</summary>
