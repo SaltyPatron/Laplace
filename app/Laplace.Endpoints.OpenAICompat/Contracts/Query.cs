@@ -70,3 +70,10 @@ public sealed record RelationBand(
 public sealed record RelationBandsResponse(
     [property: JsonPropertyName("object")] string Object,
     [property: JsonPropertyName("bands")] IReadOnlyList<RelationBand> Bands);
+
+public sealed record HighwayPopulationStatus(
+    [property: JsonPropertyName("registry_ready")] bool RegistryReady,
+    [property: JsonPropertyName("historical_population_complete")] bool HistoricalPopulationComplete,
+    [property: JsonPropertyName("completed_at")] DateTimeOffset? CompletedAt,
+    [property: JsonPropertyName("pending_pairs")] long PendingPairs,
+    [property: JsonPropertyName("pending_refreshes")] long PendingRefreshes);
