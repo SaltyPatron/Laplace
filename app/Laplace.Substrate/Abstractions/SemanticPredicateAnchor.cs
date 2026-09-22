@@ -20,8 +20,7 @@ public readonly record struct SemanticPredicateArgument(string Type, string Valu
 /// </summary>
 public static class SemanticPredicateAnchor
 {
-    private static readonly Hash128 Schema =
-        Hash128.OfCanonical("semantic-predicate/structure/v2");
+    private const string SchemaText = "semantic-predicate/structure/v2";
 
     public static Hash128 Id(
         SemanticPredicateIdentityKind kind,
@@ -35,8 +34,8 @@ public static class SemanticPredicateAnchor
         Hash128 frame = RequiredRoot(frameOrdinal.ToString(CultureInfo.InvariantCulture));
         Hash128 predicate = RequiredRoot(predicateOrdinal.ToString(CultureInfo.InvariantCulture));
         var flat = new Hash128[6 + arguments.Count * 2];
-        flat[0] = Schema;
-        flat[1] = KindMarker(kind);
+        flat[0] = RequiredRoot(SchemaText);
+        flat[1] = RequiredRoot(KindMarkerText(kind));
         flat[2] = ownerId;
         flat[3] = frame;
         flat[4] = predicate;
@@ -64,22 +63,26 @@ public static class SemanticPredicateAnchor
         ArgumentNullException.ThrowIfNull(builder);
         Validate(kind, ownerId, frameOrdinal, predicateOrdinal, label.Id, arguments);
 
+        OrderedCompositionComponent schema =
+            RequiredComponent(builder, SchemaText, source);
+        OrderedCompositionComponent system =
+            RequiredComponent(builder, KindMarkerText(kind), source);
         OrderedCompositionComponent frame = RequiredComponent(
             builder, frameOrdinal.ToString(CultureInfo.InvariantCulture), source);
         OrderedCompositionComponent predicate = RequiredComponent(
             builder, predicateOrdinal.ToString(CultureInfo.InvariantCulture), source);
 
         var flat = new Hash128[6 + arguments.Count * 2];
-        flat[0] = Schema;
-        flat[1] = KindMarker(kind);
+        flat[0] = schema.Id;
+        flat[1] = system.Id;
         flat[2] = ownerId;
         flat[3] = frame.Id;
         flat[4] = predicate.Id;
         flat[5] = label.Id;
 
-        var placed = new List<OrderedCompositionComponent>(3 + arguments.Count * 2)
+        var placed = new List<OrderedCompositionComponent>(5 + arguments.Count * 2)
         {
-            frame, predicate, label
+            schema, system, frame, predicate, label
         };
         int cursor = 6;
         foreach (SemanticPredicateArgument argument in arguments)
@@ -134,8 +137,8 @@ public static class SemanticPredicateAnchor
         ArgumentNullException.ThrowIfNull(arguments);
     }
 
-    private static Hash128 KindMarker(SemanticPredicateIdentityKind kind) =>
-        Hash128.OfCanonical($"semantic-predicate/system/{(ushort)kind}/v1");
+    private static string KindMarkerText(SemanticPredicateIdentityKind kind) =>
+        $"semantic-predicate/system/{(ushort)kind}/v1";
 
     private static Hash128 RequiredRoot(string value) =>
         ContentEmitter.RootId(value)
