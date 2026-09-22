@@ -28,13 +28,14 @@ public static class SourceArtifactProvenance
             : !string.IsNullOrWhiteSpace(artifact.Sha256)
                 ? artifact.Sha256.Trim().ToLowerInvariant()
                 : artifact.Id;
+        Hash128 source = Root(artifact.Source);
+        Hash128 release = Root(artifact.Release);
+        Hash128 artifactName = Root(artifact.Artifact);
+        Hash128 fingerprint = Root(exact);
         return new(
-            Hash128.OfCanonical(
-                $"substrate/source_artifact/{artifact.Source}/{artifact.Release}/{artifact.Artifact}/{exact}/v1"),
-            Hash128.OfCanonical(
-                $"substrate/source_release/{artifact.Source}/{artifact.Release}/v1"),
-            Hash128.OfCanonical(
-                $"substrate/source_artifact_role/{artifact.Source}/{artifact.Artifact}/v1"));
+            Merkle(source, release, artifactName, fingerprint),
+            Merkle(source, release),
+            Merkle(source, artifactName));
     }
 
     public static SubstrateChange BuildChange(
@@ -52,15 +53,44 @@ public static class SourceArtifactProvenance
             entityCapacity: 12, physicalityCapacity: 0, attestationCapacity: 16)
             .DeclareSourcePrior(sourceId, trust);
 
-        builder.AddEntity(
-            identity.ArtifactId, EntityTier.Document,
-            EntityTypeRegistry.SourceReference, sourceId);
-        builder.AddEntity(
-            identity.ReleaseId, EntityTier.Word,
-            EntityTypeRegistry.SourceVersion, sourceId);
-        builder.AddEntity(
-            identity.RoleId, EntityTier.Word,
-            EntityTypeRegistry.SourceReference, sourceId);
+        OrderedCompositionComponent sourceComponent =
+            ContentEmitter.StageComponent(builder, artifact.Source, sourceId)
+            ?? throw new InvalidOperationException("artifact source could not be composed");
+        OrderedCompositionComponent releaseComponent =
+            ContentEmitter.StageComponent(builder, artifact.Release, sourceId)
+            ?? throw new InvalidOperationException("artifact release could not be composed");
+        OrderedCompositionComponent artifactComponent =
+            ContentEmitter.StageComponent(builder, artifact.Artifact, sourceId)
+            ?? throw new InvalidOperationException("artifact name could not be composed");
+        string exact = exactFingerprint is { } fingerprint
+            ? fingerprint.ToString()
+            : !string.IsNullOrWhiteSpace(artifact.Sha256)
+                ? artifact.Sha256.Trim().ToLowerInvariant()
+                : artifact.Id;
+        OrderedCompositionComponent fingerprintComponent =
+            ContentEmitter.StageComponent(builder, exact, sourceId)
+            ?? throw new InvalidOperationException("artifact fingerprint could not be composed");
+
+        Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[3];
+        OrderedComposition.StageBatch(
+            builder.ContentStage,
+            [
+                new OrderedCompositionRequest(
+                    [sourceComponent, releaseComponent],
+                    EntityTypeRegistry.SourceVersion, sourceId, 0),
+                new OrderedCompositionRequest(
+                    [sourceComponent, artifactComponent],
+                    EntityTypeRegistry.SourceReference, sourceId, 0),
+                new OrderedCompositionRequest(
+                    [sourceComponent, releaseComponent, artifactComponent, fingerprintComponent],
+                    EntityTypeRegistry.SourceReference, sourceId, 0),
+            ],
+            composed);
+
+        if (composed[0].Id != identity.ReleaseId
+            || composed[1].Id != identity.RoleId
+            || composed[2].Id != identity.ArtifactId)
+            throw new InvalidOperationException("source artifact identity changed during composition");
 
         builder.AddAttestation(NativeAttestation.Categorical(
             sourceId, "CONTAINS", identity.ArtifactId, sourceId, trust));
@@ -99,14 +129,21 @@ public static class SourceArtifactProvenance
         void EmitProperty(string name, string? value)
         {
             if (string.IsNullOrWhiteSpace(value)) return;
-            Hash128 key = Hash128.OfCanonical($"substrate/source_artifact_property/{name}/v1");
-            builder.AddEntity(
-                key, EntityTier.Word, EntityTypeRegistry.SourceReference, sourceId);
+            Hash128 key = ContentEmitter.Emit(builder, name, sourceId)
+                ?? throw new InvalidOperationException(
+                    $"source artifact property name could not be composed: {name}");
             if (ContentEmitter.Emit(builder, value, sourceId) is not { } root) return;
             builder.AddAttestation(NativeAttestation.Categorical(
                 identity.ArtifactId, "HAS_PROPERTY", root, sourceId, trust, contextId: key));
         }
     }
+
+    private static Hash128 Root(string value) =>
+        ContentEmitter.RootId(value)
+        ?? throw new InvalidOperationException($"source artifact fragment could not be composed: {value}");
+
+    private static Hash128 Merkle(params Hash128[] constituents) =>
+        Hash128.Merkle(EntityTier.Document, constituents);
 
     public static Hash128 RecipeId(
         string sourceName, string release, string recipeName, IReadOnlyList<Hash128> requires)
