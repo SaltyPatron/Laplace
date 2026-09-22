@@ -24,6 +24,14 @@ CREATE TABLE IF NOT EXISTS highway_mask_population_state (
     complete boolean NOT NULL DEFAULT false,
     completed_at timestamptz
 );
-INSERT INTO highway_mask_population_state(singleton, complete)
-VALUES (true, false)
+-- On a greenfield database this table is installed before corpus admission, so
+-- the historical estate is already complete: there is no pre-existing consensus
+-- to repair, and every subsequent accepted pair is deposited inline. An upgrade
+-- that creates this state over an existing populated consensus estate remains
+-- incomplete and may be repaired only by an explicit operator action.
+INSERT INTO highway_mask_population_state(singleton, complete, completed_at)
+SELECT true,
+       NOT EXISTS (SELECT 1 FROM laplace.consensus),
+       CASE WHEN NOT EXISTS (SELECT 1 FROM laplace.consensus)
+            THEN clock_timestamp() ELSE NULL END
 ON CONFLICT (singleton) DO NOTHING;
