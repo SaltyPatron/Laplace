@@ -19,12 +19,7 @@ public sealed class Atomic2020Decomposer
     public static readonly Hash128 Source = Atomic2020Source.SourceId;
     public static readonly Hash128 TrustClass = Atomic2020Source.TrustClass;
 
-    private static readonly Hash128 MarkerTypeId = EntityTypeRegistry.AtomicMarker;
     private static readonly Hash128 SplitTypeId = EntityTypeRegistry.AtomicSplit;
-
-    private static readonly Hash128 NoneId = SubstrateCanonicalIds.OfVersioned("atomic", "none");
-
-    private static Hash128 SplitId(string s) => Hash128.OfCanonical($"atomic/split/{s}");
 
     internal static readonly Dictionary<string, string> RelTypeId =
         Atomic2020Source.RelPairs.ToDictionary(r => r.Rel, r => r.Type);
@@ -34,14 +29,10 @@ public sealed class Atomic2020Decomposer
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.StructuredCorpus;
 
-    protected override async Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
+    protected override Task OnInitializedAsync(IDecomposerContext context, CancellationToken ct)
     {
-        var seed = new SubstrateChangeBuilder(Source, "bootstrap/atomic-vocab", null,
-            entityCapacity: 1 + Splits.Length, physicalityCapacity: 0, attestationCapacity: 0)
-            .DeclareSourcePrior(SourceTrust);
-        seed.AddEntity(new EntityRow(NoneId, EntityTier.Word, MarkerTypeId, Source));
-        foreach (var s in Splits) seed.AddEntity(new EntityRow(SplitId(s), EntityTier.Word, SplitTypeId, Source));
-        await context.Writer.ApplyAsync(seed.Build(), ct);
+        ct.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
     }
 
     public override Task<long?> EstimateUnitCountAsync(IDecomposerContext context, CancellationToken ct = default)
@@ -61,8 +52,6 @@ public sealed class Atomic2020Decomposer
         {
             var names = new List<string>
             {
-                "substrate/atomic/none/v1",
-                "Atomic_Marker",
                 "Atomic_Split",
             };
             foreach (var name in Atomic2020Source.RelPairs.Select(r => r.Type).Distinct())
@@ -94,18 +83,16 @@ public sealed class Atomic2020Decomposer
     {
         int slash = fileLabel.LastIndexOf('/');
         string split = slash >= 0 ? fileLabel[(slash + 1)..] : Path.GetFileNameWithoutExtension(filePath);
-        Hash128 splitId = SplitId(split);
-
         await foreach (var lineMem in StreamingUtf8LineReader.ReadLinesAsync(filePath, ct))
         {
             if (lineMem.Length == 0) continue;
-            if (!TryExtract(lineMem.Span, splitId, out var record)) continue;
+            if (!TryExtract(lineMem.Span, split, out var record)) continue;
             yield return record;
         }
     }
 
     internal static bool TryExtract(
-        ReadOnlySpan<byte> line, Hash128 splitId, out RelationTripleRecord record)
+        ReadOnlySpan<byte> line, string split, out RelationTripleRecord record)
     {
         record = default;
         int t1 = line.IndexOf((byte)'\t');
@@ -142,7 +129,10 @@ public sealed class Atomic2020Decomposer
             UnderscoredUtf8Canonicalize.ToSpaces(head),
             relType,
             assertsAbsence ? null : UnderscoredUtf8Canonicalize.ToSpaces(tail),
-            splitId, magnitude);
+            ContextId: null,
+            Magnitude: magnitude,
+            ContextAnchorKey: split,
+            ContextCategoryTypeId: SplitTypeId);
         return true;
     }
 }
