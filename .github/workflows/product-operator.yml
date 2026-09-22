@@ -29,6 +29,7 @@ permissions:
 jobs:
   operator:
     name: Run explicit product maintenance operation
+    if: inputs.operation != 'forward-chat-proof'
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: ${{ inputs.operation }}
@@ -40,7 +41,6 @@ jobs:
 
   forward-chat-proof:
     if: inputs.operation == 'forward-chat-proof'
-    needs: operator
     name: Capture forward chat lifecycle receipt
     runs-on: [self-hosted, laplace]
     timeout-minutes: 10
@@ -64,6 +64,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          exec 9>/build/laplace/work/host-resource.lock
+          flock 9
           mkdir -p artifacts/forward-chat-lifecycle
           python3 scripts/verify-forward-chat-lifecycle.py \
             --receipt artifacts/forward-chat-lifecycle/receipt.json
