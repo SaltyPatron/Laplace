@@ -1074,7 +1074,8 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
     HTAB *geometry_routed;
     HTAB *origins;
     int next_origin = 0;
-    int semantic_hops = 0;
+    int coupling_hops = 0;
+    int routing_hops = 0;
     bool exhausted = false;
     bool explicit_observation_scope = false;
 
@@ -1266,12 +1267,16 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             ArrayType *changed = laplace_prompt_intent_couple(
                 &coupled_intent, channels, channel_count);
             int changed_count = ArrayGetNItems(ARR_NDIM(changed), ARR_DIMS(changed));
-            if (changed_count == 0 || semantic_hops >= semantic_hop_limit)
+            if (changed_count == 0 ||
+                (semantic_hop_limit >= 0 && coupling_hops >= semantic_hop_limit))
             {
                 pfree(changed);
                 break;
             }
-            /* One additional interpretation frontier costs one declared hop.
+            /* COUPLE expansion and ROUTE/SCAN expansion are distinct state
+             * coordinates. The same configured ceiling bounds each phase, but
+             * resolving a witnessed naming/binding path must not consume every
+             * later execution hop before the cognition program can run.
              * Naming can be read in reverse without making asymmetric result
              * relations traversable in reverse. No per-candidate SPI call. */
             ArrayBuildState *next = NULL;
@@ -1290,7 +1295,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             }
             array_free_iterator(changed_iterator);
             pfree(changed);
-            ++semantic_hops;
+            ++coupling_hops;
             if (next)
             {
                 ArrayType *next_ids = DatumGetArrayTypeP(makeArrayResult(next, walk_context));
@@ -1384,8 +1389,6 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             laplace_query_state_channels(query_state, &initial_channel_count);
         cognition = laplace_cognition_program_create(
             input, context_length, initial_channels, initial_channel_count, intent);
-        for (int i = 0; i < semantic_hops; ++i)
-            laplace_cognition_program_note_route(cognition);
         if (intent && intent->ambiguous)
             laplace_cognition_program_finalize(cognition, LAPLACE_COGNITION_AMBIGUOUS);
         else if (intent && intent->budget_exhausted)
@@ -1497,7 +1500,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         query_proposals = evidence_summaries(query_state, false, origins, step_context);
 
         if (input && ((intent && intent->relation_count > 0) ||
-                      semantic_hop_limit < 0 || semantic_hops < semantic_hop_limit))
+                      semantic_hop_limit < 0 || routing_hops < semantic_hop_limit))
         {
             query_traversal_proposals = evidence_summaries(query_state, true, origins, step_context);
             HASH_SEQ_STATUS sequence;
@@ -1695,12 +1698,13 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 output_count++;
         if (output_count == 0)
         {
-            if (!input || semantic_hops >= semantic_hop_limit)
+            if (!input ||
+                (semantic_hop_limit >= 0 && routing_hops >= semantic_hop_limit))
             {
                 exhausted = true;
                 break;
             }
-            ++semantic_hops;
+            ++routing_hops;
             if (cognition)
                 laplace_cognition_program_note_route(cognition);
             ArrayType *routed = candidate_id_array(candidates, candidate_count);
@@ -1708,7 +1712,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
                 for (int i = 0; i < candidate_count; ++i)
                     emit_result(result, step, &candidates[i], true, input,
                                 candidate_count, context_length, retained_channel_count,
-                                query_channel_count, true, semantic_hops, cognition);
+                                query_channel_count, true, routing_hops, cognition);
             MemoryContextSwitchTo(walk_context);
             for (int i = 0; i < candidate_count; ++i)
             {
@@ -1791,7 +1795,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
         MemoryContextSwitchTo(step_context);
         emit_result(result, step, &candidates[pick], trace, input,
                     candidate_count, context_length, retained_channel_count,
-                    query_channel_count, false, semantic_hops, cognition);
+                    query_channel_count, false, routing_hops, cognition);
         ++step;
 
         if (cognition)
@@ -1825,7 +1829,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
             MemoryContextSwitchTo(step_context);
             laplace_cognition_program_receipt(cognition, &receipt);
             emit_terminal(result, receipt.output_count + 1, input,
-                          context_length, semantic_hops, cognition);
+                          context_length, routing_hops, cognition);
             MemoryContextSwitchTo(walk_context);
         }
     }
