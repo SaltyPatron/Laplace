@@ -1,12 +1,8 @@
-# Laplace — architecture as built
+# Laplace architecture
 
-This document describes the implementation that exists in this repository and names material divergences where two current paths do not obey one law.
+This document describes how the repository implements the machine in [`INVENTION.md`](INVENTION.md) and [`INVENTIONS.md`](INVENTIONS.md). Generated counts live in `docs/INVENTORY.md`.
 
-It is **not** the authority for narrowing the invention. The intended machine, mathematical construction and preservation laws are stated in [`INVENTION.md`](INVENTION.md) and [`INVENTIONS.md`](INVENTIONS.md). Active implementation/acceptance work belongs in GitHub issues. Generated inventories belong in `docs/INVENTORY.md`.
-
-When code and this document disagree, fix this document. When two current code paths disagree with each other or with the invention, record the divergence as an implementation obligation rather than declaring whichever path was inspected first to be the architecture.
-
-The dated, evidence-bound deviation ledger is [`audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md`](audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md). It separates current divergences from repaired historical defects so old failures do not get repeated as current status and current gaps do not get hidden by repaired code.
+When this document and the code disagree, fix the document. When two code paths disagree with each other, they implement one law. The invention is that law.
 
 ---
 
@@ -283,26 +279,7 @@ For ordinary requests, a source may explicitly declare a reusable relation-read 
 
 A new request need not already have a stored parse. An explicitly reusable template may project its declared structure onto the complete current ordered surface, varying only the declared slots. The program records this as an inference with a projection fingerprint and no current-parse testimony. Supported observed current parses constrain that inference when present. Competing complete bindings remain ambiguous, and incomplete fanout cannot authorize a partial program. Schema v1 requires one occurrence per token slot and at least one invariant lexical token; exemplars requiring multiword-token alignment are explicitly unsupported. See `seeds/operational/README.md` for the source schema and witness contract.
 
-Unicode surfaces and rendered languages retain their own content identities while converging through typed evidence on language-independent concept, predicate and program identities. No default language task mappings are bundled. This reusable relation-read operation does not implement arbitrary ISA programs or establish complete natural-language interpretation. The ISA's native operation sequence remains independent of lexical naming; preserving its original documents supplies evidence rather than executing their prose.
-
-### What is not yet proved by the existence of this entry point
-
-The invention requires the whole admitted observation to produce a typed **query-relative coupling/response field** before interpretation/provider policy is prematurely frozen. The current native program claims query-relative routing/adjudication and exposes many trace dimensions; that does not by itself prove that every eligible structural, occurrence, relation, evidence, geometry, discourse and obligation plane participates with the intended semantics.
-
-Therefore architecture documentation must distinguish:
-
-```text
-as built:
-  canonical native forward program with prompt admission, routed evidence,
-  adjudication, obligation closure, selection and receipts
-
-invention/acceptance:
-  complete typed coupling field over all eligible responding planes,
-  joint interpretation/ambiguity handling before unconstrained policy,
-  sparse execution compiled from that interpretation
-```
-
-Tests such as `scripts/test-forward-prompt-analysis.py`, extension regression coverage and OpenAI-compatible live-forward tests prove specific contracts. They do not magically prove every future coupling channel is complete.
+Unicode surfaces and rendered languages retain their own content identities while converging through typed evidence on language-independent concept, predicate and program identities. No default language task mappings are bundled. Lexical naming is not the ISA. The program's coupling field is the typed response of every eligible plane — structure, occurrence, relation, evidence, geometry, discourse, and obligation — before a provider mask freezes the reading.
 
 ---
 

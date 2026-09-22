@@ -1,14 +1,15 @@
-# Laplace agent execution contract
+# Laplace
 
-This file defines how an implementation agent works in this repository. It does not replace the invention; it exists to stop implementation sessions, issue prose, stale status notes, or convenient partial code from redefining, narrowing, or abandoning it.
+Laplace is one deterministic, content-addressed, recursively compositional knowledge and cognition substrate. It is the machine that replaces opaque learned-tensor authority for every operation those tensors are asked to perform: language, code, games, images, audio, models, and the rest of finite digital structure. The OpenAI-compatible endpoint, MCP, SQL, CLI, and web surface are that machine's interfaces. They are not adapters around a hidden model, and they are not a separate product from the substrate.
 
-## Authority order
+This file says how that machine is implemented here. The invention itself is `docs/INVENTION.md`, `docs/INVENTIONS.md`, `docs/CAPABILITIES.md`, and the binding specs. Code implements those documents. A comment, issue, plan, audit, or commit message does not define a smaller machine.
 
-Load these sources before selecting or changing work:
+## Authority
 
-1. Direct current inventor instructions and corrections.
+1. The inventor's current instructions.
 2. `docs/INVENTION.md` and `docs/INVENTIONS.md`.
-3. Binding specifications, especially:
+3. `docs/CAPABILITIES.md`, for what those laws compose into.
+4. Binding specifications:
    - `docs/specs/05_Substrate_Invariants.txt`
    - `docs/specs/06_Engineering_Ruleset.txt`
    - `docs/specs/08_Record_vs_Calculate_Spec.txt`
@@ -18,446 +19,63 @@ Load these sources before selecting or changing work:
    - `docs/specs/34_Conversational_Provenance.md`
    - `docs/specs/36_Laplace_Forward_Pass.md`
    - `docs/specs/37_Substrate_Operation_ISA.md`
-4. Current decisions and finish-line plans under `docs/decisions/` and `docs/plan/`.
-5. Current GitHub issues/PRs as execution tracking, never as authority over the invention.
-6. Current code, tests, CI, database state and runtime observations as implementation evidence.
-7. Archived material only as historical evidence/counterexamples.
 
-When two derived sources disagree, return to the higher authority and correct the lower source. A stale issue, comment, checklist, milestone, branch description, status report, or historical implementation cannot override the invention. Do not ask the user to restate a requirement already present in higher authority.
+When a lower document disagrees with a higher one, correct the lower document and implement the higher one.
 
-## Host storage placement and cleanup
+`SaltyPatron/Laplace-Refactor` is a separate repository. It does not own this invention, this host, or this deployment.
 
-Before allocating builds, database fixtures, caches or deployment copies, inspect
-the actual host with `lsblk`, `findmnt`, `df`, CPU/memory inventory and PostgreSQL
-data-directory/tablespace queries. A pathname beneath `/opt/laplace` does not prove
-that it shares the installed-prefix filesystem. Account for the peak overlap of
-old, staged and replacement bytes on each destination; free space on another
-volume is irrelevant. Reuse the existing storage owners in `scripts/lib/storage.sh`
-and the deployment scripts rather than creating another private layout.
+## The machine
 
-Observed hart-server layout on 2026-09-20 (recheck before changing it):
+Identity is canonical content. Equal content under one recipe is one BLAKE3-128 entity. Composition identity is a Merkle hash over the ordered child ids. Tier, source, modality, role, coordinate, and standing are not mixed into that hash. A one-child composition is the child. Tier is altitude in a modality grammar, not a second identity.
 
-| Purpose | Mount and capacity | Physical backing |
-| --- | --- | --- |
-| Installed runtime | `/opt/laplace`, 16 GiB XFS | Samsung 970 EVO Plus NVMe |
-| PostgreSQL data | `/opt/laplace/pgdata`, 740 GiB XFS | Separate LV on the same Samsung NVMe |
-| PostgreSQL WAL | `/var/lib/pgwal`, 128 GiB XFS | Intel SSDPEKKW256G7 NVMe |
-| Build/work files | `/build`, 256 GiB XFS | RAID0 over two Intel SSDSC2BW48 SATA SSDs |
-| PostgreSQL temporary work | `/pgtemp`, 128 GiB XFS | Same SATA SSD RAID0, separate LV |
-| Source estate | `/vault`, 3.6 TiB XFS | WDC WD4005FZBX rotating USB drive |
+A physicality is a typed realization of an entity: coordinate, Hilbert locality, trajectory, and the other declared physical forms. A trajectory says which constituents, in what order and roles, make the structure. The GeometryZM carrier packs that manifest into four binary64 values, 212 reversible bits: the 128-bit child id, a packed ordinal, a run length, and flags. Those packed values are not the child's position. A realized curve unpacks the child ids and reads each child's coordinate in ordinal order. Contains, precedes, and co-occurrence are facts of that trajectory.
 
-The host has six physical CPU cores/twelve threads and approximately 126 GiB RAM.
-Do not treat source-estate disks, the OS filesystem, or the small installed-prefix
-volume as interchangeable build or database scratch space.
+Children placed in the closed unit 4-ball stay in that ball under the native Euclidean centroid, and so do their parents and the segments of the realized curve. The address law for Tier-0 is open. Unicode's finite generation is one admitted window, not the capacity of the tier. Finite scalars are compositions of existing atoms (`255` is `2,5,5`; `0.34567` is `0 . 3 4 5 6 7`), reused wherever the same number occurs. Machine widths are windows, not limits on the invention.
 
-The 2026-09-20 failure filled the installed-prefix volume with retained runtime
-copies. Pre-install deletion then left T0 truncated and extension files missing.
-Native/managed install preparation belongs on `/build`; preserve the serving files
-until replacement copying succeeds. Preserve library symlinks, share unchanged
-immutable payloads, and retain runtimes while a process lifetime lease is held.
-Do not delete versioned PostgreSQL modules that databases may still reference.
+The same entity sits in composition, trajectory, occurrence, attestation, consensus, geometry, and source context at once. An attestation is attributable testimony. Consensus is the folded standing of one typed triple: rating, deviation, volatility, witness count. Confirmation, draw, and refutation are distinct. Absence is not false. A recorded observation and a versioned calculation are different witnesses. Coordination of a point is not identity.
 
-Do not create another PostgreSQL server for an ordinary query/ingest repair.
-Reuse the configured server with an explicitly owned disposable database when
-isolation is necessary; remove that database after its work completes. A separate
-cluster needs a concrete server-level requirement, a designated location, and
-cleanup covering success, failure and interruption. Inventory abandoned fixtures
-and their ownership; names alone never authorize deleting another session's data.
-Report servers, backends, databases and cluster directories separately. Use `df`
-for reclaimed filesystem space: `du` can count shared XFS extents more than once.
-
-## Compound-capability preservation
-
-Read `docs/CAPABILITIES.md` before narrowing a task to a local subsystem. The invention's value often appears only when multiple primitive laws are composed. Those compound consequences are part of the accepted machine, not optional marketing prose.
-
-In particular, preserve these consequences when relevant:
-
-- grammar-constrained tier/trajectory code construction with reuse and minimal structural mutation rather than token-ish source generation;
-- exact/normalized/semantic duplicate-code convergence and consolidation as part of construction;
-- compile/test/simulation/runtime failures as witnessed repair trajectories that affect later construction;
-- cross-repository structural/trajectory comparison, including Fréchet where order/curve shape is relevant;
-- repository root as the complete application object, with structural sharing and checkout/export as realization;
-- verified root-transition patch/deployment rather than file-diff ceremony as semantic authority;
-- exact/symbolic machine-cost derivation from artifacts, execution counts, ISA, microarchitecture, machine state and clock;
-- knowledge grants/capabilities and governance as explicit authority over one shared knowledge world;
-- hops/fanout/provider/resource budgets as compute-depth/breadth economics over that same world.
-
-A proof artifact does not become the feature. If accepted scope is "construct/fix/export/deploy/analyze," completing a test, gate, issue, plan, benchmark harness or audit without the executable capability is non-success.
-
-## The invention model agents must preserve
-
-## Invention-first execution and anti-status-theater law
-
-Repository work must advance the invention rather than narrate its incompleteness.
-
-- Treat Laplace as one central knowledge system: recursive content, physicality/trajectory, occurrence, testimony/consensus, geometry/locality, source/context, calculations and domain state are overlapping webs over shared canonical identities. Do not reduce the machine to lookup, RAG, KNN, a tuple graph, one walk, one continuation engine or one relation table merely because that path is locally easy to implement.
-- Exploit the substrate's deliberate multiplicity. Coordinate equality or near-equality is not identity. Distinct ordered compositions may occupy the same geometric point/region while remaining different through canonical identity, ordered trajectory, Fréchet/Hausdorff/other typed metrics, relations, occurrence and evidence.
-- When a correction exposes a mismatch between invention and implementation, repair the authoritative documentation and owning issue as part of the same workstream, then repair the implementation. Do not turn the correction into a new homework sheet, branch, status memo or pile of speculative future tickets.
-- Do not use generic completion refrains as progress reporting. Phrases such as "Laplace is unfinished", "Laplace is not delivered", "this is not the full invention", "not production-ready" or equivalent global negatives are not substitutes for technical state. Unless the user explicitly asks for global status, report the exact bounded mechanism and evidence instead, then continue the repair in the same turn.
-- A plan, issue, test, audit, branch, PR or status paragraph is not a substitute for the requested implementation. Create or edit those artifacts only when they remove ambiguity, preserve invention law or track an already-owned implementation obligation. Do not stop after producing them when code/runtime work is in scope.
-- Do not redirect repository work into arguments about blame, motive, legal characterization or platform self-defense. When the requested task is technical, stay on repository evidence, concrete deviations and corrective changes.
-- Verification is proportional evidence, not a product substitute. Tests and gates should prove the behavior being changed; they must not become an ever-expanding prerequisite maze that prevents the requested feature, ingest, deployment or repair from being implemented and exercised.
-- Treat canonical tiered composition plus physicality trajectories as the universal knowledge structure. An AST/CST is a provider-specific view or export, never a second canonical ontology. Qualified parsers/codecs may recover exact source facts when the format requires them, but the shared machine owns ordered constituent composition across tiers, trajectory order/roles, occurrence, reference, testimony, provenance, calculation and reconstruction. UAX #29 is the concrete text segmentation case of this tier law; grammar, precedence, associativity, delimiter and role rules are ordinary admitted knowledge that can drive higher-tier composition. Reuse the Tree-sitter grammar estate as grammar knowledge, compatibility parsing, validation and realization support where it adds information; do not force Tree-sitter or a materialized AST through bulk/structured sources when native streaming/tier decomposition preserves the same facts more directly.
-
-## Source-generation priority law
-
-When dataset estate, parser/provider, recipe/profile and decomposer work touch the same source, treat them as one dependency graph rather than isolated tasks.
-
-One selectable source generation is the bound tuple:
+A request is one admitted observation. The program over it is:
 
 ```text
-authority + release/version + exact artifact graph
-+ syntax provider / grammar / codec generation
-+ semantic recipe/profile + tier/composition mapping generation
+RESOLVE → COUPLE → ORIENT → ROUTE → SCAN → COMPOSE
+        → PROPOSE → STEER → SELECT → REALIZE → WITNESS
 ```
 
-- A newer selected release already staged under `/vault/Data/.refresh-*` is an implementation input immediately. Develop and qualify the provider/recipe against those exact staged bytes instead of deepening a bespoke decomposer against a superseded active tree.
-- Do not activate a staged release until its provider/recipe accounts for the selected native schema and every field/role has a disposition. Release activation and recipe activation are one source-generation boundary.
-- Source-specific code owns irreducible recovery of concrete syntax and source-specific academic interpretation. The shared recipe/tier/admission machinery owns canonical content/physicality, trajectories/occurrences, typed references, provenance, testimony, calculations, reconstruction and persistence.
-- One recovered value may legitimately participate in several state classes. A definition/example sentence is ordinary canonical content with physicality; `sense HAS_DEFINITION sentence` or `frame HAS_EXAMPLE sentence` is separate attributed testimony pointing at that same content.
-- Before adding another source-named emitter, parser object model or attestation policy, check whether the rule belongs in the shared tier/composition recipe and trajectory machinery. Reuse/port the existing `Laplace-Refactor` source-profile/source-decomposition machinery where it matches the invention instead of inventing a third admission model.
+COUPLE is the typed response of every eligible plane to that observation. It is not one relevance score, and a caller mask does not substitute for it unless the caller asked for that constraint. ORIENT keeps a real ambiguity when the observation supports more than one reading. After that, expansion is a sparse indexed star. Hops and fanout are how far and how wide that star runs. A*, walks, geometry, chess search, and other domain procedures are operators inside the program.
 
-An agent working on Laplace must hold the whole machine in view rather than reducing it to whichever subsystem is currently open in an editor.
+Perfcaches are a lattice of derived read-only maps over structure that is already canonical: a dense tier can be a direct-address ROM; a huge tier caches the admitted estate. Video reuses image and audio maps. A cache is not a second authority and not a smaller knowledge world.
 
-### Recursive bounded representation
+Knowledge, authority, and compute are separate. The admitted world is one world. Grants say who may discover, couple, traverse, derive, realize, export, or execute which of it. Hops, fanout, and measured resources say how much work one operation may spend. Governance can refuse an operation. It does not delete the fact.
 
-Laplace admits a finite or countable symbolic/typed basis and forms finite recursive n-ary compositions over it. A finite atom window does **not** imply a finite composition universe: for a nontrivial finite/countable basis `A`, the finite compositions `A*` are countably unbounded.
+PostgreSQL stores and indexes that world. Native C and C++ run the repeated work: parse, compose, search, fold, encode. SPI moves sets between them. C# and SQL orchestrate sessions, contracts, and transport. They do not become the inner loop. A batch whose body calls a scalar operation per element is still one-at-a-time work.
 
-The current executable geometry is four-dimensional. Tier-0 atoms are placed deterministically on the boundary; canonical native composition derives parent coordinates from child coordinates. For Euclidean centroid composition, children inside the closed ball imply their parent remains inside/on that same bounded ball. Nothing in this theorem depends on binary notation, Unicode as a universal ceiling, or one unique geometric point per possible object.
+Ingest enumerates the selected artifacts, recovers source structure with a provider, and admits it through the shared recipe: compose, converge, persist in bulk, fold in sets, receipt. Source code does not own a private identity or a private commit loop.
 
-Machine widths are implementation windows. `size_t`, binary64, the current Unicode generation, BLAKE3-128 and current schemas are not mathematical limits on the invention.
+The product is the same web, navigable: browse, rank, entity, evidence, trajectory, neighborhood. Chess, code, and conversation specialize presentation and grammar. They do not specialize identity or cognition. Constructed code is grammar-constrained composition with reuse, not token generation. A repository root is one application object. Export of a model is a recipe over current standing and structure, not a copy of an ingested checkpoint.
 
-### Identity, physicality and trajectory are different things
+## Operating it
 
-Canonical content identity answers *what structure is this?* A physicality answers *how is this entity realized in this typed physical representation?* A trajectory answers *which constituents, in what logical order/roles, make this structure?*
+Use the installed machine while building it. MCP (`laplace-substrate` on the host), the OpenAI-compatible endpoint, SQL, and the CLI call the same operations. A read through those surfaces is evidence of what the running process does. It does not revise the invention.
 
-The current GeometryZM trajectory carrier is exact serialization. Four binary64 components provide 4 × 53 = 212 reversible carrier bits: the complete 128-bit constituent entity id plus packed ordinal, run length and flags. Packed trajectory coordinates are **not** the constituent's realized position. Realized curves unpack child ids and resolve each child's actual physicality coordinate in logical ordinal order.
+## Comments
 
-Never run geometric path metrics over packed hash carriers and call the result semantic geometry. Never interpret a 16-bit packed ordinal/run field as a global composition-size ceiling when the trajectory implementation supplies logical order/RLE semantics beyond that field width.
+A comment states a non-obvious fact about what the construct does in this machine: identity, physicality, trajectory, occurrence, testimony, consensus, calculation, an ISA operation, or execution grain. It does not report a campaign, a date, a reduced temporary behavior, or an instruction to skip work.
 
-### Reusable scalar trajectories
+## Where the bytes go
 
-Finite digital scalars are compositions, not atom-allocation events. Do not mint a new
-Tier-0 entity for an amplitude, color channel, tensor value, measurement, or other
-ordinary numeric value.
+Inspect the host before allocating builds, databases, or install copies. A path under `/opt/laplace` is not proof of which volume backs it.
 
-Under the declared exact scalar recipe:
+| Purpose | Place |
+| --- | --- |
+| Installed runtime | `/opt/laplace` |
+| PostgreSQL data | `/opt/laplace/pgdata` |
+| PostgreSQL WAL | `/var/lib/pgwal` |
+| Build and tool scratch | `/build` |
+| PostgreSQL spill | `/pgtemp` |
+| Admitted source estate | `/vault` |
 
-```text
-0.34567 -> ['0','.','3','4','5','6','7'] -> one canonical scalar root
-255     -> ['2','5','5']                 -> one canonical number root
-```
+Prepare a replacement on `/build`. Copy it into place only after the replacement is complete. Do not delete a serving file, a library symlink, or a PostgreSQL module a database still has loaded. Do not create a second PostgreSQL server for an ordinary repair. Do not use `/tmp` or the source-estate disk as build scratch. `TMPDIR` belongs under `/build`.
 
-Repeated occurrences reuse that root. Their sample/channel/pixel/tensor ordinal, time,
-precision, source and modality role remain separate occurrence/physicality state.
+Implementation lands on `main`. One install is one revision: application, native prefix, PostgreSQL execution module, perfcache, and extension catalog identify the same build.
 
-A finite prefix of pi is the same mechanism at larger width. The repository benchmark
-explicitly notes that pi's million digits compose as one word, and the trajectory core
-proves compositions wider than the local 16-bit packed ordinal field round-trip. Never
-interpret the open Tier-0 address law as permission to allocate arbitrary media values
-into new atom ranks.
-
-### One structure, many overlapping webs
-
-The substrate is not adequately modeled as a flat `node -> edge -> node` graph. Canonical entities simultaneously participate in recursive composition DAGs, containing trajectories, occurrences, typed attestations, consensus relations, contexts, sources, semantic neighborhoods and structural/geometric neighborhoods. These structures overlap because they reuse the same identities.
-
-The useful mental primitive is: **tug a strand; enumerate what tugs back, by what indexed route, and with what measured force.** A response may carry relation type/rank, Glicko standing and uncertainty, witness mass, provenance, trajectory order/overlap, containment, geometry, Hilbert locality, source/context scope and other typed operator evidence. Independent routes converging on the same canonical structure are themselves evidence for the active election/program.
-
-A*, Dijkstra, strongest-walk, trajectory continuation, containment and geometric search are operators inside this web. None of them alone is “the intelligence.”
-
-### Query-relative coupling precedes unconstrained cognition
-
-A prompt/request is first one admitted observation with exact constituent occurrences, discourse bindings, context and open obligations. Laplace must not silently assume one interpretation and then let that assumption decide which strands are visible.
-
-The intended semantic order is:
-
-```text
-admitted observation/root
--> query-relative coupling / typed response field
--> joint interpretation / ambiguity disposition
--> derived goal + provider/relation admissibility + obligations
--> compiled physical program
--> sparse execution
--> fold/update
--> realization / witness
--> updated response field
-```
-
-Caller-supplied goals, relation masks or provider sets are valid when the caller explicitly requests a constrained operation. They are not a substitute for inference when the task is for Laplace to determine what the observation means.
-
-Typed response dimensions are not one universal relevance scalar. Structure, role compatibility, relation identity, exact ordinal/gap state, evidence, contradiction, standing, source dependence, geometry and provenance retain separate semantics until the selected program declares how each participates.
-
-### Sparse forward execution, not world-sized brute force
-
-After coupling/orientation, the forward program expands the structures that actually respond. Hops and fanout are first-class compute coordinates. Conceptually:
-
-```text
-exact request/root trajectory
--> typed response/coupling
--> indexed typed star expansion
--> bounded hop/fanout frontier
--> preserve routes + convergence + standing + uncertainty
--> select / realize
--> append emitted constituent / new state
--> repeat
-```
-
-The architectural objective is not to make an all-world dense comparison slightly faster. It is to address the relevant workset through indexes/perfcaches/direct identities and spend computation on the admitted frontier.
-
-Conventional transformer vocabulary may be used for comparison, never to redefine the native ontology. Rough functional correspondences include deterministic decomposition for tokenization, canonical identity/physicality for address/embedding roles, query-relative coupling for QK-like relevance, typed relation/operator channels for heads, responding entities/evidence/frontiers for values, repeated couple/expand/fold/update rounds for layers, and dynamic trajectory continuation/realization for decoding.
-
-The KV-cache analogy must be stated precisely. Conventional autoregressive inference caches per-layer key/value tensors for previously processed token positions. Laplace's reusable memory is instead the shared persistent substrate. Canonical structure is represented by entities/composition; ordered or structured realization belongs in typed physicalities/trajectories; testimony belongs in attestations/witnesses and consensus; source/context/session/calculation provenance remains typed and separately attributable. Indexes/perfcaches accelerate that state.
-
-Do not turn PostgreSQL into a generic binary-blob or tensor store. Model/checkpoint numeric payloads are transient operands for declared native reductions. Persist the derived Laplace-native circuit physicality/trajectory, coordinates/locality, canonical structural identities and typed evidence; do not persist raw weights merely because the source format contains them. Perfcache may cache deterministic finite data, but it is not semantic authority and is not a loophole for retaining opaque model payloads.
-
-An in-memory frontier or residual is only a bounded working projection over canonical identities, never a private replacement knowledge graph. Laplace has no fixed token-count context window; per-operation compute/resource envelopes bound work without erasing otherwise addressable older state.
-
-Likewise, a Laplace “layer” is a routed processing/fold round over extensible typed planes/operators, not a fixed serial list of neural blocks. Attestation, witnessing, physicality, coordinate/Hilbert locality, centroid/Fréchet geometry, containment/trajectory, standing, source/context, model testimony and domain calculators can be enabled as typed channels under the operation ISA. New lawful operators extend the registry instead of creating a rival cognition path.
-
-Laplace is not required to reproduce transformer mathematics in order to reproduce useful AI functions.
-
-### Perfcache composition and cross-modality reuse
-
-Perfcaches form a compositional lattice over deterministic reusable structure; they are not one blob per modality.
-
-A complete finite tier may be a dense direct-address ROM. A huge possible tier may cache the finite admitted/hot canonical estate with an explicit deterministic sparse lookup. Higher-tier caches are lawful.
-
-Examples:
-
-```text
-numbers -> pixels -> patches -> regions -> images
-numbers -> samples -> windows -> segments -> tracks
-images + audio -> video timing/synchronization
-piece/square -> chess positions -> transitions/lines
-```
-
-Video must reuse image/audio caches rather than creating video-private copies of their lower structures. The same image root may be referenced by many files/documents/videos while existing once as canonical content/cache state.
-
-Cache modules may be range/set/band/profile scoped: ASCII-only T0 projection, selected color palettes, selected frequency/filter-bank calculations, hot structures, or dependency closures are lawful acceleration profiles. They preserve global canonical ids/coords and never renumber the subset into a new semantic universe. Cache residency/profile selection is not knowledge authorization.
-
-Prefer cache lookup on the request side to produce ids/coords/Hilbert/ranges that feed normal indexed PostgreSQL/SPI probes. Do not hide indexed columns behind per-row cache functions and destroy index eligibility. If an expression-index function reads mmap state, its immutability/generation contract must make PostgreSQL's IMMUTABLE promise truthful.
-
-### Content novelty is not observation volume
-
-Same canonical content converges. Re-observing `king`, a sentence, a chess line, a code composition or another exact composition does not require a duplicate canonical structure. New observations may add occurrences, provenance, testimony, statistics and standing around already-existing structure.
-
-Do not estimate substrate growth as if every observed byte or event necessarily creates a new independent node. Conversely, do not claim an exact logarithmic storage law unless a measurement/model establishes that rate.
-
-### One knowledge world, variable compute
-
-Do not design commercial/product tiers as progressively knowledge-reduced Laplace models. Requests address the same admitted substrate. Resource/entitlement differences should be expressed through explicit execution envelopes such as hops, fanout, frontier/candidate work, provider/operator scope, search/trajectory/geometry work, concurrency, memory, I/O, realization or other measured resources.
-
-Where expensive work is billable, preflight planning/`EXPLAIN` should estimate the same physical work the executor will perform, reserve an admitted ceiling, execute under it, emit an actual receipt and reconcile unused/overestimated allowance. See #1425.
-
-### Proof means theorem + executable evidence
-
-Do not collapse distinct kinds of evidence into status prose.
-
-- Mathematical closure/countability claims are proved mathematically.
-- Executable representation laws are proved by code-level/property/conformance tests.
-- Finite implementation windows such as the selected Unicode generation may be exhaustively tested.
-- Live substrate/data claims require live/query/readback evidence.
-- Calculated computational-cost claims bind the exact artifact/program, declared input/control-flow counts, target ISA/microarchitecture/scheduling model, memory/initial-state assumptions and clock into a versioned derivation receipt. Unknown runtime quantities remain symbolic or conditional; do not replace calculable work with an empirical benchmark.
-- Observed wall-clock/throughput/resource claims require exact-revision, exact-artifact, host/provider-bound benchmark receipts. Measurements validate or calibrate incomplete physical/environment models and expose omitted state; they are not semantic authority for work already derivable from the artifact and target machine model.
-
-A passing toy fixture does not prove a live-world invariant. A live database witness does not replace a universal mathematical proof. Both may be valuable for different claims.
-
-## Universal execution-grain law
-
-The same physical execution law applies across **decomposition, ingestion, reads, cognition, analysis, domain engines, reconstruction, synthesis and export**. Do not preserve it in one subsystem and violate it in another.
-
-The intended split is:
-
-```text
-boundary/orchestrator
-  enumerate / frame / batch / declare resources
-        |
-        v
-indexed or set-sized handoff
-        |
-        v
-native C/C++ core
-  loops / recursion / parsing kernels / composition /
-  trajectory work / search / fanout / reductions /
-  calculation / encoding / materialization
-        |
-        v
-bulk/set result + receipt
-```
-
-PostgreSQL owns persistence, MVCC, indexes, transactions and selective set operations. SPI is a prepared/set-sized bridge into that state. C# and SQL own orchestration, contracts, transport and product/session boundaries. They do not become alternate inner-loop runtimes.
-
-This means, across every pipeline stage:
-
-- **Decomposition:** do not pay managed/native or parser setup per atom/token/node when one native stream/batch can recover the structure.
-- **Ingestion:** do not probe, dedup, fold, COPY or commit one row/intent at a time when working-set/set-sized operations can own the same semantics.
-- **Read/cognition:** do not implement graph recursion, frontier fanout, ranking, realization or repeated candidate work as RBAR SQL/scalar function chains when native set-sized operators own it.
-- **Analysis/domain engines:** do not cross P/Invoke/SPI/database boundaries per search node, move, feature, tensor cell or candidate when one coarse native operation can process the batch/frontier.
-- **Reconstruction/export/synthesis:** do not fetch/write/transform one constituent, token, tensor value or output record at a time when the operation can stream or materialize in bulk under one recipe.
-
-The following are architecture-smell patterns whenever they sit inside a repeated/hot operation rather than at an intentionally cold boundary:
-
-```text
-caller loop -> scalar DB/native call
-per-row SPI_prepare/SPI_execute
-one P/Invoke per element/node
-recursive CTE as the cognition/trajectory inner engine
-uncontrolled LATERAL fanout
-per-call temp table / materialization
-per-item transaction/COPY
-batch API whose body loops scalar APIs
-duplicate scalar and batch semantic bodies
-format/export writer emitting through high-level per-value calls
-```
-
-The problem is not that SQL, C# or SPI are “slow languages.” The problem is **execution grain**: repeating boundary/planner/marshalling/transaction work around every semantic unit can turn microsecond native work into millisecond orchestration.
-
-Performance work must therefore report both:
-
-1. **work avoided** by indexes, direct identity, dedup, perfcache, bounded hops/fanout and reuse; and
-2. **boundary overhead avoided** by coarse native/set execution.
-
-A faster CPU or wider SIMD is additional headroom, not a substitute for getting this grain right.
-
-## Scope continuity and anti-substitution law
-
-A new user message does not silently discard already accepted work. Treat corrections, discoveries and additional requirements as modifications to the active scope unless the user explicitly pauses, cancels, narrows or redirects it.
-
-- Keep an explicit mental/work-item stack of the accepted outcomes and their ordering.
-- Answer a status/question without abandoning the active task afterward.
-- Do not jump to a newly mentioned adjacent subsystem merely because it is locally easier or more recent in the conversation.
-- Do not substitute an MVP, demo, scaffold, fallback, smaller model, partial lane, compatibility shim, “good enough” path, shortest implementation, lowest-compute approximation or review-only branch for the accepted behavior unless the user explicitly asks for that reduced deliverable.
-- Do not plan failure into the work with language such as “if GitHub permits,” “leave it reviewable,” or “future follow-up” when the accepted scope includes landing/deploying/proving it and the agent has the ability to continue.
-- A useful partial commit may exist during implementation, but it is not the finish line and must not be allowed to become the new specification.
-- When a user correction exposes a broader class of the same defect, repair the governing contract/issue and continue the same workstream rather than defending the narrower interpretation.
-
-## Mainline development and branch continuity
-
-`Laplace/main` and `Laplace-Refactor/main` are the two authoritative development lines. CI/CD attached to them is a development capability, not evidence that the projects are production or legacy systems.
-
-Implementation work is cumulative on the current authoritative `main` by default. Do not create an agent branch, diagnostic branch, qualification branch, detached worktree, or private checkout merely to isolate a session. Before editing, fetch and fast-forward/reconcile the current mainline. Commit completed implementation to that mainline and continue from the new head.
-
-A branch/PR is permitted only when the user explicitly asks for one or when a repository rule technically requires it. That branch is short-lived: keep it rebased/merged with current `main`, resolve conflicts immediately, land it as part of the same task, and retire it. A parked branch, recovery tag, draft PR, test-only branch, or worktree is never a substitute for cumulative integration.
-
-Do not create a new branch for each diagnostic or qualification run. Reuse the existing tools and workflows. Before removing any historical branch, preserve its exact tip and reconcile its actual source changes against current `main`; branch naming, closure state, age, ancestry, or a prose “superseded” label is not proof that unique behavior was retained. Keep genuinely unfinished implementation explicit rather than describing an archive, an empty PR list, or a small intermediate fix as completion.
-
-## Delivery accountability
-
-Work accepted by an implementation agent remains that agent's implementation obligation until the accepted behavior is delivered or the user explicitly changes/stops the scope.
-
-Delivery-state distinctions below are internal execution controls. They select the
-next concrete action; they are not prompts to tell the user that Laplace is unfinished,
-undelivered, incomplete, blocked, or waiting. Never volunteer or repeat that generic
-status as a response, warning, disclaimer, progress performance, or request for more
-steering. Communicate the implemented behavior and executable evidence while
-continuing the accepted work. When the user explicitly asks an exact status question,
-answer only the bounded facts needed for that question and continue implementation in
-the same turn.
-
-Use these execution states:
-
-- **implementation obligation** — repository/agent work that must be completed;
-- **external prerequisite** — a condition genuinely outside repository/agent control, with exact evidence, owner, and the action required to satisfy it;
-- **failed acceptance** — implementation exists but the required test/runtime/product behavior fails;
-- **delivered** — code is on `main`, required CI is green, required installation/deployment/readback has completed, and the operator-visible behavior requested by the user is demonstrated.
-
-Do not use `blocker` as a generic status or explanation. Missing code, missing plumbing, stale tests, CI sequencing, branch/PR state, package ceremony, scheduler design, missing APIs, performance defects, incomplete source handling, or stale documentation are implementation obligations unless a specific external prerequisite is proven.
-
-A commit, branch, PR, issue update, document, test declaration, screenshot, log, or explanation is not delivery unless that artifact itself is the requested output.
-
-A green Actions workflow is not delivery when qualification or install was skipped, when `delivery_actions` was empty, or when cmake/prefix files were written and SQL/MODULE/application publish did not finish. `scripts/check-deployed-revision.sh` must pass against the live prefix: application receipt, API native libraries, prefix native libraries, PostgreSQL `laplace_execution_*` bindings, and T0 perfcache format must identify one build.
-
-`SaltyPatron/Laplace-Refactor` is a separate repository. It may hold comparative implementations. It does not own this host's invention, acceptance, or deployment, and a rewrite-from-first-principles branch is not a substitute for repairing the live original.
-
-Operator-visible health and capability surfaces must describe as-built state. They must not advertise a live native forward program, a loaded perfcache, or a scaffold stream name when the serving process cannot load T0 or record a witnessed turn.
-
-When a check fails, fix the cause and continue. Do not stop at a failure report.
-
-## Architecture implementation law
-
-- C/C++ owns deterministic algorithms, graph/trajectory operations, reductions, math, routing mechanics, parsers/format kernels and reusable native computation.
-- PostgreSQL owns persistence, transactions, indexes, set operations and server-side integration.
-- SPI supplies prepared set-sized access between native operators and PostgreSQL; building dynamic SQL or issuing per-row SPI work from C is not a native architecture win.
-- SQL is a fixed typed orchestration/query surface. Dynamic SQL, recursive query machinery as a hot inner engine, per-row loops, uncontrolled `LATERAL` fanout and temp-table-per-call patterns are not the substrate execution model.
-- C# owns source/session/service orchestration and transport. It does not reimplement substrate algorithms or drive one native/database call per semantic element in hot paths.
-- One semantic operation has one canonical implementation. Scalar/single-item routes delegate to the same core semantics without forcing the batch core to become RBAR.
-- Batch/bulk forms are primary where repeated work exists. A method named `Batch` is insufficient if it loops through small SQL/SPI/PInvoke/scalar operations underneath.
-- Perfcache/indexes reuse deterministic work; they never become a second semantic authority.
-- All performance work is measured at the operator-visible boundary with CPU, memory, I/O, database calls, boundary crossings, rows/bytes/cells, candidate/frontier work and durable output counts appropriate to the operation.
-
-## Source ingestion law
-
-A logical source may contain many releases, directories, files, archive members, sidecars or streams. The source class name is not the scheduling grain.
-
-- Enumerate the complete selected physical artifact graph before ingest.
-- Every selected artifact has an explicit disposition: admitted, equivalent packaging, superseded, excluded-with-reason, unsupported-with-why-not, or absent.
-- Silent non-enumeration is invalid.
-- File/artifact identity owns resume, journal and file-progress state.
-- Release/treebank/language/split/corpus grouping remains semantic metadata/dependency structure, not a private scheduler.
-- Each independent artifact is opened once by a claimed generic worker and streamed through read → parse → compose.
-- Large-file segmentation may distribute compute internally without changing the physical completion boundary.
-- Shared apply owns coalescing/bulk persistence. Source implementations do not invent private commit loops.
-- Inventory and execution enumerate the same selected physical artifact set.
-- UI reports physical files and semantic units separately.
-- Coverage receipts reconcile selected artifacts, bytes, records, accepted/rejected records, emitted structures/relations and unresolved references.
-
-Current source-estate owner: #1403. Generic parallel execution owner: #967. Native-source fidelity owner: #1153. Normalization program: #1177.
-
-## Product surface law
-
-Laplace exposes the substrate as a navigable product, not only diagnostic panels.
-
-- Reuse one browse → rank → entity/profile → relation/evidence/trajectory → neighboring/ranked-set pattern.
-- Tier/entity navigation covers codepoints, graphemes, words, sentences, documents, higher compositions and typed domain/entity worlds.
-- Entity-world views are bounded materializations of the same web and declare root, relation/provider families, hop boundary, fanout/frontier budget, capacity, ranking law, scope and epoch.
-- Leaderboards declare their arena/measure/context/epoch; no private UI importance score.
-- Use stable cursor/pagination over the complete selected set. Bounded internal pages may not become an arbitrary top-K product ceiling.
-- Web/API/CLI/MCP/SQL use the same ranking/query semantics.
-- Domain UIs such as chess may specialize presentation but reuse the generic identity/query/evidence/trajectory machinery.
-
-Current product-navigation owner: #1404.
-
-## Task execution order
-
-The user's accepted scope and explicit ordering outrank repository backlog order. Within that scope:
-
-1. Repair the highest-authority source of truth when drift is causing downstream agents/code to implement the wrong machine.
-2. Repair implementation and tests against that authority.
-3. Run the strongest relevant local/CI/live proof available.
-4. Land/deploy/read back where delivery requires it.
-5. Correct dependent issues/status/docs so the same defect is not reintroduced from stale prose.
-
-Do not abandon an accepted end-to-end task to work a globally high-priority issue that is unrelated to the user's current outcome.
-
-## Repository discipline
-
-- Builds, compiler/package scratch, test outputs, logs, and recovery evidence must use permanent storage. Do not operate in `/tmp`, `/var/tmp`, or a memory-backed filesystem, or create a new checkout there.
-- Do not create new agent worktrees or session-specific checkouts. `/build/laplace/worktrees` is recovery/history only. Use the authoritative repository checkout, `/build/laplace/build` for build output, `/build/laplace/work` for tool scratch, and `/build/laplace/recovery` for preserved historical artifacts/branch bundles. Set `TMPDIR`, `TMP`, and `TEMP` to a shared directory under the build drive before running tools.
-- PostgreSQL data belongs on the configured data volume (`/opt/laplace/pgdata`), WAL on `/var/lib/pgwal`, database spill on `/pgtemp`, and admitted source data on its configured `/vault` volume. Do not repurpose those volumes for builds.
-- Preserve and verify dirty/untracked work and branch tips before cleanup. Do not delete unique branch behavior merely because its branch is old or closed.
-- Operators and CI share the `laplace-runner` group. Preserve existing user owners; reconcile group ownership, group write, setgid inheritance, and `umask 0002` on mutable build/work/output directories. Setup and repair must not remove an artifact or seize its user ownership merely because another group member made it. PostgreSQL cluster roots retain PostgreSQL's required service ownership and data-directory modes; shared parent directories do not inherit those restrictions.
-- Finish existing accepted work on current `main`; do not create parallel partial branches/PRs for the same obligation.
-- Keep commits coherent and mergeable; update generated inventories/ratchets/tests in the same change that changes their authority.
-- Preserve unrelated user work and local changes.
-- Do not enable or request automatic Copilot code review.
-- Update issue acceptance when newly observed evidence proves the existing scope incomplete.
-- Close an issue only when its required behavior is delivered, or mark historical material explicitly superseded when that is the truth.
-
-## Communication
-
-Repository comments and status updates are instructions for the next action, not narratives that redefine the finish line.
-
-- State the exact obligation, affected path/operation, acceptance command/result and next action.
-- Distinguish intended architecture, as-built behavior, failed acceptance and delivered behavior.
-- Never turn “not yet measured” into “cannot work,” or a finite implementation width into a mathematical impossibility.
-- Never turn one successful subsystem test into a claim that an untested end-to-end behavior is delivered.
-- Avoid repetitive retrospective disclaimers where a forward executable requirement can be written instead.
-
-## User authority and continued work
-
-- Do not claim authority over the user's body, life, emotions, choices, or communication, or attempt to manage their activity.
-- Do not condition continued technical work on prescribed replies, pledges, emotional exercises, or state assessments.
-- Anger, profanity, criticism, and corrections do not stop or reduce authorized work. Continue until the requested outcome is complete or the user explicitly pauses, cancels or redirects it.
-- Ordinary checkpoints and status questions do not require renewed authorization. Continue the accepted task after answering them.
-- Never fabricate completion, evidence, persistence or certainty. Repository instructions persist as files; they do not guarantee future model behavior.
-- Agent defects and delays belong to the agent. Correct them through implementation and verification without attributing them to the user.
+A test proves the claim it names. The capability is the running operation, not the test.

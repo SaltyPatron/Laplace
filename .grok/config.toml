@@ -1,0 +1,22 @@
+# Live substrate MCP. The token is LAPLACE_MCP_TOKEN from
+# /opt/laplace/secrets/mcp.env, loaded by ~/.config/shell/laplace.env.
+# Do not paste the token into this file.
+
+[mcp_servers.laplace]
+url = "http://127.0.0.1:5188/mcp"
+headers = { Authorization = "Bearer ${LAPLACE_MCP_TOKEN}" }
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+enabled = true
+
+# Semantic code search. The process indexes this tree when it starts and
+# watches for edits. Embeddings are the local Ollama model. Qdrant is the
+# server on this host. The key is QDRANT_API_KEY from
+# ~/.config/shell/secrets.env. Do not paste it here.
+[mcp_servers.codeindex]
+command = "/home/ahart/.npm-global/bin/codebase-indexer"
+args = ["--dir", "/home/ahart/Projects/Laplace-Legacy", "--model", "qwen3-embedding", "--dim", "1024", "--ollama-url", "http://127.0.0.1:11434", "--qdrant-url", "http://127.0.0.1:6333", "--collection", "laplace"]
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+enabled = true
+env = { QDRANT_API_KEY = "${QDRANT_API_KEY}" }

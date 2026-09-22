@@ -113,6 +113,13 @@ def configure_operator(
         'if [ -n "${LICHESS_API:-}" ] && [ -z "${LICHESS_TOKEN:-}" ]; then',
         '  export LICHESS_TOKEN="$LICHESS_API"',
         "fi",
+        'if [ -r /opt/laplace/secrets/mcp.env ]; then',
+        "  _laplace_shell_flags=$-",
+        "  set -a",
+        "  . /opt/laplace/secrets/mcp.env",
+        '  case "$_laplace_shell_flags" in *a*) ;; *) set +a ;; esac',
+        "  unset _laplace_shell_flags",
+        "fi",
         *(shell_assignment(name, value) for name, value in values.items()),
         "",
     ]

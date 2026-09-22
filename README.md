@@ -176,12 +176,12 @@ docs/         invention, architecture, specs, evidence, plans and generated inve
 
 Start with:
 
-- [`docs/README.md`](docs/README.md) — documentation authority map
-- [`docs/INVENTION.md`](docs/INVENTION.md) — the intended invention, head to tail
-- [`docs/INVENTIONS.md`](docs/INVENTIONS.md) — mechanism/capability catalog
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture as currently built
-- [`AGENTS.md`](AGENTS.md) — execution contract for implementation agents
-- [`docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`](docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md) — reproducible performance evidence
+- [`docs/INVENTION.md`](docs/INVENTION.md) — the machine
+- [`docs/INVENTIONS.md`](docs/INVENTIONS.md) — mechanism catalog
+- [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) — what the laws compose into
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how this repository implements it
+- [`AGENTS.md`](AGENTS.md) — implementation rules for this repository
+- [`docs/README.md`](docs/README.md) — documentation map
 
 ## Build and run
 

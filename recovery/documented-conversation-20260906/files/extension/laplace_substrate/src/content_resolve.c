@@ -734,15 +734,10 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
  * pg_laplace_word_segment_resolved — word_segment, but the substrate decides
  * where a word ends inside a run that has no boundary of its own.
  *
- * THE DEFECT. UAX#29 word break joins ALetter runs, so Latin, Cyrillic, Arabic
- * and Hangul words survive whole, while 4.1 puts dictionary segmentation for
- * Han, Hiragana, Katakana, Thai, Lao and Khmer explicitly out of scope. The
- * tier-2 nodes for those scripts are therefore single characters, and the word
- * a reader actually wrote is never addressed. Measured on the live substrate:
- * 自転車 (167 edges), 北京 (93), ある (81), สวัสดี (27) and 氷河 (21) all exist
- * and all carry rated evidence; converse.word_segment reaches none of them,
- * emitting 3, 2, 2, 4 and 2 fragments instead. No ranking downstream can
- * recover an address that was never formed.
+ * UAX #29 keeps Latin, Cyrillic, Arabic, and Hangul words whole. It does not
+ * dictionary-segment Han, Hiragana, Katakana, Thai, Lao, or Khmer, so those
+ * tier-2 nodes arrive as characters. This function joins a maximal
+ * byte-contiguous run when the joined span is a stored entity.
  *
  * WHITESPACE IS A REAL BOUNDARY AND IS NOT CROSSED. Joining runs across a
  * space would make "hot dog" and "New York" into word tokens, and they are not

@@ -173,7 +173,7 @@ fi
 echo
 
 # The INVENTORY pre-commit hook. docs/INVENTORY.md is generated and CI-gated, and
-# prose across README / ARCHITECTURE / INDEX / COMPLETION_PLAN / INVENTIONS carries
+# prose across README / ARCHITECTURE / INDEX / INVENTIONS carries
 # no counts at all — it points there. Keeping it true used to be a human step, and
 # forgetting it blocked main twice on 2026-08-04 at the FIRST job in the pipeline.
 # The hook removes the step; this reports a checkout where it was never installed.

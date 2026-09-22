@@ -4,7 +4,7 @@ This document defines how conventional checkpoints enter Laplace. It supersedes 
 
 Historical measurements and the old model-lane audit remain available under `docs/archive/` and Git history. They are useful counterexamples, not current invention authority.
 
-Current authority is `docs/INVENTION.md`, `docs/INVENTIONS.md`, `docs/INVENTION_PRESERVATION_2026-09-02.md`, `docs/specs/36_Laplace_Forward_Pass.md`, `docs/specs/37_Substrate_Operation_ISA.md`, and `AGENTS.md`.
+The machine is `docs/INVENTION.md`, `docs/INVENTIONS.md`, `docs/specs/36_Laplace_Forward_Pass.md`, `docs/specs/37_Substrate_Operation_ISA.md`, and `AGENTS.md`.
 
 ---
 

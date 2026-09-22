@@ -885,45 +885,22 @@ pg_laplace_resolve_phrase(PG_FUNCTION_ARGS)
 }
 
 /*
- * pg_laplace_word_segment_resolved — word_segment, but the substrate decides
- * where a word ends inside a run that has no boundary of its own.
+ * pg_laplace_word_segment_resolved — word breaks, then a stored entity decides
+ * where a word ends inside a run the text gave no boundary for.
  *
- * THE DEFECT. UAX#29 word break joins ALetter runs, so Latin, Cyrillic, Arabic
- * and Hangul words survive whole, while 4.1 puts dictionary segmentation for
- * Han, Hiragana, Katakana, Thai, Lao and Khmer explicitly out of scope. The
- * tier-2 nodes for those scripts are therefore single characters, and the word
- * a reader actually wrote is never addressed. Measured on the live substrate:
- * 自転車 (167 edges), 北京 (93), ある (81), สวัสดี (27) and 氷河 (21) all exist
- * and all carry rated evidence; converse.word_segment reaches none of them,
- * emitting 3, 2, 2, 4 and 2 fragments instead. No ranking downstream can
- * recover an address that was never formed.
+ * UAX #29 keeps Latin, Cyrillic, Arabic, and Hangul words whole. It does not
+ * dictionary-segment Han, Hiragana, Katakana, Thai, Lao, or Khmer, so those
+ * tier-2 nodes arrive as characters. This function joins a maximal
+ * byte-contiguous run when the joined span is a stored entity. Whitespace is
+ * a boundary and is not crossed: "hot dog" stays two tier-2 words under a
+ * tier-3 composition. The rule names no script.
  *
- * WHITESPACE IS A REAL BOUNDARY AND IS NOT CROSSED. Joining runs across a
- * space would make "hot dog" and "New York" into word tokens, and they are not
- * words -- they are tier-3 compositions OF two tier-2 words, and collapsing
- * them into the word rung is the tier confusion this is meant to end. So spans
- * are only considered inside a maximal run of tier-2 nodes that are byte
- * CONTIGUOUS in the normalized text: 氷|河 is contiguous and joins, hot|dog has
- * a gap and does not. The rule names no script and no language -- it says only
- * that where the text gave a boundary we keep it, and where it gave none, the
- * substrate is asked.
+ * Stores nothing. Precedence and containment stay views over the trajectory.
+ * The membership probe is tier-blind and is not consensus.entity_exists():
+ * that helper is true for every perfcache codepoint, and a single letter
+ * would hijack the join.
  *
- * NOTHING IS STORED. Adjacency stays a view over the trajectory (the 2026-07-25
- * ruling in relation_types.toml: PRECEDES and CONTAINS are "views derivable
- * from the trajectory rather than stored truth"). This mints no entity, writes
- * no attestation, and folds nothing; it computes candidate ids natively and
- * asks one batched membership question.
- *
- * The probe is deliberately tier-blind, exactly as resolve_phrase's is, and for
- * the same reason it must NOT be consensus.entity_exists(): that helper answers
- * true for any valid codepoint via the perfcache axiom, and under the tier-blind
- * content law a single-letter word IS its codepoint, so the axiom would let a
- * stopword hijack the join. "Is this a stored entity" is the stored-row
- * question.
- *
- * Degenerate case is the current behaviour: when no multi-node span resolves,
- * every run falls back to its individual tier-2 nodes and the output is
- * byte-identical to converse.word_segment. This is a strict superset.
+ * When no multi-node span is stored, the run is returned as its tier-2 nodes.
  */
 typedef struct
 {

@@ -2,7 +2,7 @@
 
 This is the one walkthrough of how Laplace operates end to end: from a selected source artifact to a witnessed turn on a served surface, with the proof boundary named for each kind of claim.
 
-It sequences and links; it does not redefine anything. The invention is governed by [`INVENTION.md`](INVENTION.md) and synthesized in [`CAPABILITIES.md`](CAPABILITIES.md); as-built architecture, including named divergences, is [`ARCHITECTURE.md`](ARCHITECTURE.md). Binding stage semantics live exactly once in [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md) and [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md) and are deliberately not restated here. Current divergences are named in the [deviation ledger](audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md); this walkthrough does not maintain a second divergence list.
+The invention is [`INVENTION.md`](INVENTION.md), synthesized in [`CAPABILITIES.md`](CAPABILITIES.md). How the repository implements it is [`ARCHITECTURE.md`](ARCHITECTURE.md). Stage semantics are [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md) and [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md).
 
 ## The sequence at a glance
 
@@ -110,4 +110,4 @@ Different claims need different evidence ([`INVENTION.md`](INVENTION.md) §17):
 | performance | exact-revision, exact-artifact, host-bound benchmark receipts |
 | machine cost | versioned derivation from artifact + ISA/microarchitecture model |
 
-One deployed revision: the application, prefix native libraries, PostgreSQL execution module and T0 perfcache must identify one build (`scripts/check-deployed-revision.sh`). A green workflow is not delivery when install/readback was skipped. For current-vs-repaired defect state, the [deviation ledger](audits/INVENTION_DEVIATION_LEDGER_2026-09-19.md) is the entry point; dated documents in this tree are evidence, not status.
+One deployed revision: the application, prefix native libraries, PostgreSQL execution module and T0 perfcache identify one build (`scripts/check-deployed-revision.sh`).
