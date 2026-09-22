@@ -29,6 +29,16 @@ internal sealed partial class SubstrateClient
             r.Band, r.Name, r.Rank, r.RelationTypes, r.ConsensusRows)).ToList();
     }
 
+    public async Task<HighwayPopulationStatus> HighwayPopulationAsync(CancellationToken ct)
+    {
+        var rows = await NpgsqlSubstrateReads.HighwayPopulationAsync(
+            _dataSource, ct, TranslateReadError);
+        var row = rows.Single();
+        return new HighwayPopulationStatus(
+            row.RegistryReady, row.HistoricalPopulationComplete, row.CompletedAt,
+            row.PendingPairs, row.PendingRefreshes);
+    }
+
     /// <summary>Resolve a word or a 32-hex id to a content id, with its label.</summary>
     public async Task<(byte[] Id, string Label)?> ResolveTopicAsync(string reference, CancellationToken ct)
     {
