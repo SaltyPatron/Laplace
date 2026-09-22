@@ -20,10 +20,11 @@ BEGIN ATOMIC
         WHERE applied_at > now() - interval '60 seconds'),
       -- Folding = rows landed recently OR a fold/apply backend is active. The
       -- journal alone under-reports a slow-flush ingest mid-working-set.
+      -- There is no durable ingest_fold_work table: live in-flight work is
+      -- observed from pg_stat_activity, while committed work is the flush journal.
       -- pg_backend_pid() is excluded: this query's own text contains the
       -- pattern strings and would otherwise match itself forever.
-      EXISTS (SELECT 1 FROM laplace.ingest_fold_work)
-        OR (SELECT (SELECT max(applied_at) FROM laplace.ingest_flush_journal) > now() - interval '20 seconds')
+      (SELECT (SELECT max(applied_at) FROM laplace.ingest_flush_journal) > now() - interval '20 seconds')
         OR EXISTS (
           SELECT 1 FROM pg_stat_activity a
           WHERE a.datname = current_database()
