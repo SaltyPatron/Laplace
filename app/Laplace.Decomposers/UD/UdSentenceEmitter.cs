@@ -54,7 +54,11 @@ public sealed class UdSentenceEmitContext
         double witnessWeight = SourceTrust.AcademicCurated,
         Hash128? sourceFileContext = null)
     {
-        b.AddEntity(new EntityRow(langId, EntityTier.Word, LanguageTypeId, sourceId));
+        Hash128 admittedLang = LanguageReference.EmitResolvedCode(
+            b, langCode, sourceId, witnessWeight);
+        if (admittedLang != langId)
+            throw new InvalidOperationException(
+                $"UD language identity diverged from shared content admission: {langCode}");
         VocabularyNames.TrackLanguage(canonicalNames, langCode);
 
         Hash128? sentenceRoot = s.TextUtf8 is { Length: > 0 } ? ctx.RootFor(s.TextUtf8) : null;
