@@ -31,6 +31,10 @@ internal interface ISubstrateClient
 
     Task<IReadOnlyList<RelationBand>> RelationBandsAsync(CancellationToken ct);
 
+    Task<HighwayPopulationStatus> HighwayPopulationAsync(CancellationToken ct) =>
+        Task.FromException<HighwayPopulationStatus>(
+            new NotSupportedException("This substrate client does not expose Highway population state."));
+
     Task<(byte[] Id, string Label)?> ResolveTopicAsync(string reference, CancellationToken ct);
 
     Task<IReadOnlyList<QueryRow>> QueryAsync(
