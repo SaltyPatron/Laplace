@@ -225,10 +225,10 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             + " UNION SELECT a.context_id FROM laplace.attestations a"
             + "       WHERE a.source_id = $1 AND a.context_id IS NOT NULL"
             + "), owned AS MATERIALIZED ("
-            + " SELECT DISTINCT ei.entity_id"
-            + " FROM laplace.entity_interpretations ei"
-            + " LEFT JOIN touched t ON t.entity_id = ei.entity_id"
-            + " WHERE ei.first_observed_by = $1 OR t.entity_id IS NOT NULL"
+            + " SELECT DISTINCT e.id AS entity_id"
+            + " FROM laplace.entities e"
+            + " LEFT JOIN touched t ON t.entity_id = e.id"
+            + " WHERE e.first_observed_by = $1 OR t.entity_id IS NOT NULL"
             + ")"
             + " SELECT count(*)::bigint,"
             + "        count(*) FILTER (WHERE EXISTS ("
@@ -263,11 +263,11 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             + " UNION SELECT a.context_id FROM laplace.attestations a"
             + "       WHERE a.source_id = $1 AND a.context_id IS NOT NULL"
             + "), governed AS MATERIALIZED ("
-            + " SELECT DISTINCT ei.entity_id"
-            + " FROM laplace.entity_interpretations ei"
-            + " LEFT JOIN touched t ON t.entity_id = ei.entity_id"
-            + " WHERE ei.type_id = ANY($2)"
-            + "   AND (ei.first_observed_by = $1 OR t.entity_id IS NOT NULL)"
+            + " SELECT DISTINCT e.id AS entity_id"
+            + " FROM laplace.entities e"
+            + " LEFT JOIN touched t ON t.entity_id = e.id"
+            + " WHERE e.type_id = ANY($2)"
+            + "   AND (e.first_observed_by = $1 OR t.entity_id IS NOT NULL)"
             + ")"
             + " SELECT count(*)::bigint,"
             + "        count(*) FILTER (WHERE EXISTS ("
@@ -741,34 +741,31 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
                 : (object)markerTypeIds.Select(m => m.ToBytes()).ToArray());
         await cmd.ExecuteNonQueryAsync(ct);
 
-        // Retire every source-owned interpretation that has no durable physicality.
-        // Entity realization is a substrate invariant; source/type whitelists cannot
-        // turn an unplaced shell into lawful state.
+        // Remove unphysical shells from the canonical entity table directly.
+        // entity_interpretations is compatibility state and cannot be the owner of
+        // entity validity or source-wide closure.
         await using var cleanup = _ds.CreateCommand(
             "WITH invalid AS MATERIALIZED ("
-            + " SELECT ei.entity_id, ei.tier, ei.type_id"
-            + " FROM laplace.entity_interpretations ei"
-            + " WHERE ei.first_observed_by = $1"
+            + " SELECT e.id"
+            + " FROM laplace.entities e"
+            + " WHERE e.first_observed_by = $1"
             + "   AND NOT EXISTS (SELECT 1 FROM laplace.physicalities p"
-            + "                   WHERE p.entity_id = ei.entity_id)"
-            + "), removed AS ("
+            + "                   WHERE p.entity_id = e.id)"
+            + "), removed_interpretations AS ("
             + " DELETE FROM laplace.entity_interpretations ei USING invalid i"
-            + " WHERE ei.entity_id = i.entity_id AND ei.tier = i.tier"
-            + "   AND ei.type_id = i.type_id"
+            + " WHERE ei.entity_id = i.id"
             + " RETURNING ei.entity_id"
             + "), orphan_ids AS MATERIALIZED ("
-            + " SELECT DISTINCT r.entity_id FROM removed r"
-            + " WHERE NOT EXISTS (SELECT 1 FROM laplace.entity_interpretations ei"
-            + "                   WHERE ei.entity_id = r.entity_id)"
-            + "   AND NOT EXISTS (SELECT 1 FROM laplace.physicalities p"
-            + "                   WHERE p.entity_id = r.entity_id)"
+            + " SELECT i.id FROM invalid i"
+            + " WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p"
+            + "                   WHERE p.entity_id = i.id)"
             + "   AND NOT EXISTS (SELECT 1 FROM laplace.attestations a"
-            + "                   WHERE a.subject_id = r.entity_id"
-            + "                      OR a.object_id = r.entity_id"
-            + "                      OR a.context_id = r.entity_id)"
+            + "                   WHERE a.subject_id = i.id"
+            + "                      OR a.object_id = i.id"
+            + "                      OR a.context_id = i.id)"
             + ")"
             + " DELETE FROM laplace.entities e USING orphan_ids o"
-            + " WHERE e.id = o.entity_id");
+            + " WHERE e.id = o.id");
         cleanup.CommandTimeout = 0;
         cleanup.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
         await cleanup.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
