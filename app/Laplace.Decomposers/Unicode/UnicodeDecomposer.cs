@@ -642,10 +642,14 @@ public sealed class UnicodeDecomposer
         string canonicalPrefix,
         string value)
     {
-        string canonical = $"{canonicalPrefix}/{value}/v1";
-        _canonicalNames.Add(canonical);
-        Hash128 id = Hash128.OfCanonical(canonical);
-        builder.AddEntity(id, EntityTier.Word, EntityTypeRegistry.UcdClassifier, Source);
+        _ = canonicalPrefix; // property/relation supplies the namespace; identity is the fragment
+        string content = value.Trim();
+        Hash128 id = ContentEmitter.Emit(builder, content, Source)
+            ?? throw new InvalidOperationException(
+                $"Unicode classifier content could not be admitted: {content}");
+        CategoryAnchor.AttestCategory(
+            builder, id, EntityTypeRegistry.UcdClassifier, Source, TC.StandardsDerived);
+        _canonicalNames.Add(content);
         return id;
     }
 
@@ -682,29 +686,24 @@ public sealed class UnicodeDecomposer
         RelationTypeRegistry.RelationTypeResolution relation =
             RelationTypeRegistry.ResolveUcdProperty(canonicalPropertyName);
         _canonicalNames.Add(relation.Canonical);
-        if (_ucdPropertyTypes.Add(relation.Id))
-            builder.AddEntity(new EntityRow(
-                relation.Id, EntityTier.Word,
-                BootstrapIntentBuilder.RelationTypeMetaTypeId, Source));
-        if (relation.ParentId is { } parent)
-        {
-            AttestationRow declaration = NativeAttestation.Categorical(
-                relation.Id, "IS_A", parent, Source, null,
-                TC.StandardsDerived);
-            if (_ucdPropertyDeclarations.Add(declaration.Id))
-                builder.AddAttestation(declaration);
-        }
+        _ucdPropertyTypes.Add(relation.Id);
+        // Relation identity/family is governed by the native relation registry.
+        // Do not materialize the operator key as content or duplicate its parentage
+        // as source testimony.
         return relation;
     }
 
     private static void EnsureOrdinalContexts(SubstrateChangeBuilder builder)
     {
-        builder.AddEntity(new EntityRow(
-            UcdProperties.OrdinalCtx0, EntityTier.Word,
-            EntityTypeRegistry.OrdinalContext, Source));
-        builder.AddEntity(new EntityRow(
-            UcdProperties.OrdinalCtx1, EntityTier.Word,
-            EntityTypeRegistry.OrdinalContext, Source));
+        foreach (string ordinal in new[] { "0", "1" })
+        {
+            Hash128 id = ContentEmitter.Emit(builder, ordinal, Source)
+                ?? throw new InvalidOperationException(
+                    $"Unicode ordinal context could not be admitted: {ordinal}");
+            CategoryAnchor.AttestCategory(
+                builder, id, EntityTypeRegistry.OrdinalContext,
+                Source, TC.StandardsDerived);
+        }
     }
 
     private IDecomposer BuildArtifactPhase(ArtifactJob job, int batch) =>
