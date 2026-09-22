@@ -220,22 +220,22 @@ internal static class InferenceEndpoints
                     }
                 }
 
-                var content = text.ToString();
+                var observedContent = text.ToString();
                 await turnWitness.RecordResponseAsync(
                     scope.Tenant, scope.UserKey, scope.SessionId,
-                    prompt, content.Length == 0 ? null : content, occurrenceKey, ct);
+                    prompt, observedContent.Length == 0 ? null : observedContent, occurrenceKey, ct);
 
                 var forwardProof = BuildForwardProof(
                     forwardEvents, scope.SessionKey, occurrenceKey, responseWitnessed: true);
                 var performance = BuildPerformance(
-                    content, substrateClock, totalClock, firstResultMs, emitted);
+                    observedContent, substrateClock, totalClock, firstResultMs, emitted);
 
                 return Results.Json(new ChatCompletionResponse(
                     Id: $"chatcmpl-{Guid.NewGuid():N}",
                     Object: "chat.completion",
                     Created: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     Model: payload.Model,
-                    Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", content), "stop")],
+                    Choices: [new ChatChoice(0, new ChatResponseMessage("assistant", observedContent), "stop")],
                     Billing: null,
                     Metadata: new ChatMetadata(
                         Witnesses: null,
