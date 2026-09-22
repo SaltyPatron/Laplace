@@ -125,14 +125,7 @@ jobs:
       target_sha: ${{ github.sha }}
       build_components: ${{ needs.plan.outputs.build_components }}
       managed_build_projects: ${{ needs.plan.outputs.managed_delivery_build_projects }}
-      managed_db_test_projects: ${{ needs.plan.outputs.managed_db_test_projects }}
-      managed_db_test_filter: ${{ needs.plan.outputs.managed_db_test_filter }}
-      managed_live_test_projects: ${{ needs.plan.outputs.managed_live_test_projects }}
-      managed_live_test_filter: ${{ needs.plan.outputs.managed_live_test_filter }}
-      native_db_test_filter: ${{ needs.plan.outputs.native_db_test_filter }}
       delivery_actions: ${{ needs.plan.outputs.delivery_actions }}
-      db_suites: ${{ needs.plan.outputs.db_suites }}
-      live_suites: ${{ needs.plan.outputs.live_suites }}
       publish_scope: ${{ needs.plan.outputs.publish_scope }}
       # The stage reconciles installed->target before build/delivery, so an older
       # queued main revision can be rejected safely: the newest candidate carries
