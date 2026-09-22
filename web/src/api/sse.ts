@@ -1,3 +1,4 @@
+import type { ForwardPassProof } from './forwardProof';
 import { laplaceHeaders, PaymentRequiredError, ApiError, type ApiOptions, type ErrorResponse, type PaymentRequiredResponse } from './client';
 
 
@@ -28,6 +29,7 @@ export interface ChatChunk {
       generated_tokens?: string | number;
       generated_tokens_per_second?: string | number;
     };
+    forward_proof?: ForwardPassProof;
   };
 }
 
