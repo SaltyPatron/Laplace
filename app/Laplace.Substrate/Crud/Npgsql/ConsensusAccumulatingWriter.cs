@@ -412,6 +412,20 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                                 atomicStats = await UpsertDeltaInTransactionAsync(
                                     acceptedDelta, connection, transaction, token).ConfigureAwait(false);
                         }
+                        else if (evidenceRefold is { } refold
+                                 && !acceptance.OriginalReplay
+                                 && refold.Cells.Length > 0)
+                        {
+                            // Bulk replayable testimony refolds INSIDE the evidence
+                            // transaction (GH #1292's boundary, closed by construction):
+                            // the native per-type recompute runs on this connection, so
+                            // the journal token can never be durable while consensus is
+                            // behind. The old post-commit continuation could die after
+                            // the journal committed and leave a permanently unfolded
+                            // token that replay true-skips.
+                            atomicStats = await RefoldInTransactionAsync(
+                                refold, connection, transaction, token).ConfigureAwait(false);
+                        }
 
                         if (!acceptance.OriginalReplay && appendConversation is not null)
                             await appendConversation(connection, transaction, token).ConfigureAwait(false);
@@ -424,7 +438,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                     reconciliation,
                     ct).ConfigureAwait(false);
 
-                if (!result.JournalReplayHit && !pipelineReplayableBulk)
+                if (!result.JournalReplayHit)
                 {
                     Interlocked.Add(ref _cellsFolded, atomicStats.Cells);
                     Interlocked.Add(ref _consensusBackendTicks, atomicStats.ConsensusBackendTicks);
@@ -432,20 +446,20 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                     Interlocked.Add(ref _consensusUpsertCalls, atomicStats.FoldCalls);
                     Interlocked.Add(ref _highwayMaskCalls, atomicStats.MaskCalls);
                     Interlocked.Add(ref _highwayMaskPairs, atomicStats.MaskPairs);
+                    if (pipelineReplayableBulk && evidenceRefold is { } refold)
+                        Interlocked.Add(ref _observations, refold.ObservationCount);
                 }
 
-                if (pipelineReplayableBulk && evidenceRefold is { } refold)
+                if (pipelineReplayableBulk
+                    && !result.JournalReplayHit
+                    && completionChanges.Count > 0)
                 {
-                    if (!result.JournalReplayHit)
-                        Interlocked.Add(ref _observations, refold.ObservationCount);
-
-                    // Dispatch NOW. The next source working set can proceed while this one
-                    // refolds from durable evidence. File-completion markers are withheld
-                    // from the evidence commit and published by this same continuation only
-                    // after its cells and masks are current, so a crash cannot leave a
-                    // marker-complete file with unfinished consensus.
-                    await EnqueueEvidenceRefoldAsync(
-                        refold, completionChanges, CancellationToken.None).ConfigureAwait(false);
+                    // File-completion markers were withheld from the evidence batch;
+                    // with the refold now inside that transaction, consensus is current
+                    // when it commits, so publishing the markers here preserves the
+                    // "no marker-complete file with unfinished consensus" law.
+                    await _inner.ApplyWorkingSetAsync(
+                        completionChanges, CancellationToken.None).ConfigureAwait(false);
                 }
             }
             else
@@ -917,6 +931,99 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         return new AtomicFoldStats(
             folded, masks, foldTicks, maskTicks,
             foldCalls, maskCalls, orderedPairs.Count);
+    }
+
+    /// <summary>
+    /// Bulk replayable refold on the EVIDENCE transaction (GH #1292 closed by
+    /// construction): the native per-type recompute runs on the same connection
+    /// that will commit the journal token, so a durable token always implies a
+    /// current cell. Idempotent by construction — refold_evidence_type derives
+    /// the complete cell state from durable evidence, never from the delta.
+    /// Masks deposit inline exactly as the delta path does.
+    /// </summary>
+    private async Task<AtomicFoldStats> RefoldInTransactionAsync(
+        EvidenceRefoldPlan plan,
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken ct)
+    {
+        bool epoch = await SupportsApplyWriteEpochAsync(connection, ct).ConfigureAwait(false);
+        const string refoldSql = "SELECT consensus.refold_evidence_type($1,$2,$3)";
+        long folded = 0;
+        long foldCalls = 0;
+        long foldStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        var cells = plan.Cells;
+        for (int i = 0; i < cells.Length;)
+        {
+            int j = i + 1;
+            while (j < cells.Length && cells[j].Type == cells[i].Type) j++;
+            // One native call per type run; chunk very large runs at the same
+            // bound the delta path uses. The recompute is idempotent per cell,
+            // so chunking does not change the result.
+            for (int off = i; off < j; off += AtomicFoldChunkCells)
+            {
+                int count = Math.Min(AtomicFoldChunkCells, j - off);
+                var subjects = new byte[count][];
+                var objects = new byte[count][];
+                for (int k = 0; k < count; k++)
+                {
+                    subjects[k] = cells[off + k].Subject.ToBytes();
+                    objects[k] = cells[off + k].Object?.ToBytes()!;
+                }
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandTimeout = 0;
+                command.CommandText = epoch
+                    ? "WITH epoch AS MATERIALIZED (SELECT nextval('laplace.apply_write_epoch')) "
+                      + refoldSql + " FROM epoch"
+                    : refoldSql;
+                command.Parameters.AddWithValue(NpgsqlDbType.Bytea, cells[i].Type.ToBytes());
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, subjects);
+                command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, objects);
+                folded += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
+                foldCalls++;
+            }
+            i = j;
+        }
+        long foldTicks = System.Diagnostics.Stopwatch.GetTimestamp() - foldStarted;
+
+        var maskPairs = new HashSet<(Hash128 Entity, Hash128 Type)>(cells.Length * 2);
+        foreach (var cell in cells)
+        {
+            maskPairs.Add((cell.Subject, cell.Type));
+            if (cell.Object is { } objectId) maskPairs.Add((objectId, cell.Type));
+        }
+        var orderedPairs = maskPairs.ToList();
+        orderedPairs.Sort(static (x, y) =>
+        {
+            int c = x.Entity.CompareToBytewise(y.Entity);
+            return c != 0 ? c : x.Type.CompareToBytewise(y.Type);
+        });
+        long masks = 0;
+        long maskCalls = 0;
+        long maskStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        for (int off = 0; off < orderedPairs.Count; off += AtomicFoldChunkCells)
+        {
+            int count = Math.Min(AtomicFoldChunkCells, orderedPairs.Count - off);
+            var entities = new byte[count][];
+            var maskTypes = new byte[count][];
+            for (int k = 0; k < count; k++)
+            {
+                entities[k] = orderedPairs[off + k].Item1.ToBytes();
+                maskTypes[k] = orderedPairs[off + k].Item2.ToBytes();
+            }
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandTimeout = 0;
+            command.CommandText = "SELECT consensus.highway_mask_deposit($1,$2)";
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, entities);
+            command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, maskTypes);
+            masks += (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
+            maskCalls++;
+        }
+        long maskTicks = System.Diagnostics.Stopwatch.GetTimestamp() - maskStarted;
+        return new AtomicFoldStats(
+            folded, masks, foldTicks, maskTicks, foldCalls, maskCalls, orderedPairs.Count);
     }
 
     /// <summary>
