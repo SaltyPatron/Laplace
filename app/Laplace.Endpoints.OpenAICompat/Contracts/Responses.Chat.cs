@@ -55,11 +55,29 @@ public sealed record ProvenanceLine(
     [property: JsonPropertyName("witnesses"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Witnesses);
 
 
+public sealed record ForwardPassProof(
+    [property: JsonPropertyName("session")] string Session,
+    [property: JsonPropertyName("prompt_occurrence_key")] string PromptOccurrenceKey,
+    [property: JsonPropertyName("response_witnessed")] bool ResponseWitnessed,
+    [property: JsonPropertyName("program_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProgramId,
+    [property: JsonPropertyName("semantic_act_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SemanticActId,
+    [property: JsonPropertyName("output_fingerprint"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OutputFingerprint,
+    [property: JsonPropertyName("completion")] bool Completion,
+    [property: JsonPropertyName("disposition")] string Disposition,
+    [property: JsonPropertyName("required_obligations")] int RequiredObligations,
+    [property: JsonPropertyName("satisfied_obligations")] int SatisfiedObligations,
+    [property: JsonPropertyName("remaining_required")] int RemainingRequired,
+    [property: JsonPropertyName("output_count")] int OutputCount,
+    [property: JsonPropertyName("prior_discourse_ids")] IReadOnlyList<string> PriorDiscourseIds,
+    [property: JsonPropertyName("events")] IReadOnlyList<ForwardTraceStep> Events);
+
+
 public sealed record ChunkProvenance(
     [property: JsonPropertyName("eff_mu"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? EffMu = null,
     [property: JsonPropertyName("witnesses"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Witnesses = null,
     [property: JsonPropertyName("ord_used"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? OrdUsed = null,
-    [property: JsonPropertyName("performance"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChatPerformance? Performance = null);
+    [property: JsonPropertyName("performance"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ChatPerformance? Performance = null,
+    [property: JsonPropertyName("forward_proof"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ForwardPassProof? ForwardProof = null);
 
 
 
