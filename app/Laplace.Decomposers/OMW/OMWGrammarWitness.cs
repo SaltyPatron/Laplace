@@ -28,9 +28,9 @@ internal static class OMWEmitter
         Hash128 synId = synAnchor.Value;
         ConceptAnchor.AttestSynsetCategory(b, synId, OMWDecomposer.Source, TC.AcademicCurated);
 
-        Hash128 langId = LanguageReference.Resolve(row.Lang);
+        Hash128 langId = LanguageReference.Emit(
+            b, row.Lang, OMWDecomposer.Source, TC.AcademicCurated);
         OMWDecomposer.TrackLanguage(row.Lang);
-        b.AddEntity(new EntityRow(langId, EntityTier.Word, EntityTypeRegistry.Language, OMWDecomposer.Source));
 
         switch (row.Type)
         {
