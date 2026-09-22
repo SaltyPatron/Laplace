@@ -750,8 +750,26 @@ candidate_can_output(const Candidate *candidate, const LaplacePromptIntent *inte
 {
     if (intent && intent->explicit_invocation)
         return candidate_is_intent_result(candidate, intent);
-    return candidate->sequence_occurrences > 0 || candidate->projection.has_positive ||
-           candidate_is_intent_result(candidate, intent);
+
+    /* A positive typed semantic transition is already a lawful proposal from
+     * the shared COUPLE/SCAN field. The old gate admitted it for ROUTE, then
+     * prohibited it from SELECT forever unless an unrelated sequence or
+     * source-declared task shape also happened to exist.
+     *
+     * Naming/sense/frame channels remain routing state rather than answer acts;
+     * protocol CALLS/HAS_INPUT edges remain invocation metadata. Every other
+     * traversable positive semantic responder may be selected, and cognition
+     * obligation closure still decides whether REALIZE is allowed. */
+    bool semantic_result =
+        candidate->query_traversal.has_positive &&
+        !laplace_prompt_binding_channel(&candidate->query_traversal.positive) &&
+        !laplace_prompt_contract_relation(
+            &candidate->query_traversal.positive.relation);
+
+    return candidate->sequence_occurrences > 0 ||
+           candidate->projection.has_positive ||
+           candidate_is_intent_result(candidate, intent) ||
+           semantic_result;
 }
 
 static bool
