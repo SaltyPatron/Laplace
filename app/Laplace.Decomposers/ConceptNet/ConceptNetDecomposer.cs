@@ -131,7 +131,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
                 SubjectPos: endPos, ObjectPos: startPos,
                 SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
                 ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
-                SubjectLangId: endLangId, ObjectLangId: startLangId,
+                SubjectLangCode: Encoding.UTF8.GetString(endLang),
+                ObjectLangCode: Encoding.UTF8.GetString(startLang),
                 ObservationCount: sourceCount);
             return true;
         }
@@ -142,7 +143,8 @@ public sealed class ConceptNetDecomposer : RelationTripleDecomposerBase<ConceptN
             SubjectPos: startPos, ObjectPos: endPos,
             SubjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(startWn, startPos),
             ObjectSynsetId: ConceptNetUri.ResolveSynsetFromWnSuffix(endWn, endPos),
-            SubjectLangId: startLangId, ObjectLangId: endLangId,
+            SubjectLangCode: Encoding.UTF8.GetString(startLang),
+            ObjectLangCode: Encoding.UTF8.GetString(endLang),
             ObservationCount: sourceCount);
         return true;
     }
