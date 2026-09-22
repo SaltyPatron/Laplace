@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import {
   Banner,
@@ -471,7 +472,12 @@ export function ChatView() {
               )}
 
               {m.forwardProof && (
-                <ForwardPassProofPanel proof={m.forwardProof} />
+                <>
+                  <Link className={styles.forwardProofLink} to={`/forward-proof?turn=${i}`}>
+                    Open full Forward Pass Proof for this exact Chat turn
+                  </Link>
+                  <ForwardPassProofPanel proof={m.forwardProof} />
+                </>
               )}
 
               {m.performance && (
