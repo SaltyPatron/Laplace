@@ -83,17 +83,26 @@ public static class PosReference
 
 
 
-    public static Hash128 Attest(
-        SubstrateChangeBuilder b, Hash128 subject, string tag, PosTagset tagset,
-        Hash128 sourceId, Hash128? contextId, double sourceTrust,
-        ConcurrentDictionary<string, byte>? readbackNames = null,
-        long observationCount = 1)
+    public static Hash128 Emit(
+        SubstrateChangeBuilder b, string tag, PosTagset tagset,
+        Hash128 sourceId, double sourceTrust,
+        ConcurrentDictionary<string, byte>? readbackNames = null)
     {
         string content = ResolveContent(tag, tagset, out bool probationary);
         Hash128 posId = ContentEmitter.Emit(b, content, sourceId)
             ?? throw new InvalidOperationException($"POS content could not be admitted: {content}");
         CategoryAnchor.AttestCategory(b, posId, PosTypeId, sourceId, sourceTrust);
         VocabularyNames.TrackProbationaryPos(readbackNames, tag, tagset, probationary);
+        return posId;
+    }
+
+    public static Hash128 Attest(
+        SubstrateChangeBuilder b, Hash128 subject, string tag, PosTagset tagset,
+        Hash128 sourceId, Hash128? contextId, double sourceTrust,
+        ConcurrentDictionary<string, byte>? readbackNames = null,
+        long observationCount = 1)
+    {
+        Hash128 posId = Emit(b, tag, tagset, sourceId, sourceTrust, readbackNames);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             subject, HasPosTypeId, posId, sourceId, contextId, sourceTrust,
             observationCount: observationCount));
