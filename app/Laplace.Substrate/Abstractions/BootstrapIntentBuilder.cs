@@ -29,7 +29,8 @@ public sealed class BootstrapIntentBuilder
             sourceId, $"bootstrap/{sourceName}", parentIntentId: null)
             .DeclareSourcePrior(SourceTrust.SubstrateMandate);
 
-        _inner.AddEntity(sourceId, EntityTier.Word, SourceTypeId, sourceId);
+        CanonicalNamedIdentity.Declare(
+            _inner, sourceId, EntityTier.Word, SourceTypeId, sourceName, sourceId);
 
         // The source names ITSELF, by the same law AddType uses for type nodes:
         // HAS_NAME_ALIAS → the name's content root. Canonical-string sources are
@@ -54,9 +55,8 @@ public sealed class BootstrapIntentBuilder
     {
         var id = EntityTypeRegistry.Id(canonicalTypeName);
         _canonicalNames.Add(canonicalTypeName);
-        _inner.AddEntity(id, EntityTier.Word, TypeMetaTypeId, _sourceId);
-
-
+        CanonicalNamedIdentity.Declare(
+            _inner, id, EntityTier.Word, TypeMetaTypeId, canonicalTypeName, _sourceId);
 
         if (ContentEmitter.Emit(_inner, canonicalTypeName, _sourceId) is { } nameId)
             _inner.AddAttestation(NativeAttestation.Categorical(
@@ -69,7 +69,8 @@ public sealed class BootstrapIntentBuilder
         var r = RelationTypeRegistry.Resolve(canonicalRelationTypeName);
         var id = r.Id;
         _canonicalNames.Add(r.Canonical);
-        _inner.AddEntity(id, EntityTier.Word, RelationTypeMetaTypeId, _sourceId);
+        CanonicalNamedIdentity.Declare(
+            _inner, id, EntityTier.Word, RelationTypeMetaTypeId, r.Canonical, _sourceId);
         return id;
     }
 
