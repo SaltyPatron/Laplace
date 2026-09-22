@@ -143,8 +143,14 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
             ? ContentEmitter.Emit(b, ann.TargetText!, Source) : null;
         var frameId = CategoryAnchor.Emit(b, ann.FrameName, FrameTypeId, Source, TC.AcademicCurated);
         if (sentId is null || frameId is null || (resolvedTarget && targetId is null)) return;
-        var resolutionMarkers = new HashSet<Hash128>();
 
+        // These are structural delimiters inside the exact annotation trajectory.
+        // They are ordinary reusable content entities with their own physicalities,
+        // never opaque path hashes or bare support rows.
+        foreach (string marker in AnnotationMarkerTexts)
+            RequireAnnotationMarker(b, marker);
+        if (unresolved)
+            RequireAnnotationMarker(b, UnresolvedAnnotationSchemaText);
         // Typed source annotation, not a text continuation: labels retain their
         // layer, source rank, offsets, null instantiation and frame-scoped role.
         // Equal labels on different spans or under different frames stay distinct.
@@ -174,23 +180,16 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                 constituents.Add(roleId);
                 if (unresolved)
                 {
-                    Hash128 resolution = SpanResolutionId(ClassifySpan(label, sourceLength));
+                    SpanResolution state = ClassifySpan(label, sourceLength);
+                    Hash128 resolution = RequireAnnotationMarker(
+                        b, SpanResolutionText(state));
                     constituents.Add(resolution);
-                    resolutionMarkers.Add(resolution);
                 }
             }
             constituents.Add(AnnotationLayerEndId);
         }
         constituents.Add(AnnotationLayersEndId);
 
-        foreach (Hash128 marker in AnnotationMarkers)
-            b.AddEntity(marker, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
-        if (unresolved)
-        {
-            b.AddEntity(UnresolvedAnnotationSchemaId, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
-            foreach (Hash128 marker in resolutionMarkers)
-                b.AddEntity(marker, EntityTier.Word, EntityTypeRegistry.SourceReference, Source);
-        }
         Hash128[] flat = constituents.ToArray();
         Hash128 annotationId = Hash128.Merkle(EntityTier.Document, flat);
         b.AddEntity(annotationId, EntityTier.Document, EntityTypeRegistry.FrameNetAnnotation, Source);
@@ -208,9 +207,34 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
                 Trajectory.Build(flat), flat.Length, null, null, 0));
         }
 
-        Hash128 occurrenceId = AnnotationOccurrenceId(ann, annotationId);
-        b.AddEntity(occurrenceId, EntityTier.Document,
-            EntityTypeRegistry.FrameNetAnnotationOccurrence, Source);
+        OrderedCompositionComponent annotationComponent =
+            new(annotationId, EntityTier.Document, x, y, z, m);
+        OrderedCompositionComponent fileComponent =
+            RequireAnnotationComponent(b, ann.FileLabel);
+        OrderedCompositionComponent sentenceReferenceComponent =
+            RequireAnnotationComponent(b, ann.SentenceReference);
+        OrderedCompositionComponent annotationReferenceComponent =
+            RequireAnnotationComponent(b, ann.AnnotationReference);
+        Span<OrderedCompositionResult> occurrenceResult = stackalloc OrderedCompositionResult[1];
+        OrderedComposition.StageBatch(
+            b.ContentStage,
+            [new OrderedCompositionRequest(
+                [
+                    annotationComponent,
+                    fileComponent,
+                    sentenceReferenceComponent,
+                    annotationReferenceComponent,
+                ],
+                EntityTypeRegistry.FrameNetAnnotationOccurrence,
+                Source,
+                0)],
+            occurrenceResult);
+        Hash128 occurrenceId = occurrenceResult[0].Id;
+        Hash128 expectedOccurrence = AnnotationOccurrenceId(ann, annotationId);
+        if (occurrenceId != expectedOccurrence)
+            throw new InvalidOperationException(
+                "FrameNet annotation occurrence identity diverged from its trajectory");
+
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             sentId.Value, FrameNetSource.HasParseTypeId, annotationId,
             Source, occurrenceId, TC.AcademicCurated));
@@ -242,15 +266,22 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         ContentEmitter.RootId(offset.ToString(System.Globalization.CultureInfo.InvariantCulture))
         ?? throw new InvalidOperationException($"FrameNet character offset could not be composed: {offset}");
 
-    internal static readonly Hash128 AnnotationSchemaId =
-        Hash128.OfCanonical("framenet/span-annotation/schema/v2");
+    private const string AnnotationSchemaText = "framenet/span-annotation/schema/v2";
+    private const string UnresolvedAnnotationSchemaText = "framenet/span-annotation/schema/v3";
+    private const string AnnotationNoneText = "framenet/span-annotation/none/v2";
+    private const string AnnotationLayerText = "framenet/span-annotation/layer/v2";
+    private const string AnnotationLabelText = "framenet/span-annotation/label/v2";
+    private const string AnnotationLayerEndText = "framenet/span-annotation/layer-end/v2";
+    private const string AnnotationLayersEndText = "framenet/span-annotation/layers-end/v2";
+
+    internal static readonly Hash128 AnnotationSchemaId = RequiredAnnotationRoot(AnnotationSchemaText);
     internal static readonly Hash128 UnresolvedAnnotationSchemaId =
-        Hash128.OfCanonical("framenet/span-annotation/schema/v3");
+        RequiredAnnotationRoot(UnresolvedAnnotationSchemaText);
 
     internal enum SpanResolution { Resolved, NoSpan, Incomplete, Reversed, OutOfRange }
 
-    internal static Hash128 SpanResolutionId(SpanResolution resolution) =>
-        Hash128.OfCanonical("framenet/span-resolution/" + (resolution switch
+    private static string SpanResolutionText(SpanResolution resolution) =>
+        "framenet/span-resolution/" + (resolution switch
         {
             SpanResolution.Resolved => "resolved",
             SpanResolution.NoSpan => "no-span",
@@ -258,29 +289,58 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
             SpanResolution.Reversed => "reversed",
             SpanResolution.OutOfRange => "out-of-range",
             _ => throw new ArgumentOutOfRangeException(nameof(resolution)),
-        }) + "/v1");
-    internal static readonly Hash128 AnnotationNoneId =
-        Hash128.OfCanonical("framenet/span-annotation/none/v2");
-    internal static readonly Hash128 AnnotationLayerId =
-        Hash128.OfCanonical("framenet/span-annotation/layer/v2");
-    internal static readonly Hash128 AnnotationLabelId =
-        Hash128.OfCanonical("framenet/span-annotation/label/v2");
-    internal static readonly Hash128 AnnotationLayerEndId =
-        Hash128.OfCanonical("framenet/span-annotation/layer-end/v2");
-    internal static readonly Hash128 AnnotationLayersEndId =
-        Hash128.OfCanonical("framenet/span-annotation/layers-end/v2");
-    private static readonly Hash128[] AnnotationMarkers =
+        }) + "/v1";
+
+    internal static Hash128 SpanResolutionId(SpanResolution resolution) =>
+        RequiredAnnotationRoot(SpanResolutionText(resolution));
+
+    internal static readonly Hash128 AnnotationNoneId = RequiredAnnotationRoot(AnnotationNoneText);
+    internal static readonly Hash128 AnnotationLayerId = RequiredAnnotationRoot(AnnotationLayerText);
+    internal static readonly Hash128 AnnotationLabelId = RequiredAnnotationRoot(AnnotationLabelText);
+    internal static readonly Hash128 AnnotationLayerEndId = RequiredAnnotationRoot(AnnotationLayerEndText);
+    internal static readonly Hash128 AnnotationLayersEndId = RequiredAnnotationRoot(AnnotationLayersEndText);
+
+    private static readonly string[] AnnotationMarkerTexts =
     [
-        AnnotationSchemaId, AnnotationNoneId, AnnotationLayerId,
-        AnnotationLabelId, AnnotationLayerEndId, AnnotationLayersEndId,
+        AnnotationSchemaText,
+        AnnotationNoneText,
+        AnnotationLayerText,
+        AnnotationLabelText,
+        AnnotationLayerEndText,
+        AnnotationLayersEndText,
     ];
+
+    private static Hash128 RequiredAnnotationRoot(string value) =>
+        ContentEmitter.RootId(value)
+        ?? throw new InvalidOperationException(
+            $"FrameNet annotation constituent could not be composed: {value}");
+
+    private static Hash128 RequireAnnotationMarker(SubstrateChangeBuilder builder, string value) =>
+        ContentEmitter.Emit(builder, value, Source)
+        ?? throw new InvalidOperationException(
+            $"FrameNet annotation constituent could not be admitted: {value}");
+
+    private static OrderedCompositionComponent RequireAnnotationComponent(
+        SubstrateChangeBuilder builder, string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            throw new InvalidDataException(
+                "FrameNet annotation occurrence has an empty source reference constituent");
+        return ContentEmitter.StageComponent(builder, value, Source)
+            ?? throw new InvalidOperationException(
+                $"FrameNet annotation occurrence constituent could not be admitted: {value}");
+    }
 
     private static Hash128 AnnotationOccurrenceId(FulltextAnno ann, Hash128 annotationId)
     {
-        static string Hex(string value) => Convert.ToHexString(Encoding.UTF8.GetBytes(value));
-        return Hash128.OfCanonical(
-            $"framenet/annotation-occurrence/{annotationId}/{Hex(ann.FileLabel)}/"
-            + $"{Hex(ann.SentenceReference)}/{Hex(ann.AnnotationReference)}/v1");
+        Span<Hash128> constituents = stackalloc Hash128[4]
+        {
+            annotationId,
+            RequiredAnnotationRoot(ann.FileLabel),
+            RequiredAnnotationRoot(ann.SentenceReference),
+            RequiredAnnotationRoot(ann.AnnotationReference),
+        };
+        return Hash128.Merkle(EntityTier.Document, constituents);
     }
 
     public Task<IngestInventory?> DescribeInputAsync(
