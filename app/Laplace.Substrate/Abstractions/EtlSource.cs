@@ -71,12 +71,6 @@ public sealed record EtlSource(
     IngestSourceProfile? Profile = null,
     string? LanguageScope = null)
 {
-    public bool IsComplete =>
-        Modality.GrammarReady && (NodeEdgeMap.Count > 0 || EtlWitnessFactory.IsRegistered(Name));
-
-    /// <summary>True when CLI dispatch must use the source's own IDecomposer, never EtlDecomposer.</summary>
-    public bool IsRoutableViaEtl => !HasDedicatedDecomposer && IsComplete;
-
     /// <summary>
     /// Entity id of the declared language scope, or null when the source has none.
     /// Resolved through LanguageReference so the id comes from the same place every other

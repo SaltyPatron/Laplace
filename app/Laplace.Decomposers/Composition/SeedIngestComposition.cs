@@ -92,7 +92,6 @@ public interface ISeedDecomposerResolver
     { decomposer = null!; resolvedRoot = ""; return false; }
     IDecomposer ResolveModel(string modelDir, bool? persistEvidence = null);
     IDecomposer ResolveRecipe(string recipePath);
-    IDecomposer ResolveEtl(EtlSource src);
     IContentRecordAdapter? FindAdapter(string path);
 }
 
@@ -137,9 +136,6 @@ public sealed class SeedDecomposerResolver : ISeedDecomposerResolver
 
     public IDecomposer ResolveRecipe(string recipePath) =>
         new RecipeDecomposer(recipePath);
-
-    public IDecomposer ResolveEtl(EtlSource src) =>
-        new EtlDecomposer(src);
 
     public IContentRecordAdapter? FindAdapter(string path) =>
         _adapters.FirstOrDefault(a => a.CanHandle(path));

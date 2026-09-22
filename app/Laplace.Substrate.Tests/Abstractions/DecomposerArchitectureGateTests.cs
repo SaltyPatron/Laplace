@@ -820,14 +820,6 @@ public sealed class DecomposerArchitectureGateTests
     }
 
     [Fact]
-    public void RuntimeEtl_UsesTheGenericMultiFileVendorContract()
-    {
-        Assert.True(typeof(EtlDecomposer).IsSubclassOf(
-            typeof(DecomposerMultiFile<GrammarIngestRecord>)));
-        Assert.False(typeof(DecomposerMultiPhase).IsAssignableFrom(typeof(EtlDecomposer)));
-    }
-
-    [Fact]
     public void ProductionHotPath_DoesNotCallTheNativeNoOpContentReset()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();

@@ -42,9 +42,6 @@ public static class EtlManifest
 
     public static bool TryGet(string cliName, out EtlSource src) => _rows.TryGetValue(cliName, out src!);
 
-    public static bool IsRoutable(string cliName) =>
-        _rows.TryGetValue(cliName, out var r) && r.IsRoutableViaEtl;
-
     public static IReadOnlyCollection<string> Names => _rows.Keys;
 
     private static Dictionary<string, EtlSource> Build()
@@ -66,9 +63,9 @@ public static class EtlManifest
 
 
             // atomic2020 + conceptnet are triple sources pinned to their lean
-            // RelationTripleDecomposerBase classes (dispatched explicitly in
-            // IngestCommands before the IsRoutable check) — they no longer route
-            // through EtlDecomposer/grammar-compose, so they carry no manifest row.
+            // RelationTripleDecomposerBase classes. EtlManifest is descriptive
+            // source/parser metadata only; executable declarative ingestion lives
+            // in SourceGenerationRecipe.
 
             ["tatoeba"] = Row("tatoeba", "TatoebaDecomposer", 2, "StructuredCorpus", TC.StructuredCorpus,
                 "tatoeba", new EtlModality("tsv", Glob: "*.csv", RecordFraming: GrammarRecordFraming.Line),
