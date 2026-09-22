@@ -187,6 +187,24 @@ internal sealed class FakeSubstrateClient : ISubstrateClient
         WalkTextStreamAsync(prompt,options.MaxTokens ?? 128,options.Window ?? 5,
             options.Temperature ?? 0.6,options.TopK ?? 10,ct);
 
+    public async IAsyncEnumerable<ForwardObservedEvent> ForwardTurnObservedStreamAsync(
+        string prompt, byte[]? session, ConverseOptions options,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        var count = 0;
+        await foreach (var token in ForwardTurnStreamAsync(prompt, session, options, ct))
+        {
+            count++;
+            yield return new ForwardObservedEvent(
+                token.Step, "emit", 0, string.Empty, token.Token, token.Token,
+                (int)token.Mu, string.Empty);
+        }
+        yield return new ForwardObservedEvent(
+            count, "complete", 0, string.Empty, string.Empty, null, 0, string.Empty,
+            Completion: true, Disposition: "complete", OutputCount: count,
+            PriorDiscourseIds: Array.Empty<string>());
+    }
+
     private const string WhaleIdHex = "00112233445566778899aabbccddeeff";
     private const string CetaceanIdHex = "ffeeddccbbaa99887766554433221100";
     private const string IsAIdHex = "0123456789abcdef0123456789abcdef";
