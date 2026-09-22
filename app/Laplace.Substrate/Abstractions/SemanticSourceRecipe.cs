@@ -42,6 +42,10 @@ public enum SourceReferenceCodec
     UnicodeCodepoint,
     UnicodeCodepointSequence,
     UPlusCodepointWithQualifier,
+    // Existing governed ids such as EntityTypeRegistry nodes are BLAKE3 over
+    // their canonical UTF-8 name. The recipe VM preserves that id while
+    // projecting it onto the same canonical content as a real physicality.
+    CanonicalNameHash,
 }
 
 /// <summary>
