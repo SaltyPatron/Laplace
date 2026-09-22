@@ -400,6 +400,7 @@ struct laplace_recipe_stream {
         if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
         const bool testimony = (rule.disposition & (1u << 6)) != 0;
         const bool ordinary_content = (rule.disposition & (1u << 1)) != 0;
+        const bool reference = (rule.disposition & (1u << 5)) != 0;
         const bool default_value = rule.has_default && raw == rule.default_value;
         const bool emitted_testimony = testimony && !(default_value && rule.omit_default_testimony);
         if (!emitted_testimony && !ordinary_content) {
@@ -458,16 +459,25 @@ struct laplace_recipe_stream {
             if (ordinary_content)
                 check(content_witness_emit_floor_atom(stage, cp, &f.object,
                     INTENT_STAGE_PG_EPOCH_UNIX_US), "field floor physicality");
+            if (reference) entity(stage, f.object, rule.entity_type);
         }
-        else if (rule.codec == 2 || (rule.codec == 0 && rule.kind == 7)) f.object = content(stage, sequence_text(raw, rule.separator));
+        else if (rule.codec == 2 || (rule.codec == 0 && rule.kind == 7)) {
+            f.object = content(stage, sequence_text(raw, rule.separator));
+            if (reference) entity(stage, f.object, rule.entity_type);
+        }
         else if (rule.kind == 4 || rule.kind == 5) {
             const auto values = rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
             for (const auto& value : values) {
-                f.object = content(stage, value); emit_fact(f);
+                f.object = content(stage, value);
+                if (reference) entity(stage, f.object, rule.entity_type);
+                emit_fact(f);
             }
             return;
         }
-        else if (rule.kind == 8 || rule.kind == 9) f.object = content(stage, raw);
+        else if (rule.kind == 8 || rule.kind == 9) {
+            f.object = content(stage, raw);
+            if (reference) entity(stage, f.object, rule.entity_type);
+        }
         else {
             auto values = rule.kind == 3 ? split(raw, rule.separator) : std::vector<std::string>{raw};
             for (auto value : values) {
@@ -511,6 +521,7 @@ struct laplace_recipe_stream {
                 check(content_witness_emit_floor_atom(stage, cp, &subject,
                     INTENT_STAGE_PG_EPOCH_UNIX_US), "subject floor physicality");
             } else throw std::runtime_error("unsupported subject reference codec");
+            entity(stage, subject, route.entity_type);
         } else if (route.kind == 2) {
             auto value = record.get(route.identity);
             const auto alias = route.aliases.find(alias_key(value));
