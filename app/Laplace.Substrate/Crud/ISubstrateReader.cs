@@ -103,9 +103,20 @@ public interface ISubstrateReader
     Task<long> CountEntitiesByTypeAsync(Hash128 typeId, CancellationToken ct = default);
 
     /// <summary>
-    /// Count source-owned semantic interpretations that require a physical realization and
-    /// how many of those identities currently have at least one durable physicality.
-    /// Implementations without durable interpretation storage return an empty contract.
+    /// Count every entity identity owned/touched by one source and how many have at least
+    /// one durable physicality. Entity identity has no recipe-specific opt-out from
+    /// realization; source recipes/providers supply the structure and the shared pipeline
+    /// owns persistence. Implementations without durable interpretation storage return an
+    /// empty contract.
+    /// </summary>
+    Task<PhysicalityCoverage> PhysicalityCoverageAsync(
+        Hash128 sourceId,
+        CancellationToken ct = default) =>
+        Task.FromResult(new PhysicalityCoverage(0, 0));
+
+    /// <summary>
+    /// Compatibility/scoped diagnostic for callers that explicitly need a type subset.
+    /// This is not the generic ingest-completion law.
     /// </summary>
     Task<PhysicalityCoverage> PhysicalityCoverageAsync(
         Hash128 sourceId,
