@@ -17,7 +17,7 @@ NAMES = ("laplace-managed-deploy", "laplace-service-control")
 # Reviewed predecessor: identical verbs, unit hardening, identity, TLS and
 # transaction semantics. Only its owned scratch directories have legacy names.
 SCRATCH_PREDECESSOR = (
-    "c87daff9fc8a8e4a48657a3a55bfed41dd9bb46d",
+    "b46219d6aef56d4e2110bbc19d120ec10bcfc267",
     "dfade6c9b72277ed4d95e64376d283a4aa8821d2",
     "14d7470f276ed33562451a12c0724767bd43aa82",
 )
