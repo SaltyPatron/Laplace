@@ -1254,8 +1254,11 @@ run_release_delivery() {
     echo "::notice::application publication omitted by planner"
   fi
 
-  if csv_selected "$actions" reconcile; then
+  if csv_selected "$actions" reconcile && [[ "${LAPLACE_STAGE:-}" != mainline ]]; then
     reconcile_installed_product
+  elif csv_selected "$actions" reconcile; then
+    echo "::notice::automatic main delivery does not run corpus-wide reconciliation; use explicit reconcile/database maintenance"
+    verify_installed_product
   elif csv_selected "$actions" publish; then
     if [[ "$publish_scope" == uci ]]; then
       verify_isolated_uci_delivery
