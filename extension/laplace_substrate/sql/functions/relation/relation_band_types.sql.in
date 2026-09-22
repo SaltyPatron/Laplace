@@ -1,12 +1,10 @@
 -- The relation-type ids in a salience band, as an ARRAY the planner can prune with.
 --
--- THE DEFECT THIS RETIRES. 25 sites across the read path wrote the band test as
--- `consensus.relation_highway_band(c.type_id) = N` directly against consensus. consensus is
--- LIST-partitioned by type_id and holds ~48M rows, so a function applied to the
--- partition key means: no partition pruning (the planner cannot evaluate a C
--- STABLE call at plan time), no index on the predicate, and one function
--- invocation PER EDGE SCANNED. The band is a property of ~221 relation types, and
--- it was being recomputed tens of millions of times to filter rows.
+-- The band is a property of the relation type, not of each consensus edge.
+-- consensus is LIST-partitioned by type_id. Applying relation_highway_band to
+-- type_id on that table blocks partition pruning and runs the function once
+-- per edge. Resolve the type ids for the band first, then probe
+-- (subject_id, type_id).
 --
 -- chat.sql.in's band lens already had the right shape and said why: resolve the
 -- types up front, "there are ~189 governed types, so resolving the set up front
