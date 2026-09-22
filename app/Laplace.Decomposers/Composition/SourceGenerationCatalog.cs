@@ -4,8 +4,10 @@ using System.Text.Json;
 namespace Laplace.Decomposers.Composition;
 
 /// <summary>
-/// Explicit host selection of source generations. Catalog discovery never enables
-/// a draft manifest; dedicated selection and catalog selection share one resolver.
+/// One source-generation selection authority. Checked-in recipes, an optional host
+/// cookbook, and explicit manifest paths all feed the same resolver. Discovery never
+/// enables a draft manifest: only an explicit path or `"selected": true` may replace
+/// a legacy source implementation.
 /// </summary>
 public sealed class SourceGenerationCatalog
 {
@@ -16,6 +18,13 @@ public sealed class SourceGenerationCatalog
     {
         string? explicitSelection = Environment.GetEnvironmentVariable("LAPLACE_SOURCE_GENERATIONS");
         var candidates = new Dictionary<string, bool>(StringComparer.Ordinal);
+
+        // Repository/deployment cookbook is part of the product, not an environment
+        // variable. This makes checked-in recipes executable by default while the
+        // selected bit remains the deliberate cut-over switch for each source.
+        foreach (string path in BuiltInRecipeManifests())
+            candidates.TryAdd(path, false);
+
         if (!string.IsNullOrWhiteSpace(explicitSelection))
             foreach (string path in SplitPaths(explicitSelection)) candidates[Path.GetFullPath(path)] = true;
         string? cookbook = Environment.GetEnvironmentVariable("LAPLACE_COOKBOOK_PATH");
@@ -59,6 +68,32 @@ public sealed class SourceGenerationCatalog
     }
 
     public bool TryGet(string key, out SourceGenerationRecipe recipe) => _selected.TryGetValue(key, out recipe!);
+
+    private static IEnumerable<string> BuiltInRecipeManifests()
+    {
+        var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            var cursor = new DirectoryInfo(Path.GetFullPath(start));
+            while (cursor is not null)
+            {
+                string cookbook = Path.Combine(cursor.FullName, "recipes");
+                if (Directory.Exists(cookbook))
+                {
+                    foreach (string path in Directory.EnumerateFiles(
+                                 cookbook, "*.source.json", SearchOption.AllDirectories)
+                                 .OrderBy(static path => path, StringComparer.Ordinal))
+                    {
+                        string full = Path.GetFullPath(path);
+                        if (emitted.Add(full))
+                            yield return full;
+                    }
+                    break;
+                }
+                cursor = cursor.Parent;
+            }
+        }
+    }
 
     private static IEnumerable<string> SplitPaths(string value) => value.Split(
         Path.PathSeparator == ';' ? [';'] : [';', Path.PathSeparator],

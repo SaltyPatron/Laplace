@@ -903,6 +903,11 @@ public sealed class IngestRunner
     {
         if (intent.CountsAsUnit) Interlocked.Increment(ref counters._unitsAttempted);
 
+        // Native stages are caller-owned only until the writer accepts them. Successful
+        // apply retires those stages, so inspect E/P closure here while the exact source
+        // tuples are still available. The tracker is idempotent across a retry.
+        counters.EntityAdmission.Observe(intent);
+
         Exception? lastEx = null;
         int attempt = 0;
         for (; attempt < options.RetryPolicy.MaxAttempts; attempt++)
@@ -1019,6 +1024,11 @@ public sealed class IngestRunner
         int unitCount = 0;
         foreach (var c in batch) if (c.CountsAsUnit) unitCount++;
         Interlocked.Add(ref counters._unitsAttempted, unitCount);
+
+        // Same ownership boundary as the scalar path: validate the complete staged
+        // source stream before a successful writer call disposes transferred stages.
+        foreach (var intent in batch)
+            counters.EntityAdmission.Observe(intent);
 
         Exception? lastEx = null;
         int attempt = 0;
@@ -1302,7 +1312,6 @@ public sealed class IngestRunner
         }
         if (unit.StartsWith("layer-complete/", StringComparison.Ordinal)) return;
 
-        c.EntityAdmission.Observe(intent);
         long consumed = intent.Metadata.InputUnitsConsumed;
         if (consumed > 0 && intent.CountsAsUnit)
             Interlocked.Add(ref c._inputUnitsDone, consumed);
@@ -1490,9 +1499,16 @@ public sealed class IngestRunner
         ISubstrateWriter inner,
         RunCounters counters) : ISubstrateWriter
     {
+        private void Observe(IReadOnlyList<SubstrateChange> changes)
+        {
+            for (int i = 0; i < changes.Count; i++)
+                counters.EntityAdmission.Observe(changes[i]);
+        }
+
         public async Task<ApplyResult> ApplyAsync(
             SubstrateChange change, CancellationToken ct = default)
         {
+            Observe([change]);
             var result = await inner.ApplyAsync(change, ct).ConfigureAwait(false);
             Account(result, [change]);
             return result;
@@ -1501,6 +1517,7 @@ public sealed class IngestRunner
         public async Task<ApplyResult> ApplyManyAsync(
             IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         {
+            Observe(changes);
             var result = await inner.ApplyManyAsync(changes, ct).ConfigureAwait(false);
             Account(result, changes);
             return result;
@@ -1513,6 +1530,7 @@ public sealed class IngestRunner
         public async Task<ApplyResult> ApplyWorkingSetAsync(
             IReadOnlyList<SubstrateChange> changes, CancellationToken ct = default)
         {
+            Observe(changes);
             var result = await inner.ApplyWorkingSetAsync(changes, ct).ConfigureAwait(false);
             Account(result, changes);
             return result;
@@ -1522,6 +1540,7 @@ public sealed class IngestRunner
             IReadOnlyList<SubstrateChange> changes,
             Func<CancellationToken, ValueTask> verifier, CancellationToken ct = default)
         {
+            Observe(changes);
             var result = await inner.ApplyWorkingSetAsync(changes, verifier, ct).ConfigureAwait(false);
             Account(result, changes);
             return result;
@@ -1539,8 +1558,6 @@ public sealed class IngestRunner
             Interlocked.Add(ref counters._bootstrapPhysicalitiesInserted, result.PhysicalitiesInserted);
             Interlocked.Add(ref counters._bootstrapAttestationsInserted, result.AttestationsInserted);
             Interlocked.Add(ref counters._roundTrips, result.RoundTrips);
-            for (int i = 0; i < changes.Count; i++)
-                counters.EntityAdmission.Observe(changes[i]);
         }
     }
 

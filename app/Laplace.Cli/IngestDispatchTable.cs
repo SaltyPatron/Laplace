@@ -20,9 +20,10 @@ using Laplace.Decomposers.WordNet;
 namespace Laplace.Cli;
 
 /// <summary>
-/// Table-driven ingest dispatch (doc 13 Phase 1). One registry; no special-case
-/// ordering forks. Dedicated decomposers win over EtlDecomposer; EtlDecomposer
-/// only for manifest rows with <see cref="EtlSource.IsRoutableViaEtl"/>.
+/// Table-driven ingest dispatch. Source-generation recipes are the only generic
+/// declarative route. Dedicated decomposers are migration fallbacks for sources
+/// that do not yet have a selected recipe; the retired EtlManifest path is metadata,
+/// not a second executable ingestion architecture.
 /// </summary>
 internal static class IngestDispatchTable
 {
@@ -228,14 +229,6 @@ internal static class IngestDispatchTable
             task = IngestCommands.IngestSafetensorSnapshotAsync(cli.Path, cli);
             return true;
         }
-        if (EtlManifest.IsRoutable(sourceKey))
-        {
-            task = IngestCommands.IngestViaRunnerAsync(
-                CliRuntime.Decomposers.ResolveEtl(EtlManifest.Get(sourceKey)),
-                IngestDataPaths.Resolve(sourceKey, cli.Path),
-                skipLayerCheck: false, cli);
-            return true;
-        }
         task = default!;
         return false;
     }
@@ -244,19 +237,14 @@ internal static class IngestDispatchTable
     private static readonly string[] ModelAliases = ["model", "safetensors", "safetensor"];
 
     /// <summary>
-    /// EVERYTHING <see cref="TryDispatch"/> can actually route — the explicit table,
-    /// the model aliases, and the manifest rows reachable through the generic ETL
-    /// lane. This used to report only Routes.Keys, so it under-reported by the model
-    /// aliases and by every ETL-routable source, and callers that printed it (the
-    /// unknown-source error, `ingest` usage) told the operator less than the binary
-    /// supports. One property, so help text and error text cannot disagree with
-    /// dispatch or with each other.
+    /// EVERYTHING <see cref="TryDispatch"/> can actually route — selected source
+    /// generations, explicit legacy fallbacks, and model aliases. One property keeps
+    /// help/error output aligned with the real dispatch surface.
     /// </summary>
     internal static IReadOnlyCollection<string> RegisteredKeys =>
         Routes.Keys
             .Concat(CliRuntime.Decomposers.SelectedGenerationKeys)
               .Concat(ModelAliases)
-              .Concat(EtlManifest.Names.Where(EtlManifest.IsRoutable))
               .Distinct(StringComparer.OrdinalIgnoreCase)
               .ToArray();
 }
