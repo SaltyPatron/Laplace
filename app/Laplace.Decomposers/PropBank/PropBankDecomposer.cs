@@ -26,7 +26,9 @@ public sealed class PropBankDecomposer
 
 
 
-    internal static Hash128 OrdinalId(string n) => Hash128.OfCanonical($"ordinal/{n}/v1");
+    internal static Hash128 OrdinalId(string n) =>
+        ContentEmitter.RootId(n.Trim())
+        ?? throw new InvalidOperationException($"ordinal content could not be composed: {n}");
 
     public override int LayerOrder => 2;
     protected override double SourceTrust => TC.AcademicCurated;
@@ -203,9 +205,10 @@ public sealed class PropBankDecomposer
             if (num.Length > 0)
             {
                 string ord = num.Equals("M", StringComparison.OrdinalIgnoreCase) ? "m" : num;
-                _canonicalNames.TryAdd($"ordinal/{ord}/v1", 0);
-                Hash128 ordEntity = OrdinalId(ord);
-                b.AddEntity(new EntityRow(ordEntity, EntityTier.Word, OrdinalTypeId, Source));
+                Hash128 ordEntity = ContentEmitter.Emit(b, ord, Source)
+                    ?? throw new InvalidOperationException($"ordinal content could not be admitted: {ord}");
+                CategoryAnchor.AttestCategory(
+                    b, ordEntity, OrdinalTypeId, Source, TC.AcademicCurated);
                 b.AddAttestation(NativeAttestation.CategoricalResolved(
                     roleEntity, PropBankSource.HasFeatureTypeId, ordEntity,
                     Source, null, TC.AcademicCurated));
