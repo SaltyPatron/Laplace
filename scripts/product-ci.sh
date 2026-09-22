@@ -431,11 +431,13 @@ import shlex
 
 plan = json.loads(os.environ["CARRY_PLAN_JSON"])
 
+# Carry-forward converges what is still UNDELIVERED, not every historical
+# qualification suite between the installed application receipt and HEAD.
+# Mainline qualification is owned by the direct impact plan; replaying old
+# dev/DB/live matrices here makes a failed publication turn into a growing test
+# gate and can prevent the already-built product from ever being published.
 orders = {
     "LAPLACE_BUILD_COMPONENTS": ("build_components", ("native", "managed", "web")),
-    "LAPLACE_DEV_SUITES": ("dev_suites", ("native-dev", "managed-dev", "uci-dev", "browser-dev")),
-    "LAPLACE_DB_SUITES": ("db_suites", ("db-health", "native-db", "managed-db")),
-    "LAPLACE_LIVE_SUITES": ("live_suites", ("live-floor", "live-api", "managed-live", "generation-eval", "chess-provider-live")),
     "LAPLACE_DELIVERY_ACTIONS": ("delivery_actions", ("install", "extension-sql", "ingest-runtime", "database", "reconcile", "publish", "live")),
 }
 
@@ -456,9 +458,6 @@ project_fields = {
         if stage in {"mainline", "release-delivery", "release-candidate", "release-activation"}
         else "managed_build_projects"
     ),
-    "LAPLACE_MANAGED_TEST_PROJECTS": "managed_test_projects",
-    "LAPLACE_MANAGED_DB_TEST_PROJECTS": "managed_db_test_projects",
-    "LAPLACE_MANAGED_LIVE_TEST_PROJECTS": "managed_live_test_projects",
 }
 for env_name, field in project_fields.items():
     current = os.environ.get(env_name, "")
@@ -471,18 +470,8 @@ for env_name, field in project_fields.items():
         value = ",".join(sorted(selected))
     print(f"export {env_name}={shlex.quote(value)}")
 
-# A carried-forward invalidation may cover more paths than the direct push.
-# Preserve exact filters only when that test plane gained no carried work.
-filter_suites = {
-    "LAPLACE_NATIVE_TEST_FILTER": ("dev_suites", "native-dev"),
-    "LAPLACE_MANAGED_TEST_FILTER": ("dev_suites", "managed-dev"),
-    "LAPLACE_NATIVE_DB_TEST_FILTER": ("db_suites", "native-db"),
-    "LAPLACE_MANAGED_DB_TEST_FILTER": ("db_suites", "managed-db"),
-    "LAPLACE_MANAGED_LIVE_TEST_FILTER": ("live_suites", "managed-live"),
-}
-for env_name, (field, suite) in filter_suites.items():
-    if suite in plan.get(field, []):
-        print(f"export {env_name}=")
+# Qualification selectors and filters remain exactly those of the direct
+# revision impact. Carry-forward is a delivery-reconciliation operation.
 
 scope = os.environ.get("LAPLACE_PUBLISH_SCOPE", "api")
 incoming_scope = plan.get("publish_scope", "api")
