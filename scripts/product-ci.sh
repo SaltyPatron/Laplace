@@ -1231,11 +1231,12 @@ run_release_delivery() {
 
   run_release_mutation_window "$actions"
 
-  # Database qualification runs with the API back online. These suites validate
-  # the installed candidate; they are not themselves an install/ALTER mutation
-  # and must not turn a short maintenance window into minutes of 502s.
+  # Automatic main delivery does not run integration qualification here.
+  # run_database_maintenance --prepare already finishes with the bounded installed
+  # database-health readback. native-db/managed-db belong to the explicit test-db
+  # or audit lanes; they must never sit between a successful mutation and publish.
   if csv_selected "$actions" database; then
-    run_db_tests
+    echo "::notice::database mutation completed with health readback; integration suites remain explicit test-db/audit work"
   fi
 
   # Publication is a planner action, not a tax on native-only SHAs. pipeline.sh
