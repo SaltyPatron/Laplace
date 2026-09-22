@@ -53,8 +53,8 @@ public readonly record struct RelationTripleRecord(
     char? ObjectPos = null,
     Hash128? SubjectSynsetId = null,
     Hash128? ObjectSynsetId = null,
-    Hash128? SubjectLangId = null,
-    Hash128? ObjectLangId = null,
+    string? SubjectLangCode = null,
+    string? ObjectLangCode = null,
     string? ContextAnchorKey = null,
     Hash128? ContextCategoryTypeId = null,
     /// <summary>
@@ -159,18 +159,18 @@ public sealed class RelationTripleHandler : IIngestRecordHandler<RelationTripleR
             builder, objectRoot, record.ObjectSynsetId,
             sourceId, sourceTrust, sourceNodeDeclarations);
 
-        if (subjectRoot != default && record.SubjectLangId is { } sl && sl != default)
+        if (subjectRoot != default && record.SubjectLangCode is { Length: > 0 } subjectLang)
         {
-            builder.AddEntity(new EntityRow(
-                sl, EntityTier.Word, EntityTypeRegistry.Language, sourceId));
+            Hash128 sl = LanguageReference.Emit(
+                builder, subjectLang, sourceId, sourceTrust);
             AddSourceNodeDeclaration(builder, NativeAttestation.Categorical(
                 subjectRoot, "HAS_LANGUAGE", sl, sourceId, sourceTrust),
                 sourceNodeDeclarations);
         }
-        if (objectRoot != default && record.ObjectLangId is { } ol && ol != default)
+        if (objectRoot != default && record.ObjectLangCode is { Length: > 0 } objectLang)
         {
-            builder.AddEntity(new EntityRow(
-                ol, EntityTier.Word, EntityTypeRegistry.Language, sourceId));
+            Hash128 ol = LanguageReference.Emit(
+                builder, objectLang, sourceId, sourceTrust);
             AddSourceNodeDeclaration(builder, NativeAttestation.Categorical(
                 objectRoot, "HAS_LANGUAGE", ol, sourceId, sourceTrust),
                 sourceNodeDeclarations);
