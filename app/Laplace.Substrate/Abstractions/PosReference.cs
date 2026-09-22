@@ -25,6 +25,17 @@ public static class PosReference
 
     public static readonly string[] Canonical = ReadCanonicalFromNative();
 
+    // Native POS resolution remains the standards/tagset mapping oracle. Its
+    // historical path-hashed ids are not entity identity: POS endpoints in the
+    // substrate are the same ordinary composed content entities used everywhere
+    // else. This map recovers the canonical UPOS spelling from the legacy native
+    // resolver without persisting that resolver's private id namespace.
+    private static readonly IReadOnlyDictionary<Hash128, string> CanonicalByLegacyId =
+        Canonical.ToDictionary(
+            static name => NativeAttestation.ResolvePos(name, PosTagset.Upos),
+            static name => name);
+
+
     private static unsafe string[] ReadCanonicalFromNative()
     {
         nuint count;
@@ -36,14 +47,36 @@ public static class PosReference
         return result;
     }
 
-    public static Hash128 CanonicalId(string upos) =>
-        NativeAttestation.ResolvePos(upos, PosTagset.Upos);
+    public static Hash128 CanonicalId(string upos)
+    {
+        string content = ResolveContent(upos, PosTagset.Upos, out bool probationary);
+        if (probationary)
+            throw new InvalidOperationException($"UPOS tag is not canonical: {upos}");
+        return ContentEmitter.RootId(content)
+            ?? throw new InvalidOperationException($"POS content could not be composed: {content}");
+    }
 
     public static Hash128 Resolve(string sourceTag, PosTagset tagset) =>
-        NativeAttestation.ResolvePos(sourceTag, tagset);
+        Resolve(sourceTag, tagset, out _);
 
-    public static Hash128 Resolve(string sourceTag, PosTagset tagset, out bool probationary) =>
-        NativeAttestation.ResolvePos(sourceTag, tagset, out probationary);
+    public static Hash128 Resolve(string sourceTag, PosTagset tagset, out bool probationary)
+    {
+        string content = ResolveContent(sourceTag, tagset, out probationary);
+        return ContentEmitter.RootId(content)
+            ?? throw new InvalidOperationException($"POS content could not be composed: {content}");
+    }
+
+    private static string ResolveContent(string sourceTag, PosTagset tagset, out bool probationary)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceTag);
+        Hash128 legacy = NativeAttestation.ResolvePos(sourceTag, tagset, out probationary);
+        if (!probationary && CanonicalByLegacyId.TryGetValue(legacy, out string? canonical))
+            return canonical;
+        // Unknown/probationary labels remain exact observed content. Do not case-fold
+        // or namespace-salt them: "NN", "nn", "Nn" are distinct fragments unless
+        // testimony later relates them.
+        return sourceTag.Trim();
+    }
 
 
 
@@ -56,12 +89,10 @@ public static class PosReference
         ConcurrentDictionary<string, byte>? readbackNames = null,
         long observationCount = 1)
     {
-        Hash128 posId = NativeAttestation.ResolvePos(tag, tagset, out bool probationary);
-        if (probationary)
-        {
-            CanonicalNamedIdentity.Declare(
-                b, posId, EntityTier.Word, PosTypeId, tag, sourceId);
-        }
+        string content = ResolveContent(tag, tagset, out bool probationary);
+        Hash128 posId = ContentEmitter.Emit(b, content, sourceId)
+            ?? throw new InvalidOperationException($"POS content could not be admitted: {content}");
+        CategoryAnchor.AttestCategory(b, posId, PosTypeId, sourceId, sourceTrust);
         VocabularyNames.TrackProbationaryPos(readbackNames, tag, tagset, probationary);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             subject, HasPosTypeId, posId, sourceId, contextId, sourceTrust,
@@ -73,14 +104,12 @@ public static class PosReference
 
     public static void SeedCanonical(SubstrateChangeBuilder builder, Hash128 sourceId)
     {
-        CanonicalNamedIdentity.Declare(
-            builder, PosTypeId, EntityTier.Word,
-            BootstrapIntentBuilder.TypeMetaTypeId, "POS", sourceId);
         foreach (var tag in Canonical)
         {
-            Hash128 posId = CanonicalId(tag);
-            CanonicalNamedIdentity.Declare(
-                builder, posId, EntityTier.Word, PosTypeId, tag, sourceId);
+            Hash128 posId = ContentEmitter.Emit(builder, tag, sourceId)
+                ?? throw new InvalidOperationException($"POS content could not be admitted: {tag}");
+            CategoryAnchor.AttestCategory(
+                builder, posId, PosTypeId, sourceId, SourceTrust.SubstrateMandate);
         }
     }
 }
