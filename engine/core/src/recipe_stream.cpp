@@ -441,6 +441,12 @@ struct laplace_recipe_stream {
             lexical.object = content(stage, raw); lexical.has_object = true; emit_fact(lexical);
         }
         f.has_object = true;
+        if (rule.codec == 4) {
+            hash128_blake3(raw.data(), raw.size(), &f.object);
+            project_named_identity(stage, f.object, rule.entity_type, raw);
+            emit_fact(f);
+            return;
+        }
         if (rule.codec == 3) {
             bool found = false;
             for (const auto& token : split(raw, " ")) {
@@ -596,7 +602,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
         uint32_t count = r.number();
         for (uint32_t j = 0; j < count; ++j) {
             field_rule f; f.path = r.text(); f.kind = r.number(); f.disposition = r.number(); f.codec = r.number();
-            if (f.kind > 9 || f.codec > 3) throw std::runtime_error("unknown field opcode");
+            if (f.kind > 9 || f.codec > 4) throw std::runtime_error("unknown field opcode");
             f.absent = r.text(); f.separator = r.text(); f.object_namespace = r.text();
             f.relation = r.hash(); f.parent = r.hash(); f.entity_type = r.hash(); f.lexical_relation = r.hash(); f.rank = r.real();
             uint32_t aliases = r.number();
