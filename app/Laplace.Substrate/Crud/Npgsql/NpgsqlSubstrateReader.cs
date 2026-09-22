@@ -215,6 +215,37 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
 
     public async Task<PhysicalityCoverage> PhysicalityCoverageAsync(
         Hash128 sourceId,
+        CancellationToken ct = default)
+    {
+        await using var cmd = _ds.CreateCommand(
+            "WITH touched AS MATERIALIZED ("
+            + " SELECT a.subject_id AS entity_id FROM laplace.attestations a WHERE a.source_id = $1"
+            + " UNION SELECT a.object_id FROM laplace.attestations a"
+            + "       WHERE a.source_id = $1 AND a.object_id IS NOT NULL"
+            + " UNION SELECT a.context_id FROM laplace.attestations a"
+            + "       WHERE a.source_id = $1 AND a.context_id IS NOT NULL"
+            + "), owned AS MATERIALIZED ("
+            + " SELECT DISTINCT ei.entity_id"
+            + " FROM laplace.entity_interpretations ei"
+            + " LEFT JOIN touched t ON t.entity_id = ei.entity_id"
+            + " WHERE ei.first_observed_by = $1 OR t.entity_id IS NOT NULL"
+            + ")"
+            + " SELECT count(*)::bigint,"
+            + "        count(*) FILTER (WHERE EXISTS ("
+            + "          SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = o.entity_id"
+            + "        ))::bigint"
+            + " FROM owned o");
+        cmd.CommandTimeout = 0;
+        cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
+
+        await using var result = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await result.ReadAsync(ct).ConfigureAwait(false))
+            return new PhysicalityCoverage(0, 0);
+        return new PhysicalityCoverage(result.GetInt64(0), result.GetInt64(1));
+    }
+
+    public async Task<PhysicalityCoverage> PhysicalityCoverageAsync(
+        Hash128 sourceId,
         IReadOnlyList<Hash128> typeIds,
         CancellationToken ct = default)
     {
