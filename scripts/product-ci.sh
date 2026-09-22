@@ -466,8 +466,20 @@ carry_forward_installed_ingest_runtime_impact() {
     return 0
   fi
   [[ "$deployed" != "$target" ]] || return 0
-  ensure_revision_available "$deployed" || return 1
-  plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")" || return 1
+  ensure_revision_available "$deployed" || {
+    echo "::warning::could not resolve installed ingest-runtime revision $deployed; carrying its bounded managed owner forward"
+    append_csv_env LAPLACE_BUILD_COMPONENTS managed
+    append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Cli/Laplace.Cli.csproj
+    append_csv_env LAPLACE_DELIVERY_ACTIONS ingest-runtime
+    return 0
+  }
+  plan="$(python3 scripts/ci-impact-plan.py --root "$PWD" --base "$deployed" --head "$target")" || {
+    echo "::warning::could not compute installed ingest-runtime impact; carrying its bounded managed owner forward"
+    append_csv_env LAPLACE_BUILD_COMPONENTS managed
+    append_csv_env LAPLACE_MANAGED_BUILD_PROJECTS app/Laplace.Cli/Laplace.Cli.csproj
+    append_csv_env LAPLACE_DELIVERY_ACTIONS ingest-runtime
+    return 0
+  }
   needs_ingest="$(CARRY_INGEST_PLAN_JSON="$plan" python3 - <<'PY'
 import json, os
 p=json.loads(os.environ["CARRY_INGEST_PLAN_JSON"])
