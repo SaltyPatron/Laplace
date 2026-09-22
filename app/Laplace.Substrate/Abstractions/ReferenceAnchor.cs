@@ -36,8 +36,9 @@ public enum ReferenceIdentityKind : ushort
 /// <summary>
 /// Admission path for source/catalog references.
 ///
-/// A reference serialization is still content. Emitting one stages the normal Unicode/content
-/// trajectory and records the requested semantic/source-reference type as an interpretation.
+/// A reference serialization is still content. Declaring one stages only that ordinary
+/// content entity and its physicality. Semantic/source-reference classification is testimony
+/// around the entity (for example IS_TYPED_AS), never a second durable identity facet.
 /// This preserves Laplace's global convergence law:
 ///
 /// same canonical content -> same entity -> same physicality/trajectory
@@ -88,8 +89,8 @@ public static class ReferenceAnchor
         if (key is null) return null;
         OrderedCompositionComponent? component = ContentEmitter.StageComponent(builder, key, source);
         if (component is not { } realized) return null;
-        builder.AddEntityInterpretation(new EntityInterpretationRow(
-            realized.Id, realized.Tier, entityTypeId, source));
+        // entityTypeId is intentionally not written into entity storage here.
+        // Emit(...) expresses that semantic classification through IS_TYPED_AS.
         return realized.Id;
     }
 
@@ -119,8 +120,7 @@ public static class ReferenceAnchor
         OrderedCompositionComponent? component =
             ContentEmitter.StageComponent(builder, normalizedKey, source);
         if (component is not { } realized) return null;
-        builder.AddEntityInterpretation(new EntityInterpretationRow(
-            realized.Id, realized.Tier, entityTypeId, source));
+        // Keep source/reference meaning outside canonical entity identity.
         return realized.Id;
     }
 
