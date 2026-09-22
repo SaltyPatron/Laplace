@@ -67,11 +67,10 @@ public sealed class BootstrapIntentBuilder
     public Hash128 AddRelationType(string canonicalRelationTypeName)
     {
         var r = RelationTypeRegistry.Resolve(canonicalRelationTypeName);
-        var id = r.Id;
         _canonicalNames.Add(r.Canonical);
-        CanonicalNamedIdentity.Declare(
-            _inner, id, EntityTier.Word, RelationTypeMetaTypeId, r.Canonical, _sourceId);
-        return id;
+        // Relation keys belong to the native relation/operator registry and highway
+        // perfcache. They are not content entities and receive no physicality.
+        return r.Id;
     }
 
     public Hash128 AddRelationType(string canonicalRelationTypeName, double typeRank, double sourceTrust)
