@@ -308,10 +308,9 @@ public sealed class LlamaTokenizerParser
     {
         Span<double> coord = stackalloc double[4];
         if (!rec.Role.HasFlag(TokenRole.Special)
-            && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys, out var interpretations))
+            && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys, out _))
         {
             foreach (var e in treeEntities) b.AddEntity(e);
-            foreach (var interpretation in interpretations) b.AddEntityInterpretation(interpretation);
             foreach (var p in treePhys) b.AddPhysicality(p);
         }
         else
@@ -506,10 +505,9 @@ public sealed class LlamaTokenizerParser
     private static Hash128 ResolveMergeSide(
         SubstrateChangeBuilder b, byte[] canonical, Hash128 sourceId, Hash128 textTypeId)
     {
-        if (TryBuildTreeRows(canonical, sourceId, out var entities, out var physicalities, out var interpretations))
+        if (TryBuildTreeRows(canonical, sourceId, out var entities, out var physicalities, out _))
         {
             foreach (var e in entities) b.AddEntity(e);
-            foreach (var interpretation in interpretations) b.AddEntityInterpretation(interpretation);
             foreach (var ph in physicalities) b.AddPhysicality(ph);
             if (TryDecomposeRoot(canonical, out var rootId, out _, out _, out _, out _, out _))
                 return rootId;
