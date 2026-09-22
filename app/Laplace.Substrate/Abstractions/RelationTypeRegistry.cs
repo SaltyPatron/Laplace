@@ -189,17 +189,11 @@ public static class RelationTypeRegistry
 
     public static void SeedCanonical(SubstrateChangeBuilder builder, Hash128 sourceId)
     {
-        var all = new List<RelationTypeResolution>(AllCanonical());
-        foreach (var k in all)
-            CanonicalNamedIdentity.Declare(
-                builder, k.Id, EntityTier.Word,
-                BootstrapIntentBuilder.RelationTypeMetaTypeId, k.Canonical, sourceId);
-
-        // The parent relation is governed by the native manifest. It is structural
-        // vocabulary, not testimony by each vendor that happens to initialize. The
-        // previous IS_A loop gave every installed decomposer another witness of the
-        // same deterministic hierarchy and made witness_count track source count.
-        // Readers resolve relation families from the same manifest directly.
+        ArgumentNullException.ThrowIfNull(builder);
+        _ = sourceId;
+        // Relation identity/rank/symmetry/family/bit live in the native manifest and
+        // highway perfcache. They are operator vocabulary, not reusable content
+        // entities. Do not deposit relation keys into entities/physicalities.
     }
 
     public static void SeedDynamic(SubstrateChangeBuilder builder, in RelationTypeResolution k, Hash128 sourceId,
@@ -209,37 +203,16 @@ public static class RelationTypeRegistry
                                    double witnessWeight = SourceTrust.AcademicCurated,
                                    Hash128? contextId = null)
     {
-
-
-
-
-
-
-
-
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(seenEntitiesThisBatch);
+        ArgumentNullException.ThrowIfNull(seenAttestationsThisRun);
+        _ = sourceId;
+        _ = witnessWeight;
+        _ = contextId;
         VocabularyNames.Track(readbackNames, VocabularyNames.RelationType(k.Canonical));
-        if (seenEntitiesThisBatch.Add(k.Id))
-            builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-
-
-        if (k.ParentId is { } parent)
-        {
-            AttestationRow declaration = NativeAttestation.Categorical(
-                k.Id, "IS_A", parent, sourceId, contextId, witnessWeight);
-            // A declaration is scoped testimony. Deduplicating only its type
-            // would erase a second source/file's independently witnessed row.
-            if (seenAttestationsThisRun.Add(declaration.Id))
-            {
-                builder.AddEntity(new EntityRow(k.Id, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-                builder.AddEntity(new EntityRow(parent, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, sourceId));
-                builder.AddAttestation(declaration);
-            }
-            // GH #1041: no content DAG for the label — "DEP_NSUBJ" was a
-            // measured tier-2 Word entity. The type id is blake3(canonical) =
-            // realize.canonical_id(canonical); VocabularyNames.Track above
-            // feeds register_canonicals, and realize.render resolves from
-            // canonical_names arm 1. Nothing walks the label's sub-tokens.
-        }
+        // Dynamic relation metadata is resolved by the native relation law. A relation
+        // key is not an Entity, and its parent family is not vendor testimony.
+        // Keeping the parameters preserves callers while removing the fake graph lane.
     }
 
     public static void SeedDeprel(SubstrateChangeBuilder builder, string deprel, Hash128 sourceId,
