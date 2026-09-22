@@ -25,7 +25,8 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
     private static readonly Hash128 CorenessTypeId = EntityTypeRegistry.FrameNetCoreness;
 
     private static Hash128 CorenessId(string coreType) =>
-        Hash128.OfCanonical($"framenet/coreness/{coreType}");
+        ContentEmitter.RootId(coreType)
+        ?? throw new InvalidOperationException($"FrameNet coreness could not be composed: {coreType}");
 
     private static readonly ConcurrentDictionary<string, byte> _vocabularyNames = new(StringComparer.Ordinal);
     internal static ConcurrentDictionary<string, byte> VocabularyNames => _vocabularyNames;
@@ -57,13 +58,18 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
     {
         var seed = new SubstrateChangeBuilder(
             Source, "bootstrap/framenet-vocab", null,
-            entityCapacity: CorenessValues.Length + 1,
-            physicalityCapacity: 0, attestationCapacity: 0)
+            entityCapacity: CorenessValues.Length * 4,
+            physicalityCapacity: CorenessValues.Length * 4,
+            attestationCapacity: CorenessValues.Length)
             .DeclareSourcePrior(SourceTrust);
-        seed.AddEntity(new EntityRow(CorenessTypeId, EntityTier.Word,
-            BootstrapIntentBuilder.TypeMetaTypeId, Source));
-        foreach (var c in CorenessValues)
-            seed.AddEntity(new EntityRow(CorenessId(c), EntityTier.Word, CorenessTypeId, Source));
+        foreach (string value in CorenessValues)
+        {
+            Hash128 id = ContentEmitter.Emit(seed, value, Source)
+                ?? throw new InvalidOperationException(
+                    $"FrameNet coreness could not be admitted: {value}");
+            CategoryAnchor.AttestCategory(
+                seed, id, CorenessTypeId, Source, TC.AcademicCurated);
+        }
         await context.Writer.ApplyAsync(seed.Build(), ct);
     }
 
@@ -328,8 +334,8 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
     {
         get
         {
-            foreach (var c in CorenessValues)
-                _vocabularyNames.TryAdd($"framenet/coreness/{c}", 0);
+            foreach (var value in CorenessValues)
+                _vocabularyNames.TryAdd(value, 0);
             return _vocabularyNames.Keys.ToList();
         }
     }
