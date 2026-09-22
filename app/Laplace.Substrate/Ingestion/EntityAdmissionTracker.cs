@@ -1,4 +1,3 @@
-using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
 using Laplace.SubstrateCRUD;
 using Laplace.SubstrateCRUD.Npgsql;
@@ -14,7 +13,6 @@ namespace Laplace.Ingestion;
 internal sealed class EntityAdmissionTracker
 {
     private readonly Dictionary<Hash128, PendingEntity> _contentAwaitingPhysicality = new();
-    private readonly HashSet<Hash128> _governedWithoutPhysicality = new();
     private readonly object _gate = new();
 
     internal void Observe(SubstrateChange change)
@@ -58,7 +56,6 @@ internal sealed class EntityAdmissionTracker
             foreach (Hash128 entityId in placedHere)
             {
                 _contentAwaitingPhysicality.Remove(entityId);
-                _governedWithoutPhysicality.Remove(entityId);
             }
 
             void ObserveEntity(EntityRow entity)
@@ -66,19 +63,17 @@ internal sealed class EntityAdmissionTracker
                 if (placedHere.Contains(entity.Id))
                     return;
 
-                if (EntityIdentityPolicy.RequiresPhysicality(entity.TypeId))
-                {
-                    _contentAwaitingPhysicality.TryAdd(
+                // Entity identity is canonical admitted structure. A bare entity is
+                // not a separate semantic class that may opt out of physical realization:
+                // the recipe/provider must supply the content/composition/typed structure
+                // from which the common pipeline emits its physicality. Keep every
+                // unplaced entity pending until some later source phase realizes it.
+                _contentAwaitingPhysicality.TryAdd(
+                    entity.Id,
+                    new PendingEntity(
                         entity.Id,
-                        new PendingEntity(
-                            entity.Id,
-                            entity.TypeId,
-                            change.Metadata.SourceContentUnitName));
-                }
-                else
-                {
-                    _governedWithoutPhysicality.Add(entity.Id);
-                }
+                        entity.TypeId,
+                        change.Metadata.SourceContentUnitName));
             }
 
             foreach (var entity in change.Entities)
@@ -93,10 +88,11 @@ internal sealed class EntityAdmissionTracker
         lock (_gate) return _contentAwaitingPhysicality.Values.ToArray();
     }
 
-    internal int GovernedWithoutPhysicalityCount
-    {
-        get { lock (_gate) return _governedWithoutPhysicality.Count; }
-    }
+    // Compatibility surface for the run receipt. The generic pipeline no longer
+    // admits a second class of "governed nonphysical" entity; recipes must realize
+    // every entity they introduce. Remove the receipt field once callers no longer
+    // consume it.
+    internal int GovernedWithoutPhysicalityCount => 0;
 
     internal sealed record PendingEntity(Hash128 Id, Hash128 TypeId, string UnitName);
 }
