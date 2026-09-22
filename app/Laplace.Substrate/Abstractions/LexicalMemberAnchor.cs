@@ -16,8 +16,7 @@ public enum LexicalMemberIdentityKind : ushort
 /// </summary>
 public static class LexicalMemberAnchor
 {
-    private static readonly Hash128 Schema =
-        Hash128.OfCanonical("lexical-member/structure/v2");
+    private const string SchemaText = "lexical-member/structure/v2";
 
     public static Hash128? Id(
         LexicalMemberIdentityKind kind, Hash128 ownerId, string? rawMemberKey)
@@ -29,7 +28,7 @@ public static class LexicalMemberAnchor
         if (member is null) return null;
         Span<Hash128> constituents = stackalloc Hash128[4]
         {
-            Schema, KindMarker(kind), ownerId, member.Value
+            RequiredRoot(SchemaText), RequiredRoot(KindMarkerText(kind)), ownerId, member.Value
         };
         return Hash128.Merkle(EntityTier.Word, constituents);
     }
@@ -46,21 +45,27 @@ public static class LexicalMemberAnchor
         Validate(kind, ownerId);
         string? key = Normalize(memberKey);
         if (key is null) return null;
+        OrderedCompositionComponent schema =
+            RequiredComponent(builder, SchemaText, source);
+        OrderedCompositionComponent system =
+            RequiredComponent(builder, KindMarkerText(kind), source);
         OrderedCompositionComponent? member =
             ContentEmitter.StageComponent(builder, key, source);
         if (member is not { } component) return null;
 
         Span<Hash128> constituents = stackalloc Hash128[4]
         {
-            Schema, KindMarker(kind), ownerId, component.Id
+            schema.Id, system.Id, ownerId, component.Id
         };
         Hash128 id = Hash128.Merkle(EntityTier.Word, constituents);
         builder.AddEntity(id, EntityTier.Word, entityTypeId, source);
 
-        Span<double> coord = stackalloc double[4]
-        {
-            component.CoordX, component.CoordY, component.CoordZ, component.CoordM
-        };
+        double[] coord = Math4d.KarcherMean(
+        [
+            schema.CoordX, schema.CoordY, schema.CoordZ, schema.CoordM,
+            system.CoordX, system.CoordY, system.CoordZ, system.CoordM,
+            component.CoordX, component.CoordY, component.CoordZ, component.CoordM,
+        ]);
         builder.AddPhysicality(new PhysicalityRow(
             PhysicalityId.Compute(id, PhysicalityType.ParseStructure),
             id, source, PhysicalityType.ParseStructure,
@@ -79,8 +84,17 @@ public static class LexicalMemberAnchor
             throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown member identity domain");
     }
 
-    private static Hash128 KindMarker(LexicalMemberIdentityKind kind) =>
-        Hash128.OfCanonical($"lexical-member/system/{(ushort)kind}/v1");
+    private static string KindMarkerText(LexicalMemberIdentityKind kind) =>
+        $"lexical-member/system/{(ushort)kind}/v1";
+
+    private static Hash128 RequiredRoot(string value) =>
+        ContentEmitter.RootId(value)
+        ?? throw new InvalidOperationException($"lexical-member constituent could not be composed: {value}");
+
+    private static OrderedCompositionComponent RequiredComponent(
+        SubstrateChangeBuilder builder, string value, Hash128 source) =>
+        ContentEmitter.StageComponent(builder, value, source)
+        ?? throw new InvalidOperationException($"lexical-member constituent could not be admitted: {value}");
 
     private static string? Normalize(string? rawMemberKey) =>
         string.IsNullOrWhiteSpace(rawMemberKey)
