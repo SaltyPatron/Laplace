@@ -400,6 +400,10 @@ laplace_stage_managed_runtimes() {
     test -s "$uci_stage/laplace-uci.$suffix" || return 1
   done
   install -d -m 2775 "$app_dir/releases" || return 1
+  # Reclaim mechanically unreferenced immutable runtimes BEFORE allocating/copying
+  # another closure. The old path only collected later, so a full LV could fail
+  # during rsync even though reclaimable failed/leased releases already existed.
+  laplace_prune_unreferenced_releases "$app_dir" >&2 || return 1
   release="$(mktemp -d "$app_dir/releases/runtime.XXXXXX")" || return 1
 
   if ! (
@@ -439,6 +443,7 @@ laplace_stage_uci_runtime() {
     test -s "$uci_stage/laplace-uci.$suffix" || return 1
   done
   install -d -m 2775 "$app_dir/releases" || return 1
+  laplace_prune_unreferenced_releases "$app_dir" >&2 || return 1
   release="$(mktemp -d "$app_dir/releases/runtime.XXXXXX")" || return 1
   if ! (
     chmod 0755 "$release" || exit $?
