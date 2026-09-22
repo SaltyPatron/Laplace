@@ -53,14 +53,13 @@ public sealed class BootstrapIntentBuilder
 
     public Hash128 AddType(string canonicalTypeName)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(canonicalTypeName);
         var id = EntityTypeRegistry.Id(canonicalTypeName);
         _canonicalNames.Add(canonicalTypeName);
-        CanonicalNamedIdentity.Declare(
-            _inner, id, EntityTier.Word, TypeMetaTypeId, canonicalTypeName, _sourceId);
-
-        if (ContentEmitter.Emit(_inner, canonicalTypeName, _sourceId) is { } nameId)
-            _inner.AddAttestation(NativeAttestation.Categorical(
-                id, "HAS_NAME_ALIAS", nameId, _sourceId, null, SourceTrust.SubstrateMandate));
+        // type_id is structural metadata on an entity row. The registry key is not
+        // itself content and must not be materialized as a fake Entity/Physicality.
+        // Semantic category endpoints are ordinary content entities witnessed by
+        // the source that actually makes the claim.
         return id;
     }
 
