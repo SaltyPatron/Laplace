@@ -130,12 +130,12 @@ internal static class OMWLmfEmitter
         Hash128? lemma = EmitContent(b, entry.Lemma);
         if (lemma is { } lemmaId)
         {
-            Attest(b, entryId, OmwRelation.HasNameAlias, lemmaId, Language(entry.LanguageCode));
+            Attest(b, entryId, OmwRelation.HasNameAlias, lemmaId, Language(b, entry.LanguageCode));
             AttestLanguage(b, lemmaId, entry.LanguageCode);
             if (!string.IsNullOrWhiteSpace(entry.PartOfSpeech))
                 PosReference.Attest(
                     b, lemmaId, entry.PartOfSpeech, PosReference.PosTagset.WordNet,
-                    OMWDecomposer.Source, Language(entry.LanguageCode), TC.AcademicCurated);
+                    OMWDecomposer.Source, Language(b, entry.LanguageCode), TC.AcademicCurated);
         }
         AttestContent(b, entryId, OmwRelation.HasNameAlias, entry.Index);
         AttestContent(b, entryId, OmwRelation.HasFeature, entry.LemmaType);
@@ -143,14 +143,14 @@ internal static class OMWLmfEmitter
         if (!string.IsNullOrWhiteSpace(entry.PartOfSpeech))
             PosReference.Attest(
                 b, entryId, entry.PartOfSpeech, PosReference.PosTagset.WordNet,
-                OMWDecomposer.Source, Language(entry.LanguageCode), TC.AcademicCurated);
+                OMWDecomposer.Source, Language(b, entry.LanguageCode), TC.AcademicCurated);
 
         foreach (OmwLmfForm form in entry.Forms)
         {
             if (EmitContent(b, form.WrittenForm) is not { } formId) continue;
-            Attest(b, entryId, OmwRelation.Contains, formId, Language(entry.LanguageCode));
+            Attest(b, entryId, OmwRelation.Contains, formId, Language(b, entry.LanguageCode));
             if (lemma is { } baseId)
-                Attest(b, formId, OmwRelation.FormOf, baseId, Language(entry.LanguageCode));
+                Attest(b, formId, OmwRelation.FormOf, baseId, Language(b, entry.LanguageCode));
             AttestLanguage(b, formId, entry.LanguageCode);
             foreach (OmwLmfTag tag in form.Tags)
                 AttestContent(b, formId, OmwRelation.HasFeature,
@@ -168,17 +168,17 @@ internal static class OMWLmfEmitter
                     System.Globalization.CultureInfo.InvariantCulture, out double count)
                 && count >= 0)
                 Attest(b, entryId, OmwRelation.HasSense, senseId,
-                    Language(entry.LanguageCode), count);
+                    Language(b, entry.LanguageCode), count);
             else
-                Attest(b, entryId, OmwRelation.HasSense, senseId, Language(entry.LanguageCode));
-            Attest(b, senseId, OmwRelation.IsSenseOf, synsetId, Language(entry.LanguageCode));
+                Attest(b, entryId, OmwRelation.HasSense, senseId, Language(b, entry.LanguageCode));
+            Attest(b, senseId, OmwRelation.IsSenseOf, synsetId, Language(b, entry.LanguageCode));
             if (lemma is { } nameId)
-                Attest(b, senseId, OmwRelation.HasNameAlias, nameId, Language(entry.LanguageCode));
+                Attest(b, senseId, OmwRelation.HasNameAlias, nameId, Language(b, entry.LanguageCode));
             AttestLanguage(b, senseId, entry.LanguageCode);
             if (!string.IsNullOrWhiteSpace(entry.PartOfSpeech))
                 PosReference.Attest(
                     b, senseId, entry.PartOfSpeech, PosReference.PosTagset.WordNet,
-                    OMWDecomposer.Source, Language(entry.LanguageCode), TC.AcademicCurated);
+                    OMWDecomposer.Source, Language(b, entry.LanguageCode), TC.AcademicCurated);
             AttestContent(b, senseId, OmwRelation.HasProperty, sense.Number);
             AttestContent(b, senseId, OmwRelation.HasSenseFrequency, sense.Count);
             AttestContent(b, senseId, OmwRelation.HasFeature, sense.AdjectivePosition);
@@ -205,21 +205,23 @@ internal static class OMWLmfEmitter
         if (!string.IsNullOrWhiteSpace(synset.PartOfSpeech))
             PosReference.Attest(
                 b, synsetId, synset.PartOfSpeech, PosReference.PosTagset.WordNet,
-                OMWDecomposer.Source, Language(synset.LanguageCode), TC.AcademicCurated);
+                OMWDecomposer.Source, Language(b, synset.LanguageCode), TC.AcademicCurated);
         AttestContent(b, synsetId, OmwRelation.HasLexCategory, synset.Lexfile);
         AttestContent(b, synsetId, OmwRelation.HasNameAlias, synset.Identifier);
         AttestContent(b, synsetId, OmwRelation.HasFeature, synset.Lexicalized);
 
-        if (!string.IsNullOrWhiteSpace(synset.Ili))
+        if (!string.IsNullOrWhiteSpace(synset.Ili)
+            && ReferenceAnchor.Emit(
+                b, ReferenceIdentityKind.CiliIli, synset.Ili,
+                EntityTypeRegistry.WordNetSynset, OMWDecomposer.Source,
+                TC.AcademicCurated) is { } iliId)
         {
-            Hash128 iliId = ReferenceAnchor.Id(ReferenceIdentityKind.CiliIli, synset.Ili)!.Value;
-            b.AddEntity(iliId, EntityTier.Word, EntityTypeRegistry.WordNetSynset, OMWDecomposer.Source);
             Attest(b, synsetId, OmwRelation.CorrespondsTo, iliId);
         }
 
         foreach (string member in synset.Members)
             Attest(b, synsetId, OmwRelation.HasMember, Sense(b, synset.Lexicon, member),
-                Language(synset.LanguageCode));
+                Language(b, synset.LanguageCode));
         foreach (string definition in synset.Definitions)
             AttestContent(b, synsetId, OmwRelation.HasDefinition, definition, synset.LanguageCode);
         foreach (string example in synset.Examples)
@@ -273,17 +275,17 @@ internal static class OMWLmfEmitter
 
     private static void AttestLanguage(SubstrateChangeBuilder b, Hash128 subject, string language)
     {
-        Hash128? languageId = Language(language);
+        Hash128? languageId = Language(b, language);
         if (languageId is null) return;
-        b.AddEntity(languageId.Value, EntityTier.Word, EntityTypeRegistry.Language, OMWDecomposer.Source);
         Attest(b, subject, OmwRelation.HasLanguage, languageId.Value);
     }
 
-    private static Hash128? Language(string language)
+    private static Hash128? Language(SubstrateChangeBuilder b, string language)
     {
         if (string.IsNullOrWhiteSpace(language)) return null;
         OMWDecomposer.TrackLanguage(language);
-        return LanguageReference.Resolve(language);
+        return LanguageReference.Emit(
+            b, language, OMWDecomposer.Source, TC.AcademicCurated);
     }
 
     private static Hash128? EmitContent(SubstrateChangeBuilder b, string value) =>
@@ -300,7 +302,7 @@ internal static class OMWLmfEmitter
     {
         if (EmitContent(b, value) is not { } contentId) return;
         Attest(b, subject, relation, contentId,
-            language is null ? null : Language(language));
+            language is null ? null : Language(b, language));
     }
 
     private static void Attest(
