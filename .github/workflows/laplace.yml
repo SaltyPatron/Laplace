@@ -118,7 +118,7 @@ jobs:
     needs: plan
     concurrency:
       group: laplace-main-delivery-dispatch
-      cancel-in-progress: ${{ contains(github.event.head_commit.message, '[supersede-stuck-mainline]') }}
+      cancel-in-progress: true
     uses: ./.github/workflows/product-stage.yml
     with:
       stage: mainline
