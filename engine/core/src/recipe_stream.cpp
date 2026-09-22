@@ -442,7 +442,7 @@ struct laplace_recipe_stream {
         }
         f.has_object = true;
         if (rule.codec == 4) {
-            hash128_blake3(raw.data(), raw.size(), &f.object);
+            hash128_blake3(reinterpret_cast<const uint8_t *>(raw.data()), raw.size(), &f.object);
             project_named_identity(stage, f.object, rule.entity_type, raw);
             emit_fact(f);
             return;
