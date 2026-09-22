@@ -120,8 +120,10 @@ internal sealed class UcdProperties
     /// The four forms the quick-check is stated for, in UCD order.
     public static readonly string[] NormalizationForms = ["NFC", "NFD", "NFKC", "NFKD"];
 
-    public static readonly Hash128 OrdinalCtx0 = Hash128.OfCanonical("ordinal/0/v1");
-    public static readonly Hash128 OrdinalCtx1 = Hash128.OfCanonical("ordinal/1/v1");
+    public static readonly Hash128 OrdinalCtx0 =
+        ContentEmitter.RootId("0") ?? throw new InvalidOperationException("ordinal 0 cannot be composed");
+    public static readonly Hash128 OrdinalCtx1 =
+        ContentEmitter.RootId("1") ?? throw new InvalidOperationException("ordinal 1 cannot be composed");
 
     private UcdProperties(
         string?[] name,
