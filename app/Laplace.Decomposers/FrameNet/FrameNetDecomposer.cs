@@ -222,14 +222,19 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
         Hash128 OffsetOrNone(int? offset)
         {
             if (offset is null) return AnnotationNoneId;
-            Hash128 id = OffsetId(offset.Value);
-            b.AddEntity(id, EntityTier.Word, EntityTypeRegistry.Ordinal, Source);
+            string value = offset.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Hash128 id = ContentEmitter.Emit(b, value, Source)
+                ?? throw new InvalidOperationException(
+                    $"FrameNet character offset could not be admitted: {value}");
+            CategoryAnchor.AttestCategory(
+                b, id, EntityTypeRegistry.Ordinal, Source, TC.AcademicCurated);
             return id;
         }
     }
 
     internal static Hash128 OffsetId(int offset) =>
-        Hash128.OfCanonical($"framenet/character-offset/{offset}/v1");
+        ContentEmitter.RootId(offset.ToString(System.Globalization.CultureInfo.InvariantCulture))
+        ?? throw new InvalidOperationException($"FrameNet character offset could not be composed: {offset}");
 
     internal static readonly Hash128 AnnotationSchemaId =
         Hash128.OfCanonical("framenet/span-annotation/schema/v2");
