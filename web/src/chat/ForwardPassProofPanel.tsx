@@ -19,6 +19,7 @@ export function ForwardPassProofPanel({ proof }: { proof: ForwardPassProof }) {
         <span>{proof.completion ? 'complete' : proof.disposition}</span>
         <span>exact producing turn · no replay</span>
         <span>program {compact(proof.program_id)}</span>
+        <span>{proof.response_witnessed ? 'response persisted' : 'response witness missing'}</span>
         <span>{proof.events.length} native receipts</span>
         <span>{proof.prior_discourse_ids.length} discourse ids</span>
       </summary>
