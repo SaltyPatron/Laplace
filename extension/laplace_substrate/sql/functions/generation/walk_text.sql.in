@@ -381,6 +381,107 @@ BEGIN ATOMIC
     ORDER BY g.step;
 END;
 
+
+-- Product observability surface for an ORDINARY conversation turn. This does
+-- not replay or re-run the prompt: one MATERIALIZED native forward_program
+-- invocation owns both the realized answer and every receipt returned here.
+-- prior_discourse is the exact ordered substrate state supplied to that native
+-- invocation after the prompt occurrence has been witnessed.
+CREATE OR REPLACE FUNCTION converse.forward_turn_observed(
+        p_prompt text, p_session bytea DEFAULT NULL,
+        p_steps int DEFAULT 128, p_max_stride int DEFAULT 5,
+        p_spread float8 DEFAULT 0.6, p_top_k int DEFAULT 10,
+        p_seed bigint DEFAULT NULL, p_hops int DEFAULT 2,
+        p_fanout int DEFAULT 8)
+    RETURNS TABLE(
+        step int, event text, routing_round int,
+        entity bytea, surface text, stride_used int, sep_entity bytea,
+        root_id bytea, candidate_count int, ordered_context_count int,
+        proposal_channel_count int, exact_channel_count int,
+        sequence_occurrences bigint, covered_occurrences int,
+        relation_families int, opposed_occurrences int,
+        support_anchor bytea, support_relation bytea, support_outbound boolean,
+        support_rating bigint, support_rd bigint, support_witnesses bigint,
+        support_sources int, support_contexts int, declared_result boolean,
+        program_id bytea, required_obligations int, satisfied_obligations int,
+        remaining_required int, completion boolean, disposition text,
+        output_fingerprint bytea, semantic_act_id bytea, output_count int,
+        prior_discourse bytea[])
+    LANGUAGE sql VOLATILE
+BEGIN ATOMIC
+    WITH occurrences AS MATERIALIZED (
+        SELECT t.ordinal, t.turn_id
+        FROM converse.session_turn_ids(p_session, NULL) t
+    ), content AS MATERIALIZED (
+        SELECT c.message_id, c.content_id
+        FROM (SELECT array_agg(DISTINCT o.turn_id) AS ids FROM occurrences o) batch,
+             converse.message_content_ids(batch.ids) c
+    ), history AS MATERIALIZED (
+        SELECT array_agg(h.id ORDER BY h.ordinal, h.branch) AS ids
+        FROM (
+            SELECT o.ordinal, 0 AS branch, o.turn_id AS id FROM occurrences o
+            UNION ALL
+            SELECT o.ordinal, 1 AS branch, c.content_id AS id
+            FROM occurrences o
+            JOIN content c ON c.message_id = o.turn_id
+            WHERE c.content_id IS NOT NULL AND c.content_id <> o.turn_id
+        ) h
+    ), execution AS MATERIALIZED (
+        SELECT g.*, h.ids AS prior_discourse
+        FROM history h,
+             LATERAL generation.forward_program(
+                 p_prompt, p_steps, p_max_stride, p_spread, p_top_k,
+                 p_seed, p_hops, p_fanout, h.ids, NULL::bytea[]) g
+    ), terminal AS MATERIALIZED (
+        SELECT completion, disposition, semantic_act_id, output_fingerprint
+        FROM execution
+        WHERE event IN ('complete', 'unresolved', 'ambiguous', 'budget_exhausted')
+        ORDER BY step DESC, routing_round DESC
+        LIMIT 1
+    ), emitted AS MATERIALIZED (
+        SELECT e.step, e.routing_round, e.entity, e.sep_entity,
+               row_number() OVER (ORDER BY e.step, e.routing_round) AS rn
+        FROM execution e
+        CROSS JOIN terminal t
+        WHERE e.event = 'emit'
+          AND t.completion
+          AND t.semantic_act_id IS NOT NULL
+    ), ids AS MATERIALIZED (
+        SELECT array_agg(entity ORDER BY rn) AS entities,
+               array_agg(sep_entity ORDER BY rn) AS separators
+        FROM emitted
+    ), txt AS MATERIALIZED (
+        SELECT realize.forward_text_batch(
+                   entities, converse.prompt_language_top(p_prompt)) AS entities,
+               realize.render_text_batch(separators) AS separators
+        FROM ids
+        WHERE entities IS NOT NULL
+    ), realized AS MATERIALIZED (
+        SELECT e.step, e.routing_round,
+               t.entities[e.rn] || COALESCE(t.separators[e.rn], '') AS surface
+        FROM emitted e
+        CROSS JOIN txt t
+    )
+    SELECT e.step, e.event, e.routing_round,
+           e.entity, r.surface, e.stride_used, e.sep_entity,
+           e.root_id, e.candidate_count, e.ordered_context_count,
+           e.proposal_channel_count, e.exact_channel_count,
+           e.sequence_occurrences, e.covered_occurrences,
+           e.relation_families, e.opposed_occurrences,
+           e.support_anchor, e.support_relation, e.support_outbound,
+           e.support_rating, e.support_rd, e.support_witnesses,
+           e.support_sources, e.support_contexts, e.declared_result,
+           e.program_id, e.required_obligations, e.satisfied_obligations,
+           e.remaining_required, e.completion, e.disposition,
+           e.output_fingerprint, e.semantic_act_id, e.output_count,
+           e.prior_discourse
+    FROM execution e
+    LEFT JOIN realized r
+      ON r.step = e.step AND r.routing_round = e.routing_round
+    ORDER BY e.step, e.routing_round,
+             CASE e.event WHEN 'route' THEN 0 WHEN 'emit' THEN 1 ELSE 2 END;
+END;
+
 CREATE OR REPLACE FUNCTION generation.walk_text(
         p_prompt text, p_steps int DEFAULT 24, p_max_stride int DEFAULT 5,
         p_spread float8 DEFAULT 0.7, p_breadth int DEFAULT 10,
