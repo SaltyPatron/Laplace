@@ -513,7 +513,8 @@ phase_install_extension_sql() (
   }
 
   install_sql_extension() {
-    local ext="$1" build_dir="$LAPLACE_BUILD_DIRECTORY/extension/$ext"
+    local ext="$1"
+    local build_dir="$LAPLACE_BUILD_DIRECTORY/extension/$ext"
     local control="$build_dir/$ext.control" version versioned upgrade execution_module
     [[ -f "$control" ]] || { echo "::error::$ext generated control file missing" >&2; return 1; }
     version="$(sed -nE "s/^default_version[[:space:]]*=[[:space:]]*'([^']+)'.*/\1/p" "$control" | head -1)"
