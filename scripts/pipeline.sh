@@ -17,6 +17,8 @@ export LAPLACE_BUILD_DIRECTORY
 LAPLACE_INSTALL_PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 LAPLACE_PG_PREFIX="${LAPLACE_PG_PREFIX:-/opt/laplace/pgsql-18}"
 LAPLACE_EXTERNAL="${LAPLACE_EXTERNAL:-/build/external}"
+# Days an unreferenced, unleased ingest runtime must be idle before reclamation.
+UNLEASED_RUNTIME_IDLE_DAYS="${UNLEASED_RUNTIME_IDLE_DAYS:-7}"
 
 PYTHON="$(command -v python3 || command -v python || true)"
 [[ -n "$PYTHON" ]] || { echo "::error::python3 is required by source/code generators" >&2; exit 127; }
@@ -414,16 +416,41 @@ reclaim_install_headroom() {
   fi
 
   # A quiet ingest journal does not prove that another CLI operation has exited.
-  # Only runtimes whose launchers participate in lifetime leasing can be removed.
-  # Keep earlier unleased releases, the active donor, and this candidate.
+  # Leased runtimes are removed only when their lifetime lease is acquirable.
+  # Runtimes installed before lifetime leasing (no .runtime-lease) can never pass
+  # that test and previously accumulated forever on the small install LV; an
+  # unleased runtime that is neither the active donor nor this candidate and has
+  # been idle for UNLEASED_RUNTIME_IDLE_DAYS can no longer host a live CLI
+  # process (every CLI exit is bounded by its own transaction), so it reclaims.
+  # Failed-install staging dirs (.stage-*) are debris once older than one day:
+  # a live install owns the host lock and renames its stage within minutes.
   [[ -d "$ingest_root" && ! -L "$ingest_root" ]] || return 0
+  local idle_seconds=$(( UNLEASED_RUNTIME_IDLE_DAYS * 86400 ))
   current_ingest="$(readlink -f "$prefix/ingest/current" 2>/dev/null || true)"
   target_ingest="$ingest_root/$(git -C "$ROOT" rev-parse HEAD)"
   while IFS= read -r -d '' candidate; do
-    [[ "$candidate" == "$current_ingest" || "$candidate" == "$target_ingest" ]] && continue
     base="${candidate##*/}"
+    if [[ "$base" == .stage-* ]]; then
+      if [[ -d "$candidate" && ! -L "$candidate" && -w "$ingest_root" ]] \
+         && [[ -z "$(find "$candidate" -maxdepth 0 -mmin +1440 2>/dev/null)" ]]; then
+        continue
+      fi
+      rm -rf -- "$candidate" \
+        && echo "::notice::reclaimed abandoned ingest staging $candidate" \
+        || return 1
+      continue
+    fi
+    [[ "$candidate" == "$current_ingest" || "$candidate" == "$target_ingest" ]] && continue
     [[ "$base" =~ ^[0-9a-f]{40}$ ]] || continue
-    [[ -f "$candidate/.runtime-lease" ]] || continue
+    if [[ ! -f "$candidate/.runtime-lease" ]]; then
+      [[ -d "$candidate" && ! -L "$candidate" && -w "$candidate" && -w "$ingest_root" ]] \
+        && [[ -n "$(find "$candidate" -maxdepth 0 -mmin +$(( idle_seconds / 60 )) 2>/dev/null)" ]] \
+        || continue
+      find "$candidate" -xdev -depth -delete \
+        && echo "::notice::reclaimed unleased idle ingest runtime $candidate" \
+        || return 1
+      continue
+    fi
     if [[ -d "$candidate" && ! -L "$candidate" && -w "$candidate" && -w "$ingest_root" ]]; then
       (
         exec {runtime_lease}<"$candidate/.runtime-lease"
@@ -548,6 +575,22 @@ phase_install() (
   [[ -f "$LAPLACE_BUILD_DIRECTORY/build.ninja" ]] || {
     echo "::error::native build tree missing; run pipeline.sh build first" >&2; exit 1;
   }
+
+  # Normal CI/CD shape: when the serving prefix already carries exactly this
+  # revision (receipt, native libraries, extension bindings, ingest runtime and
+  # perfcaches all identify one build), installation is a no-op. Only --force
+  # reinstalls an unchanged revision. This stops the per-edit full restage that
+  # minted a fresh install staging tree and runtime generation every run.
+  if [[ "${FORCE:-0}" != 1 ]]; then
+    local deployed_head
+    deployed_head="$(cat "$LAPLACE_INSTALL_PREFIX/lib/.laplace-source-revision" 2>/dev/null || true)"
+    if [[ "$deployed_head" == "$(git -C "$ROOT" rev-parse HEAD)" ]]; then
+      if bash "$ROOT/scripts/check-deployed-revision.sh" >/dev/null 2>&1; then
+        echo "::notice::prefix already serves $(git -C "$ROOT" rev-parse --short HEAD); install is a no-op (use --force to reinstall)"
+        return 0
+      fi
+    fi
+  fi
 
   # Local CLI ingests do not hold Actions' resource reservation. Observe the
   # canonical run heartbeat/beacon before replacing their database libraries.
@@ -969,7 +1012,7 @@ PHASES=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --fresh-db) FRESH_DB=1; shift ;;
-    --force) FORCE_FOUNDATION=1; shift ;;
+    --force) FORCE_FOUNDATION=1; FORCE=1; shift ;;
     --force-codegen) FORCE_CODEGEN=1; shift ;;
     --clean-first) CLEAN_FIRST=1; shift ;;
     --force-rebuild) FORCE_REBUILD=1; shift ;;
