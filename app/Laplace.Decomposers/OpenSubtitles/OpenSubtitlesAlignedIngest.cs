@@ -9,8 +9,8 @@ public sealed record AlignedSubtitleBlock(
     long StartOrdinal,
     IReadOnlyList<byte[]> Left,
     IReadOnlyList<byte[]> Right,
-    Hash128 LeftLanguage,
-    Hash128 RightLanguage)
+    string LeftLanguageCode,
+    string RightLanguageCode)
 {
     public int Count => Left.Count;
 }
@@ -43,9 +43,6 @@ internal sealed class OpenSubtitlesAlignedHandler
 
     private sealed class AlignedBlockUnit : IMultiTreeIngestDeferredUnit
     {
-        private static readonly Hash128 AlignmentSchema =
-            Hash128.OfCanonical("opensubtitles/alignment-block512/schema/v1");
-
         private readonly AlignedSubtitleBlock _block;
         private readonly Hash128 _source;
         private readonly double _trust;
@@ -95,16 +92,22 @@ internal sealed class OpenSubtitlesAlignedHandler
                     out rightIds[i], rightCoords.AsSpan(i * 4, 4));
             }
 
-            builder.AddEntity(
-                AlignmentSchema, EntityTier.Word, EntityTypeRegistry.SourceReference, _source);
-            Hash128 pairReference = Hash128.OfCanonical(
-                $"opensubtitles/language-pair/{_block.PairLabel}/v1");
-            builder.AddEntity(
-                pairReference, EntityTier.Word, EntityTypeRegistry.SourceReference, _source);
-            builder.AddEntity(
-                _block.LeftLanguage, EntityTier.Word, EntityTypeRegistry.Language, _source);
-            builder.AddEntity(
-                _block.RightLanguage, EntityTier.Word, EntityTypeRegistry.Language, _source);
+            Hash128 alignmentSchema = ContentEmitter.Emit(
+                builder, "opensubtitles/alignment-block512/schema/v1", _source)
+                ?? throw new InvalidOperationException("OpenSubtitles alignment schema could not be composed");
+            CategoryAnchor.AttestCategory(
+                builder, alignmentSchema, EntityTypeRegistry.SourceReference, _source, _trust);
+
+            Hash128 pairReference = ContentEmitter.Emit(builder, _block.PairLabel, _source)
+                ?? throw new InvalidOperationException(
+                    $"OpenSubtitles pair label could not be composed: {_block.PairLabel}");
+            CategoryAnchor.AttestCategory(
+                builder, pairReference, EntityTypeRegistry.SourceReference, _source, _trust);
+
+            Hash128 leftLanguage = LanguageReference.Emit(
+                builder, _block.LeftLanguageCode, _source, _trust);
+            Hash128 rightLanguage = LanguageReference.Emit(
+                builder, _block.RightLanguageCode, _source, _trust);
 
             (Hash128 leftSequence, double[] leftSequenceCoord) =
                 StageSequence(builder, leftIds, leftCoords);
@@ -112,23 +115,21 @@ internal sealed class OpenSubtitlesAlignedHandler
                 StageSequence(builder, rightIds, rightCoords);
 
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                leftSequence, HasLanguageTypeId, _block.LeftLanguage,
+                leftSequence, HasLanguageTypeId, leftLanguage,
                 _source, null, _trust));
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
-                rightSequence, HasLanguageTypeId, _block.RightLanguage,
+                rightSequence, HasLanguageTypeId, rightLanguage,
                 _source, null, _trust));
 
-            Hash128 start = OrdinalId(_block.StartOrdinal);
-            Hash128 end = OrdinalId(_block.StartOrdinal + _block.Count - 1);
-            builder.AddEntity(start, EntityTier.Word, EntityTypeRegistry.Ordinal, _source);
-            builder.AddEntity(end, EntityTier.Word, EntityTypeRegistry.Ordinal, _source);
+            Hash128 start = AdmitOrdinal(builder, _block.StartOrdinal);
+            Hash128 end = AdmitOrdinal(builder, _block.StartOrdinal + _block.Count - 1);
             Hash128[] alignmentConstituents =
             [
-                AlignmentSchema,
+                alignmentSchema,
                 pairReference,
-                _block.LeftLanguage,
+                leftLanguage,
                 leftSequence,
-                _block.RightLanguage,
+                rightLanguage,
                 rightSequence,
                 start,
                 end,
@@ -197,8 +198,20 @@ internal sealed class OpenSubtitlesAlignedHandler
             }
         }
 
+        private Hash128 AdmitOrdinal(SubstrateChangeBuilder builder, long ordinal)
+        {
+            string content = ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Hash128 id = ContentEmitter.Emit(builder, content, _source)
+                ?? throw new InvalidOperationException(
+                    $"OpenSubtitles ordinal could not be composed: {content}");
+            CategoryAnchor.AttestCategory(
+                builder, id, EntityTypeRegistry.Ordinal, _source, _trust);
+            return id;
+        }
+
         internal static Hash128 OrdinalId(long ordinal) =>
-            Hash128.OfCanonical($"opensubtitles/source-ordinal/{ordinal}/v1");
+            ContentEmitter.RootId(ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            ?? throw new InvalidOperationException($"OpenSubtitles ordinal could not be composed: {ordinal}");
 
         public void Dispose()
         {
