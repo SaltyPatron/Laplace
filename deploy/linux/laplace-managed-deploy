@@ -170,7 +170,7 @@ def sudoers_policy():
     entries = [f"{LIBEXEC}/laplace-service-control {name} {action}"
         for name in UNITS for action in ("status", "start", "stop", "restart")]
     entries += [str(LIBEXEC / "laplace-managed-deploy") + " " + action for action in
-        ("reconcile-host", "host-status", "preflight", "begin", "reconcile", "activate", "verify", "rollback", "commit")]
+        ("reconcile-host", "host-status", "preflight", "prune-releases", "begin", "reconcile", "activate", "verify", "rollback", "commit")]
     return "laplace-runner ALL=(root) NOPASSWD: " + ", ".join(entries) + "\n"
 
 
@@ -332,6 +332,71 @@ def reconcile_host():
     reconcile_maintenance()
     print("Managed host desired state reconciled; application processes unchanged.")
 
+
+
+def prune_releases():
+    app = ROOT / "app"
+    releases = app / "releases"
+    if not releases.exists():
+        print(json.dumps({"reclaimed": 0, "retained": 0}))
+        return
+    if releases.is_symlink() or not releases.is_dir():
+        raise ValueError("application release root is not a trusted directory")
+
+    selected = set()
+    for name in ("laplace-mcp", "laplace-lichess", "laplace-uci"):
+        link = app / name
+        if not link.is_symlink():
+            continue
+        try:
+            target = link.resolve(strict=True)
+        except FileNotFoundError:
+            continue
+        candidate = target.parent.parent
+        if candidate.parent == releases and candidate.name.startswith("runtime."):
+            selected.add(candidate)
+
+    reclaimed = 0
+    retained = 0
+    for candidate in list(releases.iterdir()):
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or not candidate.name.startswith("runtime."):
+            continue
+        if candidate in selected:
+            retained += 1
+            continue
+
+        lease = candidate / ".runtime-lease"
+        if lease.exists():
+            if lease.is_symlink() or not lease.is_file():
+                raise ValueError("managed runtime lease is not a regular file")
+            fd = os.open(lease, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    retained += 1
+                    continue
+                shutil.rmtree(candidate)
+                reclaimed += 1
+            finally:
+                os.close(fd)
+            continue
+
+        complete = all((candidate / service / executable).is_file()
+            for service, executable in (("mcp", "Laplace.Endpoints.Mcp"),
+                                        ("lichess", "Laplace.Endpoints.Lichess"),
+                                        ("uci", "laplace-uci")))
+        if complete:
+            retained += 1
+        else:
+            shutil.rmtree(candidate)
+            reclaimed += 1
+
+    print(json.dumps({"reclaimed": reclaimed, "retained": retained}))
 
 def reconcile():
     payload = ROOT / "app/managed-services"
@@ -842,7 +907,7 @@ server {{
 """
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["bootstrap", "reconcile-host", "host-status", "preflight", "begin", "reconcile", "activate", "verify", "rollback", "commit"])
+    parser.add_argument("action", choices=["bootstrap", "reconcile-host", "host-status", "preflight", "prune-releases", "begin", "reconcile", "activate", "verify", "rollback", "commit"])
     parser.add_argument("--address")
     parser.add_argument("--network")
     parser.add_argument("--hostname")
