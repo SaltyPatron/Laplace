@@ -128,7 +128,7 @@ jobs:
     # Freshness is read-only and must remain available when hosted Actions
     # billing is unavailable; product delivery itself already depends on this
     # repository's self-hosted product runner.
-    runs-on: [self-hosted, laplace]
+    runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
       execute: ${{ steps.freshness.outputs.execute }}
