@@ -466,7 +466,11 @@ phase_install_ingest_runtime() (
   if [[ ! -d "$runtime" ]]; then
     rm -rf "$stage" "$build"
     mkdir -p "$stage" "$build"
-    dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj"       -c Release -o "$build" --no-build --no-self-contained -v q
+    # ReadyToRun publish resolves the host RID and therefore needs the RID-specific
+    # assets target. The ordinary managed build is framework-only, so --no-build here
+    # can leave project.assets.json without linux-x64 and fail NETSDK1047.
+    # This is a bounded CLI-only publish, not a solution rebuild.
+    dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj"       -c Release -o "$build" --no-self-contained -v q
 
     shopt -s nullglob
     local native=("$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so*)
