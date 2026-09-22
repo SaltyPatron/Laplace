@@ -343,16 +343,10 @@ SQL_QUERY("write.commit_settings", "",
 SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch')")
 
 SQL_QUERY("ingest.physicality_observations", "bytea[],bytea[],bytea[],bytea[],int8[]",
-    "WITH input AS ("
-    " SELECT e,p,s,u,t FROM unnest($1,$2,$3,$4,$5) AS x(e,p,s,u,t)"
-    "), dedup AS ("
-    " SELECT e,p,s,u,max(t) AS t FROM input"
-    " WHERE e IS NOT NULL AND p IS NOT NULL AND s IS NOT NULL AND u IS NOT NULL AND t IS NOT NULL"
-    " GROUP BY e,p,s,u"
-    "), written AS ("
+    "WITH written AS ("
     " INSERT INTO laplace.physicality_observations AS current"
     " (entity_id,physicality_id,source_id,source_unit_id,observed_at_unix_us)"
-    " SELECT e,p,s,u,t FROM dedup"
+    " SELECT e,p,s,u,t FROM unnest($1,$2,$3,$4,$5) AS x(e,p,s,u,t)"
     " ON CONFLICT(entity_id,physicality_id,source_id,source_unit_id) DO UPDATE"
     " SET observed_at_unix_us=GREATEST(current.observed_at_unix_us,EXCLUDED.observed_at_unix_us)"
     " WHERE current.observed_at_unix_us<EXCLUDED.observed_at_unix_us"

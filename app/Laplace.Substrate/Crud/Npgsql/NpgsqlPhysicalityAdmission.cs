@@ -40,8 +40,10 @@ public sealed partial class NpgsqlSubstrateWriter
         internal readonly List<PhysicalityObservationRow> StructuralObservations = [];
         // An observation observed before is REFERENCED, not re-recorded: within one
         // admission, repeated (entity, physicality, source, unit) tuples are the same
-        // occurrence key — the publish statement's own GROUP BY e,p,s,u max(t) — held
-        // client-side so the transported set is the distinct observation set. Chess
+        // occurrence key, deduplicated client-side (first sighting owns the row, the
+        // time advances to its max) so the transported set is the distinct
+        // observation set and the publish statement performs only the indexed
+        // set write. Chess
         // composes one intent whose per-ply occurrence staging revisits the same
         // positions and moves across games; carrying 23.2M rows that collapse to
         // 623K distinct keys blew both the transport envelope (a >1 GiB Bind message
@@ -212,11 +214,11 @@ public sealed partial class NpgsqlSubstrateWriter
         private void AddObservation(
             Hash128 physicality, Hash128 entity, Hash128 source, Hash128 unit, long observedAtUnixUs)
         {
-            // Same occurrence key as the publish statement's dedup: first sighting
-            // owns the row, later sightings only advance the observed time to its
-            // max — exactly the server's GROUP BY e,p,s,u + GREATEST semantics, so
-            // the persisted state is byte-for-byte what an unchunked occurrence
-            // stream would have produced.
+            // Occurrence-key dedup is owned here, not by the publish statement:
+            // first sighting owns the row, later sightings only advance the
+            // observed time to its max — the persisted state is byte-for-byte
+            // what an unchunked occurrence stream would have produced, without
+            // a server-side GROUP BY over the transported set.
             var key = new ObservationKey(entity, physicality, source, unit);
             if (_observationIndex.TryGetValue(key, out int index))
             {
@@ -586,7 +588,7 @@ public sealed partial class NpgsqlSubstrateWriter
         // bounded statements inside the caller's transaction. Chunking changes
         // transport grain only: the client-side occurrence dedup guarantees the
         // (entity, physicality, source, unit) keys are disjoint across chunks, so
-        // the server's GROUP BY/GREATEST result is identical to one statement.
+        // the accumulated write count is identical to one statement.
         const long wireBytesPerRow = 96;
         int chunkRows = (int)Math.Clamp(
             IngestSizing.MaxArrayStatementWireBytes / wireBytesPerRow, 1, rows.Count);
