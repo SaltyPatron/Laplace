@@ -86,6 +86,12 @@ struct fact {
     bool has_object = false, has_context = false, confirm = true, explicit_rank = false;
     double rank = 1;
 };
+struct content_form {
+    hash128_t id{};
+    double coord[4]{};
+    hilbert128_t hilbert{};
+    uint8_t tier = 0;
+};
 using stage_ptr = std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)>;
 static bool nonzero(const hash128_t& h) { return h.hi != 0 || h.lo != 0; }
 static std::string alias_key(const std::string& s) {
@@ -182,7 +188,7 @@ struct laplace_recipe_stream {
     uint64_t ready_completed = 0;
     hash128_t subject{};
     std::vector<fact> facts;
-    std::unordered_map<std::string, hash128_t> content_cache;
+    std::unordered_map<std::string, content_form> content_cache;
     size_t content_cache_bytes = 0, content_cache_limit = 0, content_cache_entries = 0;
     std::unordered_set<std::string> declared_parents;
 
@@ -200,27 +206,68 @@ struct laplace_recipe_stream {
         if (intent_stage_allocation_failed(stage))
             throw std::runtime_error("recipe entity deduplication exceeded the admitted byte envelope");
     }
-    hash128_t content(intent_stage_t* stage, const std::string& text) {
+    content_form compose_content(intent_stage_t* stage, const std::string& text) {
         if (text.empty()) throw std::runtime_error("empty content reference");
         auto i = content_cache.find(text); if (i != content_cache.end()) return i->second;
         tier_tree_t* raw = nullptr;
-        check(content_witness_source_tree_build(reinterpret_cast<const uint8_t*>(text.data()), text.size(), &raw), "content composition");
+        check(content_witness_source_tree_build(
+            reinterpret_cast<const uint8_t*>(text.data()), text.size(), &raw), "content composition");
         std::unique_ptr<tier_tree_t, decltype(&tier_tree_free)> tree(raw, tier_tree_free);
+        tier_node_view_t root_node{};
+        check(content_witness_tree_root_node(tree.get(), &root_node), "content root");
         hash128_t root;
         check(content_witness_emit_tree(stage, tree.get(), &witness, nullptr, 0, &root), "content admission");
-        const size_t entry_overhead = sizeof(hash128_t) + sizeof(std::string) + 4 * sizeof(void*);
+        if (!hash128_equals(&root, &root_node.id))
+            throw std::runtime_error("content root changed between composition and admission");
+        content_form result{};
+        result.id = root;
+        std::memcpy(result.coord, root_node.coord, sizeof(result.coord));
+        result.hilbert = root_node.hilbert;
+        result.tier = root_node.tier;
+        const size_t entry_overhead = sizeof(content_form) + sizeof(std::string) + 4 * sizeof(void*);
         if (content_cache.size() < content_cache_entries &&
             entry_overhead <= content_cache_limit - content_cache_bytes &&
             text.size() <= content_cache_limit - content_cache_bytes - entry_overhead) {
-            content_cache.emplace(text, root);
+            content_cache.emplace(text, result);
             content_cache_bytes += text.size() + entry_overhead;
         }
-        return root;
+        return result;
     }
-    hash128_t classifier(intent_stage_t* stage, const std::string& ns, const std::string& value, hash128_t type) {
+    hash128_t content(intent_stage_t* stage, const std::string& text) {
+        return compose_content(stage, text).id;
+    }
+    void project_named_identity(intent_stage_t* stage, hash128_t id, hash128_t type,
+                                const std::string& canonical) {
+        const bool already = intent_stage_witness_seen(stage, &id) != 0;
+        content_form form = compose_content(stage, canonical);
+        entity(stage, id, type);
+        if (already || hash128_equals(&id, &form.id)) return;
+
+        double trajectory[4]{};
+        check(trajectory_build(&form.id, 1, trajectory), "named identity trajectory");
+        hash128_t physicality;
+        laplace_physicality_id_compute(id, 3, &physicality);
+        check(intent_stage_add_physicality(
+            stage, &physicality, &id, 3,
+            form.coord, &form.hilbert,
+            trajectory, 1, 1,
+            1, 0.0, 1, 0, INTENT_STAGE_PG_EPOCH_UNIX_US),
+            "named identity physicality");
+    }
+    hash128_t classifier(intent_stage_t* stage, const std::string& ns,
+                         const std::string& value, hash128_t type) {
         if (ns.empty() || value.empty()) throw std::runtime_error("empty classifier binding");
         std::string canonical = ns + "/" + value + "/v1";
-        hash128_t id; hash128_blake3_str(canonical.c_str(), &id); entity(stage, id, type); return id;
+        hash128_t id;
+        hash128_blake3_str(canonical.c_str(), &id);
+        project_named_identity(stage, id, type, canonical);
+        return id;
+    }
+    void relation_entity(intent_stage_t* stage, hash128_t id, hash128_t type) {
+        const char* canonical = laplace_relation_canonical_for_type_id(&id);
+        if (!canonical || !*canonical)
+            throw std::runtime_error("recipe relation identity has no canonical preimage");
+        project_named_identity(stage, id, type, canonical);
     }
     void build_attestation(hash128_t subj, const fact& f, laplace_attestation_staged_t& row) {
         const laplace_relation_def_t* definition = nullptr;
@@ -362,12 +409,12 @@ struct laplace_recipe_stream {
         }
         auto emit_fact = [&](const fact& value) { if (emitted_testimony) facts.push_back(value); };
         hash128_t relation_type; hash128_blake3_str("RelationType", &relation_type);
-        if (emitted_testimony) entity(stage, rule.relation, relation_type);
+        if (emitted_testimony) relation_entity(stage, rule.relation, relation_type);
         if (emitted_testimony && nonzero(rule.parent)) {
             std::string declaration(reinterpret_cast<const char*>(&rule.relation), sizeof(rule.relation));
             declaration.append(reinterpret_cast<const char*>(&rule.parent), sizeof(rule.parent));
             if (declared_parents.find(declaration) == declared_parents.end()) {
-                entity(stage, rule.parent, relation_type);
+                relation_entity(stage, rule.parent, relation_type);
                 fact parent;
                 check(laplace_relation_type_id("IS_A", &parent.relation), "relation identity");
                 parent.object = rule.parent; parent.has_object = true;
@@ -388,7 +435,7 @@ struct laplace_recipe_stream {
             emit_fact(f); return;
         }
         if (emitted_testimony && nonzero(rule.lexical_relation)) {
-            entity(stage, rule.lexical_relation, relation_type);
+            relation_entity(stage, rule.lexical_relation, relation_type);
             fact lexical = f; lexical.relation = rule.lexical_relation; lexical.explicit_rank = false;
             lexical.object = content(stage, raw); lexical.has_object = true; emit_fact(lexical);
         }
@@ -476,7 +523,7 @@ struct laplace_recipe_stream {
             if (cursor > end) throw std::runtime_error("inverted subject membership range");
             membership = true; membership_relation = route.range_relation;
             hash128_t relation_type; hash128_blake3_str("RelationType", &relation_type);
-            entity(stage, membership_relation, relation_type);
+            relation_entity(stage, membership_relation, relation_type);
         }
         facts.clear();
         for (const auto& a : record.attributes) {
