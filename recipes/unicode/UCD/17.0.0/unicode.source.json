@@ -5,6 +5,9 @@
   "trust": 1,
   "trustClass": "StandardsDerived",
   "layerOrder": 0,
+  "selected": true,
+  "aliases": ["unicode"],
+  "root": "/vault/Data/UCD/Public/UCD/latest",
   "artifacts": [
     {
       "selector": "ReadMe.txt",
@@ -15,14 +18,14 @@
     {
       "selector": "charts/CodeCharts.pdf",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
     },
     {
       "selector": "charts/RSIndex.pdf",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
     },
     {
       "selector": "charts/RSIndex.txt",
@@ -39,8 +42,8 @@
     {
       "selector": "charts/fr/CodeCharts.pdf",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
     },
     {
       "selector": "charts/fr/Readme.txt",
@@ -159,8 +162,11 @@
     {
       "selector": "uca/allkeys.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Admitted",
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "UTS10/allkeys",
+      "recipePath": "allkeys.recipe.json",
+      "recordDepth": 2
     },
     {
       "selector": "uca/ctt.txt",
@@ -429,14 +435,14 @@
     {
       "selector": "ucd/USourceGlyphs.pdf",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
     },
     {
       "selector": "ucd/USourceRSChart.pdf",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Excluded",
+      "reason": "Release documentation, schema, directory listing, or integrity metadata retained in the exact physical source graph; not character-property testimony."
     },
     {
       "selector": "ucd/UnicodeData.txt",

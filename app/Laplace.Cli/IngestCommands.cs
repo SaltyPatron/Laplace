@@ -91,8 +91,8 @@ internal static partial class IngestCommands
             }
             else if (rest[i] == "--no-evidence")
             {
-                skipEvidence = true;
-                rest.RemoveAt(i);
+                throw new ArgumentException(
+                    "Consensus is folded testimony. --no-evidence is not an ingest mode.");
             }
             else if (rest[i] == "--register-only")
             {
@@ -163,7 +163,7 @@ internal static partial class IngestCommands
 
         var cli = ParseIngestCliArgs(args);
         if (string.IsNullOrEmpty(cli.Source))
-            return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang] [--no-evidence]\n"
+            return Fail("usage: laplace ingest <source> [path] [--langs en,...] [--emit-cross-lang]\n"
                         + "       laplace ingest chain \"<source [path] [flags]>\" ...\n"
                         // ASK THE REGISTRY. This line used to hand-list the sources, and it
                         // lied in both directions: it advertised `image` and `audio`, which
@@ -174,7 +174,6 @@ internal static partial class IngestCommands
                         // binary supports.
                         + "  sources: " + string.Join(" | ", IngestDispatchTable.RegisteredKeys.OrderBy(k => k)) + "\n"
                         + "  --langs: language scope for this run\n"
-                        + "  --no-evidence: fold consensus only; skip laplace.attestations\n"
                         + "  chain: run several ingests sequentially in ONE process; Unicode admits its\n"
                         + "         floor before T0 runtime acceleration is mapped; stops at the first failing spec");
 
@@ -706,7 +705,7 @@ internal static partial class IngestCommands
 
         string destination = dec is RepoDecomposer { VerifiedRepository: not null }
             ? "configured PostgreSQL (verified Git corpus)" : ConnString;
-        Console.WriteLine($"ingest {dec.SourceName} via IngestRunner → {destination} ..."
+        Console.WriteLine($"ingest {dec.GetType().Name} source={dec.SourceName} via IngestRunner → {destination} ..."
             + (persistEvidence ? "" : " (consensus-only, no attestation writes)"));
         var sw = Stopwatch.StartNew();
         var result = await runner.RunAsync(

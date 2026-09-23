@@ -52,7 +52,10 @@ public sealed class SourceGenerationCatalog
             SourceGenerationRecipe recipe = SourceGenerationRecipe.Load(path);
             if (sourceNames.TryGetValue(recipe.SourceName, out string? prior)
                 || sourceIds.TryGetValue(recipe.SourceId, out prior))
+            {
+                if (SameManifest(prior, path)) continue;
                 throw new InvalidDataException($"Conflicting source-generation selections '{prior}' and '{path}'.");
+            }
             sourceNames.Add(recipe.SourceName, path);
             sourceIds.Add(recipe.SourceId, path);
             IEnumerable<string> builtinAliases = SeedIngestComposition.Registry
@@ -68,6 +71,13 @@ public sealed class SourceGenerationCatalog
     }
 
     public bool TryGet(string key, out SourceGenerationRecipe recipe) => _selected.TryGetValue(key, out recipe!);
+
+    private static bool SameManifest(string left, string right)
+    {
+        var a = File.ReadAllBytes(left);
+        var b = File.ReadAllBytes(right);
+        return a.AsSpan().SequenceEqual(b);
+    }
 
     private static IEnumerable<string> BuiltInRecipeManifests()
     {

@@ -218,23 +218,12 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         CancellationToken ct = default)
     {
         await using var cmd = _ds.CreateCommand(
-            "WITH touched AS MATERIALIZED ("
-            + " SELECT a.subject_id AS entity_id FROM laplace.attestations a WHERE a.source_id = $1"
-            + " UNION SELECT a.object_id FROM laplace.attestations a"
-            + "       WHERE a.source_id = $1 AND a.object_id IS NOT NULL"
-            + " UNION SELECT a.context_id FROM laplace.attestations a"
-            + "       WHERE a.source_id = $1 AND a.context_id IS NOT NULL"
-            + "), owned AS MATERIALIZED ("
-            + " SELECT DISTINCT e.id AS entity_id"
+            "SELECT count(*)::bigint,"
+            + "       count(*) FILTER (WHERE EXISTS ("
+            + "         SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = e.id"
+            + "       ))::bigint"
             + " FROM laplace.entities e"
-            + " LEFT JOIN touched t ON t.entity_id = e.id"
-            + " WHERE e.first_observed_by = $1 OR t.entity_id IS NOT NULL"
-            + ")"
-            + " SELECT count(*)::bigint,"
-            + "        count(*) FILTER (WHERE EXISTS ("
-            + "          SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = o.entity_id"
-            + "        ))::bigint"
-            + " FROM owned o");
+            + " WHERE e.first_observed_by = $1");
         cmd.CommandTimeout = 0;
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
 

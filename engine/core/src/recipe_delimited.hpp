@@ -77,7 +77,7 @@ class recipe_delimited_stream {
             if (end == std::string_view::npos) break;
             start = end + config.separator.size();
         }
-        const size_t minimum = directive || config.minimum_columns == 0
+        const size_t minimum = config.minimum_columns == 0
             ? columns.size() : config.minimum_columns;
         if (column < minimum) fail("expected at least " + std::to_string(minimum)
             + " fields, recovered " + std::to_string(column));

@@ -44,7 +44,6 @@ internal sealed class IngestCommand : ForwardCommand<IngestCommand.Settings>
         [CommandOption("--recursive")][Description("Recurse into nested corpora (multi-file sources).")] public bool Recursive { get; init; }
         [CommandOption("--force")][Description("Rebuild content already proven present; existing witness identities remain unchanged.")] public bool Force { get; init; }
         [CommandOption("--no-analyze")][Description("chess: record game-grain only; defer derivation to chess-analyze.")] public bool NoAnalyze { get; init; }
-        [CommandOption("--no-evidence")][Description("Skip evidence attestations (structure only).")] public bool NoEvidence { get; init; }
         [CommandOption("--register-only")][Description("Register canonical ids only; no fold.")] public bool RegisterOnly { get; init; }
         [CommandOption("--emit-cross-lang")][Description("Emit cross-language links.")] public bool EmitCrossLang { get; init; }
         [CommandOption("--langs <SPEC>")][Description("Language filter spec.")] public string? Langs { get; init; }

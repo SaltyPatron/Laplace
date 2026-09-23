@@ -176,8 +176,7 @@ internal sealed class UcdProperties
                                            "unicode/age/{0}/v1");
         EmojiPropEntityIds = BuildEntityIds(EmojiPropNames,
                                            "unicode/emoji/{0}/v1");
-        NumericEntityIds = BuildEntityIds(numericValue.Where(x => x != null).Distinct()!,
-                                           "unicode/numeric/{0}/v1");
+        NumericEntityIds = new Dictionary<string, Hash128>(StringComparer.Ordinal);
         LineBreakEntityIds = BuildEntityIds(lineBreakRanges.Select(r => r.N).Distinct(),
                                            "unicode/line_break/{0}/v1");
         EastAsianWidthEntityIds = BuildEntityIds(eaWidthRanges.Select(r => r.N).Distinct(),
@@ -235,8 +234,6 @@ internal sealed class UcdProperties
         foreach (var (_, id) in AgeEntityIds)
             yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
         foreach (var (_, id) in EmojiPropEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
-        foreach (var (_, id) in NumericEntityIds)
             yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
         foreach (var (_, id) in LineBreakEntityIds)
             yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);

@@ -58,6 +58,9 @@
   ],
   "delimitedSyntax": {
     "recordName": "record",
+    "separator": ";",
+    "commentPrefix": "#",
+    "trimFields": true,
     "columns": [
       "source",
       "old",

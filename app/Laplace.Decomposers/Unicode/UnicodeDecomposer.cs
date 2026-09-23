@@ -51,20 +51,7 @@ public sealed class UnicodeDecomposer
     {
         get
         {
-            var names = new HashSet<string>(_canonicalNames, StringComparer.Ordinal)
-            {
-                "Byte",
-                "substrate/encoding/ISO-8859-1/v1",
-                "substrate/encoding/windows-1252/v1",
-                "substrate/utf8/continuation/v1",
-                "substrate/utf8/lead2/v1",
-                "substrate/utf8/lead3/v1",
-                "substrate/utf8/lead4/v1",
-                "substrate/utf8/invalid/v1",
-                "ordinal/0/v1",
-                "ordinal/1/v1",
-            };
-            return names.ToArray();
+            return _canonicalNames.ToArray();
         }
     }
 
@@ -432,6 +419,8 @@ public sealed class UnicodeDecomposer
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(ecosystemPath))
+            ecosystemPath = "/vault/Data/UCD/Public/UCD/latest";
         if (!Directory.Exists(ecosystemPath))
             return Task.FromResult<IngestArtifactGraph?>(null);
 
@@ -1159,6 +1148,7 @@ public sealed class UnicodeDecomposer
         string path,
         string label)
     {
+        if (string.IsNullOrWhiteSpace(path)) return;
         path = Path.GetFullPath(path);
         if (File.Exists(path)) jobs.Add(new ArtifactJob(kind, path, label));
     }
@@ -1559,8 +1549,9 @@ public sealed class UnicodeDecomposer
 
             if (row.NumericValue is { Length: > 0 } numeric)
             {
-                Hash128 numericId = _owner.ClassifierEntity(
-                    builder, "unicode/numeric", numeric);
+                Hash128 numericId = ContentEmitter.Emit(builder, numeric, Source)
+                    ?? throw new InvalidOperationException(
+                        $"numeric value '{numeric}' is not a composition of the codepoint floor");
                 builder.AddAttestation(NativeAttestation.CategoricalResolved(
                     entityId, UcdProperties.RelTypeHasNumericValue, numericId,
                     Source, null, RelationTypeRank.ScalarValued * TC.StandardsDerived));

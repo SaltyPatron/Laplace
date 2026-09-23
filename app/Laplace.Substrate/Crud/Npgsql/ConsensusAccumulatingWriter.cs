@@ -165,11 +165,11 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _ds = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
-        _persistEvidence = persistEvidence ?? true;
+        if (persistEvidence == false)
+            throw new ArgumentException(
+                "Consensus is folded testimony. A deposit cannot fold standing and drop laplace.attestations.");
+        _persistEvidence = true;
         _log = logger ?? (ILogger)NullLogger<ConsensusAccumulatingWriter>.Instance;
-        if (!_persistEvidence)
-            _log.LogInformation(
-                "consensus-only deposit: folding relations inline; laplace.attestations writes skipped");
     }
 
     public bool PersistEvidence => _persistEvidence;

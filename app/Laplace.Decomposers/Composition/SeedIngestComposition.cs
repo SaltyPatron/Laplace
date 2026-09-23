@@ -114,7 +114,9 @@ public sealed class SeedDecomposerResolver : ISeedDecomposerResolver
     {
         if (!_generations.TryGet(sourceKey, out var recipe))
         { decomposer = null!; resolvedRoot = ""; return false; }
-        resolvedRoot = Path.GetFullPath(root ?? recipe.Root ?? Path.GetDirectoryName(recipe.ManifestPath)!);
+        string? requested = string.IsNullOrWhiteSpace(root) ? null : root;
+        string? generationRoot = string.IsNullOrWhiteSpace(recipe.Root) ? null : recipe.Root;
+        resolvedRoot = Path.GetFullPath(requested ?? generationRoot ?? Path.GetDirectoryName(recipe.ManifestPath)!);
         decomposer = new Structured.Decomposer<SourceGenerationRecipe>(recipe, resolvedRoot);
         return true;
     }

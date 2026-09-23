@@ -1,0 +1,40 @@
+{
+  "authority": "OMW",
+  "release": "2.0",
+  "sourceName": "OMW",
+  "trust": 1,
+  "trustClass": "StructuredCorpus",
+  "layerOrder": 1,
+  "selected": true,
+  "root": "/vault/Data/.refresh-20260903/OMW-2.0",
+  "aliases": ["omw"],
+  "artifacts": [
+    {
+      "selector": "omw-2.0.tar.xz",
+      "disposition": "equivalent-packaging",
+      "required": true,
+      "reason": "Compressed release of the same WN-LMF 1.4 generation as extracted/omw-2.0. Not a second lexicon."
+    },
+    {
+      "selector": "extracted/omw-2.0/*/*.xml",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-xml-recipe/v1",
+      "syntax": "WN-LMF/1.4",
+      "recipePath": "wn-lmf-1.4.recipe.json",
+      "recordDepth": 3
+    },
+    {
+      "selector": "extracted/omw-2.0/*/README",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Per-lexicon release note. Not lexical testimony."
+    },
+    {
+      "selector": "extracted/omw-2.0/*/README.md",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Per-lexicon release note. Not lexical testimony."
+    }
+  ]
+}

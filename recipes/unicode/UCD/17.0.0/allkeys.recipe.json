@@ -2,42 +2,39 @@
   "authority": "Unicode/UCD",
   "release": "17.0.0",
   "provider": "laplace/native-streaming-delimited-recipe/v1",
-  "syntax": "UCD/EmojiSources",
+  "syntax": "UTS10/allkeys",
   "fields": [
     {
-      "syntaxPath": "record/@sequence",
-      "propertyName": "sequence",
+      "syntaxPath": "record/@source",
+      "propertyName": "source",
       "valueKind": "CodepointSequence",
       "disposition": "Identity, Reference",
       "referenceCodec": "UnicodeCodepointSequence",
       "sequenceSeparator": " "
     },
     {
-      "syntaxPath": "record/@docomo",
-      "propertyName": "docomo",
+      "syntaxPath": "record/@elements",
+      "propertyName": "elements",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_EMOJI_SOURCE_DOCOMO",
+      "relationName": "UCD_COLLATION_KEY",
       "relationParent": "HAS_ATTRIBUTE",
       "relationRank": 0.08
     },
     {
-      "syntaxPath": "record/@kddi",
-      "propertyName": "kddi",
+      "syntaxPath": "directive/@kind",
+      "propertyName": "kind",
       "valueKind": "Text",
       "disposition": "Content, Testimony",
-      "relationName": "UCD_EMOJI_SOURCE_KDDI",
+      "relationName": "UCD_COLLATION_DIRECTIVE",
       "relationParent": "HAS_ATTRIBUTE",
       "relationRank": 0.08
     },
     {
-      "syntaxPath": "record/@softbank",
-      "propertyName": "softbank",
+      "syntaxPath": "directive/@payload",
+      "propertyName": "payload",
       "valueKind": "Text",
-      "disposition": "Content, Testimony",
-      "relationName": "UCD_EMOJI_SOURCE_SOFTBANK",
-      "relationParent": "HAS_ATTRIBUTE",
-      "relationRank": 0.08
+      "disposition": "Content"
     }
   ],
   "providerRoutes": [
@@ -47,21 +44,30 @@
       "fieldPrefix": "record",
       "subject": {
         "kind": "ContentField",
-        "identityField": "sequence"
+        "identityField": "source"
+      },
+      "structurePaths": []
+    },
+    {
+      "recordName": "directive",
+      "namespaceUri": "",
+      "fieldPrefix": "directive",
+      "subject": {
+        "kind": "ContentField",
+        "identityField": "kind"
       },
       "structurePaths": []
     }
   ],
   "delimitedSyntax": {
     "recordName": "record",
+    "columns": ["source", "elements"],
     "separator": ";",
     "commentPrefix": "#",
     "trimFields": true,
-    "columns": [
-      "sequence",
-      "docomo",
-      "kddi",
-      "softbank"
-    ]
+    "directivePrefix": "@",
+    "directiveRecordName": "directive",
+    "directiveColumns": ["kind", "payload"],
+    "minimumColumns": 1
   }
 }

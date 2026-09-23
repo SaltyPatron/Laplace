@@ -90,37 +90,6 @@ public sealed class IngestRunner
         long entitiesInserted = 0, physicalitiesInserted = 0, attestationsInserted = 0;
         long totalRoundTrips = 0;
 
-        // Physical realization is a substrate invariant, not a per-decomposer list
-        // of entity types. A source recipe/provider may choose HOW an entity is
-        // realized (Content, Set, ParseStructure, Projection, ...), but it cannot
-        // opt the entity out of physicality closure.
-        PhysicalityCoverage existingCoverage = await _reader.PhysicalityCoverageAsync(
-            decomposer.SourceId, ct).ConfigureAwait(false);
-        if (!existingCoverage.Complete)
-        {
-            log.LogWarning(
-                "INGEST_STALE_PHYSICALITY_CONTRACT source={Source} entities={Entities} placed={Placed} "
-                + "missing={Missing} action=evict-and-rederive",
-                decomposer.SourceName,
-                existingCoverage.GovernedEntities,
-                existingCoverage.PlacedEntities,
-                existingCoverage.MissingEntities);
-
-            await _reader.EvictSourceAsync(
-                decomposer.SourceId,
-                relationIds: null,
-                markerTypeIds: null,
-                ct).ConfigureAwait(false);
-
-            PhysicalityCoverage afterEviction = await _reader.PhysicalityCoverageAsync(
-                decomposer.SourceId, ct).ConfigureAwait(false);
-            if (!afterEviction.Complete)
-                throw new InvalidOperationException(
-                    $"{decomposer.SourceName}: stale physicality repair left "
-                    + $"{afterEviction.MissingEntities} unplaced entity identities; "
-                    + "refusing to reuse completion markers or add testimony on top of them");
-        }
-
         if (!options.SkipSourceCompletion
             && !options.BypassSourceCompletionGuard
             && !decomposer.PerFileCompletion

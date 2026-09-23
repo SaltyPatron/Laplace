@@ -148,10 +148,8 @@ public static class SourceArtifactProvenance
     public static Hash128 RecipeId(
         string sourceName, string release, string recipeName, IReadOnlyList<Hash128> requires)
     {
-        string deps = string.Join(",", requires.Select(static id => id.ToString())
-            .OrderBy(static id => id, StringComparer.Ordinal));
-        return Hash128.OfCanonical(
-            $"substrate/source_recipe/{sourceName}/{release}/{recipeName}/{deps}/v1");
+        ArgumentNullException.ThrowIfNull(requires);
+        return Merkle(Root(sourceName), Root(release), Root(recipeName));
     }
 
     public static SubstrateChange BuildRecipeChange(
@@ -166,15 +164,35 @@ public static class SourceArtifactProvenance
             throw new ArgumentException("a source recipe must declare at least one input artifact", nameof(requires));
         double trust = SourceTrust.ForClass(trustClassId);
         Hash128 recipeId = RecipeId(sourceName, release, recipeName, requires);
-        Hash128 roleId = Hash128.OfCanonical(
-            $"substrate/source_recipe_role/{sourceName}/{recipeName}/v1");
+        Hash128 roleId = Merkle(Root(sourceName), Root(recipeName));
         var builder = new SubstrateChangeBuilder(
             sourceId, $"source-recipe/{sourceName}/{recipeName}", null,
-            entityCapacity: 4, physicalityCapacity: 0,
+            entityCapacity: 12, physicalityCapacity: 0,
             attestationCapacity: 4 + requires.Count)
             .DeclareSourcePrior(sourceId, trust);
-        builder.AddEntity(recipeId, EntityTier.Document, EntityTypeRegistry.SourceReference, sourceId);
-        builder.AddEntity(roleId, EntityTier.Word, EntityTypeRegistry.SourceReference, sourceId);
+        OrderedCompositionComponent sourceComponent =
+            ContentEmitter.StageComponent(builder, sourceName, sourceId)
+            ?? throw new InvalidOperationException("recipe source could not be composed");
+        OrderedCompositionComponent releaseComponent =
+            ContentEmitter.StageComponent(builder, release, sourceId)
+            ?? throw new InvalidOperationException("recipe release could not be composed");
+        OrderedCompositionComponent nameComponent =
+            ContentEmitter.StageComponent(builder, recipeName, sourceId)
+            ?? throw new InvalidOperationException("recipe name could not be composed");
+        Span<OrderedCompositionResult> composed = stackalloc OrderedCompositionResult[2];
+        OrderedComposition.StageBatch(
+            builder.ContentStage,
+            [
+                new OrderedCompositionRequest(
+                    [sourceComponent, releaseComponent, nameComponent],
+                    EntityTypeRegistry.SourceReference, sourceId, 0),
+                new OrderedCompositionRequest(
+                    [sourceComponent, nameComponent],
+                    EntityTypeRegistry.SourceReference, sourceId, 0),
+            ],
+            composed);
+        if (composed[0].Id != recipeId || composed[1].Id != roleId)
+            throw new InvalidOperationException("source recipe identity changed during composition");
         builder.AddAttestation(NativeAttestation.Categorical(
             sourceId, "CONTAINS", recipeId, sourceId, trust));
         builder.AddAttestation(NativeAttestation.Categorical(

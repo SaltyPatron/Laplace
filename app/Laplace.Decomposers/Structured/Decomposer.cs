@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -192,23 +193,56 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
             SourceArtifactProvenance.BuildRecipeChange(SourceName, _release,
                 recipeName, SourceId, TrustClassId, requires), label);
         long records = 0, entities = 0, physicalities = 0, attestations = 0;
-        using var parsedHash = SHA256.Create();
-        using var parsedInput = new CryptoStream(input, parsedHash, CryptoStreamMode.Read, leaveOpen: true);
-        await foreach (SubstrateChange change in _runtime.ReadChangesAsync(
-                           parsedInput, _options, label, ct).ConfigureAwait(false))
+        byte[] expectedDigest = Convert.FromHexString(artifact.Sha256);
+        Stream parseInput = input;
+        ZipArchive? archive = null;
+        Stream? entry = null;
+        IncrementalHash? passHash = null;
+        if (_inputPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            records += change.Metadata.InputUnitsConsumed;
-            foreach (IntentStage stage in change.IntentStages)
-            {
-                entities += stage.EntityCount;
-                physicalities += stage.PhysicalityCount;
-                attestations += stage.AttestationCount;
-            }
-            yield return IngestBatchPipeline.BindFileLabel(SourceArtifactProvenance.Bind(change, generationId), label);
+            byte[] zipDigest = await SHA256.HashDataAsync(input, ct).ConfigureAwait(false);
+            if (!CryptographicOperations.FixedTimeEquals(zipDigest, expectedDigest))
+                throw new IOException("Recipe input changed while being parsed; file completion was not recorded.");
+            input.Position = 0;
+            archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true);
+            ZipArchiveEntry xmlEntry = archive.Entries.Count == 1
+                ? archive.Entries[0]
+                : archive.Entries.First(static item => item.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase));
+            entry = xmlEntry.Open();
+            parseInput = new BlockingReadStream(entry);
         }
-        if (parsedHash.Hash is not { } parsedDigest
-            || !CryptographicOperations.FixedTimeEquals(parsedDigest, Convert.FromHexString(artifact.Sha256)))
-            throw new IOException("Recipe input changed while being parsed; file completion was not recorded.");
+        else
+        {
+            passHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            parseInput = new HashingReadStream(input, passHash);
+        }
+        try
+        {
+            await foreach (SubstrateChange change in _runtime.ReadChangesAsync(
+                               parseInput, _options, label, ct).ConfigureAwait(false))
+            {
+                records += change.Metadata.InputUnitsConsumed;
+                foreach (IntentStage stage in change.IntentStages)
+                {
+                    entities += stage.EntityCount;
+                    physicalities += stage.PhysicalityCount;
+                    attestations += stage.AttestationCount;
+                }
+                yield return IngestBatchPipeline.BindFileLabel(SourceArtifactProvenance.Bind(change, generationId), label);
+            }
+        }
+        finally
+        {
+            entry?.Dispose();
+            archive?.Dispose();
+        }
+        if (passHash is not null)
+        {
+            byte[] parsedDigest = passHash.GetHashAndReset();
+            passHash.Dispose();
+            if (!CryptographicOperations.FixedTimeEquals(parsedDigest, expectedDigest))
+                throw new IOException("Recipe input changed while being parsed; file completion was not recorded.");
+        }
         observability.OnFileComposed(SourceName, label, identity.ArtifactId,
             records, entities, physicalities, attestations, resumeFingerprint: generationId);
         yield return IngestBatchPipeline.BuildFileCompletion(SourceId, label, generationId, LayerOrder, _canonicalNames);
@@ -245,6 +279,56 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
     }
     public ValueTask DisposeAsync() => _input?.DisposeAsync() ?? ValueTask.CompletedTask;
     private static string Hex(Hash128 id) => Convert.ToHexStringLower(id.ToBytes());
+
+    private sealed class BlockingReadStream : Stream
+    {
+        private readonly Stream _inner;
+        public BlockingReadStream(Stream inner) => _inner = inner;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => new(_inner.Read(buffer.Span));
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class HashingReadStream : Stream
+    {
+        private readonly Stream _inner;
+        private readonly IncrementalHash _hash;
+        public HashingReadStream(Stream inner, IncrementalHash hash)
+        {
+            _inner = inner;
+            _hash = hash;
+        }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => _inner.Length;
+        public override long Position { get => _inner.Position; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int read = _inner.Read(buffer, offset, count);
+            if (read > 0) _hash.AppendData(buffer.AsSpan(offset, read));
+            return read;
+        }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            int read = await _inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read > 0) _hash.AppendData(buffer.Span[..read]);
+            return read;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 
     internal static string[] TypesFor(SemanticSourceRecipe? recipe) => (recipe?.Fields ?? [])
         .Select(static field => field.ObjectEntityType)

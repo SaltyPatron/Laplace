@@ -131,37 +131,7 @@ The important substitution is physical: a transformer repeatedly synthesizes rel
 
 The response is not collapsed immediately into one universal relevance scalar. Structure, relation identity, ordinal/gap state, evidence, contradiction, standing, source scope, geometry and provenance remain typed until the selected program decides which are gates, costs, ranking dimensions or evidence.
 
-## Measured floor
-
-The repository ships a revision-bound benchmark workflow that builds the exact selected source revision, hashes/binds the produced native artifacts, records host provenance and uploads machine-readable evidence.
-
-A completed evidence run on the project's 6-core/12-thread Intel i7-6850K host measured the native composition path, **single-threaded, with no PostgreSQL and no GPU selected**, at approximately:
-
-```text
-1.86 million Unicode codepoints / second
-465 thousand 4-char BPE-equivalent input units / second
-4.56 million exact tier-tree nodes / second
-```
-
-A later run of the same benchmark family has also reproduced the same order of magnitude on that host. The BPE-equivalent number is only a familiar normalization: the underlying work is exact Unicode handling, segmentation, recursive tier-tree construction, content/Merkle identity and geometric composition—not one flat token operation.
-
-Whole-machine, database-backed, query/cognition and accepted-answer benchmarks remain separate profiles so unlike workloads are not silently promoted into one number. The point of the current result is the floor: millions of exact structural operations per second on decade-old consumer CPU hardware before modern ISA width, accelerator offload or mature-substrate reuse is credited.
-
-See [`docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`](docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md) and [the benchmark workflow](.github/workflows/benchmark-evidence.yml).
-
-## What is already here
-
-The repository contains the native core and PostgreSQL substrate, multimodal decomposers, evidence/consensus machinery, spatial and trajectory indexes, graph/trajectory search operators, model/checkpoint ingestion and synthesis tooling, chess as an executable proving domain, a React product surface, and multiple protocol fronts:
-
-- OpenAI-compatible HTTP API
-- MCP server
-- CLI / SQL operation surfaces
-- UCI chess engine and Lichess integration
-- entity/profile/evidence/trajectory exploration
-- model/checkpoint readers and GGUF materialization
-- deterministic benchmark and CI evidence lanes
-
-The system deliberately keeps conventional checkpoints, corpora, tools, users and generated outputs as participants/witnesses in one world rather than making any one of them the hidden authority.
+Benchmark receipts live in [`docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md`](docs/benchmarks/MANUAL_BENCHMARK_EVIDENCE.md).
 
 ## Repository map
 
