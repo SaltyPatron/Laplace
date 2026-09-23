@@ -1736,6 +1736,7 @@ walk_continuations(FunctionCallInfo fcinfo, const LaplacePromptInput *input,
              * independently witnessed observation plane. */
             if (candidates[i].sequence_occurrences == 0 &&
                 !candidates[i].projection.has_positive &&
+                !candidates[i].query.has_positive &&
                 !(input && candidates[i].query_traversal.has_positive) &&
                 !geometry_summary_present(&candidates[i].geometry))
                 continue;
