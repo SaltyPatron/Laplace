@@ -98,7 +98,12 @@ shape_receive_structure(Datum physicality, Datum entity, Datum geometry, void *o
     pfree(aligned);
     pfree(wkb);
     hash128_t canonical;
-    hash128_merkle(4, flat, count, &canonical);
+    if (count == 0)
+        hash128_zero(&canonical);
+    else if (count == 1)
+        canonical = flat[0];
+    else
+        hash128_merkle(4, flat, count, &canonical);
     if (!hash128_eq(&canonical, &id))
     {
         pfree(flat);

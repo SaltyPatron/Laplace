@@ -543,6 +543,43 @@ public sealed class UnicodeDecomposerTests
     }
 
     [Fact]
+    public void Grouped_ucd_parent_properties_apply_to_each_codepoint_and_child_overrides_win()
+    {
+        var recipe = InstalledSourceGeneration.Load(
+            "Unicode/UCD", "17.0.0", "UAX42/ucd.all.grouped.xml");
+        byte[] program = NativeRecipeCompiler.Compile(recipe.Recipe, recordDepth: 3);
+        using var stream = NativeRecipeStream.Open(
+            program, UnicodeDecomposer.Source, SourceTrust.StandardsDerived);
+
+        const string xml =
+            "<ucd xmlns=\"http://www.unicode.org/ns/2003/ucd/1.0\"><repertoire>"
+            + "<group Alpha=\"Y\" gc=\"Lu\">"
+            + "<char cp=\"0041\"/><char cp=\"0042\" Alpha=\"N\"/>"
+            + "</group></repertoire></ucd>";
+        stream.Feed(Encoding.UTF8.GetBytes(xml), final: true);
+
+        var rows = new List<AttestationRow>();
+        while (true)
+        {
+            using var stage = stream.Drain(
+                32768, 32L * 1024 * 1024, out _);
+            if (stage is null) break;
+            CopyTupleParser.DecodeAttestations(
+                [stage.TupleBuffer(IntentStageTable.Attestations)], rows);
+        }
+
+        Hash128 alphabetic = RelationTypeRegistry.RelationTypeId("UCD_ALPHABETIC");
+        Hash128 category = RelationTypeRegistry.RelationTypeId("UCD_GENERAL_CATEGORY");
+        AttestationRow[] alpha = rows.Where(row => row.TypeId == alphabetic).ToArray();
+        AttestationRow[] gc = rows.Where(row => row.TypeId == category).ToArray();
+        Assert.Single(alpha);
+        Assert.Equal(CodepointPerfcache.Records[0x41].Hash, alpha[0].SubjectId);
+        Assert.Equal(2, gc.Length);
+        Assert.Contains(gc, row => row.SubjectId == CodepointPerfcache.Records[0x41].Hash);
+        Assert.Contains(gc, row => row.SubjectId == CodepointPerfcache.Records[0x42].Hash);
+    }
+
+    [Fact]
     public void Ucdxml_binary_defaults_are_declared_and_do_not_expand_into_refuting_rows()
     {
         var recipe = InstalledSourceGeneration.Load(

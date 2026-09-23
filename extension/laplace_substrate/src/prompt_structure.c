@@ -225,7 +225,12 @@ receive_parse(Datum physicality, Datum entity, Datum geometry, void *context)
     if (status == LAPLACE_UD_PARSE_MEMORY)
         elog(ERROR, "structural coupling cannot allocate the complete decoded parse");
     hash128_t canonical;
-    hash128_merkle(4, flat, length, &canonical);
+    if (length == 0)
+        hash128_zero(&canonical);
+    else if (length == 1)
+        canonical = flat[0];
+    else
+        hash128_merkle(4, flat, length, &canonical);
     if (!hash128_eq(&canonical, &id))
     {
         laplace_ud_parse_free(&decoded);

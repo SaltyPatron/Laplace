@@ -475,6 +475,11 @@ static int emit_node(
         || intent_stage_allocation_failed(scratch->forms)) return -2;
 
     hash128_t type_id = laplace_content_tier_type_id(node.tier);
+    /* A fresh stage claims a complete interpretation stream. intent_stage_add_entity
+     * records the canonical row and this observation's facet together. Calling
+     * intent_stage_add_entity_interpretation again would deposit that same facet
+     * twice. An already-present node keeps its canonical row and records only
+     * the facet. */
     if (emit_entity) {
         if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
             return -2;

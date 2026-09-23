@@ -179,6 +179,7 @@ struct laplace_recipe_stream {
     node parent_scope{};
     std::vector<ordinal_span> parent_spans;
     bool parent_scope_active = false;
+    bool child_inherited = false;
     std::deque<node> pending;
     uint32_t cursor = 0, end = 0;
     bool range = false, membership = false, record_facts_done = false;
@@ -674,6 +675,7 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                     s->parent_scope = node{e.name, e.namespace_uri ? e.namespace_uri : "", {}, {}};
                     s->parent_spans.clear();
                     s->parent_scope_active = true;
+                    s->child_inherited = false;
                 } else if (e.kind == 4 && s->parent_scope_active) {
                     if (e.namespace_uri && *e.namespace_uri)
                         throw std::runtime_error("recipe has no namespaced parent attribute disposition");
@@ -688,7 +690,8 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                                 !s->parent_scope.get(route->second.identity).empty()
                                 || !s->parent_scope.get(route->second.first).empty()
                                 || !s->parent_scope.get(route->second.last).empty();
-                            if (route->second.kind == 3 && !explicit_subject
+                            if (!(s->child_inherited && !explicit_subject)
+                                && route->second.kind == 3 && !explicit_subject
                                 && !s->parent_spans.empty()) {
                                 std::sort(s->parent_spans.begin(), s->parent_spans.end(),
                                     [](const ordinal_span& a, const ordinal_span& b) {
@@ -713,7 +716,7 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                                     projected.attributes[route->second.last] = point_text(span.last);
                                     s->pending.push_back(std::move(projected));
                                 }
-                            } else {
+                            } else if (!(s->child_inherited && !explicit_subject)) {
                                 s->pending.push_back(std::move(s->parent_scope));
                             }
                         }
@@ -761,6 +764,7 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                             throw std::runtime_error("record/parent namespace mismatch");
                         for (const auto& a : s->parent_scope.attributes)
                             done.attributes.try_emplace(a.first, a.second);
+                        s->child_inherited = true;
                     }
                     s->pending.push_back(std::move(done));
                 } else s->stack.back().children.push_back(std::move(done));

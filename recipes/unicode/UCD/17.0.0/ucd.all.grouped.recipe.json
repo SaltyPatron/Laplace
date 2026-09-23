@@ -3571,8 +3571,8 @@
       "disposition": "Content, Testimony",
       "absentSentinel": "NaN",
       "sequenceSeparator": null,
-      "objectNamespace": "unicode/property_value/Numeric_Value",
-      "objectEntityType": "UcdClassifier",
+      "objectNamespace": null,
+      "objectEntityType": "Scalar",
       "referenceCodec": "None",
       "preserveLexicalValue": false,
       "relationName": "UCD_NUMERIC_VALUE",
@@ -6113,24 +6113,6 @@
   },
   "providerRoutes": [
     {
-      "recordName": "group",
-      "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
-      "fieldPrefix": "repertoire/*",
-      "subject": {
-        "kind": "CodepointInterval",
-        "identityField": "cp",
-        "rangeStartField": "first-cp",
-        "lastField": "last-cp",
-        "entityNamespace": null,
-        "entityType": "Range",
-        "sequenceSeparator": null
-      },
-      "structurePaths": [
-        "repertoire",
-        "repertoire/group"
-      ]
-    },
-    {
       "recordName": "char",
       "namespaceUri": "http://www.unicode.org/ns/2003/ucd/1.0",
       "fieldPrefix": "repertoire/*",
@@ -6150,7 +6132,8 @@
       ],
       "childFieldPrefixes": {
         "name-alias": "repertoire/*/name-alias"
-      }
+      },
+      "inheritParentAttributes": true
     },
     {
       "recordName": "reserved",
@@ -6172,7 +6155,8 @@
       ],
       "childFieldPrefixes": {
         "name-alias": "repertoire/*/name-alias"
-      }
+      },
+      "inheritParentAttributes": true
     },
     {
       "recordName": "noncharacter",
@@ -6194,7 +6178,8 @@
       ],
       "childFieldPrefixes": {
         "name-alias": "repertoire/*/name-alias"
-      }
+      },
+      "inheritParentAttributes": true
     },
     {
       "recordName": "surrogate",
@@ -6216,7 +6201,8 @@
       ],
       "childFieldPrefixes": {
         "name-alias": "repertoire/*/name-alias"
-      }
+      },
+      "inheritParentAttributes": true
     },
     {
       "recordName": "block",

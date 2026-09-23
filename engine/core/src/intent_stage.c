@@ -460,16 +460,35 @@ static int append_entity_row(
     if (!b || !id || !type_id) return -1;
     if (tier < 0 || tier > 255) return -1;
 
-    if (buf_append_be16(b, ENTITY_COL_COUNT) != 0) return -1;
-    if (buf_append_field_hash128(b, id) != 0) return -1;
-    if (buf_append_field_int2(b, tier) != 0) return -1;
-    if (buf_append_field_hash128(b, type_id) != 0) return -1;
-    if (first_observed_by) {
-        if (buf_append_field_hash128(b, first_observed_by) != 0) return -1;
-    } else {
-        if (buf_append_field_null(b) != 0) return -1;
+    const size_t mark = b->len;
+    if (buf_append_be16(b, ENTITY_COL_COUNT) != 0 ||
+        buf_append_field_hash128(b, id) != 0 ||
+        buf_append_field_int2(b, tier) != 0 ||
+        buf_append_field_hash128(b, type_id) != 0 ||
+        (first_observed_by
+            ? buf_append_field_hash128(b, first_observed_by)
+            : buf_append_field_null(b)) != 0) {
+        b->len = mark;
+        return -1;
     }
     b->row_count++;
+    return 0;
+}
+
+/* Entity rows are the interpretation rows until those rows are recorded.
+ * The first admission copies them once, after they validate. A malformed
+ * row refuses the write. */
+static int record_entity_interpretations(intent_stage_t* stage) {
+    if (stage->interpretations_complete) return 0;
+    if (!interpretations_valid(&stage->entities)) return -1;
+    if (stage->interpretations.len != 0u || stage->interpretations.row_count != 0u)
+        return -1;
+    if (stage->entities.len != 0u) {
+        if (buf_append(&stage->interpretations, stage->entities.data, stage->entities.len) != 0)
+            return -1;
+        stage->interpretations.row_count = stage->entities.row_count;
+    }
+    stage->interpretations_complete = 1;
     return 0;
 }
 
@@ -477,16 +496,26 @@ int intent_stage_add_entity_interpretation(
     intent_stage_t* stage, const hash128_t* id, int16_t tier,
     const hash128_t* type_id, const hash128_t* first_observed_by) {
     if (!stage || !id || !type_id || tier < 0 || tier > 255) return -1;
-    /* Compatibility metadata is explicit. Ordinary entity admission must never
-     * clone canonical entity tuples into a parallel interpretation stream. */
-    stage->interpretations_complete = 1;
+    if (record_entity_interpretations(stage) != 0) return -1;
     return append_entity_row(&stage->interpretations,id,tier,type_id,first_observed_by);
 }
 
 int intent_stage_add_entity(
     intent_stage_t* stage, const hash128_t* id, int16_t tier,
     const hash128_t* type_id, const hash128_t* first_observed_by) {
-    return append_entity_row(&stage->entities,id,tier,type_id,first_observed_by);
+    if (!stage || !id || !type_id || tier < 0 || tier > 255) return -1;
+    if (record_entity_interpretations(stage) != 0) return -1;
+    const size_t interpretation_len = stage->interpretations.len;
+    const size_t interpretation_rows = stage->interpretations.row_count;
+    if (append_entity_row(&stage->interpretations,id,tier,type_id,first_observed_by) != 0)
+        return -1;
+    if (append_entity_row(&stage->entities,id,tier,type_id,first_observed_by) != 0) {
+        stage->interpretations.len = interpretation_len;
+        stage->interpretations.row_count = interpretation_rows;
+        return -1;
+    }
+    stage->interpretations_complete = 1;
+    return 0;
 }
 
 size_t intent_stage_entity_interpretation_count(const intent_stage_t* stage) {
