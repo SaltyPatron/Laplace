@@ -347,10 +347,21 @@ if [[ -z "$web_source" ]]; then
   web_source=built
 fi
 
+# A fresh worktree has no project.assets.json. --no-build is the fast path
+# after build-app; without that restore, publish must build.
+publish_dotnet() {
+  local project="$1" output="$2"
+  local assets="${project%/*}/obj/project.assets.json"
+  local args=(-c Release --no-self-contained -o "$output")
+  if [[ -f "$assets" ]]; then
+    args+=(--no-build)
+  fi
+  dotnet publish "$project" "${args[@]}"
+}
+
 publish_api() {
   echo "==> publish API -> staging ($STAGE)"
-  dotnet publish "$REPO_ROOT/app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" \
-    -c Release --no-build --no-self-contained -o "$STAGE"
+  publish_dotnet "$REPO_ROOT/app/Laplace.Endpoints.OpenAICompat/Laplace.Endpoints.OpenAICompat.csproj" "$STAGE"
 }
 
 if [[ "$API_ONLY" -eq 1 ]]; then
@@ -392,25 +403,21 @@ trap 'rm -rf "$STAGE" "$UCI_STAGE" "$MCP_STAGE" "$LICHESS_STAGE" "$MIGRATIONS_ST
 
 publish_uci() {
   echo "==> publish laplace-uci -> $UCI_STAGE"
-  dotnet publish "$REPO_ROOT/app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj" \
-    -c Release --no-build --no-self-contained -o "$UCI_STAGE"
+  publish_dotnet "$REPO_ROOT/app/Laplace.Chess.Uci/Laplace.Chess.Uci.csproj" "$UCI_STAGE"
 }
 
 publish_mcp() {
   echo "==> publish laplace-mcp -> $MCP_STAGE"
-  dotnet publish "$REPO_ROOT/app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" \
-    -c Release --no-build --no-self-contained -o "$MCP_STAGE"
+  publish_dotnet "$REPO_ROOT/app/Laplace.Endpoints.Mcp/Laplace.Endpoints.Mcp.csproj" "$MCP_STAGE"
 }
 
 publish_lichess() {
-  dotnet publish "$REPO_ROOT/app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj" \
-    -c Release --no-build --no-self-contained -o "$LICHESS_STAGE"
+  publish_dotnet "$REPO_ROOT/app/Laplace.Endpoints.Lichess/Laplace.Endpoints.Lichess.csproj" "$LICHESS_STAGE"
 }
 
 publish_migrations() {
   echo "==> publish database migration runtime -> $MIGRATIONS_STAGE"
-  dotnet publish "$REPO_ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" \
-    -c Release --no-build --no-self-contained -o "$MIGRATIONS_STAGE"
+  publish_dotnet "$REPO_ROOT/app/Laplace.Migrations/Laplace.Migrations.csproj" "$MIGRATIONS_STAGE"
 }
 
 if [[ "$SERIAL" -eq 1 ]]; then

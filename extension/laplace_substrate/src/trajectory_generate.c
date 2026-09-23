@@ -555,7 +555,17 @@ evidence_summaries_from_channels(const LaplaceQueryChannel *channels, int count,
         if (!found)
             MemSet(&entry->summary, 0, sizeof(entry->summary));
 
+        /* Pooled edge weight and DerivedCalculation standing are different
+         * responses. A neutral rating must not hide a calculation confirmation
+         * or refutation, and the calculation counts stay on the channel. */
         sign = laplace_walk_edge_weight(channel->rating, channel->rd);
+        if (!(sign > 0.0 && isfinite(sign)) && !(sign < 0.0 && isfinite(sign)))
+        {
+            if (channel->calculation_confirm_occurrences > 0)
+                sign = 1.0;
+            else if (channel->calculation_refute_occurrences > 0)
+                sign = -1.0;
+        }
         if (sign > 0.0 && isfinite(sign))
         {
             cover_origins(coverage, origins, channel, 1,
