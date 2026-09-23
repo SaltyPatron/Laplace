@@ -12,11 +12,9 @@
 --   CARRY   session is metadata: a turn with no resolvable topic carries the
 --           session's last resolved topic. p_elaborate advances through
 --           non-empty fact layers.
---   CLOSE   happens at the FRONTEND, not here: every caller (MCP chat tool, HTTP
---           TurnWitness, CLI chat) deposits the prompt (UserPrompt) and response
---           (Response) through the writer spine -- full content mint + evidence +
---           inline fold, proper trust classes. SQL converse.chat() stays read-side; its only
---           write is session_topics app-state.
+--   CLOSE   witnesses the prompt under UserPrompt and the response under Response
+--           through converse.witness_precedes_chain, one batched fold each.
+--           Session topic carry remains generation.session_record_prompt.
 --
 -- The English pattern ladder this function used to run on (parse_ask, plus five
 -- inline regexes over the prompt) is gone from the PARSE side. It answered only
@@ -62,8 +60,7 @@ BEGIN
             p_prompt, p_session, 128, 5, 0.6, 10,
             NULL::bigint,
             2, 8) g;
-        RETURN out;
-    END IF;
+    ELSE
 
     -- ANSWER IN THE LANGUAGE THAT WAS ASKED. A concept's surfaces are a FAMILY
     -- spanning every language that witnesses it, and realize.realize(id, NULL) is free to
@@ -450,9 +447,16 @@ BEGIN
         END IF;
     END IF;
 
-    -- RECORD session carry; the OODA close (turn witnessing) is the caller's duty.
+    END IF;
+
     IF p_session IS NOT NULL THEN
         PERFORM generation.session_record_prompt(p_session, p_prompt, resolved);
+    END IF;
+    IF NULLIF(btrim(COALESCE(p_prompt, '')), '') IS NOT NULL THEN
+        PERFORM converse.witness_precedes_chain(p_prompt, laplace.source_id('UserPrompt'));
+    END IF;
+    IF NULLIF(btrim(COALESCE(out, '')), '') IS NOT NULL THEN
+        PERFORM converse.witness_precedes_chain(out, laplace.source_id('Response'));
     END IF;
 
     RETURN btrim(out);
