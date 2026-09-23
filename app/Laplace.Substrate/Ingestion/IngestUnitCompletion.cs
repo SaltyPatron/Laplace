@@ -41,11 +41,15 @@ public static class IngestUnitCompletion
         int layerOrder, Hash128? contextId = null)
     {
         var typeId = RelationTypeId(layerOrder);
-        builder
-            .AddEntity(typeId, EntityTier.Word,
-                BootstrapIntentBuilder.RelationTypeMetaTypeId, ownerSourceId)
-            .AddAttestation(NativeAttestation.CategoricalResolved(
-                unitId, typeId, unitId, ownerSourceId, contextId,
-                RelationTypeRank.Mandate * SourceTrust.SubstrateMandate));
+        CanonicalNamedIdentity.Declare(
+            builder,
+            typeId,
+            EntityTier.Word,
+            BootstrapIntentBuilder.RelationTypeMetaTypeId,
+            $"substrate/type/HasUnitCompleted/{layerOrder}/v1",
+            ownerSourceId);
+        builder.AddAttestation(NativeAttestation.CategoricalResolved(
+            unitId, typeId, unitId, ownerSourceId, contextId,
+            RelationTypeRank.Mandate * SourceTrust.SubstrateMandate));
     }
 }

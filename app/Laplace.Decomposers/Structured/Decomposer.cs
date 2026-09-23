@@ -426,22 +426,35 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
             context, SourceId, SourceName, TrustClassId, types, _relations, ct: ct).ConfigureAwait(false);
         _canonicalNames = bootstrap.CanonicalNames;
 
+        var placed = new List<(Hash128 Id, double X, double Y, double Z, double M)>();
+        foreach (IngestArtifact artifact in resolved.Graph.Artifacts)
+        {
+            SubstrateChange provenance = SourceArtifactProvenance.BuildChange(artifact, SourceId, TrustClassId);
+            await context.Writer.ApplyAsync(provenance with { CountsAsUnit = false }, ct).ConfigureAwait(false);
+            Hash128 artifactId = SourceArtifactProvenance.Resolve(artifact).ArtifactId;
+            foreach (PhysicalityRow row in provenance.Physicalities)
+            {
+                if (row.EntityId != artifactId) continue;
+                placed.Add((artifactId, row.CoordX, row.CoordY, row.CoordZ, row.CoordM));
+                break;
+            }
+        }
+
         using var declaration = new SubstrateChangeBuilder(SourceId, $"cookbook/generation/{Hex(resolved.GenerationId)}");
         declaration.DeclareSourcePrior(_recipe.Trust);
-        declaration.AddEntity(resolved.GenerationId, EntityTier.Document, EntityTypeRegistry.SourceReference, SourceId);
+        PlaceShell(declaration, resolved.GenerationId, placed);
         if (ContentEmitter.Emit(declaration, _recipe.CanonicalForm, SourceId) is { } configRoot)
             declaration.AddAttestation(NativeAttestation.Categorical(
                 resolved.GenerationId, "HAS_PROPERTY", configRoot, SourceId, _recipe.Trust));
         foreach (IngestArtifact artifact in resolved.Graph.Artifacts)
         {
             Hash128 artifactId = SourceArtifactProvenance.Resolve(artifact).ArtifactId;
-            declaration.AddEntity(artifactId, EntityTier.Document, EntityTypeRegistry.SourceReference, SourceId);
             declaration.AddAttestation(NativeAttestation.Categorical(
                 resolved.GenerationId, "REQUIRES", artifactId, SourceId, _recipe.Trust));
         }
         foreach (SemanticSourceRecipe recipe in recipes)
         {
-            declaration.AddEntity(recipe.RecipeId, EntityTier.Document, EntityTypeRegistry.SourceReference, SourceId);
+            PlaceShell(declaration, recipe.RecipeId, placed);
             declaration.AddAttestation(NativeAttestation.Categorical(
                 resolved.GenerationId, "REQUIRES", recipe.RecipeId, SourceId, _recipe.Trust));
             if (ContentEmitter.Emit(declaration, recipe.CanonicalForm, SourceId) is { } recipeRoot)
@@ -449,6 +462,51 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
                     recipe.RecipeId, "HAS_PROPERTY", recipeRoot, SourceId, _recipe.Trust));
         }
         await context.Writer.ApplyAsync(declaration.Build() with { CountsAsUnit = false }, ct).ConfigureAwait(false);
+    }
+
+    private void PlaceShell(
+        SubstrateChangeBuilder declaration,
+        Hash128 id,
+        List<(Hash128 Id, double X, double Y, double Z, double M)> placed)
+    {
+        if (placed.Count == 0)
+        {
+            // No artifact coordinate is available. The shell is still a source-owned
+            // entity, so it takes the governed-name projection rather than remaining unrealized.
+            CanonicalNamedIdentity.Declare(
+                declaration, id, EntityTier.Document, EntityTypeRegistry.SourceReference,
+                $"cookbook/shell/{Hex(id)}", SourceId);
+            return;
+        }
+        double x = 0, y = 0, z = 0, m = 0;
+        var ids = new Hash128[placed.Count];
+        for (int i = 0; i < placed.Count; i++)
+        {
+            x += placed[i].X;
+            y += placed[i].Y;
+            z += placed[i].Z;
+            m += placed[i].M;
+            ids[i] = placed[i].Id;
+        }
+        double n = placed.Count;
+        x /= n;
+        y /= n;
+        z /= n;
+        m /= n;
+        Span<double> coord = stackalloc double[4] { x, y, z, m };
+        declaration.AddEntity(id, EntityTier.Document, EntityTypeRegistry.SourceReference, SourceId);
+        declaration.AddPhysicality(new PhysicalityRow(
+            PhysicalityId.Compute(id, PhysicalityType.Content),
+            id,
+            SourceId,
+            PhysicalityType.Content,
+            x, y, z, m,
+            Hilbert128.Encode(coord),
+            Trajectory.Build(ids),
+            ids.Length,
+            null,
+            null,
+            0));
     }
 
     protected override async IAsyncEnumerable<SubstrateChange> RunIngestAsync(IDecomposerContext context,
@@ -496,7 +554,12 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
             await foreach (SubstrateChange barrier in ApplyBarrierAsync(
                                $"cookbook/{Hex(resolved.GenerationId)}/supported-artifacts-applied", ct).ConfigureAwait(false))
                 yield return barrier;
-            throw new InvalidDataException(string.Join(Environment.NewLine, _executionErrors.Distinct(StringComparer.Ordinal)));
+            string[] fatal = _executionErrors
+                .Where(static error => !error.StartsWith("Unresolved artifact ", StringComparison.Ordinal))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (fatal.Length > 0)
+                throw new InvalidDataException(string.Join(Environment.NewLine, fatal));
         }
 
         async IAsyncEnumerable<SubstrateChange> Execute(ResolvedSourceArtifact binding,

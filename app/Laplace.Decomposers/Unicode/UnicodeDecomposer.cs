@@ -1396,18 +1396,32 @@ public sealed class UnicodeDecomposer
 
         private static void EmitByteCatalog(SubstrateChangeBuilder builder)
         {
-            Hash128 latin1 = SubstrateCanonicalIds.OfVersioned("encoding", "ISO-8859-1");
-            Hash128 cp1252 = SubstrateCanonicalIds.OfVersioned("encoding", "windows-1252");
             Hash128 encodingType = EntityTypeRegistry.CharacterEncoding;
             Hash128 roleType = EntityTypeRegistry.Utf8Role;
-            builder.AddEntity(new EntityRow(latin1, EntityTier.Word, encodingType, Source));
-            builder.AddEntity(new EntityRow(cp1252, EntityTier.Word, encodingType, Source));
+            PlaceGoverned(
+                builder,
+                SubstrateCanonicalIds.OfVersioned("encoding", "ISO-8859-1"),
+                encodingType,
+                SubstrateCanonicalKeys.OfVersioned("encoding", "ISO-8859-1"));
+            PlaceGoverned(
+                builder,
+                SubstrateCanonicalIds.OfVersioned("encoding", "windows-1252"),
+                encodingType,
+                SubstrateCanonicalKeys.OfVersioned("encoding", "windows-1252"));
             foreach (string role in new[] { "continuation", "lead2", "lead3", "lead4", "invalid" })
             {
-                Hash128 roleId = Hash128.OfCanonical($"substrate/utf8/{role}/v1");
-                builder.AddEntity(new EntityRow(roleId, EntityTier.Word, roleType, Source));
+                string key = SubstrateCanonicalKeys.OfVersioned("utf8", role);
+                PlaceGoverned(builder, Hash128.OfCanonical(key), roleType, key);
             }
         }
+
+        // A governed catalog key is not the Merkle of its spelling. The content
+        // spine places that spelling; the key itself still needs a physicality
+        // or source closure refuses the floor.
+        private static void PlaceGoverned(
+            SubstrateChangeBuilder builder, Hash128 id, Hash128 typeId, string key)
+            => CanonicalNamedIdentity.Declare(
+                builder, id, EntityTier.Word, typeId, key, Source);
 
         private static void EmitByte(SubstrateChangeBuilder builder, byte value)
         {

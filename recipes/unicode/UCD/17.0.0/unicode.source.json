@@ -183,8 +183,8 @@
     {
       "selector": "ucd/ArabicShaping.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
     },
     {
       "selector": "ucd/BidiBrackets.txt",
@@ -627,8 +627,8 @@
     {
       "selector": "ucd/extracted/DerivedEastAsianWidth.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
     },
     {
       "selector": "ucd/extracted/DerivedGeneralCategory.txt",
@@ -651,8 +651,8 @@
     {
       "selector": "ucd/extracted/DerivedLineBreak.txt",
       "required": true,
-      "disposition": "Unsupported",
-      "reason": "The selected physical source includes this artifact; its recipe/provider lowering remains required. This disposition does not establish source completion."
+      "disposition": "Superseded",
+      "reason": "The selected complete UAX42 XML declares these repertoire or catalog fields; retain this artifact as a source/conformance reference without repeating the same source testimony."
     },
     {
       "selector": "ucd/extracted/DerivedName.txt",

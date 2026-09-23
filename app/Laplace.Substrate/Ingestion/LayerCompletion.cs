@@ -36,11 +36,10 @@ public static class LayerCompletion
     public static void EmitFileMarker(SubstrateChangeBuilder builder, Hash128 fileRoot, int layerOrder)
     {
         var typeId = RelationTypeId(layerOrder);
-        builder
-            .AddEntity(typeId, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, fileRoot)
-            .AddAttestation(NativeAttestation.CategoricalResolved(
-                fileRoot, typeId, fileRoot, fileRoot, contextId: null,
-                RelationTypeRank.Mandate * SourceTrust.SubstrateMandate));
+        PlaceMarker(builder, typeId, fileRoot, layerOrder);
+        builder.AddAttestation(NativeAttestation.CategoricalResolved(
+            fileRoot, typeId, fileRoot, fileRoot, contextId: null,
+            RelationTypeRank.Mandate * SourceTrust.SubstrateMandate));
     }
 
     /// <summary>Vendor-owned per-file marker. File identity remains the provenance
@@ -51,21 +50,21 @@ public static class LayerCompletion
         int layerOrder)
     {
         var typeId = RelationTypeId(layerOrder);
-        builder
-            .AddEntity(typeId, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, fileRoot)
-            .AddAttestation(NativeAttestation.CategoricalResolved(
-                fileRoot, typeId, fileRoot, fileRoot, contextId: decomposerSourceId,
-                RelationTypeRank.Mandate * SourceTrust.SubstrateMandate));
+        PlaceMarker(builder, typeId, fileRoot, layerOrder);
+        builder.AddAttestation(NativeAttestation.CategoricalResolved(
+            fileRoot, typeId, fileRoot, fileRoot, contextId: decomposerSourceId,
+            RelationTypeRank.Mandate * SourceTrust.SubstrateMandate));
     }
 
     public static SubstrateChange BuildMarker(IDecomposer decomposer)
     {
         var typeId = RelationTypeId(decomposer.LayerOrder);
-        return new SubstrateChangeBuilder(
+        var builder = new SubstrateChangeBuilder(
                 decomposer.SourceId, $"layer-complete/{decomposer.LayerOrder}", null,
-                entityCapacity: 1, physicalityCapacity: 0, attestationCapacity: 1)
-            .DeclareSourcePrior(SourceTrust.SubstrateMandate)
-            .AddEntity(typeId, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, decomposer.SourceId)
+                entityCapacity: 8, physicalityCapacity: 4, attestationCapacity: 1)
+            .DeclareSourcePrior(SourceTrust.SubstrateMandate);
+        PlaceMarker(builder, typeId, decomposer.SourceId, decomposer.LayerOrder);
+        return builder
             .AddAttestation(NativeAttestation.CategoricalResolved(
                 decomposer.SourceId,
                 typeId,
@@ -75,4 +74,17 @@ public static class LayerCompletion
                 RelationTypeRank.Mandate * SourceTrust.SubstrateMandate))
             .Build();
     }
+
+    // The marker id is a governed operator key. Closure counts that entity row,
+    // so the key is realized through the same named-identity projection as every
+    // other governed id. The attestation stays operational and is not testimony.
+    private static void PlaceMarker(
+        SubstrateChangeBuilder builder, Hash128 typeId, Hash128 observedBy, int layerOrder)
+        => CanonicalNamedIdentity.Declare(
+            builder,
+            typeId,
+            EntityTier.Word,
+            BootstrapIntentBuilder.RelationTypeMetaTypeId,
+            $"substrate/type/HasLayerCompleted/{layerOrder}/v1",
+            observedBy);
 }
