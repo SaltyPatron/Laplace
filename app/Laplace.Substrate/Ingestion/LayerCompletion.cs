@@ -78,13 +78,20 @@ public static class LayerCompletion
     // The marker id is a governed operator key. Closure counts that entity row,
     // so the key is realized through the same named-identity projection as every
     // other governed id. The attestation stays operational and is not testimony.
+    // The realized name's physicalities are observed by the marker's owner. An owner
+    // that already declared its prior in this unit keeps it; otherwise the marker
+    // declares the mandate prior every physicality observation requires.
     private static void PlaceMarker(
         SubstrateChangeBuilder builder, Hash128 typeId, Hash128 observedBy, int layerOrder)
-        => CanonicalNamedIdentity.Declare(
+    {
+        if (!builder.HasSourcePrior(observedBy))
+            builder.DeclareSourcePrior(observedBy, SourceTrust.SubstrateMandate);
+        CanonicalNamedIdentity.Declare(
             builder,
             typeId,
             EntityTier.Word,
             BootstrapIntentBuilder.RelationTypeMetaTypeId,
             $"substrate/type/HasLayerCompleted/{layerOrder}/v1",
             observedBy);
+    }
 }

@@ -7,9 +7,16 @@ using Microsoft.Extensions.Logging;
 
 namespace Laplace.SubstrateCRUD.Npgsql;
 
+/// <summary>Novel attestations accepted by one working-set transaction. Rows is that exact
+/// set as persisted (duplicates collapsed to their summed observation), whether the
+/// testimony was staged by managed code or natively, so the consensus participant folds
+/// the load's own delta in the same transaction.</summary>
 internal sealed record WorkingSetAcceptedEvidence(
     IReadOnlySet<Hash128> AttestationIds,
-    bool OriginalReplay);
+    bool OriginalReplay)
+{
+    public IReadOnlyList<AttestationRow> Rows { get; init; } = [];
+}
 
 internal readonly record struct PhysicalityObservationRow(
     Hash128 EntityId,

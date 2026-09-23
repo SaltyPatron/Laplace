@@ -640,9 +640,11 @@ public sealed class IngestRunner
                 committedCoverage.PlacedEntities);
         }
 
+        // Files proven complete by their own markers count toward the layer: a run
+        // that reuses every committed file still establishes the source's layer.
         if (!options.SkipSourceCompletion
             && fullSuccessfulExtraction
-            && counters.UnitsApplied > 0)
+            && (counters.UnitsApplied > 0 || counters.FilesSkippedComplete > 0))
             await _writer.ApplyAsync(LayerCompletion.BuildMarker(decomposer), ct);
 
         sw.Stop();

@@ -447,7 +447,10 @@ public sealed partial class NpgsqlSubstrateWriter
         long blobMs = prepSw.ElapsedMilliseconds;
 
         var phys = CopyTupleParser.ParsePhysicalities(physBlobs);
-        var atts = CopyTupleParser.ParseAttestations(attBlobs);
+        // The consensus participant folds the accepted evidence set itself, so it needs
+        // every staged row decoded, managed and native alike, in staging order.
+        List<AttestationRow>? decodedAtts = transactionParticipant is null ? null : new();
+        var atts = CopyTupleParser.ParseAttestations(attBlobs, decodedAtts);
         if (transactionParticipant is null && atts.FoldReplayable.Any(static replayable => !replayable))
             throw new InvalidOperationException(
                 "non-replayable categorical evidence requires the atomic consensus participant");
@@ -1169,10 +1172,25 @@ public sealed partial class NpgsqlSubstrateWriter
             if (transactionParticipant is not null && workingSetToken is not null)
             {
                 using var participantDiagnostic = MeasureApplyPhase("consensus-acceptance-participant");
+                var acceptedRows = new List<AttestationRow>(novelRepIdx.Count);
+                foreach (int i in novelRepIdx)
+                {
+                    var g = attGroups[atts.Ids[i]];
+                    acceptedRows.Add(decodedAtts![i] with
+                    {
+                        ObservationCount = g.Games,
+                        SumScoreFp1e9 = g.Sum,
+                        LastObservedAtUnixUs = decodedAtts[i].LastObservedAtUnixUs
+                            + (g.MaxTs - atts.TimestampsPgUs[i]),
+                    });
+                }
                 await transactionParticipant(conn, tx,
                     new WorkingSetAcceptedEvidence(
                         novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(),
-                        physicalityAdmission?.OriginalReplay ?? originalReceiptPresent), ct);
+                        physicalityAdmission?.OriginalReplay ?? originalReceiptPresent)
+                    {
+                        Rows = acceptedRows,
+                    }, ct);
                 participantDiagnostic?.Complete();
             }
 

@@ -215,8 +215,11 @@ internal static class IngestDispatchTable
     {
         if (CliRuntime.Decomposers.TryResolveGeneration(sourceKey, cli.Path, out var configured, out var sourceRoot))
         {
+            // A selected generation resumes per file and owns its layer: once every
+            // admitted artifact commits, the runner records HasLayerCompleted for the
+            // source so the next layer's precondition can see it.
             task = IngestCommands.IngestViaRunnerAsync(configured, sourceRoot,
-                skipLayerCheck: configured.LayerOrder == 0, cli, skipSourceCompletion: true);
+                skipLayerCheck: configured.LayerOrder == 0, cli, skipSourceCompletion: false);
             return true;
         }
         if (Routes.TryGetValue(sourceKey, out var handler))

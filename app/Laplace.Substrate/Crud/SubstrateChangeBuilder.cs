@@ -87,6 +87,12 @@ public sealed class SubstrateChangeBuilder : IDisposable
     public SubstrateChangeBuilder DeclareSourcePrior(double sourceTrust) =>
         DeclareSourcePrior(_sourceId, sourceTrust);
 
+    public bool HasSourcePrior(Hash128 sourceId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _sourcePriors.ContainsKey(sourceId);
+    }
+
     public SubstrateChangeBuilder SetCommitEpoch(int epoch)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
