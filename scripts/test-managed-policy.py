@@ -15,6 +15,7 @@ SPEC = importlib.util.spec_from_file_location("managed_policy", ROOT / "scripts/
 policy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(policy)
 FIXTURE = ROOT / "scripts/fixtures/laplace-managed-deploy-legacy-scratch.py"
+PUBLICATION = ROOT / "scripts/fixtures/laplace-managed-deploy-publication.py"
 
 class Compatibility(unittest.TestCase):
     def setUp(self):
@@ -48,6 +49,15 @@ class Compatibility(unittest.TestCase):
         self.assertEqual(raw, self.previous)
         self.assertFalse(receipt["privilegedPolicyReplaced"])
         self.assertEqual(set(units), {"mcp", "lichess"})
+
+    def test_installed_publication_retained(self):
+        installed = PUBLICATION.read_bytes()
+        self.assertEqual(policy.blob(installed), "bf491d485c5399241846226016465b841a4c8973")
+        previous = {policy.NAMES[0]: installed, policy.NAMES[1]: self.source[policy.NAMES[1]]}
+        self.assertEqual(policy.select_profile(self.source, previous), "retained-installed-publication")
+        for name in ("mcp", "lichess"):
+            text = self.unit(name)
+            self.assertEqual(policy.unit_text(text, name, "retained-installed-publication"), text)
 
     def test_equal_current_policy(self):
         self.assertEqual(policy.select_profile(self.source, self.source), "same-policy")

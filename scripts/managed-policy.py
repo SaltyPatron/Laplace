@@ -30,6 +30,13 @@ PUBLICATION_PREDECESSOR = (
     "cf9a67f6271e3208bfda6c1d0d6904105ce17ac6",
     "14d7470f276ed33562451a12c0724767bd43aa82",
 )
+# The installed helper is the publication above. This source adds prune-releases.
+# Service-control bytes match. Application publication retains that helper.
+INSTALLED_PUBLICATION = (
+    "b46219d6aef56d4e2110bbc19d120ec10bcfc267",
+    "bf491d485c5399241846226016465b841a4c8973",
+    "14d7470f276ed33562451a12c0724767bd43aa82",
+)
 
 def blob(raw):
     return hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
@@ -44,6 +51,8 @@ def select_profile(source, installed):
         return "retained-legacy-scratch"
     if identities == PUBLICATION_PREDECESSOR:
         return "retained-publication-policy"
+    if identities == INSTALLED_PUBLICATION:
+        return "retained-installed-publication"
     raise ValueError("installed managed policy requires a supported policy upgrade")
 
 def trusted_bytes(path, trusted_uid=0):
@@ -62,7 +71,7 @@ def trusted_bytes(path, trusted_uid=0):
     return raw
 
 def unit_text(text, name, profile):
-    if profile in ("same-policy", "retained-publication-policy"):
+    if profile in ("same-policy", "retained-publication-policy", "retained-installed-publication"):
         return text
     if profile != "retained-legacy-scratch" or name not in ("mcp", "lichess"):
         raise ValueError("unknown managed policy profile")
