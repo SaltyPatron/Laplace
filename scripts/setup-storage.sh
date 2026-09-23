@@ -36,6 +36,21 @@ for path in "${paths[@]}"; do
         failed=1
     fi
 done
+# Ingest runtimes are created later by the operator and the runner. The same
+# g+rws repair setup-host uses on the checkout applies here. PostgreSQL data,
+# WAL, and the serving release tree are not in this walk.
+if [[ -d /opt/laplace/ingest && ! -L /opt/laplace/ingest ]]; then
+    if [[ "$mode" == --repair ]]; then
+        find /opt/laplace/ingest -xdev ! -type l -exec chgrp "$group" {} +
+        find /opt/laplace/ingest -xdev -type d -exec chmod g+rws {} +
+        find /opt/laplace/ingest -xdev -type f -exec chmod g+rwX {} +
+    fi
+    drift="$(find /opt/laplace/ingest -xdev -type d ! -perm -g+w -print -quit)"
+    if [[ -n "$drift" ]]; then
+        echo "Shared-directory drift: $drift (requires group write)" >&2
+        failed=1
+    fi
+fi
 [[ "$failed" == 0 ]] || exit "$failed"
 if [[ "$mode" == --repair ]]; then
     # Only workspace trees are recursive. Never apply build permissions to the

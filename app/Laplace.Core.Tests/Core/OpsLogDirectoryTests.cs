@@ -1,4 +1,5 @@
 using Laplace.Engine.Core;
+using Laplace.Ops;
 using Xunit;
 
 namespace Laplace.Core.Tests;
@@ -69,6 +70,28 @@ public sealed class OpsLogDirectoryTests
         finally
         {
             Environment.SetEnvironmentVariable(Var, saved);
+        }
+    }
+
+    [Fact]
+    public void ShareInstallDirectory_restores_group_write()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "laplace-share-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var logs = Directory.CreateDirectory(Path.Combine(root, "logs"));
+            logs.UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+                | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+            LaplaceLogging.ShareInstallDirectory(logs.FullName, root);
+            var mode = new DirectoryInfo(logs.FullName).UnixFileMode;
+            Assert.True(mode.HasFlag(UnixFileMode.GroupWrite));
+            Assert.True(mode.HasFlag(UnixFileMode.SetGroup));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
         }
     }
 }

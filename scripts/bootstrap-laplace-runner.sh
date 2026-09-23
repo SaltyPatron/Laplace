@@ -1481,12 +1481,12 @@ bootstrap_external_dirs() {
     done
     # Preserve the creator owner while enforcing the shared writer group. Both
     # the operator and the service runner execute the installed ingest CLI.
-    for sub in ingest ingest/logs; do
+    for sub in ingest ingest/logs ingest/runtimes; do
         mkdir -p "/opt/laplace/$sub"
         chgrp "$RUNNER_GROUP" "/opt/laplace/$sub"
         chmod 2775 "/opt/laplace/$sub"
     done
-    green "✓ $LAPLACE_EXTERNAL/ + /opt/laplace/{tree-sitter,geos,proj,gdal,pgsql-18,include,lib,share,bin,ingest,ingest/logs}/ ready (shared $RUNNER_GROUP, mode 2775 setgid)"
+    green "✓ $LAPLACE_EXTERNAL/ + /opt/laplace/{tree-sitter,geos,proj,gdal,pgsql-18,include,lib,share,bin,ingest,ingest/logs,ingest/runtimes}/ ready (shared $RUNNER_GROUP, mode 2775 setgid)"
     bootstrap_external_pins
 }
 

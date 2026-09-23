@@ -28,3 +28,22 @@ laplace_storage_init() {
     }
     export TMPDIR="$resolved" TMP="$resolved" TEMP="$resolved"
 }
+
+# umask 022 clears group write on mkdir. A setgid parent still passes
+# laplace-runner and the setgid bit, so the directory is mode 2755 and the
+# other writer cannot unlink it. setup-host and setup-storage repair shared
+# trees with chmod g+rws. Apply that to a directory this process owns.
+laplace_share_directory() {
+    local path="$1"
+    [[ -d "$path" && ! -L "$path" && -O "$path" ]] || return 0
+    [[ "$(stat -c '%G' "$path")" == laplace-runner ]] || return 0
+    chmod g+rws -- "$path"
+}
+
+laplace_share_tree() {
+    local path="$1" dir
+    [[ -d "$path" && ! -L "$path" ]] || return 0
+    while IFS= read -r -d '' dir; do
+        laplace_share_directory "$dir" || true
+    done < <(find "$path" -xdev -type d -print0)
+}

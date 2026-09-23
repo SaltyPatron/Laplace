@@ -65,6 +65,7 @@ public static class LaplaceLogging
         LogEventLevel consoleMinLevel = LogEventLevel.Verbose)
     {
         Directory.CreateDirectory(LaplaceInstall.OpsLogDirectory);
+        ShareInstallDirectory(LaplaceInstall.OpsLogDirectory);
         var path = Path.Combine(LaplaceInstall.OpsLogDirectory, $"laplace-{role}.csv");
 
         config = config.Enrich.FromLogContext()
@@ -84,5 +85,28 @@ public static class LaplaceLogging
         }
 
         return config;
+    }
+
+    /// <summary>
+    /// umask 022 clears group write on a directory created under a setgid
+    /// laplace-runner parent, leaving mode 2755. The other writer cannot unlink
+    /// that directory. setup-host repairs the same trees with chmod g+rws.
+    /// </summary>
+    internal static void ShareInstallDirectory(string path, string installRoot = "/opt/laplace")
+    {
+        if (!OperatingSystem.IsLinux() || string.IsNullOrWhiteSpace(path)) return;
+        var full = Path.GetFullPath(path);
+        var root = Path.GetFullPath(installRoot);
+        var prefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(prefix, StringComparison.Ordinal) && full != root) return;
+        try
+        {
+            var info = new DirectoryInfo(full);
+            info.UnixFileMode |= UnixFileMode.GroupRead | UnixFileMode.GroupWrite
+                | UnixFileMode.GroupExecute | UnixFileMode.SetGroup;
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 }

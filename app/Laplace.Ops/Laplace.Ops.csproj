@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Laplace.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The shared ops-logging foundation (GH #602/#635 refactor): Serilog does the hard
          parts — concurrent shared-file append, buffering, flush — that were hand-rolled in
          Laplace.Core. Referenced by the console deployables only, so Core stays dependency-free. -->

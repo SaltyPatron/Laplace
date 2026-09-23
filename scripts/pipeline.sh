@@ -435,9 +435,10 @@ reclaim_install_headroom() {
          && [[ -z "$(find "$candidate" -maxdepth 0 -mmin +1440 2>/dev/null)" ]]; then
         continue
       fi
+      laplace_share_tree "$candidate"
       rm -rf -- "$candidate" \
         && echo "::notice::reclaimed abandoned ingest staging $candidate" \
-        || return 1
+        || echo "::warning::left undeletable ingest debris $candidate"
       continue
     fi
     [[ "$candidate" == "$current_ingest" || "$candidate" == "$target_ingest" ]] && continue
@@ -446,18 +447,21 @@ reclaim_install_headroom() {
       [[ -d "$candidate" && ! -L "$candidate" && -w "$candidate" && -w "$ingest_root" ]] \
         && [[ -n "$(find "$candidate" -maxdepth 0 -mmin +$(( idle_seconds / 60 )) 2>/dev/null)" ]] \
         || continue
+      laplace_share_tree "$candidate"
       find "$candidate" -xdev -depth -delete \
         && echo "::notice::reclaimed unleased idle ingest runtime $candidate" \
-        || return 1
+        || echo "::warning::left undeletable ingest debris $candidate"
       continue
     fi
     if [[ -d "$candidate" && ! -L "$candidate" && -w "$candidate" && -w "$ingest_root" ]]; then
       (
         exec {runtime_lease}<"$candidate/.runtime-lease"
         flock -n -x "$runtime_lease" || exit 0
-        find "$candidate" -xdev -depth -delete || exit 1
-        echo "::notice::reclaimed stale ingest runtime $candidate"
-      ) || return 1
+        laplace_share_tree "$candidate"
+        find "$candidate" -xdev -depth -delete \
+          && echo "::notice::reclaimed stale ingest runtime $candidate" \
+          || echo "::warning::left undeletable ingest debris $candidate"
+      )
     fi
   done < <(find "$ingest_root" -mindepth 1 -maxdepth 1 -xdev -type d -print0)
 }
@@ -473,6 +477,9 @@ phase_install_ingest_runtime() (
   build="$LAPLACE_BUILD_DIRECTORY/ingest-managed-$revision"
 
   mkdir -p "$ingest_dir" "$ingest_dir/logs" "$runtime_root"
+  laplace_share_directory "$ingest_dir"
+  laplace_share_directory "$ingest_dir/logs"
+  laplace_share_directory "$runtime_root"
   if getent group laplace-runner >/dev/null; then
     local path owner group mode
     for path in "$ingest_dir" "$ingest_dir/logs" "$runtime_root"; do
@@ -493,6 +500,7 @@ phase_install_ingest_runtime() (
   if [[ ! -d "$runtime" ]]; then
     rm -rf "$stage" "$build"
     mkdir -p "$stage" "$build"
+    laplace_share_directory "$stage"
     # ReadyToRun publish resolves the host RID and therefore needs the RID-specific
     # assets target. The ordinary managed build is framework-only, so --no-build here
     # can leave project.assets.json without linux-x64 and fail NETSDK1047.
@@ -656,6 +664,7 @@ phase_install() (
   if [[ ! -d "$ingest_runtime" ]]; then
     rm -rf "$ingest_stage"
     mkdir -p "$ingest_stage"
+    laplace_share_directory "$ingest_stage"
     local ingest_build="$install_stage/ingest" ingest_reference
     dotnet publish "$ROOT/app/Laplace.Cli/Laplace.Cli.csproj" -c Release -o "$ingest_build" --no-self-contained -v q
     cp -Pf "$install_stage$LAPLACE_INSTALL_PREFIX/lib"/liblaplace_*.so* "$ingest_build/"

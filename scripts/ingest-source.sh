@@ -26,6 +26,7 @@ case "$LOGDIR" in
         echo "Ingest logs require permanent storage: $LOGDIR" >&2; exit 2 ;;
 esac
 mkdir -p -- "$LOGDIR"
+laplace_share_directory "$LOGDIR"
 
 PREFIX="${LAPLACE_INSTALL_PREFIX:-/opt/laplace}"
 INGEST_ROOT="$PREFIX/ingest"
@@ -73,6 +74,7 @@ mkdir -p -- "$LAPLACE_OPS_LOG_DIR" || {
     echo "::error::cannot create ingest operations log directory: $LAPLACE_OPS_LOG_DIR" >&2
     exit 1
 }
+laplace_share_directory "$LAPLACE_OPS_LOG_DIR"
 [[ -w "$LAPLACE_OPS_LOG_DIR" ]] || {
     echo "::error::ingest operations log directory is not writable: $LAPLACE_OPS_LOG_DIR" >&2
     exit 1
