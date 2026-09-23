@@ -1064,9 +1064,10 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 if (keptPhys.Count > 0)
                 {
-                    pIns = checked((int)await MergePhysicalitiesAsync(
-                        conn, tx, phys, keptPhys, ct).ConfigureAwait(false));
-                    rtMerge++;
+                    await CopyKeptAsync(conn, "physicalities", IntentStageTable.Physicalities,
+                        physBlobs, keptPhys, 0, keptPhys.Count, ct);
+                    pIns = keptPhys.Count;
+                    rtCopy++;
                 }
                 if (keptAtts.Count > 0)
                 {
@@ -1118,10 +1119,9 @@ public sealed partial class NpgsqlSubstrateWriter
                 // mistake an unfolded witness for a completed observation.
                 if (workingSetToken is not null)
                 {
-                    var physicalityMerge = await MergePhysicalitiesParallelAsync(
-                        phys, keptPhys, copyTransactions, ct).ConfigureAwait(false);
-                    rtMerge += physicalityMerge.RoundTrips;
-                    pIns = physicalityMerge.Inserted;
+                    rtCopy += await CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
+                        physBlobs, keptPhys, copyTransactions, ct);
+                    pIns = keptPhys.Count;
                     if (keptAtts.Count > 0)
                     {
                         copyTransactions.StartControl();
@@ -1133,24 +1133,17 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 else
                 {
-                    var physCopyTask = MergePhysicalitiesParallelAsync(
-                        phys, keptPhys, copyTransactions, ct);
+                    var physCopyTask = CopyPhaseParallelAsync("physicalities", IntentStageTable.Physicalities,
+                        physBlobs, keptPhys, copyTransactions, ct);
                     var attCopyTask = CopyPhaseParallelAsync("attestations", IntentStageTable.Attestations,
                         attBlobs, keptAtts, copyTransactions, ct);
                     await Task.WhenAll(physCopyTask, attCopyTask);
-                    rtMerge += physCopyTask.Result.RoundTrips;
-                    rtCopy += attCopyTask.Result;
-                    pIns = physCopyTask.Result.Inserted;
+                    rtCopy += physCopyTask.Result + attCopyTask.Result;
+                    pIns = keptPhys.Count;
                     aIns = keptAtts.Count;
                 }
 
             }
-
-            // Presence is an optimization, not a correctness boundary. A
-            // concurrent admission may win after the probe; the set-sized
-            // physicality merge reports that row as skipped instead of raising
-            // 23505 and forcing the entire working set through a retry path.
-            pSkip += keptPhys.Count - pIns;
 
             copyDiagnostic?.Complete();
 
@@ -2102,193 +2095,6 @@ public sealed partial class NpgsqlSubstrateWriter
             string.Join(",", elapsedMsByLane.Select(static value =>
                 value.ToString("F3", System.Globalization.CultureInfo.InvariantCulture))));
         return 1;
-    }
-
-    private async Task<(int RoundTrips, int Inserted)> MergePhysicalitiesParallelAsync(
-        CopyTupleParser.PhysicalityRows physicalities,
-        List<KeptRow> kept,
-        CopyTransactionCounts transactions,
-        CancellationToken ct)
-    {
-        if (kept.Count == 0) return (0, 0);
-
-        long payloadBytes = TotalKeptBytes(kept);
-        int groupCount = ResolveCopyGroups(kept.Count, payloadBytes);
-        var sourceIndex = new Dictionary<StagedRowRef, int>(physicalities.Rows.Count);
-        for (int i = 0; i < physicalities.Rows.Count; i++)
-            sourceIndex.Add(physicalities.Rows[i], i);
-        var groups = new List<int>[groupCount];
-        for (int i = 0; i < kept.Count; i++)
-        {
-            int group = CopyGroupOf(
-                CopySortKey.FromWire(kept[i].LaneKey.Wire).HiBe, groupCount);
-            (groups[group] ??= new List<int>()).Add(sourceIndex[kept[i].Row]);
-        }
-
-        var tasks = new Task<(int Calls, int Inserted)>[groupCount];
-        for (int group = 0; group < groupCount; group++)
-        {
-            var indices = groups[group] ?? [];
-            indices.Sort((left, right) =>
-                physicalities.Ids[left].CompareToBytewise(physicalities.Ids[right]));
-            tasks[group] = MergeGroupAsync(indices);
-        }
-        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-        return (results.Sum(static result => result.Calls),
-                results.Sum(static result => result.Inserted));
-
-        async Task<(int Calls, int Inserted)> MergeGroupAsync(List<int> indices)
-        {
-            if (indices.Count == 0) return (0, 0);
-            await CopyConnectionBudget.WaitAsync(ct).ConfigureAwait(false);
-            try
-            {
-                await using var connection = await _ds.OpenConnectionAsync(ct).ConfigureAwait(false);
-                await using var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-                Interlocked.Increment(ref transactions.Started);
-                bool epochBump = Volatile.Read(ref _applyWriteEpochRoute) == 1;
-                await using (var guc = connection.CreateCommand())
-                {
-                    guc.Transaction = transaction;
-                    guc.CommandText = TransactionGucs(Durability)
-                        + (epochBump ? SqlCatalog.Get("write.advance_epoch").Text : "");
-                    await guc.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                }
-                if (epochBump) Interlocked.Increment(ref _epochOwnBumpsSinceBaseline);
-
-                int calls = 0, inserted = 0;
-                for (int start = 0; start < indices.Count;)
-                {
-                    int count = PhysicalityMergeChunkLength(physicalities, indices, start);
-                    inserted = checked(inserted + (int)await MergePhysicalityChunkAsync(
-                        connection, transaction, physicalities, indices,
-                        start, count, ct)
-                        .ConfigureAwait(false));
-                    calls++;
-                    start += count;
-                }
-                await transaction.CommitAsync(ct).ConfigureAwait(false);
-                Interlocked.Increment(ref transactions.Committed);
-                return (calls, inserted);
-            }
-            finally
-            {
-                CopyConnectionBudget.Release();
-            }
-        }
-    }
-
-    private static async Task<long> MergePhysicalitiesAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        CopyTupleParser.PhysicalityRows physicalities,
-        List<KeptRow> kept,
-        CancellationToken ct)
-    {
-        if (kept.Count == 0) return 0;
-        var sourceIndex = new Dictionary<StagedRowRef, int>(physicalities.Rows.Count);
-        for (int i = 0; i < physicalities.Rows.Count; i++)
-            sourceIndex.Add(physicalities.Rows[i], i);
-        var indices = new int[kept.Count];
-        for (int i = 0; i < kept.Count; i++) indices[i] = sourceIndex[kept[i].Row];
-        Array.Sort(indices, (left, right) =>
-            physicalities.Ids[left].CompareToBytewise(physicalities.Ids[right]));
-
-        long inserted = 0;
-        for (int start = 0; start < indices.Length;)
-        {
-            int count = PhysicalityMergeChunkLength(physicalities, indices, start);
-            inserted = checked(inserted + await MergePhysicalityChunkAsync(
-                connection, transaction, physicalities, indices,
-                start, count, ct).ConfigureAwait(false));
-            start += count;
-        }
-        return inserted;
-    }
-
-    private static int PhysicalityMergeChunkLength(
-        CopyTupleParser.PhysicalityRows physicalities,
-        IReadOnlyList<int> indices,
-        int start)
-    {
-        long byteLimit = IngestSizing.ResolveWorkingSetFlushEnvelopeBytes();
-        int count = 0;
-        long bytes = 0;
-        while (start + count < indices.Count && count < ApplySizing.ProbeChunkIds)
-        {
-            long rowBytes = physicalities.Rows[indices[start + count]].Length;
-            if (count > 0 && bytes + rowBytes > byteLimit) break;
-            bytes = checked(bytes + rowBytes);
-            count++;
-        }
-        return Math.Max(1, count);
-    }
-
-    private static int PhysicalityMergeChunkLength(
-        CopyTupleParser.PhysicalityRows physicalities,
-        int[] indices,
-        int start) => PhysicalityMergeChunkLength(
-            physicalities, (IReadOnlyList<int>)indices, start);
-
-    private static async Task<long> MergePhysicalityChunkAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        CopyTupleParser.PhysicalityRows physicalities,
-        IReadOnlyList<int> indices,
-        int start,
-        int count,
-        CancellationToken ct)
-    {
-        var ids = new byte[count][];
-        var entityIds = new byte[count][];
-        var types = new short[count];
-        var coordinates = new byte[count][];
-        var hilberts = new byte[count][];
-        var trajectories = new byte[count][];
-        var constituents = new int[count];
-        var residuals = new double[count];
-        var hasResidual = new bool[count];
-        var sourceDimensions = new int[count];
-        var hasSourceDimension = new bool[count];
-        var observedAt = new DateTime[count];
-        Span<byte> hilbertBytes = stackalloc byte[16];
-        for (int i = 0; i < count; i++)
-        {
-            int source = indices[start + i];
-            ids[i] = physicalities.Ids[source].ToBytes();
-            entityIds[i] = physicalities.EntityIds[source].ToBytes();
-            types[i] = physicalities.Types[source];
-            coordinates[i] = physicalities.CoordinatesEwkb[source];
-            physicalities.HilbertKeys[source].WriteBytes(hilbertBytes);
-            hilberts[i] = hilbertBytes.ToArray();
-            trajectories[i] = physicalities.TrajectoriesEwkb[source]!;
-            constituents[i] = physicalities.ConstituentCounts[source];
-            residuals[i] = physicalities.AlignmentResiduals[source];
-            hasResidual[i] = physicalities.HasAlignmentResidual[source];
-            sourceDimensions[i] = physicalities.SourceDimensions[source];
-            hasSourceDimension[i] = physicalities.HasSourceDimension[source];
-            observedAt[i] = DateTime.UnixEpoch.AddTicks(checked(
-                (physicalities.TimestampsPgUs[source] + IntentStage.PgEpochUnixUs) * 10));
-        }
-
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandTimeout = 0;
-        command.CommandText =
-            "SELECT laplace.physicalities_merge($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)";
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, entityIds);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Smallint, types);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, coordinates);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, hilberts);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, trajectories);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Integer, constituents);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Double, residuals);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Boolean, hasResidual);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Integer, sourceDimensions);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Boolean, hasSourceDimension);
-        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.TimestampTz, observedAt);
-        return (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
     }
 
     private async Task<int> CopyPhaseParallelAsync(

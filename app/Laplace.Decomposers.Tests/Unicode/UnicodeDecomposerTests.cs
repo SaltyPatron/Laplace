@@ -408,7 +408,6 @@ public sealed class UnicodeDecomposerTests
         Assert.Equal("Latin", recipe.CanonicalValue("Script", "Latn"));
         Assert.Equal("Latin", recipe.CanonicalValue("Script_Extensions", "Latn"));
         Assert.Equal("Basic_Latin", recipe.CanonicalValue("Block", "Basic Latin"));
-        Assert.Equal(LanguageGraph.ScriptEntityId("Latin"), Hash128.OfCanonical("unicode/script/Latin/v1"));
     }
 
     [Fact]

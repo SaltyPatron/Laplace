@@ -5,12 +5,6 @@ namespace Laplace.Decomposers.ISO;
 
 internal static class LanguageGraph
 {
-    public static Laplace.Engine.Core.Hash128 ScriptEntityId(string ucdName) =>
-        Laplace.Engine.Core.Hash128.OfCanonical($"unicode/script/{ucdName}/v1");
-
-    public static Laplace.Engine.Core.Hash128 VariantEntityId(string subtag) =>
-        Laplace.Engine.Core.Hash128.OfCanonical($"substrate/iso639/variant/{subtag.ToLowerInvariant()}/v1");
-
     public static Dictionary<string, string> LoadIso6393Aliases(string iso639Dir)
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);

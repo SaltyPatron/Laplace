@@ -392,10 +392,8 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         protected override string PhaseLabel => "iso639/macrolanguages";
         protected override void Compose((string Indiv, string Macro) rec, SubstrateChangeBuilder b)
         {
-            var indivId = LanguageEntityId.FromIso639_3(rec.Indiv);
-            var macroId = LanguageEntityId.FromIso639_3(rec.Macro);
-            b.AddEntity(indivId, EntityTier.Word, LanguageTypeId, Source);
-            b.AddEntity(macroId, EntityTier.Word, LanguageTypeId, Source);
+            var indivId = LanguageReference.EmitResolvedCode(b, rec.Indiv, Source, TC.StandardsDerived);
+            var macroId = LanguageReference.EmitResolvedCode(b, rec.Macro, Source, TC.StandardsDerived);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 indivId, RelTypeMemberOfMacrolanguage, macroId, Source, null,
                 RelationTypeRank.StandardsStructural * TC.StandardsDerived));
@@ -452,8 +450,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         protected override void Compose(
             (string Retired, string Reason, string[] Successors) rec, SubstrateChangeBuilder b)
         {
-            var retId = LanguageEntityId.FromIso639_3(rec.Retired);
-            b.AddEntity(retId, EntityTier.Word, LanguageTypeId, Source);
+            var retId = LanguageReference.EmitResolvedCode(b, rec.Retired, Source, TC.StandardsDerived);
 
             if (rec.Reason == NonExistent)
             {
@@ -465,8 +462,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
 
             foreach (var successor in rec.Successors)
             {
-                var sucId = LanguageEntityId.FromIso639_3(successor);
-                b.AddEntity(sucId, EntityTier.Word, LanguageTypeId, Source);
+                var sucId = LanguageReference.EmitResolvedCode(b, successor, Source, TC.StandardsDerived);
                 b.AddAttestation(NativeAttestation.Categorical(
                     retId, "SUPERSEDED_BY", sucId, Source, TC.StandardsDerived));
             }
@@ -531,7 +527,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         protected override void Compose(Iso6392Record rec, SubstrateChangeBuilder b)
         {
             Hash128? languageId = rec.LanguageCode is { Length: 3 } languageCode
-                ? LanguageEntityId.FromIso639_3(languageCode)
+                ? LanguageReference.EmitResolvedCode(b, languageCode, Source, TC.StandardsDerived)
                 : null;
 
             StageCode(rec.Bibliographic, "HAS_ISO639_2B_CODE");
@@ -540,10 +536,11 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
             void StageCode(string code, string relation)
             {
                 if (code.Length != 3) return;
-                string canonical = $"iso639-2:{code.ToLowerInvariant()}";
+                string canonical = code.ToLowerInvariant();
                 Owner._codeNames.Add(canonical);
-                Hash128 codeId = Hash128.OfCanonical(canonical);
-                b.AddEntity(codeId, EntityTier.Word, Iso639CodeTypeId, Source);
+                Hash128 codeId = ContentEmitter.Emit(b, canonical, Source)
+                    ?? throw new InvalidOperationException($"ISO 639-2 code could not be composed: {canonical}");
+                CategoryAnchor.AttestCategory(b, codeId, Iso639CodeTypeId, Source, TC.StandardsDerived);
 
                 if (ContentEmitter.Emit(b, rec.English, Source) is { } english)
                     b.AddAttestation(NativeAttestation.Categorical(
@@ -554,7 +551,6 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
 
                 if (languageId is { } lid)
                 {
-                    b.AddEntity(lid, EntityTier.Word, LanguageTypeId, Source);
                     b.AddAttestation(NativeAttestation.Categorical(
                         lid, relation, codeId, Source, TC.StandardsDerived));
                 }
@@ -593,8 +589,7 @@ public sealed class ISODecomposer : DecomposerMultiPhase<ISOSource, FullScope>, 
         protected override string PhaseLabel => "iso639/names";
         protected override void Compose((string Id, string PrintName) rec, SubstrateChangeBuilder b)
         {
-            var lid = LanguageEntityId.FromIso639_3(rec.Id);
-            b.AddEntity(lid, EntityTier.Word, LanguageTypeId, Source);
+            var lid = LanguageReference.EmitResolvedCode(b, rec.Id, Source, TC.StandardsDerived);
             if (ContentEmitter.Emit(b, rec.PrintName, Source) is { } nid)
                 b.AddAttestation(NativeAttestation.Categorical(
                     lid, NameAliasRelation, nid, Source, TC.StandardsDerived));
