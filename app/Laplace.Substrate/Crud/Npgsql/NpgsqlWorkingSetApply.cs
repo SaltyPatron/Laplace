@@ -999,6 +999,22 @@ public sealed partial class NpgsqlSubstrateWriter
                     phys.Rows[i], -1, 0));
             }
 
+            // Physicality closure is decided here, per working set, in memory: every
+            // entity this apply writes must be realized by a physicality staged in the
+            // same set. A novel entity cannot already own a stored physicality.
+            {
+                var placedEntities = new HashSet<Hash128>(phys.EntityIds);
+                long unplaced = 0;
+                for (int k = 0; k < firstEntIdx.Count; k++)
+                {
+                    var eid = ents.Ids[firstEntIdx[k]];
+                    if (presentEntities.Contains(eid) || (persistedEnt?.ContainsKey(eid) ?? false))
+                        continue;
+                    if (!placedEntities.Contains(eid)) unplaced++;
+                }
+                PhysicalityClosureLedger.Record(firstEntIdx.Count, unplaced);
+            }
+
             // The content-addressed five-tuple owns testimony identity. An
             // existing attestation is a replay even if dispatch boundaries or
             // the working-set token changed. Only novel identities may fold.

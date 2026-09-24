@@ -624,20 +624,16 @@ public sealed class IngestRunner
 
         if (fullSuccessfulExtraction)
         {
-            PhysicalityCoverage committedCoverage = await _reader.PhysicalityCoverageAsync(
-                decomposer.SourceId, ct).ConfigureAwait(false);
-            if (!committedCoverage.Complete)
+            var (writtenEntities, unplacedEntities) =
+                Laplace.SubstrateCRUD.Npgsql.PhysicalityClosureLedger.Take();
+            if (unplacedEntities != 0)
                 throw new InvalidOperationException(
                     $"{decomposer.SourceName}: physicality closure failed after ingest: "
-                    + $"{committedCoverage.PlacedEntities}/{committedCoverage.GovernedEntities} "
-                    + "source-owned entity identities are physically realized; "
-                    + $"{committedCoverage.MissingEntities} remain unplaced. "
-                    + "No completion marker will be written.");
+                    + $"{unplacedEntities} of {writtenEntities} written entity identities have no "
+                    + "physicality. No completion marker will be written.");
             log.LogInformation(
-                "INGEST_PHYSICALITY_COVERAGE source={Source} entities={Entities} placed={Placed} missing=0 status=ok",
-                decomposer.SourceName,
-                committedCoverage.GovernedEntities,
-                committedCoverage.PlacedEntities);
+                "INGEST_PHYSICALITY_COVERAGE source={Source} entities={Entities} missing=0 status=ok",
+                decomposer.SourceName, writtenEntities);
         }
 
         // Files proven complete by their own markers count toward the layer: a run
