@@ -21,11 +21,9 @@ if [[ "${LAPLACE_FRESH_DB:-}" != 1 ]]; then
   if ! entity_storage_generation="$(psql -X -d "$database" -U "$user" -tAX -v ON_ERROR_STOP=1 <<'SQL'
 SELECT CASE
          WHEN e.oid IS NULL THEN 'absent'
-         WHEN e.relkind = 'p' AND p.partstrat = 'h'
-              AND i.relkind IN ('r', 'p') THEN 'canonical'
+         WHEN e.relkind = 'p' AND p.partstrat = 'h' THEN 'canonical'
          WHEN e.relkind = 'r'
               OR (e.relkind = 'p' AND p.partstrat IN ('l', 'r'))
-              OR (e.relkind = 'p' AND p.partstrat = 'h' AND i.oid IS NULL)
            THEN 'incompatible'
          ELSE 'unsupported'
        END
