@@ -1426,7 +1426,7 @@ public sealed class UnicodeDecomposer
         private static void EmitByte(SubstrateChangeBuilder builder, byte value)
         {
             Hash128 byteId = ByteAtoms.Id(value);
-            builder.AddEntity(byteId, tier: 0, ByteAtoms.TypeId, firstObservedBy: Source);
+            builder.AddEntity(byteId, tier: 0, ByteAtoms.TypeId);
             ReadOnlySpan<double> coord = ByteAtoms.Coord(value);
             Hash128 physicalityId = PhysicalityId.Compute(byteId, PhysicalityType.Content);
             builder.AddPhysicality(new PhysicalityRow(

@@ -98,7 +98,7 @@ public static class SemanticPredicateAnchor
         }
 
         Hash128 id = Hash128.Merkle(EntityTier.Word, flat);
-        builder.AddEntity(id, EntityTier.Word, entityTypeId, source);
+        builder.AddEntity(id, EntityTier.Word, entityTypeId);
 
         var coords = new double[placed.Count * 4];
         for (int i = 0; i < placed.Count; i++)

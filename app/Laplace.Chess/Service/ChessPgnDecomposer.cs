@@ -678,9 +678,9 @@ public sealed class ChessPgnDecomposer(bool recursive = false, bool analyzeInlin
         GameOutcome result, Hash128? whitePlayer, Hash128? blackPlayer, int whiteElo, int blackElo,
         Hash128 src)
     {
-        b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, src);
-        b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType, src);
-        b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType, src);
+        b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType);
+        b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType);
+        b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType);
 
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             playingId, ChessVocabulary.PlaysLineType, lineId, src, null, PgnWitnessWeight));

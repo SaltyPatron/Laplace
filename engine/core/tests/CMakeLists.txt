@@ -30,7 +30,6 @@ set(LAPLACE_CORE_TEST_SOURCES
     test_physicality_descriptor_provider.cpp
     test_centroid_workspace.cpp
     test_physicality_descriptor_transport.cpp
-    test_physicality_descriptor_admission.cpp
     test_physicality_descriptor_retention.cpp
     test_grapheme_break.cpp
     test_word_break.cpp

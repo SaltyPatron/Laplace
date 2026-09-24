@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -25,6 +26,14 @@ struct recipe_delimited_reference {
 inline constexpr char recipe_group_trunk_value[] = "\x01";
 inline constexpr char recipe_pair_item_separator = '\x1e';
 inline constexpr char recipe_pair_value_separator = '\x1f';
+
+// Source structure recovered alongside the keyed cells: the raw values of one
+// line in column order, and for the last row of a group the group's lines in
+// source order (comment key/value lines, rows, and key-skipped rows).
+struct recipe_delimited_structure {
+    std::vector<std::string> cells;
+    std::shared_ptr<const std::vector<std::vector<std::string>>> group;
+};
 
 struct recipe_delimited_config {
     std::string record_name, namespace_uri, separator, comment_prefix;
@@ -51,6 +60,8 @@ class recipe_delimited_stream {
     // Rows skipped by key (multiword ranges, empty nodes) are not records, but
     // other rows may still point at them.
     std::vector<std::map<std::string, std::string>> group_skipped_;
+    std::vector<std::vector<std::string>> group_lines_;
+    std::vector<std::vector<std::string>> group_row_cells_;
 
     static std::string_view trim(std::string_view text) {
         auto first = text.find_first_not_of(" \t\r");
@@ -79,6 +90,9 @@ class recipe_delimited_stream {
                     auto value = trim(body.substr(split_at + config.group_attribute_separator.size()));
                     if (!key.empty())
                         group_attributes_["group:" + std::string(key)] = std::string(value);
+                    group_lines_.push_back({std::string(key), std::string(value)});
+                } else if (!body.empty()) {
+                    group_lines_.push_back({std::string(body)});
                 }
                 return;
             }
@@ -100,6 +114,7 @@ class recipe_delimited_stream {
         }
         const auto& columns = directive ? config.directive_columns : config.columns;
         std::map<std::string, std::string> values;
+        std::vector<std::string> cells;
         size_t start = 0, column = 0;
         for (;;) {
             auto end = text.find(config.separator, start);
@@ -114,6 +129,7 @@ class recipe_delimited_stream {
                 break;
             }
             if (!values.emplace(columns[column++], std::string(value)).second) fail("duplicate column name");
+            cells.emplace_back(value);
             if (end == std::string_view::npos) break;
             start = end + config.separator.size();
         }
@@ -148,14 +164,18 @@ class recipe_delimited_stream {
                 if (key != values.end()
                     && key->second.find_first_of(config.skip_key_characters) != std::string::npos) {
                     group_skipped_.push_back(std::move(values));
+                    group_lines_.push_back(std::move(cells));
                     return;
                 }
             }
             group_rows_.push_back(std::move(values));
+            group_lines_.push_back(cells);
+            group_row_cells_.push_back(std::move(cells));
             return;
         }
         emit(directive ? config.directive_record_name : config.record_name,
-             config.namespace_uri, std::move(values));
+             config.namespace_uri, std::move(values),
+             recipe_delimited_structure{std::move(cells), nullptr});
     }
 
     std::string resolve_reference(const recipe_delimited_reference& ref,
@@ -173,7 +193,12 @@ class recipe_delimited_stream {
     }
 
     template<class Emit> void flush_group(Emit& emit) {
-        if (group_rows_.empty()) { group_attributes_.clear(); group_skipped_.clear(); return; }
+        if (group_rows_.empty()) {
+            group_attributes_.clear(); group_skipped_.clear();
+            group_lines_.clear(); group_row_cells_.clear();
+            return;
+        }
+        auto group = std::make_shared<const std::vector<std::vector<std::string>>>(std::move(group_lines_));
         std::map<std::string, const std::map<std::string, std::string>*> by_key;
         for (const auto& ref : config.references) {
             for (const auto& row : group_rows_) {
@@ -219,11 +244,15 @@ class recipe_delimited_stream {
             }
             for (const auto& attribute : group_attributes_) row.emplace(attribute.first, attribute.second);
             row["group:first"] = i == 0 ? "1" : "0";
-            emit(config.record_name, config.namespace_uri, std::move(row));
+            emit(config.record_name, config.namespace_uri, std::move(row),
+                 recipe_delimited_structure{std::move(group_row_cells_[i]),
+                     i + 1 == resolved.size() ? group : nullptr});
         }
         group_rows_.clear();
         group_skipped_.clear();
         group_attributes_.clear();
+        group_lines_.clear();
+        group_row_cells_.clear();
     }
 
 public:

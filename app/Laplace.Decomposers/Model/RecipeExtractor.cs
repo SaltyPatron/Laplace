@@ -86,7 +86,7 @@ public sealed class RecipeExtractor
         Hash128 hasHiddenSizeTypeId,
         Hash128 hasNumLayersTypeId)
     {
-        b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId, firstObservedBy: sourceId);
+        b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId);
 
         // Recipe JSON is source content, not a canonical-name side channel. Stage the
         // canonical bytes through the same tier/content spine as every other textual
@@ -104,7 +104,7 @@ public sealed class RecipeExtractor
             // claims content identity without retaining the content hierarchy/physicality.
             var valueId = ContentEmitter.Emit(b, Encoding.UTF8.GetBytes(value), sourceId)
                 ?? throw new InvalidOperationException($"scalar '{value}' has no content root");
-            b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar, sourceId);
+            b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 recipe.RecipeEntityId, typeId, valueId, sourceId, null, 1.0));
         }

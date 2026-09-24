@@ -35,7 +35,7 @@ public sealed class ParallelIngestPipelineTests
             segment => new DirectComposeHandler<int>((record, builder) =>
             {
                 witnessed.Add((record, segment));
-                builder.AddEntity(EntityIdFor(record), EntityTier.Word, Src, Src);
+                builder.AddEntity(EntityIdFor(record), EntityTier.Word, Src);
             }), _ => config, segments, "monolith-tail"))
         {
             change.ApplyEnvelope?.Dispose();
@@ -116,7 +116,7 @@ public sealed class ParallelIngestPipelineTests
             WorkingSet = WorkingSetMode.Enabled,
         };
         var handler = new DirectComposeHandler<int>((i, b) =>
-            b.AddEntity(EntityIdFor(i), EntityTier.Word, Src, Src));
+            b.AddEntity(EntityIdFor(i), EntityTier.Word, Src));
 
         await foreach (var change in IngestBatchPipeline.RunAsync(
                            new ParallelIntRecordStream(n, workers), handler, config, CancellationToken.None))

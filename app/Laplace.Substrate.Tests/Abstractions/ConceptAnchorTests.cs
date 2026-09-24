@@ -41,8 +41,6 @@ public class ConceptAnchorTests
 
         var change = b.Build();
         Assert.Contains(change.Physicalities, p => p.EntityId == id);
-        Assert.Contains(change.EntityInterpretations, e =>
-            e.EntityId == id && e.TypeId == EntityTypeRegistry.WordNetSynset);
         var typedAs = RelationTypeRegistry.RelationTypeId("IS_TYPED_AS");
         Assert.Contains(change.Attestations, a =>
             a.SubjectId == id!.Value && a.TypeId == typedAs && a.ObjectId == EntityTypeRegistry.WordNetSynset);

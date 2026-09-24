@@ -344,7 +344,7 @@ public static class ChessGraph
     // identification. A placement address alone cannot prove body equivalence.
     private static void AddNode(SubstrateChangeBuilder b, in ChessNode n, Hash128 typeId, long nowUs, Hash128 src)
     {
-        b.AddEntity(n.Id, n.Tier, typeId, src);
+        b.AddEntity(n.Id, n.Tier, typeId);
         b.AddPhysicality(new PhysicalityRow(
             Id: n.PhysId,
             EntityId: n.Id,

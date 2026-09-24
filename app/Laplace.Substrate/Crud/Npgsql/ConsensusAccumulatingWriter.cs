@@ -388,16 +388,13 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
                         // this transaction admitted, managed and native alike. It folds on
                         // this connection before commit, so a durable journal token always
                         // implies current standing for the testimony it carries.
-                        if (!acceptance.OriginalReplay)
-                        {
-                            var acceptedDelta = BuildDelta(
-                                changes, acceptance.AttestationIds, acceptance.Rows);
-                            if (acceptedDelta is { Count: > 0 })
-                                atomicStats = await UpsertDeltaInTransactionAsync(
-                                    acceptedDelta, connection, transaction, token).ConfigureAwait(false);
-                        }
+                        var acceptedDelta = BuildDelta(
+                            changes, acceptance.AttestationIds, acceptance.Rows);
+                        if (acceptedDelta is { Count: > 0 })
+                            atomicStats = await UpsertDeltaInTransactionAsync(
+                                acceptedDelta, connection, transaction, token).ConfigureAwait(false);
 
-                        if (!acceptance.OriginalReplay && appendConversation is not null)
+                        if (appendConversation is not null)
                             await appendConversation(connection, transaction, token).ConfigureAwait(false);
 
                         // Source-integrity verification remains on the evidence transaction.

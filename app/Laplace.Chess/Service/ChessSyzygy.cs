@@ -182,7 +182,7 @@ public static class ChessSyzygy
                 node.Position.Id, "HAS_DTZ", dtzId, SourceId, contextId: null, Weight));
 
         b.AddEntity(MarkerId(product.PositionId, Version), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, SourceId);
+            ChessVocabulary.AnalysisMarkerType);
         if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
             b.AddAttestation(NativeAttestation.Categorical(
                 product.PositionId, "ANALYZED_AT", vId, SourceId, null, Weight));
@@ -299,7 +299,7 @@ public static class ChessSyzygy
                 SourceId, contextId: null, Weight));
         }
 
-        b.AddEntity(chunk.Id, ChessCompose.SegmentTier, ChessVocabulary.AnalysisMarkerType, SourceId);
+        b.AddEntity(chunk.Id, ChessCompose.SegmentTier, ChessVocabulary.AnalysisMarkerType);
         b.AddPhysicality(new PhysicalityRow(
             PhysicalityId.Compute(chunk.Id, PhysicalityType.Projection),
             chunk.Id, SourceId, PhysicalityType.Projection,
@@ -336,7 +336,7 @@ public static class ChessSyzygy
         SubstrateChangeBuilder b, SyzygyGraphNode graphNode, long nowUs)
     {
         var node = graphNode.Node;
-        b.AddEntity(node.Id, node.Tier, graphNode.TypeId, SourceId);
+        b.AddEntity(node.Id, node.Tier, graphNode.TypeId);
         b.AddPhysicality(new PhysicalityRow(
             node.PhysId, node.Id, SourceId, PhysicalityType.Content,
             node.Coord[0], node.Coord[1], node.Coord[2], node.Coord[3], node.Hb,
@@ -361,7 +361,7 @@ public static class ChessSyzygy
         }
         double[] rootCentroid = Math4d.KarcherMean(chunkCoords);
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-        b.AddEntity(materialId, ChessCompose.LineTier, ChessVocabulary.AnalysisMarkerType, SourceId);
+        b.AddEntity(materialId, ChessCompose.LineTier, ChessVocabulary.AnalysisMarkerType);
         b.AddPhysicality(new PhysicalityRow(
             PhysicalityId.Compute(materialId, PhysicalityType.Projection),
             materialId, SourceId, PhysicalityType.Projection,

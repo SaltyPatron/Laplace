@@ -112,8 +112,8 @@ public sealed class GutenbergRetainedDbTests
             "SELECT EXISTS (SELECT 1 FROM laplace.entities WHERE id = $1)",
             DocumentSource.SourceId.ToBytes()));
         Assert.True(await ScalarAsync<bool>(connection,
-            "SELECT EXISTS (SELECT 1 FROM laplace.entities "
-            + "WHERE id = $1 AND first_observed_by = $2)",
+            "SELECT EXISTS (SELECT 1 FROM laplace.attestations "
+            + "WHERE subject_id = $1 AND source_id = $2)",
             file.FileId.ToBytes(), DocumentSource.SourceId.ToBytes()));
 
         var children = await NpgsqlSubstrateReads.PackedTrajectoryVerticesAsync(

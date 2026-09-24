@@ -297,7 +297,7 @@ public static unsafe partial class NativeInterop
 
     [LibraryImport(Library, EntryPoint = "intent_stage_add_entity")]
     internal static partial int IntentStageAddEntity(
-        IntPtr stage, Hash128* id, short tier, Hash128* typeId, Hash128* firstObservedBy);
+        IntPtr stage, Hash128* id, short tier, Hash128* typeId);
 
     [LibraryImport(Library, EntryPoint = "intent_stage_add_physicality")]
     internal static partial int IntentStageAddPhysicality(

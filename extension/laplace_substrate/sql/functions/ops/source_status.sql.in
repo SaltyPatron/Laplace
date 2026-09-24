@@ -76,8 +76,12 @@ rolled AS (
            COALESCE(ev.evidence_approx,
                     (SELECT count(*) FROM @extschema@.attestations a
                       WHERE a.source_id = i.source_id))             AS evidence_approx,
-           EXISTS (SELECT 1 FROM @extschema@.entities e
-                   WHERE e.first_observed_by = i.source_id)        AS has_entities,
+           -- Entities are source-independent; a source only ever witnesses
+           -- through attestations. Per-source content presence is therefore
+           -- attestation presence, not entity ownership.
+           COALESCE(ev.evidence_approx,
+                    (SELECT count(*) FROM @extschema@.attestations a
+                      WHERE a.source_id = i.source_id)) > 0          AS has_entities,
            jr.source_name                                          AS journal_name,
            jr.status                                               AS last_run_status,
            jr.started_at                                           AS last_run_at,

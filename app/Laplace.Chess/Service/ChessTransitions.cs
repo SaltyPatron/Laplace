@@ -34,7 +34,7 @@ public static class ChessTransitions
             TC.StructuredCorpus, SourceId, parsed.PlayingId);
         b.AddEntity(
             MarkerId(parsed.PlayingId), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, SourceId);
+            ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(b, MarkerId(parsed.PlayingId), SourceId, 22);
     }
 
@@ -60,7 +60,7 @@ public static class ChessTransitions
             TC.StructuredCorpus, SourceId, game.PlayingId);
         b.AddEntity(
             MarkerId(game.PlayingId), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, SourceId);
+            ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(b, MarkerId(game.PlayingId), SourceId, 22);
     }
 }

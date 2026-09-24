@@ -224,27 +224,27 @@ internal sealed class UcdProperties
     {
         var typeId = EntityTypeRegistry.UcdClassifier;
         foreach (var (_, id) in CategoryEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in ScriptEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in BlockEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in BidiClassEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in AgeEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in EmojiPropEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in LineBreakEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in EastAsianWidthEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in JoiningTypeEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in NumericTypeEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
         foreach (var (_, id) in NormalizationFormEntityIds)
-            yield return new EntityRow(id, EntityTier.Word, typeId, sourceId);
+            yield return new EntityRow(id, EntityTier.Word, typeId);
     }
 
     public static UcdProperties Load(string ucdDir)

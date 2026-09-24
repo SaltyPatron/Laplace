@@ -10,8 +10,6 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
-#include "physicality_descriptor_admission_pg.h"
-#include "generated_stage_sink.h"
 
 #include "laplace/core/mantissa.h"
 #include "laplace/core/content_witness_batch.h"
@@ -315,7 +313,9 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
     /* Validate the common writer isolation contract before taking the session
      * row lock. A statement that waited for that row must not retain its
      * pre-wait provider snapshot. */
-    laplace_generated_stage_sink_lock();
+    if (XactIsoLevel != XACT_READ_COMMITTED)
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("session_append_turns requires READ COMMITTED")));
     admission = palloc0(sizeof(*admission));
     admission->context = CurrentMemoryContext;
     admission->maximum_bytes = (size_t) requested_bytes;
@@ -336,47 +336,6 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
 
     PushActiveSnapshot(GetLatestSnapshot());
     Datum manifest_args[2] = {hash128_to_datum(&physicality_id), hash128_to_datum(&legacy_id)};
-    Oid metadata_types[1] = {BYTEAARRAYOID};
-    Datum metadata_args[1] = {PointerGetDatum(construct_array(manifest_args, 2,
-        BYTEAOID, -1, false, TYPALIGN_INT))};
-    SPIPlanPtr metadata = session_plan(&session_manifest_metadata_plan,
-        laplace_sql_query_text("ingest.physicality_descriptor_provider_metadata"), 1, metadata_types);
-    if (SPI_execute_snapshot(metadata, metadata_args, NULL, GetActiveSnapshot(), InvalidSnapshot,
-        true, false, 2) != SPI_OK_SELECT)
-        elog(ERROR, "session_append_turns: reading prior projection metadata failed");
-    size_t manifest_payload = 0;
-    for (uint64 i = 0; i < SPI_processed; ++i) {
-        HeapTuple row = SPI_tuptable->vals[i];
-        TupleDesc desc = SPI_tuptable->tupdesc;
-        bool missing;
-        Datum type = SPI_getbinval(row, desc, 3, &missing);
-        if (missing || DatumGetInt16(type) != SESSION_MANIFEST_TYPE)
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
-                errmsg("conversation session: legacy Content manifest requires typed recovery")));
-        Datum entity = SPI_getbinval(row, desc, 2, &missing);
-        if (missing || toast_raw_datum_size(entity) != VARHDRSZ + sizeof(session_id) ||
-            memcmp(VARDATA_ANY(DatumGetByteaPP(entity)), &session_id, sizeof(session_id)) != 0)
-            elog(ERROR, "session_append_turns: prior projection has an invalid entity owner");
-        /* Inspect external/compressed TOAST sizes before asking PostGIS for
-         * expanded WKB. Two copies cover decompression plus its set projection;
-         * row storage and exact aligned/native copies are charged separately. */
-        session_charge(admission, row->t_len);
-        manifest_payload += row->t_len;
-        for (int column = 4; column <= 6; column += 2) {
-            Datum geometry = SPI_getbinval(row, desc, column, &missing);
-            if (missing) {
-                if (column == 4) elog(ERROR, "session_append_turns: prior coordinate is missing");
-                continue;
-            }
-            size_t raw = toast_raw_datum_size(geometry);
-            if (raw > (admission->maximum_bytes - admission->bytes) / 2)
-                ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                    errmsg("session_append_turns: prior projection exceeds byte grant")));
-            session_charge(admission, raw * 2);
-            manifest_payload += raw * 2;
-        }
-    }
-    SPI_freetuptable(SPI_tuptable);
     if (SPI_execute_snapshot(session_manifest(), manifest_args, NULL, GetActiveSnapshot(), InvalidSnapshot,
         true, false, 2) != SPI_OK_SELECT)
         elog(ERROR, "session_append_turns: reading session manifest failed");
@@ -394,40 +353,9 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
             if (trajectory_constituent_count(previous, previous_vertices, &previous_count) != 0)
                 elog(ERROR, "session_append_turns: invalid prior manifest");
         }
-        /* Capture the complete persisted old form, including nullable fields,
-         * before its stable projection address receives the next body. */
-        HeapTuple old_row = SPI_tuptable->vals[0];
-        TupleDesc old_desc = SPI_tuptable->tupdesc;
-        double old_coord[4], old_alignment = 0;
-        int32 old_dimension = 0;
-        bool alignment_null, dimension_null;
-        hilbert128_t old_hilbert;
-        for (int axis = 0; axis < 4; ++axis) {
-            value = SPI_getbinval(old_row, old_desc, axis + 3, &isnull);
-            if (isnull) elog(ERROR, "session_append_turns: prior coordinate is incomplete");
-            old_coord[axis] = DatumGetFloat8(value);
-        }
-        value = SPI_getbinval(old_row, old_desc, 7, &isnull);
-        if (isnull || VARSIZE_ANY_EXHDR(DatumGetByteaPP(value)) != sizeof(old_hilbert))
-            elog(ERROR, "session_append_turns: prior Hilbert identity is invalid");
-        memcpy(&old_hilbert, VARDATA_ANY(DatumGetByteaPP(value)), sizeof(old_hilbert));
-        value = SPI_getbinval(old_row, old_desc, 8, &isnull);
-        if (isnull || DatumGetInt32(value) < 0 || (size_t) DatumGetInt32(value) != previous_count)
-            elog(ERROR, "session_append_turns: prior count disagrees with its exact trajectory");
-        value = SPI_getbinval(old_row, old_desc, 9, &alignment_null);
-        if (!alignment_null) old_alignment = DatumGetFloat8(value);
-        value = SPI_getbinval(old_row, old_desc, 10, &dimension_null);
-        if (!dimension_null) old_dimension = DatumGetInt32(value);
-        value = SPI_getbinval(old_row, old_desc, 11, &isnull);
-        if (isnull) elog(ERROR, "session_append_turns: prior observation time is missing");
-        session_observe(admission, &physicality_id, &session_id, old_coord,
-            &old_hilbert, previous, previous_vertices, (int32) previous_count,
-            alignment_null, old_alignment, dimension_null, old_dimension,
-            session_unix_us(DatumGetTimestampTz(value)));
     }
     SPI_freetuptable(SPI_tuptable);
 
-    admission->bytes -= manifest_payload;
     if (previous_count > PG_INT32_MAX - (size_t) added ||
         previous_count + added > (MaxAllocSize - 9 - VARHDRSZ) / (4 * sizeof(double)))
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
@@ -510,85 +438,7 @@ pg_laplace_session_append_turns(PG_FUNCTION_ARGS)
         memcpy(bytes + 5, &vertices, 4);
     }
     memcpy(bytes + header, packed, packed_count * 4 * sizeof(double));
-    session_observe(admission, &physicality_id, &session_id, centroid, &hilbert,
-        packed, packed_count, (int32) total, true, 0, true, 0, observed_unix);
     session_release(admission, packed, total * 4 * sizeof(double));
-    if (PG_NARGS() == 7)
-        memcpy(&admission->unit, VARDATA_ANY(PG_GETARG_BYTEA_PP(3)), sizeof(admission->unit));
-    else if (intent_stage_semantic_digest_batch((const intent_stage_t *const *)admission->raw,
-        admission->observation_count, &admission->unit) != 0)
-        elog(ERROR, "session_append_turns: deriving exact operation receipt failed");
-    size_t source_peak = 0;
-    physicality_descriptor_status_t source_status = physicality_descriptor_session_source_create(
-        admission->maximum_bytes - admission->bytes, &admission->source,
-        &admission->declaration, &source_peak);
-    if (source_status != PHYSICALITY_DESCRIPTOR_OK)
-        ereport(ERROR, (errcode(source_status == PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED ?
-            ERRCODE_PROGRAM_LIMIT_EXCEEDED : ERRCODE_DATA_EXCEPTION),
-            errmsg("session_append_turns: ordinary projection source creation failed (%d)", (int)source_status)));
-    session_charge(admission, source_peak); admission->bytes -= source_peak;
-    session_charge(admission, intent_stage_memory_bytes(admission->declaration));
-    size_t observation_count = admission->observation_count;
-    if (observation_count < 1 || observation_count > 2)
-        elog(ERROR, "session_append_turns: exact projection observation count is invalid");
-    const intent_stage_t *generated[1] = {admission->declaration};
-    if (maximum_operations <= SESSION_OPERATION_RESERVATION)
-        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-            errmsg("session_append_turns: source declaration sink has no operation grant")));
-    LaplaceGeneratedStageSinkLimits sink_limits = {
-        (admission->maximum_bytes - admission->bytes) / sizeof(hash128_t),
-        admission->maximum_bytes - admission->bytes,
-        (size_t) maximum_logical - composition_work,
-        (uint32) (maximum_operations - SESSION_OPERATION_RESERVATION)};
-    LaplaceGeneratedStageSinkReceipt sink_receipt;
-    laplace_generated_stage_sink(generated, 1, &sink_limits, &sink_receipt);
-    {
-        Datum *entities = palloc(sizeof(Datum) * observation_count);
-        Datum *physicalities = palloc(sizeof(Datum) * observation_count);
-        Datum *sources = palloc(sizeof(Datum) * observation_count);
-        Datum *units = palloc(sizeof(Datum) * observation_count);
-        Datum *times = palloc(sizeof(Datum) * observation_count);
-        for (size_t i = 0; i < observation_count; ++i) {
-            entities[i] = hash128_to_datum(&session_id);
-            physicalities[i] = hash128_to_datum(&physicality_id);
-            sources[i] = hash128_to_datum(&admission->source);
-            units[i] = hash128_to_datum(&admission->unit);
-            times[i] = Int64GetDatum(admission->observation_times[i]);
-        }
-        Oid types[5] = {BYTEAARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID,BYTEAARRAYOID,INT8ARRAYOID};
-        Datum args[5] = {
-            PointerGetDatum(construct_array(entities, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
-            PointerGetDatum(construct_array(physicalities, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
-            PointerGetDatum(construct_array(sources, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
-            PointerGetDatum(construct_array(units, observation_count, BYTEAOID,-1,false,TYPALIGN_INT)),
-            PointerGetDatum(construct_array(times, observation_count, INT8OID,8,true,TYPALIGN_DOUBLE))
-        };
-        SPIPlanPtr plan = session_plan(&session_observation_plan,
-            laplace_sql_query_text("ingest.physicality_observations"), 5, types);
-        if (SPI_execute_plan(plan, args, NULL, false, 1) != SPI_OK_SELECT || SPI_processed != 1)
-            elog(ERROR, "session_append_turns: retaining structural physicality provenance failed");
-        SPI_freetuptable(SPI_tuptable);
-    }
-    /* Register display names against the actual ordinary source IDs. The
-     * legacy canonical-name helper hashes whole label bytes and therefore is
-     * not an identity constructor for these content-tree entities. */
-    Oid registration_types[2] = {BYTEAARRAYOID, TEXTARRAYOID};
-    Datum source_ids[1] = {hash128_to_datum(&admission->source)};
-    Datum names[1] = {CStringGetTextDatum(physicality_descriptor_session_source_name())};
-    Datum registration_args[2] = {
-        PointerGetDatum(construct_array(source_ids, 1, BYTEAOID, -1, false, TYPALIGN_INT)),
-        PointerGetDatum(construct_array(names, 1, TEXTOID, -1, false, TYPALIGN_INT))};
-    SPIPlanPtr registration = SPI_prepare(laplace_sql_query_text("conversation.register_projection_sources"),
-        2, registration_types);
-    if (registration == NULL || SPI_execute_plan(registration, registration_args, NULL, false, 1) != SPI_OK_SELECT ||
-        SPI_processed != 1)
-        elog(ERROR, "session_append_turns: registering actual projection source names failed");
-    bool missing_mapping;
-    Datum registered = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &missing_mapping);
-    if (missing_mapping || DatumGetInt64(registered) != 1)
-        elog(ERROR, "session_append_turns: projection source display name conflicts with its actual content ID");
-    SPI_freetuptable(SPI_tuptable);
-    SPI_freeplan(registration);
     Oid write_types[10] = {BYTEAOID, BYTEAOID, BYTEAOID, FLOAT8OID, FLOAT8OID,
                            FLOAT8OID, FLOAT8OID, BYTEAOID, INT4OID, TIMESTAMPTZOID};
     hash128_t hilbert_bytes;

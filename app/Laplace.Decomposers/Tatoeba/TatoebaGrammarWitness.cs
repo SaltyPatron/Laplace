@@ -47,7 +47,7 @@ internal sealed class TatoebaEmitter
         string? iso3 = LanguageReference.ResolveCode(lang);
         Hash128 langId = LanguageReference.IdForResolvedCode(iso3);
         VocabularyNames.TrackResolvedLanguage(TatoebaDecomposer.LanguageNames, iso3);
-        b.AddEntity(new EntityRow(langId, EntityTier.Word, TatoebaDecomposer.LanguageTypeId, TatoebaDecomposer.Source));
+        b.AddEntity(new EntityRow(langId, EntityTier.Word, TatoebaDecomposer.LanguageTypeId));
 
         // The content root is the REAL sentence entity — content-addressed, UAX-tiered,
         // shared with any other source that ingests the same text (OpenSubtitles, a UAX

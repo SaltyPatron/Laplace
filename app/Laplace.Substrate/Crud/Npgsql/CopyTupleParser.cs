@@ -17,7 +17,7 @@ internal readonly record struct StagedRowRef(int Blob, long Offset, int Length);
 /// fields the write protocol's in-transaction verification needs: every row's
 /// id, a physicality's entity reference, and an attestation's merge inputs
 /// (last_observed_at, observation_count). Layout comes from intent_stage.c's
-/// column lists; nullable fields (first_observed_by, object_id, context_id,
+/// column lists; nullable fields (object_id, context_id,
 /// trajectory, highway_mask, ...) are length -1 and skipped like any other.
 /// </summary>
 internal static class CopyTupleParser
@@ -25,9 +25,8 @@ internal static class CopyTupleParser
     internal sealed class EntityRows
     {
         public readonly List<Hash128> Ids = new();
-        /// <summary>Observed structural tier. Canonical storage is HASH(id);
-        /// tier is retained for interpretation publication and deterministic
-        /// compatibility-row selection, never as an entity presence key.</summary>
+        /// <summary>Structural tier of the staged entity row; presence is keyed
+        /// by id alone, never by tier.</summary>
         public readonly List<short> Tiers = new();
         /// <summary>Observed type interpretation and deterministic compatibility
         /// representative key for canonical entity COPY.</summary>
@@ -84,23 +83,23 @@ internal static class CopyTupleParser
         public readonly List<StagedRowRef> Rows = new();
     }
 
-    private const int EntityFields = 4;
+    private const int EntityFields = 3;
     private const int PhysicalityFields = 10;
     private const int AttestationFields = 14;
 
     /// <summary>
-    /// Fixed PGCOPY layout for <c>id,tier,type_id,first_observed_by=NULL</c>
-    /// (intent_stage_add_entity). MEASURED: general field-walk parse was ~200ms
-    /// for 500k rows; stride extract is the throughput path.
+    /// Fixed PGCOPY layout for <c>id,tier,type_id</c> (intent_stage_add_entity):
+    /// 2-byte field count, then length-prefixed 16-byte id, 2-byte tier, 16-byte
+    /// type. Stride extract avoids the general field walk on bulk stages.
     /// </summary>
-    private const int EntityRowStrideNullFob = 52;
+    private const int EntityRowStride = 48;
 
     public static unsafe EntityRows ParseEntities(IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
     {
         var result = new EntityRows();
         long bytes = 0;
         for (int b = 0; b < blobs.Count; b++) bytes += blobs[b].Len;
-        int hint = (int)Math.Min(int.MaxValue, Math.Max(0, bytes / EntityRowStrideNullFob));
+        int hint = (int)Math.Min(int.MaxValue, Math.Max(0, bytes / EntityRowStride));
         result.Ids.Capacity = hint;
         result.Tiers.Capacity = hint;
         result.TypeIds.Capacity = hint;
@@ -109,22 +108,20 @@ internal static class CopyTupleParser
         {
             var (ptr, len) = blobs[b];
             byte* p = (byte*)ptr;
-            // Fast path: every row is the null-fob 52-byte stride (throughput
-            // fixture + most bulk entity stages).
-            if (len > 0 && len % EntityRowStrideNullFob == 0
+            // Fast path: every entity row has the fixed 48-byte stride.
+            if (len > 0 && len % EntityRowStride == 0
                 && BinaryPrimitives.ReadInt16BigEndian(new ReadOnlySpan<byte>(p, 2)) == EntityFields
-                && BinaryPrimitives.ReadInt32BigEndian(new ReadOnlySpan<byte>(p + 2, 4)) == 16
-                && BinaryPrimitives.ReadInt32BigEndian(new ReadOnlySpan<byte>(p + 48, 4)) == -1)
+                && BinaryPrimitives.ReadInt32BigEndian(new ReadOnlySpan<byte>(p + 2, 4)) == 16)
             {
-                int rows = (int)(len / EntityRowStrideNullFob);
+                int rows = (int)(len / EntityRowStride);
                 for (int r = 0; r < rows; r++)
                 {
-                    long rowStart = (long)r * EntityRowStrideNullFob;
+                    long rowStart = (long)r * EntityRowStride;
                     byte* row = p + rowStart;
                     result.Ids.Add(Hash128.FromBytes(new ReadOnlySpan<byte>(row + 6, 16)));
                     result.Tiers.Add(BinaryPrimitives.ReadInt16BigEndian(new ReadOnlySpan<byte>(row + 26, 2)));
                     result.TypeIds.Add(Hash128.FromBytes(new ReadOnlySpan<byte>(row + 32, 16)));
-                    result.Rows.Add(new StagedRowRef(b, rowStart, EntityRowStrideNullFob));
+                    result.Rows.Add(new StagedRowRef(b, rowStart, EntityRowStride));
                 }
                 continue;
             }
@@ -266,7 +263,6 @@ internal static class CopyTupleParser
             while (offset < length)
             {
                 Hash128 id = default, type = default;
-                Hash128? source = null;
                 byte tier = 0;
                 WalkRow(bytes, length, ref offset, EntityFields, "entities", (field, valueOffset, valueLength) =>
                 {
@@ -275,11 +271,9 @@ internal static class CopyTupleParser
                         case 0: id = ReadHash(bytes, valueOffset, valueLength, "entities.id"); break;
                         case 1: tier = checked((byte)ReadInt16(bytes, valueOffset, valueLength, "entities.tier")); break;
                         case 2: type = ReadHash(bytes, valueOffset, valueLength, "entities.type_id"); break;
-                        case 3: source = valueLength == -1 ? null
-                            : ReadHash(bytes, valueOffset, valueLength, "entities.first_observed_by"); break;
                     }
                 });
-                result.Add(new EntityRow(id, tier, type, source));
+                result.Add(new EntityRow(id, tier, type));
             }
         }
         return result;

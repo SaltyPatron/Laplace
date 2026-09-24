@@ -21,7 +21,7 @@ public sealed class IngestUnitCompletionIdentityTests
         SubstrateChange Build(bool complete, Hash128 owner)
         {
             using var builder = new SubstrateChangeBuilder(source, "same-actual-source-unit")
-                .AddEntity(marker, EntityTier.Document, EntityTypeRegistry.SourceReference, source)
+                .AddEntity(marker, EntityTier.Document, EntityTypeRegistry.SourceReference)
                 .AddAttestation(NativeAttestation.CategoricalResolved(
                     marker, relation, obj, source, null, 0.9));
             if (complete) IngestUnitCompletion.Emit(builder, marker, owner, layer);

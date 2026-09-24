@@ -168,7 +168,7 @@ public class RepoDecomposer : GrammarComposeDecomposerMultiFile<RepoSource, Full
 
     private static void StageRepoRoot(SubstrateChangeBuilder b, string repoCanonical, Hash128 repoId)
     {
-        b.AddEntity(new EntityRow(repoId, EntityTier.Document, RepoTypeId, Source));
+        b.AddEntity(new EntityRow(repoId, EntityTier.Document, RepoTypeId));
 
         // repoId is a stable governed handle for this repository. The canonical path text is
         // actual content and therefore enters through the normal text Merkle DAG all the way

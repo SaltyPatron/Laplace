@@ -45,7 +45,7 @@ public sealed class UnicodeDecomposerTests
         var codepointEntities = new HashSet<Hash128>();
         var highByteEntities = new HashSet<Hash128>();
         long codepointPhysicalities = 0, passThreeEntities = 0, inputUnits = 0;
-        bool allTier0 = true, allFirstObserved = true;
+        bool allTier0 = true, anySourceWitness = false;
         EntityRow? aEntity = null;
         PhysicalityRow? aPhys = null;
 
@@ -59,7 +59,6 @@ public sealed class UnicodeDecomposerTests
                 {
                     codepointEntities.Add(e.Id);
                     if (e.Tier != 0) allTier0 = false;
-                    if (e.FirstObservedBy != UnicodeDecomposer.Source) allFirstObserved = false;
                     if (aEntity is null && e.Id == aHash)
                     {
                         aEntity = e;
@@ -77,6 +76,8 @@ public sealed class UnicodeDecomposerTests
             foreach (var ph in change.Physicalities)
                 if (ph.Type == PhysicalityType.Content && ph.TrajectoryXyzm is null)
                     codepointPhysicalities++;
+            if (change.Attestations.Any(a => a.SourceId == UnicodeDecomposer.Source))
+                anySourceWitness = true;
         }
 
         Assert.Equal(TotalCodepoints, codepointEntities.Count);
@@ -91,7 +92,7 @@ public sealed class UnicodeDecomposerTests
         Assert.True(passThreeEntities > 0,
             "pass 3 must witness name aliases / confusable sequences as content");
         Assert.True(allTier0, "all codepoint entities are tier 0");
-        Assert.True(allFirstObserved, "all codepoint entities first_observed_by UnicodeDecomposer");
+        Assert.True(anySourceWitness, "the Unicode source witnesses its codepoints through attestations");
 
         Assert.NotNull(aEntity);
         Assert.NotNull(aPhys);

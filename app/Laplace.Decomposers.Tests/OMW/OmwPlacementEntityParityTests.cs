@@ -60,7 +60,6 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
 
         Assert.True(rows > 0, "no OMW records read; the assertion would be vacuous");
         Assert.Empty(change.Physicalities);
-        Assert.Empty(change.PhysicalityObservations);
         Assert.True(stagedPhysicalities > 0, "semantic values must still compose");
         using var actual = Assert.Single(change.IntentStages);
         Assert.Equal(expected.EntityCount, stagedEntities);

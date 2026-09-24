@@ -8,9 +8,7 @@ namespace Laplace.SubstrateCRUD;
 public sealed class SubstrateChangeBuilder : IDisposable
 {
     private readonly ImmutableArray<EntityRow>.Builder _entities;
-    private readonly ImmutableArray<EntityInterpretationRow>.Builder _entityInterpretations;
     private readonly ImmutableArray<PhysicalityRow>.Builder _physicalities;
-    private readonly ImmutableArray<PhysicalityRow>.Builder _physicalityObservations;
     private readonly ImmutableDictionary<Hash128, double>.Builder _sourcePriors =
         ImmutableDictionary.CreateBuilder<Hash128, double>();
     private readonly ImmutableArray<AttestationRow>.Builder _attestations;
@@ -23,17 +21,12 @@ public sealed class SubstrateChangeBuilder : IDisposable
 
     private readonly HashSet<Hash128> _seenEntities = new();
     private readonly Dictionary<Hash128, int> _entityIndex = new();
-    private readonly Dictionary<EntityInterpretationKey, int> _seenEntityInterpretations = new();
     private readonly HashSet<Hash128> _seenPhysicalities = new();
     private readonly Dictionary<Hash128, int> _physByEntity = new();
     private int _physIndexWatermark;
     private long _physicalityTrajectoryBytes;
-    private PhysicalityDescriptorSizing.Shape _observationShape;
-    private PhysicalityDescriptorSizing.Shape _selectedShape;
     private bool _partialTrajectory;
     private bool _disposed;
-
-    private readonly record struct EntityInterpretationKey(Hash128 Id, byte Tier, Hash128 TypeId);
 
     // The canonical member order for a set composition. memcmp of the 16-byte host layout,
     // which is exactly hash128_compare — the same order the native side and the substrate's
@@ -60,9 +53,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
             ?? throw new ArgumentNullException(nameof(sourceContentUnitName));
         _parentIntentId = parentIntentId;
         _entities = ImmutableArray.CreateBuilder<EntityRow>(entityCapacity);
-        _entityInterpretations = ImmutableArray.CreateBuilder<EntityInterpretationRow>(entityCapacity);
         _physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>(physicalityCapacity);
-        _physicalityObservations = ImmutableArray.CreateBuilder<PhysicalityRow>(physicalityCapacity);
         _attestations = ImmutableArray.CreateBuilder<AttestationRow>(attestationCapacity);
     }
 
@@ -79,7 +70,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
         SubstrateChange.ValidateSourcePrior(sourceTrust);
         if (_sourcePriors.TryGetValue(sourceId, out double prior)
             && BitConverter.DoubleToInt64Bits(prior) != BitConverter.DoubleToInt64Bits(sourceTrust))
-            throw new InvalidOperationException($"source {sourceId} has conflicting priors in one physicality observation unit");
+            throw new InvalidOperationException($"source {sourceId} has conflicting priors in one ingest unit");
         _sourcePriors[sourceId] = sourceTrust;
         return this;
     }
@@ -124,26 +115,14 @@ public sealed class SubstrateChangeBuilder : IDisposable
                 row.Tier > prior.Tier ? prior.TypeId :
                 row.TypeId.CompareToBytewise(prior.TypeId) < 0 ? row.TypeId : prior.TypeId;
 
-            Hash128? firstObservedBy = prior.FirstObservedBy;
-            if (row.FirstObservedBy is { } incoming
-                && (firstObservedBy is not { } current
-                    || incoming.CompareToBytewise(current) < 0))
-                firstObservedBy = incoming;
-
-            if (tier != prior.Tier || typeId != prior.TypeId
-                || firstObservedBy != prior.FirstObservedBy)
-                _entities[existingIndex] = prior with
-                {
-                    Tier = tier,
-                    TypeId = typeId,
-                    FirstObservedBy = firstObservedBy,
-                };
+            if (tier != prior.Tier || typeId != prior.TypeId)
+                _entities[existingIndex] = prior with { Tier = tier, TypeId = typeId };
             return this;
         }
 
         // TrySeeEntity is used when a native stage already owns the entity tuple.
-        // In that case do not manufacture a managed duplicate or an interpretation
-        // sidecar merely because a managed caller observes the same identity.
+        // In that case do not manufacture a managed duplicate merely because a
+        // managed caller observes the same identity.
         if (!_seenEntities.Add(row.Id)) return this;
 
         _entityIndex[row.Id] = _entities.Count;
@@ -152,61 +131,22 @@ public sealed class SubstrateChangeBuilder : IDisposable
     }
 
     // A managed entity observation converges directly onto the canonical row.
-    // Semantic plurality belongs in attestations; callers that still require the
-    // compatibility interpretation transport must opt into AddEntityInterpretation.
+    // Semantic plurality belongs in attestations.
     public SubstrateChangeBuilder AddEntity(
-        Hash128 id, byte tier, Hash128 typeId, Hash128? firstObservedBy = null) =>
-        AddEntity(new EntityRow(id, tier, typeId, firstObservedBy));
-
-    /// <summary>Retain an actual observed facet without making its entity eligible
-    /// for creation. Admission requires an existing or independently staged E.</summary>
-    public SubstrateChangeBuilder AddEntityInterpretation(EntityInterpretationRow row)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(row);
-        ObserveEntityInterpretation(row.EntityId, row.Tier, row.TypeId, row.FirstObservedBy);
-        return this;
-    }
-
-    private void ObserveEntityInterpretation(
-        Hash128 id, byte tier, Hash128 typeId, Hash128? firstObservedBy)
-    {
-        var key = new EntityInterpretationKey(id, tier, typeId);
-        if (_seenEntityInterpretations.TryGetValue(key, out int index))
-        {
-            var prior = _entityInterpretations[index];
-            if (firstObservedBy is { } source && (prior.FirstObservedBy is not { } existing
-                || source.CompareToBytewise(existing) < 0))
-                _entityInterpretations[index] = prior with { FirstObservedBy = source };
-            return;
-        }
-        _seenEntityInterpretations.Add(key, _entityInterpretations.Count);
-        _entityInterpretations.Add(new EntityInterpretationRow(id, tier, typeId, firstObservedBy));
-    }
+        Hash128 id, byte tier, Hash128 typeId) =>
+        AddEntity(new EntityRow(id, tier, typeId));
 
     public SubstrateChangeBuilder AddPhysicality(PhysicalityRow row)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(row);
-        // The placement address does not identify an immutable body. Capture
-        // source forms before selecting the compatible first placement row.
+        // A physicality exists because its entity exists: one row per
+        // PhysicalityId(entity, type). A repeated sighting adds nothing.
         int values = row.TrajectoryXyzm?.Length ?? 0;
-        long trajectoryBytes = checked(_physicalityTrajectoryBytes + (long)values * sizeof(double));
-        ulong vertices = (ulong)(values / 4);
-        var shape = new PhysicalityDescriptorSizing.Shape(1, vertices, vertices);
-        var observations = _observationShape.Add(shape);
-        bool selected = !_seenPhysicalities.Contains(row.Id);
-        var selection = selected ? _selectedShape.Add(shape) : _selectedShape;
-        _physicalityObservations.Add(row);
-        _physicalityTrajectoryBytes = trajectoryBytes;
-        _observationShape = observations;
-        _selectedShape = selection;
         _partialTrajectory |= values % 4 != 0;
-        if (selected)
-        {
-            _seenPhysicalities.Add(row.Id);
-            _physicalities.Add(row);
-        }
+        if (!_seenPhysicalities.Add(row.Id)) return this;
+        _physicalityTrajectoryBytes = checked(_physicalityTrajectoryBytes + (long)values * sizeof(double));
+        _physicalities.Add(row);
         return this;
     }
 
@@ -231,7 +171,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
                 [first, last], EntityTypeRegistry.Range, sourceId, observedAtUnixUs)
         ])[0];
 
-        AddEntity(result.Id, result.Tier, EntityTypeRegistry.Range, sourceId);
+        AddEntity(result.Id, result.Tier, EntityTypeRegistry.Range);
         Span<Hash128> endpoints = stackalloc Hash128[2] { first.Id, last.Id };
         AddPhysicality(new PhysicalityRow(
             Id: PhysicalityId.Compute(result.Id, PhysicalityType.Range),
@@ -375,7 +315,7 @@ public sealed class SubstrateChangeBuilder : IDisposable
         // would claim the member IS a collection; the tier-floor law says it is just itself.
         if (n == 1) return id;
 
-        AddEntity(id, tier, typeId, sourceId);
+        AddEntity(id, tier, typeId);
 
         Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Set);
         AddPhysicality(new PhysicalityRow(
@@ -500,13 +440,10 @@ public sealed class SubstrateChangeBuilder : IDisposable
             foreach (var s in _intentStages)
                 if (!s.IsInvalid) total += s.TotalTupleBytes;
             total += (long)_entities.Count * 72
-                   + (long)_entityInterpretations.Count * 56
-                   + (long)_physicalityObservations.Count * 160
-                   + (long)_physicalities.Count * IntPtr.Size
+                   + (long)_physicalities.Count * 160
                    + (long)_attestations.Count * 152;
-            // Every observation contributes, including reused placements. Array length is
-            // immutable; charge once on append instead of rescanning all prior trajectories
-            // at every complete-record memory check.
+            // Trajectory array length is immutable; charge once on append instead of
+            // rescanning all prior trajectories at every complete-record memory check.
             total += _physicalityTrajectoryBytes;
             return total;
         }
@@ -518,13 +455,9 @@ public sealed class SubstrateChangeBuilder : IDisposable
 
 
     /// <summary>
-    /// Modeled source-local admission payload for builders sharing one apply.
-    /// Native tuple/capture/descriptor widths come from their actual owners;
-    /// growing native stages use a constant-time framing-inclusive shape bound.
-    /// Managed dimensions accumulate on append, including every raw observation.
-    /// Deferred content not yet materialized, provider closure, elected views and
-    /// other fixed SQL/native owners remain subject to the actual runtime grant.
-    /// This is a grouping estimate, never a promise that a complete apply fits.
+    /// Modeled admission payload for builders sharing one apply: the larger of
+    /// their managed row estimate and the native stage bytes they hold. This is a
+    /// grouping estimate, never a promise that a complete apply fits.
     /// </summary>
     public static long ModeledSourceAdmissionPayloadBytes(params SubstrateChangeBuilder[] builders)
     {
@@ -535,11 +468,9 @@ public sealed class SubstrateChangeBuilder : IDisposable
             ArgumentNullException.ThrowIfNull(builder);
             ObjectDisposedException.ThrowIf(builder._disposed, builder);
             if (builder._partialTrajectory)
-                throw new InvalidOperationException("physicality observation contains a partial trajectory vertex");
+                throw new InvalidOperationException("physicality contains a partial trajectory vertex");
             total = total.Add(IngestAdmissionSizing.MeasureGrowingBuilder(
-                builder.StagedBytesEstimate, builder._intentStages,
-                builder._selectedShape, builder._observationShape,
-                (ulong)builder._entities.Count, (ulong)builder._attestations.Count));
+                builder.StagedBytesEstimate, builder._intentStages, builder._physicalities.Count));
         }
         return total.ModeledSourcePayloadBytes;
     }
@@ -612,7 +543,6 @@ public sealed class SubstrateChangeBuilder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var entities = _entities.ToImmutable();
-        var interpretations = _entityInterpretations.ToImmutable();
         var physicalities = _physicalities.ToImmutable();
         var attestations = _attestations.ToImmutable();
 
@@ -641,8 +571,8 @@ public sealed class SubstrateChangeBuilder : IDisposable
 
         var stages = _intentStages.ToImmutableArray();
         var walks = _walks.ToImmutableArray();
-        // Keep native ownership here until every immutable sidecar and the complete
-        // returned change exists. An allocation/validation failure must remain disposable.
+        // Keep native ownership here until the complete returned change exists.
+        // An allocation/validation failure must remain disposable.
         var change = new SubstrateChange(
             entities, physicalities, attestations,
             new SubstrateChangeMetadata(
@@ -659,8 +589,6 @@ public sealed class SubstrateChangeBuilder : IDisposable
             default,
             ephemeralFolds)
         {
-            EntityInterpretations = interpretations,
-            PhysicalityObservations = _physicalityObservations.ToImmutable(),
             PhysicalitySourcePriors = _sourcePriors.ToImmutable(),
         };
         _intentStages.Clear();
@@ -683,14 +611,11 @@ public sealed class SubstrateChangeBuilder : IDisposable
         foreach (var stage in _intentStages) stage.Dispose();
         _intentStages.Clear();
         _contentStage = null;
-        _observationShape = default;
-        _selectedShape = default;
         _partialTrajectory = false;
     }
 
-    // Keep source-observation identity byte-for-byte compatible with existing
-    // content. Structural interpretations are independently bound by the writer's
-    // admission receipt; adding a facet must not rename physicality observations.
+    // The intent id binds the source unit to the ids of its staged entities,
+    // physicalities, attestations and ephemeral fold receipts.
     private static Hash128 ComputeIntentId(
         Hash128 sourceId,
         string unitName,

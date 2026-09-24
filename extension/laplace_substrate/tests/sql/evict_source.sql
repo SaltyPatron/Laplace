@@ -38,17 +38,17 @@ DECLARE
     t3       timestamptz := '2026-03-01 00:00:00+00';
     affected bigint;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src_w, 0, type_t, NULL), (src_a, 0, type_t, NULL),
-        (rel_p, 0, type_t, src_w), (subj, 0, type_t, src_w),
-        (o1, 0, type_t, src_w), (o2, 0, type_t, src_w), (o3, 0, type_t, src_w),
-        (o4, 0, type_t, src_w), (o5, 0, type_t, src_w),
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src_w, 0, type_t), (src_a, 0, type_t),
+        (rel_p, 0, type_t), (subj, 0, type_t),
+        (o1, 0, type_t), (o2, 0, type_t), (o3, 0, type_t),
+        (o4, 0, type_t), (o5, 0, type_t),
         -- m1/m2: the analysis lane's derivation-gate markers (deleted by evict).
         -- m3: CONTENT first-observed by the analysis source (must survive).
         -- m4: a marker-typed entity of ANOTHER source (must survive).
-        (m1, 4, marker_t, src_a), (m2, 4, marker_t, src_a),
-        (m3, 4, type_t, src_a), (m4, 4, marker_t, src_w),
-        (fm_t, 4, type_t, f1), (f1, 4, type_t, src_a), (f2, 4, type_t, src_a)
+        (m1, 4, marker_t), (m2, 4, marker_t),
+        (m3, 4, type_t), (m4, 4, marker_t),
+        (fm_t, 4, type_t), (f1, 4, type_t), (f2, 4, type_t)
     ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO laplace.ingest_run_journal
@@ -71,9 +71,9 @@ BEGIN
          sum_score_fp1e9, opponent_rd_fp1e9)
     VALUES
         (public.laplace_hash128_blake3('test/evict/file-marker/owned'),
-         f1, fm_t, f1, f1, src_a, 2, t3, 1, win, phi_w),
+         f1, fm_t, f1, f1, src_a, 2, t3, 1, win)phi_w
         (public.laplace_hash128_blake3('test/evict/file-marker/legacy'),
-         f2, fm_t, f2, f2, NULL, 2, t3, 1, win, phi_w);
+         f2, fm_t, f2, f2, NULL, 2, t3, 1, win)phi_w
 
     -- Evidence rows persist the fold's exact inputs (observation_count,
     -- sum_score_fp1e9, opponent_rd_fp1e9) — the refold replays them verbatim.
@@ -86,12 +86,12 @@ BEGIN
         (public.laplace_hash128_blake3('test/evict/a1'), subj, rel_p, o1, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a),
         (public.laplace_hash128_blake3('test/evict/a2'), subj, rel_p, o1, src_a, NULL,
-         1, t3, 1, s_ref, phi_a),
+         1, t3, 1, s_ref)phi_a
         -- cell II (subj, rel_p, o2): MIXED — witness survives, cell refolds
         (public.laplace_hash128_blake3('test/evict/w1'), subj, rel_p, o2, src_w, NULL,
          2, t1, 3, 3 * s_conf, phi_w),
         (public.laplace_hash128_blake3('test/evict/a3'), subj, rel_p, o2, src_a, NULL,
-         2, t2, 2, s_conf, phi_a),
+         2, t2, 2, s_conf)phi_a
         -- cell III (subj, rel_p, o3): WITNESS ONLY — untouched, byte-identical
         (public.laplace_hash128_blake3('test/evict/w2'), subj, rel_p, o3, src_w, NULL,
          2, t1, 4, 2 * win, phi_w),
@@ -99,18 +99,18 @@ BEGIN
         (public.laplace_hash128_blake3('test/evict/w3'), subj, rel_hot, o4, src_w, NULL,
          2, t1, 2, 2 * s_conf, phi_w),
         (public.laplace_hash128_blake3('test/evict/a4'), subj, rel_hot, o4, src_a, NULL,
-         0, t2, 1, 0, phi_a),
+         0, t2, 1, 0)phi_a
         -- cell V (subj, rel_p, NULL): ANALYSIS ONLY, NULL object — culled
         (public.laplace_hash128_blake3('test/evict/a5'), subj, rel_p, NULL, src_a, NULL,
          2, t2, 3, 3 * win, phi_a),
         -- cell VI (subj, rel_p, o5): interleaved observations — grouped refold pin:
         -- surviving witness rows t1 and t3 straddle the deleted analysis row t2
         (public.laplace_hash128_blake3('test/evict/w4'), subj, rel_p, o5, src_w, NULL,
-         2, t1, 1, win, phi_w),
+         2, t1, 1, win)phi_w
         (public.laplace_hash128_blake3('test/evict/a6'), subj, rel_p, o5, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a),
         (public.laplace_hash128_blake3('test/evict/w5'), subj, rel_p, o5, src_w, NULL,
-         1, t3, 2, s_conf, phi_w);
+         1, t3, 2, s_conf)phi_w
 
     -- Consensus built exactly as ingest builds it: one incremental fold per
     -- batch against the stored prior, batches in timestamp order.
@@ -404,11 +404,11 @@ BEGIN
         (public.laplace_hash128_blake3('test/evict/v2/a1'), subj, rel_p, o1, src_a, NULL,
          2, t2, 2, 2 * s_conf, phi_a),
         (public.laplace_hash128_blake3('test/evict/v2/a2'), subj, rel_p, o1, src_a, NULL,
-         1, t3, 1, s_ref, phi_a),
+         1, t3, 1, s_ref)phi_a
         (public.laplace_hash128_blake3('test/evict/v2/a3'), subj, rel_p, o2, src_a, NULL,
-         2, t2, 2, s_conf, phi_a),
+         2, t2, 2, s_conf)phi_a
         (public.laplace_hash128_blake3('test/evict/v2/a4'), subj, rel_hot, o4, src_a, NULL,
-         0, t2, 1, 0, phi_a),
+         0, t2, 1, 0)phi_a
         (public.laplace_hash128_blake3('test/evict/v2/a5'), subj, rel_p, NULL, src_a, NULL,
          2, t2, 3, 3 * win, phi_a),
         (public.laplace_hash128_blake3('test/evict/v2/a6'), subj, rel_p, o5, src_a, NULL,
@@ -479,8 +479,7 @@ BEGIN
     WHERE run_id = '00000000-0000-0000-0000-000000000508';
     DELETE FROM laplace.attestations WHERE source_id IN (src_w, src_a);
     DELETE FROM laplace.entities
-    WHERE id = realize.canonical_id('substrate/type/HasLayerCompleted/2/v1')
-      AND first_observed_by = public.laplace_hash128_blake3('test/evict/file/owned');
+    WHERE id = realize.canonical_id('substrate/type/HasLayerCompleted/2/v1');
     DELETE FROM laplace.consensus WHERE subject_id = subj;
     DELETE FROM laplace.highway_mask_dirty WHERE id IN (
         subj,
@@ -518,8 +517,8 @@ DECLARE
     obj    bytea;
     evid   bytea;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-    VALUES (src, 0, type_t, NULL), (subj, 0, type_t, src);
+    INSERT INTO laplace.entities (id, tier, type_id)
+    VALUES (src, 0, type_t), (subj, 0, type_t);
 
     FOR i IN 1..9 LOOP
         rel := public.laplace_hash128_blake3(
@@ -528,8 +527,8 @@ BEGIN
             convert_to('test/evict/default/object/' || i, 'UTF8'));
         evid := public.laplace_hash128_blake3(
             convert_to('test/evict/default/evidence/' || i, 'UTF8'));
-        INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-        VALUES (rel, 0, type_t, src), (obj, 0, type_t, src);
+        INSERT INTO laplace.entities (id, tier, type_id)
+        VALUES (rel, 0, type_t), (obj, 0, type_t);
         INSERT INTO laplace.attestations
             (id, subject_id, type_id, object_id, source_id, context_id,
              outcome, last_observed_at, observation_count,

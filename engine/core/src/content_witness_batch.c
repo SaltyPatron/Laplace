@@ -416,7 +416,6 @@ static int emit_node(
     intent_stage_t*    stage,
     const tier_tree_t* tree,
     uint32_t           idx,
-    const hash128_t*   source_id,
     int64_t            now_us,
     emit_scratch_t*    scratch,
     int                emit_entity,
@@ -474,17 +473,11 @@ static int emit_node(
     if (intent_stage_witness_record(scratch->forms, &form_id) != 0
         || intent_stage_allocation_failed(scratch->forms)) return -2;
 
-    hash128_t type_id = laplace_content_tier_type_id(node.tier);
-    /* A fresh stage claims a complete interpretation stream. intent_stage_add_entity
-     * records the canonical row and this observation's facet together. Calling
-     * intent_stage_add_entity_interpretation again would deposit that same facet
-     * twice. An already-present node keeps its canonical row and records only
-     * the facet. */
     if (emit_entity) {
-        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0)
+        hash128_t type_id = laplace_content_tier_type_id(node.tier);
+        if (intent_stage_add_entity(stage, &node.id, (int16_t)node.tier, &type_id) != 0)
             return -2;
-    } else if (intent_stage_add_entity_interpretation(
-            stage, &node.id, (int16_t)node.tier, &type_id, source_id) != 0) return -2;
+    }
 
     if (m > 1) {
         traj = scratch->trajectory;
@@ -574,6 +567,7 @@ int content_witness_emit_tree(
     int64_t now_us = INTENT_STAGE_PG_EPOCH_UNIX_US;
     if (root.tier == 0)
         return content_witness_emit_floor_atom(stage, root.atom, &root.id, now_us);
+
     emit_scratch_t scratch = {0};
     scratch.forms = intent_stage_new(0);
     if (!scratch.forms) return -2;
@@ -599,12 +593,12 @@ int content_witness_emit_tree(
      * compositional form as a raw observation for the calling source unit. */
     for (size_t k = 0; k < (novel ? novel_n : nc); ++k) {
         const uint32_t idx = novel ? novel[k] : (uint32_t)k;
-        rc = emit_node(stage, tree, idx, source_id, now_us, &scratch, 1, &emitted[idx]);
+        rc = emit_node(stage, tree, idx, now_us, &scratch, 1, &emitted[idx]);
         if (rc != 0) goto done;
     }
     for (uint32_t idx = 0; idx < (uint32_t)nc; ++idx) {
         if (emitted[idx]) continue;
-        rc = emit_node(stage, tree, idx, source_id, now_us, &scratch, 0, &emitted[idx]);
+        rc = emit_node(stage, tree, idx, now_us, &scratch, 0, &emitted[idx]);
         if (rc != 0) goto done;
     }
 

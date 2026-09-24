@@ -42,7 +42,6 @@ public sealed class CILIReferenceAdmissionTests
             var entities = new Dictionary<Hash128, EntityRow>();
             var physicalEntities = new HashSet<Hash128>();
             var attestations = new List<AttestationRow>();
-            var interpretations = new List<EntityInterpretationRow>();
             var decomposer = new CILIDecomposer();
             var context = new FakeContext(new NullWriter()) { EcosystemPath = dir };
 
@@ -52,7 +51,6 @@ public sealed class CILIReferenceAdmissionTests
                 foreach (var physicality in change.Physicalities)
                     physicalEntities.Add(physicality.EntityId);
                 attestations.AddRange(change.Attestations);
-                interpretations.AddRange(change.EntityInterpretations);
             }
 
             Hash128 ili = ReferenceAnchor.Id(ReferenceIdentityKind.CiliIli, "i35545")!.Value;
@@ -65,14 +63,14 @@ public sealed class CILIReferenceAdmissionTests
                 ReferenceIdentityKind.CiliMapVersion, "pwn31")!.Value;
 
             Assert.Equal(key, pwn31Key);
-            Assert.Contains(interpretations, e =>
-                e.EntityId == ili && e.TypeId == EntityTypeRegistry.WordNetSynset);
-            Assert.Contains(interpretations, e =>
-                e.EntityId == key && e.TypeId == EntityTypeRegistry.SourceReference);
-            Assert.Contains(interpretations, e =>
-                e.EntityId == version && e.TypeId == EntityTypeRegistry.SourceVersion);
-            Assert.Contains(interpretations, e =>
-                e.EntityId == pwn31Version && e.TypeId == EntityTypeRegistry.SourceVersion);
+            Assert.Contains(entities.Values, e =>
+                e.Id == ili && e.TypeId == EntityTypeRegistry.WordNetSynset);
+            Assert.Contains(entities.Values, e =>
+                e.Id == key && e.TypeId == EntityTypeRegistry.SourceReference);
+            Assert.Contains(entities.Values, e =>
+                e.Id == version && e.TypeId == EntityTypeRegistry.SourceVersion);
+            Assert.Contains(entities.Values, e =>
+                e.Id == pwn31Version && e.TypeId == EntityTypeRegistry.SourceVersion);
             Assert.Contains(ili, physicalEntities);
             Assert.Contains(key, physicalEntities);
             Assert.Contains(version, physicalEntities);

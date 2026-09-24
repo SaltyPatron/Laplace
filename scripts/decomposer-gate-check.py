@@ -146,9 +146,11 @@ def check_source(
             n = int(
                 psql(
                     dbname,
-                    "SELECT count(*) FROM laplace.entities "
-                    f"WHERE first_observed_by = laplace.source_id('{decomposer}') "
-                    f"AND type_id = laplace.entity_type_id('{marker_type}');",
+                    "SELECT count(*) FROM laplace.entities e "
+                    "WHERE EXISTS (SELECT 1 FROM laplace.attestations a "
+                    f"  WHERE a.source_id = laplace.source_id('{decomposer}') "
+                    "  AND a.subject_id = e.id) "
+                    f"AND e.type_id = laplace.entity_type_id('{marker_type}');",
                     host=host,
                     user=user,
                 )
@@ -206,10 +208,9 @@ def check_source(
                 " UNION SELECT context_id FROM laplace.attestations"
                 f" WHERE source_id=laplace.source_id('{decomposer}') AND context_id IS NOT NULL"
                 "), governed AS MATERIALIZED ("
-                " SELECT DISTINCT ei.entity_id FROM laplace.entity_interpretations ei"
-                " LEFT JOIN touched t ON t.entity_id=ei.entity_id"
-                f" WHERE ei.type_id=ANY({type_array})"
-                f" AND (ei.first_observed_by=laplace.source_id('{decomposer}') OR t.entity_id IS NOT NULL)"
+                " SELECT DISTINCT e.id AS entity_id FROM laplace.entities e"
+                " JOIN touched t ON t.entity_id=e.id"
+                f" WHERE e.type_id=ANY({type_array})"
                 ") SELECT count(*)::text || ' ' ||"
                 " count(*) FILTER (WHERE EXISTS (SELECT 1 FROM laplace.physicalities p"
                 " WHERE p.entity_id=governed.entity_id))::text FROM governed;",

@@ -136,10 +136,9 @@ internal sealed partial class ChessRecordingMeasurement
         public long BuiltChanges { get; internal set; }
         public long BuiltManagedEntityRows { get; internal set; }
         public long BuiltManagedPhysicalityRows { get; internal set; }
-        public long BuiltManagedPhysicalityObservationRows { get; internal set; }
         public long BuiltManagedAttestationRows { get; internal set; }
         public long BuiltNativeStages { get; internal set; }
-        public string CounterScope => "Attempt/composition counters are work observations, not durable games or unique entities. Managed row counts describe finalized builder arrays before writer merging and exclude the separately counted native stages. BuiltManagedPhysicalityObservationRows counts explicit raw sidecar occurrences, including multiplicity, and excludes fallback to selected physicality rows; these counts do not imply distinct entities or placements. Position occurrences retain repeated positions within and across games.";
+        public string CounterScope => "Attempt/composition counters are work observations, not durable games or unique entities. Managed row counts describe finalized builder arrays before writer merging and exclude the separately counted native stages. These counts do not imply distinct entities or placements. Position occurrences retain repeated positions within and across games.";
         internal void Add(WorkPhase phase, long ticks) => _ticks[(int)phase] += ticks;
     }
 
@@ -171,8 +170,6 @@ internal sealed partial class ChessRecordingMeasurement
             Work.BuiltChanges++;
             Work.BuiltManagedEntityRows += change.Entities.Length;
             Work.BuiltManagedPhysicalityRows += change.Physicalities.Length;
-            Work.BuiltManagedPhysicalityObservationRows += change.PhysicalityObservations.IsDefault
-                ? 0 : change.PhysicalityObservations.Length;
             Work.BuiltManagedAttestationRows += change.Attestations.Length;
             Work.BuiltNativeStages += change.IntentStages.IsDefault ? 0 : change.IntentStages.Length;
         }

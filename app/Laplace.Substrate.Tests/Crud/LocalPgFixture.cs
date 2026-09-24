@@ -91,9 +91,8 @@ public sealed class LocalPgFixture : IAsyncLifetime
             WITH basis AS MATERIALIZED (
                 SELECT root_id, tier FROM converse.text_root_placements($1)
             )
-            INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
-            SELECT root_id,0,laplace.entity_type_id('Codepoint'),
-                   realize.canonical_id('substrate/source/UnicodeDecomposer/v1')
+            INSERT INTO laplace.entities(id,tier,type_id)
+            SELECT root_id,0,laplace.entity_type_id('Codepoint')
             FROM basis WHERE tier=0
             ON CONFLICT DO NOTHING
             """;
@@ -109,7 +108,6 @@ public sealed class LocalPgFixture : IAsyncLifetime
             FROM basis JOIN laplace.entities e ON e.id=basis.root_id
             WHERE basis.tier=0 AND e.tier=0
               AND e.type_id=laplace.entity_type_id('Codepoint')
-              AND e.first_observed_by=realize.canonical_id('substrate/source/UnicodeDecomposer/v1')
             """;
         verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Text, symbols);
         if (await verify.ExecuteScalarAsync() is not long count || count != symbols.Length)
@@ -124,13 +122,13 @@ public sealed class LocalPgFixture : IAsyncLifetime
         var source = UnicodeDecomposer.Source;
         var builder = new SubstrateChangeBuilder(source, "test-foundation/native-byte-basis/v1")
             .DeclareSourcePrior(SourceTrust.StandardsDerived)
-            .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId, source);
+            .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId);
         for (int index = 0; index < ByteAtoms.Count; index++)
         {
             byte value = checked((byte)(ByteAtoms.First + index));
             Hash128 id = ByteAtoms.Id(value);
             ReadOnlySpan<double> coordinate = ByteAtoms.Coord(value);
-            builder.AddEntity(id, 0, ByteAtoms.TypeId, source);
+            builder.AddEntity(id, 0, ByteAtoms.TypeId);
             builder.AddPhysicality(new PhysicalityRow(
                 PhysicalityId.Compute(id, PhysicalityType.Content), id, source, PhysicalityType.Content,
                 coordinate[0], coordinate[1], coordinate[2], coordinate[3], ByteAtoms.Hilbert(value),
@@ -154,7 +152,7 @@ public sealed class LocalPgFixture : IAsyncLifetime
                         $6::double precision[],$7::bytea[]) AS expected(e,p,x,y,z,m,h)
             JOIN laplace.entities e ON e.id=expected.e
             JOIN laplace.physicalities p ON p.id=expected.p
-            WHERE e.tier=0 AND e.type_id=$8 AND e.first_observed_by=$9
+            WHERE e.tier=0 AND e.type_id=$8
               AND p.entity_id=expected.e AND p.type=1
               AND float8send(public.ST_X(p.coord))=float8send(expected.x)
               AND float8send(public.ST_Y(p.coord))=float8send(expected.y)

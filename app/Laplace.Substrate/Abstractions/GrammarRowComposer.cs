@@ -291,7 +291,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             // stopped. One operation, two implementations, exactly the drift the
             // packaging flag exists to end.
             if (e.Packaging != 0) continue;
-            entities.Add(new EntityRow(e.Id, e.Tier, e.TypeId, _sourceId));
+            entities.Add(new EntityRow(e.Id, e.Tier, e.TypeId));
         }
 
         nuint nPhys = NativeInterop.ComposePhysicalityCount(ActiveResult);
@@ -356,7 +356,7 @@ public sealed unsafe class GrammarRowComposer : IDisposable
             // Materialize, and here). GrammarRowComposerDrainParityTests exists
             // precisely because they must agree, and it caught this one.
             if (e.Packaging != 0) continue;
-            stage.AddEntity(e.Id, e.Tier, e.TypeId, _sourceId);
+            stage.AddEntity(e.Id, e.Tier, e.TypeId);
         }
 
         nuint nPhys = NativeInterop.ComposePhysicalityCount(_compose);

@@ -52,7 +52,6 @@ BEGIN ATOMIC
           -- family exclusions above and is exactly equivalent to NOT IN here: type_id is
           -- NOT NULL on both laplace.consensus and laplace.attestations (catalog-verified).
           c.type_id <> ALL (consensus.relation_set_ids('NON_SALIENT_STRUCTURAL'))
-          AND c.type_id <> laplace.relation_type_id('HAS_PHYSICALITY')
           -- UNDECLARED VOCABULARY, kept inline deliberately: CO_OCCURS_WITH and
           -- OCCURS_IN_CONTEXT are in neither the manifest's canonicals nor its
           -- aliases, though both exist as live RelationType entities. Codegen

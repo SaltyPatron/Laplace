@@ -11,7 +11,7 @@ SELECT
     decode(lpad(to_hex(b), 2, '0') || repeat(lpad(to_hex(b), 2, '0'), 15), 'hex') AS id
 FROM generate_series(0, 7) b;
 
-INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+INSERT INTO laplace.entities (id, tier, type_id)
 SELECT id, 0::smallint, (SELECT id FROM test_fixtures LIMIT 1), NULL
 FROM test_fixtures
 WHERE id IN (
@@ -68,12 +68,6 @@ BEGIN
     SELECT array_agg(id ORDER BY id) INTO ids
     FROM (SELECT id FROM test_fixtures ORDER BY id LIMIT 2) q;
     SELECT id INTO STRICT kind FROM test_fixtures ORDER BY id LIMIT 1;
-    PERFORM laplace.entity_interpretations_publish(
-        ids,
-        ARRAY[2,2]::smallint[],
-        ARRAY[kind,kind]::bytea[],
-        ARRAY[NULL::bytea,NULL::bytea]::bytea[],
-        ARRAY[true,true]::boolean[]);
 END
 $facet_fixture$;
 

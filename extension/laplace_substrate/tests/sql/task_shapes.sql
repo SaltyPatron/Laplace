@@ -10,7 +10,7 @@ BEGIN
     -- prompt_tree exposes the complete parser scaffolding. Native admission
     -- collapses a unary, span-identical wrapper to its child; persisting that
     -- wrapper would give one Word identity conflicting Sentence/Document types.
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     WITH nodes AS MATERIALIZED (SELECT * FROM converse.prompt_tree(p_text,false)),
     unary_children AS (
         SELECT parent_index,min(node_index) AS child_index
@@ -39,9 +39,9 @@ BEGIN
         (id,subject_id,type_id,object_id,source_id,context_id,outcome,
          last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
     VALUES(public.laplace_hash128_blake3(
-        p_subject || p_type || p_object || p_source || COALESCE(p_context,''::bytea)),
+        p_subject || p_type || p_object || p_source || COALESCE(p_context, ''::bytea)),
         p_subject,p_type,p_object,p_source,p_context,2,now(),5,5000000000,30000000000)
-    ON CONFLICT (id,type_id,subject_id) DO UPDATE
+    ON CONFLICT (id, type_id, subject_id) DO UPDATE
        SET outcome=2,observation_count=5,sum_score_fp1e9=5000000000;
     INSERT INTO laplace.consensus
         (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,last_observed_at)
@@ -57,7 +57,7 @@ CREATE FUNCTION pg_temp.shape_projection(p_flat bytea[],p_type text,p_source byt
 RETURNS bytea LANGUAGE plpgsql AS $projection$
 DECLARE v_id bytea := public.laplace_hash128_merkle(4::smallint,p_flat);
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     VALUES(v_id,4,laplace.entity_type_id(p_type),p_source)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.physicalities
@@ -102,7 +102,7 @@ BEGIN
             public.laplace_hash128_blake3('ud/parse/misc-end/v1')];
     END LOOP;
     v_flat := v_flat || ARRAY[public.laplace_hash128_blake3('ud/parse/tokens-end/v1')];
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     SELECT DISTINCT value,2,laplace.entity_type_id('UD_Annotation_Marker'),p_source
       FROM unnest(v_flat) value
      WHERE NOT EXISTS (SELECT 1 FROM laplace.entities e WHERE e.id=value)
@@ -129,7 +129,7 @@ BEGIN
             ARRAY[v_slot_schema,pg_temp.shape_ref(p_ordinals[i]),p_types[i]]);
         v_slots := v_slots || v_slot;
         v_flat := v_flat || ARRAY[v_slot,pg_temp.shape_ref(p_ordinals[i]),p_types[i]];
-        INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+        INSERT INTO laplace.entities(id,tier,type_id)
         VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'),p_source)
         ON CONFLICT (id) DO NOTHING;
     END LOOP;
@@ -162,7 +162,7 @@ BEGIN
             ARRAY[v_slot_schema,pg_temp.shape_ref(p_ordinals[i]),p_types[i],p_modes[i]]);
         v_slots := v_slots || v_slot;
         v_flat := v_flat || ARRAY[v_slot,pg_temp.shape_ref(p_ordinals[i]),p_types[i],p_modes[i]];
-        INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+        INSERT INTO laplace.entities(id,tier,type_id)
         VALUES(v_slot,4,laplace.entity_type_id('CodeConcept'),p_source)
         ON CONFLICT (id) DO NOTHING;
     END LOOP;
@@ -236,7 +236,7 @@ DECLARE
     v_before jsonb;
     r record;
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     SELECT value,2,laplace.entity_type_id('CodeConcept'),v_source
       FROM unnest(ARRAY[v_source,v_context,v_language,v_answer,v_changed,v_answer_a,v_answer_b]) value;
     v_exemplar := pg_temp.shape_parse('ζξ őűȝ',ARRAY['ζξ','őűȝ'],ARRAY[0,1],
@@ -320,15 +320,8 @@ BEGIN
 
     -- An unrelated smaller summary and a second same-type facet must neither
     -- erase this exact current form's Word membership nor duplicate candidates.
-    PERFORM laplace.entity_interpretations_publish(
-        ARRAY[v_original,v_original]::bytea[],
-        ARRAY[0,3]::smallint[],
-        ARRAY[decode(repeat('00',16),'hex'),v_word]::bytea[],
-        ARRAY[v_source,v_source]::bytea[],
-        ARRAY[false,false]::boolean[]);
-    IF (SELECT type_id FROM laplace.entities WHERE id=v_original)<>decode(repeat('00',16),'hex')
-       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=v_original AND type_id=v_word)<>2 THEN
-        RAISE EXCEPTION 'FAIL: current-form fixture did not establish plural memberships and changed summary';
+    IF (SELECT type_id FROM laplace.entities WHERE id=v_original)<>decode(repeat('00',16),'hex') THEN
+        RAISE EXCEPTION 'FAIL: current-form fixture changed the entity row type';
     END IF;
     SELECT * INTO r FROM pg_temp.shape_receipt(v_prompt,p_fanout=>8);
     IF r.emitted IS DISTINCT FROM ARRAY[v_answer] OR r.complete IS DISTINCT FROM true THEN
@@ -411,7 +404,7 @@ DECLARE
     v_cell record;
     r record;
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     SELECT value,2,v_concept,v_source FROM unnest(ARRAY[v_source,v_context,v_other_context,v_other_source,
         v_language,v_input,v_answer,v_changed,v_other_answer,v_other_input]) value;
     v_exemplar := pg_temp.shape_parse('ζαλκ próbulo',ARRAY['ζαλκ','próbulo'],ARRAY[0,1],
@@ -450,8 +443,8 @@ BEGIN
     -- Each declared applicability/call/slot record is necessary, independently
     -- of positive pooled consensus or another source record from the lesson.
     FOR v_cell IN SELECT * FROM (VALUES
-        (v_exemplar,v_example_of,v_shape),(v_shape,v_calls,v_predicate),(v_shape,v_inputs,v_slot))
-        AS cells(subject_id,type_id,object_id)
+        (v_exemplar, v_example_of, v_shape),(v_shape, v_calls, v_predicate),(v_shape, v_inputs, v_slot))
+        AS cells(subject_id, type_id, object_id)
     LOOP
         UPDATE laplace.attestations SET outcome=0,sum_score_fp1e9=0
          WHERE subject_id=v_cell.subject_id AND type_id=v_cell.type_id AND object_id=v_cell.object_id;
@@ -476,16 +469,10 @@ BEGIN
      WHERE subject_id=v_shape AND type_id=v_inputs AND object_id=v_slot;
     PERFORM pg_temp.shape_reject('slot with negative pooled standing',v_prompt);
     PERFORM pg_temp.shape_cell(v_shape,v_inputs,v_slot,v_source,v_context);
-    -- Membership is plural. A compatibility summary cannot confer a type that
-    -- is absent from the interpretation set.
-    DELETE FROM laplace.entity_interpretations WHERE entity_id=v_input AND type_id=v_concept;
+    -- A declared semantic input type is the entity row's type; removing it
+    -- must break execution.
+    UPDATE laplace.entities SET type_id=decode(repeat('00',16),'hex') WHERE id=v_input;
     PERFORM pg_temp.shape_reject('semantic input without its declared type membership',v_prompt);
-    PERFORM laplace.entity_interpretations_publish(
-        ARRAY[v_input]::bytea[],
-        ARRAY[2]::smallint[],
-        ARRAY[v_concept]::bytea[],
-        ARRAY[v_source]::bytea[],
-        ARRAY[false]::boolean[]);
     RAISE NOTICE 'task shapes: complete source and context testimony plus declared semantic input types are required';
 
     PERFORM pg_temp.shape_surface('«ζαλκ ñébulo»',v_source);
@@ -566,7 +553,7 @@ DECLARE
     v_surface bytea;
     r record;
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     SELECT value,2,v_concept,v_source FROM unnest(ARRAY[v_source,v_context,v_language] || v_inputs || v_answers) value;
     v_exemplar := pg_temp.shape_parse('ψόλκ cáreno féreno',ARRAY['ψόλκ','cáreno','féreno'],
         ARRAY[0,1,1],v_deps,v_language,v_source,v_context);
@@ -609,7 +596,7 @@ DECLARE
     v_example_word text;
     r record;
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     SELECT value,2,v_concept,v_source FROM unnest(ARRAY[v_source,v_context,v_input,v_answer]) value;
     PERFORM pg_temp.shape_cell(v_input,v_predicate,v_answer,v_source,v_context);
     FOR i IN 1..2 LOOP
@@ -628,15 +615,8 @@ BEGIN
             RAISE EXCEPTION 'FAIL: language-specific surface structure changed the shared semantic input/result: %',r;
         END IF;
         IF i=1 THEN
-            PERFORM laplace.entity_interpretations_publish(
-                ARRAY[v_input,v_input]::bytea[],
-                ARRAY[0,3]::smallint[],
-                ARRAY[decode(repeat('00',16),'hex'),v_concept]::bytea[],
-                ARRAY[v_source,v_source]::bytea[],
-                ARRAY[false,false]::boolean[]);
-            IF (SELECT type_id FROM laplace.entities WHERE id=v_input)<>decode(repeat('00',16),'hex')
-               OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id=v_input AND type_id=v_concept)<>2 THEN
-                RAISE EXCEPTION 'FAIL: semantic fixture did not establish plural memberships and changed summary';
+            IF (SELECT type_id FROM laplace.entities WHERE id=v_input)<>decode(repeat('00',16),'hex') THEN
+                RAISE EXCEPTION 'FAIL: semantic fixture changed the entity row type';
             END IF;
             SELECT * INTO r FROM pg_temp.shape_receipt(v_cue || ' ' || v_word);
             IF r.emitted IS DISTINCT FROM ARRAY[v_answer] OR r.complete IS DISTINCT FROM true THEN

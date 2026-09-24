@@ -13,14 +13,12 @@ public sealed class ChessRecordingDiagnosticsTests
 {
     private static Hash128 Id(ulong value) => new(1, value);
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ActualNativeRejectionRetainsFailedWindowWithoutDurableSuccess(bool failDuringCapture)
+    [Fact]
+    public async Task StagingRejectionRetainsFailedWindowWithoutDurableSuccess()
     {
         // A valid placement is copied with a deliberately false declared identity.
-        // The real native staging boundary rejects it before any database access.
-        var change = RejectedPlacement(failDuringCapture);
+        // The staging boundary rejects it before any database access.
+        var change = RejectedPlacement();
         var measurement = new ChessRecordingMeasurement(null, 1);
         measurement.ObserveBuiltChanges([change]);
         var logger = new ChessRecordingMeasurement.WriterDiagnosticLogger { Measurement = measurement };
@@ -35,12 +33,10 @@ public sealed class ChessRecordingDiagnosticsTests
             measurement.Work.WriterApplyAttempts++;
             var failure = await Assert.ThrowsAsync<InvalidOperationException>(
                 () => writer.ApplyAsync(change));
-            Assert.Contains(
-                failDuringCapture ? "physicality identity mismatch" : "native physicality batch staging failed",
-                failure.Message);
+            Assert.Contains("physicality identity mismatch", failure.Message);
         }
         measurement.Complete("failed", "expected native identity rejection");
-        string expectedPhase = failDuringCapture ? "physicality-capture" : "managed-staging";
+        const string expectedPhase = "managed-staging";
         var failed = Assert.Single(measurement.WriterLog.Entries.Where(entry =>
             entry.Fields.TryGetValue("Phase", out var phase) && Equals(phase, expectedPhase)
             && Equals(entry.Fields.GetValueOrDefault("Boundary"), "exited")));
@@ -57,15 +53,10 @@ public sealed class ChessRecordingDiagnosticsTests
         Assert.Equal(0, failedAggregate.ReturnedExits);
         Assert.Equal(1, failedAggregate.InterruptedExits);
         Assert.Equal(Convert.ToDouble(failed.Fields["ElapsedMs"]), failedAggregate.TotalMilliseconds);
-        if (failDuringCapture)
-            Assert.Contains(measurement.WriterLog.Entries, entry =>
-                Equals(entry.Fields.GetValueOrDefault("Phase"), "managed-staging")
-                && Equals(entry.Fields.GetValueOrDefault("Returned"), true));
         Assert.DoesNotContain(measurement.WriterLog.Entries, entry =>
             Equals(entry.Fields.GetValueOrDefault("Phase"), "connection-and-apply-lock"));
         Assert.Equal(1, measurement.Work.WriterApplyAttempts);
         Assert.Equal(1, measurement.Work.BuiltManagedPhysicalityRows);
-        Assert.Equal(failDuringCapture ? 1 : 0, measurement.Work.BuiltManagedPhysicalityObservationRows);
         Assert.Equal(0, measurement.Work.BuiltNativeStages);
         Assert.Equal(0, measurement.Writer.ApplyCalls);
         Assert.Equal(0, measurement.CommittedGames);
@@ -88,14 +79,14 @@ public sealed class ChessRecordingDiagnosticsTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ThrowingDiagnosticSinkCannotMaskActualNativeFailure(bool throwOnIsEnabled)
+    public async Task ThrowingDiagnosticSinkCannotMaskActualStagingFailure(bool throwOnIsEnabled)
     {
         await using var dataSource = NpgsqlDataSource.Create(
             "Host=127.0.0.1;Port=1;Database=diagnostics_never_opened;Username=unused;Timeout=1");
         var writer = new NpgsqlSubstrateWriter(dataSource, new ThrowingWriterLogger(throwOnIsEnabled));
         var failure = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => writer.ApplyAsync(RejectedPlacement(false)));
-        Assert.Contains("native physicality batch staging failed", failure.Message);
+            () => writer.ApplyAsync(RejectedPlacement()));
+        Assert.Contains("physicality identity mismatch", failure.Message);
         Assert.DoesNotContain("diagnostic sink", failure.Message);
     }
 
@@ -277,18 +268,16 @@ public sealed class ChessRecordingDiagnosticsTests
             "WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs}",
             phase, "exited", returned, milliseconds);
 
-    private static SubstrateChange RejectedPlacement(bool failDuringCapture)
+    private static SubstrateChange RejectedPlacement()
     {
         double[] coordinate = [.1, .2, .3, .4];
         var row = new PhysicalityRow(PhysicalityId.Compute(Id(1), PhysicalityType.Projection),
             Id(1), Id(2), PhysicalityType.Projection, .1, .2, .3, .4,
             Hilbert128.Encode(coordinate), null, 0, null, null, IntentStage.PgEpochUnixUs + 10);
         var invalid = row with { Id = Id(99) };
-        return new SubstrateChange([], [failDuringCapture ? row : invalid], [],
+        return new SubstrateChange([], [invalid], [],
             new(Id(3), Id(2), "native-rejection-diagnostic", DateTimeOffset.UtcNow, null))
-        {
-            PhysicalityObservations = failDuringCapture ? [invalid] : default,
-        }.WithSourcePrior(Id(2), .5);
+            .WithSourcePrior(Id(2), .5);
     }
 
     private sealed class ThrowingWriterLogger(bool throwOnIsEnabled) : ILogger<NpgsqlSubstrateWriter>

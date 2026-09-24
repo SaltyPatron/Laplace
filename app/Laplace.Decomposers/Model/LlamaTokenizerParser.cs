@@ -155,10 +155,8 @@ public sealed class LlamaTokenizerParser
     private static bool TryBuildTreeRows(
         byte[] canonical, Hash128 sourceId,
         out ImmutableArray<EntityRow> entities,
-        out ImmutableArray<PhysicalityRow> physicalities,
-        out ImmutableArray<EntityInterpretationRow> interpretations)
+        out ImmutableArray<PhysicalityRow> physicalities)
     {
-        interpretations = [];
         try
         {
             using var tree = TextDecomposer.Run(canonical);
@@ -169,7 +167,7 @@ public sealed class LlamaTokenizerParser
                 return false;
             }
             unsafe { HashComposer.Run(tree, &PerfcacheResolver); }
-            var (es, ps) = new TextEntityBuilder(tree, sourceId).Build(out interpretations);
+            var (es, ps) = new TextEntityBuilder(tree, sourceId).Build();
             entities = es;
             physicalities = ps;
             return true;
@@ -179,7 +177,6 @@ public sealed class LlamaTokenizerParser
             if (!CodepointPerfcache.IsLoaded) throw;
             entities = ImmutableArray<EntityRow>.Empty;
             physicalities = ImmutableArray<PhysicalityRow>.Empty;
-            interpretations = [];
             return false;
         }
     }
@@ -308,7 +305,7 @@ public sealed class LlamaTokenizerParser
     {
         Span<double> coord = stackalloc double[4];
         if (!rec.Role.HasFlag(TokenRole.Special)
-            && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys, out _))
+            && TryBuildTreeRows(rec.CanonicalBytes, sourceId, out var treeEntities, out var treePhys))
         {
             foreach (var e in treeEntities) b.AddEntity(e);
             foreach (var p in treePhys) b.AddPhysicality(p);
@@ -321,7 +318,7 @@ public sealed class LlamaTokenizerParser
             Hash128 typeId = rec.Role.HasFlag(TokenRole.Special)
                 ? EntityTypeRegistry.SourceReference
                 : TextEntityBuilder.WordTypeId;
-            b.AddEntity(rec.EntityId, rec.Tier, typeId, firstObservedBy: sourceId);
+            b.AddEntity(rec.EntityId, rec.Tier, typeId);
             if (rec.HasContentCoord)
             {
                 if (rec.CanonicalBytes.Length > 1)
@@ -505,7 +502,7 @@ public sealed class LlamaTokenizerParser
     private static Hash128 ResolveMergeSide(
         SubstrateChangeBuilder b, byte[] canonical, Hash128 sourceId, Hash128 textTypeId)
     {
-        if (TryBuildTreeRows(canonical, sourceId, out var entities, out var physicalities, out _))
+        if (TryBuildTreeRows(canonical, sourceId, out var entities, out var physicalities))
         {
             foreach (var e in entities) b.AddEntity(e);
             foreach (var ph in physicalities) b.AddPhysicality(ph);
@@ -513,7 +510,7 @@ public sealed class LlamaTokenizerParser
                 return rootId;
         }
         var id = Hash128.Blake3(canonical);
-        b.AddEntity(id, EntityTier.Word, TextEntityBuilder.WordTypeId, firstObservedBy: sourceId);
+        b.AddEntity(id, EntityTier.Word, TextEntityBuilder.WordTypeId);
         // Same fallback coordinate rule as Parse(): a lone high byte still has a real,
         // deterministic ByteAtoms placement -- give it the matching physicality rather than
         // leaving this Word-tier content entity geometry-less.

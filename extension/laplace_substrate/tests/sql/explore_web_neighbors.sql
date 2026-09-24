@@ -35,14 +35,14 @@ DECLARE
     wrong_branches bigint;
     multi_seed_rows bigint;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-    VALUES (src, 0, type_t, NULL),
-           (s1, 0, type_t, src), (s2, 0, type_t, src),
-           (n1, 0, type_t, src), (n2, 0, type_t, src),
-           (n3, 0, type_t, src), (n4, 0, type_t, src),
-           (m1, 0, type_t, src), (m2, 0, type_t, src),
-           (m3, 0, type_t, src), (m4, 0, type_t, src),
-           (rel_dynamic, 0, type_t, src)
+    INSERT INTO laplace.entities (id, tier, type_id)
+    VALUES (src, 0, type_t),
+           (s1, 0, type_t), (s2, 0, type_t),
+           (n1, 0, type_t), (n2, 0, type_t),
+           (n3, 0, type_t), (n4, 0, type_t),
+           (m1, 0, type_t), (m2, 0, type_t),
+           (m3, 0, type_t), (m4, 0, type_t),
+           (rel_dynamic, 0, type_t)
     ON CONFLICT DO NOTHING;
 
     -- s1 exercises outbound, inbound, dynamic/default-partition, and self-edge

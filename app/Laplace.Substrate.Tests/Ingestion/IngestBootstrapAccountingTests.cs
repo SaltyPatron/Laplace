@@ -162,7 +162,7 @@ public sealed class IngestBootstrapAccountingTests
         public async Task InitializeAsync(IDecomposerContext context, CancellationToken ct = default)
         {
             var bootstrap = new SubstrateChangeBuilder(Source, "bootstrap/test")
-                .AddEntity(Governed, EntityTier.Word, EntityTypeRegistry.SourceReference, Source)
+                .AddEntity(Governed, EntityTier.Word, EntityTypeRegistry.SourceReference)
                 .Build();
             if (workingSetMode == 1) await context.Writer.ApplyWorkingSetAsync(bootstrap, ct);
             else if (workingSetMode == 2) await context.Writer.ApplyWorkingSetAsync([bootstrap], ct);
@@ -181,7 +181,7 @@ public sealed class IngestBootstrapAccountingTests
         {
             double[] coord = [1, 0, 0, 0];
             var change = new SubstrateChangeBuilder(Source, "content/test")
-                .AddEntity(Content, EntityTier.Word, EntityTypeRegistry.Word, Source)
+                .AddEntity(Content, EntityTier.Word, EntityTypeRegistry.Word)
                 .AddPhysicality(new PhysicalityRow(
                     PhysicalityId.Compute(Content, PhysicalityType.Content),
                     Content, Source, PhysicalityType.Content,

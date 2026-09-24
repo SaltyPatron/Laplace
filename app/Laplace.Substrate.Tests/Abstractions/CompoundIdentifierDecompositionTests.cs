@@ -29,8 +29,6 @@ public sealed class CompoundIdentifierDecompositionTests
 
         var change = builder.Build();
         Assert.Contains(change.Physicalities, p => p.EntityId == id);
-        Assert.Contains(change.EntityInterpretations, e =>
-            e.EntityId == id && e.TypeId == EntityTypeRegistry.PropBankRoleset);
         Assert.Contains(change.Attestations, a =>
             a.SubjectId == id
             && a.TypeId == RelationTypeRegistry.RelationTypeId("IS_TYPED_AS")

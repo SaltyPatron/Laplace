@@ -37,8 +37,10 @@ BEGIN
         FROM laplace.entities e
         JOIN laplace.physicalities w ON w.entity_id = e.id AND w.type = 3
         WHERE e.type_id = v_game_type
-          AND e.first_observed_by = v_openings_src
           AND e.id <> p_line
+          AND EXISTS (SELECT 1 FROM laplace.attestations a
+                      WHERE a.source_id = v_openings_src
+                        AND a.subject_id = e.id)
           AND w.coord IS NOT NULL
           AND w.trajectory IS NOT NULL
     ),

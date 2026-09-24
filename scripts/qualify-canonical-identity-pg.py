@@ -37,7 +37,6 @@ MANAGED_CLASSES = {
 }
 NATIVE_TESTS = (
     "generated_stage_sink_pg_native_helpers",
-    "physicality_descriptor_pg_native_helpers",
     "physicality_readback_pg_native_helpers",
 )
 # CTest uses its own POSIX-style regular expressions, not Python's (?:...) syntax.

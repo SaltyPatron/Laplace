@@ -51,7 +51,7 @@ BEGIN
     BEGIN
         DELETE FROM laplace.physicalities WHERE entity_id=ANY(f.node_ids) AND type=9;
         GET DIAGNOSTICS removed=ROW_COUNT;
-        IF removed<>10 THEN RAISE EXCEPTION 'cold legacy control lost its exact native type9 closure'; END IF;
+        IF removed<>1 THEN RAISE EXCEPTION 'cold legacy control lost its exact staged type9 closure'; END IF;
         SELECT * INTO STRICT cold_result FROM structural.physicality_descriptor_read(warm_result.descriptor_ids,268435456,2048,10000000);
         SELECT * INTO STRICT indexed FROM structural.physicality_forms(ARRAY[f.entity_id],decode('','hex'),32,268435456,2048,10000000);
         IF ROW(cold_result.descriptor_ids,cold_result.entity_ids,cold_result.physicality_types,cold_result.coordinate_bits,
@@ -69,12 +69,11 @@ BEGIN
     RAISE NOTICE 'physicality readback: independent cold backend reads genuine legacy Content with exact type9 body and index parity';
 END
 $legacy_cold$;
-DROP TABLE physicality_readback_fixture.incidental,physicality_readback_fixture.warm,
-    physicality_readback_fixture.legacy_warm,physicality_readback_fixture.legacy_admitted,
+DROP TABLE IF EXISTS physicality_readback_fixture.warm,
+    physicality_readback_fixture.legacy_warm,
     physicality_readback_fixture.legacy_frames,
-    physicality_readback_fixture.unavailable_warm,physicality_readback_fixture.unavailable_admitted,
+    physicality_readback_fixture.unavailable_warm,
     physicality_readback_fixture.unavailable_source,
-    physicality_readback_fixture.admitted,physicality_readback_fixture.frames,
     physicality_readback_fixture.source,physicality_readback_fixture.atoms;
 DROP SCHEMA physicality_readback_fixture;
 COMMIT;

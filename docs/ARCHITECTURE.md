@@ -19,7 +19,7 @@ The PostgreSQL extension persists four primary substrate families under `extensi
 
 Supporting tables/journals include canonical names, repair/dirty state and ingest/index progress. Exact generated counts and partition inventory are intentionally not duplicated here; `docs/INVENTORY.md` is regenerated and CI-gated.
 
-Current ordinary physicality admission records source/unit/time provenance in `laplace.physicality_observations`. That structural provenance is not ordinary proposition testimony: it must not manufacture repeated `HAS_PHYSICALITY` attestations or consensus merely because the same typed physical form was observed in multiple source units. Explicit governed structural associations may still use the relation where their contract calls for it.
+Every entity has a physicality; entities are both building blocks and content. Physicality admission records source/unit/time provenance through ordinary attestations only — an attestation recording that an entity has a physicality adds nothing and is not admitted.
 
 The high-level separation is deliberate:
 

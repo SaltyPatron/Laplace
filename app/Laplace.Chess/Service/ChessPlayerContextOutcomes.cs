@@ -136,7 +136,7 @@ public static class ChessPlayerContextOutcomes
     private static void Stamp(SubstrateChangeBuilder b, Hash128 playingId)
     {
         var marker = MarkerId(playingId);
-        b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType, SourceId);
+        b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(b, marker, SourceId, 25);
     }
 }

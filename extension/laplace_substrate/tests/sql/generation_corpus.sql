@@ -171,13 +171,13 @@ BEGIN
     -- also holds relation types, trust classes, POS tags, sources and languages, and a
     -- single-grapheme word collapses to tier 0. A fixture that typed everything the same
     -- could not tell a correct role predicate from a broken one.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL),
-        (w_the, 2, type_word, src), (w_capital, 2, type_word, src),
-        (w_of, 2, type_word, src), (w_france, 2, type_word, src),
-        (w_end, 2, type_word, src),
-        (sp, 2, type_word, src), (zs_cat, 0, type_t, src),
-        (sent, 3, type_sent, src), (sent2, 3, type_sent, src), (doc, 4, type_doc, src);
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t),
+        (w_the, 2, type_word), (w_capital, 2, type_word),
+        (w_of, 2, type_word), (w_france, 2, type_word),
+        (w_end, 2, type_word),
+        (sp, 2, type_word), (zs_cat, 0, type_t),
+        (sent, 3, type_sent), (sent2, 3, type_sent), (doc, 4, type_doc);
 
     -- Separator-ness is an ATTESTED UCD fact, never a render: the fixture
     -- declares its space exactly the way the Unicode seed does —
@@ -360,7 +360,7 @@ BEGIN
 
     -- Consensus floor: a dead-end context continues through COMPLETES_TO with
     -- stride_used = 0.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+    INSERT INTO laplace.entities (id, tier, type_id)
     VALUES (laplace.relation_type_id('COMPLETES_TO'), 0, laplace.entity_type_id('RelationType'), src)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO laplace.consensus (id, subject_id, type_id, object_id,
@@ -405,8 +405,8 @@ BEGIN
     -- No cache, no invalidation: a trajectory written NOW is visible to the very
     -- next read. sent3 repeats capital of twice (no separator): every matching
     -- occurrence counts, so the new unseparated capital→of has weight 2.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-    VALUES (sent3, 3, type_sent, src);
+    INSERT INTO laplace.entities (id, tier, type_id)
+    VALUES (sent3, 3, type_sent);
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
     VALUES (public.laplace_hash128_blake3('test/corpus/phys-sentence3'), sent3, 1,

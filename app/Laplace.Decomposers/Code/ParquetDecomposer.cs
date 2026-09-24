@@ -84,7 +84,7 @@ public sealed class ParquetDecomposer
     private static OrderedCompositionComponent EnsureColumn(SubstrateChangeBuilder b, string col)
     {
         OrderedCompositionComponent column = RequireComponent(b, col);
-        b.AddEntity(new EntityRow(column.Id, column.Tier, ColumnTypeId, Source));
+        b.AddEntity(new EntityRow(column.Id, column.Tier, ColumnTypeId));
         return column;
     }
 

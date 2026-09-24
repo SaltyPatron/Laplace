@@ -74,7 +74,7 @@ public static class ChessMoveOutcomes
                 witnessWeight: witnessWeight));
 
         b.AddEntity(MarkerId(lineId, Version), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, src);
+            ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(b, MarkerId(lineId, Version), src, 22);
     }
 

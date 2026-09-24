@@ -166,7 +166,7 @@ entity_ids AS MATERIALIZED (
   UNION SELECT entity_id FROM projection_starts
 ),
 entities AS MATERIALIZED (
-  SELECT e.id,e.tier,e.type_id,e.first_observed_by,e.created_at
+  SELECT e.id,e.tier,e.type_id,e.created_at
   FROM entity_ids i JOIN laplace.entities e ON e.id=i.id
 )
 SELECT json_build_object(
@@ -228,7 +228,7 @@ SELECT json_build_object(
     'run_length',s.run_length,'flags',s.flags)) FROM projection_starts s),'[]'::json),
   'entities',COALESCE((SELECT json_agg(json_build_object(
     'id',encode(e.id,'hex'),'tier',e.tier,'type_id',encode(e.type_id,'hex'),
-    'first_observed_by',encode(e.first_observed_by,'hex'),'created_at',e.created_at))
+    'created_at',e.created_at))
     FROM entities e),'[]'::json)
 )::text;
 ROLLBACK;

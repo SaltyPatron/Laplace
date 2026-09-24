@@ -30,16 +30,11 @@ public sealed class TextEntityBuilder
     }
 
     public (ImmutableArray<EntityRow> Entities, ImmutableArray<PhysicalityRow> Physicalities) Build()
-        => Build(out _);
-
-    public (ImmutableArray<EntityRow> Entities, ImmutableArray<PhysicalityRow> Physicalities) Build(
-        out ImmutableArray<EntityInterpretationRow> interpretations)
-        => Build(IngestSizing.ResolveWorkingSetBudgetBytes(), out interpretations);
+        => Build(IngestSizing.ResolveWorkingSetBudgetBytes());
 
     internal unsafe (ImmutableArray<EntityRow> Entities, ImmutableArray<PhysicalityRow> Physicalities) Build(
-        long grant, out ImmutableArray<EntityInterpretationRow> interpretations)
+        long grant)
     {
-        interpretations = [];
         if (grant <= 0) throw new ArgumentOutOfRangeException(nameof(grant));
         int nodeCount = _tree.NodeCount;
         if (nodeCount == 0) return ([], []);
@@ -50,20 +45,13 @@ public sealed class TextEntityBuilder
         using var stage = IntentStage.NewBounded(nodeCount, grant);
         if (!stage.EmitContentTree(_tree, _sourceId, _existingBitmap, out _))
             throw new InvalidOperationException("native content tree emission failed");
-        // The same native owner supplies all identities, tiers, geometry, RLE
-        // carriers and raw observations. A known entity does not erase a new
-        // source observation; an atomic root uses its actual floor placement.
+        // The same native owner supplies all identities, tiers, geometry and RLE
+        // carriers; an atomic root uses its actual floor placement.
         // This synchronous interval accounts actual managed export allocations,
         // including temporary decoder/coverage collections and retained row arrays.
         // It is a conservative allocation reservation, not a live-heap estimate.
-        // The borrowed auxiliary bytes already belong to stage.AllocatedBytes.
         long exportAllocationStart = GC.GetAllocatedBytesForCurrentThread();
         var entities = CopyTupleParser.DecodeEntityRows([stage.TupleBuffer(IntentStageTable.Entities)])
-            .ToImmutableArray();
-        // The canonical collector validates complete auxiliary coverage without
-        // creating entities. Keep historical first-winner E rows unchanged;
-        // known content can still carry newly observed tier/type interpretations.
-        interpretations = NpgsqlSubstrateWriter.CollectEntityInterpretations([stage], [], default)
             .ToImmutableArray();
         var physicalities = ImmutableArray.CreateBuilder<PhysicalityRow>(stage.PhysicalityCount);
         long nativeStageBytes = stage.AllocatedBytes;
@@ -71,7 +59,7 @@ public sealed class TextEntityBuilder
         long remaining = checked(grant - nativeStageBytes - managedExportBytes);
         if (remaining <= 0)
             throw new InvalidOperationException("native content stage and managed metadata exhausted the row-export allocation grant");
-        stage.VisitPhysicalityRows(remaining, (inputs, observations, retainedCaptureBytes) =>
+        stage.VisitPhysicalityRows(remaining, (inputs, origins, retainedCaptureBytes) =>
         {
             // The native capture and managed trajectory copies coexist. Reject
             // impossible trajectory payload before copying, then measure actual
@@ -87,19 +75,19 @@ public sealed class TextEntityBuilder
             for (int i = 0; i < inputs.Length; ++i)
             {
                 var input = inputs[i];
-                var observation = observations[i];
-                if (observation.SourceStageIndex != 0 || observation.SourceRowIndex != (nuint)i)
+                var origin = origins[i];
+                if (origin.SourceStageIndex != 0 || origin.SourceRowIndex != (nuint)i)
                     throw new InvalidOperationException("native text physicality rows lost their source order");
                 int width = checked((int)(input.TrajectoryVertices * 4));
                 double[]? trajectory = width == 0 ? null
                     : new ReadOnlySpan<double>(input.Trajectory, width).ToArray();
-                physicalities.Add(new PhysicalityRow(observation.PlacementId,
+                physicalities.Add(new PhysicalityRow(origin.PlacementId,
                     input.EntityId, _sourceId, (PhysicalityType)input.Type,
                     input.Coordinate[0], input.Coordinate[1], input.Coordinate[2], input.Coordinate[3],
                     input.HilbertIndex, trajectory, input.Constituents,
                     input.AlignmentResidualIsNull != 0 ? null : input.AlignmentResidual,
                     input.SourceDimIsNull != 0 ? null : input.SourceDim,
-                    observation.ObservedAtUnixUs));
+                    origin.ObservedAtUnixUs));
                 long allocated = checked(GC.GetAllocatedBytesForCurrentThread() - exportAllocationStart);
                 if (allocated > checked(grant - nativeStageBytes - retainedCaptureBytes))
                     throw new InvalidOperationException("managed physicality row export exceeded its allocation grant");
@@ -204,18 +192,7 @@ public sealed class TextEntityBuilder
         out ImmutableArray<PhysicalityRow> physicalities,
         out ImmutableArray<AttestationRow> attestations,
         out Hash128 rootId, out byte rootTier)
-        => TryBuildContentWitness(canonical, sourceId, witnessWeight, out entities,
-            out physicalities, out attestations, out rootId, out rootTier, out _);
-
-    public static bool TryBuildContentWitness(
-        byte[] canonical, Hash128 sourceId, double witnessWeight,
-        out ImmutableArray<EntityRow> entities,
-        out ImmutableArray<PhysicalityRow> physicalities,
-        out ImmutableArray<AttestationRow> attestations,
-        out Hash128 rootId, out byte rootTier,
-        out ImmutableArray<EntityInterpretationRow> interpretations)
     {
-        interpretations = [];
         try
         {
             using var tree = TextDecomposer.Run(canonical);
@@ -235,7 +212,7 @@ public sealed class TextEntityBuilder
             }
             var root = tree.GetNode(tree.NaturalUnitIndex());
             rootId = root.Id; rootTier = root.Tier;
-            var (es, ps) = new TextEntityBuilder(tree, sourceId).Build(out interpretations);
+            var (es, ps) = new TextEntityBuilder(tree, sourceId).Build();
             entities = es;
             physicalities = ps;
             // Pillar 3a: text emits its content DAG (entities + physicalities/trajectory) ONLY.
@@ -254,7 +231,6 @@ public sealed class TextEntityBuilder
             entities = ImmutableArray<EntityRow>.Empty;
             physicalities = ImmutableArray<PhysicalityRow>.Empty;
             attestations = ImmutableArray<AttestationRow>.Empty;
-            interpretations = [];
             rootId = default; rootTier = 0;
             return false;
         }

@@ -71,9 +71,9 @@ public class CopyTupleParserTests
     public async Task Entities_ParseAndFullEmit_MatchesStage()
     {
         using var stage = IntentStage.New(4);
-        stage.AddEntity(H(1), 2, H(100), H(200));
-        stage.AddEntity(H(2), 0, H(100), null);
-        stage.AddEntity(H(3), 4, H(101), H(200));
+        stage.AddEntity(H(1), 2, H(100));
+        stage.AddEntity(H(2), 0, H(100));
+        stage.AddEntity(H(3), 4, H(101));
 
         var blobs = Blobs(stage, IntentStageTable.Entities);
         var parsed = CopyTupleParser.ParseEntities(blobs);
@@ -92,9 +92,9 @@ public class CopyTupleParserTests
     public async Task Entities_FilteredEmit_KeepsOnlySelectedRows()
     {
         using var stage = IntentStage.New(4);
-        stage.AddEntity(H(1), 2, H(100), null);
-        stage.AddEntity(H(2), 2, H(100), null);
-        stage.AddEntity(H(3), 2, H(100), null);
+        stage.AddEntity(H(1), 2, H(100));
+        stage.AddEntity(H(2), 2, H(100));
+        stage.AddEntity(H(3), 2, H(100));
 
         var blobs = Blobs(stage, IntentStageTable.Entities);
         var parsed = CopyTupleParser.ParseEntities(blobs);
@@ -165,9 +165,9 @@ public class CopyTupleParserTests
     {
         using var s1 = IntentStage.New(2);
         using var s2 = IntentStage.New(2);
-        s1.AddEntity(H(1), 2, H(100), null);
-        s1.AddEntity(H(2), 2, H(100), null);
-        s2.AddEntity(H(3), 2, H(100), null);
+        s1.AddEntity(H(1), 2, H(100));
+        s1.AddEntity(H(2), 2, H(100));
+        s2.AddEntity(H(3), 2, H(100));
 
         var blobs = new List<(IntPtr, long)>();
         blobs.AddRange(Blobs(s1, IntentStageTable.Entities));
@@ -188,10 +188,10 @@ public class CopyTupleParserTests
     {
         using var s1 = IntentStage.New(2);
         using var s2 = IntentStage.New(2);
-        s1.AddEntity(H(1), 2, H(100), null);
-        s1.AddEntity(H(2), 2, H(100), null);
-        s2.AddEntity(H(1), 2, H(100), null);
-        s2.AddEntity(H(3), 2, H(100), null);
+        s1.AddEntity(H(1), 2, H(100));
+        s1.AddEntity(H(2), 2, H(100));
+        s2.AddEntity(H(1), 2, H(100));
+        s2.AddEntity(H(3), 2, H(100));
 
         var blobs = new List<(IntPtr, long)>();
         blobs.AddRange(Blobs(s1, IntentStageTable.Entities));

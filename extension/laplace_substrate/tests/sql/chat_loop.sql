@@ -34,19 +34,19 @@ DECLARE
     neutral  bigint := 1500000000000;
     sharp_rd bigint := 30000000000;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-    VALUES (src, 0, type_t, NULL),
-           (k_sense, 0, rel_meta, src), (k_senseof, 0, rel_meta, src),
-           (k_def, 0, rel_meta, src), (k_member, 0, rel_meta, src),
-           (k_isa, 0, rel_meta, src), (k_part, 0, rel_meta, src),
-           (k_rel, 0, rel_meta, src),
-           (w_dog, 2, type_t, src), (w_d, 0, type_t, src), (w_p, 0, type_t, src),
-           (w_h, 0, type_t, src), (w_c, 0, type_t, src),
-           (gloss1, 0, type_t, src), (gloss2, 0, type_t, src),
-           (sense1, 0, type_t, src), (sense2, 0, type_t, src),
-           (sense3, 0, type_t, src), (synset1, 0, type_t, src),
-           (synset2, 0, type_t, src), (synset3, 0, type_t, src),
-           (syn_bad, 0, type_t, src)
+    INSERT INTO laplace.entities (id, tier, type_id)
+    VALUES (src, 0, type_t),
+           (k_sense, 0, rel_meta), (k_senseof, 0, rel_meta),
+           (k_def, 0, rel_meta), (k_member, 0, rel_meta),
+           (k_isa, 0, rel_meta), (k_part, 0, rel_meta),
+           (k_rel, 0, rel_meta),
+           (w_dog, 2, type_t), (w_d, 0, type_t), (w_p, 0, type_t),
+           (w_h, 0, type_t), (w_c, 0, type_t),
+           (gloss1, 0, type_t), (gloss2, 0, type_t),
+           (sense1, 0, type_t), (sense2, 0, type_t),
+           (sense3, 0, type_t), (synset1, 0, type_t),
+           (synset2, 0, type_t), (synset3, 0, type_t),
+           (syn_bad, 0, type_t)
     ON CONFLICT DO NOTHING;
 
     PERFORM realize.register_canonical('HAS_SENSE');

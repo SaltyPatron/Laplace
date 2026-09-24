@@ -47,7 +47,7 @@ public sealed class EntityWriterThroughputTests
     public async Task NativeStage_Exceeds_500k_RowsPerSecond()
     {
         await using var cmd = _pg.DataSource.CreateCommand(
-            "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES "
+            "INSERT INTO laplace.entities (id, tier, type_id) VALUES "
           + "($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
         await cmd.ExecuteNonQueryAsync();
@@ -57,7 +57,7 @@ public sealed class EntityWriterThroughputTests
         const int totalRows = 500_000;
         var stage = IntentStage.New(totalRows);
         for (int i = 0; i < totalRows; i++)
-            stage.AddEntity(Id(10_000_000 + i), 0, ThroughputTypeId, null);
+            stage.AddEntity(Id(10_000_000 + i), 0, ThroughputTypeId);
 
         var change = WriterThroughputTests.NativeOnly(stage, ThroughputSrc, "tp-ent-native");
         // Bulk bracket matches IngestRunner; secondaries stay UP (O(tier) probes /
@@ -101,7 +101,7 @@ public sealed class WriterThroughputTests
     private async Task EnsureVocabAsync()
     {
         await using var cmd = _pg.DataSource.CreateCommand(
-            "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES "
+            "INSERT INTO laplace.entities (id, tier, type_id) VALUES "
           + "($1, 0::smallint, $1, NULL), ($2, 0::smallint, $1, NULL), ($3, 0::smallint, $1, NULL) "
           + "ON CONFLICT (id) DO NOTHING");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, ThroughputTypeId.ToBytes());
@@ -141,7 +141,7 @@ public sealed class WriterThroughputTests
 
         var seedStage = IntentStage.New(totalRows * 2);
         for (int i = 0; i < totalRows * 2; i++)
-            seedStage.AddEntity(Id(seedBase + i), 0, ThroughputTypeId, null);
+            seedStage.AddEntity(Id(seedBase + i), 0, ThroughputTypeId);
 
         var attStage = IntentStage.New(totalRows);
         for (int i = 0; i < totalRows; i++)
@@ -207,7 +207,7 @@ public sealed class WriterThroughputTests
             {
                 var body = results[offset];
                 entityIds[start + offset] = body.Id;
-                entStage.AddEntity(body.Id, body.Tier, ThroughputTypeId, ThroughputSrc);
+                entStage.AddEntity(body.Id, body.Tier, ThroughputTypeId);
                 physStage.AddPhysicality(PhysicalityId.Compute(body.Id, PhysicalityType.Content),
                     body.Id, (short)PhysicalityType.Content,
                     new double[] { body.CoordX, body.CoordY, body.CoordZ, body.CoordM }, body.Hilbert,
@@ -224,7 +224,7 @@ public sealed class WriterThroughputTests
         sw.Stop();
         await writer.CompleteBulkRunAsync();
 
-        PhysicalityWriterTestSupport.AssertAttempts(result, 0, totalRows, 0, totalRows);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 0, totalRows, 0);
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
             entityIds, entityIds.Select(id => PhysicalityId.Compute(id, PhysicalityType.Content)), []);
         Assert.InRange(result.RoundTrips, 1, IngestBaselineGates.MaxRoundTripsPerApplyBatch);
@@ -248,7 +248,7 @@ public sealed class WriterThroughputTests
         {
             var stage = IntentStage.New(rows);
             for (int i = 0; i < rows; i++)
-                stage.AddEntity(Id(idBase + i), 0, ThroughputTypeId, null);
+                stage.AddEntity(Id(idBase + i), 0, ThroughputTypeId);
             var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
             var r = await writer.ApplyAsync(NativeOnly(stage, ThroughputSrc, $"tp-rt-{idBase}"));
             Assert.Equal(rows, r.EntitiesInserted);

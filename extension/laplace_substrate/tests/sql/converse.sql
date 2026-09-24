@@ -50,24 +50,24 @@ DECLARE
     neutral  bigint := 1500000000000;
     sharp_rd bigint := 30000000000;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-    VALUES (src, 0, type_t, NULL),
-           (k_sense, 0, rel_meta, src), (k_senseof, 0, rel_meta, src), (k_def, 0, rel_meta, src),
-           (k_syn, 0, rel_meta, src), (k_member, 0, rel_meta, src), (k_lang, 0, rel_meta, src),
-           (k_isa, 0, rel_meta, src),
-           (k_causes, 0, rel_meta, src), (k_anto, 0, rel_meta, src),
-           (k_evokes, 0, rel_meta, src),
-           (w_dog, 2, type_t, src), (w_p, 0, type_t, src), (w_h, 0, type_t, src),
-           (w_c, 0, type_t, src), (w_ja, 0, type_t, src),
-           (w_request, 2, type_t, src), (w_binder, 2, type_t, src),
-           (frame_people, 2, type_t, src), (frame_existence, 2, type_t, src),
-           (sense1, 0, type_t, src), (synset1, 0, type_t, src),
-           (sense_b, 0, type_t, src), (synset_b, 0, type_t, src),
-           (sense_ja, 0, type_t, src), (syn_ja, 0, type_t, src),
-           (synset2, 0, type_t, src), (syn_bad, 0, type_t, src),
-           (gloss1, 0, type_t, src),
-           (lang_en, 0, type_lang, src), (lang_de, 0, type_lang, src),
-           (lang_ja, 0, type_lang, src)
+    INSERT INTO laplace.entities (id, tier, type_id)
+    VALUES (src, 0, type_t),
+           (k_sense, 0, rel_meta), (k_senseof, 0, rel_meta), (k_def, 0, rel_meta),
+           (k_syn, 0, rel_meta), (k_member, 0, rel_meta), (k_lang, 0, rel_meta),
+           (k_isa, 0, rel_meta),
+           (k_causes, 0, rel_meta), (k_anto, 0, rel_meta),
+           (k_evokes, 0, rel_meta),
+           (w_dog, 2, type_t), (w_p, 0, type_t), (w_h, 0, type_t),
+           (w_c, 0, type_t), (w_ja, 0, type_t),
+           (w_request, 2, type_t), (w_binder, 2, type_t),
+           (frame_people, 2, type_t), (frame_existence, 2, type_t),
+           (sense1, 0, type_t), (synset1, 0, type_t),
+           (sense_b, 0, type_t), (synset_b, 0, type_t),
+           (sense_ja, 0, type_t), (syn_ja, 0, type_t),
+           (synset2, 0, type_t), (syn_bad, 0, type_t),
+           (gloss1, 0, type_t),
+           (lang_en, 0, type_lang), (lang_de, 0, type_lang),
+           (lang_ja, 0, type_lang)
     ON CONFLICT DO NOTHING;
 
     INSERT INTO laplace.canonical_names (id, name)
@@ -163,18 +163,11 @@ DO $token_facet$
 DECLARE
     entity_id bytea := laplace.word_id('p');
     entity_type bytea;
-    source_id bytea;
 BEGIN
-    SELECT type_id, first_observed_by
-      INTO STRICT entity_type, source_id
+    SELECT type_id
+      INTO STRICT entity_type
       FROM laplace.entities
      WHERE id = entity_id;
-    PERFORM laplace.entity_interpretations_publish(
-        ARRAY[entity_id]::bytea[],
-        ARRAY[2]::smallint[],
-        ARRAY[entity_type]::bytea[],
-        ARRAY[source_id]::bytea[],
-        ARRAY[source_id IS NULL]::boolean[]);
 END
 $token_facet$;
 SELECT count(*) = 2 AND count(DISTINCT ord) = 2

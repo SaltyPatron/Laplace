@@ -53,20 +53,15 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
 
             var metaSeed = new SubstrateChangeBuilder(SourceId, "meta-seed")
                 .AddEntity(BootstrapIntentBuilder.SourceTypeId, 0,
-                           BootstrapIntentBuilder.SourceTypeId,
-                           firstObservedBy: null)
+                           BootstrapIntentBuilder.SourceTypeId)
                 .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0,
-                           BootstrapIntentBuilder.SourceTypeId,
-                           firstObservedBy: null)
+                           BootstrapIntentBuilder.SourceTypeId)
                 .AddEntity(BootstrapIntentBuilder.RelationTypeMetaTypeId, 0,
-                           BootstrapIntentBuilder.SourceTypeId,
-                           firstObservedBy: null)
+                           BootstrapIntentBuilder.SourceTypeId)
                 .AddEntity(TrustClassId, 0,
-                           BootstrapIntentBuilder.SourceTypeId,
-                           firstObservedBy: null)
+                           BootstrapIntentBuilder.SourceTypeId)
                 .AddEntity(BootstrapIntentBuilder.HasTrustClassTypeId, 0,
-                           BootstrapIntentBuilder.RelationTypeMetaTypeId,
-                           firstObservedBy: null)
+                           BootstrapIntentBuilder.RelationTypeMetaTypeId)
                 .Build();
             await context.Writer.ApplyAsync(metaSeed, ct);
 
@@ -94,7 +89,7 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
                     builder.AddEntity(leaf, 0, BootstrapIntentBuilder.SourceTypeId);
                 }
                 var parent = Hash128.Merkle(1, children);
-                builder.AddEntity(parent, 1, BootstrapIntentBuilder.SourceTypeId, SourceId);
+                builder.AddEntity(parent, 1, BootstrapIntentBuilder.SourceTypeId);
                 yield return builder.SetInputUnitsConsumed(1).Build();
                 await Task.Yield();
             }
@@ -496,11 +491,11 @@ public class SyntheticDecomposerTests : IClassFixture<LocalPgFixture>, IAsyncLif
             if (bitmap.Length > 0 && (bitmap[0] & 1) != 0) return;
 
             var metaSeed = new SubstrateChangeBuilder(SourceId, "meta-seed")
-                .AddEntity(BootstrapIntentBuilder.SourceTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
-                .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
-                .AddEntity(BootstrapIntentBuilder.RelationTypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId, null)
-                .AddEntity(TrustClassId, 0, BootstrapIntentBuilder.SourceTypeId, null)
-                .AddEntity(BootstrapIntentBuilder.HasTrustClassTypeId, 0, BootstrapIntentBuilder.RelationTypeMetaTypeId, null)
+                .AddEntity(BootstrapIntentBuilder.SourceTypeId, 0, BootstrapIntentBuilder.SourceTypeId)
+                .AddEntity(BootstrapIntentBuilder.TypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId)
+                .AddEntity(BootstrapIntentBuilder.RelationTypeMetaTypeId, 0, BootstrapIntentBuilder.SourceTypeId)
+                .AddEntity(TrustClassId, 0, BootstrapIntentBuilder.SourceTypeId)
+                .AddEntity(BootstrapIntentBuilder.HasTrustClassTypeId, 0, BootstrapIntentBuilder.RelationTypeMetaTypeId)
                 .Build();
             await context.Writer.ApplyAsync(metaSeed, ct);
             await context.Writer.ApplyAsync(

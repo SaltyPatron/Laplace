@@ -30,8 +30,8 @@ BEGIN
     END IF;
     IF p_lang IS NOT NULL AND NOT EXISTS (
         SELECT 1
-        FROM laplace.entity_interpretations i
-        WHERE i.entity_id = p_lang
+        FROM laplace.entities i
+        WHERE i.id = p_lang
           AND i.type_id = realize.canonical_id('Language')) THEN
         RAISE EXCEPTION 'bubble_down: language % is not a Language entity', encode(p_lang, 'hex');
     END IF;
@@ -171,8 +171,8 @@ BEGIN
         SELECT DISTINCT a.subject_id AS surface_id
         FROM candidate_ids ci
         JOIN laplace.attestations a ON a.subject_id = ANY(ci.ids)
-        JOIN laplace.entity_interpretations i
-          ON i.entity_id = a.context_id
+        JOIN laplace.entities i
+          ON i.id = a.context_id
          AND i.type_id = realize.canonical_id('Language')
         WHERE p_lang IS NOT NULL
     ),

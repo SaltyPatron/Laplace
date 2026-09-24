@@ -22,9 +22,9 @@ DECLARE
     leafname text;
     dup_ok   boolean := false;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL), (rel_a, 0, type_t, src), (subj, 0, type_t, src),
-        (o1, 0, type_t, src), (o2, 0, type_t, src)
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t), (rel_a, 0, type_t), (subj, 0, type_t),
+        (o1, 0, type_t), (o2, 0, type_t)
     ON CONFLICT (id) DO NOTHING;
 
     -- 1) fresh insert: three cells in one ordered call (hot relation, plain

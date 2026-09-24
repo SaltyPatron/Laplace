@@ -953,9 +953,9 @@ word_shape_peers_fast_impl(Datum p_word, double p_frechet_max)
 
         rc = SPI_execute_with_args(
             "SELECT w.id, w.coord, EXISTS ("
-            "  SELECT 1 FROM laplace.entity_interpretations self "
-            "  JOIN laplace.entity_interpretations peer ON peer.type_id=self.type_id "
-            "  WHERE self.entity_id=$1 AND peer.entity_id=w.id"
+            "  SELECT 1 FROM laplace.entities self "
+            "  JOIN laplace.entities peer ON peer.type_id=self.type_id "
+            "  WHERE self.id=$1 AND peer.id=w.id"
             "), w.n_constituents "
             "FROM laplace.v_word_points w "
             "WHERE w.trajectory IS NOT NULL AND w.coord IS NOT NULL "

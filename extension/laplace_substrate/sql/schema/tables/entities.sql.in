@@ -1,22 +1,14 @@
--- Canonical entity identity is the content id. Tier/type/source are observed
+-- Canonical entity identity is the content id. Tier and type are observed
 -- structural/typing projections and must never participate in uniqueness.
---
--- The compatibility columns on `entities` remain a deterministic summary for
--- existing readers while `entity_interpretations` retains every distinct
--- (id,tier,type) observation. On a repeated id the summary converges by byte/
--- numeric minimum rather than arrival order; no second logical entity can be
--- created. New readers that care about tier/type multiplicity must read the
--- interpretation relation, not treat the compatibility summary as authority.
+-- Sources witness entities through attestations only; no column here records
+-- which source first observed an entity.
 --
 -- HASH(id) is the physical layout because ids are content hashes and therefore
--- distribute independently of modality-relative tier. This schema is created in
--- a new database; an existing LIST(tier)/(id,tier) database remains intact and
--- is rejected here until an explicit data-preserving conversion is provided.
+-- distribute independently of modality-relative tier.
 CREATE TABLE IF NOT EXISTS entities (
     id                 bytea            NOT NULL CHECK (octet_length(id) = 16),
     tier               smallint         NOT NULL CHECK (tier >= 0 AND tier < 256),
     type_id            bytea            NOT NULL CHECK (octet_length(type_id) = 16),
-    first_observed_by  bytea            CHECK (first_observed_by IS NULL OR octet_length(first_observed_by) = 16),
     created_at         timestamptz      NOT NULL DEFAULT now(),
     highway_mask       bytea            CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32),
     PRIMARY KEY (id)
@@ -56,35 +48,4 @@ BEGIN
     END LOOP;
 END $$;
 
--- Explicit home for structural altitude/type observations. Distinct sources
--- witnessing the same interpretation converge on the same row; provenance of
--- semantic claims remains in attestations, while first_observed_by is retained
--- only as non-authoritative compatibility metadata.
-CREATE TABLE IF NOT EXISTS entity_interpretations (
-    entity_id          bytea        NOT NULL CHECK (octet_length(entity_id) = 16),
-    tier               smallint     NOT NULL CHECK (tier >= 0 AND tier < 256),
-    type_id            bytea        NOT NULL CHECK (octet_length(type_id) = 16),
-    first_observed_by  bytea        CHECK (first_observed_by IS NULL OR octet_length(first_observed_by) = 16),
-    observed_at        timestamptz  NOT NULL DEFAULT now(),
-    PRIMARY KEY (entity_id, tier, type_id)
-) PARTITION BY HASH (entity_id);
-
-DO $$
-DECLARE
-    b int;
-    suffix text;
-    opts constant text := ' SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)';
-BEGIN
-    IF to_regclass(current_schema() || '.entity_interpretations_h00') IS NOT NULL THEN
-        RETURN;
-    END IF;
-    FOR b IN 0..63 LOOP
-        suffix := lpad(to_hex(b), 2, '0');
-        EXECUTE format('CREATE TABLE entity_interpretations_h%s PARTITION OF entity_interpretations FOR VALUES WITH (MODULUS 64, REMAINDER %s)',
-                       suffix, b);
-        EXECUTE format('ALTER TABLE entity_interpretations_h%s', suffix) || opts;
-    END LOOP;
-END $$;
-
 SELECT pg_extension_config_dump('entities', '');
-SELECT pg_extension_config_dump('entity_interpretations', '');

@@ -104,12 +104,6 @@ DECLARE
     entity_id bytea;
 BEGIN
     SELECT id INTO STRICT entity_id FROM deposit_fixtures WHERE name='entity_a';
-    PERFORM laplace.entity_interpretations_publish(
-        ARRAY[entity_id]::bytea[],
-        ARRAY[3]::smallint[],
-        ARRAY[decode(repeat('dc',16),'hex')]::bytea[],
-        ARRAY[NULL::bytea]::bytea[],
-        ARRAY[true]::boolean[]);
 END
 $facet_fixture$;
 DO $$
@@ -124,12 +118,12 @@ DECLARE
         consensus.relation_highway_bit(laplace.relation_type_id('HAS_PART')),
         consensus.relation_highway_bit(laplace.relation_type_id('IS_ANTONYM_OF'))]);
 BEGIN
-    SELECT jsonb_agg(jsonb_build_array(tier,encode(type_id,'hex')) ORDER BY tier,type_id)
-      INTO facets_before FROM laplace.entity_interpretations
-      WHERE entity_id=decode(repeat('a7',16),'hex');
+    SELECT jsonb_build_array(tier,encode(type_id,'hex'))
+      INTO facets_before FROM laplace.entities
+      WHERE id=decode(repeat('a7',16),'hex');
     IF (SELECT count(*) FROM laplace.entities WHERE id=decode(repeat('a7',16),'hex'))<>1
        OR facets_before IS DISTINCT FROM expected_facets THEN
-        RAISE EXCEPTION 'fixture must retain one content entity and both exact interpretations';
+        RAISE EXCEPTION 'fixture must retain one content entity and its exact typed row';
     END IF;
     SELECT consensus.highway_mask_deposit(
         ARRAY[decode(repeat('a7',16),'hex')],
@@ -143,14 +137,14 @@ BEGIN
         ARRAY[decode(repeat('a7',16),'hex')],
         ARRAY[laplace.relation_type_id('IS_ANTONYM_OF')]) INTO n;
     IF n<>0 THEN RAISE EXCEPTION 'replay updated % masks',n; END IF;
-    SELECT jsonb_agg(jsonb_build_array(tier,encode(type_id,'hex')) ORDER BY tier,type_id)
-      INTO facets_after FROM laplace.entity_interpretations
-      WHERE entity_id=decode(repeat('a7',16),'hex');
+    SELECT jsonb_build_array(tier,encode(type_id,'hex'))
+      INTO facets_after FROM laplace.entities
+      WHERE id=decode(repeat('a7',16),'hex');
     IF (SELECT count(*) FROM laplace.entities WHERE id=decode(repeat('a7',16),'hex'))<>1
        OR facets_after IS DISTINCT FROM facets_before
        OR (SELECT highway_mask FROM laplace.entities WHERE id=decode(repeat('a7',16),'hex'))
           IS DISTINCT FROM expected_mask THEN
-        RAISE EXCEPTION 'mask replay changed canonical identity, interpretations or bits';
+        RAISE EXCEPTION 'mask replay changed canonical identity or bits';
     END IF;
 END $$;
 

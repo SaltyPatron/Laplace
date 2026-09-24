@@ -61,8 +61,8 @@ BEGIN
         (source_id,           2, type_id);
 
     subscan_id := public.laplace_hash128_blake3('substrate/source/SubstrateCanonical/v1'::bytea);
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (subscan_id, 2, source_id, NULL);
+    INSERT INTO entities (id, tier, type_id) VALUES
+        (subscan_id, 2, source_id);
 
     pk_content_id    := public.laplace_hash128_blake3('substrate/physicality_type/CONTENT/v1'::bytea);
     pk_buildblock_id := public.laplace_hash128_blake3('substrate/physicality_type/BUILDING_BLOCK/v1'::bytea);
@@ -70,11 +70,11 @@ BEGIN
 
     pk_projection_out_id := public.laplace_hash128_blake3('substrate/physicality_type/PROJECTION_OUTPUT/v1'::bytea);
 
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (pk_content_id,        2, physicality_type_meta_id, subscan_id),
-        (pk_buildblock_id,     2, physicality_type_meta_id, subscan_id),
-        (pk_projection_id,     2, physicality_type_meta_id, subscan_id),
-        (pk_projection_out_id, 2, physicality_type_meta_id, subscan_id);
+    INSERT INTO entities (id, tier, type_id) VALUES
+        (pk_content_id,        2, physicality_type_meta_id),
+        (pk_buildblock_id,     2, physicality_type_meta_id),
+        (pk_projection_id,     2, physicality_type_meta_id),
+        (pk_projection_out_id, 2, physicality_type_meta_id);
 
     type_codepoint_id := public.laplace_hash128_blake3('Codepoint'::bytea);
     type_grapheme_id  := public.laplace_hash128_blake3('Grapheme'::bytea);
@@ -82,12 +82,12 @@ BEGIN
     type_sentence_id  := public.laplace_hash128_blake3('Sentence'::bytea);
     type_document_id  := public.laplace_hash128_blake3('Document'::bytea);
 
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (type_codepoint_id, 2, type_id, subscan_id),
-        (type_grapheme_id,  2, type_id, subscan_id),
-        (type_word_id,      2, type_id, subscan_id),
-        (type_sentence_id,  2, type_id, subscan_id),
-        (type_document_id,  2, type_id, subscan_id);
+    INSERT INTO entities (id, tier, type_id) VALUES
+        (type_codepoint_id, 2, type_id),
+        (type_grapheme_id,  2, type_id),
+        (type_word_id,      2, type_id),
+        (type_sentence_id,  2, type_id),
+        (type_document_id,  2, type_id);
 
     tc_mandate_id       := public.laplace_hash128_blake3('substrate/trust_class/SubstrateMandate/v1'::bytea);
     tc_standards_id     := public.laplace_hash128_blake3('substrate/trust_class/StandardsDerived/v1'::bytea);
@@ -101,18 +101,18 @@ BEGIN
     tc_response_id      := public.laplace_hash128_blake3('substrate/trust_class/ResponseContent/v1'::bytea);
     tc_adversarial_id   := public.laplace_hash128_blake3('substrate/trust_class/AdversarialUntrusted/v1'::bytea);
 
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (tc_mandate_id,       2, type_id, subscan_id),
-        (tc_standards_id,     2, type_id, subscan_id),
-        (tc_academic_id,      2, type_id, subscan_id),
-        (tc_academic_user_id, 2, type_id, subscan_id),
-        (tc_corpus_id,        2, type_id, subscan_id),
-        (tc_user_curated_id,  2, type_id, subscan_id),
-        (tc_ai_probe_id,      2, type_id, subscan_id),
-        (tc_app_derived_id,   2, type_id, subscan_id),
-        (tc_user_prompt_id,   2, type_id, subscan_id),
-        (tc_response_id,      2, type_id, subscan_id),
-        (tc_adversarial_id,   2, type_id, subscan_id);
+    INSERT INTO entities (id, tier, type_id) VALUES
+        (tc_mandate_id,       2, type_id),
+        (tc_standards_id,     2, type_id),
+        (tc_academic_id,      2, type_id),
+        (tc_academic_user_id, 2, type_id),
+        (tc_corpus_id,        2, type_id),
+        (tc_user_curated_id,  2, type_id),
+        (tc_ai_probe_id,      2, type_id),
+        (tc_app_derived_id,   2, type_id),
+        (tc_user_prompt_id,   2, type_id),
+        (tc_response_id,      2, type_id),
+        (tc_adversarial_id,   2, type_id);
 
     reltype_is_a_id              := public.laplace_hash128_blake3('IS_A'::bytea);
     reltype_has_part_id          := public.laplace_hash128_blake3('HAS_PART'::bytea);
@@ -131,23 +131,23 @@ BEGIN
     reltype_has_trust_class_id   := public.laplace_hash128_blake3('HAS_TRUST_CLASS'::bytea);
     reltype_is_alias_of_id       := public.laplace_hash128_blake3('IS_ALIAS_OF'::bytea);
 
-    INSERT INTO entities (id, tier, type_id, first_observed_by) VALUES
-        (reltype_is_a_id,              2, relation_type_meta_id, subscan_id),
-        (reltype_has_part_id,          2, relation_type_meta_id, subscan_id),
-        (reltype_co_occurs_with_id,    2, relation_type_meta_id, subscan_id),
-        (reltype_follows_id,           2, relation_type_meta_id, subscan_id),
-        (reltype_precedes_id,          2, relation_type_meta_id, subscan_id),
-        (reltype_occurs_in_context_id, 2, relation_type_meta_id, subscan_id),
-        (reltype_has_language_id,      2, relation_type_meta_id, subscan_id),
-        (reltype_is_translation_of_id, 2, relation_type_meta_id, subscan_id),
-        (reltype_depicts_id,           2, relation_type_meta_id, subscan_id),
-        (reltype_captions_id,          2, relation_type_meta_id, subscan_id),
-        (reltype_transcribes_as_id,    2, relation_type_meta_id, subscan_id),
-        (reltype_is_lossy_enc_id,      2, relation_type_meta_id, subscan_id),
-        (reltype_has_variant_of_id,    2, relation_type_meta_id, subscan_id),
-        (reltype_is_replaced_by_id,    2, relation_type_meta_id, subscan_id),
-        (reltype_has_trust_class_id,   2, relation_type_meta_id, subscan_id),
-        (reltype_is_alias_of_id,       2, relation_type_meta_id, subscan_id);
+    INSERT INTO entities (id, tier, type_id) VALUES
+        (reltype_is_a_id,              2, relation_type_meta_id),
+        (reltype_has_part_id,          2, relation_type_meta_id),
+        (reltype_co_occurs_with_id,    2, relation_type_meta_id),
+        (reltype_follows_id,           2, relation_type_meta_id),
+        (reltype_precedes_id,          2, relation_type_meta_id),
+        (reltype_occurs_in_context_id, 2, relation_type_meta_id),
+        (reltype_has_language_id,      2, relation_type_meta_id),
+        (reltype_is_translation_of_id, 2, relation_type_meta_id),
+        (reltype_depicts_id,           2, relation_type_meta_id),
+        (reltype_captions_id,          2, relation_type_meta_id),
+        (reltype_transcribes_as_id,    2, relation_type_meta_id),
+        (reltype_is_lossy_enc_id,      2, relation_type_meta_id),
+        (reltype_has_variant_of_id,    2, relation_type_meta_id),
+        (reltype_is_replaced_by_id,    2, relation_type_meta_id),
+        (reltype_has_trust_class_id,   2, relation_type_meta_id),
+        (reltype_is_alias_of_id,       2, relation_type_meta_id);
 
     -- Fold inputs on the evidence row: one confirming observation (score 1.0
     -- fixed-point) witnessed at the fully-trusted phi (30.0 x 1e9 — the
@@ -165,8 +165,8 @@ BEGIN
         1000000000, 30000000000
     );
 
-    -- Per-row self-FKs stay out of the hot COPY path. Canonical entities now
-    -- have one id-only primary key, while tier/type/source observations live in
-    -- entity_interpretations. Referential closure is proved set-wise by the
-    -- admission/apply/proof owners rather than by one RBAR FK check per tuple.
+    -- Per-row self-FKs stay out of the hot COPY path. Canonical entities have
+    -- one id-only primary key; tier/type projections live in the row itself.
+    -- Referential closure is proved set-wise by the apply/proof owners rather
+    -- than by one RBAR FK check per tuple.
 END $bootstrap$;

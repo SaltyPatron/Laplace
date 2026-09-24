@@ -27,7 +27,7 @@ public sealed class GrammarRowComposerDrainParityTests
 
         using var expected = IntentStage.New(Math.Max(16, ents.Length + phys.Length));
         foreach (var e in ents)
-            expected.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
+            expected.AddEntity(e.Id, e.Tier, e.TypeId);
         Span<double> coord = stackalloc double[4];
         foreach (var p in phys)
         {

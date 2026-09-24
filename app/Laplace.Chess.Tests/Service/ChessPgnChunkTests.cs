@@ -23,18 +23,19 @@ public sealed class ChessPgnChunkTests
     // Different grouping changes operational intent/source-unit IDs; these controls
     // compare canonical objects and raw source payload/multiplicity, not generated
     // source-unit evidence IDs across arbitrary fresh schedules.
-    // Exact form comparison excludes only observation wall-clock time, which is sampled
-    // anew by each actual composition. Identity/coordinates/carrier bits/source stay exact.
+    // Exact form comparison excludes wall-clock time, which is sampled anew by each
+    // actual composition, and the staging source, which is the first builder to stage
+    // the row. Identity/coordinates/carrier bits stay exact.
     private static string Form(PhysicalityRow row) => string.Join("|",
-        row.Id, row.EntityId, row.SourceId, row.Type,
+        row.Id, row.EntityId, row.Type,
         BitConverter.DoubleToInt64Bits(row.CoordX), BitConverter.DoubleToInt64Bits(row.CoordY),
         BitConverter.DoubleToInt64Bits(row.CoordZ), BitConverter.DoubleToInt64Bits(row.CoordM),
         row.HilbertIndex, row.NConstituents, row.AlignmentResidual, row.SourceDim,
         row.TrajectoryXyzm is null ? "null" : string.Join(",", row.TrajectoryXyzm.Select(BitConverter.DoubleToInt64Bits)));
 
-    private static string[] Observations(IEnumerable<SubstrateChange> changes) =>
-        changes.SelectMany(change => change.PhysicalityObservations)
-            .Select(Form).Order(StringComparer.Ordinal).ToArray();
+    private static string[] Physicalities(IEnumerable<SubstrateChange> changes) =>
+        changes.SelectMany(change => change.Physicalities)
+            .Select(Form).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 
     private static (Hash128 Id, long Count, long Score)[] Attestations(IEnumerable<SubstrateChange> changes) =>
         changes.SelectMany(change => change.Attestations).GroupBy(row => row.Id)
@@ -56,7 +57,7 @@ public sealed class ChessPgnChunkTests
         Assert.Equal(expected.Metadata.IntentId, repaired.Metadata.IntentId);
         Assert.Equal(expected.Entities.Select(row => row.Id).OrderBy(id => id.ToString()),
             repaired.Entities.Select(row => row.Id).OrderBy(id => id.ToString()));
-        Assert.Equal(Observations([expected]), Observations([repaired]));
+        Assert.Equal(Physicalities([expected]), Physicalities([repaired]));
         Assert.Equal(expected.Physicalities.Select(Form).Order(StringComparer.Ordinal),
             repaired.Physicalities.Select(Form).Order(StringComparer.Ordinal));
         // The same game/window must produce the complete canonical evidence body.
@@ -70,7 +71,7 @@ public sealed class ChessPgnChunkTests
             repaired.PhysicalitySourcePriors.OrderBy(pair => pair.Key.ToString()));
         Assert.Equal(expected.IntentStages.Sum(stage => stage.PhysicalityCount),
             repaired.IntentStages.Sum(stage => stage.PhysicalityCount));
-        foreach (var row in repaired.PhysicalityObservations)
+        foreach (var row in repaired.Physicalities)
             Assert.Equal(expected.RequireSourcePrior(row.SourceId), repaired.RequireSourcePrior(row.SourceId));
         foreach (var stage in repaired.IntentStages)
         {
@@ -124,7 +125,7 @@ public sealed class ChessPgnChunkTests
                 ChessAnalyze.SourceId, ChessTransitions.SourceId, ChessPositionOutcomes.SourceId
             })
                 Assert.Contains(repaired[3].Attestations, row => row.SourceId == source);
-            Assert.Contains(repaired[3].PhysicalityObservations,
+            Assert.Contains(repaired[3].Physicalities,
                 row => row.SourceId == ChessVocabulary.TrajectorySourceId);
         }
         finally { Dispose(expected); Dispose(repaired); }
@@ -154,7 +155,7 @@ public sealed class ChessPgnChunkTests
             AssertRepairParity(expected[0], repaired[2]);
             AssertRepairParity(expected[1], repaired[3]);
             Assert.Contains(repaired[3].Attestations, row => row.SourceId == ChessSyzygy.SourceId);
-            Assert.Contains(repaired[3].PhysicalityObservations, row => row.SourceId == ChessSyzygy.SourceId);
+            Assert.Contains(repaired[3].Physicalities, row => row.SourceId == ChessSyzygy.SourceId);
             Assert.True(measurement.Work.SyzygyAvailable);
             Assert.Equal(1L, measurement.Work.SyzygyGameCalls);
             Assert.Equal(1L, measurement.Work.SyzygyGameCallsCompleted);
@@ -193,13 +194,13 @@ public sealed class ChessPgnChunkTests
             Assert.Equal(154, admitted[0].MoveIds.Length);
             Assert.Equal(expected.SelectMany(c => c.Entities).Select(row => row.Id).Distinct().OrderBy(id => id.ToString()),
                 split.SelectMany(c => c.Entities).Select(row => row.Id).Distinct().OrderBy(id => id.ToString()));
-            Assert.Equal(Observations(expected), Observations(split));
+            Assert.Equal(Physicalities(expected), Physicalities(split));
             Assert.Equal(Attestations(expected), Attestations(split));
             Assert.Equal(EvidenceFacts(expected), EvidenceFacts(split));
             Assert.Equal(expected.SelectMany(c => c.IntentStages).Sum(stage => stage.PhysicalityCount),
                 split.SelectMany(c => c.IntentStages).Sum(stage => stage.PhysicalityCount));
             long after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
-            Assert.All(split.SelectMany(c => c.PhysicalityObservations)
+            Assert.All(split.SelectMany(c => c.Physicalities)
                 .Where(row => row.ObservedAtUnixUs != 0),
                 row => Assert.InRange(row.ObservedAtUnixUs, before, after));
         }
@@ -282,7 +283,7 @@ public sealed class ChessPgnChunkTests
             Assert.Equal(games.Length, offset);
             foreach (var actual in new[] { owned, attached, replayed })
             {
-                Assert.Equal(Observations(expected), Observations(actual));
+                Assert.Equal(Physicalities(expected), Physicalities(actual));
                 Assert.Equal(Attestations(expected), Attestations(actual));
                 Assert.Equal(EvidenceFacts(expected), EvidenceFacts(actual));
                 Assert.Equal(expected.SelectMany(change => change.Entities)
@@ -362,7 +363,7 @@ public sealed class ChessPgnChunkTests
             }
             Assert.Equal<ChessGameRecord>(games, observed);
             Assert.Equal(games.Sum(game => game.MoveIds.Length), observed.Sum(game => game.MoveIds.Length));
-            Assert.Equal(Observations(expected), Observations(split));
+            Assert.Equal(Physicalities(expected), Physicalities(split));
             Assert.Equal(Attestations(expected), Attestations(split));
             Assert.Equal(EvidenceFacts(expected), EvidenceFacts(split));
             Assert.Equal(expected.SelectMany(c => c.Entities).Select(row => row.Id).Distinct().OrderBy(id => id.ToString()),
@@ -450,9 +451,9 @@ public sealed class ChessPgnChunkTests
                 Assert.Equal(game.PlayingId, Assert.Single(repeated.RepairPlayings));
                 Assert.Empty(repeatedChanges[0].Entities);
                 Assert.Empty(repeatedChanges[1].Attestations);
-                Assert.Empty(repeatedChanges[1].PhysicalityObservations);
+                Assert.Empty(repeatedChanges[1].Physicalities);
                 Assert.Contains(repeatedChanges[2].Entities, row => row.Id == game.PlayingId);
-                Assert.NotEmpty(repeatedChanges[2].PhysicalityObservations);
+                Assert.NotEmpty(repeatedChanges[2].Physicalities);
                 AssertRepairParity(firstChanges[0], repeatedChanges[2]);
                 AssertRepairParity(firstChanges[1], repeatedChanges[3]);
                 Assert.DoesNotContain(game.PlayingId, remainingNovel);
@@ -479,7 +480,7 @@ public sealed class ChessPgnChunkTests
             Assert.Contains(changes[0].Entities, row => row.Id == games[0].PlayingId);
             Assert.Contains(changes[2].Entities, row => row.Id == games[1].PlayingId);
             Assert.DoesNotContain(changes[0].Entities, row => row.Id == games[1].PlayingId);
-            Assert.NotEmpty(changes[2].PhysicalityObservations);
+            Assert.NotEmpty(changes[2].Physicalities);
             Assert.NotEmpty(changes[3].Attestations);
         }
         finally { Dispose(changes); }

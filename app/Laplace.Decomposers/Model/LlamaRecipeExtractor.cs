@@ -185,7 +185,7 @@ public sealed class LlamaRecipeExtractor
         Hash128 isATypeId,
         Hash128 architectureEntityId)
     {
-        b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId, firstObservedBy: sourceId);
+        b.AddEntity(recipe.RecipeEntityId, EntityTier.Word, modelRecipeTypeId);
 
         // Retain the canonical config as decomposed content rather than relying on
         // canonical_names as a payload store. This keeps source bytes reconstructible
@@ -204,7 +204,7 @@ public sealed class LlamaRecipeExtractor
         {
             var valueId = ContentEmitter.Emit(b, Encoding.UTF8.GetBytes(value), sourceId)
                 ?? throw new InvalidOperationException($"scalar '{value}' has no content root");
-            b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar, sourceId);
+            b.AddEntity(valueId, EntityTier.Word, EntityTypeRegistry.Scalar);
             AddAttestation(typeId, valueId);
         }
 
@@ -215,7 +215,7 @@ public sealed class LlamaRecipeExtractor
         AddScalar(hasIntermSizeTypeId, recipe.IntermediateSize.ToString());
         AddScalar(hasVocabSizeTypeId, recipe.VocabSize.ToString());
 
-        b.AddEntity(architectureEntityId, EntityTier.Word, EntityTypeRegistry.Architecture, sourceId);
+        b.AddEntity(architectureEntityId, EntityTier.Word, EntityTypeRegistry.Architecture);
         AddAttestation(isATypeId, architectureEntityId);
     }
 

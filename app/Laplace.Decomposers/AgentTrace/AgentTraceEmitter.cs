@@ -108,8 +108,7 @@ public static class AgentTraceEmitter
         long sessionUs = session.StartedAtUnixUs;
         int watermark = session.WitnessedTurnWatermark;
 
-        b.AddEntity(sessionId, EntityTier.Document, EntityTypeRegistry.ConversationSession,
-            scope.Tenant.PromptSource);
+        b.AddEntity(sessionId, EntityTier.Document, EntityTypeRegistry.ConversationSession);
 
         var coords = new Dictionary<Hash128, double[]>();
         var turnIds = new List<Hash128>(session.Turns.Count);
@@ -238,7 +237,7 @@ public static class AgentTraceEmitter
             Hash128 chain = sessionId;
             foreach (var tid in turnIds) chain = WatermarkChainStep(chain, tid);
             b.AddEntity(WatermarkId(sessionId, turnIds.Count, chain), EntityTier.Word,
-                EntityTypeRegistry.AgentSessionWatermark, LaneSource);
+                EntityTypeRegistry.AgentSessionWatermark);
         }
 
         if (turnIds.Count <= watermark) return;
@@ -277,7 +276,7 @@ public static class AgentTraceEmitter
         if (string.IsNullOrEmpty(text)) return null;
         if (!TextEntityBuilder.TryBuildContentWitness(
                 Encoding.UTF8.GetBytes(text), sourceId, 1.0,
-                out var entities, out var physicalities, out _, out var root, out _, out _))
+                out var entities, out var physicalities, out _, out var root, out _))
             return null;
         foreach (var e in entities) b.AddEntity(e);
         foreach (var p in physicalities)
@@ -325,7 +324,7 @@ public static class AgentTraceEmitter
         }
         double[] centroid = coords[id];
 
-        b.AddEntity(id, tier, typeId, sourceId);
+        b.AddEntity(id, tier, typeId);
         Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);
         b.AddPhysicality(new PhysicalityRow(
                 Id: physId, EntityId: id, SourceId: sourceId,
@@ -354,7 +353,7 @@ public static class AgentTraceEmitter
         Dictionary<Hash128, double[]>? coords)
     {
         Hash128 id = Hash128.OfCanonical(canonicalKey);
-        b.AddEntity(id, EntityTier.Word, typeId, LaneSource);
+        b.AddEntity(id, EntityTier.Word, typeId);
         if (ContentEmitter.Emit(b, surfaceName, LaneSource) is { } nameRoot && nameRoot != id)
             b.AddAttestation(NativeAttestation.Categorical(
                 id, Rel(AgentRelation.IsInstanceOf), nameRoot, LaneSource, null, TC.AppDerived));
@@ -405,7 +404,7 @@ public static class AgentTraceEmitter
     {
         if (Witness(b, value, LaneSource, coords, members: null) is not { } scalarRoot)
             return;
-        b.AddEntity(scalarRoot, EntityTier.Word, EntityTypeRegistry.Scalar, LaneSource);
+        b.AddEntity(scalarRoot, EntityTier.Word, EntityTypeRegistry.Scalar);
         Attest(b, ts, NativeAttestation.Categorical(
             subject, relation, scalarRoot, LaneSource, sessionId, TC.AppDerived));
     }

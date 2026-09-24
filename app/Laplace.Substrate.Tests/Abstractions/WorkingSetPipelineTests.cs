@@ -152,7 +152,7 @@ public sealed class WorkingSetPipelineTests
                 for (int row = 0; row < 6; ++row)
                 {
                     Hash128 id = Hash128.OfCanonical($"expanded/{record}/{row}");
-                    builder.ContentStage.AddEntity(id, EntityTier.Word, TestSource, TestSource);
+                    builder.ContentStage.AddEntity(id, EntityTier.Word, TestSource);
                 }
             },
             estimatedOutputRows: static _ => 6);
@@ -312,7 +312,7 @@ public sealed class WorkingSetPipelineTests
         {
             builder = value;
             staged = value.ContentStage;
-            staged.AddEntity(TestSource, 0, TestSource, TestSource);
+            staged.AddEntity(TestSource, 0, TestSource);
             throw new InvalidOperationException("controlled direct-drain failure");
         });
 
@@ -331,7 +331,7 @@ public sealed class WorkingSetPipelineTests
         Assert.True(staged.IsClosed);
         Assert.NotNull(builder);
         Assert.Throws<ObjectDisposedException>(() => builder.AddEntity(
-            TestSource, 0, TestSource, TestSource));
+            TestSource, 0, TestSource));
     }
 
     [Fact]
@@ -344,10 +344,10 @@ public sealed class WorkingSetPipelineTests
             // Reaching a second window must have retired the prior builder.
             if (builders.Count != 0)
                 Assert.Throws<ObjectDisposedException>(() => builders[^1].AddEntity(
-                    TestSource, 0, TestSource, TestSource));
+                    TestSource, 0, TestSource));
             builders.Add(builder);
             var id = Hash128.Blake3(BitConverter.GetBytes(record));
-            builder.ContentStage.AddEntity(id, 0, TestSource, TestSource);
+            builder.ContentStage.AddEntity(id, 0, TestSource);
         });
 
         try
@@ -360,7 +360,7 @@ public sealed class WorkingSetPipelineTests
             Assert.Equal(2, changes.Count);
             Assert.Equal(2, builders.Count);
             Assert.All(builders, builder => Assert.Throws<ObjectDisposedException>(
-                () => builder.AddEntity(TestSource, 0, TestSource, TestSource)));
+                () => builder.AddEntity(TestSource, 0, TestSource)));
             Assert.All(changes, change =>
             {
                 Assert.Equal(1, change.Metadata.InputUnitsConsumed);

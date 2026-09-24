@@ -82,7 +82,7 @@ BEGIN ATOMIC
     -- corpus.
     SELECT used.type_id, NULL::smallint, 'dangling_entity_type'::text
     FROM (
-        SELECT i.type_id FROM laplace.entity_interpretations i
+        SELECT i.type_id FROM laplace.entities i
         UNION
         -- Retain detection on an already incomplete legacy/corrupt sidecar.
         SELECT e.type_id FROM laplace.entities e

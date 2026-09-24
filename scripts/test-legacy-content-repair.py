@@ -72,7 +72,7 @@ BEGIN
  DELETE FROM laplace.attestations WHERE source_id=repair_test.id('source');
  DELETE FROM laplace.physicalities WHERE entity_id IN (SELECT id FROM repair_test.ids);
  DELETE FROM laplace.entities WHERE id IN (SELECT id FROM repair_test.ids);
- INSERT INTO laplace.entities(id,tier,type_id,first_observed_by,created_at)
+ INSERT INTO laplace.entities(id,tier,type_id,created_at)
  SELECT id,CASE WHEN name IN ('game','healthy-game','session','msg1','msg2') THEN 4
                 WHEN name='player' THEN 3 WHEN name LIKE 'p%' OR name='name' THEN 2 ELSE 1 END,
    realize.canonical_id(CASE WHEN name IN ('game','healthy-game') THEN 'Chess_Game'
@@ -163,7 +163,7 @@ SELECT CASE ord WHEN 1 THEN 'alias-old' ELSE 'alias-target' END,root_id
 FROM repair_alias_roots ON CONFLICT(name) DO NOTHING;
 DELETE FROM laplace.physicalities WHERE entity_id IN (SELECT root_id FROM repair_alias_roots);
 DELETE FROM laplace.entities WHERE id IN (SELECT root_id FROM repair_alias_roots);
-INSERT INTO laplace.entities(id,tier,type_id,first_observed_by,created_at)
+INSERT INTO laplace.entities(id,tier,type_id,created_at)
 SELECT root_id,tier,realize.canonical_id('Repair_Test_Atom'),repair_test.id('source'),
   '2026-09-01 12:34:56.123456+00'::timestamptz FROM repair_alias_roots;
 INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
@@ -208,7 +208,7 @@ DELETE FROM laplace.entities WHERE id IN (SELECT root_id FROM repair_alias_atoms
 INSERT INTO repair_test.ids(name,id)
 SELECT CASE ord WHEN 1 THEN 'alias-atom-old' ELSE 'alias-atom-target' END,root_id
 FROM repair_alias_atoms ON CONFLICT(name) DO UPDATE SET id=excluded.id;
-INSERT INTO laplace.entities(id,tier,type_id,first_observed_by,created_at)
+INSERT INTO laplace.entities(id,tier,type_id,created_at)
 SELECT root_id,tier,realize.canonical_id('Repair_Test_Atom'),repair_test.id('source'),
   '2026-09-01 12:34:56.123456+00'::timestamptz FROM repair_alias_atoms
 ON CONFLICT(id) DO NOTHING;
@@ -1019,8 +1019,8 @@ class NativeRepairProof:
         self.sql("SELECT repair_test.reset();")
         self.run("one-move-base", max_rows=3)
         self.sql("""
-          INSERT INTO laplace.entities(id,tier,type_id,first_observed_by,created_at)
-          SELECT repair_test.id('one-move-game'),tier,type_id,first_observed_by,created_at
+          INSERT INTO laplace.entities(id,tier,type_id,created_at)
+          SELECT repair_test.id('one-move-game'),tier,type_id,created_at
           FROM laplace.entities WHERE id=repair_test.id('game');
           INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
               n_constituents,alignment_residual,source_dim,observed_at)
@@ -1210,7 +1210,7 @@ class NativeRepairProof:
             assert {witness["outcome"] for witness in witnesses} == {2, outcome}, \
                 f"{name}: opposing applicable testimony was filtered out of retained evidence"
         incoming = self.rejected("incoming-content-dependency", """
-          INSERT INTO laplace.entities(id,tier,type_id,first_observed_by,created_at)
+          INSERT INTO laplace.entities(id,tier,type_id,created_at)
           VALUES(repair_test.id('container'),5,realize.canonical_id('Repair_Test_Container'),
             repair_test.id('source'),'2026-09-01 12:34:56.123456+00'::timestamptz);
           INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,trajectory,
@@ -1283,7 +1283,7 @@ class NativeRepairProof:
           CROSS JOIN LATERAL (SELECT array_agg(p.coord ORDER BY v.ordinal) AS coords
             FROM unnest(ids) WITH ORDINALITY v(id,ordinal)
             JOIN laplace.physicalities p ON p.entity_id=v.id AND p.type=1) placement;
-          INSERT INTO laplace.entities(id,tier,type_id,first_observed_by,created_at)
+          INSERT INTO laplace.entities(id,tier,type_id,created_at)
           SELECT id,4,realize.canonical_id('Chess_Game'),repair_test.id('source'),
             '2026-09-01 12:34:56.123456+00'::timestamptz FROM repair_test.healthy_extra;
           INSERT INTO laplace.physicalities(id,entity_id,type,coord,hilbert_index,

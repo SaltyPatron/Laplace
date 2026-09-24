@@ -22,11 +22,11 @@ public static class UserPromptContent
     {
         var b = new SubstrateChangeBuilder(Source, "bootstrap/UserPrompt", parentIntentId: null)
             .DeclareSourcePrior(SourceTrust.SubstrateMandate);
-        b.AddEntity(Source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId, Source);
-        b.AddEntity(TextEntityBuilder.GraphemeTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
-        b.AddEntity(TextEntityBuilder.WordTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
-        b.AddEntity(TextEntityBuilder.SentenceTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
-        b.AddEntity(TextEntityBuilder.DocumentTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId, Source);
+        b.AddEntity(Source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId);
+        b.AddEntity(TextEntityBuilder.GraphemeTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId);
+        b.AddEntity(TextEntityBuilder.WordTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId);
+        b.AddEntity(TextEntityBuilder.SentenceTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId);
+        b.AddEntity(TextEntityBuilder.DocumentTypeId, EntityTier.Word, BootstrapIntentBuilder.TypeMetaTypeId);
         return b.Build();
     }
 
@@ -37,7 +37,7 @@ public static class UserPromptContent
         out Hash128 rootId)
     {
         if (!TextEntityBuilder.TryBuildContentWitness(utf8, Source, WitnessWeight,
-                out var entities, out var physicalities, out var attestations, out rootId, out _, out _))
+                out var entities, out var physicalities, out var attestations, out rootId, out _))
         {
             change = default!;
             rootId = Hash128.Zero;

@@ -18,7 +18,7 @@ const hash128_t kEntity{123u, 456u};
 Stage sample_stage() {
     Stage stage(intent_stage_new(0u), intent_stage_free);
     const hash128_t type = laplace_content_tier_type_id(4);
-    EXPECT_EQ(intent_stage_add_entity(stage.get(), &kEntity, 4, &type, &kEntity), 0);
+    EXPECT_EQ(intent_stage_add_entity(stage.get(), &kEntity, 4, &type), 0);
     hash128_t placement;
     laplace_physicality_id_compute(kEntity, 3, &placement);
     const double coord[4] = {0.125, 0.25, 0.375, 0.5};

@@ -210,23 +210,6 @@ TEST(ImageDecomposer, ModalityFormsSurvivePresentEntitiesAndRepeatedSourceOccurr
         EXPECT_EQ(2 * forms, intent_stage_physicality_count(full.get()));
         EXPECT_EQ(2 * forms, intent_stage_physicality_count(known.get()));
 
-        // Complete interpretation streams have the same actual input tuples
-        // despite different canonical E winners. Use the unchanged semantic
-        // serializer on these four-column tuples to compare the full multiset.
-        hash128_t facet_digests[2]{};
-        for(unsigned i=0;i<2;++i) {
-            const auto* observed=i ? known.get() : full.get();
-            ASSERT_TRUE(intent_stage_entity_interpretations_complete(observed));
-            ASSERT_GT(intent_stage_entity_interpretation_count(observed),0u);
-            size_t bytes=0;
-            const auto* tuples=intent_stage_entity_interpretation_tuple_ptr(observed,&bytes);
-            intent_stage_t* raw=nullptr;
-            ASSERT_EQ(0,intent_stage_from_tuple_bytes(tuples,bytes,nullptr,0,nullptr,0,SIZE_MAX,&raw));
-            std::unique_ptr<intent_stage_t,decltype(&intent_stage_free)> owner(raw,intent_stage_free);
-            ASSERT_EQ(0,intent_stage_semantic_digest(owner.get(),&facet_digests[i]));
-        }
-        EXPECT_EQ(0,hash128_compare(&facet_digests[0],&facet_digests[1]));
-
         // Compare every semantic body field and duplicate multiplicity independently
         // of the historical first-winner row ordering used by entity insertion.
         (void)intent_stage_retain_physicalities(full.get());

@@ -100,7 +100,7 @@ internal static class WiktionarySenseAnchor
         Hash128[] flat = Flatten(wordId, languageId, posId, mode, ordered);
         Hash128 id = Hash128.Merkle(EntityTier.Word, flat);
 
-        builder.AddEntity(id, EntityTier.Word, EntityTypeRegistry.WiktionarySense, source);
+        builder.AddEntity(id, EntityTier.Word, EntityTypeRegistry.WiktionarySense);
 
         var coordinateRows = new double[(pairs.Count + 1) * 4];
         wordCoord.CopyTo(coordinateRows.AsSpan(0, 4));

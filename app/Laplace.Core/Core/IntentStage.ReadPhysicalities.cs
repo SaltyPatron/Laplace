@@ -2,8 +2,10 @@ using System.Runtime.InteropServices;
 
 namespace Laplace.Engine.Core;
 
+/// <summary>Native origin of one exported physicality row: its placement id and
+/// the stage/row it was read from, in source order.</summary>
 [StructLayout(LayoutKind.Sequential)]
-internal struct PhysicalityObservationNative
+internal struct PhysicalityRowOriginNative
 {
     internal Hash128 PlacementId;
     internal nuint SourceStageIndex;
@@ -15,21 +17,20 @@ public sealed partial class IntentStage
 {
     internal delegate void PhysicalityRowsVisitor(
         ReadOnlySpan<PhysicalityDescriptorInputNative> inputs,
-        ReadOnlySpan<PhysicalityObservationNative> observations);
+        ReadOnlySpan<PhysicalityRowOriginNative> origins);
 
     internal delegate void PhysicalityRowsBudgetVisitor(
         ReadOnlySpan<PhysicalityDescriptorInputNative> inputs,
-        ReadOnlySpan<PhysicalityObservationNative> observations,
+        ReadOnlySpan<PhysicalityRowOriginNative> origins,
         long retainedCaptureBytes);
 
     /// <summary>Copy native tuple bodies into a bounded native snapshot, then
-    /// visit it while owned. Trajectory pointers must not escape the visitor.
-    /// This transport does not perform descriptor admission.</summary>
+    /// visit it while owned. Trajectory pointers must not escape the visitor.</summary>
     internal unsafe void VisitPhysicalityRows(long maximumBytes, PhysicalityRowsVisitor visitor)
     {
         ArgumentNullException.ThrowIfNull(visitor);
         VisitPhysicalityRows(maximumBytes,
-            (inputs, observations, _) => visitor(inputs, observations));
+            (inputs, origins, _) => visitor(inputs, origins));
     }
 
     /// <summary>The visitor receives the capture's actual retained allocation so
@@ -53,14 +54,14 @@ public sealed partial class IntentStage
                 if (status != 0 || capture == IntPtr.Zero)
                     throw new InvalidOperationException($"native physicality row export failed: {status}");
             }
-            nuint inputsCount = 0, observationCount = 0;
+            nuint inputsCount = 0, originCount = 0;
             var inputs = NativeInterop.PhysicalityDescriptorCaptureInputs(capture, &inputsCount);
-            var observations = NativeInterop.PhysicalityDescriptorCaptureObservations(capture, &observationCount);
-            if (inputsCount != (nuint)expected || observationCount != inputsCount
-                || (inputsCount != 0 && (inputs == null || observations == null)))
+            var origins = NativeInterop.PhysicalityDescriptorCaptureOrigins(capture, &originCount);
+            if (inputsCount != (nuint)expected || originCount != inputsCount
+                || (inputsCount != 0 && (inputs == null || origins == null)))
                 throw new InvalidOperationException("native physicality row export count differs from its source stage");
             visitor(new ReadOnlySpan<PhysicalityDescriptorInputNative>(inputs, expected),
-                new ReadOnlySpan<PhysicalityObservationNative>(observations, expected),
+                new ReadOnlySpan<PhysicalityRowOriginNative>(origins, expected),
                 checked((long)NativeInterop.PhysicalityDescriptorCaptureRetainedBytes(capture)));
         }
         finally
@@ -81,7 +82,7 @@ public static unsafe partial class NativeInterop
         IntPtr capture, nuint* count);
 
     [LibraryImport(Library, EntryPoint = "physicality_descriptor_capture_observations")]
-    internal static partial PhysicalityObservationNative* PhysicalityDescriptorCaptureObservations(
+    internal static partial PhysicalityRowOriginNative* PhysicalityDescriptorCaptureOrigins(
         IntPtr capture, nuint* count);
 
     [LibraryImport(Library, EntryPoint = "physicality_descriptor_capture_bytes")]

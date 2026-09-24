@@ -159,12 +159,12 @@ public static class ChessStockfishEval
         }
 
         b.AddEntity(context, EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, SourceId);
+            ChessVocabulary.AnalysisMarkerType);
         // The existing source family remains addressable. Each new calculated context names
         // its exact inputs; legacy anonymous v1 contexts and their evidence are left intact.
         if ((recipeMetadataRoot ?? ContentEmitter.Emit(b, prepared.Recipe.CanonicalManifest, SourceId)) is { } vId)
             b.AddEntity(ChessVocabulary.AnalysisVersionMetaTypeId, EntityTier.Word,
-                    BootstrapIntentBuilder.RelationTypeMetaTypeId, SourceId)
+                    BootstrapIntentBuilder.RelationTypeMetaTypeId)
                 .AddAttestation(NativeAttestation.CategoricalResolved(
                     game.LineId, ChessVocabulary.AnalysisVersionMetaTypeId, vId,
                     SourceId, contextId: context, ChessVocabulary.Trust));

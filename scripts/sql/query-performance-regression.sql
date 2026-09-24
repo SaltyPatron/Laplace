@@ -17,31 +17,17 @@ BEGIN
     -- A resolvable cached atom is not proof of a persisted canonical entity.
     ASSERT bit_count(laplace.entities_exist_bitmap(ARRAY[id])) = 1;
     ASSERT bit_count(laplace.entities_stored_bitmap(ARRAY[id])) = 0;
-    ASSERT laplace.entity_interpretations_publish(
-        ARRAY[id], ARRAY[0::smallint], ARRAY[high], ARRAY[high], ARRAY[false]);
-    ASSERT NOT EXISTS (SELECT FROM laplace.entity_interpretations e WHERE e.entity_id=id);
     INSERT INTO laplace.entities(id,tier,type_id) VALUES(id,5,high);
-    -- Duplicate facets, independent tier/type minima, and null/source ordering.
-    ASSERT NOT laplace.entity_interpretations_publish(
-        ARRAY[id,id,id,id], ARRAY[5,5,3,4]::smallint[],
-        ARRAY[high,high,high,low], ARRAY[high,low,high,low], ARRAY[false,false,true,false]);
-    ASSERT (SELECT count(*)=3 FROM laplace.entity_interpretations e WHERE e.entity_id=id);
-    ASSERT (SELECT e.tier=3 AND e.type_id=low AND e.first_observed_by=low
-            FROM laplace.entities e WHERE e.id=id);
-    ASSERT (SELECT e.first_observed_by=low FROM laplace.entity_interpretations e
-            WHERE e.entity_id=id AND e.tier=5 AND e.type_id=high);
-    SELECT e.ctid INTO before_tid FROM laplace.entities e WHERE e.id=id;
-    ASSERT NOT laplace.entity_interpretations_publish(
-        ARRAY[id,id], ARRAY[5,5]::smallint[], ARRAY[high,high], ARRAY[high,high], ARRAY[false,true]);
-    ASSERT (SELECT e.ctid=before_tid AND e.first_observed_by=low FROM laplace.entities e WHERE e.id=id);
-    ASSERT NOT laplace.entity_interpretations_publish(
-        ARRAY[]::bytea[], ARRAY[]::smallint[], ARRAY[]::bytea[], ARRAY[]::bytea[], ARRAY[]::boolean[]);
+    -- Re-inserting the same content id is an ordinary key conflict, not a
+    -- second identity or mutation of the row's projection.
     BEGIN
-        PERFORM laplace.entity_interpretations_publish(
-            ARRAY[id], ARRAY[]::smallint[], ARRAY[high], ARRAY[high], ARRAY[false]);
-        RAISE EXCEPTION 'unequal arrays were accepted';
-    EXCEPTION WHEN invalid_parameter_value THEN NULL;
+        INSERT INTO laplace.entities(id,tier,type_id) VALUES(id,3,low);
+        RAISE EXCEPTION 'duplicate content id was accepted as a second identity';
+    EXCEPTION WHEN unique_violation THEN NULL;
     END;
+    SELECT e.ctid INTO before_tid FROM laplace.entities e WHERE e.id=id;
+    ASSERT (SELECT e.tier=5 AND e.type_id=high FROM laplace.entities e WHERE e.id=id);
+    ASSERT (SELECT e.ctid=before_tid FROM laplace.entities e WHERE e.id=id);
 END $test$;
 ROLLBACK;
 

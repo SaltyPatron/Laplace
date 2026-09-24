@@ -171,7 +171,7 @@ public static class UdParseStructure
         }
 
         Hash128 parseId = Hash128.Merkle(ParseTier, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(flat));
-        builder.AddEntity(parseId, ParseTier, EntityTypeRegistry.UdParse, sourceId);
+        builder.AddEntity(parseId, ParseTier, EntityTypeRegistry.UdParse);
 
         Span<double> parseCoord = stackalloc double[4];
         bool hasCoord = sentence.TextUtf8 is { Length: > 0 }
@@ -204,7 +204,7 @@ public static class UdParseStructure
             sourceId, parseId, fileLabel, sentence.SourceOrdinal, sentence.SourceSentenceId,
             sourceFileContext);
         builder.AddEntity(
-            occurrenceId, EntityTier.Document, EntityTypeRegistry.UdParseOccurrence, sourceId);
+            occurrenceId, EntityTier.Document, EntityTypeRegistry.UdParseOccurrence);
         Hash128 subjectId = sentenceId == None ? occurrenceId : sentenceId;
         builder.AddAttestation(NativeAttestation.CategoricalResolved(
             subjectId,
@@ -307,7 +307,7 @@ public static class UdParseStructure
         foreach (string name in MarkerNames)
         {
             Hash128 id = NamedMarker(name);
-            builder.AddEntity(id, EntityTier.Word, EntityTypeRegistry.UdAnnotationMarker, sourceId);
+            builder.AddEntity(id, EntityTier.Word, EntityTypeRegistry.UdAnnotationMarker);
             VocabularyNames.Track(canonicalNames, name);
         }
     }
@@ -319,7 +319,7 @@ public static class UdParseStructure
         ConcurrentDictionary<string, byte> canonicalNames)
     {
         NamedAnchor anchor = TokenRef(tokenRef);
-        builder.AddEntity(anchor.Id, EntityTier.Word, EntityTypeRegistry.UdTokenRef, sourceId);
+        builder.AddEntity(anchor.Id, EntityTier.Word, EntityTypeRegistry.UdTokenRef);
         VocabularyNames.Track(canonicalNames, anchor.Name);
         return anchor.Id;
     }
@@ -350,7 +350,7 @@ public static class UdParseStructure
     {
         if (string.IsNullOrWhiteSpace(xpos) || xpos == "_") return None;
         NamedAnchor anchor = XposAnchor(languageCode, xpos);
-        builder.AddEntity(anchor.Id, EntityTier.Word, EntityTypeRegistry.UdXpos, sourceId);
+        builder.AddEntity(anchor.Id, EntityTier.Word, EntityTypeRegistry.UdXpos);
         VocabularyNames.Track(canonicalNames, anchor.Name);
         if (uposId != None)
         {
@@ -475,7 +475,7 @@ public static class UdParseStructure
 
             NamedAnchor keyAnchor = MiscKey(key);
             builder.AddEntity(
-                keyAnchor.Id, EntityTier.Word, EntityTypeRegistry.UdAnnotationMarker, sourceId);
+                keyAnchor.Id, EntityTier.Word, EntityTypeRegistry.UdAnnotationMarker);
             VocabularyNames.Track(canonicalNames, keyAnchor.Name);
 
             Hash128 valueId;
@@ -526,7 +526,7 @@ public static class UdParseStructure
                 if (!valueId.Equals(None))
                 {
                     builder.AddEntity(
-                        valueId, EntityTier.Word, EntityTypeRegistry.UdAnnotationValue, sourceId);
+                        valueId, EntityTier.Word, EntityTypeRegistry.UdAnnotationValue);
                 }
             }
             resolved.Add((keyAnchor.Id, valueId));

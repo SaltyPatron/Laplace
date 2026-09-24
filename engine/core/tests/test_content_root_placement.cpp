@@ -266,7 +266,7 @@ TEST(LaplaceContentObservations, ExistingRootRetainsSourcesAndFormsWithoutDuplic
     const std::array<physicality_descriptor_source_observation_t, 4> sources{a, b, b, b};
     physicality_descriptor_materialization_t* raw_materialized = nullptr;
     ASSERT_EQ(PHYSICALITY_DESCRIPTOR_OK, physicality_descriptor_materialize(capture.get(), vocabulary.get(),
-        nullptr, 0, nullptr, 0, nullptr, 0, sources.data(), sources.size(), &source_a,
+        nullptr, 0, nullptr, 0, nullptr, 0, sources.data(), sources.size(),
         INTENT_STAGE_PG_EPOCH_UNIX_US, budget, &raw_materialized));
     std::unique_ptr<physicality_descriptor_materialization_t, decltype(&physicality_descriptor_materialization_free)>
         materialized(raw_materialized, physicality_descriptor_materialization_free);
@@ -318,14 +318,16 @@ TEST(LaplaceContentObservations, PresentRootDoesNotSuppressMissingDescendantsOrO
         ASSERT_EQ(0, content_witness_emit_tree(stage.get(), tree.get(), &source, bitmap.data(), nodes, &root));
         EXPECT_TRUE(hash128_equals(&root, &expected_root.id));
         EXPECT_EQ(all_present ? 0u : 1u, intent_stage_entity_count(stage.get()));
-        // Two computed occurrences of "ab" plus the sentence composition.
-        EXPECT_EQ(3u, intent_stage_physicality_count(stage.get()));
+        // The two "ab" occurrences collapse to one placement by the identity
+        // law (same content, same form), so exactly one word form plus the
+        // sentence composition is retained; no duplicate rows per occurrence.
+        EXPECT_EQ(2u, intent_stage_physicality_count(stage.get()));
         if (!all_present) {
             size_t size = 0, offset = 0;
             const uint8_t* bytes = intent_stage_tuple_ptr(stage.get(), INTENT_STAGE_TABLE_ENTITIES, &size);
             std::vector<Field> fields;
             ASSERT_TRUE(next_row(bytes, size, offset, fields));
-            ASSERT_EQ(4u, fields.size());
+            ASSERT_EQ(3u, fields.size());
             ASSERT_EQ(16, fields[0].length);
             EXPECT_EQ(0, std::memcmp(fields[0].bytes, &expected_word.id, 16));
             EXPECT_EQ(size, offset);
@@ -450,7 +452,7 @@ TEST(LaplaceContentObservations, AtomicRootReplaySharesDescriptorAndPreservesEve
         EXPECT_TRUE(hash128_equals(&descriptors[i], &descriptors[0]));
     physicality_descriptor_materialization_t* raw_materialized = nullptr;
     ASSERT_EQ(physicality_descriptor_materialize(capture.get(), vocabulary.get(),
-        nullptr, 0, nullptr, 0, nullptr, 0, sources.data(), sources.size(), &source_a,
+        nullptr, 0, nullptr, 0, nullptr, 0, sources.data(), sources.size(),
         INTENT_STAGE_PG_EPOCH_UNIX_US, budget, &raw_materialized), PHYSICALITY_DESCRIPTOR_OK);
     std::unique_ptr<physicality_descriptor_materialization_t, decltype(&physicality_descriptor_materialization_free)>
         materialized(raw_materialized, physicality_descriptor_materialization_free);

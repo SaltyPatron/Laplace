@@ -15,11 +15,11 @@ DECLARE
     sent       bytea := public.laplace_hash128_blake3('test/browse/sentence');
     t2flag     bigint := (2::bigint << 1);
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL),
-        (w_sodium, 2, type_word, src),
-        (w_chloride, 2, type_word, src),
-        (sent, 3, type_sent, src);
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t),
+        (w_sodium, 2, type_word),
+        (w_chloride, 2, type_word),
+        (sent, 3, type_sent);
 
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)

@@ -52,27 +52,6 @@ public sealed class WorkingSetQueryShapeTests
     }
 
     [Fact]
-    public void EntityInterpretationPublication_StaysOptimisticSetWiseAndIncremental()
-    {
-        var repoRoot = TypeIdLawTests.FindRepoRootPublic();
-        var publisher = File.ReadAllText(Path.Combine(
-            repoRoot, "extension", "laplace_substrate", "sql", "functions",
-            "identity", "entity_interpretations_publish.sql.in"));
-        var retry = File.ReadAllText(Path.Combine(
-            repoRoot, "app", "Laplace.Substrate", "Ingestion",
-            "TransientErrorRetryPolicy.cs"));
-        string publication = publisher.Split(
-            "-- Ordinary ad-hoc INSERT/COPY", StringSplitOptions.None)[0];
-
-        Assert.Contains("pg_laplace_entity_interpretations_publish", publication, StringComparison.Ordinal);
-        Assert.Contains("LANGUAGE C VOLATILE PARALLEL UNSAFE", publication, StringComparison.Ordinal);
-        Assert.DoesNotContain("LANGUAGE plpgsql", publication, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("MATERIALIZED", publication, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("array_agg", publication, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("sqlState is \"23505\" or", retry, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void FoldHotPaths_SendOneMixedTypeWorkingSetPerDatabaseCall()
     {
         var repoRoot = TypeIdLawTests.FindRepoRootPublic();
@@ -145,7 +124,7 @@ public sealed class WorkingSetQueryShapeTests
 
         var admission = File.ReadAllText(Path.Combine(
             repoRoot, "app", "Laplace.Substrate", "Crud", "Npgsql",
-            "NpgsqlPhysicalityAdmission.cs"));
+            "NpgsqlPhysicalityStaging.cs"));
         var owner = CSharpSyntaxTree.ParseText(admission).GetRoot()
             .DescendantNodes()
             .OfType<MethodDeclarationSyntax>()
@@ -159,14 +138,9 @@ public sealed class WorkingSetQueryShapeTests
             Assert.IsType<LiteralExpressionSyntax>(arguments[1].Expression).Token.ValueText);
         Assert.Equal("TransactionGucs(Durability)", arguments[2].Expression.ToString());
 
-        var prepare = Assert.Single(calls.Where(call =>
-            call.Expression.ToString() == "PrepareCanonicalPhysicalityObservations"));
         var applyPrepared = Assert.Single(calls.Where(call =>
             call.Expression.ToString() == "ApplyPreparedStagesCoreAsync"));
-        Assert.True(acquire.SpanStart < prepare.SpanStart);
-        Assert.True(prepare.SpanStart < applyPrepared.SpanStart);
-        Assert.Equal("physicalityAdmission",
-            prepare.ArgumentList.Arguments[0].Expression.ToString());
+        Assert.True(acquire.SpanStart < applyPrepared.SpanStart);
         Assert.Equal("connection", applyPrepared.ArgumentList.Arguments[0].Expression.ToString());
         Assert.Equal("transaction", applyPrepared.ArgumentList.Arguments[1].Expression.ToString());
         Assert.DoesNotContain("AdvisoryTxLock.BeginWithLockAsync",

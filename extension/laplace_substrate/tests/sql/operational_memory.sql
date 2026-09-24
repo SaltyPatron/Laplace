@@ -4,7 +4,7 @@
 BEGIN;
 CREATE FUNCTION pg_temp.admit_operational_prompt(p_prompt text,p_source bytea)
 RETURNS void LANGUAGE sql AS $admit$
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     SELECT DISTINCT p.id,p.tier,
            laplace.entity_type_id(CASE p.tier
                WHEN 0 THEN 'Codepoint' WHEN 1 THEN 'Grapheme'
@@ -25,7 +25,7 @@ BEGIN
          last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9)
     VALUES
         (public.laplace_hash128_blake3(
-             p_subject || p_type || p_object || p_source || COALESCE(p_context,''::bytea)),
+             p_subject || p_type || p_object || p_source || COALESCE(p_context, ''::bytea)),
          p_subject,p_type,p_object,p_source,p_context,2,
          now(),5,5000000000,30000000000);
     INSERT INTO laplace.consensus
@@ -101,7 +101,7 @@ DECLARE
     first_program bytea;
     r record;
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) VALUES
+    INSERT INTO laplace.entities(id,tier,type_id) VALUES
         (source_id,2,laplace.entity_type_id('Source'),source_id),
         (other_source,2,laplace.entity_type_id('Source'),other_source),
         (context_id,2,laplace.entity_type_id('Source_Reference'),source_id),
@@ -257,7 +257,7 @@ DECLARE
     prompt_root bytea;
     r record;
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) VALUES
+    INSERT INTO laplace.entities(id,tier,type_id) VALUES
         (source_id,2,laplace.entity_type_id('Source'),source_id),
         (context_id,2,laplace.entity_type_id('Source_Reference'),source_id),
         (first_answer,2,laplace.entity_type_id('CodeConcept'),source_id),
@@ -309,7 +309,7 @@ DECLARE
     prompt_root bytea;
     r record;
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) VALUES
+    INSERT INTO laplace.entities(id,tier,type_id) VALUES
         (source_id,2,laplace.entity_type_id('Source'),source_id),
         (context_id,2,laplace.entity_type_id('Source_Reference'),source_id),
         (operation_id,2,laplace.entity_type_id('RelationType'),source_id),
@@ -351,7 +351,7 @@ DECLARE
     first_result bytea[];
     r record;
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by) VALUES
+    INSERT INTO laplace.entities(id,tier,type_id) VALUES
         (source_id,2,laplace.entity_type_id('Source'),source_id),
         (first_context,2,laplace.entity_type_id('Source_Reference'),source_id),
         (second_context,2,laplace.entity_type_id('Source_Reference'),source_id),
@@ -473,7 +473,7 @@ DECLARE
     metadata bytea;
     r record;
 BEGIN
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     SELECT id,2,laplace.entity_type_id('Source_Reference'),source
       FROM unnest(ARRAY[source,scope,occurrence,lang,schema,none_id,root_marker,
           features_end,enhanced_end,misc_end,tokens_end,ref_one,ref_two,pos_id,dep_id,answer]) id
@@ -496,7 +496,7 @@ BEGIN
         ref_two,surface,lemma,pos_id,none_id,features_end,ref_one,dep_id,enhanced_end,misc_end,
         tokens_end];
     parse_id := public.laplace_hash128_merkle(4::smallint,manifest);
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     VALUES(parse_id,4,laplace.entity_type_id('UD_Parse'),source);
     INSERT INTO laplace.physicalities
         (id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,observed_at)
@@ -516,7 +516,7 @@ BEGIN
     FOR i IN 1..3 LOOP
         metadata := public.laplace_hash128_blake3(convert_to(
             'test/structure/metadata/' || i::text,'UTF8'));
-        INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+        INSERT INTO laplace.entities(id,tier,type_id)
         VALUES(metadata,2,laplace.entity_type_id('CodeConcept'),source);
         PERFORM pg_temp.operation_cell(lemma,laplace.relation_type_id('RELATED_TO'),metadata,source,scope);
     END LOOP;

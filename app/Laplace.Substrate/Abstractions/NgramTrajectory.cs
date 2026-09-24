@@ -36,7 +36,7 @@ public static class NgramTrajectory
         double[] traj = Trajectory.Build(childIds);
         Hash128 physId = PhysicalityId.Compute(id, PhysicalityType.Content);
 
-        var entity = new EntityRow(id, tier, typeId, sourceId);
+        var entity = new EntityRow(id, tier, typeId);
         var phys = new PhysicalityRow(
             Id: physId,
             EntityId: id,

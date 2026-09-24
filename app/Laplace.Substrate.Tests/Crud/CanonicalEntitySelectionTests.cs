@@ -20,8 +20,8 @@ public sealed class CanonicalEntitySelectionTests
 
         using var high = IntentStage.New(2);
         using var low = IntentStage.New(2);
-        high.AddEntity(id, 3, highType, H("source-z"));
-        low.AddEntity(id, 1, lowType, H("source-a"));
+        high.AddEntity(id, 3, highType);
+        low.AddEntity(id, 1, lowType);
 
         static (short Tier, Hash128 Type) Pick(
             IReadOnlyList<(IntPtr Ptr, long Len)> blobs)
@@ -48,8 +48,8 @@ public sealed class CanonicalEntitySelectionTests
     {
         var id = H("canonical-selection/tier0-id");
         using var stage = IntentStage.New(2);
-        stage.AddEntity(id, 2, H("canonical-selection/word"), H("source-word"));
-        stage.AddEntity(id, 0, H("canonical-selection/codepoint"), H("source-codepoint"));
+        stage.AddEntity(id, 2, H("canonical-selection/word"));
+        stage.AddEntity(id, 0, H("canonical-selection/codepoint"));
 
         var parsed = CopyTupleParser.ParseEntities([Blob(stage)]);
         var selected = NpgsqlSubstrateWriter.DistinctEntityRowIndices(

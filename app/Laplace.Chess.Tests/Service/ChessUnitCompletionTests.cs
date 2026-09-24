@@ -79,7 +79,7 @@ public sealed class ChessUnitCompletionTests
                         && row.SourceId == owner && row.SubjectId == marker);
                 Assert.Empty(change.Attestations);
                 Assert.Empty(change.Entities);
-                Assert.Empty(change.PhysicalityObservations);
+                Assert.Empty(change.Physicalities);
             }
             finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
         }

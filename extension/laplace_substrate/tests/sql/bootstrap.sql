@@ -67,4 +67,4 @@ SELECT EXISTS(
 SELECT count(*) AS deferred_fk_count
 FROM pg_constraint
 WHERE conrelid = 'laplace.entities'::regclass
-  AND conname IN ('entities_type_fk', 'entities_first_observed_fk');
+  AND conname IN ('entities_type_fk');

@@ -69,8 +69,6 @@ def native_test_filter_for_paths(paths: list[str], root: Path) -> str:
     sources: set[Path] = set()
     explicit: set[str] = set()
     probe_names = {
-        "generated_stage_sink_native_probe.c": "generated_stage_sink_pg_native_helpers",
-        "physicality_descriptor_native_probe.c": "physicality_descriptor_pg_native_helpers",
         "physicality_readback_native_probe.c": "physicality_readback_pg_native_helpers",
         "test_ud_parse.c": "laplace_ud_parse_tests",
         "test_task_shape.c": "laplace_task_shape_tests",
@@ -94,8 +92,6 @@ def native_test_filter_for_paths(paths: list[str], root: Path) -> str:
             sources.update((root / "engine/synthesis/tests").glob("*.cpp"))
         elif path.startswith("extension/laplace_substrate/"):
             explicit.update((
-                "generated_stage_sink_pg_native_helpers",
-                "physicality_descriptor_pg_native_helpers",
                 "physicality_readback_pg_native_helpers",
             ))
         elif path.startswith(("engine/", "extension/")) or path in ROOT_FILES_FULL:

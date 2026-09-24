@@ -1238,7 +1238,7 @@ TEST(PhysicalityDescriptorStage, ShapeAndPayloadBoundsUseActualOrdinaryTupleFram
     stage_body(stage.get(), empty, INTENT_STAGE_PG_EPOCH_UNIX_US + 1);
     stage_body(stage.get(), point, INTENT_STAGE_PG_EPOCH_UNIX_US + 2);
     stage_body(stage.get(), line, INTENT_STAGE_PG_EPOCH_UNIX_US + 3);
-    ASSERT_EQ(intent_stage_add_entity(stage.get(), &empty.entity_id, 4, &type, &source), 0);
+    ASSERT_EQ(intent_stage_add_entity(stage.get(), &empty.entity_id, 4, &type), 0);
     std::array<uint8_t, 32> mask{}; mask.fill(0xff);
     ASSERT_EQ(intent_stage_add_attestation_mode(stage.get(), &attestation, &empty.entity_id,
         &relation, &source, &source, &type, 1, INTENT_STAGE_PG_EPOCH_UNIX_US + 4,

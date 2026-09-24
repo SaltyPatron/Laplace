@@ -33,14 +33,14 @@ DECLARE
     s        double precision;
     s2       double precision;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL), (src2, 0, type_t, NULL),
-        (pos, 0, type_t, src), (n_strong, 0, type_t, src),
-        (n_mid, 0, type_t, src), (n_thin, 0, type_t, src),
-        (player, 0, type_t, src), (rival, 0, type_t, src),
-        (g_white, 0, type_t, src), (g_black, 0, type_t, src),
-        (l_white, 0, type_t, src), (l_black, 0, type_t, src),
-        (r_white, 0, type_t, src);
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t), (src2, 0, type_t),
+        (pos, 0, type_t), (n_strong, 0, type_t),
+        (n_mid, 0, type_t), (n_thin, 0, type_t),
+        (player, 0, type_t), (rival, 0, type_t),
+        (g_white, 0, type_t), (g_black, 0, type_t),
+        (l_white, 0, type_t), (l_black, 0, type_t),
+        (r_white, 0, type_t);
 
     -- eff_mu = rating - 2*rd:
     --   strong: 1600e9 - 2*50e9  = 1500e9   (ranked 1st)
@@ -238,19 +238,19 @@ BEGIN
         RAISE EXCEPTION 'FAIL: a missing result was scored instead of abstaining';
     END IF;
 
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL),
-        (tal, 0, type_t, src), (botv, 0, type_t, src), (spas, 0, type_t, src),
-        (e1, 0, type_t, src), (e2, 0, type_t, src),
-        (e3, 0, type_t, src), (e4, 0, type_t, src),
-        (e_no_traj, 0, type_t, src),
-        (ln_a, 0, type_t, src), (ln_b, 0, type_t, src), (ln_c, 0, type_t, src),
-        (ln_no_traj, 0, type_t, src),
-        (pos2, 0, type_t, src), (mv_w, 0, type_t, src), (mv_b, 0, type_t, src),
-        (r_white, 0, type_t, src), (r_black, 0, type_t, src), (r_draw, 0, type_t, src),
-        (d1, 0, type_t, src), (d2, 0, type_t, src), (d3, 0, type_t, src),
-        (en, 0, type_t, src), (ec, 0, type_t, src), (mt, 0, type_t, src),
-        (elo, 0, type_t, src), (pos_probe, 0, type_t, src)
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t),
+        (tal, 0, type_t), (botv, 0, type_t), (spas, 0, type_t),
+        (e1, 0, type_t), (e2, 0, type_t),
+        (e3, 0, type_t), (e4, 0, type_t),
+        (e_no_traj, 0, type_t),
+        (ln_a, 0, type_t), (ln_b, 0, type_t), (ln_c, 0, type_t),
+        (ln_no_traj, 0, type_t),
+        (pos2, 0, type_t), (mv_w, 0, type_t), (mv_b, 0, type_t),
+        (r_white, 0, type_t), (r_black, 0, type_t), (r_draw, 0, type_t),
+        (d1, 0, type_t), (d2, 0, type_t), (d3, 0, type_t),
+        (en, 0, type_t), (ec, 0, type_t), (mt, 0, type_t),
+        (elo, 0, type_t), (pos_probe, 0, type_t)
     ON CONFLICT DO NOTHING;
 
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
@@ -444,21 +444,11 @@ BEGIN
     -- through the aggregating lane instead of counted by a GROUP BY. Tal is given a strong
     -- cell, Spassky a thin one, so the conservative estimate has to order them by strength
     -- rather than by games -- the thing a win percentage cannot express.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
         (public.laplace_hash128_blake3('t2/outcome_obj'), 0, type_t, src)
     ON CONFLICT DO NOTHING;
     -- Admit an additional observed type through the canonical facet owner;
     -- the scalar compatibility summary is not the membership relation.
-    PERFORM laplace.entity_interpretations_publish(
-        ARRAY[tal,botv,spas]::bytea[],
-        ARRAY[0,0,0]::smallint[],
-        ARRAY[
-            laplace.entity_type_id('Chess_Player'),
-            laplace.entity_type_id('Chess_Player'),
-            laplace.entity_type_id('Chess_Player')
-        ]::bytea[],
-        ARRAY[src,src,src]::bytea[],
-        ARRAY[false,false,false]::boolean[]);
 
     INSERT INTO laplace.consensus
         (id, subject_id, type_id, object_id, rating, rd, volatility, witness_count, last_observed_at)
@@ -545,8 +535,8 @@ BEGIN
     -- chess_players_by_initial: Tal browsable under 'T' via a name whose trajectory's
     -- first constituent IS the codepoint, bound to him by a HAS_NAME_ALIAS cell -- and
     -- the same display-scale law on the rating columns.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (cap_t, 0, type_t, src), (tname, 0, type_t, src),
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (cap_t, 0, type_t), (tname, 0, type_t),
         (profile_only, 0, laplace.entity_type_id('Chess_Player'), src);
     INSERT INTO laplace.physicalities (id, entity_id, type, coord, hilbert_index,
                                trajectory, n_constituents, observed_at)
@@ -609,7 +599,7 @@ BEGIN
     END IF;
     -- A declared type alone does not witness a player or a profile. Such
     -- identities can be staged before their evidence commits during ingestion.
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     VALUES(chess.player_id('Unwitnessed, Placeholder'),2,laplace.entity_type_id('Chess_Player'),src);
     IF EXISTS(SELECT 1 FROM chess.ranked(100,0,'games','asc')
               WHERE player_id=chess.player_id('Unwitnessed, Placeholder')) THEN
@@ -646,12 +636,12 @@ DECLARE
     n        bigint;
     mu       numeric;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL), (result, 0, type_t, src),
-        (p_rush, 0, type_t, src), (p_plan, 0, type_t, src),
-        (p_press, 0, type_t, src), (p_flag, 0, type_t, src),
-        (w_rush, 0, type_t, src), (w_plan, 0, type_t, src),
-        (w_press, 0, type_t, src), (w_flag, 0, type_t, src)
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t), (result, 0, type_t),
+        (p_rush, 0, type_t), (p_plan, 0, type_t),
+        (p_press, 0, type_t), (p_flag, 0, type_t),
+        (w_rush, 0, type_t), (w_plan, 0, type_t),
+        (w_press, 0, type_t), (w_flag, 0, type_t)
     ON CONFLICT DO NOTHING;
 
     -- One class OUTCOME fold plus the position→class membership cells.
@@ -711,12 +701,12 @@ DECLARE
     good_flags bigint := (4::bigint << 10) | (13::bigint << 16);
     bad_flags bigint := (1::bigint << 10) | (4::bigint << 16);
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (syz_src, 0, type_t, NULL), (other_src, 0, type_t, NULL),
-        (pos, 0, type_t, syz_src),
-        (good_move, 0, type_t, syz_src), (good_next, 0, type_t, syz_src),
-        (bad_move, 0, type_t, other_src), (bad_next, 0, type_t, other_src),
-        (good_chunk, 0, type_t, syz_src), (bad_chunk, 0, type_t, other_src)
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (syz_src, 0, type_t), (other_src, 0, type_t),
+        (pos, 0, type_t),
+        (good_move, 0, type_t), (good_next, 0, type_t),
+        (bad_move, 0, type_t), (bad_next, 0, type_t),
+        (good_chunk, 0, type_t), (bad_chunk, 0, type_t)
     ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO laplace.physicalities

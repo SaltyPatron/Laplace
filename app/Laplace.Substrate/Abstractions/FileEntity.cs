@@ -297,7 +297,7 @@ public static class FileEntity
             return;
         builder
             .AddEntity(MetadataRelationTypeId, EntityTier.Word,
-                BootstrapIntentBuilder.RelationTypeMetaTypeId, fileRoot)
+                BootstrapIntentBuilder.RelationTypeMetaTypeId)
             .AddAttestation(NativeAttestation.CategoricalResolved(
                 fileRoot, MetadataRelationTypeId, metaRoot, fileRoot, contextId: null,
                 SourceTrust.SubstrateMandate));

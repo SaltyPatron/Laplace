@@ -46,7 +46,7 @@ public sealed class ChessRecordingProgressTests : IDisposable
             measurement.Work.NovelPliesComposed = 70;
             measurement.Checkpoint("WriterApply", "writer-entered", chunkGames: 2000);
             ILogger logger = new ChessRecordingMeasurement.WriterDiagnosticLogger { Measurement = measurement };
-            logger.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", "physicality-capture", "entered");
+            logger.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", "managed-staging", "entered");
             // Deliberately mutate owner state without publishing. The observer must
             // retain the immutable sample, even while the owner makes no callbacks.
             measurement.Work.NovelGamesComposed = 999;
@@ -67,7 +67,7 @@ public sealed class ChessRecordingProgressTests : IDisposable
             Assert.Equal(0, counters.GetProperty("writerCallsAcknowledged").GetInt64());
             Assert.Equal("running", checkpoint.GetProperty("admissionStatus").GetString());
             var writer = checkpoint.GetProperty("lastWriterBoundary");
-            Assert.Equal("physicality-capture", writer.GetProperty("phase").GetString());
+            Assert.Equal("managed-staging", writer.GetProperty("phase").GetString());
             Assert.Equal("entered", writer.GetProperty("boundary").GetString());
             Assert.Equal(JsonValueKind.Null, writer.GetProperty("returned").ValueKind);
             Assert.Equal(Environment.ProcessId, second.GetProperty("processId").GetInt32());
@@ -141,7 +141,7 @@ public sealed class ChessRecordingProgressTests : IDisposable
         await using var sink = new ChessRecordingMeasurement.ProgressSink(path, Stopwatch.GetTimestamp(),
             timingAggregates: () => throw new InvalidOperationException("fixture timing observation failed"));
         ChessRecordingMeasurement.ProgressCounters counters = new(
-            0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         sink.Publish("WriterApply", "writer-entered", "running", counters);
         await sink.FlushAsync();
         var document = await ReadAsync(path);
@@ -164,7 +164,7 @@ public sealed class ChessRecordingProgressTests : IDisposable
         measurement.Work.WriterApplyAttempts = 1;
         measurement.Writer.ApplyCalls = 1;
         measurement.Writer.CopyTransactionsCommitted = 2;
-        measurement.Work.BuiltManagedPhysicalityObservationRows = 123;
+        measurement.Work.BuiltManagedPhysicalityRows = 123;
         // Synthetic transport state, not native/PG proof. Even a populated
         // readback list must not advance the independently sealed evidence count.
         measurement.Games.Add(new("playing", "line", "start", ["move"], "1-0",
@@ -178,7 +178,7 @@ public sealed class ChessRecordingProgressTests : IDisposable
         Assert.Equal(1, counters.GetProperty("writerCallsAcknowledged").GetInt64());
         Assert.Equal(2, counters.GetProperty("copyTransactionsAcknowledged").GetInt64());
         Assert.Equal(1, counters.GetProperty("exactReadbackGames").GetInt32());
-        Assert.Equal(123, counters.GetProperty("builtManagedPhysicalityObservationRows").GetInt64());
+        Assert.Equal(123, counters.GetProperty("builtManagedPhysicalityRows").GetInt64());
         Assert.Equal(0, counters.GetProperty("gamesWithSealedChunkEvidence").GetInt32());
         Assert.Equal(0, counters.GetProperty("newlyRecordedGamesWithSealedChunkEvidence").GetInt32());
         Assert.False(document.TryGetProperty("recordedGamesPerSecond", out _));
@@ -223,7 +223,7 @@ public sealed class ChessRecordingProgressTests : IDisposable
                 finally { Interlocked.Decrement(ref active); }
             });
         ChessRecordingMeasurement.ProgressCounters zero = new(
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         for (int i = 0; i < 10_000; i++)
             sink.Publish("composition", "game-completed", "running", zero with { NovelGamesComposed = i });
         await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => sink.FlushAsync()));
@@ -246,9 +246,9 @@ public sealed class ChessRecordingProgressTests : IDisposable
         ILogger logger = new ChessRecordingMeasurement.WriterDiagnosticLogger { Measurement = measurement };
         using (measurement.MeasurePhase(ChessRecordingMeasurement.WorkPhase.WriterApply))
         {
-            logger.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", "physicality-capture", "entered");
+            logger.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary}", "managed-staging", "entered");
             logger.LogInformation("WS_APPLY phase: {Phase} boundary={Boundary} returned={Returned} elapsed_ms={ElapsedMs}",
-                "physicality-capture", "exited", false, 10.0);
+                "managed-staging", "exited", false, 10.0);
         }
         measurement.Complete("failed", "fixture native failure");
         await measurement.StopProgressAsync();
@@ -256,7 +256,7 @@ public sealed class ChessRecordingProgressTests : IDisposable
         Assert.Equal("terminal", checkpoint.GetProperty("boundary").GetString());
         var writer = checkpoint.GetProperty("lastWriterBoundary");
         Assert.Equal("WriterApply", writer.GetProperty("ownerPhase").GetString());
-        Assert.Equal("physicality-capture", writer.GetProperty("phase").GetString());
+        Assert.Equal("managed-staging", writer.GetProperty("phase").GetString());
         Assert.Equal("exited", writer.GetProperty("boundary").GetString());
         Assert.False(writer.GetProperty("returned").GetBoolean());
         Assert.Equal(0, checkpoint.GetProperty("counters")

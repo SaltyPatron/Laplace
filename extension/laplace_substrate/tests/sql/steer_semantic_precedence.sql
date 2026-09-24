@@ -26,16 +26,16 @@ DECLARE
     scoped_steps bytea[];
     next_root bytea := public.laplace_hash128_blake3('test/steer/next-observation');
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+    INSERT INTO laplace.entities (id, tier, type_id)
     VALUES
-        (src, 0, type_t, NULL),
-        (ctx, 2, type_word, src),
-        (noise, 2, type_word, src),
-        (semantic, 2, type_word, src),
-        (frontier, 2, type_word, src),
-        (unrelated, 2, type_word, src),
-        (sent_noise, 3, type_sent, src),
-        (sent_sem, 3, type_sent, src),
+        (src, 0, type_t),
+        (ctx, 2, type_word),
+        (noise, 2, type_word),
+        (semantic, 2, type_word),
+        (frontier, 2, type_word),
+        (unrelated, 2, type_word),
+        (sent_noise, 3, type_sent),
+        (sent_sem, 3, type_sent),
         (rel, 0, laplace.entity_type_id('RelationType'), src)
     ON CONFLICT DO NOTHING;
 

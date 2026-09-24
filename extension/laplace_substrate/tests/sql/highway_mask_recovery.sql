@@ -16,12 +16,6 @@ SELECT DISTINCT entity_id,2,decode('d673b68115514712b366347069127aff','hex')
 FROM highway_recovery_pairs;
 DO $recovery_facet$
 BEGIN
-    PERFORM laplace.entity_interpretations_publish(
-        ARRAY[decode('d673b68115514712b366347069127a01','hex')]::bytea[],
-        ARRAY[3]::smallint[],
-        ARRAY[decode('d673b68115514712b366347069127aff','hex')]::bytea[],
-        ARRAY[NULL::bytea]::bytea[],
-        ARRAY[true]::boolean[]);
 END
 $recovery_facet$;
 CREATE TEMP TABLE highway_recovery_interpretations AS
@@ -37,11 +31,9 @@ DO $$
 BEGIN
     IF (SELECT count(*) FROM laplace.entities WHERE id IN
         (SELECT entity_id FROM highway_recovery_interpretations))<>2
-       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
-        (SELECT entity_id FROM highway_recovery_interpretations))<>(SELECT count(*) FROM highway_recovery_interpretations)
        OR EXISTS(SELECT FROM highway_recovery_interpretations x
-        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
-        WHERE i.entity_id IS NULL) THEN
+        WHERE NOT EXISTS(SELECT FROM laplace.entities e
+            WHERE e.id=x.entity_id AND e.tier=x.tier AND e.type_id=x.type_id)) THEN
         RAISE EXCEPTION 'fixture lost canonical entities or exact interpretation pairs';
     END IF;
     IF NOT consensus.highway_ready() THEN RAISE EXCEPTION 'fixture registry is unavailable'; END IF;
@@ -99,11 +91,9 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM laplace.entities WHERE id IN
         (SELECT entity_id FROM highway_recovery_interpretations))<>2
-       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
-        (SELECT entity_id FROM highway_recovery_interpretations))<>(SELECT count(*) FROM highway_recovery_interpretations)
        OR EXISTS(SELECT FROM highway_recovery_interpretations x
-        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
-        WHERE i.entity_id IS NULL) THEN
+        WHERE NOT EXISTS(SELECT FROM laplace.entities e
+            WHERE e.id=x.entity_id AND e.tier=x.tier AND e.type_id=x.type_id)) THEN
         RAISE EXCEPTION 'replay changed canonical entities or exact interpretation pairs';
     END IF;
     IF EXISTS(SELECT 1 FROM laplace.consensus WHERE subject_id IN
@@ -129,15 +119,12 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM laplace.entities WHERE id IN
         (SELECT entity_id FROM highway_recovery_interpretations))<>2
-       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
-        (SELECT entity_id FROM highway_recovery_interpretations))<>(SELECT count(*) FROM highway_recovery_interpretations)
        OR EXISTS(SELECT FROM highway_recovery_interpretations x
-        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
-        WHERE i.entity_id IS NULL) THEN
+        WHERE NOT EXISTS(SELECT FROM laplace.entities e
+            WHERE e.id=x.entity_id AND e.tier=x.tier AND e.type_id=x.type_id)) THEN
         RAISE EXCEPTION 'clear changed canonical entities or exact interpretation pairs';
     END IF;
 END $$;
-DELETE FROM laplace.entity_interpretations WHERE entity_id IN (SELECT entity_id FROM highway_recovery_pairs);
 DELETE FROM laplace.entities WHERE id IN (SELECT entity_id FROM highway_recovery_pairs);
 DROP TABLE highway_recovery_interpretations;
 DROP TABLE highway_recovery_pairs;
@@ -174,8 +161,6 @@ BEGIN
            array_agg(true ORDER BY entity_id,tier,type_id)
       INTO entity_ids,tiers,type_ids,source_ids,source_is_null
       FROM highway_refresh_interpretations;
-    PERFORM laplace.entity_interpretations_publish(
-        entity_ids,tiers,type_ids,source_ids,source_is_null);
 END
 $refresh_facets$;
 INSERT INTO laplace.consensus
@@ -221,11 +206,9 @@ DECLARE ids bytea[]; changed bigint;
 BEGIN
     IF (SELECT count(*) FROM laplace.entities WHERE id IN
         (SELECT entity_id FROM highway_refresh_interpretations))<>5
-       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
-        (SELECT entity_id FROM highway_refresh_interpretations))<>(SELECT count(*) FROM highway_refresh_interpretations)
        OR EXISTS(SELECT FROM highway_refresh_interpretations x
-        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
-        WHERE i.entity_id IS NULL) THEN
+        WHERE NOT EXISTS(SELECT FROM laplace.entities e
+            WHERE e.id=x.entity_id AND e.tier=x.tier AND e.type_id=x.type_id)) THEN
         RAISE EXCEPTION 'refresh fixture lost canonical entities or exact interpretation pairs';
     END IF;
     IF (SELECT l.lanname FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang
@@ -297,11 +280,9 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM laplace.entities WHERE id IN
         (SELECT entity_id FROM highway_refresh_interpretations))<>5
-       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
-        (SELECT entity_id FROM highway_refresh_interpretations))<>(SELECT count(*) FROM highway_refresh_interpretations)
        OR EXISTS(SELECT FROM highway_refresh_interpretations x
-        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
-        WHERE i.entity_id IS NULL) THEN
+        WHERE NOT EXISTS(SELECT FROM laplace.entities e
+            WHERE e.id=x.entity_id AND e.tier=x.tier AND e.type_id=x.type_id)) THEN
         RAISE EXCEPTION 'failed refresh changed canonical entities or exact interpretation pairs';
     END IF;
 END $$;
@@ -322,11 +303,9 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM laplace.entities WHERE id IN
         (SELECT entity_id FROM highway_refresh_interpretations))<>5
-       OR (SELECT count(*) FROM laplace.entity_interpretations WHERE entity_id IN
-        (SELECT entity_id FROM highway_refresh_interpretations))<>(SELECT count(*) FROM highway_refresh_interpretations)
        OR EXISTS(SELECT FROM highway_refresh_interpretations x
-        LEFT JOIN laplace.entity_interpretations i USING(entity_id,tier,type_id)
-        WHERE i.entity_id IS NULL) THEN
+        WHERE NOT EXISTS(SELECT FROM laplace.entities e
+            WHERE e.id=x.entity_id AND e.tier=x.tier AND e.type_id=x.type_id)) THEN
         RAISE EXCEPTION 'final refresh changed canonical entities or exact interpretation pairs';
     END IF;
 END $$;

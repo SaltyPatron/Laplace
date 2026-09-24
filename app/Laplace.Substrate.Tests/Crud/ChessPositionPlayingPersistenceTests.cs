@@ -373,16 +373,16 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
             + "resource_refusal_preserved=true resumed_without_double_observation=true "
             + "context_substitution_rebuilt=true");
 
-        await AssertPlayingInterpretationEnumerationAsync(
+        await AssertPlayingEnumerationAsync(
             [Hash128.FromBytes(Convert.FromHexString(firstPlaying)),
              Hash128.FromBytes(Convert.FromHexString(secondPlaying))]);
     }
 
-    private async Task AssertPlayingInterpretationEnumerationAsync(Hash128[] playingIds)
+    private async Task AssertPlayingEnumerationAsync(Hash128[] playingIds)
     {
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var ct = stop.Token;
-        var source = Hash128.OfCanonical("test/chess/playing-interpretations/" + Guid.NewGuid().ToString("N"));
+        var source = Hash128.OfCanonical("test/chess/playing-enumeration/" + Guid.NewGuid().ToString("N"));
         byte[][] ids = playingIds.Select(id => id.ToBytes()).ToArray();
         byte[][] sources = [source.ToBytes()];
         byte[] playingType = ChessVocabulary.PlayingType.ToBytes();
@@ -395,8 +395,8 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
         Assert.Equal(playingIds.Length, byPlaying.Count);
         Hash128 nonPlaying = byPlaying[playingIds[0]];
         await using (var check = pg.DataSource.CreateCommand("""
-            SELECT EXISTS (SELECT FROM laplace.entity_interpretations
-                           WHERE entity_id=$1 AND type_id=$2)
+            SELECT EXISTS (SELECT FROM laplace.entities
+                           WHERE id=$1 AND type_id=$2)
             """))
         {
             check.Parameters.AddWithValue(nonPlaying.ToBytes());
@@ -406,10 +406,10 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
 
         // Isolate the count/page scope while retaining the actual complete PGN
         // bodies for ordinary strict hydration. The negative witness has the same
-        // source/relation but its subject is a line, without a Playing interpretation.
-        using var builder = new SubstrateChangeBuilder(source, "test/chess/playing-interpretations")
+        // source/relation but its subject is a line, not a Playing.
+        using var builder = new SubstrateChangeBuilder(source, "test/chess/playing-enumeration")
             .DeclareSourcePrior(SourceTrust.StructuredCorpus)
-            .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId, source);
+            .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId);
         foreach (var playing in playingIds)
             builder.AddAttestation(NativeAttestation.CategoricalResolved(playing,
                 ChessVocabulary.PlaysLineType, byPlaying[playing], source, null, 0.9));
@@ -452,56 +452,6 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
         long? originalCount = await ordinary.CountAsync(ct);
         var before = await ordinary.HydrateAsync(playingIds, 64L * 1024 * 1024, ct);
 
-        // Choose a real already-declared named type, not a made-up hash. Publish the
-        // alternate through the canonical facet owner so its smaller byte order
-        // replaces the compatibility summary while preserving both facets.
-        byte[] lowerType;
-        await using (var choose = pg.DataSource.CreateCommand("""
-            SELECT DISTINCT i.type_id
-            FROM laplace.entity_interpretations i
-            JOIN laplace.canonical_names n ON n.id=i.type_id
-            WHERE i.type_id < $1
-            ORDER BY i.type_id LIMIT 1
-            """))
-        {
-            choose.Parameters.AddWithValue(playingType);
-            lowerType = Assert.IsType<byte[]>(await choose.ExecuteScalarAsync(ct));
-        }
-        await using (var admit = pg.DataSource.CreateCommand("""
-            WITH facets AS (
-                SELECT array_agg(e.id ORDER BY u.ord) AS ids,
-                       array_agg(e.tier ORDER BY u.ord) AS tiers,
-                       array_agg($2::bytea ORDER BY u.ord) AS types,
-                       array_agg($3::bytea ORDER BY u.ord) AS sources,
-                       array_agg(false ORDER BY u.ord) AS source_is_null
-                FROM unnest($1::bytea[]) WITH ORDINALITY AS u(id,ord)
-                JOIN laplace.entities e ON e.id=u.id
-            )
-            SELECT laplace.entity_interpretations_publish(
-                ids,tiers,types,sources,source_is_null)
-            FROM facets
-            """))
-        {
-            admit.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
-            admit.Parameters.AddWithValue(lowerType);
-            admit.Parameters.AddWithValue(source.ToBytes());
-            Assert.False(Assert.IsType<bool>(await admit.ExecuteScalarAsync(ct)));
-        }
-        await using (var verify = pg.DataSource.CreateCommand("""
-            SELECT count(*) FROM laplace.entities e
-            WHERE e.id=ANY($1) AND e.type_id=$2
-              AND EXISTS (SELECT FROM laplace.entity_interpretations i
-                          WHERE i.entity_id=e.id AND i.type_id=$2)
-              AND EXISTS (SELECT FROM laplace.entity_interpretations i
-                          WHERE i.entity_id=e.id AND i.type_id=$3)
-            """))
-        {
-            verify.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea, ids);
-            verify.Parameters.AddWithValue(lowerType);
-            verify.Parameters.AddWithValue(playingType);
-            Assert.Equal(2L, (long)(await verify.ExecuteScalarAsync(ct))!);
-        }
-
         await AssertEnumerationAsync();
         Assert.Equal(originalCount, await ordinary.CountAsync(ct));
         var afterHydration = await ordinary.HydrateAsync(playingIds, 64L * 1024 * 1024, ct);
@@ -519,8 +469,8 @@ public sealed class ChessPositionPlayingPersistenceTests(LocalPgFixture pg)
             Assert.Null(game.AdmittedReplay.Truncated);
             Assert.Equal(154, game.AdmittedReplay.Plies.Count);
         }
-        Console.WriteLine("CHESS_PLAYING_INTERPRETATIONS counted=2 paged=2 hydrated=2 "
-            + "plies_per_game=154 lower_summary_preserved=true non_playing_excluded=true");
+        Console.WriteLine("CHESS_PLAYING_ENUMERATION counted=2 paged=2 hydrated=2 "
+            + "plies_per_game=154 non_playing_excluded=true");
     }
 
     private static object RowIdentity(Evidence row) => (row.Id, row.Subject, row.Context, row.Count, row.Score);

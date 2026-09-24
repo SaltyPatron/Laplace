@@ -16,10 +16,11 @@ CREATE OR REPLACE FUNCTION ops.surface_sample(
     STABLE
 BEGIN ATOMIC
     WITH eligible AS MATERIALIZED (
-        SELECT DISTINCT i.entity_id, i.type_id
-        FROM laplace.entity_interpretations i
+        SELECT DISTINCT i.id, i.type_id
+        FROM laplace.entities i
         WHERE i.tier = p_tier
-          AND i.first_observed_by = p_source
+          AND EXISTS (SELECT 1 FROM laplace.attestations a
+                      WHERE a.source_id = p_source AND a.subject_id = i.id)
     ), kept AS (
         SELECT a.subject_id AS id,
                e.type_id,

@@ -22,35 +22,10 @@ public sealed record ApplyResult(
     /// <summary>Actual PostgreSQL transaction settings and acknowledgement for this apply.
     /// Null means the writer did not establish this PostgreSQL-specific contract.</summary>
     public PostgresCommitReceipt? PostgresCommit { get; init; }
-    public PhysicalityAdmissionReceipt? PhysicalityAdmission { get; init; }
     /// <summary>Actual transactions containing COPY, counted once per transaction.
     /// These are not estimates of physical network round trips.</summary>
     public int CopyTransactionsStarted { get; init; }
     public int CopyTransactionsCommitted { get; init; }
-}
-
-public sealed record PhysicalityAdmissionReceipt(
-    Hash128 FloorReceipt, Hash128 GeneratedSourceId, string SnapshotReceipt, long SourceForms,
-    long CurrentContentBodies, long MissingContentBodies, int ProviderRounds,
-    int DatabaseOperations, long ReservedPeakBytes, long TupleBytes,
-    long FloorIndexAddedBytes, long LogicalWork, long StoredVertices)
-{
-    public long ClientPayloadGrantBytes { get; init; }
-    public long SqlPayloadGrantBytes { get; init; }
-    public long LogicalWorkGrant { get; init; }
-    public int DatabaseOperationGrant { get; init; }
-    public int GeneratedEntityRows { get; init; }
-    public int GeneratedPhysicalityRows { get; init; }
-    /// <summary>Exact source-form provenance rows retained outside semantic testimony.</summary>
-    public int PhysicalityObservationRows { get; init; }
-    /// <summary>Rows inserted or timestamp-advanced by this apply.</summary>
-    public long PhysicalityObservationWrites { get; init; }
-    /// <summary>Source-order canonical typed physicalities. ViewId is the same
-    /// native physicality address; no parallel descriptor entity is generated.</summary>
-    public ImmutableArray<PhysicalityFormReceipt> Forms { get; init; } = [];
-    /// <summary>Exact missing entity IDs, addressed by each form's first/count slice.
-    /// Each nonempty slice is sorted by canonical ID bytes with no duplicates.</summary>
-    public ImmutableArray<Hash128> MissingViewReferences { get; init; } = [];
 }
 
 public enum PhysicalityViewState : short

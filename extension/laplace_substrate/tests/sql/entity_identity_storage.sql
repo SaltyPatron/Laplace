@@ -10,7 +10,7 @@ CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
 JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum
 WHERE c.conrelid = 'laplace.entities'::regclass AND c.contype = 'p';
 
-SELECT to_regclass('laplace.entity_interpretations') IS NOT NULL AS interpretations_present;
+SELECT to_regclass('laplace.entity_interpretations') IS NULL AS interpretations_absent;
 
 DO $$
 DECLARE
@@ -18,21 +18,12 @@ DECLARE
     b bytea := public.laplace_hash128_blake3('test/entity-identity/b');
     ta bytea := public.laplace_hash128_blake3('test/entity-identity/type-a');
     tb bytea := public.laplace_hash128_blake3('test/entity-identity/type-b');
-    s1 bytea := public.laplace_hash128_blake3('test/entity-identity/source-1');
-    s2 bytea := public.laplace_hash128_blake3('test/entity-identity/source-2');
 BEGIN
-    -- Same logical facet set with opposite first-observation order. Canonical
-    -- identity is inserted once; later facets use the one publication owner.
-    -- Physical scheduling must not change the compatibility summary.
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
-    VALUES (a,3,tb,s2), (b,1,ta,s1);
-
-    PERFORM laplace.entity_interpretations_publish(
-        ARRAY[a,b]::bytea[],
-        ARRAY[1,3]::smallint[],
-        ARRAY[ta,tb]::bytea[],
-        ARRAY[s1,s2]::bytea[],
-        ARRAY[false,false]::boolean[]);
+    -- Entities are source-independent content: one insert per content id, the
+    -- row itself carrying its tier/type projection. Sources witness through
+    -- attestations, never through a column here.
+    INSERT INTO laplace.entities(id,tier,type_id)
+    VALUES (a, 3, tb), (b, 1, ta);
 END $$;
 
 WITH ids AS (
@@ -46,34 +37,10 @@ WHERE e.id IN (ids.a, ids.b);
 WITH ids AS (
     SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
            public.laplace_hash128_blake3('test/entity-identity/b') AS b
-), rows AS (
-    SELECT e.* FROM laplace.entities e, ids WHERE e.id IN (ids.a, ids.b)
 )
-SELECT count(DISTINCT (tier,type_id,first_observed_by)) = 1
-       AND min(tier) = 1 AS arrival_order_invariant_summary
-FROM rows;
-
-WITH ids AS (
-    SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
-           public.laplace_hash128_blake3('test/entity-identity/b') AS b
-)
-SELECT count(*) = 4
-       AND count(*) FILTER (WHERE tier = 1) = 2
-       AND count(*) FILTER (WHERE tier = 3) = 2 AS all_interpretations_preserved
-FROM laplace.entity_interpretations i, ids
-WHERE i.entity_id IN (ids.a, ids.b);
-
-WITH ids AS (
-    SELECT public.laplace_hash128_blake3('test/entity-identity/a') AS a,
-           public.laplace_hash128_blake3('test/entity-identity/b') AS b
-), a_claims AS (
-    SELECT tier,type_id FROM laplace.entity_interpretations i, ids WHERE i.entity_id = ids.a
-), b_claims AS (
-    SELECT tier,type_id FROM laplace.entity_interpretations i, ids WHERE i.entity_id = ids.b
-)
-SELECT NOT EXISTS ((SELECT * FROM a_claims EXCEPT SELECT * FROM b_claims)
-                   UNION ALL
-                   (SELECT * FROM b_claims EXCEPT SELECT * FROM a_claims))
-       AS interpretation_set_is_order_invariant;
+SELECT (SELECT tier FROM laplace.entities WHERE id = ids.a) = 3
+       AND (SELECT tier FROM laplace.entities WHERE id = ids.b) = 1
+       AS row_projection_matches_insert
+FROM ids;
 
 ROLLBACK;

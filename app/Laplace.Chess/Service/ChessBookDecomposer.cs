@@ -160,7 +160,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
     private static void ComposeProseLine(ChessBookRecord record, SubstrateChangeBuilder b)
     {
         var src = ChessVocabulary.BookSourceId;
-        b.AddEntity(record.RootId, EntityTier.Document, ChessVocabulary.BookLineType, src);
+        b.AddEntity(record.RootId, EntityTier.Document, ChessVocabulary.BookLineType);
 
         var m = new ChessModality();
         var state = m.Initial();
@@ -175,7 +175,7 @@ public sealed partial class ChessBookDecomposer(bool recursive = false)
             states.Add(state);
         }
 
-        b.AddEntity(record.LineId, EntityTier.Document, ChessVocabulary.GameType, src);
+        b.AddEntity(record.LineId, EntityTier.Document, ChessVocabulary.GameType);
         var line = new List<ChessNode>(states.Count);
         foreach (var position in states)
             line.Add(ChessGraph.ComposePositionPoint(position.Board));

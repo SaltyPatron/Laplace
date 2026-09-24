@@ -314,10 +314,9 @@ BEGIN ATOMIC
             p_plane, p_layer, p_head) AS id
     ),
     forms AS MATERIALIZED (
-        SELECT DISTINCT o.physicality_id
+        SELECT DISTINCT p.id AS physicality_id
         FROM circuit c
-        JOIN laplace.physicality_observations o ON o.entity_id = c.id
-        WHERE o.source_id = p_source
+        JOIN laplace.physicalities p ON p.entity_id = c.id
     ),
     bodies AS MATERIALIZED (
         SELECT c.id AS circuit_id,

@@ -129,7 +129,7 @@ public static class ChessPositionOutcomes
     private static void AddMarker(SubstrateChangeBuilder b, Hash128 playingId)
     {
         var marker = MarkerId(playingId);
-        b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType, SourceId);
+        b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(b, marker, SourceId, 22);
     }
 }

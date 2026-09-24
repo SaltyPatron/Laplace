@@ -327,7 +327,6 @@ public sealed class UdSentenceEmitterTests
         AttestationRow parseClaim = ParseClaim(emitted.Change);
         Assert.NotNull(parseClaim.ContextId);
         Assert.Equal(emitted.ParseId, parseClaim.ObjectId);
-        Assert.All(emitted.Change.Entities, entity => Assert.Equal(witness.SourceId, entity.FirstObservedBy));
         AttestationRow language = Assert.Single(emitted.Change.Attestations.Where(a =>
             a.TypeId == RelationTypeRegistry.Resolve("HAS_LANGUAGE").Id
             && a.ContextId == witness.SourceFileContext));

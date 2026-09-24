@@ -251,8 +251,7 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
         EXPECT_EQ(laplace_compose_physicality_count(full), count)
             << "a fully composed result must already be complete";
 
-        // Drain actual owner output with and without exact E presence. Auxiliary
-        // metadata retains each real compositional interpretation while P tuples
+        // Drain actual owner output with and without exact E presence. P tuples
         // (including placement IDs and occurrence order) stay exactly identical.
         std::unique_ptr<intent_stage_t,decltype(&intent_stage_free)> all_stage(
             intent_stage_new(0),intent_stage_free), known_stage(intent_stage_new(0),intent_stage_free);
@@ -267,16 +266,6 @@ TEST(GrammarCompose, ProbeMaterializationPreservesFullBodiesAndOccurrenceMultipl
         const auto* known_p=intent_stage_tuple_ptr(known_stage.get(),INTENT_STAGE_TABLE_PHYSICALITIES,&known_bytes);
         ASSERT_EQ(full_bytes,known_bytes);
         EXPECT_EQ(0,std::memcmp(full_p,known_p,full_bytes));
-        // This fixture's retained interpretation authority is the actual native
-        // result's non-packaging, non-floor entity set, independent of E novelty.
-        size_t interpreted=0;
-        for(size_t i=0;i<entity_count;++i) {
-            laplace_compose_entity_t entity{};
-            ASSERT_EQ(0,laplace_compose_get_entity(probe,i,&entity));
-            if(!entity.packaging && entity.tier>0) ++interpreted;
-        }
-        EXPECT_EQ(interpreted,intent_stage_entity_interpretation_count(known_stage.get()));
-        EXPECT_TRUE(intent_stage_entity_interpretations_complete(known_stage.get()));
     }
 }
 

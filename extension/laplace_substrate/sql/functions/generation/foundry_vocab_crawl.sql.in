@@ -26,8 +26,8 @@ BEGIN ATOMIC
         SELECT array_agg(e.id) AS ids
         FROM laplace.entities e
         WHERE EXISTS (
-              SELECT 1 FROM laplace.entity_interpretations i
-              WHERE i.entity_id = e.id AND i.type_id = realize.canonical_id('RelationType'))
+              SELECT 1 FROM laplace.entities i
+              WHERE i.id = e.id AND i.type_id = realize.canonical_id('RelationType'))
           AND consensus.relation_rank_resolved(e.id) >= p_rank_floor
     ),
     crawled AS (
@@ -56,8 +56,8 @@ BEGIN ATOMIC
         FROM seed_ids si
         CROSS JOIN LATERAL structural.geometry_successors_batch(si.ids, p_fanout, 8, false) gs
         JOIN laplace.entities e ON e.id = gs.successor_id AND EXISTS (
-                SELECT 1 FROM laplace.entity_interpretations i
-                WHERE i.entity_id = e.id AND i.type_id = realize.canonical_id('Word'))
+                SELECT 1 FROM laplace.entities i
+                WHERE i.id = e.id AND i.type_id = realize.canonical_id('Word'))
     ),
     order1_cut AS (
         SELECT point_id, entity_id, w, w::bigint AS weight
@@ -71,8 +71,8 @@ BEGIN ATOMIC
         CROSS JOIN LATERAL generation.trajectory_continuations(
             ARRAY[o.point_id, o.entity_id], p_fanout) tc
         JOIN laplace.entities e ON e.id = tc.object_id AND EXISTS (
-                SELECT 1 FROM laplace.entity_interpretations i
-                WHERE i.entity_id = e.id AND i.type_id = realize.canonical_id('Word'))
+                SELECT 1 FROM laplace.entities i
+                WHERE i.id = e.id AND i.type_id = realize.canonical_id('Word'))
     ),
     order2_cut AS (
         SELECT entity_id, weight FROM order2 WHERE rn <= p_max
@@ -87,8 +87,8 @@ BEGIN ATOMIC
             AND c.type_id = laplace.relation_type_id('IS_LEMMA_OF')
             AND c.object_id IS NOT NULL
         JOIN laplace.entities e ON e.id = c.object_id AND EXISTS (
-                SELECT 1 FROM laplace.entity_interpretations i
-                WHERE i.entity_id = e.id AND i.type_id = realize.canonical_id('Word'))
+                SELECT 1 FROM laplace.entities i
+                WHERE i.id = e.id AND i.type_id = realize.canonical_id('Word'))
     ),
     order_closure AS (
         SELECT entity_id, max(weight) AS weight,

@@ -66,7 +66,6 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         int roundTrips = 0;
 
         int managedEntitiesAttempted = 0, managedPhysAttempted = 0, managedAttAttempted = 0;
-        var managedInterpretations = new List<EntityInterpretationRow>();
         checked
         {
             for (int i = 0; i < changes.Count; i++)
@@ -79,16 +78,6 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 managedEntitiesAttempted += changes[i].Entities.Length;
                 managedPhysAttempted += changes[i].Physicalities.Length;
                 managedAttAttempted += changes[i].Attestations.Length;
-
-                // Preserve every managed interpretation. Direct/legacy callers may
-                // not know about the sidecar yet, so canonical entity rows are also
-                // projected into it. The transaction owner deduplicates the union
-                // with native stage interpretations before one set-sized write.
-                if (!changes[i].EntityInterpretations.IsDefaultOrEmpty)
-                    managedInterpretations.AddRange(changes[i].EntityInterpretations);
-                foreach (var entity in changes[i].Entities)
-                    managedInterpretations.Add(new EntityInterpretationRow(
-                        entity.Id, entity.Tier, entity.TypeId, entity.FirstObservedBy));
             }
         }
         if (changes.Count == 0)
@@ -150,14 +139,13 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             var seenEntity = new HashSet<Hash128>();
             var seenPhys = new HashSet<Hash128>();
 
-            // Canonical table staging remains id-only. Tier/type multiplicity is
-            // published separately from managedInterpretations in the same control
-            // transaction, so COPY cannot manufacture a second logical entity.
+            // One canonical row per content id: the first managed row for an id
+            // owns its staged tuple, so COPY cannot manufacture a second entity.
             foreach (var c in changes)
                 foreach (var e in c.Entities)
                 {
                     if (!seenEntity.Add(e.Id)) continue;
-                    managedStage.AddEntity(e.Id, e.Tier, e.TypeId, e.FirstObservedBy);
+                    managedStage.AddEntity(e.Id, e.Tier, e.TypeId);
                 }
             var selectedPhysicalities = new List<PhysicalityRow>(managedPhysAttempted);
             foreach (var c in changes)
@@ -167,7 +155,7 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                     selectedPhysicalities.Add(p);
                 }
             if (selectedPhysicalities.Count != 0)
-                PhysicalityAdmissionBatch.StageManagedObservations(managedStage,
+                StageManagedPhysicalities(managedStage,
                     System.Runtime.InteropServices.CollectionsMarshal.AsSpan(selectedPhysicalities),
                     IngestSizing.ResolveWorkingSetBudgetBytes(), ct);
             // No dedup here: duplicate attestation ids across changes carry
@@ -243,86 +231,59 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         bool journalReplayHit = false;
         PostgresCommitReceipt? postgresCommit = null;
         int copyTransactionsStarted = 0, copyTransactionsCommitted = 0;
-        bool anyRows = entCount > 0 || physCount > 0 || attCount > 0
-            || managedInterpretations.Count > 0
-            || sourceStages.Any(static stage => stage.EntityInterpretationCount > 0);
+        bool anyRows = entCount > 0 || physCount > 0 || attCount > 0;
 
-        PhysicalityAdmissionBatch? physicalityAdmission = null;
-        try
+        if (canonicalNames is { Count: > 0 })
         {
-            // Validate coverage while owned stages are inside the existing
-            // cleanup scope, before registry/admission can write anything.
-            var sourceInterpretations = CollectEntityInterpretations(sourceStages, managedInterpretations, ct);
-            using (var captureDiagnostic = MeasureApplyPhase("physicality-capture"))
-            {
-                physicalityAdmission = PhysicalityAdmissionBatch.Capture(changes, sourceStages, ct);
-                captureDiagnostic?.Complete();
-            }
-            anyRows |= physicalityAdmission is not null;
-            if (canonicalNames is { Count: > 0 })
-            {
-                // Validate the complete physicality transport before any database
-                // access. Names still become durable before the file's completion
-                // marker, through the existing shared registry owner.
-                using var registryDiagnostic = MeasureApplyPhase("canonical-registration");
-                var registration = await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(
-                    _ds, canonicalNames, ct);
-                roundTrips += registration.RoundTrips;
-                registryDiagnostic?.Complete();
-            }
-            if (anyRows)
-            {
-                var r = await ApplyStagesCoreAsync(
-                    sourceStages, physicalityAdmission, sourceInterpretations,
-                    workingSetToken, legacyWorkingSetToken, legacySingletonToken,
-                    workingSetSource, workingSetSources, transactionParticipant, reconciliation, ct);
-                entitiesInserted = r.e;
-                physicalitiesInserted = r.p;
-                attestationsInserted = r.a;
-                attestationsFolded = r.fold;
-                entitiesSkipped = r.eSkip;
-                physicalitiesSkipped = r.pSkip;
-                roundTrips += r.rt;
-                journalReplayHit = r.journalHit;
-                postgresCommit = r.commit;
-                copyTransactionsStarted = r.copy.Started;
-                copyTransactionsCommitted = r.copy.Committed;
-                if (physicalityAdmission is not null)
-                {
-                    entitiesAttempted = checked(entitiesAttempted + physicalityAdmission.GeneratedEntityCount);
-                    physAttempted = checked(physAttempted + physicalityAdmission.GeneratedPhysicalityCount);
-                    attAttempted = checked(attAttempted + physicalityAdmission.GeneratedAttestationCount);
-                }
-
-                // Apply-side bitmap verify is the presence gate: compose descent
-                // stages the working set (content-addressed, deduped in the
-                // content bank), apply probes claimed-novel ids and COPYs only
-                // survivors (present attestations merge via attestation_merge).
-                // Skipped rows are therefore EXPECTED — shared substrate already
-                // committed by an earlier working set or source, not an error and
-                // not a race. Logged at info for volume visibility.
-                if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
-                {
-                    _log.LogInformation(
-                        "APPLY_PRESENT_SKIPPED entities={EntitiesSkipped} physicalities={PhysicalitiesSkipped} "
-                        + "(already-present shared-substrate rows skipped from COPY by the apply-verify — expected)",
-                        entitiesSkipped, physicalitiesSkipped);
-                }
-            }
-
-            // Caller-owned prebuilt stages are retired ONLY on success. On a failed
-            // apply the batch may be retried wholesale (IngestRunner's transient-error
-            // loop re-submits the same SubstrateChange objects); disposing here on the
-            // failure path turned every retry into an ObjectDisposedException that
-            // masked the real error (.scratchpad/02 Issues 15/17). IntentStage is a
-            // SafeHandle, so stages abandoned by a fatal abort are still reclaimed by
-            // the finalizer.
-            foreach (var pre in prebuiltStages) pre.Dispose();
+            // Names become durable before the file's completion marker,
+            // through the existing shared registry owner.
+            using var registryDiagnostic = MeasureApplyPhase("canonical-registration");
+            var registration = await NpgsqlCanonicalRegistry.RegisterCanonicalsAsync(
+                _ds, canonicalNames, ct);
+            roundTrips += registration.RoundTrips;
+            registryDiagnostic?.Complete();
         }
-        finally
+        if (anyRows)
         {
-            physicalityAdmission?.Dispose();
+            var r = await ApplyStagesCoreAsync(
+                sourceStages, workingSetToken, legacyWorkingSetToken, legacySingletonToken,
+                workingSetSource, workingSetSources, transactionParticipant, reconciliation, ct);
+            entitiesInserted = r.e;
+            physicalitiesInserted = r.p;
+            attestationsInserted = r.a;
+            attestationsFolded = r.fold;
+            entitiesSkipped = r.eSkip;
+            physicalitiesSkipped = r.pSkip;
+            roundTrips += r.rt;
+            journalReplayHit = r.journalHit;
+            postgresCommit = r.commit;
+            copyTransactionsStarted = r.copy.Started;
+            copyTransactionsCommitted = r.copy.Committed;
+
+            // Apply-side bitmap verify is the presence gate: compose descent
+            // stages the working set (content-addressed, deduped in the
+            // content bank), apply probes claimed-novel ids and COPYs only
+            // survivors (present attestations merge via attestation_merge).
+            // Skipped rows are therefore EXPECTED — shared substrate already
+            // committed by an earlier working set or source, not an error and
+            // not a race. Logged at info for volume visibility.
+            if (entitiesSkipped > 0 || physicalitiesSkipped > 0)
+            {
+                _log.LogInformation(
+                    "APPLY_PRESENT_SKIPPED entities={EntitiesSkipped} physicalities={PhysicalitiesSkipped} "
+                    + "(already-present shared-substrate rows skipped from COPY by the apply-verify — expected)",
+                    entitiesSkipped, physicalitiesSkipped);
+            }
         }
+
+        // Caller-owned prebuilt stages are retired ONLY on success. On a failed
+        // apply the batch may be retried wholesale (IngestRunner's transient-error
+        // loop re-submits the same SubstrateChange objects); disposing here on the
+        // failure path turned every retry into an ObjectDisposedException that
+        // masked the real error (.scratchpad/02 Issues 15/17). IntentStage is a
+        // SafeHandle, so stages abandoned by a fatal abort are still reclaimed by
+        // the finalizer.
+        foreach (var pre in prebuiltStages) pre.Dispose();
 
         sw.Stop();
 
@@ -344,7 +305,6 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
             JournalReplayHit: journalReplayHit)
         {
             PostgresCommit = postgresCommit,
-            PhysicalityAdmission = physicalityAdmission?.Receipt,
             CopyTransactionsStarted = copyTransactionsStarted,
             CopyTransactionsCommitted = copyTransactionsCommitted,
         };
@@ -455,26 +415,18 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
         FoldReplayable = (byte)(a.FoldReplayable ? 1 : 0),
     };
 
+    // The working-set replay token binds the legacy intent token to the semantic
+    // digest of every staged entity, physicality and attestation tuple. Equal
+    // staged content yields the equal token, so a replay is recognised exactly.
     private static Hash128 ReplayTokenV2(
-        Hash128 legacyToken, IReadOnlyList<IntentStage> sourceStages,
-        Hash128? structuralObservationDigest = null)
+        Hash128 legacyToken, IReadOnlyList<IntentStage> sourceStages)
     {
         Hash128 semanticDigest = IntentStage.SemanticDigestBatch(sourceStages);
-        if (structuralObservationDigest is not { } provenance || provenance == default)
-        {
-            Span<byte> v2 = stackalloc byte[23 + 16 + 16];
-            "LaplaceReplayIntent/v2\0"u8.CopyTo(v2);
-            legacyToken.WriteBytes(v2.Slice(23, 16));
-            semanticDigest.WriteBytes(v2.Slice(39, 16));
-            return Hash128.Blake3(v2);
-        }
-
-        Span<byte> payload = stackalloc byte[23 + 16 + 16 + 16];
-        "LaplaceReplayIntent/v3\0"u8.CopyTo(payload);
-        legacyToken.WriteBytes(payload.Slice(23, 16));
-        semanticDigest.WriteBytes(payload.Slice(39, 16));
-        provenance.WriteBytes(payload.Slice(55, 16));
-        return Hash128.Blake3(payload);
+        Span<byte> v2 = stackalloc byte[23 + 16 + 16];
+        "LaplaceReplayIntent/v2\0"u8.CopyTo(v2);
+        legacyToken.WriteBytes(v2.Slice(23, 16));
+        semanticDigest.WriteBytes(v2.Slice(39, 16));
+        return Hash128.Blake3(v2);
     }
 
 }

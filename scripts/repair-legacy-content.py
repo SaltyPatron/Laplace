@@ -624,7 +624,7 @@ $snapshot$;
 {prior_sql(prior_paths, deadline=deadline, max_bytes=max_prior_bytes, max_line_bytes=max_line_bytes, budget=prior_budget)}
 
 CREATE TEMP TABLE repair_owner_inventory ON COMMIT DROP AS
-SELECT p.*,e.tier,e.type_id,e.first_observed_by,to_jsonb(e) AS entity_evidence,
+SELECT p.*,e.tier,e.type_id,to_jsonb(e) AS entity_evidence,
        (SELECT count(*) FROM laplace.entities duplicate WHERE duplicate.id=e.id) AS entity_rows,
        CASE e.type_id
          WHEN realize.canonical_id('Chess_Game') THEN 'chess-line'

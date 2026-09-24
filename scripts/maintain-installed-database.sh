@@ -29,11 +29,9 @@ SELECT CASE
            THEN 'incompatible'
          ELSE 'unsupported'
        END
-FROM (SELECT pg_catalog.to_regclass('laplace.entities') AS entity_id,
-             pg_catalog.to_regclass('laplace.entity_interpretations') AS interpretation_id) AS selected
+FROM (SELECT pg_catalog.to_regclass('laplace.entities') AS entity_id) AS selected
 LEFT JOIN pg_catalog.pg_class AS e ON e.oid = selected.entity_id
-LEFT JOIN pg_catalog.pg_partitioned_table AS p ON p.partrelid = e.oid
-LEFT JOIN pg_catalog.pg_class AS i ON i.oid = selected.interpretation_id;
+LEFT JOIN pg_catalog.pg_partitioned_table AS p ON p.partrelid = e.oid;
 SQL
   )"; then
     echo "::error::could not classify entity storage in $database; maintenance was not started" >&2

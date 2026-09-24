@@ -65,7 +65,7 @@ int add_body(intent_stage_t* stage, const physicality_descriptor_input_t& input,
 
 int add_entity(intent_stage_t* stage) {
     const hash128_t type = laplace_content_tier_type_id(2);
-    return intent_stage_add_entity(stage, &kSource, 2, &type, nullptr);
+    return intent_stage_add_entity(stage, &kSource, 2, &type);
 }
 
 int add_attestation(intent_stage_t* stage) {

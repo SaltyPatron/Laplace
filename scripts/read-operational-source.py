@@ -420,7 +420,7 @@ rendered AS MATERIALIZED (
 entity_rows AS MATERIALIZED (
  SELECT e.id,jsonb_agg(jsonb_build_object('tier',e.tier,'type_id',encode(e.type_id,'hex'),
         'type_canonical_name',n.name,
-        'first_observed_by',encode(e.first_observed_by,'hex')) ORDER BY e.tier) AS rows
+        ) ORDER BY e.tier) AS rows
  FROM laplace.entities e LEFT JOIN laplace.canonical_names n ON n.id=e.type_id
  WHERE e.id=ANY(ARRAY(SELECT id FROM needed_ids WHERE id IS NOT NULL))
  GROUP BY e.id

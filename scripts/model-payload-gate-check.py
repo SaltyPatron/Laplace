@@ -85,17 +85,20 @@ CEILING_PER_SOURCE_BYTES = 1_000_000_000
 CEILING_TOTAL_VERTICES = 100_000_000
 
 QUERY = """
-SELECT coalesce(encode(e.first_observed_by, 'hex'), 'unattributed') AS src,
+SELECT coalesce(encode(w.source_id, 'hex'), 'unattributed') AS src,
        count(*)                                        AS rows,
        coalesce(sum(length(p.trajectory::bytea)), 0)   AS payload_bytes,
        coalesce(sum(ST_NPoints(p.trajectory)), 0)      AS vertices
 FROM laplace.physicalities p
 JOIN laplace.entities e ON e.id = p.entity_id
+JOIN LATERAL (
+    SELECT DISTINCT source_id FROM laplace.attestations
+    WHERE type_id = laplace.relation_type_id('TOKEN_MAPS_TO')
+      AND source_id IN (SELECT source_id FROM laplace.attestations
+                        WHERE type_id = laplace.relation_type_id('TOKEN_MAPS_TO')
+                          AND subject_id = e.id)
+) w ON true
 WHERE p.trajectory IS NOT NULL
-  AND e.first_observed_by IN (
-        SELECT source_id FROM laplace.attestations
-        WHERE type_id = laplace.relation_type_id('TOKEN_MAPS_TO')
-        GROUP BY source_id)
 GROUP BY 1
 ORDER BY 3 DESC
 """

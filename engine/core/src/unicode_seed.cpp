@@ -447,7 +447,8 @@ extern "C" int laplace_unicode_seed_snapshot_stage(
     size_t count,
     intent_stage_t* stage,
     const hash128_t* source_id) {
-    if (!snapshot || !stage || !source_id) return -1;
+    if (!snapshot || !stage) return -1;
+    (void)source_id;
     if (first > snapshot->records.size()
         || count > snapshot->records.size() - first) return -1;
 
@@ -455,7 +456,7 @@ extern "C" int laplace_unicode_seed_snapshot_stage(
     for (size_t i = 0; i < count; ++i) {
         const laplace_perfcache_record_t& record = snapshot->records[first + i];
         if (intent_stage_add_entity(
-                stage, &record.hash, 0, &codepoint_type, source_id) != 0)
+                stage, &record.hash, 0, &codepoint_type) != 0)
             return -2;
 
         hash128_t physicality_id;

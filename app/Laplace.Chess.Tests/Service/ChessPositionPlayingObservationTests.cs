@@ -146,7 +146,7 @@ public sealed class ChessPositionPlayingObservationTests
             }
         }
         builder.AddEntity(ChessPositionOutcomes.MarkerId(game.PlayingId), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, ChessPositionOutcomes.SourceId);
+            ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(builder, ChessPositionOutcomes.MarkerId(game.PlayingId),
             ChessPositionOutcomes.SourceId, 22);
         return builder.SetInputUnitsConsumed(1).Build();
@@ -166,7 +166,6 @@ public sealed class ChessPositionPlayingObservationTests
         Assert.Equal(expected.PhysicalitySourcePriors.OrderBy(row => row.Key.ToString()),
             actual.PhysicalitySourcePriors.OrderBy(row => row.Key.ToString()));
         AssertPhysicalitiesEqual(expected.Physicalities, actual.Physicalities);
-        AssertPhysicalitiesEqual(expected.PhysicalityObservations, actual.PhysicalityObservations);
         Assert.Equal(expected.CanonicalNames.IsDefault, actual.CanonicalNames.IsDefault);
         if (!expected.CanonicalNames.IsDefault)
         {

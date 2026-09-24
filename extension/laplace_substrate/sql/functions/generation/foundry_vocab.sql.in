@@ -12,8 +12,8 @@ BEGIN ATOMIC
         SELECT w.id AS entity_id, w.trajectory
         FROM laplace.v_word_points w
         WHERE EXISTS (
-                  SELECT 1 FROM laplace.entity_interpretations i
-                  WHERE i.entity_id = w.id
+                  SELECT 1 FROM laplace.entities i
+                  WHERE i.id = w.id
                     AND i.type_id IN (realize.canonical_id('Sentence'),
                                       realize.canonical_id('Document')))
           AND w.trajectory IS NOT NULL
@@ -24,8 +24,8 @@ BEGIN ATOMIC
         SELECT tc.entity_id AS id, sum(GREATEST(tc.run_length, 1)) AS d
         FROM traj CROSS JOIN LATERAL laplace_trajectory_constituents(traj.trajectory) tc
         WHERE EXISTS (
-            SELECT 1 FROM laplace.entity_interpretations wi
-            WHERE wi.entity_id = tc.entity_id
+            SELECT 1 FROM laplace.entities wi
+            WHERE wi.id = tc.entity_id
               AND wi.type_id = realize.canonical_id('Word'))
         GROUP BY tc.entity_id
     ),
@@ -33,8 +33,8 @@ BEGIN ATOMIC
         SELECT f.id, f.d
         FROM freq f
         WHERE EXISTS (
-            SELECT 1 FROM laplace.entity_interpretations i
-            WHERE i.entity_id = f.id
+            SELECT 1 FROM laplace.entities i
+            WHERE i.id = f.id
               AND i.type_id = realize.canonical_id('Word'))
         ORDER BY f.d DESC LIMIT p_size
     ),
@@ -44,8 +44,8 @@ BEGIN ATOMIC
         JOIN seeds s ON s.id = c.subject_id
         WHERE c.object_id IS NOT NULL
           AND EXISTS (
-              SELECT 1 FROM laplace.entity_interpretations i
-              WHERE i.entity_id = c.object_id
+              SELECT 1 FROM laplace.entities i
+              WHERE i.id = c.object_id
                 AND i.type_id = realize.canonical_id('Word'))
           AND c.type_id IN (
               laplace.relation_type_id('IS_A'), laplace.relation_type_id('IS_SYNONYM_OF'),

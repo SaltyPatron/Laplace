@@ -26,13 +26,11 @@ public sealed class ForwardRealizationDbTests(LocalPgFixture pg)
         builder.AddEntity(
             source,
             EntityTier.Word,
-            BootstrapIntentBuilder.SourceTypeId,
-            source);
+            BootstrapIntentBuilder.SourceTypeId);
         builder.AddEntity(
             concept,
             EntityTier.Word,
-            EntityTypeRegistry.Id("FrameNet_Frame"),
-            source);
+            EntityTypeRegistry.Id("FrameNet_Frame"));
 
         Hash128 surface = ContentEmitter.Emit(builder, surfaceText, source)
             ?? throw new InvalidOperationException("test surface did not enter the content spine");

@@ -78,7 +78,7 @@ internal sealed record ChessExperimentEvidence(string ExperimentId, string PgnEv
         var contextId = ContentEmitter.Emit(builder, PgnEvent, source)
             ?? throw new InvalidOperationException("Could not admit chess experiment context.");
         var type = ReceiptMetaTypeId;
-        builder.AddEntity(type, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, source);
+        builder.AddEntity(type, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId);
         foreach (var playing in games.Select(game => game.PlayingId).Distinct())
             builder.AddAttestation(NativeAttestation.CategoricalResolved(
                 playing, type, receiptId, source, contextId, SourceTrust.AppDerived));

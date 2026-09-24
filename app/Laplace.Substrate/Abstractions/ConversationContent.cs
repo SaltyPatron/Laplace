@@ -196,7 +196,7 @@ public static class ConversationContent
             .DeclareSourcePrior(scope.PromptSource, SourceTrust.UserPrompt)
             .DeclareSourcePrior(scope.ResponseSource, SourceTrust.Response);
 
-        b.AddEntity(sessionId, EntityTier.Document, SessionType, scope.PromptSource);
+        b.AddEntity(sessionId, EntityTier.Document, SessionType);
         if ((phase != TurnPhase.Output && !ContentTierSpine.EmitTree(b, promptTree, scope.PromptSource, [], out _))
             || (hasReply && !ContentTierSpine.EmitTree(b, replyTree!, scope.ResponseSource, [], out _)))
             throw new InvalidOperationException("Conversation content could not be staged.");
@@ -272,14 +272,14 @@ public static class ConversationContent
             Trajectory.VertexFlags(metadataRoot.Tier, metadataRoot.Tier == 0, metadataRoot.Atom),
             Trajectory.VertexFlags(contentRoot.Tier, contentRoot.Tier == 0, contentRoot.Atom)
         ];
-        builder.AddEntity(id, tier, EntityTypeRegistry.ConversationMessage, sourceId);
+        builder.AddEntity(id, tier, EntityTypeRegistry.ConversationMessage);
         builder.AddPhysicality(new PhysicalityRow(
             PhysicalityId.Compute(id, PhysicalityType.Content), id, sourceId,
             PhysicalityType.Content, centroid[0], centroid[1], centroid[2], centroid[3],
             hilbert, Trajectory.Build(members, flags), members.Length, null, null,
             IngestClock.NowUnixUs()));
         Hash128 roleId = Hash128.OfCanonical($"agent/role/{role}/v1");
-        builder.AddEntity(roleId, EntityTier.Word, EntityTypeRegistry.ConversationTurn, sourceId);
+        builder.AddEntity(roleId, EntityTier.Word, EntityTypeRegistry.ConversationTurn);
         Hash128 roleName = ContentEmitter.Emit(builder, role, sourceId)
             ?? throw new InvalidOperationException("Conversation role could not be composed.");
         builder.AddAttestation(NativeAttestation.Categorical(

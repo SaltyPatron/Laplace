@@ -76,9 +76,9 @@ BEGIN
         ) arms
         JOIN laplace.entities x ON x.id = arms.peer
         WHERE EXISTS (
-            SELECT 1 FROM laplace.entity_interpretations own
-            JOIN laplace.entity_interpretations peer ON peer.type_id = own.type_id
-            WHERE own.entity_id = p_id AND peer.entity_id = x.id)
+            SELECT 1 FROM laplace.entities own
+            JOIN laplace.entities peer ON peer.type_id = own.type_id
+            WHERE own.id = p_id AND peer.id = x.id)
         GROUP BY x.id
         ORDER BY score DESC
         LIMIT GREATEST(p_k, 0)
@@ -115,9 +115,9 @@ BEGIN
             FROM laplace.v_word_points w
             WHERE w.id <> p_id AND w.trajectory IS NOT NULL
               AND EXISTS (
-                  SELECT 1 FROM laplace.entity_interpretations own
-                  JOIN laplace.entity_interpretations peer ON peer.type_id = own.type_id
-                  WHERE own.entity_id = p_id AND peer.entity_id = w.id)
+                  SELECT 1 FROM laplace.entities own
+                  JOIN laplace.entities peer ON peer.type_id = own.type_id
+                  WHERE own.id = p_id AND peer.id = w.id)
             ORDER BY w.coord <<->> v_coord
             LIMIT GREATEST(p_k, 0)
         ) knn

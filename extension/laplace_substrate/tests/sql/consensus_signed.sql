@@ -25,12 +25,12 @@ DECLARE
     n_prov   bigint;
     neutral bigint := 1500000000000;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src,    0, type_t, NULL),
-        (rel_type,   0, type_t, src), (subj, 0, type_t, src),
-        (o_conf, 0, type_t, src), (o_ref, 0, type_t, src), (o_draw, 0, type_t, src),
-        (o_trust,0, type_t, src), (o_crank,0, type_t, src),
-        (o_games,0, type_t, src), (o_one, 0, type_t, src);
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t),
+        (rel_type, 0, type_t), (subj, 0, type_t),
+        (o_conf, 0, type_t), (o_ref, 0, type_t), (o_draw, 0, type_t),
+        (o_trust, 0, type_t), (o_crank, 0, type_t),
+        (o_games, 0, type_t), (o_one, 0, type_t);
 
     -- Evidence persists the fold's exact inputs: sum_score_fp1e9 (score total)
     -- and opponent_rd_fp1e9 (per-deposit phi) — the same partials the

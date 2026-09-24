@@ -155,7 +155,7 @@ public static class ChessVocabulary
         SubstrateChangeBuilder b, Hash128 playerId, string name, Hash128 sourceId,
         double witnessWeight = SourceTrust.AcademicCurated)
     {
-        b.AddEntity(playerId, EntityTier.Word, PlayerType, sourceId);
+        b.AddEntity(playerId, EntityTier.Word, PlayerType);
         if (ContentEmitter.Emit(b, name, sourceId) is { } nameId)
         {
             b.AddAttestation(NativeAttestation.Categorical(

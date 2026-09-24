@@ -181,17 +181,14 @@ public sealed class TextEntityBuilderEmissionTests
         byte[]? bitmap = known ? Enumerable.Repeat((byte)255, (tree.NodeCount + 7) / 8).ToArray() : null;
         using var expected = IntentStage.New(tree.NodeCount);
         Assert.True(expected.EmitContentTree(tree, Src, bitmap, out var expectedRoot));
-        var (entities, physicalities) = new TextEntityBuilder(tree, Src, bitmap).Build(out var interpretations);
-        var expectedInterpretations = NpgsqlSubstrateWriter.CollectEntityInterpretations([expected], [], default);
-        Assert.Equal(expectedInterpretations, interpretations.ToArray());
-        Assert.NotEmpty(interpretations);
+        var (entities, physicalities) = new TextEntityBuilder(tree, Src, bitmap).Build();
         if (known) Assert.Empty(entities);
         Assert.NotEmpty(physicalities);
         Assert.True(physicalities.Length > physicalities.Select(p => p.EntityId).Distinct().Count(),
             "Repeated content must retain each actual native raw occurrence.");
         using var transported = IntentStage.New(tree.NodeCount);
         foreach (var entity in entities)
-            transported.AddEntity(entity.Id, entity.Tier, entity.TypeId, entity.FirstObservedBy);
+            transported.AddEntity(entity.Id, entity.Tier, entity.TypeId);
         foreach (var p in physicalities)
         {
             Assert.Equal(Src, p.SourceId);
@@ -209,13 +206,12 @@ public sealed class TextEntityBuilderEmissionTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void TextWitnessConsumersPreserveActualFacetsWithoutExtraCanonicalEntities(bool response)
+    public void TextWitnessConsumersAddNoExtraCanonicalEntities(bool response)
     {
         byte[] bytes = Encoding.UTF8.GetBytes("alpha alpha. alpha beta.");
         Hash128 source = response ? ResponseContent.Source : UserPromptContent.Source;
         Assert.True(TextEntityBuilder.TryBuildContentWitness(bytes, source, 1.0,
-            out var entities, out _, out _, out var expectedRoot, out _, out var interpretations));
-        Assert.NotEmpty(interpretations);
+            out var entities, out _, out _, out var expectedRoot, out _));
         SubstrateChange change;
         Hash128 root;
         bool built = response
@@ -225,11 +221,10 @@ public sealed class TextEntityBuilderEmissionTests
         Assert.Equal(expectedRoot, root);
         Assert.True(entities.Select(row => row.Id).ToHashSet()
             .SetEquals(change.Entities.Select(row => row.Id)));
-        Assert.All(interpretations, row => Assert.Contains(row, change.EntityInterpretations));
     }
 
     [Fact]
-    public unsafe void MetadataExportRefusesAStageOnlyGrantAndCanRetryWithoutLosingFacets()
+    public unsafe void RowExportRefusesAStageOnlyGrantAndCanRetry()
     {
         byte[] bytes = Encoding.UTF8.GetBytes(string.Concat(
             Enumerable.Repeat("alpha beta. alpha beta. ", 32)));
@@ -256,18 +251,17 @@ public sealed class TextEntityBuilderEmissionTests
         }
         Assert.True(CanStage(low)); // The exact native emission fits this grant.
         var builder = new TextEntityBuilder(tree, Src, bitmap);
-        var error = Assert.Throws<InvalidOperationException>(() => builder.Build(low, out _));
+        var error = Assert.Throws<InvalidOperationException>(() => builder.Build(low));
         Assert.Contains("managed metadata exhausted", error.Message);
-        var (entities, physicalities) = builder.Build(out var interpretations);
+        var (entities, physicalities) = builder.Build();
         Assert.Empty(entities);
         Assert.NotEmpty(physicalities);
-        Assert.NotEmpty(interpretations);
         Assert.Equal(bytes, ReconstructFromPhysicalities(physicalities,
             tree.GetNode(tree.NaturalUnitIndex()).Id));
     }
 
     [Fact]
-    public void PromptSourceUnitsRetainExplicitPriorAndAnAtomicObservationEach()
+    public void PromptSourceUnitsRetainExplicitPriorAndAnAtomicPhysicalityEach()
     {
         Assert.True(UserPromptContent.TryBuildWitnessChange(Encoding.UTF8.GetBytes("A"), "prompt-one",
             out var first, out var firstRoot));
@@ -277,7 +271,7 @@ public sealed class TextEntityBuilderEmissionTests
         Assert.NotEqual(first.Metadata.IntentId, second.Metadata.IntentId);
         foreach (var change in new[] { first, second })
         {
-            var physicality = Assert.Single(change.PhysicalityObservations);
+            var physicality = Assert.Single(change.Physicalities);
             Assert.Equal(firstRoot, physicality.EntityId);
             Assert.Equal(UserPromptContent.Source, physicality.SourceId);
             Assert.Equal(SourceTrust.UserPrompt, change.RequireSourcePrior(physicality.SourceId));

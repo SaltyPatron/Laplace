@@ -162,7 +162,7 @@ physicality_descriptor_status_t materialize(
     const intent_stage_t* const* admitted_stages, size_t admitted_stage_count,
     const hash128_t* missing_ids, size_t missing_count,
     const physicality_descriptor_source_observation_t* sources, size_t source_count,
-    const hash128_t& generated_source, int64_t generated_at,
+    int64_t generated_at,
     const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_materialization_diagnostics_t* diagnostics) {
     const auto phase = [&](uint32_t value) {
@@ -634,7 +634,7 @@ physicality_descriptor_status_t materialize(
         require(trajectory_build_rle(output_children.data() + node.first_child,
             node.child_count, packed.data(), &stored_vertices) == 0);
         require(stored_vertices <= UINT32_MAX, PHYSICALITY_DESCRIPTOR_RESOURCE_EXHAUSTED);
-        stage_require(intent_stage_add_entity(stage.get(), &node.geometry.id, 4, &document_type, &generated_source) == 0 &&
+        stage_require(intent_stage_add_entity(stage.get(), &node.geometry.id, 4, &document_type) == 0 &&
             intent_stage_add_physicality(stage.get(), &placement, &node.geometry.id, node.type,
                 node.geometry.coord.data(), &node.geometry.hilbert, packed.data(),
                 static_cast<uint32_t>(stored_vertices), static_cast<int32_t>(node.child_count),
@@ -662,12 +662,12 @@ extern "C" physicality_descriptor_status_t physicality_descriptor_materialize(
     const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
     const hash128_t* explicitly_missing_ids, size_t missing_count,
     const physicality_descriptor_source_observation_t* observation_sources, size_t observation_source_count,
-    const hash128_t* source_id, int64_t observed_at_unix_us, size_t maximum_bytes,
+    int64_t observed_at_unix_us, size_t maximum_bytes,
     physicality_descriptor_materialization_t** out_materialization) {
     return physicality_descriptor_materialize_cancelable(captured_source, vocabulary,
         current_content_stages, current_stage_count, admitted_content_stages, admitted_stage_count,
         explicitly_missing_ids, missing_count, observation_sources, observation_source_count,
-        source_id, observed_at_unix_us, maximum_bytes, nullptr, out_materialization);
+        observed_at_unix_us, maximum_bytes, nullptr, out_materialization);
 }
 
 extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_cancelable(
@@ -677,13 +677,13 @@ extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_ca
     const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
     const hash128_t* explicitly_missing_ids, size_t missing_count,
     const physicality_descriptor_source_observation_t* observation_sources, size_t observation_source_count,
-    const hash128_t* source_id, int64_t observed_at_unix_us, size_t maximum_bytes,
+    int64_t observed_at_unix_us, size_t maximum_bytes,
     const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_materialization_t** out_materialization) {
     return physicality_descriptor_materialize_diagnosed_cancelable(captured_source, vocabulary,
         current_content_stages, current_stage_count, admitted_content_stages, admitted_stage_count,
         explicitly_missing_ids, missing_count, observation_sources, observation_source_count,
-        source_id, observed_at_unix_us, maximum_bytes, cancellation, nullptr, out_materialization);
+        observed_at_unix_us, maximum_bytes, cancellation, nullptr, out_materialization);
 }
 
 extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_diagnosed_cancelable(
@@ -693,7 +693,7 @@ extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_di
     const intent_stage_t* const* admitted_content_stages, size_t admitted_stage_count,
     const hash128_t* explicitly_missing_ids, size_t missing_count,
     const physicality_descriptor_source_observation_t* observation_sources, size_t observation_source_count,
-    const hash128_t* source_id, int64_t observed_at_unix_us, size_t maximum_bytes,
+    int64_t observed_at_unix_us, size_t maximum_bytes,
     const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_materialization_diagnostics_t* diagnostics,
     physicality_descriptor_materialization_t** out_materialization) {
@@ -713,7 +713,7 @@ extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_di
     if (out_materialization == nullptr) return finish(PHYSICALITY_DESCRIPTOR_INVALID);
     *out_materialization = nullptr;
     if (physicality_descriptor_cancel_requested(cancellation)) return finish(PHYSICALITY_DESCRIPTOR_CANCELLED);
-    if (captured_source == nullptr || vocabulary == nullptr || source_id == nullptr ||
+    if (captured_source == nullptr || vocabulary == nullptr ||
         (current_stage_count != 0 && current_content_stages == nullptr) ||
         (admitted_stage_count != 0 && admitted_content_stages == nullptr) ||
         (missing_count != 0 && explicitly_missing_ids == nullptr) ||
@@ -737,7 +737,7 @@ extern "C" physicality_descriptor_status_t physicality_descriptor_materialize_di
         const auto status = materialize(*result, captured_source, *vocabulary,
             current_content_stages, current_stage_count, admitted_content_stages, admitted_stage_count,
             explicitly_missing_ids, missing_count,
-            observation_sources, observation_source_count, *source_id, observed_at_unix_us, cancellation, diagnostics);
+            observation_sources, observation_source_count, observed_at_unix_us, cancellation, diagnostics);
         if (diagnostics != nullptr) {
             // materialize's local vectors and provider owners have unwound.
             // Match the returned object's retained payload, excluding its header.

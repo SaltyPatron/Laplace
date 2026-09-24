@@ -168,7 +168,7 @@ public class NpgsqlSubstrateWriterTests
             .Build();
 
         var result = await writer.ApplyAsync(change);
-        PhysicalityWriterTestSupport.AssertAttempts(result, 1, 1, 1, 1);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 1, 1, 1);
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
             [subjId], [physicalityId], [H(4003)]);
 
@@ -208,7 +208,7 @@ public class NpgsqlSubstrateWriterTests
             .Build();
 
         var result = await writer.ApplyAsync(change);
-        PhysicalityWriterTestSupport.AssertAttempts(result, 1, 2, 0, 2);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 1, 2, 0);
 
         await using var cnt = _pg.DataSource.CreateCommand(
             "SELECT count(*) FROM laplace.physicalities WHERE entity_id = $1");
@@ -221,46 +221,23 @@ public class NpgsqlSubstrateWriterTests
             .AddPhysicality(Phys(PhysicalityType.Projection, 0.99))
             .Build();
         var same = await writer.ApplyAsync(reapplySame);
-        PhysicalityWriterTestSupport.AssertAttempts(same, 0, 2, 0, 2);
+        PhysicalityWriterTestSupport.AssertAttempts(same, 0, 2, 0);
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
 
-        // The canonical typed placement remains one selected row. A later
-        // observation of that same E/type address records source-unit provenance
-        // against the existing physicality id; it does not serialize the row back
-        // into descriptor entities or HAS_PHYSICALITY testimony.
+        // The canonical typed placement remains one row per E/type address. A
+        // later row for that same address is skipped as already present.
         var changedSameIdentity = new SubstrateChangeBuilder(src, "phys-identity-changed")
             .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddPhysicality(Phys(PhysicalityType.Content, 0.55))
             .Build();
         var changed = await writer.ApplyAsync(changedSameIdentity);
-        PhysicalityWriterTestSupport.AssertAttempts(changed, 0, 1, 0, 1);
+        PhysicalityWriterTestSupport.AssertAttempts(changed, 0, 1, 0);
         Assert.Equal(2L, (long)(await cnt.ExecuteScalarAsync())!);
         await using var original = _pg.DataSource.CreateCommand(
             "SELECT ST_X(coord) FROM laplace.physicalities WHERE id=$1");
         original.Parameters.AddWithValue(
             PhysicalityId.Compute(entId, PhysicalityType.Content).ToBytes());
         Assert.Equal(0.1, (double)(await original.ExecuteScalarAsync())!);
-
-        await using var observations = _pg.DataSource.CreateCommand("""
-            SELECT
-              count(*),
-              count(DISTINCT physicality_id),
-              count(DISTINCT source_unit_id),
-              (SELECT count(*) FROM laplace.attestations
-               WHERE subject_id=$1 AND source_id=$2 AND type_id=$3)
-            FROM laplace.physicality_observations
-            WHERE entity_id=$1 AND source_id=$2
-            """);
-        observations.Parameters.AddWithValue(entId.ToBytes());
-        observations.Parameters.AddWithValue(src.ToBytes());
-        observations.Parameters.AddWithValue(
-            RelationTypeRegistry.Resolve("HAS_PHYSICALITY").Id.ToBytes());
-        await using var rows = await observations.ExecuteReaderAsync();
-        Assert.True(await rows.ReadAsync());
-        Assert.Equal(5L, rows.GetInt64(0)); // two + two + one source-unit observations
-        Assert.Equal(2L, rows.GetInt64(1)); // Content and Projection typed addresses
-        Assert.Equal(3L, rows.GetInt64(2)); // three actual source units
-        Assert.Equal(0L, rows.GetInt64(3)); // structural provenance is not testimony
     }
 
     [Fact]
@@ -398,7 +375,7 @@ public class NpgsqlSubstrateWriterTests
         var physicalityId = PhysicalityId.Compute(entityId, PhysicalityType.Content);
         var attestationId = Hash128.OfCanonical($"attestation/test/native-stage-counts/{scope}");
         using var stage = IntentStage.New(3);
-        stage.AddEntity(entityId, 2, typeId, src);
+        stage.AddEntity(entityId, 2, typeId);
         double[] coord = [0.1, 0.2, 0.3, 0.4];
         stage.AddPhysicality(
             physicalityId, entityId, (short)PhysicalityType.Content,
@@ -416,7 +393,7 @@ public class NpgsqlSubstrateWriterTests
                 .AddIntentStage(stage, src)
                 .Build());
 
-        PhysicalityWriterTestSupport.AssertAttempts(result, 1, 1, 1, 1);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 1, 1, 1);
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
             [entityId], [physicalityId], [attestationId]);
     }
@@ -430,11 +407,11 @@ public class NpgsqlSubstrateWriterTests
         var typeId = await EnsureTestTypeAsync(src);
         var sharedId = Hash128.OfCanonical($"entity/test/mixed-stage-counts/{scope}");
         using var stage = IntentStage.New(1);
-        stage.AddEntity(sharedId, 2, typeId, src);
+        stage.AddEntity(sharedId, 2, typeId);
 
         ApplyResult result = await writer.ApplyAsync(
             new SubstrateChangeBuilder(src, "mixed-stage-counts")
-                .AddEntity(sharedId, 2, typeId, src)
+                .AddEntity(sharedId, 2, typeId)
                 .AddIntentStage(stage)
                 .Build());
 
@@ -446,14 +423,14 @@ public class NpgsqlSubstrateWriterTests
     {
         var typeId = Hash128.OfCanonical("TestFixture");
         await using var cmdType = _pg.DataSource.CreateCommand(
-            "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
-          + "VALUES ($1, 0::smallint, $1, NULL) ON CONFLICT (id) DO NOTHING");
+            "INSERT INTO laplace.entities (id, tier, type_id) "
+          + "VALUES ($1, 0::smallint, $1) ON CONFLICT (id) DO NOTHING");
         cmdType.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         await cmdType.ExecuteNonQueryAsync();
 
         await using var cmdSrc = _pg.DataSource.CreateCommand(
-            "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
-          + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id) DO NOTHING");
+            "INSERT INTO laplace.entities (id, tier, type_id) "
+          + "VALUES ($1, 0::smallint, $2) ON CONFLICT (id) DO NOTHING");
         cmdSrc.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, source.ToBytes());
         cmdSrc.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         await cmdSrc.ExecuteNonQueryAsync();
@@ -465,8 +442,8 @@ public class NpgsqlSubstrateWriterTests
         var typeId = Hash128.OfCanonical($"substrate/type/{name}/v1");
         var relTypeId = Hash128.OfCanonical("TestFixture");
         await using var cmd = _pg.DataSource.CreateCommand(
-            "INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) "
-          + "VALUES ($1, 0::smallint, $2, NULL) ON CONFLICT (id) DO NOTHING");
+            "INSERT INTO laplace.entities (id, tier, type_id) "
+          + "VALUES ($1, 0::smallint, $2) ON CONFLICT (id) DO NOTHING");
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         cmd.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Bytea, typeId.ToBytes());
         await cmd.ExecuteNonQueryAsync();

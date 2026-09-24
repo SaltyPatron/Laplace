@@ -157,7 +157,6 @@ public sealed class ChessStartingSideOutcomeTests
             Assert.Empty(change.Entities);
             Assert.Empty(change.Attestations);
             Assert.Empty(change.Physicalities);
-            Assert.Empty(change.PhysicalityObservations);
             Assert.Empty(change.IntentStages);
         }
         finally { Dispose(change); }

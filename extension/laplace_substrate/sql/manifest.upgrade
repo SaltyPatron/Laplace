@@ -2,17 +2,14 @@ schema/purpose_schemas.sql.in
 schema/purpose_relocate.sql.in
 schema/laplace_substrate_version.sql.in
 functions/planner/array_length_rows_support.sql.in
-schema/tables/physicality_observations.sql.in
 schema/tables/attestation_witness_columns.sql.in
 schema/tables/ingest_flush_journal.sql.in
 schema/tables/index_cycle_journal.sql.in
 schema/tables/ingest_run_journal.sql.in
 schema/tables/ingest_file_journal.sql.in
-functions/identity/entity_interpretations_publish.sql.in
 indexes/entities_type_btree.sql.in
 indexes/drop_entities_tier_btree.sql.in
 indexes/drop_entities_tier_type_btree.sql.in
-indexes/entities_first_observed_btree.sql.in
 indexes/entities_created_at_brin.sql.in
 indexes/physicalities_type_btree.sql.in
 indexes/physicalities_coord_gist.sql.in
@@ -21,7 +18,6 @@ indexes/physicalities_hilbert_btree.sql.in
 indexes/physicalities_radius_btree.sql.in
 indexes/physicalities_residual_btree.sql.in
 indexes/physicalities_observed_brin.sql.in
-indexes/physicality_observations_source_entity_btree.sql.in
 indexes/physicalities_traj_probe.sql.in
 indexes/physicalities_traj_first_id_btree.sql.in
 indexes/physicalities_constituents_gin.sql.in
@@ -281,7 +277,6 @@ functions/ops/source_tier_census.sql.in
 functions/ops/surface_sample.sql.in
 functions/ingest/intent_preflight_result.sql.in
 functions/ingest/intent_preflight.sql.in
-functions/ingest/physicality_descriptor_materialize.sql.in
 functions/ingest/physicalities_merge.sql.in
 functions/generation/drop_retired_content_lane.sql.in
 functions/generation/relation_plane.sql.in

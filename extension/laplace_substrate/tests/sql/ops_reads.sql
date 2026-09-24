@@ -33,7 +33,7 @@ FROM ops.source_roster(public.laplace_hash128_blake3('test/ops/source'), 3);
 
 -- surface_sample admits the requested source×tier before ranking. A much heavier
 -- tier-3 subject cannot consume a tier-2 result slot, and zero is an exact bound.
-INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+INSERT INTO laplace.entities (id, tier, type_id)
 VALUES
     (laplace.word_id('sample-tier2-high'), 2, public.laplace_hash128_blake3('Type'),
      public.laplace_hash128_blake3('test/ops/source')),
@@ -197,7 +197,7 @@ BEGIN
     -- The profile receipt consumes the same native witness reader with subject
     -- roles only. Source labels are final display; repeated contexts still count
     -- as observations, and an incoming assertion must not reverse its meaning.
-    INSERT INTO laplace.entities(id,tier,type_id,first_observed_by)
+    INSERT INTO laplace.entities(id,tier,type_id)
     VALUES (rel,2,laplace.entity_type_id('RelationType'),src1)
     ON CONFLICT DO NOTHING;
     INSERT INTO laplace.canonical_names(id,name) VALUES
@@ -332,7 +332,7 @@ BEGIN
            public.ST_MakePoint(p.coord[1], p.coord[2], p.coord[3], p.coord[4])
     INTO STRICT existing_id, existing_tier, observed_coord
     FROM converse.text_root_placements(ARRAY[chr(57344)]) p;
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+    INSERT INTO laplace.entities (id, tier, type_id)
     VALUES (existing_id, existing_tier, laplace.entity_type_id('Codepoint'),
             laplace.source_id('IntegrityRegressionTest'))
     ON CONFLICT DO NOTHING;
@@ -379,7 +379,7 @@ BEGIN
         RAISE EXCEPTION 'actual missing reference or its observation-time scope was lost';
     END IF;
 
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+    INSERT INTO laplace.entities (id, tier, type_id)
     VALUES (missing_id, 2, laplace.entity_type_id('Word'),
             laplace.source_id('IntegrityRegressionTest'));
     IF EXISTS (SELECT 1 FROM ops.ingest_integrity_gate() WHERE physicality_id = orphan_id)

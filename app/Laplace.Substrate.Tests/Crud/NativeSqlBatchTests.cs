@@ -68,8 +68,8 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
         var type = Hash128.OfCanonical("catalog-conversation/type");
         var builder = new SubstrateChangeBuilder(source, tag)
             .DeclareSourcePrior(SourceTrust.StructuredCorpus)
-            .AddEntity(new EntityRow(session, 4, type, source))
-            .AddEntity(new EntityRow(turn, 4, type, source))
+            .AddEntity(new EntityRow(session, 4, type))
+            .AddEntity(new EntityRow(turn, 4, type))
             .AddPhysicality(new PhysicalityRow(
                 Id: PhysicalityId.Compute(turn, PhysicalityType.Content),
                 EntityId: turn, SourceId: source, Type: PhysicalityType.Content,
@@ -87,7 +87,7 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
                 1_000_000_000L, 30_000_000_000L));
         foreach (var atom in atoms)
         {
-            builder.AddEntity(new EntityRow(atom, 0, type, source));
+            builder.AddEntity(new EntityRow(atom, 0, type));
             builder.AddPhysicality(new PhysicalityRow(
                 PhysicalityId.Compute(atom, PhysicalityType.Content), atom, source,
                 PhysicalityType.Content, 0.1, 0.2, 0.3, 0.4, Hilbert128.Encode([0.1, 0.2, 0.3, 0.4]), null, 0,
@@ -112,7 +112,7 @@ public sealed class NativeSqlBatchTests(LocalPgFixture pg)
         // Reopen the writer, append one new occurrence, and retain the earlier
         // exact order. Replaying the first journaled intent above adds nothing.
         var next = new SubstrateChangeBuilder(source, $"{tag}/next")
-            .AddEntity(new EntityRow(session, 4, type, source)).Build();
+            .AddEntity(new EntityRow(session, 4, type)).Build();
         await using (var resumed = new ConsensusAccumulatingWriter(
             new NpgsqlSubstrateWriter(pg.DataSource), pg.DataSource))
             await resumed.ApplyConversationTurnAsync(next, session, new[] { atoms[0] });

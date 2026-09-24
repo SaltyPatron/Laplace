@@ -190,7 +190,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                 var lineId = ChessCompose.LineId(
                     session.PositionIds[0],
                     System.Runtime.InteropServices.CollectionsMarshal.AsSpan(session.MoveIds));
-                b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.SourceId);
+                b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType);
 
                 playingId = ChessVocabulary.LivePlayingId(
                     session.WhitePlayerId, session.BlackPlayerId, session.LearnContext,
@@ -261,7 +261,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
                     ChessTransitions.SourceId, playingId);
                 b.AddEntity(
                     ChessTransitions.MarkerId(playingId), EntityTier.Document,
-                    ChessVocabulary.AnalysisMarkerType, ChessTransitions.SourceId);
+                    ChessVocabulary.AnalysisMarkerType);
                 ChessPositionOutcomes.DepositTrajectory(
                     b, session.Plies.Select(static ply => ply.FromKey)
                         .Append(session.Plies[^1].ToKey).ToArray(),
@@ -429,7 +429,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
     private static void EnsurePlayingEntity(SubstrateChangeBuilder b, Hash128 playingId, LiveGameSession session)
     {
         if (session.EntityEmitted) return;
-        b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType, ChessVocabulary.SourceId);
+        b.AddEntity(playingId, EntityTier.Document, ChessVocabulary.PlayingType);
         session.EntityEmitted = true;
     }
 
@@ -504,7 +504,7 @@ public sealed class ChessLiveGameHost : IAsyncDisposable, ITurnLearner
         if (eventName.Length > 0)
         {
             var eventId = ChessVocabulary.PgnEventId(eventName, site, date);
-            b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType, ChessVocabulary.SourceId);
+            b.AddEntity(eventId, EntityTier.Document, ChessVocabulary.EventType);
             b.AddAttestation(NativeAttestation.CategoricalResolved(
                 playingId, ChessVocabulary.HasEventType, eventId,
                 ChessVocabulary.SourceId, null, WitnessWeight));

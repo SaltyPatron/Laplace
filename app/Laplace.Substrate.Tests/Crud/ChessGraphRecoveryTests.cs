@@ -10,7 +10,7 @@ namespace Laplace.SubstrateCRUD.Tests;
 
 [Collection("substrate-pg")]
 [Trait("Tier", "db")]
-public sealed class ChessGraphObservationRecoveryTests(LocalPgFixture pg)
+public sealed class ChessGraphRecoveryTests(LocalPgFixture pg)
 {
     [Fact]
     public async Task ExistingPositionEntityRestoresMissingChildAndFormsThenReplaysWithoutWrites()
@@ -30,7 +30,7 @@ public sealed class ChessGraphObservationRecoveryTests(LocalPgFixture pg)
             await ordinary.ApplyAsync(partial
                 .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId)
                 .AddEntity(composed.Position.Id, composed.Position.Tier,
-                    ChessVocabulary.PositionType, source).Build());
+                    ChessVocabulary.PositionType).Build());
         }
 
         var reader = new NpgsqlSubstrateReader(pg.DataSource);
@@ -49,7 +49,7 @@ public sealed class ChessGraphObservationRecoveryTests(LocalPgFixture pg)
 
         SubstrateChange Compose()
         {
-            using var builder = new SubstrateChangeBuilder(source, "chess/same-position-observation")
+            using var builder = new SubstrateChangeBuilder(source, "chess/same-position")
                 .DeclareSourcePrior(SourceTrust.StructuredCorpus).SetPresenceOracle(reader);
             ChessGraph.EmitComposed(builder, composed, source);
             return builder.Build();
@@ -57,22 +57,20 @@ public sealed class ChessGraphObservationRecoveryTests(LocalPgFixture pg)
 
         await using var writer = new ConsensusAccumulatingWriter(ordinary, pg.DataSource);
         var repair = Compose();
-        Assert.Equal(composed.Substructures.Count + 1, repair.PhysicalityObservations.Length);
+        Assert.Equal(composed.Substructures.Select(node => node.Id).Append(composed.Position.Id)
+            .Distinct().Count(), repair.Physicalities.Length);
         var first = await writer.ApplyWorkingSetAsync([repair]);
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(pg.DataSource,
             repair.Entities.Select(row => row.Id), repair.Physicalities.Select(row => row.Id), []);
 
-        var admission = Assert.IsType<PhysicalityAdmissionReceipt>(first.PhysicalityAdmission);
-        Assert.Equal(repair.PhysicalityObservations.Length, admission.Forms.Length);
         foreach (var entity in new[] { rule.Id, composed.Position.Id })
         {
-            int index = Enumerable.Range(0, repair.PhysicalityObservations.Length)
-                .Single(i => repair.PhysicalityObservations[i].EntityId == entity);
-            await PhysicalityWriterTestSupport.AssertPhysicalityReadbackAsync(pg.DataSource,
-                admission.Forms[index].PhysicalityId, repair.PhysicalityObservations[index]);
+            var row = Assert.Single(repair.Physicalities, row => row.EntityId == entity);
+            await PhysicalityWriterTestSupport.AssertPhysicalityReadbackAsync(pg.DataSource, row.Id, row);
         }
 
-        string accepted = await SnapshotAsync(source);
+        var physicalityIds = repair.Physicalities.Select(row => row.Id).ToArray();
+        string accepted = await SnapshotAsync(physicalityIds);
         Assert.NotEqual("[]", accepted);
         var replay = Compose();
         Assert.Equal(repair.Metadata.IntentId, replay.Metadata.IntentId);
@@ -80,7 +78,7 @@ public sealed class ChessGraphObservationRecoveryTests(LocalPgFixture pg)
         Assert.Equal(0, repeated.EntitiesInserted);
         Assert.Equal(0, repeated.PhysicalitiesInserted);
         Assert.Equal(0, repeated.AttestationsInserted);
-        Assert.Equal(accepted, await SnapshotAsync(source));
+        Assert.Equal(accepted, await SnapshotAsync(physicalityIds));
         Assert.Equal(composed.Position.Id,
             ChessCompose.Position(Board.FromFen(ChessModality.StartFen), rules).Position.Id);
         await using var rootCount = pg.DataSource.CreateCommand(
@@ -89,21 +87,22 @@ public sealed class ChessGraphObservationRecoveryTests(LocalPgFixture pg)
         Assert.Equal(1L, (long)(await rootCount.ExecuteScalarAsync())!);
     }
 
-    private async Task<string> SnapshotAsync(Hash128 source)
+    private async Task<string> SnapshotAsync(Hash128[] physicalityIds)
     {
         await using var command = pg.DataSource.CreateCommand("""
             SELECT COALESCE(jsonb_agg(
                 jsonb_build_object(
+                    'physicality',encode(id,'hex'),
                     'entity',encode(entity_id,'hex'),
-                    'physicality',encode(physicality_id,'hex'),
-                    'unit',encode(source_unit_id,'hex'),
-                    'observed_at_unix_us',observed_at_unix_us)
-                ORDER BY entity_id,physicality_id,source_unit_id),
+                    'type',type,
+                    'n_constituents',n_constituents)
+                ORDER BY id),
                 '[]'::jsonb)::text
-            FROM laplace.physicality_observations
-            WHERE source_id=$1
+            FROM laplace.physicalities
+            WHERE id=ANY($1::bytea[])
             """);
-        command.Parameters.AddWithValue(source.ToBytes());
+        command.Parameters.AddWithValue(NpgsqlDbType.Array | NpgsqlDbType.Bytea,
+            physicalityIds.Select(id => id.ToBytes()).ToArray());
         return (string)(await command.ExecuteScalarAsync())!;
     }
 }

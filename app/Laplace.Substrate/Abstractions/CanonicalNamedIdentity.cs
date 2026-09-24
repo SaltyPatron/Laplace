@@ -29,7 +29,7 @@ public static class CanonicalNamedIdentity
             ?? throw new InvalidOperationException(
                 $"canonical identity '{canonicalName}' could not be composed");
 
-        builder.AddEntity(id, tier, typeId, sourceId);
+        builder.AddEntity(id, tier, typeId);
 
         // When the governed id is itself the ordinary content root, the content spine
         // already emitted the exact physicality. Do not invent a second representation.

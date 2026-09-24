@@ -103,7 +103,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
 
         var lineId = ChessCompose.LineId(
             line[0].Id, moves.Select(static n => n.Id).ToArray());
-        b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType, ChessVocabulary.SourceId);
+        b.AddEntity(lineId, EntityTier.Document, ChessVocabulary.GameType);
         PlyOutcome whiteOutcome = WhiteOutcome(edges, adjudicated);
         string resultToken = whiteOutcome switch
         {
@@ -114,8 +114,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
         var playingId = ChessVocabulary.LivePlayingId(
             null, null, _learnContext, lineId, resultToken);
         b.AddEntity(
-            playingId, EntityTier.Document, ChessVocabulary.PlayingType,
-            ChessVocabulary.SourceId);
+            playingId, EntityTier.Document, ChessVocabulary.PlayingType);
         b.AddAttestation(NativeAttestation.CategoricalResolved(
             playingId, ChessVocabulary.PlaysLineType, lineId,
             ChessVocabulary.SourceId, null, _witnessWeight));
@@ -157,7 +156,7 @@ public sealed class SubstrateTurnHost : IContentAddresser, IEdgeRatings, IStateV
             b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
         b.AddEntity(
             ChessTrajectoryDecomposer.MarkerId(lineId), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, ChessVocabulary.TrajectorySourceId);
+            ChessVocabulary.AnalysisMarkerType);
 
         var change = await b.BuildAsync(ct);
         await _writer.ApplyAsync(change, ct);

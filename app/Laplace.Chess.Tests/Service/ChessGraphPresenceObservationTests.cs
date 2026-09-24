@@ -62,9 +62,9 @@ public sealed class ChessGraphPresenceObservationTests
         Assert.Contains(input.Nodes, node => !reader.IsProvenPresent(node.Id));
         Assert.Equal(input.Nodes.Select(node => node.Id).Distinct().OrderBy(id => id.ToString()),
             change.Entities.Select(row => row.Id).OrderBy(id => id.ToString()));
-        Assert.Equal(input.Nodes.Length, change.PhysicalityObservations.Length);
+        Assert.Equal(input.Nodes.Select(node => node.Id).Distinct().Count(), change.Physicalities.Length);
         foreach (var node in input.Nodes)
-            AssertBody(node, Assert.Single(change.PhysicalityObservations,
+            AssertBody(node, Assert.Single(change.Physicalities,
                 row => row.EntityId == node.Id));
         Assert.Equal(input.Root.Id, Input(position).Root.Id);
     }
@@ -72,7 +72,7 @@ public sealed class ChessGraphPresenceObservationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ReusedEntitiesKeepSourceFormsWithoutDuplicatingSelectedEntitiesOrPlacements(bool position)
+    public void ReusedEntitiesDoNotDuplicateEntitiesOrPhysicalities(bool position)
     {
         var input = Input(position);
         var firstSource = ChessVocabulary.PgnSourceId;
@@ -90,17 +90,9 @@ public sealed class ChessGraphPresenceObservationTests
         int uniqueNodes = input.Nodes.Select(node => node.Id).Distinct().Count();
         Assert.Equal(uniqueNodes, change.Entities.Length);
         Assert.Equal(uniqueNodes, change.Physicalities.Length);
-        Assert.Equal(3 * input.Nodes.Length, change.PhysicalityObservations.Length);
-        Assert.Equal(2 * input.Nodes.Length,
-            change.PhysicalityObservations.Count(row => row.SourceId == firstSource));
-        Assert.Equal(input.Nodes.Length,
-            change.PhysicalityObservations.Count(row => row.SourceId == secondSource));
         foreach (var node in input.Nodes)
-            Assert.All(change.PhysicalityObservations.Where(row => row.EntityId == node.Id),
-                row => AssertBody(node, row));
+            AssertBody(node, Assert.Single(change.Physicalities, row => row.EntityId == node.Id));
         Assert.Empty(change.Attestations);
-        // Raw source occurrences are retained here. Native descriptor admission and
-        // the durable source-unit journal own evidence deduplication, not E presence.
     }
 
     private static void AssertBody(ChessNode expected, PhysicalityRow actual)

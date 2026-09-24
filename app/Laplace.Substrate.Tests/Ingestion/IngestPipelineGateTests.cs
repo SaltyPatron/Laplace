@@ -93,7 +93,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                     if (!ContentTierSpine.TryStageIntoBuilder(b, unit.Utf8, SourceId, out var root)
                         || root != unit.Root)
                         throw new InvalidOperationException("synthetic unit did not compose its exact content");
-                    b.AddEntity(unit.Recipe, EntityTier.Word, EntityTypeRegistry.SourceReference, SourceId);
+                    b.AddEntity(unit.Recipe, EntityTier.Word, EntityTypeRegistry.SourceReference);
                     // BuildAsync must finish deferred content before the control transaction
                     // can admit this receipt together with its physicality testimony.
                     IngestUnitCompletion.Emit(b, root, SourceId, LayerOrder, unit.Recipe);
@@ -227,14 +227,10 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                 WITH owned AS MATERIALIZED (
                     SELECT a.* FROM laplace.attestations a
                     WHERE a.source_id=$1),
-                observed AS MATERIALIZED (
-                    SELECT o.* FROM laplace.physicality_observations o
-                    WHERE o.source_id=$1),
                 referenced AS MATERIALIZED (
                     SELECT subject_id AS id FROM owned
                     UNION SELECT object_id FROM owned WHERE object_id IS NOT NULL
-                    UNION SELECT context_id FROM owned WHERE context_id IS NOT NULL
-                    UNION SELECT entity_id FROM observed)
+                    UNION SELECT context_id FROM owned WHERE context_id IS NOT NULL)
                 SELECT jsonb_build_object(
                     'entities', COALESCE((
                         SELECT jsonb_agg(jsonb_build_array(encode(e.id,'hex'),e.tier,e.type_id)
@@ -243,7 +239,7 @@ public sealed class IngestPipelineGateTests : IClassFixture<LocalPgFixture>, IAs
                     'physicalities', COALESCE((
                         SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)
                         FROM laplace.physicalities p
-                        JOIN observed o ON o.physicality_id=p.id), '[]'::jsonb),
+                        JOIN referenced r ON r.id=p.entity_id), '[]'::jsonb),
                     'evidence', COALESCE((
                         SELECT jsonb_agg(to_jsonb(a) ORDER BY a.type_id,a.id)
                         FROM owned a), '[]'::jsonb),

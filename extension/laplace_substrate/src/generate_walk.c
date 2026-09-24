@@ -132,7 +132,7 @@ ensure_edge_plan(void)
  */
 static const char *WALK_BATCH_QUERY =
     "SELECT e.idx, e.neighbor, EXISTS (SELECT 1 "
-    "FROM laplace.entity_interpretations i WHERE i.entity_id=eo.id "
+    "FROM laplace.entities i WHERE i.id=eo.id "
     "AND i.type_id=laplace.entity_type_id('RelationType')), "
     "e.type_id, e.rating, e.rd, e.witness_count, "
     "       eo.highway_mask, "
@@ -164,7 +164,7 @@ static const char *WALK_BATCH_QUERY =
  * the only difference the caller sees. */
 static const char *WALK_BATCH_QUERY_NOGEO =
     "SELECT e.idx, e.neighbor, EXISTS (SELECT 1 "
-    "FROM laplace.entity_interpretations i WHERE i.entity_id=eo.id "
+    "FROM laplace.entities i WHERE i.id=eo.id "
     "AND i.type_id=laplace.entity_type_id('RelationType')), "
     "e.type_id, e.rating, e.rd, e.witness_count, "
     "       eo.highway_mask "

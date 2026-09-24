@@ -516,7 +516,7 @@ public sealed class ModelDecomposer : DecomposerMultiPhase, IIngestInventoryProv
         protected override string PhaseLabel => "tokenizer/entity";
 
         protected override void Compose(Hash128 id, SubstrateChangeBuilder b) =>
-            b.AddEntity(id, EntityTier.Word, ModelTokenizerTypeId, firstObservedBy: SourceId);
+            b.AddEntity(id, EntityTier.Word, ModelTokenizerTypeId);
 
         protected override async IAsyncEnumerable<Hash128> ExtractRecordsAsync(
             string ecosystemPath, DecomposerOptions options,

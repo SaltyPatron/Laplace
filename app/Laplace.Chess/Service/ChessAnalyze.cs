@@ -59,7 +59,7 @@ public static class ChessAnalyze
 
         // Analyzer unit = PLAYING (not tournament Chess_Event). Marker per playing.
         var marker = ChessVocabulary.AnalysisMarkerId(playingId, Version);
-        b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType, SourceId);
+        b.AddEntity(marker, EntityTier.Document, ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(b, marker, SourceId, 21);
         return true;
     }
@@ -125,7 +125,7 @@ public static class ChessAnalyze
         // per analysed game.
         if (ContentEmitter.Emit(b, Version.ToString(), SourceId) is { } vId)
             b.AddEntity(ChessVocabulary.AnalysisVersionMetaTypeId, EntityTier.Word,
-                    BootstrapIntentBuilder.RelationTypeMetaTypeId, SourceId)
+                    BootstrapIntentBuilder.RelationTypeMetaTypeId)
                 .AddAttestation(NativeAttestation.CategoricalResolved(
                     eventId, ChessVocabulary.AnalysisVersionMetaTypeId, vId,
                     SourceId, contextId: null, ChessVocabulary.Trust));
@@ -297,7 +297,7 @@ public static class ChessAnalyze
         long nowUs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
         ChessGraph.AppendPositionProjection(b, lineId, line, ChessVocabulary.TrajectorySourceId, nowUs);
         b.AddEntity(ChessTrajectoryDecomposer.MarkerId(lineId), EntityTier.Document,
-                    ChessVocabulary.AnalysisMarkerType, ChessVocabulary.TrajectorySourceId);
+                    ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(
             b, ChessTrajectoryDecomposer.MarkerId(lineId), ChessVocabulary.TrajectorySourceId, 21);
         return true;

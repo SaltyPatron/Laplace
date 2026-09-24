@@ -45,7 +45,7 @@ public class IntentStageTests
         using var s = IntentStage.New(1);
         var id = new Hash128(0x1111_1111_1111_1111ul, 0x1111_1111_1111_1111ul);
         var typeId = new Hash128(0x2222_2222_2222_2222ul, 0x2222_2222_2222_2222ul);
-        s.AddEntity(id, 5, typeId, firstObservedBy: null);
+        s.AddEntity(id, 5, typeId);
         Assert.Equal(1, s.EntityCount);
 
         var bytes = s.EmitCopyBinary(IntentStageTable.Entities);
@@ -203,7 +203,7 @@ public class IntentStageTests
     [Fact]
     public void CopyColumnList_ReturnsKnownStringForEntities()
     {
-        Assert.Equal("id, tier, type_id, first_observed_by",
+        Assert.Equal("id, tier, type_id",
             IntentStage.CopyColumnList(IntentStageTable.Entities));
     }
 

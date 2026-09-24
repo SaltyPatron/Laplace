@@ -137,7 +137,7 @@ internal sealed class OpenSubtitlesAlignedHandler
             Hash128 alignmentId = Hash128.Merkle(EntityTier.Document, alignmentConstituents);
             builder.AddEntity(
                 alignmentId, EntityTier.Document,
-                EntityTypeRegistry.OpenSubtitlesAlignment, _source);
+                EntityTypeRegistry.OpenSubtitlesAlignment);
 
             double[] pairCoords = new double[8];
             leftSequenceCoord.CopyTo(pairCoords, 0);
@@ -163,7 +163,7 @@ internal sealed class OpenSubtitlesAlignedHandler
             Hash128[] constituents = sentenceIds;
             Hash128 id = Hash128.Merkle(EntityTier.Document, constituents);
             builder.AddEntity(
-                id, EntityTier.Document, EntityTypeRegistry.OpenSubtitlesSequence, _source);
+                id, EntityTier.Document, EntityTypeRegistry.OpenSubtitlesSequence);
             double[] coord = Math4d.KarcherMean(sentenceCoords);
             StagePhysicality(builder, id, constituents, coord, PhysicalityType.Content);
             return (id, coord);

@@ -63,7 +63,7 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
             .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId)
             .AddEntity(peer, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId);
         foreach (var unit in units)
-            carriers.AddEntity(unit.TrunkRootId, EntityTier.Document, type, source);
+            carriers.AddEntity(unit.TrunkRootId, EntityTier.Document, type);
         await ordinary.ApplyAsync(carriers.Build());
 
         var reader = new NpgsqlSubstrateReader(pg.DataSource);
@@ -86,8 +86,8 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
             using var b = new SubstrateChangeBuilder(source, label)
                 .DeclareSourcePrior(SourceTrust.StructuredCorpus)
                 .DeclareSourcePrior(peer, SourceTrust.StructuredCorpus)
-                .AddEntity(subject, EntityTier.Word, type, source)
-                .AddEntity(obj, EntityTier.Word, type, source)
+                .AddEntity(subject, EntityTier.Word, type)
+                .AddEntity(obj, EntityTier.Word, type)
                 .AddAttestation(NativeAttestation.CategoricalResolved(
                     subject, relation, obj, source, units[1].TrunkRootId, 0.9));
             ContentEmitter.Emit(b, sourceName + " completed source body", source);
@@ -199,10 +199,10 @@ public sealed class IngestUnitCompletionWriterTests(LocalPgFixture pg)
             .DeclareSourcePrior(SourceTrust.StructuredCorpus)
             .AddEntity(source, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId)
             .AddEntity(peer, EntityTier.Word, BootstrapIntentBuilder.SourceTypeId)
-            .AddEntity(file, EntityTier.Document, EntityTypeRegistry.SourceReference, source)
-            .AddEntity(unit.TrunkRootId, EntityTier.Document, EntityTypeRegistry.SourceReference, source)
-            .AddEntity(obj, EntityTier.Word, EntityTypeRegistry.SourceReference, source)
-            .AddEntity(secondRelation, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId, source)
+            .AddEntity(file, EntityTier.Document, EntityTypeRegistry.SourceReference)
+            .AddEntity(unit.TrunkRootId, EntityTier.Document, EntityTypeRegistry.SourceReference)
+            .AddEntity(obj, EntityTier.Word, EntityTypeRegistry.SourceReference)
+            .AddEntity(secondRelation, EntityTier.Word, BootstrapIntentBuilder.RelationTypeMetaTypeId)
             .AddAttestation(firstEvidence)
             .AddAttestation(secondEvidence);
         IngestUnitCompletion.Emit(builder, unit.TrunkRootId, source, unit.Layer);

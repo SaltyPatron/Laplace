@@ -198,16 +198,15 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
         byte[] fileId = Convert.FromHexString(admittedByA.FileId);
         await using (var conn = await pg.DataSource.OpenConnectionAsync())
         await using (var command = new NpgsqlCommand(
-            "SELECT first_observed_by, type_id FROM laplace.entities WHERE id = @file", conn))
+            "SELECT type_id FROM laplace.entities WHERE id = @file", conn))
         {
             command.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
             await using var reader = await command.ExecuteReaderAsync();
             Assert.True(await reader.ReadAsync());
-            // Compatibility provenance converges by bytewise minimum, independent
-            // of admission order. Tenant authorization comes from its own claim.
-            Assert.Equal(firstTenantHasMinimumSource ? sourceA : sourceB,
-                reader.GetFieldValue<byte[]>(0));
-            Assert.Equal(EntityTypeRegistry.SourceFile.ToBytes(), reader.GetFieldValue<byte[]>(1));
+            // The canonical entity row is source-independent; both tenants'
+            // writers converge on the same content id. Provenance is witnessed
+            // by each tenant's own attestation, not by this row.
+            Assert.Equal(EntityTypeRegistry.SourceFile.ToBytes(), reader.GetFieldValue<byte[]>(0));
             Assert.False(await reader.ReadAsync());
         }
 
@@ -232,51 +231,6 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
                 Convert.FromHexString(admittedByA.ContentId);
             containers.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
             Assert.True(await containers.ExecuteScalarAsync() is true);
-        }
-
-        // An unrelated recorded interpretation can become the canonical summary.
-        // It must not erase SourceFile membership or either tenant's authorization.
-        await using (var conn = await pg.DataSource.OpenConnectionAsync())
-        {
-            await using var lowerType = new NpgsqlCommand("""
-                SELECT type_id FROM laplace.entity_interpretations
-                WHERE type_id < @file_type ORDER BY type_id LIMIT 1
-                """, conn);
-            lowerType.Parameters.Add("file_type", NpgsqlDbType.Bytea).Value =
-                EntityTypeRegistry.SourceFile.ToBytes();
-            byte[] unrelatedType = Assert.IsType<byte[]>(await lowerType.ExecuteScalarAsync());
-
-            await using var observe = new NpgsqlCommand("""
-                WITH current AS (
-                    SELECT tier FROM laplace.entities WHERE id = @file
-                )
-                SELECT laplace.entity_interpretations_publish(
-                    ARRAY[@file]::bytea[],
-                    ARRAY[(SELECT tier FROM current)]::smallint[],
-                    ARRAY[@type]::bytea[],
-                    ARRAY['\\x'::bytea]::bytea[],
-                    ARRAY[true]::boolean[])
-                """, conn);
-            observe.Parameters.Add("type", NpgsqlDbType.Bytea).Value = unrelatedType;
-            observe.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
-            Assert.False(Assert.IsType<bool>(await observe.ExecuteScalarAsync()));
-
-            await using var verify = new NpgsqlCommand("""
-                SELECT e.type_id, e.first_observed_by, EXISTS (
-                    SELECT 1 FROM laplace.entity_interpretations ei
-                    WHERE ei.entity_id = e.id AND ei.type_id = @file_type)
-                FROM laplace.entities e WHERE e.id = @file
-                """, conn);
-            verify.Parameters.Add("file_type", NpgsqlDbType.Bytea).Value =
-                EntityTypeRegistry.SourceFile.ToBytes();
-            verify.Parameters.Add("file", NpgsqlDbType.Bytea).Value = fileId;
-            await using var reader = await verify.ExecuteReaderAsync();
-            Assert.True(await reader.ReadAsync());
-            Assert.Equal(unrelatedType, reader.GetFieldValue<byte[]>(0));
-            Assert.Equal(firstTenantHasMinimumSource ? sourceA : sourceB,
-                reader.GetFieldValue<byte[]>(1));
-            Assert.True(reader.GetBoolean(2));
-            Assert.False(await reader.ReadAsync());
         }
 
         foreach (string tenant in new[] { tenantA, tenantB })
@@ -379,8 +333,7 @@ public sealed class UserContentOwnershipIntegrationTests(UserContentEndpointPgFi
             .AddEntity(
                 sessionId,
                 EntityTier.Document,
-                ConversationContent.SessionType,
-                refutedPromptScope.PromptSource);
+                ConversationContent.SessionType);
         refutedPrompt.AddAttestation(NativeAttestation.Categorical(
             contentId,
             ConversationContent.MembershipRelation,
@@ -720,7 +673,7 @@ public sealed class UserContentEndpointPgFixture : IAsyncLifetime
         await ApplySqlFileAsync(testConnection, reconstructSql);
 
         command.CommandText = """
-            INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
+            INSERT INTO laplace.entities (id, tier, type_id)
             VALUES (laplace.word_id('☃'), 0, laplace.entity_type_id('Codepoint'), NULL)
             ON CONFLICT DO NOTHING
             """;

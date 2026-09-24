@@ -117,7 +117,7 @@ public sealed class TabularDecomposer
         OrderedCompositionComponent column = RequireComponent(b, col);
         // The column is the witnessed column-name content with an additional source
         // interpretation, not a second flat-string hash that must be reverse-registered.
-        b.AddEntity(new EntityRow(column.Id, column.Tier, ColumnTypeId, Source));
+        b.AddEntity(new EntityRow(column.Id, column.Tier, ColumnTypeId));
         return column;
     }
 

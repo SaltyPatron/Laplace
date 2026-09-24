@@ -16,23 +16,9 @@ public sealed record SubstrateChange(
     public bool CountsAsUnit { get; init; } = true;
     public SubstrateApplyEnvelope? ApplyEnvelope { get; init; }
     public IngestApplyBarrier? ApplyBarrier { get; init; }
-    /// <summary>
-    /// Every distinct structural interpretation observed while composing this
-    /// change. Canonical <see cref="Entities"/> remains one row per content id;
-    /// this sidecar preserves tier/type multiplicity without changing identity.
-    /// A default/empty sidecar is valid for legacy/direct callers; the writer
-    /// derives at least the canonical entity rows as interpretations.
-    /// </summary>
-    public ImmutableArray<EntityInterpretationRow> EntityInterpretations { get; init; }
-    /// <summary>
-    /// Source physicality bodies before current-placement selection. The native
-    /// descriptor owner identifies exact forms and retains their observation scope.
-    /// Default means a caller supplied only <see cref="Physicalities"/>.
-    /// </summary>
-    public ImmutableArray<PhysicalityRow> PhysicalityObservations { get; init; }
-    /// <summary>Explicit priors for the source owners of this unit's raw physicality
-    /// observations. This is producer metadata, not a trust inferred from entity
-    /// identity, relation weight, or the first selected placement.</summary>
+    /// <summary>Explicit priors for the source owners of this unit's physicalities.
+    /// This is producer metadata, not a trust inferred from entity identity,
+    /// relation weight, or the first selected placement.</summary>
     public ImmutableDictionary<Hash128, double> PhysicalitySourcePriors { get; init; } =
         ImmutableDictionary<Hash128, double>.Empty;
 
@@ -92,14 +78,7 @@ public sealed record SubstrateChangeMetadata(
 public sealed record EntityRow(
     Hash128 Id,
     byte Tier,
-    Hash128 TypeId,
-    Hash128? FirstObservedBy);
-
-public sealed record EntityInterpretationRow(
-    Hash128 EntityId,
-    byte Tier,
-    Hash128 TypeId,
-    Hash128? FirstObservedBy);
+    Hash128 TypeId);
 
 public sealed record PhysicalityRow(
     Hash128 Id,

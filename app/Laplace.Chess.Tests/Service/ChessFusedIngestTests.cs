@@ -26,10 +26,10 @@ public sealed class ChessFusedIngestTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ActualComposedObservationsRetainEveryOwningSourcePrior(bool analyzeInline)
+    public void ComposedPhysicalitiesRetainEveryOwningSourcePrior(bool analyzeInline)
     {
         var change = Compose(analyzeInline);
-        Assert.NotEmpty(change.PhysicalityObservations);
+        Assert.NotEmpty(change.Physicalities);
         var declared = new Dictionary<Hash128, double>
         {
             [ChessVocabulary.PgnSourceId] = SourceTrust.StructuredCorpus,
@@ -51,7 +51,7 @@ public sealed class ChessFusedIngestTests
 
         try
         {
-            Assert.All(change.PhysicalityObservations, row => VerifySource(row.SourceId));
+            Assert.All(change.Physicalities, row => VerifySource(row.SourceId));
             foreach (var stage in change.IntentStages)
             {
                 int covered = 0;
@@ -65,14 +65,14 @@ public sealed class ChessFusedIngestTests
                 Assert.Equal(stage.PhysicalityCount, covered);
             }
 
-            Assert.Contains(change.PhysicalityObservations,
+            Assert.Contains(change.Physicalities,
                 row => row.SourceId == ChessVocabulary.PgnSourceId);
             if (analyzeInline)
             {
                 // Analysis content is emitted through native stages; the ordered
                 // position projection has the trajectory lane's own source.
                 Assert.Contains(ChessAnalyze.SourceId, observedSources);
-                Assert.Contains(change.PhysicalityObservations,
+                Assert.Contains(change.Physicalities,
                     row => row.SourceId == ChessVocabulary.TrajectorySourceId
                         && row.Type == PhysicalityType.Projection);
             }

@@ -111,15 +111,6 @@ public class SubstrateChangeTests
     }
 
     [Fact]
-    public void EntityRow_FirstObservedByNullable()
-    {
-        var r1 = new EntityRow(H(1), 0, H(99), null);
-        var r2 = new EntityRow(H(1), 0, H(99), H(2));
-        Assert.Null(r1.FirstObservedBy);
-        Assert.NotNull(r2.FirstObservedBy);
-    }
-
-    [Fact]
     public void AttestationRow_ObjectAndContextNullable()
     {
         var a = new AttestationRow(H(1), H(2), H(3), null, H(4), null,
@@ -154,13 +145,11 @@ public class SubstrateChangeTests
         b.AddPhysicality(phys);
         var change = b.Build();
         Assert.Single(change.Entities);
-        Assert.Single(change.Physicalities);
-        Assert.Equal(2, change.PhysicalityObservations.Length);
-        Assert.All(change.PhysicalityObservations, observed => Assert.Same(phys, observed));
+        Assert.Same(phys, Assert.Single(change.Physicalities));
     }
 
     [Fact]
-    public void Builder_PreservesAlternateFormsAndActualObservationSourcesBeforePlacementSelection()
+    public void Builder_FirstPhysicalityForAnIdOwnsItsRow()
     {
         var entity = H(901);
         var source = H(902);
@@ -177,20 +166,16 @@ public class SubstrateChangeTests
             ObservedAtUnixUs = 20,
         };
         var builder = new SubstrateChangeBuilder(source, "same-source-unit");
-        builder.AddEntity(entity, 1, H(906), source);
+        builder.AddEntity(entity, 1, H(906));
         builder.AddPhysicality(body);
         long firstBytes = builder.StagedBytesEstimate;
-        builder.AddEntity(entity, 1, H(906), laterSource);
+        builder.AddEntity(entity, 1, H(906));
         builder.AddPhysicality(alternate);
         long bothBytes = builder.StagedBytesEstimate;
         var result = builder.Build();
         Assert.Single(result.Entities);
         Assert.Same(body, Assert.Single(result.Physicalities));
-        Assert.Equal<PhysicalityRow>([body, alternate], result.PhysicalityObservations);
-        Assert.True(bothBytes > firstBytes);
-        Assert.Equal(source, result.PhysicalityObservations[0].SourceId);
-        Assert.Equal(laterSource, result.PhysicalityObservations[1].SourceId);
-        Assert.Equal(20, result.PhysicalityObservations[1].ObservedAtUnixUs);
+        Assert.Equal(firstBytes, bothBytes);
     }
 
     [Fact]
@@ -199,10 +184,10 @@ public class SubstrateChangeTests
         var source = H(960);
         var builder = new SubstrateChangeBuilder(source, "transferred-native-owner");
         var transferred = builder.ContentStage;
-        transferred.AddEntity(H(961), 1, H(962), source);
+        transferred.AddEntity(H(961), 1, H(962));
         var built = builder.Build();
         var stillOwned = builder.ContentStage;
-        stillOwned.AddEntity(H(963), 1, H(962), source);
+        stillOwned.AddEntity(H(963), 1, H(962));
         builder.Dispose();
         builder.Dispose();
         try
@@ -219,29 +204,25 @@ public class SubstrateChangeTests
     }
 
     [Fact]
-    public void Builder_ObservationByteEstimateTracksAppendAndNativeOwnershipTransfer()
+    public void Builder_ByteEstimateTracksDistinctPhysicalitiesAndNativeOwnershipTransfer()
     {
         var source = H(950);
         var entity = H(951);
-        var builder = new SubstrateChangeBuilder(source, "incremental-observations");
-        builder.AddEntity(entity, 1, H(952), source);
+        var builder = new SubstrateChangeBuilder(source, "incremental-physicalities");
+        builder.AddEntity(entity, 1, H(952));
         var row = new PhysicalityRow(
             PhysicalityId.Compute(entity, PhysicalityType.Content), entity, source,
             PhysicalityType.Content, .1, .2, .3, .4, default, null, 0, null, null, 10);
-        long trajectoryBytes = 0;
+        const long expected = 72L + 160L;
         for (int i = 0; i < 128; i++)
         {
             double[]? trajectory = i % 3 == 0 ? null : Trajectory.Build([H(i + 1000), H(i + 2000)]);
-            var observed = row with { TrajectoryXyzm = trajectory, ObservedAtUnixUs = i + 10 };
-            builder.AddPhysicality(observed);
-            trajectoryBytes += (long)(trajectory?.Length ?? 0) * sizeof(double);
-            long expected = 128L + (i + 1L) * 160 + IntPtr.Size + trajectoryBytes;
-            Assert.Equal(expected, builder.StagedBytesEstimate);
+            builder.AddPhysicality(row with { TrajectoryXyzm = trajectory, ObservedAtUnixUs = i + 10 });
             Assert.Equal(expected, builder.StagedBytesEstimate);
         }
         long managedBytes = builder.StagedBytesEstimate;
         var stage = builder.ContentStage;
-        stage.AddEntity(H(5000), 1, H(952), source);
+        stage.AddEntity(H(5000), 1, H(952));
         long nativeBytes = stage.TotalTupleBytes;
         Assert.True(nativeBytes > 0);
         Assert.Equal(managedBytes + nativeBytes, builder.StagedBytesEstimate);
@@ -249,19 +230,17 @@ public class SubstrateChangeTests
         try
         {
             Assert.Equal(managedBytes, builder.StagedBytesEstimate);
-            Assert.Equal(128, built.PhysicalityObservations.Length);
             Assert.Single(built.Physicalities);
             Assert.Single(built.IntentStages);
             Assert.Equal(nativeBytes, built.IntentStages[0].TotalTupleBytes);
             builder.AddPhysicality(row);
-            Assert.Equal(managedBytes + 160, builder.StagedBytesEstimate);
-            Assert.Equal(128, built.PhysicalityObservations.Length);
+            Assert.Equal(managedBytes, builder.StagedBytesEstimate);
         }
         finally { foreach (var retained in built.IntentStages) retained.Dispose(); }
     }
 
     [Fact]
-    public void Builder_AlreadyStagedPlacementCannotDiscardAnotherObservedForm()
+    public void Builder_AlreadyStagedPlacementIsNotRestagedManaged()
     {
         var entity = H(910);
         var source = H(911);
@@ -274,8 +253,6 @@ public class SubstrateChangeTests
         builder.AddPhysicality(body);
         var result = builder.Build();
         Assert.Empty(result.Physicalities);
-        Assert.Same(body, Assert.Single(result.PhysicalityObservations));
-        Assert.False(result.PhysicalityObservations.IsDefault);
     }
 
     [Fact]

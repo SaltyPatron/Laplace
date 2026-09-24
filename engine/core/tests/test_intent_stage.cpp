@@ -80,7 +80,7 @@ TEST(LaplaceCoreIntentStage, FreeNullIsSafe) {
 }
 
 TEST(LaplaceCoreIntentStage, ColumnListsAreStableAndCorrect) {
-    EXPECT_STREQ("id, tier, type_id, first_observed_by",
+    EXPECT_STREQ("id, tier, type_id",
                  intent_stage_copy_column_list(INTENT_STAGE_TABLE_ENTITIES));
     EXPECT_NE(nullptr, intent_stage_copy_column_list(INTENT_STAGE_TABLE_PHYSICALITIES));
     EXPECT_NE(nullptr, intent_stage_copy_column_list(INTENT_STAGE_TABLE_ATTESTATIONS));
@@ -110,11 +110,11 @@ TEST(LaplaceCoreIntentStage, AddEntityRejectsInvalidArgs) {
     ASSERT_NE(nullptr, s);
     hash128_t id = make_hash(0xAA);
     hash128_t type_id = make_hash(0xBB);
-    EXPECT_NE(0, intent_stage_add_entity(nullptr, &id, 0, &type_id, nullptr));
-    EXPECT_NE(0, intent_stage_add_entity(s, nullptr, 0, &type_id, nullptr));
-    EXPECT_NE(0, intent_stage_add_entity(s, &id, 0, nullptr, nullptr));
-    EXPECT_NE(0, intent_stage_add_entity(s, &id, -1, &type_id, nullptr));
-    EXPECT_NE(0, intent_stage_add_entity(s, &id, 256, &type_id, nullptr));
+    EXPECT_NE(0, intent_stage_add_entity(nullptr, &id, 0, &type_id));
+    EXPECT_NE(0, intent_stage_add_entity(s, nullptr, 0, &type_id));
+    EXPECT_NE(0, intent_stage_add_entity(s, &id, 0, nullptr));
+    EXPECT_NE(0, intent_stage_add_entity(s, &id, -1, &type_id));
+    EXPECT_NE(0, intent_stage_add_entity(s, &id, 256, &type_id));
     EXPECT_EQ(0u, intent_stage_entity_count(s));
     intent_stage_free(s);
 }
@@ -124,7 +124,7 @@ TEST(LaplaceCoreIntentStage, AddEntityEncodesOneRowExactly) {
     ASSERT_NE(nullptr, s);
     hash128_t id = make_hash(0x11);
     hash128_t type_id = make_hash(0x22);
-    ASSERT_EQ(0, intent_stage_add_entity(s, &id, 5, &type_id, nullptr));
+    ASSERT_EQ(0, intent_stage_add_entity(s, &id, 5, &type_id));
     EXPECT_EQ(1u, intent_stage_entity_count(s));
 
     const size_t need = intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ENTITIES, nullptr, 0);
@@ -132,35 +132,19 @@ TEST(LaplaceCoreIntentStage, AddEntityEncodesOneRowExactly) {
     ASSERT_EQ(need, intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ENTITIES,
                                                  buf.data(), buf.size()));
 
-    ASSERT_EQ(73u, need);
-    EXPECT_EQ(4, (int16_t)read_be16(buf.data() + 19));
+    ASSERT_EQ(69u, need);
+    EXPECT_EQ(3, (int16_t)read_be16(buf.data() + 19));
     EXPECT_EQ(16u, read_be32(buf.data() + 21));
     for (int i = 0; i < 16; ++i) EXPECT_EQ(0x11, buf[25 + i]);
     EXPECT_EQ(2u, read_be32(buf.data() + 41));
     EXPECT_EQ(5, (int16_t)read_be16(buf.data() + 45));
     EXPECT_EQ(16u, read_be32(buf.data() + 47));
     for (int i = 0; i < 16; ++i) EXPECT_EQ(0x22, buf[51 + i]);
-    EXPECT_EQ((uint32_t)-1, read_be32(buf.data() + 67));
-    EXPECT_EQ(0xff, buf[71]);
-    EXPECT_EQ(0xff, buf[72]);
+    EXPECT_EQ(0xff, buf[67]);
+    EXPECT_EQ(0xff, buf[68]);
     intent_stage_free(s);
 }
 
-TEST(LaplaceCoreIntentStage, AddEntityFirstObservedByPopulated) {
-    intent_stage_t* s = intent_stage_new(1);
-    ASSERT_NE(nullptr, s);
-    hash128_t id = make_hash(0x10);
-    hash128_t type_id = make_hash(0x20);
-    hash128_t source = make_hash(0x30);
-    ASSERT_EQ(0, intent_stage_add_entity(s, &id, 0, &type_id, &source));
-    const size_t need = intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ENTITIES, nullptr, 0);
-    std::vector<uint8_t> buf(need);
-    ASSERT_EQ(need, intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ENTITIES,
-                                                 buf.data(), buf.size()));
-    EXPECT_EQ(16u, read_be32(buf.data() + 67));
-    for (int i = 0; i < 16; ++i) EXPECT_EQ(0x30, buf[71 + i]);
-    intent_stage_free(s);
-}
 
 TEST(LaplaceCoreIntentStage, BufferTooSmallReturnsRequiredCount) {
     intent_stage_t* s = intent_stage_new(0);
@@ -177,11 +161,11 @@ TEST(LaplaceCoreIntentStage, MultipleEntitiesAccumulate) {
     for (uint8_t i = 0; i < 3; ++i) {
         hash128_t id = make_hash(i);
         hash128_t t  = make_hash((uint8_t)(0x80 | i));
-        ASSERT_EQ(0, intent_stage_add_entity(s, &id, (int16_t)i, &t, nullptr));
+        ASSERT_EQ(0, intent_stage_add_entity(s, &id, (int16_t)i, &t));
     }
     EXPECT_EQ(3u, intent_stage_entity_count(s));
     const size_t need = intent_stage_emit_copy_binary(s, INTENT_STAGE_TABLE_ENTITIES, nullptr, 0);
-    EXPECT_EQ(177u, need);
+    EXPECT_EQ(165u, need);
     intent_stage_free(s);
 }
 
@@ -369,7 +353,7 @@ TEST(LaplaceCoreIntentStage, EachTableHasIndependentRowCount) {
     laplace_physicality_id_compute(z, 1, &placement);
     double coord[4] = {0, 0, 0, 0};
     hilbert128_t hb; std::memset(&hb, 0, sizeof(hb));
-    ASSERT_EQ(0, intent_stage_add_entity(s, &z, 0, &z, nullptr));
+    ASSERT_EQ(0, intent_stage_add_entity(s, &z, 0, &z));
     ASSERT_EQ(0, intent_stage_add_physicality(s, &placement, &z, 1, coord, &hb, nullptr, 0, 0, 1, 0, 1, 0, 0));
     ASSERT_EQ(0, intent_stage_add_attestation(s, &z, &z, &z, nullptr, &z, nullptr, 1, 0, 0, 0, 0, 0, NULL));
     EXPECT_EQ(1u, intent_stage_entity_count(s));
@@ -445,8 +429,7 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
         hash128_t type = make_hash((uint8_t)(i >> 8));
         hash128_t fob  = make_hash((uint8_t)(i >> 4));
         const hash128_t* fobp = (i & 1) ? &fob : nullptr;
-        ASSERT_EQ(0, intent_stage_add_entity(
-            s, &id, (int16_t)(i % 7), &type, fobp))
+        ASSERT_EQ(0, intent_stage_add_entity(s, &id, (int16_t)(i % 7), &type))
             << "entity add failed at i=" << i;
     }
     ASSERT_EQ(kEntities, intent_stage_entity_count(s));
@@ -516,22 +499,13 @@ TEST(LaplaceCoreIntentStage, UdBatchShapeEntitiesSurviveAttestationGrowth) {
     for (size_t row = 0; row < kEntities; ++row) {
         ASSERT_LE(p + 2, end) << "ran off blob at row " << row;
         const int16_t fields = (int16_t)read_be16(p);
-        ASSERT_EQ(4, fields)
+        ASSERT_EQ(3, fields)
             << "ENTITIES corruption at row " << row
             << " byte offset " << (size_t)(p - buf.data());
         p += 2;
-        
-        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;   
-        ASSERT_EQ(2u,  read_be32(p)); p += 4 + 2;     
-        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;    
-        
-        const uint32_t fob_len = read_be32(p); p += 4;
-        if ((row & 1) == 0) {
-            ASSERT_EQ((uint32_t)-1, fob_len) << "row " << row;
-        } else {
-            ASSERT_EQ(16u, fob_len) << "row " << row;
-            p += 16;
-        }
+        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;   /* id */
+        ASSERT_EQ(2u,  read_be32(p)); p += 4 + 2;   /* tier */
+        ASSERT_EQ(16u, read_be32(p)); p += 4 + 16;  /* type_id */
     }
     
     EXPECT_EQ(end, p) << "entity rows did not consume the blob exactly";
@@ -579,7 +553,7 @@ TEST(LaplaceCoreIntentStage, PartitionRoutesEveryRowDisjointByIdLo) {
     for (size_t i = 0; i < kEnt; ++i) {
         hash128_t id; id.hi = 0x1111; id.lo = i * 2654435761ULL + 7;
         hash128_t t = make_hash(0x22);
-        ASSERT_EQ(0, intent_stage_add_entity(s, &id, (int16_t)(i % 7), &t, nullptr));
+        ASSERT_EQ(0, intent_stage_add_entity(s, &id, (int16_t)(i % 7), &t));
     }
     for (size_t i = 0; i < kPhys; ++i) {
         hash128_t id;
@@ -641,7 +615,7 @@ TEST(LaplaceCoreIntentStage, PartitionCountOnePreservesAllRows) {
     for (size_t i = 0; i < 50; ++i) {
         hash128_t id; id.hi = 1; id.lo = i;
         hash128_t t = make_hash(0x22);
-        ASSERT_EQ(0, intent_stage_add_entity(s, &id, 0, &t, nullptr));
+        ASSERT_EQ(0, intent_stage_add_entity(s, &id, 0, &t));
     }
     intent_stage_t* parts[1];
     ASSERT_EQ(0, intent_stage_partition(s, 1, parts));
@@ -760,10 +734,10 @@ TEST(LaplaceCoreIntentStage, SemanticDigestIgnoresOrderPartitionAndObservationCl
     auto* split = intent_stage_new(0);
     ASSERT_NE(nullptr, first); ASSERT_NE(nullptr, second); ASSERT_NE(nullptr, split);
     hash128_t a = make_hash(11), b = make_hash(12), type = make_hash(13);
-    ASSERT_EQ(0, intent_stage_add_entity(first, &a, 1, &type, nullptr));
-    ASSERT_EQ(0, intent_stage_add_entity(first, &b, 2, &type, nullptr));
-    ASSERT_EQ(0, intent_stage_add_entity(second, &b, 2, &type, nullptr));
-    ASSERT_EQ(0, intent_stage_add_entity(split, &a, 1, &type, nullptr));
+    ASSERT_EQ(0, intent_stage_add_entity(first, &a, 1, &type));
+    ASSERT_EQ(0, intent_stage_add_entity(first, &b, 2, &type));
+    ASSERT_EQ(0, intent_stage_add_entity(second, &b, 2, &type));
+    ASSERT_EQ(0, intent_stage_add_entity(split, &a, 1, &type));
     double coord[4] = {1, 0, 0, 0}; hilbert128_t hilbert{};
     hash128_t placement;
     laplace_physicality_id_compute(a, 1, &placement);
@@ -819,283 +793,4 @@ TEST(LaplaceCoreIntentStage, SemanticDigestBindsFoldReplayDisposition) {
     ASSERT_EQ(0, intent_stage_semantic_digest(transient, &two));
     EXPECT_NE(0, std::memcmp(&one, &two, sizeof(one)));
     intent_stage_free(replayable); intent_stage_free(transient);
-}
-
-namespace {
-using InterpretationStage = std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)>;
-
-std::vector<uint8_t> stage_tuple_bytes(const intent_stage_t* stage, intent_stage_table_t table) {
-    size_t bytes=0;
-    const auto* data=intent_stage_tuple_ptr(stage,table,&bytes);
-    return bytes ? std::vector<uint8_t>(data,data+bytes) : std::vector<uint8_t>();
-}
-
-std::vector<uint8_t> interpretation_bytes(const intent_stage_t* stage) {
-    size_t bytes=0;
-    const auto* data=intent_stage_entity_interpretation_tuple_ptr(stage,&bytes);
-    return bytes ? std::vector<uint8_t>(data,data+bytes) : std::vector<uint8_t>();
-}
-
-std::vector<std::vector<uint8_t>> wire_rows(const std::vector<uint8_t>& bytes, unsigned columns) {
-    std::vector<std::vector<uint8_t>> rows;
-    size_t at=0;
-    while(at<bytes.size()) {
-        const size_t start=at;
-        if(bytes.size()-at<2 || read_be16(bytes.data()+at)!=columns) { ADD_FAILURE(); return {}; }
-        at+=2;
-        for(unsigned field=0;field<columns;++field) {
-            if(bytes.size()-at<4) { ADD_FAILURE(); return {}; }
-            const uint32_t size=read_be32(bytes.data()+at);at+=4;
-            if(size==UINT32_MAX) continue;
-            if(size>bytes.size()-at) { ADD_FAILURE(); return {}; }
-            at+=size;
-        }
-        rows.emplace_back(bytes.begin()+start,bytes.begin()+at);
-    }
-    std::sort(rows.begin(),rows.end());
-    return rows;
-}
-
-std::vector<std::vector<uint8_t>> interpretation_rows(const intent_stage_t* stage) {
-    return wire_rows(interpretation_bytes(stage),4);
-}
-}
-
-TEST(LaplaceCoreIntentStage, InterpretationsRetainOriginalPairsWithoutChangingLegacySemanticBytes) {
-    InterpretationStage stage(intent_stage_new(0),intent_stage_free);
-    ASSERT_NE(nullptr,stage.get());
-    const auto id=make_hash(51), type_old=make_hash(52), type_new=make_hash(53), source=make_hash(54);
-    ASSERT_EQ(0,intent_stage_add_entity(stage.get(),&id,4,&type_old,&source));
-    ASSERT_EQ(1,intent_stage_lower_entity_tier(stage.get(),&id,1));
-    const auto entity=stage_tuple_bytes(stage.get(),INTENT_STAGE_TABLE_ENTITIES);
-    ASSERT_EQ(68u,entity.size());
-    EXPECT_EQ(1u,read_be16(entity.data()+26));
-    EXPECT_EQ(0,std::memcmp(entity.data()+32,&type_old,16)); // historical compatibility bytes
-    hash128_t before{},after{};
-    ASSERT_EQ(0,intent_stage_semantic_digest(stage.get(),&before));
-    ASSERT_EQ(0,intent_stage_add_entity_interpretation(stage.get(),&id,1,&type_new,&source));
-    EXPECT_EQ(1u,intent_stage_entity_count(stage.get()));
-    EXPECT_EQ(entity,stage_tuple_bytes(stage.get(),INTENT_STAGE_TABLE_ENTITIES));
-    ASSERT_EQ(0,intent_stage_semantic_digest(stage.get(),&after));
-    EXPECT_EQ(0,hash128_compare(&before,&after));
-    const auto facets=interpretation_bytes(stage.get());
-    ASSERT_EQ(136u,facets.size());
-    EXPECT_EQ(4u,read_be16(facets.data()+26));
-    EXPECT_EQ(0,std::memcmp(facets.data()+32,&type_old,16));
-    EXPECT_EQ(1u,read_be16(facets.data()+68+26));
-    EXPECT_EQ(0,std::memcmp(facets.data()+68+32,&type_new,16));
-    EXPECT_TRUE(intent_stage_entity_interpretations_complete(stage.get()));
-}
-
-TEST(LaplaceCoreIntentStage, InterpretationImportIsExplicitCompleteValidatedAndNondestructive) {
-    InterpretationStage original(intent_stage_new(0),intent_stage_free);
-    const auto id=make_hash(61), type=make_hash(62), source=make_hash(63);
-    ASSERT_EQ(0,intent_stage_add_entity(original.get(),&id,2,&type,&source));
-    const auto entities=stage_tuple_bytes(original.get(),INTENT_STAGE_TABLE_ENTITIES);
-    intent_stage_t* raw=nullptr;
-    ASSERT_EQ(0,intent_stage_from_tuple_bytes(entities.data(),entities.size(),nullptr,0,nullptr,0,SIZE_MAX,&raw));
-    InterpretationStage imported(raw,intent_stage_free);
-    EXPECT_FALSE(intent_stage_entity_interpretations_complete(imported.get()));
-    EXPECT_EQ(0u,intent_stage_entity_interpretation_count(imported.get()));
-    const auto good=interpretation_bytes(original.get());
-    ASSERT_EQ(0,intent_stage_import_entity_interpretations(imported.get(),good.data(),good.size()));
-    EXPECT_TRUE(intent_stage_entity_interpretations_complete(imported.get()));
-    EXPECT_EQ(good,interpretation_bytes(imported.get()));
-    // Legacy import validates framing only. Promotion must validate the old
-    // entity fields before claiming a complete interpretation stream.
-    const auto reject_malformed_legacy_promotion = [&](const std::vector<uint8_t>& bad) {
-        intent_stage_t* raw_legacy=nullptr;
-        ASSERT_EQ(0,intent_stage_from_tuple_bytes(
-            bad.data(),bad.size(),nullptr,0,nullptr,0,SIZE_MAX,&raw_legacy));
-        InterpretationStage malformed(raw_legacy,intent_stage_free);
-        const auto allocated=intent_stage_memory_bytes(malformed.get());
-        ASSERT_FALSE(intent_stage_entity_interpretations_complete(malformed.get()));
-        ASSERT_EQ(0u,intent_stage_entity_interpretation_count(malformed.get()));
-        EXPECT_EQ(-1,intent_stage_add_entity_interpretation(malformed.get(),&id,3,&type,&source));
-        EXPECT_EQ(-1,intent_stage_add_entity(malformed.get(),&id,3,&type,&source));
-        EXPECT_FALSE(intent_stage_entity_interpretations_complete(malformed.get()));
-        EXPECT_EQ(0u,intent_stage_entity_interpretation_count(malformed.get()));
-        EXPECT_TRUE(interpretation_bytes(malformed.get()).empty());
-        EXPECT_EQ(bad,stage_tuple_bytes(malformed.get(),INTENT_STAGE_TABLE_ENTITIES));
-        EXPECT_EQ(1u,intent_stage_entity_count(malformed.get()));
-        EXPECT_EQ(allocated,intent_stage_memory_bytes(malformed.get()));
-    };
-    // Well-framed but invalid fields must fail before replacing prior metadata.
-    for(unsigned field : {0u,1u,2u,3u}) {
-        auto bad=good;
-        const size_t prefix[]={2,22,28,48};
-        const size_t width[]={16,2,16,16};
-        bad.erase(bad.begin()+prefix[field]+4,bad.begin()+prefix[field]+4+width[field]);
-        bad[prefix[field]+3]=0; // zero-length payload, valid overall framing
-        reject_malformed_legacy_promotion(bad);
-        EXPECT_EQ(-1,intent_stage_import_entity_interpretations(imported.get(),bad.data(),bad.size()));
-        EXPECT_EQ(good,interpretation_bytes(imported.get()));
-        EXPECT_TRUE(intent_stage_entity_interpretations_complete(imported.get()));
-    }
-    auto bad_tier=good;bad_tier[26]=1;bad_tier[27]=0; // 256
-    reject_malformed_legacy_promotion(bad_tier);
-    EXPECT_EQ(-1,intent_stage_import_entity_interpretations(imported.get(),bad_tier.data(),bad_tier.size()));
-    EXPECT_EQ(good,interpretation_bytes(imported.get()));
-    EXPECT_EQ(-1,intent_stage_import_entity_interpretations(imported.get(),good.data(),good.size()-1));
-    EXPECT_EQ(good,interpretation_bytes(imported.get()));
-    // Aliased input is copied before releasing the old buffer.
-    size_t length=0;const auto* alias=intent_stage_entity_interpretation_tuple_ptr(imported.get(),&length);
-    ASSERT_EQ(0,intent_stage_import_entity_interpretations(imported.get(),alias,length));
-    EXPECT_EQ(good,interpretation_bytes(imported.get()));
-    InterpretationStage empty(intent_stage_new(0),intent_stage_free);
-    ASSERT_EQ(0,intent_stage_import_entity_interpretations(empty.get(),nullptr,0));
-    EXPECT_TRUE(intent_stage_entity_interpretations_complete(empty.get()));
-    EXPECT_EQ(0u,intent_stage_entity_interpretation_count(empty.get()));
-    // A new observation appended to a legacy stage first retains its old E interpretation.
-    raw=nullptr;
-    ASSERT_EQ(0,intent_stage_from_tuple_bytes(entities.data(),entities.size(),nullptr,0,nullptr,0,SIZE_MAX,&raw));
-    InterpretationStage legacy(raw,intent_stage_free);
-    ASSERT_EQ(0,intent_stage_add_entity_interpretation(legacy.get(),&id,3,&type,nullptr));
-    EXPECT_TRUE(intent_stage_entity_interpretations_complete(legacy.get()));
-    EXPECT_EQ(2u,intent_stage_entity_interpretation_count(legacy.get()));
-    EXPECT_EQ(entities,stage_tuple_bytes(legacy.get(),INTENT_STAGE_TABLE_ENTITIES));
-}
-
-TEST(LaplaceCoreIntentStage, NullableInterpretationProvenanceSurvivesImportPromotionAndPartition) {
-    const auto id=make_hash(91),other=make_hash(92),type=make_hash(93),source=make_hash(94);
-    InterpretationStage original(intent_stage_new(0),intent_stage_free);
-    ASSERT_NE(nullptr,original.get());
-    ASSERT_EQ(0,intent_stage_add_entity(original.get(),&id,2,&type,nullptr));
-    ASSERT_EQ(0,intent_stage_add_entity(original.get(),&other,3,&type,&source));
-    const auto entities=stage_tuple_bytes(original.get(),INTENT_STAGE_TABLE_ENTITIES);
-    const auto facets=interpretation_bytes(original.get());
-    ASSERT_EQ(120u,facets.size()); // one NULL source row (52), one sourced row (68)
-    EXPECT_EQ(UINT32_MAX,read_be32(facets.data()+48));
-    hash128_t before{},after{};
-    ASSERT_EQ(0,intent_stage_semantic_digest(original.get(),&before));
-
-    intent_stage_t* raw=nullptr;
-    ASSERT_EQ(0,intent_stage_from_tuple_bytes(
-        entities.data(),entities.size(),nullptr,0,nullptr,0,SIZE_MAX,&raw));
-    InterpretationStage imported(raw,intent_stage_free);
-    ASSERT_EQ(0,intent_stage_import_entity_interpretations(imported.get(),facets.data(),facets.size()));
-    EXPECT_TRUE(intent_stage_entity_interpretations_complete(imported.get()));
-    EXPECT_EQ(2u,intent_stage_entity_interpretation_count(imported.get()));
-    EXPECT_EQ(facets,interpretation_bytes(imported.get()));
-    EXPECT_EQ(entities,stage_tuple_bytes(imported.get(),INTENT_STAGE_TABLE_ENTITIES));
-    ASSERT_EQ(0,intent_stage_semantic_digest(imported.get(),&after));
-    EXPECT_EQ(0,hash128_compare(&before,&after));
-
-    raw=nullptr;
-    ASSERT_EQ(0,intent_stage_from_tuple_bytes(
-        entities.data(),entities.size(),nullptr,0,nullptr,0,SIZE_MAX,&raw));
-    InterpretationStage legacy(raw,intent_stage_free);
-    ASSERT_FALSE(intent_stage_entity_interpretations_complete(legacy.get()));
-    ASSERT_EQ(0,intent_stage_add_entity_interpretation(legacy.get(),&id,4,&type,nullptr));
-    EXPECT_TRUE(intent_stage_entity_interpretations_complete(legacy.get()));
-    EXPECT_EQ(3u,intent_stage_entity_interpretation_count(legacy.get()));
-    EXPECT_EQ(entities,stage_tuple_bytes(legacy.get(),INTENT_STAGE_TABLE_ENTITIES));
-    const auto promoted=interpretation_bytes(legacy.get());
-    ASSERT_EQ(172u,promoted.size());
-    EXPECT_TRUE(std::equal(facets.begin(),facets.end(),promoted.begin()));
-    ASSERT_EQ(0,intent_stage_semantic_digest(legacy.get(),&after));
-    EXPECT_EQ(0,hash128_compare(&before,&after));
-
-    intent_stage_t* raw_parts[2]={};
-    ASSERT_EQ(0,intent_stage_partition(legacy.get(),2,raw_parts));
-    std::vector<std::vector<uint8_t>> combined;
-    for(auto* part:raw_parts) {
-        InterpretationStage owner(part,intent_stage_free);
-        ASSERT_TRUE(intent_stage_entity_interpretations_complete(owner.get()));
-        const auto bytes=interpretation_bytes(owner.get());
-        InterpretationStage roundtrip(intent_stage_new(0),intent_stage_free);
-        ASSERT_EQ(0,intent_stage_import_entity_interpretations(roundtrip.get(),bytes.data(),bytes.size()));
-        EXPECT_EQ(bytes,interpretation_bytes(roundtrip.get()));
-        auto rows=interpretation_rows(roundtrip.get());
-        combined.insert(combined.end(),rows.begin(),rows.end());
-    }
-    std::sort(combined.begin(),combined.end());
-    EXPECT_EQ(interpretation_rows(legacy.get()),combined);
-
-    // Only provenance may be NULL; malformed lengths and required NULL fields
-    // must preserve the previously accepted mixed-source stream.
-    auto bad=facets;bad[51]=0xfe; // -2 is not the COPY null marker.
-    EXPECT_EQ(-1,intent_stage_import_entity_interpretations(imported.get(),bad.data(),bad.size()));
-    for(unsigned field=0;field<3;++field) {
-        const size_t prefix[]={2,22,28},width[]={16,2,16};
-        bad=facets;
-        bad.erase(bad.begin()+prefix[field]+4,bad.begin()+prefix[field]+4+width[field]);
-        std::fill(bad.begin()+prefix[field],bad.begin()+prefix[field]+4,0xff);
-        EXPECT_EQ(-1,intent_stage_import_entity_interpretations(imported.get(),bad.data(),bad.size()));
-        EXPECT_EQ(facets,interpretation_bytes(imported.get()));
-        EXPECT_TRUE(intent_stage_entity_interpretations_complete(imported.get()));
-        EXPECT_EQ(2u,intent_stage_entity_interpretation_count(imported.get()));
-    }
-}
-
-TEST(LaplaceCoreIntentStage, InterpretationPartitionBudgetAndRetentionFollowStageOwnership) {
-    InterpretationStage stage(intent_stage_new(0),intent_stage_free);
-    const auto type=make_hash(71),source=make_hash(72);
-    for(uint8_t i=1;i<=3;++i) {
-        auto id=make_hash(i);
-        ASSERT_EQ(0,intent_stage_add_entity(stage.get(),&id,2,&type,&source));
-        ASSERT_EQ(0,intent_stage_add_entity_interpretation(stage.get(),&id,3,&type,nullptr));
-    }
-    intent_stage_t* raw_parts[3]={};
-    ASSERT_EQ(0,intent_stage_partition(stage.get(),3,raw_parts));
-    std::vector<std::vector<uint8_t>> combined;
-    for(size_t part=0;part<3;++part) {
-        InterpretationStage owner(raw_parts[part],intent_stage_free);
-        EXPECT_TRUE(intent_stage_entity_interpretations_complete(owner.get()));
-        auto rows=interpretation_rows(owner.get());
-        for(const auto& row:rows) {
-            uint64_t lo=0;std::memcpy(&lo,row.data()+14,sizeof(lo));
-            EXPECT_EQ(part,lo%3);
-            combined.push_back(row);
-        }
-    }
-    std::sort(combined.begin(),combined.end());
-    EXPECT_EQ(interpretation_rows(stage.get()),combined);
-    InterpretationStage empty(intent_stage_new(0),intent_stage_free);
-    const size_t base=intent_stage_memory_bytes(empty.get());
-    InterpretationStage bounded(intent_stage_new_bounded(0,base+256),intent_stage_free);
-    ASSERT_NE(nullptr,bounded.get());
-    auto id=make_hash(73);
-    ASSERT_EQ(0,intent_stage_add_entity_interpretation(bounded.get(),&id,2,&type,&source));
-    const auto retained=interpretation_bytes(bounded.get());
-    EXPECT_EQ(-2,intent_stage_import_entity_interpretations(bounded.get(),retained.data(),retained.size()));
-    EXPECT_EQ(retained,interpretation_bytes(bounded.get()));
-    EXPECT_TRUE(intent_stage_entity_interpretations_complete(bounded.get()));
-    EXPECT_LE(intent_stage_memory_peak_bytes(bounded.get()),base+256);
-    EXPECT_EQ(256u,intent_stage_retain_physicalities(bounded.get()));
-    EXPECT_EQ(base,intent_stage_memory_bytes(bounded.get()));
-    EXPECT_EQ(0u,intent_stage_entity_interpretation_count(bounded.get()));
-    EXPECT_EQ(0u,intent_stage_retain_physicalities(bounded.get()));
-}
-
-TEST(LaplaceCoreIntentStage, PresentContentRetainsInterpretationsAndExactPhysicalityObservations) {
-    const uint8_t text[]={'a','b',' ','a','b'};
-    tier_tree_t* raw_tree=nullptr;
-    ASSERT_EQ(0,content_witness_tree_build(text,sizeof(text),&raw_tree));
-    std::unique_ptr<tier_tree_t,decltype(&tier_tree_free)> tree(raw_tree,tier_tree_free);
-    InterpretationStage full(intent_stage_new(0),intent_stage_free),known(intent_stage_new(0),intent_stage_free);
-    const auto source=make_hash(81);
-    hash128_t root{},present_root{};
-    const size_t nodes=tier_tree_node_count(tree.get());
-    std::vector<uint8_t> present((nodes+7)/8,255);
-    ASSERT_EQ(0,content_witness_emit_tree(full.get(),tree.get(),&source,nullptr,0,&root));
-    ASSERT_EQ(0,content_witness_emit_tree(known.get(),tree.get(),&source,present.data(),nodes,&present_root));
-    ASSERT_GT(intent_stage_entity_count(full.get()),0u);
-    EXPECT_EQ(0u,intent_stage_entity_count(known.get()));
-    EXPECT_EQ(0,hash128_compare(&root,&present_root));
-    EXPECT_EQ(interpretation_rows(full.get()),interpretation_rows(known.get()));
-    ASSERT_GT(intent_stage_entity_interpretation_count(known.get()),0u);
-    EXPECT_EQ(wire_rows(stage_tuple_bytes(full.get(),INTENT_STAGE_TABLE_PHYSICALITIES),10),
-              wire_rows(stage_tuple_bytes(known.get(),INTENT_STAGE_TABLE_PHYSICALITIES),10));
-    auto rows=interpretation_rows(known.get());
-    ASSERT_EQ(0,content_witness_emit_tree(known.get(),tree.get(),&source,present.data(),nodes,&present_root));
-    auto doubled=rows;doubled.insert(doubled.end(),rows.begin(),rows.end());std::sort(doubled.begin(),doubled.end());
-    EXPECT_EQ(doubled,interpretation_rows(known.get()));
-    // Cache-backed atomic roots keep their existing P-only contract.
-    InterpretationStage atom(intent_stage_new(0),intent_stage_free);
-    const uint8_t atomic[]={'A'};
-    ASSERT_EQ(0,content_witness_batch_add(atom.get(),atomic,sizeof(atomic),&source,&root));
-    EXPECT_EQ(0u,intent_stage_entity_count(atom.get()));
-    EXPECT_EQ(0u,intent_stage_entity_interpretation_count(atom.get()));
-    EXPECT_EQ(1u,intent_stage_physicality_count(atom.get()));
 }

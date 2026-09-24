@@ -29,12 +29,12 @@ DECLARE
     vocab     bytea[];
     n         bigint;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL),
-        (w_a, 2, type_word, src), (w_gap, 2, type_word, src),
-        (w_b, 2, type_word, src), (w_rep, 2, type_word, src),
-        (sent, 3, type_sent, src), (sent_rep, 3, type_sent, src),
-        (doc, 4, type_doc, src)
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t),
+        (w_a, 2, type_word), (w_gap, 2, type_word),
+        (w_b, 2, type_word), (w_rep, 2, type_word),
+        (sent, 3, type_sent), (sent_rep, 3, type_sent),
+        (doc, 4, type_doc)
     ON CONFLICT (id) DO NOTHING;
 
     -- sent = a, gap, b  — three CONSECUTIVE words. `gap` is deliberately left OUT of the

@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Laplace.SubstrateCRUD.Tests;
 
-/// <summary>Assertions for canonical physicality rows and structural provenance.
+/// <summary>Assertions for canonical physicality rows.
 /// Descriptor helpers remain only for explicit legacy/readback compatibility tests;
 /// ordinary apply must not manufacture descriptor graphs.</summary>
 internal static class PhysicalityWriterTestSupport
@@ -130,16 +130,12 @@ internal static class PhysicalityWriterTestSupport
         return bytes;
     }
 
-    internal static PhysicalityAdmissionReceipt AssertAttempts(
-        ApplyResult result, int entities, int physicalities, int attestations, long sourceForms)
+    internal static void AssertAttempts(
+        ApplyResult result, int entities, int physicalities, int attestations)
     {
-        var receipt = Assert.IsType<PhysicalityAdmissionReceipt>(result.PhysicalityAdmission);
-        Assert.Equal(sourceForms, receipt.SourceForms);
-        Assert.Equal(entities + receipt.GeneratedEntityRows, result.EntitiesAttempted);
-        Assert.Equal(physicalities + receipt.GeneratedPhysicalityRows, result.PhysicalitiesAttempted);
+        Assert.Equal(entities, result.EntitiesAttempted);
+        Assert.Equal(physicalities, result.PhysicalitiesAttempted);
         Assert.Equal(attestations, result.AttestationsAttempted);
-        Assert.Equal(sourceForms, receipt.PhysicalityObservationRows);
-        return receipt;
     }
 
     internal static async Task AssertSelectedRowsAsync(NpgsqlDataSource dataSource,

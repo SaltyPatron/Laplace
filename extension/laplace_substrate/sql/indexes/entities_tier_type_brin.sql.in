@@ -1,7 +1,7 @@
--- Canonical entities are HASH(id)-partitioned.  type_id/tier are compatibility
--- summaries over explicit entity_interpretations, so physical row order is hash
--- order and a BRIN on either summary has no locality to exploit.  Do not charge
--- every canonical insert for a non-selective summary index.
+-- Canonical entities are HASH(id)-partitioned.  type_id/tier projections live
+-- on the row itself, so physical row order is hash order and a BRIN on either
+-- projection has no locality to exploit.  Do not charge every canonical insert
+-- for a non-selective summary index.
 DO $do$
 BEGIN
     BEGIN

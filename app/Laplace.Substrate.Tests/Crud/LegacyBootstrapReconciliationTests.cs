@@ -48,17 +48,15 @@ public sealed class LegacyBootstrapReconciliationTests : IAsyncLifetime
             marker = Marker(bootstrap, scope);
             ApplyResult reconciled = await upgraded.ApplyLegacyBootstrapWorkingSetAsync(
                 bootstrap, marker);
-            // The original bootstrap is complete, but its deleted journal cannot
-            // prove the current descriptor admission is complete. Authenticate
-            // that path once, then require no new durable evidence or standing.
-            Assert.False(reconciled.JournalReplayHit);
+            // The original bootstrap is complete; verification against its durable
+            // rows seals the receipt without new durable evidence or standing.
+            Assert.True(reconciled.JournalReplayHit);
             Assert.True(reconciled.TrunkShortcircuitHit);
             Assert.Equal(0, reconciled.EntitiesInserted);
             Assert.Equal(0, reconciled.PhysicalitiesInserted);
             Assert.Equal(0, reconciled.AttestationsInserted);
-            Assert.NotNull(reconciled.PhysicalityAdmission);
             Assert.Equal(before, await DurableStateAsync(scope.Source));
-            Assert.Equal("applied", await ReceiptKindAsync(scope.Source));
+            Assert.Equal("reconciled-existing", await ReceiptKindAsync(scope.Source));
 
             SubstrateChange[] retry = UserArtifactContent.BuildTenantBootstrapChanges(scope);
             ApplyResult replay = await upgraded.ApplyLegacyBootstrapWorkingSetAsync(
@@ -111,17 +109,15 @@ public sealed class LegacyBootstrapReconciliationTests : IAsyncLifetime
         await using var upgraded = NewWriter();
         ApplyResult reconciled = await upgraded.ApplyLegacyBootstrapWorkingSetAsync(
             bootstrap, marker);
-        // The original bootstrap is complete, but its deleted journal cannot
-        // prove the current descriptor admission is complete. Authenticate
-        // that path once, then require no new durable evidence or standing.
-        Assert.False(reconciled.JournalReplayHit);
+        // The original bootstrap is complete; verification against its durable
+        // rows seals the receipt without new durable evidence or standing.
+        Assert.True(reconciled.JournalReplayHit);
         Assert.True(reconciled.TrunkShortcircuitHit);
         Assert.Equal(0, reconciled.EntitiesInserted);
         Assert.Equal(0, reconciled.PhysicalitiesInserted);
         Assert.Equal(0, reconciled.AttestationsInserted);
-        Assert.NotNull(reconciled.PhysicalityAdmission);
         Assert.Equal(before, await DurableStateAsync(scope.Source));
-        Assert.Equal("applied", await ReceiptKindAsync(scope.Source));
+        Assert.Equal("reconciled-existing", await ReceiptKindAsync(scope.Source));
     }
 
     [Fact]

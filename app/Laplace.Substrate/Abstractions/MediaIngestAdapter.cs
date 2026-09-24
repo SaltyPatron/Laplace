@@ -277,7 +277,7 @@ public sealed class VideoFrameIngestHandler : IIngestRecordHandler<VideoIngestRe
             SourceDim: null,
             ObservedAtUnixUs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000);
 
-        builder.AddEntity(videoRoot, EntityTier.Document, EntityTypeRegistry.Video, sourceId);
+        builder.AddEntity(videoRoot, EntityTier.Document, EntityTypeRegistry.Video);
         builder.AddPhysicality(physicality);
         return videoRoot;
     }

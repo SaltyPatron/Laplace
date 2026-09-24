@@ -84,7 +84,7 @@ public sealed class PostgresWriteDurabilityTests(LocalPgFixture pg)
                 participantMode = settings.SynchronousCommit;
                 Assert.False(settings.WriteCommitAcknowledged);
             }, reconciliation: null);
-            PhysicalityWriterTestSupport.AssertAttempts(applied, 1024, 1, 1, 1);
+            PhysicalityWriterTestSupport.AssertAttempts(applied, 1024, 1, 1);
             Assert.Equal(expected, participantMode);
             var commit = Assert.IsType<PostgresCommitReceipt>(applied.PostgresCommit);
             Assert.Equal(expected, commit.SynchronousCommit);

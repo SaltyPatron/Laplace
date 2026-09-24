@@ -83,6 +83,12 @@ struct node {
     std::string name, ns;
     std::map<std::string, std::string> attributes;
     std::vector<node> children;
+    // Recovered source structure in source order: a delimited line's raw cells,
+    // or an XML element's own (name, value) attributes. `group` is carried by the
+    // last row of a delimited group and lists the group's lines in order.
+    std::vector<std::string> cells;
+    std::vector<std::pair<std::string, std::string>> own;
+    std::shared_ptr<const std::vector<std::vector<std::string>>> group;
     std::string get(const std::string& key) const {
         auto i = attributes.find(key); return i == attributes.end() ? "" : i->second;
     }
@@ -101,6 +107,7 @@ struct content_form {
     double coord[4]{};
     hilbert128_t hilbert{};
     uint8_t tier = 0;
+    uint32_t atom = 0;
 };
 using stage_ptr = std::unique_ptr<intent_stage_t, decltype(&intent_stage_free)>;
 static bool nonzero(const hash128_t& h) { return h.hi != 0 || h.lo != 0; }
@@ -208,7 +215,7 @@ struct laplace_recipe_stream {
     }
     void entity(intent_stage_t* stage, hash128_t id, hash128_t type) {
         if (intent_stage_witness_seen(stage, &id)) return;
-        check(intent_stage_add_entity(stage, &id, 2, &type, &witness), "entity admission");
+        check(intent_stage_add_entity(stage, &id, 2, &type), "entity admission");
         intent_stage_witness_record(stage, &id);
         if (intent_stage_allocation_failed(stage))
             throw std::runtime_error("recipe entity deduplication exceeded the admitted byte envelope");
@@ -231,6 +238,7 @@ struct laplace_recipe_stream {
         std::memcpy(result.coord, root_node.coord, sizeof(result.coord));
         result.hilbert = root_node.hilbert;
         result.tier = root_node.tier;
+        result.atom = root_node.atom;
         const size_t entry_overhead = sizeof(content_form) + sizeof(std::string) + 4 * sizeof(void*);
         if (content_cache.size() < content_cache_entries &&
             entry_overhead <= content_cache_limit - content_cache_bytes &&
@@ -352,7 +360,7 @@ struct laplace_recipe_stream {
 
         if (!intent_stage_witness_seen(stage, &result.id)) {
             check(intent_stage_add_entity(
-                stage, &result.id, result.tier, &range_type, &witness), "range entity");
+                stage, &result.id, result.tier, &range_type), "range entity");
 
             hash128_t ids[2] = {components[0].id, components[1].id};
             double trajectory[8]{};
@@ -370,6 +378,79 @@ struct laplace_recipe_stream {
                 throw std::runtime_error("range staging exceeded the admitted byte envelope");
         }
         return result.id;
+    }
+
+    static laplace_ordered_component_t component(const content_form& form) {
+        laplace_ordered_component_t c{};
+        c.id = form.id;
+        std::memcpy(c.coord, form.coord, sizeof(c.coord));
+        c.tier = form.tier;
+        c.atom = form.atom;
+        c.has_atom = form.tier == 0 ? 1 : 0;
+        return c;
+    }
+    // A source record is content: the ordered composition of its values. Each
+    // value is composed by the universal ladder; the record's trajectory lists
+    // those value ids in source order, so fields are read from containment.
+    content_form compose_ordered(intent_stage_t* stage, const std::vector<laplace_ordered_component_t>& parts) {
+        if (parts.empty()) throw std::runtime_error("empty source record");
+        uint8_t tier = 0;
+        for (const auto& p : parts) tier = std::max(tier, p.tier);
+        laplace_ordered_composition_request_t request{
+            parts.data(), parts.size(),
+            laplace_content_tier_type_id(static_cast<uint8_t>(parts.size() == 1 ? tier : tier + 1)),
+            witness, INTENT_STAGE_PG_EPOCH_UNIX_US};
+        laplace_ordered_composition_result_t result{};
+        check(laplace_ordered_composition_stage_batch(stage, &request, 1, &result), "record composition");
+        if (intent_stage_allocation_failed(stage))
+            throw std::runtime_error("record staging exceeded the admitted byte envelope");
+        content_form out{};
+        out.id = result.id;
+        std::memcpy(out.coord, result.coord, sizeof(out.coord));
+        out.hilbert = result.hilbert;
+        out.tier = result.tier;
+        if (parts.size() == 1) { out.atom = parts[0].atom; }
+        return out;
+    }
+    bool compose_values(intent_stage_t* stage, const std::vector<std::string>& values, content_form* out) {
+        std::vector<laplace_ordered_component_t> parts;
+        parts.reserve(values.size());
+        for (const auto& v : values)
+            if (!v.empty()) parts.push_back(component(compose_content(stage, v)));
+        if (parts.empty()) return false;
+        *out = compose_ordered(stage, parts);
+        return true;
+    }
+    bool compose_element(intent_stage_t* stage, const node& element, content_form* out) {
+        std::vector<laplace_ordered_component_t> parts;
+        parts.push_back(component(compose_content(stage, element.name)));
+        for (const auto& a : element.own) {
+            content_form pair;
+            if (compose_values(stage, {a.first, a.second}, &pair)) parts.push_back(component(pair));
+        }
+        for (const auto& child : element.children) {
+            content_form composed;
+            if (compose_element(stage, child, &composed)) parts.push_back(component(composed));
+        }
+        *out = compose_ordered(stage, parts);
+        return true;
+    }
+    void compose_record(intent_stage_t* stage, const node& record) {
+        content_form ignored;
+        if (delimited) {
+            compose_values(stage, record.cells, &ignored);
+            if (record.group) {
+                std::vector<laplace_ordered_component_t> lines;
+                lines.reserve(record.group->size());
+                for (const auto& line : *record.group) {
+                    content_form composed;
+                    if (compose_values(stage, line, &composed)) lines.push_back(component(composed));
+                }
+                if (!lines.empty()) compose_ordered(stage, lines);
+            }
+            return;
+        }
+        compose_element(stage, record, &ignored);
     }
 
     void field(intent_stage_t* stage, const std::string& path, const std::string& raw,
@@ -593,6 +674,7 @@ struct laplace_recipe_stream {
             ? route.first + "=" + record.get(route.first) + ", " + route.last + "=" + record.get(route.last)
             : route.identity + "=" + identity.substr(0, 160) + (identity.size() > 160 ? "..." : "")) + "]";
         if (record.ns != route.ns) throw std::runtime_error("record namespace mismatch: " + record.name);
+        compose_record(stage, record);
         range = route.kind == 0;
         membership = false; record_facts_done = false; fact_offset = 0;
         if (range) {
@@ -813,8 +895,12 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
         if (s->delimited) {
             s->delimited->feed(bytes, n, final != 0,
                 [&](const std::string& name, const std::string& ns,
-                    std::map<std::string, std::string>&& attributes) {
-                    s->pending.push_back(node{name, ns, std::move(attributes), {}});
+                    std::map<std::string, std::string>&& attributes,
+                    recipe_delimited_structure&& structure) {
+                    node n{name, ns, std::move(attributes), {}};
+                    n.cells = std::move(structure.cells);
+                    n.group = std::move(structure.group);
+                    s->pending.push_back(std::move(n));
                 });
             s->final = final != 0;
             return 0;
@@ -836,6 +922,7 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                     if (!s->parent_scope.attributes.emplace(
                             e.name, std::string(e.value, e.value_len)).second)
                         throw std::runtime_error("duplicate parent record attribute");
+                    s->parent_scope.own.emplace_back(e.name, std::string(e.value, e.value_len));
                 } else if (e.kind == 2) {
                     if (s->parent_scope_active) {
                         auto route = s->routes.find(s->parent_scope.name);
@@ -889,6 +976,7 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                     throw std::runtime_error("recipe has no namespaced attribute disposition");
                 if (!s->stack.back().attributes.emplace(e.name,std::string(e.value,e.value_len)).second)
                     throw std::runtime_error("duplicate record attribute");
+                s->stack.back().own.emplace_back(e.name, std::string(e.value, e.value_len));
             } else if (e.kind == 2) {
                 if (s->stack.empty()) throw std::runtime_error("unbalanced record");
                 node done = std::move(s->stack.back()); s->stack.pop_back();
@@ -933,28 +1021,26 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
     catch (...) { s->failed = true; return -3; }
 }
 namespace {
-// Preserve all native interpretation/provenance tuples when coalescing records.
-// The final import is one set operation, independent of semantic row count.
+// Coalesce entity, physicality and testimony tuples across records; the final
+// import is one set operation, independent of semantic row count.
 struct tuple_span {
     const uint8_t* bytes;
     size_t size;
 };
 struct tuple_selection {
-    std::array<std::vector<tuple_span>, 4> spans;
-    std::array<size_t, 4> byte_counts{};
+    std::array<std::vector<tuple_span>, 3> spans;
+    std::array<size_t, 3> byte_counts{};
     size_t row_count = 0;
 };
 struct tuple_batch {
-    std::array<std::vector<uint8_t>, 4> buffers;
-    // Keys contain the complete canonical tuple, not only its id. Distinct
-    // type/provenance interpretations and physical realizations survive; hash
+    std::array<std::vector<uint8_t>, 3> buffers;
+    // Keys contain the complete canonical tuple, not only its id; hash
     // equality alone never establishes identity. Testimony is never indexed.
-    std::array<std::unordered_set<std::string>, 4> canonical_rows;
+    std::array<std::unordered_set<std::string>, 3> canonical_rows;
     size_t row_count = 0, base_bytes;
     explicit tuple_batch(size_t base) : base_bytes(base) {}
     static const uint8_t* buffer(const intent_stage_t* stage, size_t index, size_t* size) {
-        return index == 3 ? intent_stage_entity_interpretation_tuple_ptr(stage, size)
-            : intent_stage_tuple_ptr(stage, static_cast<intent_stage_table_t>(index + 1), size);
+        return intent_stage_tuple_ptr(stage, static_cast<intent_stage_table_t>(index + 1), size);
     }
     static size_t tuple_size(const uint8_t* bytes, size_t available, uint16_t columns) {
         if (available < 2 || (uint16_t(bytes[0]) << 8 | bytes[1]) != columns)
@@ -996,7 +1082,7 @@ struct tuple_batch {
                     local.emplace(std::move(key)).second) {
                     selected.spans[i].push_back({bytes + offset, length});
                     selected.byte_counts[i] += length;
-                    if (i < 3) ++selected.row_count;
+                    ++selected.row_count;
                 }
                 offset += length;
             }
@@ -1037,8 +1123,6 @@ struct tuple_batch {
             buffers[1].data(), buffers[1].size(), buffers[2].data(), buffers[2].size(), maximum_bytes, &raw);
         stage_ptr stage(raw, intent_stage_free);
         if (result != 0 || !stage) throw std::runtime_error("recipe tuple batch exceeds the admitted byte envelope");
-        if (intent_stage_import_entity_interpretations(stage.get(), buffers[3].data(), buffers[3].size()) != 0)
-            throw std::runtime_error("recipe interpretation batch exceeds the admitted byte envelope");
         return stage;
     }
 };

@@ -35,8 +35,7 @@ typedef struct {
     uint8_t      tier;
     uint8_t      _pad[7];
     /* Exact span appended by this request to the supplied stage. These are
-     * zero for compose-only results. Stage spans can be out of request order:
-     * legacy placement winners precede alternate raw observations. */
+     * zero for compose-only results and for repeats of an already staged id. */
     size_t       first_physicality_row;
     size_t       emitted_physicality_rows;
 } laplace_ordered_composition_result_t;
@@ -76,11 +75,8 @@ int laplace_ordered_composition_compose_batch(
  * only a reference and coordinate, not the full child body: they emit no P;
  * an observation requires that body through its actual provider/source path.
  *
- * Every computed multi-component candidate physicality is retained as a raw
- * observation, including exact repeats and alternate geometry of the same E.
- * Entity creation retains existing dedup/minimum-floor behavior. Existing
- * placement winners are emitted first so downstream first-placement selection
- * stays compatible. Source-unit replay and exact-form reuse belong to admission.
+ * A distinct multi-component composition stages one entity and one content
+ * physicality; a repeat of an already staged id lowers its floor only.
  * The operation validates every request before mutating `stage`. `out_results`
  * holds request-order entries with actual emitted physicality spans.
  */

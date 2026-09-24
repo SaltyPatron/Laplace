@@ -112,7 +112,7 @@ protected:
         physicality_descriptor_materialization_t* raw = nullptr;
         const auto status = physicality_descriptor_materialize(source.get(), vocabulary.get(),
             current.data(), current.size(), nullptr, 0, missing.data(), missing.size(),
-            witnesses.data(), witnesses.size(), &kSource, 456, kBudget, &raw);
+            witnesses.data(), witnesses.size(), 456, kBudget, &raw);
         out.reset(raw);
         return status;
     }

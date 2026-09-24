@@ -106,7 +106,7 @@ public static class ChessTacticOutcomes
         }
 
         b.AddEntity(MarkerId(playingId), EntityTier.Document,
-            ChessVocabulary.AnalysisMarkerType, sourceId);
+            ChessVocabulary.AnalysisMarkerType);
         IngestUnitCompletion.Emit(b, MarkerId(playingId), sourceId, 24);
     }
 

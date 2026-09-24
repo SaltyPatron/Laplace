@@ -90,7 +90,7 @@ public sealed class DeferredContentBatchTests
     [InlineData("dog")]
     [InlineData("hello world")]
     [InlineData("a longer example sentence, with punctuation.")]
-    public async Task PresentBitmap_DefersEntitiesAndRetainsPhysicalityObservations(string s)
+    public async Task PresentBitmap_DefersEntitiesAndRetainsPhysicalities(string s)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(s);
         var reader = new FakeReader(present: true);

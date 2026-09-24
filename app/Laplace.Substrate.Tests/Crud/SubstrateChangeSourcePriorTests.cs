@@ -33,10 +33,7 @@ public sealed class SubstrateChangeSourcePriorTests
         builder.AddPhysicality(new(placement, entity, OtherSource, PhysicalityType.Projection,
             0.2, 0, 0, 0, default, null, 0, null, null, 2));
         var first = builder.Build();
-        Assert.Single(first.Physicalities);
-        Assert.Equal(2, first.PhysicalityObservations.Length);
-        Assert.Equal(0.3, first.RequireSourcePrior(first.PhysicalityObservations[0].SourceId));
-        Assert.Equal(0.2, first.RequireSourcePrior(first.PhysicalityObservations[1].SourceId));
+        Assert.Equal(Source, Assert.Single(first.Physicalities).SourceId);
         Assert.Equal(0.3, first.RequireSourcePrior(Source));
         Assert.Equal(0.2, first.RequireSourcePrior(OtherSource));
         builder.DeclareSourcePrior(new Hash128(5, 6), 0.95);
@@ -89,7 +86,7 @@ public sealed class SubstrateChangeSourcePriorTests
         var declared = change.WithSourcePrior(Source, 0.85);
         Assert.Same(change.Metadata, declared.Metadata);
         Assert.Equal(change.Metadata.IntentId, declared.Metadata.IntentId);
-        Assert.Equal(change.PhysicalityObservations, declared.PhysicalityObservations);
+        Assert.Equal(change.Physicalities, declared.Physicalities);
         Assert.Equal(0.4, declared.RequireSourcePrior(OtherSource));
         Assert.Equal(0.85, declared.RequireSourcePrior(Source));
         Assert.False(change.PhysicalitySourcePriors.ContainsKey(Source));
@@ -199,16 +196,8 @@ public sealed class SubstrateChangeSourcePriorTests
                 Assert.Equal(Source, range.SourceId);
                 Assert.Equal(prior, change.RequireSourcePrior(range.SourceId));
             });
-            using var captured = NpgsqlSubstrateWriter.PhysicalityAdmissionBatch.Capture(
-                [change], change.IntentStages, CancellationToken.None)!;
-            Assert.NotNull(captured);
-            Assert.Equal(ranges.Sum(range => range.RowCount) + change.PhysicalityObservations.Length,
-                captured.ObservationSources.Count);
-            Assert.All(captured.ObservationSources, source => Assert.Equal(Source, source));
-            Assert.Equal(captured.ObservationSources.Count, captured.ObservationUnits.Count);
-            Assert.Equal(captured.ObservationSources.Count, captured.ObservationTimesUnixUs.Count);
-            // Trust is a source declaration used by semantic testimony/folding. Physical
-            // provenance is structural only and must not duplicate that standing channel.
+            Assert.All(change.Physicalities, row => Assert.Equal(Source, row.SourceId));
+            // Trust is a source declaration used by semantic testimony/folding.
             Assert.Equal(prior, change.RequireSourcePrior(Source));
         }
         finally { foreach (var stage in change.IntentStages) stage.Dispose(); }
@@ -231,7 +220,6 @@ public sealed class SubstrateChangeSourcePriorTests
         Assert.Equal(.25, change.RequireSourcePrior(Source));
         Assert.Empty(change.Entities);
         Assert.Empty(change.Physicalities);
-        Assert.Empty(change.PhysicalityObservations);
         Assert.Empty(change.Attestations);
         Assert.Empty(change.IntentStages);
     }

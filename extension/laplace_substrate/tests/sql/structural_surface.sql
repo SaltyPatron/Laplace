@@ -43,12 +43,12 @@ DECLARE
     batch_ids  bytea[];
     n bigint;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (src, 0, type_t, NULL),
-        (l0, 0, type_word, src), (l1, 0, type_word, src),
-        (l2, 0, type_word, src), (l3, 0, type_word, src),
-        (seed, 2, type_word, src), (near_word, 2, type_word, src),
-        (far_word, 2, type_word, src);
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (src, 0, type_t),
+        (l0, 0, type_word), (l1, 0, type_word),
+        (l2, 0, type_word), (l3, 0, type_word),
+        (seed, 2, type_word), (near_word, 2, type_word),
+        (far_word, 2, type_word);
 
     INSERT INTO laplace.physicalities
         (id, entity_id, type, coord, hilbert_index, trajectory, n_constituents, observed_at)
@@ -129,7 +129,7 @@ ROLLBACK;
 -- Exact angular KNN must ignore radius. Raw coord chord ranks `raw-close` first,
 -- while its angle is worse; unit-direction KNN must return `angular-close`.
 BEGIN;
-INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+INSERT INTO laplace.entities (id, tier, type_id) VALUES
     (public.laplace_hash128_blake3('test/angular/source'), 0,
      public.laplace_hash128_blake3('Type'), NULL),
     (public.laplace_hash128_blake3('test/angular/raw-close'), 42,
@@ -170,7 +170,7 @@ WHERE i.indexrelid = 'laplace.physicalities_direction_gist'::regclass;
 
 -- Locale counts are exact radius counts over the direction index, not an
 -- estimate from an arbitrary nearest-3,000 prefix.
-INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+INSERT INTO laplace.entities (id, tier, type_id) VALUES
     (laplace.word_id('localeanchor'), 2, realize.canonical_id('Word'),
      public.laplace_hash128_blake3('test/angular/source')),
     (laplace.word_id('localeneighbor'), 2, realize.canonical_id('Word'),

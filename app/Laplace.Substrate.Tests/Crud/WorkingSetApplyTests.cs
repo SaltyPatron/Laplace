@@ -42,7 +42,7 @@ public class WorkingSetApplyTests
         Hash128 source, string unit, Hash128 entityId)
     {
         var stage = IntentStage.New(1);
-        stage.AddEntity(entityId, 2, H("type/word"), source);
+        stage.AddEntity(entityId, 2, H("type/word"));
         return new SubstrateChangeBuilder(source, unit)
             .AddIntentStage(stage)
             .Build();
@@ -114,7 +114,7 @@ public class WorkingSetApplyTests
             .Build();
 
         var first = await writer.ApplyAsync(Change());
-        PhysicalityWriterTestSupport.AssertAttempts(first, 1, 1, 1, 1);
+        PhysicalityWriterTestSupport.AssertAttempts(first, 1, 1, 1);
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
             [H("repeat/e1")], [Phys("repeat/e1").Id], [H("att/repeat")]);
 
@@ -122,7 +122,7 @@ public class WorkingSetApplyTests
         Assert.Equal(0, second.EntitiesInserted);
         Assert.Equal(0, second.PhysicalitiesInserted);
         Assert.Equal(0, second.AttestationsInserted);
-        PhysicalityWriterTestSupport.AssertAttempts(second, 1, 1, 1, 1);
+        PhysicalityWriterTestSupport.AssertAttempts(second, 1, 1, 1);
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
             [H("repeat/e1")], [Phys("repeat/e1").Id], [H("att/repeat")]);
 
@@ -202,7 +202,7 @@ public class WorkingSetApplyTests
             .Build();
 
         var result = await writer.ApplyWorkingSetAsync(workingSet);
-        PhysicalityWriterTestSupport.AssertAttempts(result, 2, 2, 0, 2);
+        PhysicalityWriterTestSupport.AssertAttempts(result, 2, 2, 0);
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
             [H("subtract/x"), H("subtract/y")],
             [Phys("subtract/x").Id, Phys("subtract/y").Id], []);
@@ -304,7 +304,7 @@ public class WorkingSetApplyTests
         // novel in the SAME batch, so the structural filter proves it novel
         // without a probe — it must still COPY.
         var first = await writer.ApplyWorkingSetAsync(Change("structural-a", 2));
-        PhysicalityWriterTestSupport.AssertAttempts(first, 1, 1, 1, 1);
+        PhysicalityWriterTestSupport.AssertAttempts(first, 1, 1, 1);
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,
             [subj], [Phys("structural/e1").Id], [H("att/structural")]);
         var (games, _) = await AttStateAsync(H("att/structural"));
@@ -314,7 +314,7 @@ public class WorkingSetApplyTests
         // present now, the filter no longer fires, and the attestation rides
         // the routed merge lane.
         var second = await writer.ApplyWorkingSetAsync(Change("structural-b", 5));
-        PhysicalityWriterTestSupport.AssertAttempts(second, 1, 1, 1, 1);
+        PhysicalityWriterTestSupport.AssertAttempts(second, 1, 1, 1);
         // The new source unit contributes direct structural physicality provenance;
         // the explicitly supplied semantic attestation remains unchanged.
         await PhysicalityWriterTestSupport.AssertSelectedRowsAsync(_pg.DataSource,

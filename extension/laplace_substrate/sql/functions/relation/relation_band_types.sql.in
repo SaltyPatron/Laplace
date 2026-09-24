@@ -26,8 +26,8 @@ CREATE OR REPLACE FUNCTION laplace.relation_band_types(p_band int)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH typed AS MATERIALIZED (
-        SELECT DISTINCT i.entity_id
-        FROM laplace.entity_interpretations i
+        SELECT DISTINCT i.id
+        FROM laplace.entities i
         WHERE i.type_id = laplace.entity_type_id('RelationType')
     )
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])
@@ -43,8 +43,8 @@ CREATE OR REPLACE FUNCTION laplace.relation_band_types(p_bands int[])
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     WITH typed AS MATERIALIZED (
-        SELECT DISTINCT i.entity_id
-        FROM laplace.entity_interpretations i
+        SELECT DISTINCT i.id
+        FROM laplace.entities i
         WHERE i.type_id = laplace.entity_type_id('RelationType')
     )
     SELECT COALESCE(array_agg(e.id), '{}'::bytea[])

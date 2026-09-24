@@ -122,8 +122,8 @@ BEGIN
                      * (c.witness_count::float8 / (1.0 + c.witness_count)) AS w
             FROM laplace.consensus c
             JOIN laplace.entities e ON e.id = c.object_id AND EXISTS (
-                SELECT 1 FROM laplace.entity_interpretations i
-                WHERE i.entity_id = e.id AND i.tier >= 3)
+                SELECT 1 FROM laplace.entities i
+                WHERE i.id = e.id AND i.tier >= 3)
             WHERE c.subject_id = p_topic
         ) u
         WHERE u.w > 0
@@ -154,8 +154,8 @@ BEGIN
             SELECT e.id
             FROM laplace.entities e
             WHERE EXISTS (
-                  SELECT 1 FROM laplace.entity_interpretations i
-                  WHERE i.entity_id = e.id AND i.type_id = laplace.entity_type_id('RelationType'))
+                  SELECT 1 FROM laplace.entities i
+                  WHERE i.id = e.id AND i.type_id = laplace.entity_type_id('RelationType'))
               AND consensus.relation_in_family(e.id, 'HAS_SENSE')
         ) fam ON fam.id = sc.type_id
         WHERE tp.ctier = 2

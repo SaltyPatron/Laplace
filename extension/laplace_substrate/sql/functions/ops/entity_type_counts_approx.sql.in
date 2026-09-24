@@ -14,7 +14,7 @@ BEGIN ATOMIC
         JOIN pg_namespace pn ON pn.oid = p.relnamespace
         JOIN pg_class c ON c.oid = h.inhrelid
         WHERE pn.nspname = '@extschema@'
-          AND p.relname = 'entity_interpretations'
+          AND p.relname = 'entities'
     ), st AS MATERIALIZED (
         SELECT s.tablename,
                s.most_common_vals::text::bytea[] AS vals,

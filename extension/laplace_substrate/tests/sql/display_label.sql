@@ -32,18 +32,18 @@ BEGIN
     -- attestation fixture therefore declares the relation type it uses, exactly like
     -- production source bootstrap does; inventing an evidence row without its governed
     -- type entity would be testing an impossible partially-bootstrapped substrate.
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
-        (defrel, 0, rel_meta, src),
-        (wolf, 0, type_cp, src),
-        (stop, 0, type_cp, src),
-        (ending, 0, type_cp, src),
-        (sent1, 3, type_s, src),
-        (sent2, 3, type_s, src),
-        (doc, 4, type_d, src),
-        (book, 5, type_b, src),
-        (concept, 2, type_c, src),
-        (concept2, 2, type_c, src),
-        (opaque, 2, type_c, src)
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
+        (defrel, 0, rel_meta),
+        (wolf, 0, type_cp),
+        (stop, 0, type_cp),
+        (ending, 0, type_cp),
+        (sent1, 3, type_s),
+        (sent2, 3, type_s),
+        (doc, 4, type_d),
+        (book, 5, type_b),
+        (concept, 2, type_c),
+        (concept2, 2, type_c),
+        (opaque, 2, type_c)
     ON CONFLICT DO NOTHING;
 
     INSERT INTO laplace.physicalities
@@ -127,7 +127,6 @@ BEGIN
     -- Content roots can observe themselves. A provenance fallback must not
     -- render the entire source, either directly or for an unrelated entity.
     DELETE FROM laplace.attestations WHERE subject_id IN (concept,concept2);
-    UPDATE laplace.entities SET first_observed_by=doc WHERE id IN (doc,opaque);
     SELECT array_agg(d.label ORDER BY d.ord) INTO labels
       FROM realize.display_label_batch(ARRAY[doc,book,opaque])
            WITH ORDINALITY d(id,label,tier,ord);

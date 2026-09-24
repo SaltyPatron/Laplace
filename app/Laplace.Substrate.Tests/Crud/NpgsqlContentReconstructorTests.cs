@@ -127,7 +127,7 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         Hash128 type = Hash128.OfCanonical("TestFixture");
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         await writer.ApplyAsync(new SubstrateChangeBuilder(source, "test/reconstruct/incomplete")
-            .AddEntity(incomplete, EntityTier.Document, type, source)
+            .AddEntity(incomplete, EntityTier.Document, type)
             .Build());
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
@@ -145,8 +145,8 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         Hash128 b = Hash128.OfCanonical($"substrate/test/reconstruct/cycle-b/{Guid.NewGuid():N}");
         var writer = new NpgsqlSubstrateWriter(_pg.DataSource);
         await writer.ApplyAsync(new SubstrateChangeBuilder(source, "test/reconstruct/cycle-entities")
-            .AddEntity(a, EntityTier.Document, type, source)
-            .AddEntity(b, EntityTier.Document, type, source)
+            .AddEntity(a, EntityTier.Document, type)
+            .AddEntity(b, EntityTier.Document, type)
             .Build());
 
         // A legal content writer cannot create a cycle: a one-child content node
@@ -208,8 +208,8 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         Hash128 inner = Hash128.Merkle((byte)EntityTier.Word, [atomA, atomB]);
         Hash128 outer = Hash128.Merkle((byte)EntityTier.Sentence, [inner, atomC]);
         Hilbert128 hilbert = Hilbert128.Encode([1, 0, 0, 0]);
-        builder.AddEntity(inner, EntityTier.Word, type, source)
-            .AddEntity(outer, EntityTier.Sentence, type, source)
+        builder.AddEntity(inner, EntityTier.Word, type)
+            .AddEntity(outer, EntityTier.Sentence, type)
             .AddPhysicality(Composition(inner, [atomA, atomB], source, hilbert))
             .AddPhysicality(Composition(outer, [inner, atomC], source, hilbert));
         await new NpgsqlSubstrateWriter(_pg.DataSource).ApplyAsync(builder.Build());
@@ -254,12 +254,12 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         // its recipe row with a NULL body; it must not shift the other columns.
         Assert.True(builder.ContentStage.TryAddContentWitness([0], source, out Hash128 nul));
 
-        builder.AddEntity(recipes[0], EntityTier.Word, EntityTypeRegistry.ModelRecipe, source)
-            .AddEntity(recipes[0], EntityTier.Sentence, EntityTypeRegistry.ModelRecipe, otherSource)
+        builder.AddEntity(recipes[0], EntityTier.Word, EntityTypeRegistry.ModelRecipe)
+            .AddEntity(recipes[0], EntityTier.Sentence, EntityTypeRegistry.ModelRecipe)
             .AddEntity(recipes[1], EntityTier.Word, EntityTypeRegistry.ModelRecipe)
-            .AddEntity(recipes[2], EntityTier.Word, EntityTypeRegistry.ModelRecipe, otherSource)
-            .AddEntity(recipes[3], EntityTier.Word, EntityTypeRegistry.ModelRecipe, source)
-            .AddEntity(recipes[4], EntityTier.Word, EntityTypeRegistry.ModelRecipe, source);
+            .AddEntity(recipes[2], EntityTier.Word, EntityTypeRegistry.ModelRecipe)
+            .AddEntity(recipes[3], EntityTier.Word, EntityTypeRegistry.ModelRecipe)
+            .AddEntity(recipes[4], EntityTier.Word, EntityTypeRegistry.ModelRecipe);
         Hash128 encodes = RelationTypeRegistry.RelationTypeId("ENCODES");
         foreach (var (recipe, content) in new[]
                  { (recipes[0], a), (recipes[0], b), (recipes[1], b), (recipes[2], b), (recipes[3], nul) })
@@ -303,29 +303,26 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         }
 
         string Hex(Hash128 id) => Convert.ToHexString(id.ToBytes());
-        string firstSource = new[] { Hex(source), Hex(otherSource) }
-            .OrderBy(value => value, StringComparer.Ordinal).First();
         string chosenJson = StringComparer.Ordinal.Compare(Hex(a), Hex(b)) < 0 ? json[0] : json[1];
-        var expected = new Dictionary<string, (string? Json, string? Source)>
+        var expected = new Dictionary<string, string?>
         {
-            [Hex(recipes[0])] = (chosenJson, firstSource),
-            [Hex(recipes[1])] = (json[1], null),
-            [Hex(recipes[2])] = (json[1], Hex(otherSource)),
-            [Hex(recipes[3])] = (null, Hex(source)),
+            [Hex(recipes[0])] = chosenJson,
+            [Hex(recipes[1])] = json[1],
+            [Hex(recipes[2])] = json[1],
+            [Hex(recipes[3])] = null,
         };
         await using var command = _pg.DataSource.CreateCommand("""
-            SELECT recipe_id, recipe_json, first_observed_by
+            SELECT recipe_id, recipe_json
             FROM structural.model_recipes()
             WHERE recipe_id = ANY(@ids)
             """);
         command.Parameters.Add("ids", NpgsqlDbType.Array | NpgsqlDbType.Bytea).Value =
             recipes.Select(id => id.ToBytes()).ToArray();
         await using var rows = await command.ExecuteReaderAsync();
-        var actual = new Dictionary<string, (string? Json, string? Source)>();
+        var actual = new Dictionary<string, string?>();
         while (await rows.ReadAsync())
             actual.Add(Convert.ToHexString((byte[])rows[0]),
-                (rows.IsDBNull(1) ? null : rows.GetString(1),
-                 rows.IsDBNull(2) ? null : Convert.ToHexString((byte[])rows[2])));
+                rows.IsDBNull(1) ? null : rows.GetString(1));
         Assert.Equal(expected.Count, actual.Count);
         foreach (var row in expected)
         {
@@ -361,11 +358,11 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
             Hash128[] children = [content, atom];
             byte tier = checked((byte)(i + 1));
             content = Hash128.Merkle(tier, children);
-            builder.AddEntity(content, tier, EntityTypeRegistry.Text, source)
+            builder.AddEntity(content, tier, EntityTypeRegistry.Text)
                 .AddPhysicality(Composition(content, children, source, hilbert));
         }
         Assert.True(json.Length > 17);
-        builder.AddEntity(recipe, EntityTier.Word, EntityTypeRegistry.ModelRecipe, source)
+        builder.AddEntity(recipe, EntityTier.Word, EntityTypeRegistry.ModelRecipe)
             .AddAttestation(NativeAttestation.CategoricalResolved(
                 recipe, RelationTypeRegistry.RelationTypeId("ENCODES"), content, source, null, 1.0));
         var change = builder.Build();
@@ -397,7 +394,7 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
 
         await using var command = _pg.DataSource.CreateCommand("""
             SELECT realize.render_text_fast(@content, 16) IS NULL,
-                   m.recipe_json, m.first_observed_by
+                   m.recipe_json
             FROM structural.model_recipes() m
             WHERE m.recipe_id = @recipe
             """);
@@ -407,7 +404,6 @@ public sealed class NpgsqlContentReconstructorTests : IAsyncLifetime
         Assert.True(await reader.ReadAsync());
         Assert.True(reader.GetBoolean(0), "fixture must exceed the former scalar preview depth");
         Assert.Equal(json, reader.GetString(1));
-        Assert.Equal(source.ToBytes(), (byte[])reader[2]);
         Assert.False(await reader.ReadAsync());
     }
 

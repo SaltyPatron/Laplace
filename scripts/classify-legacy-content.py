@@ -479,7 +479,6 @@ def classification_sql(sample_limit: int) -> str:
 entity_metadata AS MATERIALIZED (
   SELECT f.parent_id,count(e.id)::int AS entity_rows,
          (array_agg(e.type_id ORDER BY e.tier))[1] AS type_id,
-         (array_agg(e.first_observed_by ORDER BY e.tier))[1] AS source_id,
          min(e.created_at) AS first_created_at,max(e.created_at) AS last_created_at,
          COALESCE(jsonb_agg(to_jsonb(e) ORDER BY e.tier)
              FILTER (WHERE e.id IS NOT NULL),'[]'::jsonb) AS entity_records

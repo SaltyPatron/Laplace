@@ -99,17 +99,13 @@ public sealed partial class IntentStage : SafeHandle
             ?? throw new ArgumentOutOfRangeException(nameof(table));
     }
 
-    public void AddEntity(Hash128 id, short tier, Hash128 typeId, Hash128? firstObservedBy)
+    public void AddEntity(Hash128 id, short tier, Hash128 typeId)
     {
         ThrowIfDisposed();
         if (tier < 0 || tier > 255) throw new ArgumentOutOfRangeException(nameof(tier));
         unsafe
         {
-            int rc;
-            if (firstObservedBy is Hash128 fob)
-                rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, &fob);
-            else
-                rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId, null);
+            int rc = NativeInterop.IntentStageAddEntity(handle, &id, tier, &typeId);
             if (rc != 0) throw new InvalidOperationException("intent_stage_add_entity failed");
         }
     }

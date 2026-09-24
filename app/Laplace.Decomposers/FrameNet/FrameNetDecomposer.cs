@@ -192,7 +192,7 @@ public sealed class FrameNetDecomposer : DecomposerMultiFile<FrameNetDecomposer.
 
         Hash128[] flat = constituents.ToArray();
         Hash128 annotationId = Hash128.Merkle(EntityTier.Document, flat);
-        b.AddEntity(annotationId, EntityTier.Document, EntityTypeRegistry.FrameNetAnnotation, Source);
+        b.AddEntity(annotationId, EntityTier.Document, EntityTypeRegistry.FrameNetAnnotation);
 
         byte[] sentenceUtf8 = Encoding.UTF8.GetBytes(ann.Sentence);
         if (!TextEntityBuilder.TryDecomposeRoot(

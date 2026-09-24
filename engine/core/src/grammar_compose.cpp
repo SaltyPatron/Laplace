@@ -1526,14 +1526,6 @@ int laplace_compose_drain_into_stage(
         if (e->packaging) continue;   /* navigation only -- never a row */
         const int novel = entity_novel(&filter, i);
         const int seen = intent_stage_witness_seen(stage, &e->id);
-        if ((!novel || seen) && e->tier > 0) {
-            /* Shared T0 presence may be cache-backed without a PostgreSQL E. */
-            if (intent_stage_add_entity_interpretation(
-                    stage, &e->id, (int16_t)e->tier, &e->type_id, source_id) != 0) {
-                free_emit_filter(&filter);
-                return -1;
-            }
-        }
         if (!novel) continue;
         if (seen) {
             if (intent_stage_lower_entity_tier(stage, &e->id, (int16_t)e->tier) < 0) {
@@ -1542,7 +1534,7 @@ int laplace_compose_drain_into_stage(
             }
             continue;
         }
-        if (intent_stage_add_entity(stage, &e->id, (int16_t)e->tier, &e->type_id, source_id) != 0) {
+        if (intent_stage_add_entity(stage, &e->id, (int16_t)e->tier, &e->type_id) != 0) {
             free_emit_filter(&filter);
             return -1;
         }

@@ -419,12 +419,8 @@ public sealed partial class NpgsqlSubstrateWriter
         bool journalHit, PostgresCommitReceipt commit, CopyTransactionCounts copy)>
         ApplyPreparedStagesCoreAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, bool epochRoute,
-        PhysicalityAdmissionBatch? physicalityAdmission,
         IReadOnlyList<IntentStage> stages,
-        IReadOnlyList<EntityInterpretationRow> interpretations,
         Hash128? workingSetToken,
-        Hash128? originalToken,
-        bool originalReceiptPresent,
         Hash128? legacyWorkingSetToken,
         Hash128? legacySingletonToken,
         Hash128? workingSetSource,
@@ -436,7 +432,8 @@ public sealed partial class NpgsqlSubstrateWriter
         using var preparationDiagnostic = MeasureApplyPhase("native-tuples-and-merge-preparation");
         var prepSw = System.Diagnostics.Stopwatch.StartNew();
         var copyTransactions = new CopyTransactionCounts();
-        var ents = CollectEntityCopyRows(stages, out var entBlobs);
+        var entBlobs = CollectBlobs(stages, IntentStageTable.Entities, 4, "entities");
+        var ents = CopyTupleParser.ParseEntities(entBlobs);
         var physBlobs = CollectBlobs(stages, IntentStageTable.Physicalities, 10, "physicalities");
         // 14 since fold_replayable (model transient-fold receipts) — must track
         // ATTESTATION_COL_COUNT in engine/core/src/intent_stage.c. This validator
@@ -539,7 +536,7 @@ public sealed partial class NpgsqlSubstrateWriter
         preparationDiagnostic?.Complete();
 
         // Entity sort+pack overlaps verification. The outer control transaction
-        // already holds the apply lock and the physicality provider observation.
+        // already holds the apply lock.
         Task<(byte[][] Payloads, int[] RowsByLane, int Groups)>? optimisticEntCopy = null;
         long firstEntBytes = TotalEntityBytes(ents, firstEntIdx);
         int optimisticGroups = ResolveCopyGroups(firstEntIdx.Count, firstEntBytes);
@@ -632,38 +629,15 @@ public sealed partial class NpgsqlSubstrateWriter
 
                 if (reconciliation is not null)
                 {
-                    var verifyEntities = physicalityAdmission is null ? entBlobs
-                        : CollectBlobs(physicalityAdmission.OriginalStages, IntentStageTable.Entities, 4, "entities");
-                    var verifyPhysicalities = physicalityAdmission is null ? physBlobs
-                        : CollectBlobs(physicalityAdmission.OriginalStages, IntentStageTable.Physicalities, 10, "physicalities");
-                    var verifyAttestations = physicalityAdmission is null ? attBlobs
-                        : CollectBlobs(physicalityAdmission.OriginalStages, IntentStageTable.Attestations, 14, "attestations");
                     var verified = await LegacyBootstrapVerifier.VerifyAsync(
-                        conn, tx, reconciliation, verifyEntities,
-                        physicalityAdmission is null ? ents.Rows : CopyTupleParser.ParseEntities(verifyEntities).Rows,
-                        verifyPhysicalities,
-                        physicalityAdmission is null ? phys.Rows : CopyTupleParser.ParsePhysicalities(verifyPhysicalities).Rows,
-                        verifyAttestations,
-                        physicalityAdmission is null ? atts.Rows : CopyTupleParser.ParseAttestations(verifyAttestations).Rows,
+                        conn, tx, reconciliation, entBlobs, ents.Rows,
+                        physBlobs, phys.Rows, attBlobs, atts.Rows,
                         ct).ConfigureAwait(false);
                     rtJournal += verified.RoundTrips;
-                    if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled
-                        && physicalityAdmission is not null)
-                        physicalityAdmission.OriginalReplay = true;
-                    if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled
-                        && physicalityAdmission is null)
+                    if (verified.Disposition == LegacyBootstrapVerifier.Result.Reconciled)
                     {
                         // This path performs no COPY: verified legacy rows already
-                        // exist. Complete their interpretation union before sealing
-                        // the same control receipt.
-                        rtJournal += await PersistEntityInterpretationsAsync(
-                            conn, tx, interpretations, ct).ConfigureAwait(false);
-                        if (!originalReceiptPresent && originalToken is { } reconciledOriginal)
-                        {
-                            await InsertJournalReceiptAsync(conn, tx, reconciledOriginal,
-                                workingSetSource, workingSetSources, "reconciled-existing", ct).ConfigureAwait(false);
-                            rtJournal++;
-                        }
+                        // exist, so the control receipt seals them as they stand.
                         await InsertJournalReceiptAsync(
                             conn, tx, token, workingSetSource, workingSetSources,
                             receiptKind: "reconciled-existing", ct).ConfigureAwait(false);
@@ -743,8 +717,8 @@ public sealed partial class NpgsqlSubstrateWriter
             // preserving the same visibility (every snapshot starts after the apply
             // advisory lock was acquired).
             long physEmptySkip = 0, attEmptySkip = 0;
-            // Canonical entity storage is HASH(id). Tier is an interpretation
-            // projection and cannot participate in row presence or partition
+            // Canonical entity storage is HASH(id). Tier is altitude, not
+            // identity, and cannot participate in row presence or partition
             // routing. Build the exact id set that still needs verification;
             // the former LIST(tier) smaller-side inversion would otherwise turn
             // a stored id observed at another tier into a false absence.
@@ -916,9 +890,8 @@ public sealed partial class NpgsqlSubstrateWriter
 
             using var filteringDiagnostic = MeasureApplyPhase("copy-survivor-selection");
 
-            // Entities: one deterministic compatibility representative per
-            // canonical id, minus stored rows. Interpretations publish
-            // after COPY within the accepting transaction. Kept rows carry content ids so parallel COPY
+            // Entities: one deterministic representative per canonical id,
+            // minus stored rows. Kept rows carry content ids so parallel COPY
             // groups stay uniform over HASH(id), while sorted ids walk each
             // bucket's PK leaves forward.
             List<KeptRow> keptEnts;
@@ -1163,17 +1136,6 @@ public sealed partial class NpgsqlSubstrateWriter
 
             copyDiagnostic?.Complete();
 
-            // COPY uses replica role and chooses one canonical row per ID;
-            // the ordinary INSERT trigger cannot publish its full interpretation
-            // summary. The row must exist before the set-wise summary UPDATE.
-            // Publish the complete managed/native union after every COPY has
-            // finished, before testimony acceptance and the replay commit.
-            rtCopy += await PersistEntityInterpretationsAsync(
-                conn, tx, interpretations, ct).ConfigureAwait(false);
-            if (physicalityAdmission is not null)
-                rtCopy += await PersistPhysicalityObservationsAsync(
-                    conn, tx, physicalityAdmission, ct).ConfigureAwait(false);
-
             // Consensus acceptance is supplied only by the accumulating writer
             // for a freshly claimed V2 working set. It shares this transaction
             // with the evidence and replay token: a failure leaves no accepted
@@ -1195,23 +1157,13 @@ public sealed partial class NpgsqlSubstrateWriter
                 }
                 await transactionParticipant(conn, tx,
                     new WorkingSetAcceptedEvidence(
-                        novelRepIdx.Select(i => atts.Ids[i]).ToHashSet(),
-                        physicalityAdmission?.OriginalReplay ?? originalReceiptPresent)
+                        novelRepIdx.Select(i => atts.Ids[i]).ToHashSet())
                     {
                         Rows = acceptedRows,
                     }, ct);
                 participantDiagnostic?.Complete();
             }
 
-            // Keep the semantic source receipt in this same commit. It prevents
-            // form/facet upgrades from repeating already-accepted participant work.
-            if (!originalReceiptPresent && originalToken is { } semanticReceiptToken
-                && semanticReceiptToken != workingSetToken)
-            {
-                await InsertJournalReceiptAsync(conn, tx, semanticReceiptToken, workingSetSource,
-                    workingSetSources, "applied", ct).ConfigureAwait(false);
-                rtJournal++;
-            }
             await CommitMeasuredAsync(tx, ct);
             copyTransactions.CommitControl();
             commit = commit with { WriteCommitAcknowledged = workingSetToken is not null
@@ -1384,12 +1336,11 @@ public sealed partial class NpgsqlSubstrateWriter
     }
 
     /// <summary>
-    /// Return one deterministic canonical row for each staged content id.
-    /// Tier/type multiplicity is persisted separately as entity interpretations;
-    /// the base entity COPY therefore chooses a compatibility representative by
-    /// (tier,type_id) rather than by arrival/batch order. If any interpretation
-    /// is tier 0 after the Unicode completion marker, the content id is already
-    /// known present and the whole canonical id can skip the database probe.
+    /// Return one deterministic canonical row for each staged content id. The
+    /// entity COPY chooses its representative by (tier,type_id) rather than by
+    /// arrival/batch order. If any staged row for an id is tier 0 after the
+    /// Unicode completion marker, the content id is already known present and
+    /// the whole canonical id can skip the database probe.
     /// </summary>
     internal static List<int> DistinctEntityRowIndices(
         CopyTupleParser.EntityRows ents, bool tier0Gate, out List<Hash128>? tier0Present)

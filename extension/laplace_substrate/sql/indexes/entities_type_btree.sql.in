@@ -1,9 +1,4 @@
--- Authoritative structural typing lives in entity_interpretations. Keep the
--- compatibility-summary index while legacy readers are migrated, and add the
--- authoritative type/tier path beside it; deleting the former before every
--- reader moves would turn a semantic repair into a read-path regression.
+-- The entity row is the structural typing fact. This is the type/tier
+-- admission path for every reader.
 CREATE INDEX IF NOT EXISTS entities_type_btree
     ON entities USING btree (type_id);
-
-CREATE INDEX IF NOT EXISTS entity_interpretations_type_tier_btree
-    ON entity_interpretations USING btree (type_id, tier, entity_id);

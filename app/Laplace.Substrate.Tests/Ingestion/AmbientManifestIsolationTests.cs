@@ -130,7 +130,7 @@ public sealed class AmbientManifestIsolationTests
                 string name = Path.GetFileName(path);
                 Hash128 id = Hash128.OfCanonical($"test/ambient-manifest/{name}");
                 yield return new SubstrateChangeBuilder(Source, $"ambient/{name}")
-                    .AddEntity(id, EntityTier.Word, EntityTypeRegistry.SourceReference, Source)
+                    .AddEntity(id, EntityTier.Word, EntityTypeRegistry.SourceReference)
                     .SetInputUnitsConsumed(1)
                     .Build();
             }

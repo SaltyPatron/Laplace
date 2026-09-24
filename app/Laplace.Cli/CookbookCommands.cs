@@ -120,14 +120,12 @@ internal static class CookbookCommands
         using var entities = new TupleOutput(outputDirectory, "entities", IntentStage.CopyColumnList(IntentStageTable.Entities));
         using var physicalities = new TupleOutput(outputDirectory, "physicalities", IntentStage.CopyColumnList(IntentStageTable.Physicalities));
         using var attestations = new TupleOutput(outputDirectory, "attestations", IntentStage.CopyColumnList(IntentStageTable.Attestations));
-        using var interpretations = new TupleOutput(outputDirectory, "entity_interpretations", IntentStage.CopyColumnList(IntentStageTable.Entities));
         using var inputHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var stopwatch = Stopwatch.StartNew();
         byte[] buffer = new byte[64 * 1024];
         long inputBytes = 0;
         ulong records = 0;
         long batches = 0;
-        bool interpretationsComplete = true;
         bool cancelled = false;
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; Volatile.Write(ref cancelled, true); };
         Console.CancelKeyPress += cancel;
@@ -146,7 +144,7 @@ internal static class CookbookCommands
             Drain();
             var receipt = new
             {
-                format = "laplace-native-recipe-tuples/v1",
+                format = "laplace-native-recipe-tuples/v2",
                 completed = true,
                 recipeId = Hex(recipe.RecipeId),
                 recipe.Authority,
@@ -158,15 +156,13 @@ internal static class CookbookCommands
                 inputBytes,
                 inputSha256 = Convert.ToHexStringLower(inputHash.GetHashAndReset()),
                 witnessSourceId = Hex(witness),
-                physicalityProvenanceSourceId = Hex(witness),
                 trust,
                 recordDepth,
                 records,
                 batches,
-                entityInterpretationsComplete = interpretationsComplete,
                 tupleFraming = "PostgreSQL binary COPY tuples without header or trailer",
                 elapsedSeconds = stopwatch.Elapsed.TotalSeconds,
-                outputs = new[] { entities.Complete(), physicalities.Complete(), attestations.Complete(), interpretations.Complete() }
+                outputs = new[] { entities.Complete(), physicalities.Complete(), attestations.Complete() }
             };
             string json = JsonSerializer.Serialize(receipt, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(Path.Combine(outputDirectory, "receipt.json"), json + Environment.NewLine);
@@ -190,8 +186,6 @@ internal static class CookbookCommands
                 entities.Append(stage.TupleBuffer(IntentStageTable.Entities), stage.EntityCount);
                 physicalities.Append(stage.TupleBuffer(IntentStageTable.Physicalities), stage.PhysicalityCount);
                 attestations.Append(stage.TupleBuffer(IntentStageTable.Attestations), stage.AttestationCount);
-                interpretations.Append(stage.EntityInterpretationTupleBuffer(), stage.EntityInterpretationCount);
-                interpretationsComplete &= stage.EntityInterpretationsComplete;
                 GC.KeepAlive(stage);
             }
         }

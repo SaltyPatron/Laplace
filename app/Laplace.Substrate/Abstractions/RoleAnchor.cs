@@ -65,7 +65,7 @@ public static class RoleAnchor
             schema.Id, system.Id, parentId, component.Id
         };
         Hash128 id = Hash128.Merkle(EntityTier.Word, constituents);
-        builder.AddEntity(id, EntityTier.Word, entityTypeId, source);
+        builder.AddEntity(id, EntityTier.Word, entityTypeId);
 
         double[] coord = Math4d.KarcherMean(
         [

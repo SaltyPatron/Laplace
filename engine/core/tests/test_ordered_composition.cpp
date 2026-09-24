@@ -349,11 +349,13 @@ TEST(OrderedCompositionStage, BatchDeduplicatesEntitiesAndRetainsIdenticalRawPhy
     EXPECT_TRUE(hash128_equals(&results[0].id, &results[1].id));
     EXPECT_EQ(results[0].tier, results[1].tier);
     EXPECT_EQ(1u, intent_stage_entity_count(stage));
-    EXPECT_EQ(2u, intent_stage_physicality_count(stage));
+    // One content id: the repeated identical observation stages no second form.
+    EXPECT_EQ(1u, intent_stage_physicality_count(stage));
     EXPECT_EQ(results[0].first_physicality_row, 0u);
-    EXPECT_EQ(results[1].first_physicality_row, 1u);
+    EXPECT_EQ(results[0].emitted_physicality_rows, 1u);
+    EXPECT_EQ(results[1].first_physicality_row, 0u);
+    EXPECT_EQ(results[1].emitted_physicality_rows, 0u);
     expect_physicality(stage, requests[0], results[0]);
-    expect_physicality(stage, requests[1], results[1]);
     intent_stage_free(stage);
 }
 
@@ -380,12 +382,15 @@ TEST(OrderedCompositionStage, SameIdentityAtDifferentFloorsStagesTheMinimumFloor
         EXPECT_EQ(6, results[high_index].tier);
         EXPECT_EQ(3, results[low_index].tier);
         EXPECT_EQ(1u, intent_stage_entity_count(stage.get()));
-        EXPECT_EQ(2u, intent_stage_physicality_count(stage.get()));
+        // The placement id is floor-blind, so both floors share one form; the
+        // entity row keeps the minimum floor.
+        EXPECT_EQ(1u, intent_stage_physicality_count(stage.get()));
         EXPECT_EQ(3, only_entity_tier(stage.get()));
         EXPECT_EQ(results[low_index].first_physicality_row, 0u);
-        EXPECT_EQ(results[high_index].first_physicality_row, 1u);
+        EXPECT_EQ(results[low_index].emitted_physicality_rows, 1u);
+        EXPECT_EQ(results[high_index].first_physicality_row, 0u);
+        EXPECT_EQ(results[high_index].emitted_physicality_rows, 0u);
         expect_physicality(stage.get(), requests[low_index], results[low_index]);
-        expect_physicality(stage.get(), requests[high_index], results[high_index]);
         expect_trajectory(stage.get(), lower, 2);
     }
 }
@@ -406,12 +411,15 @@ TEST(OrderedCompositionStage, SeparateCallsLowerAnAlreadyStagedFloor) {
     ASSERT_EQ(0, laplace_ordered_composition_stage_batch(stage, &low_request, 1, &low));
     EXPECT_TRUE(hash128_equals(&high.id, &low.id));
     EXPECT_EQ(1u, intent_stage_entity_count(stage));
-    EXPECT_EQ(2u, intent_stage_physicality_count(stage));
+    // Floor-blind placement: the lower floor lowers the entity row and stages
+    // no second form.
+    EXPECT_EQ(1u, intent_stage_physicality_count(stage));
     EXPECT_EQ(3, only_entity_tier(stage));
     EXPECT_EQ(high.first_physicality_row, 0u);
-    EXPECT_EQ(low.first_physicality_row, 1u);
+    EXPECT_EQ(high.emitted_physicality_rows, 1u);
+    EXPECT_EQ(low.first_physicality_row, 0u);
+    EXPECT_EQ(low.emitted_physicality_rows, 0u);
     expect_physicality(stage, high_request, high);
-    expect_physicality(stage, low_request, low);
     intent_stage_free(stage);
 }
 
@@ -432,20 +440,22 @@ TEST(OrderedCompositionStage, AlternateGeometryRetainsBothBodiesAndReportsActual
     EXPECT_TRUE(hash128_equals(&results[0].id, &results[1].id));
     EXPECT_NE(std::memcmp(results[0].coord, results[1].coord, sizeof(results[0].coord)), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), 1u);
-    EXPECT_EQ(intent_stage_physicality_count(stage.get()), 2u);
+    // One content id: alternate geometry is payload on the same placement, not
+    // a second form; the replay stages nothing further.
+    EXPECT_EQ(intent_stage_physicality_count(stage.get()), 1u);
     EXPECT_EQ(results[0].first_physicality_row, 0u);
-    EXPECT_EQ(results[1].first_physicality_row, 1u);
-    expect_physicality(stage.get(), requests[0], results[0]);
-    expect_physicality(stage.get(), requests[1], results[1]);
+    EXPECT_EQ(results[0].emitted_physicality_rows, 1u);
+    EXPECT_EQ(results[1].first_physicality_row, 0u);
+    EXPECT_EQ(results[1].emitted_physicality_rows, 0u);
     EXPECT_TRUE(hash128_equals(&results[2].id, &original[0].id));
     EXPECT_EQ(results[2].emitted_physicality_rows, 0u);
 
     laplace_ordered_composition_result_t replay{};
     ASSERT_EQ(laplace_ordered_composition_stage_batch(stage.get(), &requests[1], 1, &replay), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), 1u);
-    EXPECT_EQ(intent_stage_physicality_count(stage.get()), 3u);
-    EXPECT_EQ(replay.first_physicality_row, 2u);
-    expect_physicality(stage.get(), requests[1], replay);
+    EXPECT_EQ(intent_stage_physicality_count(stage.get()), 1u);
+    EXPECT_EQ(replay.first_physicality_row, 0u);
+    EXPECT_EQ(replay.emitted_physicality_rows, 0u);
 }
 
 TEST(OrderedCompositionStage, ExactReplayRetainsRawRowsAndReusesDescriptorAndSourceUnitWitness) {
@@ -490,12 +500,14 @@ TEST(OrderedCompositionStage, ExactReplayRetainsRawRowsAndReusesDescriptorAndSou
     laplace_ordered_composition_result_t replay_results[2]{};
     ASSERT_EQ(laplace_ordered_composition_stage_batch(stage.get(), replays, 2, replay_results), 0);
     EXPECT_EQ(intent_stage_entity_count(stage.get()), 1u);
-    ASSERT_EQ(intent_stage_physicality_count(stage.get()), 3u);
-    EXPECT_EQ(replay_results[0].first_physicality_row, 1u);
-    EXPECT_EQ(replay_results[1].first_physicality_row, 2u);
+    // One content id: exact replay stages no additional form; only the
+    // observation clock of the witness changes.
+    ASSERT_EQ(intent_stage_physicality_count(stage.get()), 1u);
+    EXPECT_EQ(replay_results[0].first_physicality_row, 0u);
+    EXPECT_EQ(replay_results[0].emitted_physicality_rows, 0u);
+    EXPECT_EQ(replay_results[1].first_physicality_row, 0u);
+    EXPECT_EQ(replay_results[1].emitted_physicality_rows, 0u);
     expect_physicality(stage.get(), first_request, first);
-    expect_physicality(stage.get(), replays[0], replay_results[0]);
-    expect_physicality(stage.get(), replays[1], replay_results[1]);
     physicality_descriptor_capture_t* captured_raw = nullptr;
     ASSERT_EQ(physicality_descriptor_capture_stages(&source_stage, 1, basis,
         &limits, kDescriptorBudget, &captured_raw), PHYSICALITY_DESCRIPTOR_OK);
@@ -503,17 +515,19 @@ TEST(OrderedCompositionStage, ExactReplayRetainsRawRowsAndReusesDescriptorAndSou
         captured(captured_raw, physicality_descriptor_capture_free);
     const auto* roots = physicality_descriptor_plan_roots(
         physicality_descriptor_capture_plan(captured.get()), &count);
-    ASSERT_EQ(count, 3u);
+    ASSERT_EQ(count, 1u);
     for (size_t i = 0; i < count; ++i)
         EXPECT_TRUE(hash128_equals(&roots[i], &descriptor));
 
     const physicality_descriptor_source_observation_t witness{
         first_request.source_id, hash("test/ordered/source-unit"), 0.8};
-    const std::array<physicality_descriptor_source_observation_t, 3> witnesses{witness, witness, witness};
+    // One retained form carries one provenance witness; replayed observations
+    // witnessed the same content and add no rows.
+    const std::array<physicality_descriptor_source_observation_t, 1> witnesses{witness};
     physicality_descriptor_materialization_t* materialized_raw = nullptr;
     ASSERT_EQ(physicality_descriptor_materialize(captured.get(), vocabulary.get(),
         nullptr, 0, nullptr, 0, nullptr, 0, witnesses.data(), witnesses.size(),
-        &first_request.source_id, first_request.observed_at_unix_us, kDescriptorBudget,
+        first_request.observed_at_unix_us, kDescriptorBudget,
         &materialized_raw), PHYSICALITY_DESCRIPTOR_OK);
     std::unique_ptr<physicality_descriptor_materialization_t, decltype(&physicality_descriptor_materialization_free)>
         materialized(materialized_raw, physicality_descriptor_materialization_free);
@@ -521,17 +535,12 @@ TEST(OrderedCompositionStage, ExactReplayRetainsRawRowsAndReusesDescriptorAndSou
     const auto* provenance =
         physicality_descriptor_materialization_observations(materialized.get(), &provenance_count);
     ASSERT_NE(provenance, nullptr);
-    ASSERT_EQ(provenance_count, 3u);
-    const std::array<int64_t, 3> expected_times{
-        first_request.observed_at_unix_us,
-        replays[0].observed_at_unix_us,
-        replays[1].observed_at_unix_us
-    };
+    // The retained form carries exactly one provenance witness.
+    ASSERT_EQ(provenance_count, 1u);
     for (size_t i = 0; i < provenance_count; ++i) {
         EXPECT_TRUE(hash128_equals(&provenance[i].descriptor_id, &descriptor));
         EXPECT_TRUE(hash128_equals(&provenance[i].source_id, &witness.source_id));
         EXPECT_TRUE(hash128_equals(&provenance[i].source_unit_id, &witness.source_unit_id));
-        EXPECT_EQ(provenance[i].observed_at_unix_us, expected_times[i]);
     }
     Stage generated(physicality_descriptor_materialization_take_stage(materialized.get()), intent_stage_free);
     ASSERT_NE(generated, nullptr);
@@ -635,18 +644,22 @@ TEST(OrderedCompositionStage, MixedFloorObservationsAndReplayedCompositionsRepor
     laplace_ordered_composition_result_t results[5]{};
     ASSERT_EQ(laplace_ordered_composition_stage_batch(stage.get(), requests, 5, results), 0);
     ASSERT_EQ(intent_stage_entity_count(stage.get()), 1u);
-    ASSERT_EQ(intent_stage_physicality_count(stage.get()), 5u);
-    // New floor observations retain request order; the already witnessed
-    // compositional candidate follows the previous winner-first pass.
+    // One form per distinct placement: the composition plus the two distinct
+    // atoms; the repeated atom observation stages nothing further.
+    ASSERT_EQ(intent_stage_physicality_count(stage.get()), 3u);
     EXPECT_EQ(results[0].first_physicality_row, 1u);
-    EXPECT_EQ(results[2].first_physicality_row, 4u);
-    EXPECT_EQ(results[3].first_physicality_row, 2u);
-    EXPECT_EQ(results[4].first_physicality_row, 3u);
+    EXPECT_EQ(results[0].emitted_physicality_rows, 1u);
+    EXPECT_EQ(results[2].first_physicality_row, 0u);
+    EXPECT_EQ(results[2].emitted_physicality_rows, 0u);
+    EXPECT_EQ(results[3].first_physicality_row, 1u);
+    EXPECT_EQ(results[3].emitted_physicality_rows, 0u);
+    EXPECT_EQ(results[4].first_physicality_row, 2u);
+    EXPECT_EQ(results[4].emitted_physicality_rows, 1u);
     EXPECT_EQ(results[1].emitted_physicality_rows, 0u);
     EXPECT_TRUE(hash128_equals(&results[1].id, &opaque.id));
     EXPECT_EQ(results[1].tier, opaque.tier);
     expect_physicality(stage.get(), initial, first);
-    for (size_t i : {0u, 2u, 3u, 4u}) expect_physicality(stage.get(), requests[i], results[i]);
+    for (size_t i : {0u, 4u}) expect_physicality(stage.get(), requests[i], results[i]);
 
     physicality_descriptor_vocabulary_t* raw_vocabulary = nullptr;
     ASSERT_EQ(physicality_descriptor_vocabulary_create(&initial.source_id, kDescriptorBudget,
@@ -663,13 +676,14 @@ TEST(OrderedCompositionStage, MixedFloorObservationsAndReplayedCompositionsRepor
         capture(raw_capture, physicality_descriptor_capture_free);
     size_t count = 0;
     const auto* roots = physicality_descriptor_plan_roots(physicality_descriptor_capture_plan(capture.get()), &count);
-    ASSERT_EQ(count, 5u);
-    EXPECT_TRUE(hash128_equals(&roots[0], &roots[4]));
-    EXPECT_TRUE(hash128_equals(&roots[1], &roots[2]));
-    EXPECT_FALSE(hash128_equals(&roots[1], &roots[3]));
+    // Distinct retained placements: the two atoms and their composition.
+    ASSERT_EQ(count, 3u);
+    EXPECT_FALSE(hash128_equals(&roots[0], &roots[1]));
+    EXPECT_FALSE(hash128_equals(&roots[0], &roots[2]));
+    EXPECT_FALSE(hash128_equals(&roots[1], &roots[2]));
     const auto* observations = physicality_descriptor_capture_observations(capture.get(), &count);
-    ASSERT_EQ(count, 5u);
-    for (size_t i : {0u, 2u, 3u, 4u}) {
+    ASSERT_EQ(count, 3u);
+    for (size_t i : {0u, 4u}) {
         const size_t row = results[i].first_physicality_row;
         EXPECT_EQ(observations[row].source_stage_index, 0u);
         EXPECT_EQ(observations[row].source_row_index, row);
@@ -780,7 +794,7 @@ TEST(OrderedCompositionStage, HigherTierSingletonRequiresItsActualChildBodyFromP
     const physicality_descriptor_source_observation_t witness{source, hash("test/ordered/source-unit"), 0.8};
     physicality_descriptor_materialization_t* raw_materialized = nullptr;
     ASSERT_EQ(physicality_descriptor_materialize(capture.get(), vocabulary.get(),
-        nullptr, 0, nullptr, 0, nullptr, 0, &witness, 1, &source,
+        nullptr, 0, nullptr, 0, nullptr, 0, &witness, 1,
         requests[1].observed_at_unix_us, kDescriptorBudget, &raw_materialized),
         PHYSICALITY_DESCRIPTOR_NEEDS_PROVIDER);
     std::unique_ptr<physicality_descriptor_materialization_t, decltype(&physicality_descriptor_materialization_free)>
@@ -801,7 +815,7 @@ TEST(OrderedCompositionStage, HigherTierSingletonRequiresItsActualChildBodyFromP
     const intent_stage_t* provider = child_stage.get();
     raw_materialized = nullptr;
     ASSERT_EQ(physicality_descriptor_materialize(capture.get(), vocabulary.get(),
-        &provider, 1, nullptr, 0, nullptr, 0, &witness, 1, &source,
+        &provider, 1, nullptr, 0, nullptr, 0, &witness, 1,
         requests[1].observed_at_unix_us, kDescriptorBudget, &raw_materialized), PHYSICALITY_DESCRIPTOR_OK);
     materialized.reset(raw_materialized);
     size_t provenance_count = 0;

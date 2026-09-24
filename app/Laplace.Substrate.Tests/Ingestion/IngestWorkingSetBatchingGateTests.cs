@@ -45,10 +45,10 @@ public sealed class IngestWorkingSetBatchingGateTests
         var tracker = new EntityAdmissionTracker();
 
         tracker.Observe(new SubstrateChangeBuilder(source, "word")
-            .AddEntity(word, EntityTier.Word, EntityTypeRegistry.Word, source)
+            .AddEntity(word, EntityTier.Word, EntityTypeRegistry.Word)
             .Build());
         tracker.Observe(new SubstrateChangeBuilder(source, "pos")
-            .AddEntity(pos, EntityTier.Word, EntityTypeRegistry.Pos, source)
+            .AddEntity(pos, EntityTier.Word, EntityTypeRegistry.Pos)
             .Build());
 
         var pending = tracker.SnapshotPendingContent().Select(static item => item.Id).ToHashSet();

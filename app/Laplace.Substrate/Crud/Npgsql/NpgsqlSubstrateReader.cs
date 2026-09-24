@@ -223,7 +223,8 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             + "         SELECT 1 FROM laplace.physicalities p WHERE p.entity_id = e.id"
             + "       ))::bigint"
             + " FROM laplace.entities e"
-            + " WHERE e.first_observed_by = $1");
+            + " WHERE EXISTS (SELECT 1 FROM laplace.attestations a"
+            + "   WHERE a.source_id = $1 AND a.subject_id = e.id)");
         cmd.CommandTimeout = 0;
         cmd.Parameters.AddWithValue(NpgsqlDbType.Bytea, sourceId.ToBytes());
 
@@ -256,7 +257,7 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
             + " FROM laplace.entities e"
             + " LEFT JOIN touched t ON t.entity_id = e.id"
             + " WHERE e.type_id = ANY($2)"
-            + "   AND (e.first_observed_by = $1 OR t.entity_id IS NOT NULL)"
+            + "   AND t.entity_id IS NOT NULL"
             + ")"
             + " SELECT count(*)::bigint,"
             + "        count(*) FILTER (WHERE EXISTS ("
@@ -707,19 +708,14 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         await cmd.ExecuteNonQueryAsync(ct);
 
         // Remove unphysical shells from the canonical entity table directly.
-        // entity_interpretations is compatibility state and cannot be the owner of
-        // entity validity or source-wide closure.
         await using var cleanup = _ds.CreateCommand(
             "WITH invalid AS MATERIALIZED ("
             + " SELECT e.id"
             + " FROM laplace.entities e"
-            + " WHERE e.first_observed_by = $1"
+            + " WHERE EXISTS (SELECT 1 FROM laplace.attestations a"
+            + "               WHERE a.source_id = $1 AND a.subject_id = e.id)"
             + "   AND NOT EXISTS (SELECT 1 FROM laplace.physicalities p"
             + "                   WHERE p.entity_id = e.id)"
-            + "), removed_interpretations AS ("
-            + " DELETE FROM laplace.entity_interpretations ei USING invalid i"
-            + " WHERE ei.entity_id = i.id"
-            + " RETURNING ei.entity_id"
             + "), orphan_ids AS MATERIALIZED ("
             + " SELECT i.id FROM invalid i"
             + " WHERE NOT EXISTS (SELECT 1 FROM laplace.physicalities p"

@@ -143,7 +143,7 @@ public sealed class ChessOpeningMatchDecomposer
         // against this catalog generation and reached no named board" is a fact, and without it every
         // re-run re-replays every unmatched line forever.
         b.AddEntity(MarkerId(w.LineId), EntityTier.Document,
-                    ChessVocabulary.AnalysisMarkerType, sourceId);
+                    ChessVocabulary.AnalysisMarkerType);
 
         if (index.DeepestMatch(positions) is not { } hit)
         {

@@ -33,8 +33,8 @@ public sealed class UserArtifactObservationPersistenceTests : IAsyncLifetime
         await ApplySqlFileAsync(readback);
 
         await using var command = _pg.DataSource.CreateCommand("""
-            INSERT INTO laplace.entities (id, tier, type_id, first_observed_by)
-            VALUES (laplace.word_id('☃'), 0, laplace.entity_type_id('Codepoint'), NULL)
+            INSERT INTO laplace.entities (id, tier, type_id)
+            VALUES (laplace.word_id('☃'), 0, laplace.entity_type_id('Codepoint'))
             ON CONFLICT DO NOTHING
             """);
         await command.ExecuteNonQueryAsync();

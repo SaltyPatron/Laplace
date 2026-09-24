@@ -1,22 +1,17 @@
 DROP FUNCTION IF EXISTS laplace.model_recipes();
 CREATE OR REPLACE FUNCTION structural.model_recipes()
-    RETURNS TABLE(recipe_id bytea, recipe_json text, first_observed_by bytea)
+    RETURNS TABLE(recipe_id bytea, recipe_json text)
     LANGUAGE sql STABLE
 BEGIN ATOMIC
     WITH constants AS MATERIALIZED (
         SELECT public.laplace_hash128_blake3(convert_to('Model_Recipe', 'UTF8')) AS model_recipe_type,
                laplace.relation_type_id('ENCODES') AS encodes_type
     ), recipes AS MATERIALIZED (
-        SELECT e.id,
-               (array_agg(i.first_observed_by ORDER BY i.first_observed_by)
-                  FILTER (WHERE i.first_observed_by IS NOT NULL))[1] AS first_observed_by
+        SELECT e.id
         FROM constants k
-        JOIN laplace.entity_interpretations i ON i.type_id = k.model_recipe_type
-        JOIN laplace.entities e ON e.id = i.entity_id
-        GROUP BY e.id
+        JOIN laplace.entities e ON e.type_id = k.model_recipe_type
     ), encoded AS MATERIALIZED (
         SELECT r.id,
-               r.first_observed_by,
                (array_agg(c.object_id ORDER BY c.object_id)
                   FILTER (WHERE c.object_id IS NOT NULL))[1] AS content_id
         FROM constants k
@@ -24,24 +19,22 @@ BEGIN ATOMIC
         JOIN laplace.consensus c
           ON c.subject_id = r.id
          AND c.type_id = k.encodes_type
-        GROUP BY r.id, r.first_observed_by
+        GROUP BY r.id
     ), selected AS MATERIALIZED (
         SELECT array_agg(id ORDER BY id) AS recipe_ids,
-               array_agg(content_id ORDER BY id) AS content_ids,
-               array_agg(first_observed_by ORDER BY id) AS first_observers
+               array_agg(content_id ORDER BY id) AS content_ids
         FROM encoded
         WHERE content_id IS NOT NULL
     ), rendered AS MATERIALIZED (
         -- Callers consume complete recipe JSON, so render the elected content
-        -- without a preview depth ceiling. The three arrays stay position-aligned.
+        -- without a preview depth ceiling. The arrays stay position-aligned.
         SELECT recipe_ids,
-               realize.render_text_batch(content_ids) AS recipe_jsons,
-               first_observers
+               realize.render_text_batch(content_ids) AS recipe_jsons
         FROM selected
         WHERE content_ids IS NOT NULL
     )
-    SELECT u.recipe_id, u.recipe_json, u.first_observed_by
+    SELECT u.recipe_id, u.recipe_json
     FROM rendered r
-    CROSS JOIN LATERAL unnest(r.recipe_ids, r.recipe_jsons, r.first_observers)
-        AS u(recipe_id, recipe_json, first_observed_by);
+    CROSS JOIN LATERAL unnest(r.recipe_ids, r.recipe_jsons)
+        AS u(recipe_id, recipe_json);
 END;

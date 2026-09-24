@@ -196,8 +196,8 @@ public sealed class IngestRunner
                     stageBytes += s.TotalTupleBytes;
                     stageAtt += s.AttestationCount;
                 }
-                // Commit grain must cover actual held native allocations,
-                // including the auxiliary facet stream. The serialized E/P/A
+                // Commit grain must cover actual held native allocations.
+                // The serialized E/P/A
                 // metric remains unchanged and repeated references retain their
                 // existing transport estimate without double-counting ownership.
                 stageBytes = Math.Max(stageBytes,
@@ -234,11 +234,10 @@ public sealed class IngestRunner
         {
             if (workingSet)
                 log.LogInformation(
-                    "INGEST_ADMISSION_WINDOW source={Source} intents={Intents} source_forms_upper={Forms} "
-                    + "source_vertices_upper={Vertices} modeled_source_payload_bytes={Modeled} grant_bytes={Grant} "
-                    + "over_bound_singleton={OverBound} scope=source-local-provider-expansion-unmodeled",
-                    decomposer.SourceName, count, admissionWindow.Sizing.Source.Forms,
-                    admissionWindow.Sizing.Source.StoredVertices, admissionWindow.ModeledSourcePayloadBytes,
+                    "INGEST_ADMISSION_WINDOW source={Source} intents={Intents} physicalities={Physicalities} "
+                    + "modeled_source_payload_bytes={Modeled} grant_bytes={Grant} over_bound_singleton={OverBound}",
+                    decomposer.SourceName, count, admissionWindow.Sizing.Physicalities,
+                    admissionWindow.ModeledSourcePayloadBytes,
                     applyEnvelope, count == 1 && admissionWindow.ModeledSourcePayloadBytes > applyEnvelope);
         }
 
@@ -443,13 +442,12 @@ public sealed class IngestRunner
                     if (workingSet)
                         log.LogInformation(
                             "INGEST_ADMISSION_WINDOW source={Source} file={File} intents={Intents} "
-                            + "source_forms_upper={Forms} source_vertices_upper={Vertices} "
+                            + "physicalities={Physicalities} "
                             + "modeled_source_payload_bytes={Modeled} grant_bytes={Grant}",
                             decomposer.SourceName,
                             bucket.Batch[0].Metadata.FileLabel ?? "<source>",
                             bucket.Batch.Count,
-                            bucket.AdmissionWindow.Sizing.Source.Forms,
-                            bucket.AdmissionWindow.Sizing.Source.StoredVertices,
+                            bucket.AdmissionWindow.Sizing.Physicalities,
                             bucket.AdmissionWindow.ModeledSourcePayloadBytes,
                             applyEnvelope);
                     await ProcessOwnedBatchAsync(bucket.Batch, decomposer, options, rng,

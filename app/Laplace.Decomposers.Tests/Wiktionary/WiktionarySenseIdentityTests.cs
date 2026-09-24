@@ -215,8 +215,8 @@ public sealed class WiktionarySenseIdentityTests
         });
 
         Hash128 item = ReferenceAnchor.Id(ReferenceIdentityKind.WikidataItem, "Q22687")!.Value;
-        Assert.Contains(change.EntityInterpretations, e =>
-            e.EntityId == item && e.TypeId == EntityTypeRegistry.WikidataItem);
+        Assert.Contains(change.Entities, e =>
+            e.Id == item && e.TypeId == EntityTypeRegistry.WikidataItem);
         Assert.Contains(change.Physicalities, p => p.EntityId == item);
         Hash128 sense = Assert.Single(change.Attestations, a => a.TypeId == HasSense).ObjectId!.Value;
         Assert.Contains(change.Attestations, a =>

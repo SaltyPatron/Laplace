@@ -8,7 +8,6 @@ set(EXT_EXECUTION_SOURCES
     src/execution_module.c
     src/presence.c
     src/descent_probe.c
-    src/entity_interpretations_publish.c
     src/planner_support.c
     src/fold_route.c
     src/consensus_bulk_write.c
@@ -16,8 +15,6 @@ set(EXT_EXECUTION_SOURCES
     ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.c
     src/content_resolve.c
     src/text_root_placements.c
-    src/physicality_descriptor_admission.c
-    src/generated_stage_sink.c
     src/content_trajectory_read.c
     src/physicality_descriptor_readback.c
     src/content_carrier_vertices.c

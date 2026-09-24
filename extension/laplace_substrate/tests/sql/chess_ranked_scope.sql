@@ -16,7 +16,7 @@ DECLARE
     g bigint;
     r double precision;
 BEGIN
-    INSERT INTO laplace.entities (id, tier, type_id, first_observed_by) VALUES
+    INSERT INTO laplace.entities (id, tier, type_id) VALUES
         (player, 0, laplace.entity_type_id('Chess_Player'), src),
         (rogue,  0, laplace.entity_type_id('Chess_Result'), src)
     ON CONFLICT DO NOTHING;
@@ -158,9 +158,9 @@ BEGIN
     -- Player IDs can also be names/content with another compatibility summary.
     -- Require exactly five canonical entities and their actual player facets.
     IF (SELECT count(*) FROM laplace.entities WHERE id=ANY(players))<>5
-       OR (SELECT count(*) FROM laplace.entity_interpretations
-            WHERE entity_id=ANY(players) AND tier=0 AND type_id=player_type)<>5 THEN
-        RAISE EXCEPTION 'membership fixture requires five canonical entities with player interpretations';
+       OR (SELECT count(*) FROM laplace.entities
+            WHERE id=ANY(players) AND tier=0 AND type_id=player_type)<>5 THEN
+        RAISE EXCEPTION 'membership fixture requires five canonical player entities';
     END IF;
     FOREACH sort_key IN ARRAY ARRAY['strength','games','rating','rd'] LOOP
         FOREACH direction IN ARRAY ARRAY['asc','desc'] LOOP
@@ -176,22 +176,8 @@ BEGIN
             before_rows:=before_rows || jsonb_build_object(key,after_rows);
         END LOOP;
     END LOOP;
-    PERFORM laplace.entity_interpretations_publish(
-        players,
-        array_fill(1::smallint,ARRAY[cardinality(players)]),
-        array_fill(unrelated,ARRAY[cardinality(players)]),
-        array_fill(NULL::bytea,ARRAY[cardinality(players)]),
-        array_fill(true,ARRAY[cardinality(players)]));
-    PERFORM laplace.entity_interpretations_publish(
-        players,
-        array_fill(2::smallint,ARRAY[cardinality(players)]),
-        array_fill(player_type,ARRAY[cardinality(players)]),
-        array_fill(NULL::bytea,ARRAY[cardinality(players)]),
-        array_fill(true,ARRAY[cardinality(players)]));
-    IF (SELECT count(*) FROM laplace.entities WHERE id=ANY(players) AND type_id=unrelated)<>5
-       OR (SELECT count(*) FROM laplace.entity_interpretations
-            WHERE entity_id=ANY(players) AND type_id=player_type)<>10 THEN
-        RAISE EXCEPTION 'fixture failed to change summaries while retaining two player facets per entity';
+    IF (SELECT count(*) FROM laplace.entities WHERE id=ANY(players) AND type_id=unrelated)<>5 THEN
+        RAISE EXCEPTION 'fixture failed to change summaries';
     END IF;
     FOREACH sort_key IN ARRAY ARRAY['strength','games','rating','rd'] LOOP
         FOREACH direction IN ARRAY ARRAY['asc','desc'] LOOP

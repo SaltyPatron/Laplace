@@ -136,7 +136,7 @@ physicality_descriptor_status_t physicality_descriptor_materialize(
     const hash128_t* explicitly_missing_ids, size_t missing_count,
     const physicality_descriptor_source_observation_t* observation_sources,
     size_t observation_source_count,
-    const hash128_t* source_id, int64_t observed_at_unix_us,
+    int64_t observed_at_unix_us,
     size_t maximum_bytes,
     physicality_descriptor_materialization_t** out_materialization);
 physicality_descriptor_status_t physicality_descriptor_materialize_cancelable(
@@ -147,7 +147,7 @@ physicality_descriptor_status_t physicality_descriptor_materialize_cancelable(
     const hash128_t* explicitly_missing_ids, size_t missing_count,
     const physicality_descriptor_source_observation_t* observation_sources,
     size_t observation_source_count,
-    const hash128_t* source_id, int64_t observed_at_unix_us,
+    int64_t observed_at_unix_us,
     size_t maximum_bytes,
     const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_materialization_t** out_materialization);
@@ -203,7 +203,7 @@ physicality_descriptor_status_t physicality_descriptor_materialize_diagnosed_can
     const hash128_t* explicitly_missing_ids, size_t missing_count,
     const physicality_descriptor_source_observation_t* observation_sources,
     size_t observation_source_count,
-    const hash128_t* source_id, int64_t observed_at_unix_us,
+    int64_t observed_at_unix_us,
     size_t maximum_bytes,
     const physicality_descriptor_cancel_t* cancellation,
     physicality_descriptor_materialization_diagnostics_t* diagnostics,

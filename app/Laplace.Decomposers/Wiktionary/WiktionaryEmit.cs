@@ -159,7 +159,7 @@ internal static class WiktionaryEmit
         {
             Hash128 langEntity = LanguageReference.Resolve(lc);
             VocabularyNames.TrackLanguage(WiktionaryDecomposer.VocabularyNames, lc);
-            b.AddEntity(new EntityRow(langEntity, EntityTier.Word, LanguageTypeId, WiktionaryDecomposer.Source));
+            b.AddEntity(new EntityRow(langEntity, EntityTier.Word, LanguageTypeId));
             // HAS_LANGUAGE keeps a null context: the object IS the language.
             b.AddAttestation(NativeAttestation.Categorical(
                 wordId, "HAS_LANGUAGE", langEntity, WiktionaryDecomposer.Source, Trust));
