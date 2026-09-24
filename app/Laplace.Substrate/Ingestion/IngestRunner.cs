@@ -737,8 +737,6 @@ public sealed class IngestRunner
                 $"{decomposer.SourceName}: ingest run recorded status=failed — "
                 + (failureReason ?? "no reason derived")
                 + ". Failing the process so the exit code matches the ledger.");
-        if (result.EntitiesInserted + result.PhysicalitiesInserted + result.AttestationsInserted > 0)
-            await ReportPartitionPressureAsync(log, ct);
         if (emptySourceNoOp)
             throw new InvalidOperationException(
                 $"{decomposer.SourceName}: source declares {declaredInput} input unit(s) / {declaredFiles} file(s) "
@@ -779,28 +777,6 @@ public sealed class IngestRunner
             return $"files_done {filesDone} exceeds files_total {filesTotal} — "
                  + "the lane counted more completions than it declared inputs";
         return null;
-    }
-
-    private async Task ReportPartitionPressureAsync(ILogger log, CancellationToken ct)
-    {
-        IReadOnlyList<PartitionPressure> pressure;
-        try
-        {
-            pressure = await _reader.PartitionPressureAsync(ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return;
-        }
-
-        foreach (var p in pressure)
-            log.LogWarning(
-                "INGEST_PARTITION_PRESSURE relation={Relation} rows={Rows} pct_of_default={Pct:F1} "
-                + "action=promote-to-hot detail=\"{Relation} rides consensus_rdefault, a single "
-                + "shared heap+btree. Add `hot = true` to its [[relation]] block in "
-                + "engine/manifest/relation_types.toml and run scripts/codegen-attestation-law.py; "
-                + "the partition seed adopts the existing rows in place.\"",
-                p.Relation, p.Rows, p.PctOfDefault, p.Relation);
     }
 
     private void TrackTerminalWhenDurable(

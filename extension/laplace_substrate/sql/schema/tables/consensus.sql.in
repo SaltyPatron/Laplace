@@ -1,25 +1,15 @@
--- consensus: the convergence table, LIST-partitioned along the HIGHWAY axis
--- (type_id = the relation). Each triple has ONE fixed relation, so every
--- cross-modal witness of (subject, type, object) still folds into one row in
--- one partition — the merge invariant is untouched; partitioning only files
--- each triple under its relation. Per-relation partitions are generated from
--- the governed manifest (generated/seed_relation_partitions.sql.in, emitted by
--- scripts/codegen-attestation-law.py); dynamic relations (EDEP_*/FEAT_*) land
--- in the DEFAULT partition until the next codegen+reseed (the relation-addition
--- law already owes that reseed). Small per-partition indexes stay LIVE during
--- bulk loads — this retires the index drop/rebuild cycle.
+-- consensus: the folded standing of every typed triple, HASH-partitioned on
+-- subject_id like entities are on id. A subject's whole star (every relation,
+-- every object) lives in one leaf, so the sparse indexed star that expansion
+-- reads from a subject prunes to exactly one partition. Relation types are
+-- content ids and unbounded; the layout never depends on which relations exist.
+-- Leaf count is declared once here; native routing reads it from the partition
+-- descriptor.
 --
--- PK includes the partition keys (PG rule for unique constraints on partitioned
--- tables, including the HASH(subject_id) sub-partitions of hot relations); id
--- stays unique by construction (id = blake3(subject‖type‖object)).
+-- PK includes the partition key (PG rule for unique constraints on partitioned
+-- tables); id stays unique by construction (id = hash(subject, type, object)).
 --
--- FKs to entities are dropped by design: a partitioned entities has no unique
--- (id) to reference, and per-row FK validation on 100M-row COPYs was pure cost.
--- Referential integrity is structural (content-addressed ids).
---
--- GREENFIELD: an existing non-partitioned DB cannot ALTER into this layout —
--- db-reset + reseed is the upgrade path (IF NOT EXISTS leaves a legacy plain
--- table untouched; the partition generator skips non-partitioned targets).
+-- No FKs: referential integrity is structural (content-addressed ids).
 CREATE TABLE IF NOT EXISTS consensus (
     id                bytea       NOT NULL CHECK (octet_length(id) = 16),
     subject_id        bytea       NOT NULL,
@@ -31,26 +21,31 @@ CREATE TABLE IF NOT EXISTS consensus (
     witness_count     bigint      NOT NULL DEFAULT 1 CHECK (witness_count >= 0),
     last_observed_at  timestamptz NOT NULL,
     PRIMARY KEY (id, type_id, subject_id)
-) PARTITION BY LIST (type_id);
+) PARTITION BY HASH (subject_id);
 
 DO $$
+DECLARE
+    b int;
+    suffix text;
+    strategy "char";
+    opts constant text := ' SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)';
 BEGIN
-    IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = current_schema() AND c.relname = 'consensus') = 'p'
-       AND to_regclass(current_schema() || '.consensus_rdefault') IS NULL THEN
-        -- The DEFAULT is hash-sharded like every named sibling (#1008): flat, it
-        -- absorbed 56% of all rows (5.1M measured 2026-08-12) because every
-        -- dynamic family (DEP_*/EDEP_*/FEAT_*) lands here until promoted to a
-        -- named partition — the highest-volume incoming families had the only
-        -- unsharded heap, and a full UD pass (~36M arcs) would have landed on it.
-        CREATE TABLE consensus_rdefault PARTITION OF consensus DEFAULT
-            PARTITION BY HASH (subject_id);
-        FOR i IN 0..7 LOOP
-            EXECUTE format('CREATE TABLE consensus_rdefault_h%s PARTITION OF consensus_rdefault'
-                           || ' FOR VALUES WITH (MODULUS 8, REMAINDER %s)', i, i);
-            EXECUTE format('ALTER TABLE consensus_rdefault_h%s SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)', i);
-        END LOOP;
+    SELECT p.partstrat INTO strategy
+    FROM pg_partitioned_table p
+    WHERE p.partrelid = (current_schema() || '.consensus')::regclass;
+    IF strategy IS DISTINCT FROM 'h' THEN
+        RAISE EXCEPTION
+            'consensus uses an obsolete partition layout; this version requires HASH(subject_id). Create a new canonical database.';
     END IF;
+    IF to_regclass(current_schema() || '.consensus_h00') IS NOT NULL THEN
+        RETURN;
+    END IF;
+    FOR b IN 0..63 LOOP
+        suffix := lpad(to_hex(b), 2, '0');
+        EXECUTE format('CREATE TABLE consensus_h%s PARTITION OF consensus FOR VALUES WITH (MODULUS 64, REMAINDER %s)',
+                       suffix, b);
+        EXECUTE format('ALTER TABLE consensus_h%s', suffix) || opts;
+    END LOOP;
 END $$;
 
 

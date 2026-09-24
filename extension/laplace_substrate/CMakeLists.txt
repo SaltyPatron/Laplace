@@ -12,6 +12,7 @@ set(EXT_EXECUTION_SOURCES
     src/planner_support.c
     src/fold_route.c
     src/consensus_bulk_write.c
+    src/hash_leaves.c
     ${PROJECT_SOURCE_DIR}/engine/core/src/sql_catalog.c
     src/content_resolve.c
     src/text_root_placements.c
@@ -164,6 +165,7 @@ set(EXT_C_SOURCES
     src/descent_probe.c
     src/fold_route.c
     src/consensus_bulk_write.c
+    src/hash_leaves.c
     src/containers_of.c
     src/browse_native.c
     src/band_leaders.c

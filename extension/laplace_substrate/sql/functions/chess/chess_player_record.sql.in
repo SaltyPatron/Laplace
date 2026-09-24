@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION chess.player_record(p_player bytea)
     LANGUAGE sql STABLE PARALLEL SAFE
 BEGIN ATOMIC
     -- One player's record, straight off the witnessed game headers. Rides
-    -- attestations_rdefault_object_id_idx to find the games he appears in (as
+    -- attestations_object_btree to find the games he appears in (as
     -- HAS_WHITE or HAS_BLACK), then the (subject_id, type_id, object_id) index
     -- to pick up each game's HAS_RESULT -- both index lookups, so this stays
     -- interactive for a 9k-game career.

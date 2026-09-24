@@ -45,9 +45,6 @@ public readonly record struct CircuitPairProposalPage(
     Hash128? NextSubject,
     Hash128? NextObject);
 
-/// <summary>One relation crowding the consensus/attestations DEFAULT partition — a
-/// relation carrying real traffic that the manifest never flagged <c>hot = true</c>.</summary>
-public readonly record struct PartitionPressure(string Relation, long Rows, double PctOfDefault);
 
 public interface ISubstrateReader
 {
@@ -259,15 +256,4 @@ public interface ISubstrateReader
         IReadOnlyList<(Hash128 Subject, Hash128 Object)> pairs, Hash128 typeId, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<double>>(Array.Empty<double>());
 
-    /// <summary>
-    /// Relations crowding the DEFAULT partition of consensus, worst first. The hot roster in
-    /// <c>engine/manifest/relation_types.toml</c> is a human judgement about traffic, and it goes
-    /// stale in silence: a decomposer can become the single largest writer in the database with
-    /// every one of its rows piling into one shared heap and btree, and nothing says so. Reported
-    /// at the end of every ingest run so the source that causes it is the source that names it.
-    /// Defaults to empty for readers/installs without the diagnostic.
-    /// </summary>
-    Task<IReadOnlyList<PartitionPressure>> PartitionPressureAsync(
-        CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<PartitionPressure>>(Array.Empty<PartitionPressure>());
 }

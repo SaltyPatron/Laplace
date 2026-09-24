@@ -143,8 +143,7 @@ term_lang AS MATERIALIZED (
 --   join form    cand_lang 150,653 ms,   Index probes 1,076,788 loops
 -- The join becomes a nested loop issuing one probe per candidate; the array form is
 -- ONE bounded ScalarArrayOp per partition however many ids it carries. laplace.attestations
--- is LIST (type_id) and this predicate is on subject_id, so nothing prunes and the
--- probe count is what decides.
+-- is HASH (subject_id), so the probe count, not partition fan-out, is what decides.
 --
 -- Routing the same set through converse.attested_language_batch as an ARGUMENT is worse
 -- again -- the set must materialise as one Datum before the call, and the whole

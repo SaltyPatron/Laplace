@@ -12,6 +12,8 @@
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
 
+/* The primary key must lead on id; trailing key columns (partition keys of a
+ * multi-key PK) do not change the result because id is unique by content. */
 bool
 laplace_identity_scan(Oid leaf, ArrayType *ids,
     LaplaceIdentityConsumer consume, void *context)
@@ -26,7 +28,7 @@ laplace_identity_scan(Oid leaf, ArrayType *ids,
     }
     Relation index = index_open(index_oid, AccessShareLock);
     if (index->rd_rel->relam != BTREE_AM_OID || !index->rd_index->indisvalid ||
-        !index->rd_index->indisready || index->rd_index->indnkeyatts != 1 ||
+        !index->rd_index->indisready || index->rd_index->indnkeyatts < 1 ||
         index->rd_index->indkey.values[0] != id ||
         index->rd_opfamily[0] != BYTEA_BTREE_FAM_OID || RelationGetIndexPredicate(index) != NIL)
     {

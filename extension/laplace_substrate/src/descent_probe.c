@@ -1,5 +1,6 @@
 #include "descent_probe.h"
 #include "identity_scan.h"
+#include "hash_leaves.h"
 #include "laplace/core/sql_catalog.h"
 
 #include "access/table.h"
@@ -40,13 +41,6 @@
  * and every apply in the backend; runtime HASH pruning picks the one leaf per
  * row. One index descent per id, no temp table, no re-plan, no volatility trap.
  */
-typedef struct AttestTypePlan
-{
-    char       type_id[16];     /* hash key (blake3 relation-type id) */
-    SPIPlanPtr plan;
-} AttestTypePlan;
-
-static HTAB *attest_type_plans = NULL;
 
 /* Entities are LIST(tier), with tier 2 further HASH(id).  The keyed entity
  * probes used to hand their arrays to a PL/pgSQL function which created and
@@ -108,79 +102,6 @@ entity_tier_probe_plan(int16 tier)
         entry->plan = plan;
     }
     return entry->plan;
-}
-
-/* Resolve (build once, then cache) the per-type presence plan. Must be called
- * inside an SPI connection. The plan takes ($1 ids[], $2 subjects[], $3 ords[])
- * and returns, for each row whose (type,subject,id) exists, the caller-supplied
- * ord verbatim -- so the caller controls the bit index the hit maps to. */
-static SPIPlanPtr
-attest_type_probe_plan(const uint8_t *type_id16)
-{
-    AttestTypePlan *entry;
-    bool            found;
-
-    if (attest_type_plans == NULL)
-    {
-        HASHCTL ctl;
-
-        memset(&ctl, 0, sizeof(ctl));
-        ctl.keysize = 16;
-        ctl.entrysize = sizeof(AttestTypePlan);
-        ctl.hcxt = TopMemoryContext;   /* survives SPI_finish and statement end */
-        attest_type_plans = hash_create("attestation type probe plans", 256,
-                                        &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-    }
-
-    entry = (AttestTypePlan *) hash_search(attest_type_plans, type_id16,
-                                           HASH_ENTER, &found);
-    if (!found)
-    {
-        char       hex[33];
-        char       sql[512];
-        Oid        argtypes[3] = { BYTEAARRAYOID, BYTEAARRAYOID, INT4ARRAYOID };
-        SPIPlanPtr plan;
-        int        j;
-
-        for (j = 0; j < 16; j++)
-            snprintf(hex + j * 2, 3, "%02x", type_id16[j]);
-
-        /* Type is a LITERAL -> LIST prune at plan time (cached). subject_id is a
-         * per-row value -> HASH-leaf prune at runtime. id completes the leaf PK. */
-        snprintf(sql, sizeof(sql),
-                 "SELECT u.ord FROM unnest($1::bytea[], $2::bytea[], $3::int[]) "
-                 "WITH ORDINALITY AS u(id, s, ord, n) "
-                 "JOIN laplace.attestations a "
-                 "ON a.type_id = '\\x%s'::bytea AND a.subject_id = u.s AND a.id = u.id",
-                 hex);
-
-        plan = SPI_prepare_cursor(sql, 3, argtypes, CURSOR_OPT_PARALLEL_OK);
-        if (plan == NULL)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("attest_type_probe_plan: SPI_prepare failed: %s",
-                            SPI_result_code_string(SPI_result))));
-        if (SPI_keepplan(plan) != 0)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("attest_type_probe_plan: SPI_keepplan failed")));
-        entry->plan = plan;
-    }
-    return entry->plan;
-}
-
-/* qsort_arg comparator: order probe indices by their 16-byte type id so
- * same-type rows form contiguous runs. arg = the probe-space type Datum[]. */
-static int
-cmp_probe_by_type(const void *a, const void *b, void *arg)
-{
-    const Datum *types = (const Datum *) arg;
-    int          ia = *(const int *) a;
-    int          ib = *(const int *) b;
-    bytea       *ta = DatumGetByteaPP(types[ia]);
-    bytea       *tb = DatumGetByteaPP(types[ib]);
-
-    return memcmp(VARDATA_ANY(ta), VARDATA_ANY(tb), 16);
 }
 
 static int
@@ -360,187 +281,108 @@ laplace_tier_batch_existence_probe(ArrayType *ids_array, uint8_t *bm, int candid
                                true, "entities");
 }
 
-/*
- * Keyed batch-presence: same positive-confirmation semantics as
- * batch_presence_core, but the caller supplies the target table's PARTITION
- * KEYS in arrays parallel to the ids, and the ordinals SQL receives all
- * three. No perfcache path (attestation ids are never codepoint ids). The
- * remap subsets all three arrays TOGETHER so ordinals still line up when a
- * malformed id is skipped.
- */
-static int
-batch_presence_core_keyed(ArrayType *ids_array, ArrayType *keys1_array,
-                          ArrayType *keys2_array, uint8_t *bm,
-                          int candidate_count, const char *ordinals_sql)
-{
-    Datum      *elems, *k1_elems, *k2_elems;
-    bool       *nulls, *k1_nulls, *k2_nulls;
-    int         nelems, k1_n, k2_n;
-    int        *remap;
-    Datum      *probe_elems, *probe_k1, *probe_k2;
-    int         probe_n = 0;
-    int         i;
-    int         spi_rc;
-
-    if (candidate_count <= 0)
-        return SPI_OK_SELECT;
-
-    deconstruct_array(ids_array, BYTEAOID, -1, false, 'i', &elems, &nulls, &nelems);
-    deconstruct_array(keys1_array, BYTEAOID, -1, false, 'i', &k1_elems, &k1_nulls, &k1_n);
-    deconstruct_array(keys2_array, BYTEAOID, -1, false, 'i', &k2_elems, &k2_nulls, &k2_n);
-    if (nelems != candidate_count || k1_n != candidate_count || k2_n != candidate_count)
-    {
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("batch_presence_core_keyed: array length mismatch")));
-    }
-
-    remap = (int *) palloc(sizeof(int) * candidate_count);
-    probe_elems = (Datum *) palloc(sizeof(Datum) * candidate_count);
-    probe_k1 = (Datum *) palloc(sizeof(Datum) * candidate_count);
-    probe_k2 = (Datum *) palloc(sizeof(Datum) * candidate_count);
-
-    for (i = 0; i < candidate_count; i++)
-    {
-        bytea *b;
-
-        if (nulls[i] || k1_nulls[i] || k2_nulls[i])
-            continue;
-        b = DatumGetByteaPP(elems[i]);
-        if (VARSIZE_ANY_EXHDR(b) != 16)
-            continue;
-        remap[probe_n] = i;
-        probe_elems[probe_n] = elems[i];
-        probe_k1[probe_n] = k1_elems[i];
-        probe_k2[probe_n] = k2_elems[i];
-        probe_n++;
-    }
-
-    if (probe_n == 0)
-    {
-        spi_rc = SPI_OK_SELECT;
-        goto done;
-    }
-
-    /*
-     * Native per-type routing. `ordinals_sql` is superseded here -- kept in the
-     * signature only so the (attestation-only) caller compiles unchanged -- see
-     * the header comment on attest_type_probe_plan. Group the probe rows by type
-     * into contiguous runs, then execute each type's session-cached, literal-typed
-     * plan; the returned ord is the original candidate index, so a hit sets that
-     * bit directly.
-     */
-    (void) ordinals_sql;
-    {
-        int   *order = (int *) palloc(sizeof(int) * probe_n);
-        Datum *run_ids = (Datum *) palloc(sizeof(Datum) * probe_n);
-        Datum *run_subs = (Datum *) palloc(sizeof(Datum) * probe_n);
-        Datum *run_ords = (Datum *) palloc(sizeof(Datum) * probe_n);
-        int    run_start;
-
-        for (i = 0; i < probe_n; i++)
-            order[i] = i;
-        qsort_arg(order, probe_n, sizeof(int), cmp_probe_by_type, probe_k1);
-
-        spi_rc = SPI_OK_SELECT;
-        run_start = 0;
-        while (run_start < probe_n)
-        {
-            const uint8_t *type16 =
-                (const uint8_t *) VARDATA_ANY(DatumGetByteaPP(probe_k1[order[run_start]]));
-            int         run_end = run_start;
-            int         run_n = 0;
-            SPIPlanPtr  plan;
-            ArrayType  *idA, *sA, *oA;
-            Datum       vals[3];
-            uint64      r;
-
-            while (run_end < probe_n &&
-                   memcmp(VARDATA_ANY(DatumGetByteaPP(probe_k1[order[run_end]])),
-                          type16, 16) == 0)
-            {
-                int src = order[run_end];
-
-                run_ids[run_n] = probe_elems[src];
-                run_subs[run_n] = probe_k2[src];
-                run_ords[run_n] = Int32GetDatum(remap[src]);   /* original candidate index */
-                run_n++;
-                run_end++;
-            }
-
-            plan = attest_type_probe_plan(type16);
-            idA = construct_array(run_ids, run_n, BYTEAOID, -1, false, 'i');
-            sA = construct_array(run_subs, run_n, BYTEAOID, -1, false, 'i');
-            oA = construct_array(run_ords, run_n, INT4OID, 4, true, 'i');
-            vals[0] = PointerGetDatum(idA);
-            vals[1] = PointerGetDatum(sA);
-            vals[2] = PointerGetDatum(oA);
-
-            spi_rc = SPI_execute_plan(plan, vals, NULL, true, 0);
-            if (spi_rc != SPI_OK_SELECT)
-                break;
-
-            for (r = 0; r < SPI_processed; r++)
-            {
-                bool  isnull;
-                Datum d = SPI_getbinval(SPI_tuptable->vals[r],
-                                        SPI_tuptable->tupdesc, 1, &isnull);
-                if (!isnull)
-                {
-                    int pos = DatumGetInt32(d);
-
-                    if (pos >= 0 && pos < candidate_count)
-                        bitmap_set(bm, pos);
-                }
-            }
-
-            pfree(idA);
-            pfree(sA);
-            pfree(oA);
-            run_start = run_end;
-        }
-
-        pfree(order);
-        pfree(run_ids);
-        pfree(run_subs);
-        pfree(run_ords);
-    }
-
-done:
-    pfree(remap);
-    pfree(probe_elems);
-    pfree(probe_k1);
-    pfree(probe_k2);
-    pfree(elems);
-    pfree(nulls);
-    pfree(k1_elems);
-    pfree(k1_nulls);
-    pfree(k2_elems);
-    pfree(k2_nulls);
-    return spi_rc;
-}
-
-int
-laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_ids_array,
-                                          ArrayType *subject_ids_array,
-                                          uint8_t *bm, int candidate_count)
-{
-    /* Attestation ids derive from (subject,type,object,source,context) --
-     * never codepoint ids -- so the perfcache fast path is off by
-     * construction, not merely expected-not-to-match. The type/subject keys
-     * let the ordinals probe prune LIST(type_id) at plan time and the
-     * HASH(subject_id) leaves per row -- one descent per id, not one per
-     * leaf. */
-    return batch_presence_core_keyed(ids_array, type_ids_array, subject_ids_array,
-                                     bm, candidate_count,
-                                     "SELECT idx FROM laplace.attestations_present_ordinals($1, $2, $3)");
-}
-
 typedef struct IdentityPresence
 {
     unsigned char id[16];
     bool present;
 } IdentityPresence;
+
+static void
+mark_identity_presence(TupleTableSlot *slot, AttrNumber id, void *opaque);
+
+/*
+ * Attestation presence. Attestations are HASH(subject_id); an attestation id is
+ * the content hash of its five-tuple and unique. Each candidate routes by its
+ * subject to the one leaf that can hold it, and each touched leaf answers its
+ * whole id set in one native primary-key array scan. No SQL, no per-type plan.
+ */
+int
+laplace_attestations_present_bitmap_keyed(ArrayType *ids_array, ArrayType *type_ids_array,
+                                          ArrayType *subject_ids_array,
+                                          uint8_t *bm, int candidate_count)
+{
+    const char *label = "attestations presence";
+    Datum *ids, *subjects, *types;
+    bool *id_nulls, *subject_nulls, *type_nulls;
+    int n, ns, nt;
+
+    if (candidate_count <= 0) return SPI_OK_SELECT;
+    deconstruct_array(ids_array, BYTEAOID, -1, false, 'i', &ids, &id_nulls, &n);
+    deconstruct_array(subject_ids_array, BYTEAOID, -1, false, 'i', &subjects, &subject_nulls, &ns);
+    deconstruct_array(type_ids_array, BYTEAOID, -1, false, 'i', &types, &type_nulls, &nt);
+    if (n != candidate_count || ns != candidate_count || nt != candidate_count)
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                        errmsg("%s: array length mismatch", label)));
+
+    const LaplaceHashLeaves *leaves = laplace_hash_leaves("attestations", label);
+    int *leaf = palloc(sizeof(int) * n);
+    int *counts = palloc0(sizeof(int) * leaves->count);
+    int *offsets = palloc0(sizeof(int) * (leaves->count + 1));
+    int *fill = palloc0(sizeof(int) * leaves->count);
+    Datum *routed = palloc(sizeof(Datum) * n);
+    Datum *valid_subjects = palloc(sizeof(Datum) * n);
+    int *valid_index = palloc(sizeof(int) * n);
+    int valid = 0;
+    HASHCTL ctl;
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.keysize = 16;
+    ctl.entrysize = sizeof(IdentityPresence);
+    ctl.hcxt = CurrentMemoryContext;
+    HTAB *presence = hash_create("attestation presence", Max(n, 1), &ctl,
+                                 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+    for (int i = 0; i < n; i++)
+    {
+        leaf[i] = -1;
+        if (id_nulls[i] || subject_nulls[i] ||
+            VARSIZE_ANY_EXHDR(DatumGetByteaPP(ids[i])) != 16)
+            continue;
+        valid_subjects[valid] = subjects[i];
+        valid_index[valid++] = i;
+    }
+    {
+        int *routes = palloc(sizeof(int) * Max(valid, 1));
+        laplace_hash_leaf_route(leaves, valid_subjects, valid, routes, label);
+        for (int k = 0; k < valid; k++)
+        {
+            leaf[valid_index[k]] = routes[k];
+            counts[routes[k]]++;
+        }
+        pfree(routes);
+    }
+    for (int p = 0; p < leaves->count; p++)
+        offsets[p + 1] = offsets[p] + counts[p];
+    for (int i = 0; i < n; i++)
+    {
+        bool found;
+        if (leaf[i] < 0) continue;
+        routed[offsets[leaf[i]] + fill[leaf[i]]++] = ids[i];
+        IdentityPresence *entry = hash_search(presence,
+            VARDATA_ANY(DatumGetByteaPP(ids[i])), HASH_ENTER, &found);
+        if (!found) entry->present = false;
+    }
+    for (int p = 0; p < leaves->count; p++)
+    {
+        if (counts[p] == 0) continue;
+        CHECK_FOR_INTERRUPTS();
+        ArrayType *id_array = construct_array(routed + offsets[p], counts[p],
+                                              BYTEAOID, -1, false, 'i');
+        if (!laplace_identity_scan(leaves->leaf_oids[p], id_array,
+                                   mark_identity_presence, presence))
+            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("%s: attestation leaf has no id-leading primary key", label)));
+        pfree(id_array);
+    }
+    for (int i = 0; i < n; i++)
+    {
+        if (leaf[i] < 0) continue;
+        IdentityPresence *entry = hash_search(presence,
+            VARDATA_ANY(DatumGetByteaPP(ids[i])), HASH_FIND, NULL);
+        if (entry != NULL && entry->present) bitmap_set(bm, i);
+    }
+    hash_destroy(presence);
+    return SPI_OK_SELECT;
+}
 
 static void
 mark_identity_presence(TupleTableSlot *slot, AttrNumber id, void *opaque)

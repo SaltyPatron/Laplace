@@ -102,7 +102,6 @@ BEGIN
             ('consensus_out', 'consensus', 'consensus_out'),
             ('consensus_out_labeled', 'ops', 'consensus_out_labeled'),
             ('consensus_pair_scores', 'consensus', 'pair_scores'),
-            ('consensus_partition_pressure', 'ops', 'consensus_partition_pressure'),
             ('consensus_peer', 'generation', 'consensus_peer'),
             ('consensus_stats', 'consensus', 'stats'),
             ('consensus_stats_approx', 'consensus', 'stats_approx'),

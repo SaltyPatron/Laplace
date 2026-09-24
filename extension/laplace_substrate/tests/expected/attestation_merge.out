@@ -81,7 +81,7 @@ BEGIN
     --    prune has a leaf to prune TO).
     SELECT a.tableoid::regclass::text INTO leafname FROM laplace.attestations a
     WHERE a.type_id = rel_hot AND a.subject_id = subj AND a.id = a1;
-    IF leafname NOT LIKE '%attestations_r_is_a_h%' THEN
+    IF leafname NOT LIKE '%attestations_h%' THEN
         RAISE EXCEPTION 'FAIL: hot row routed to %, expected an is_a hash leaf', leafname;
     END IF;
 

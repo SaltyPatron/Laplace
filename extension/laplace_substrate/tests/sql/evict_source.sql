@@ -273,7 +273,7 @@ BEGIN
     END IF;
     SELECT c.tableoid::regclass::text INTO leafname FROM laplace.consensus c
     WHERE c.subject_id = subj AND c.type_id = rel_hot AND c.object_id = o4;
-    IF leafname NOT LIKE '%consensus_r_is_a_h%' THEN
+    IF leafname NOT LIKE '%consensus_h%' THEN
         RAISE EXCEPTION 'FAIL: refolded hot cell in %, expected an is_a hash leaf', leafname;
     END IF;
 

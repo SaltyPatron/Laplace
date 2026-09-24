@@ -14,14 +14,7 @@ public sealed class ExtensionManifestSeparationTests
         var install = Read("extension", "laplace_substrate", "sql", "manifest.install");
         var upgrade = Read("extension", "laplace_substrate", "sql", "manifest.upgrade");
 
-        Assert.Contains("generated/seed_relation_partitions.sql.in", install);
         Assert.DoesNotContain("drop_retired_", install);
-        Assert.True(
-            install.IndexOf("generated/seed_relation_partitions.sql.in", StringComparison.Ordinal)
-            < install.IndexOf("bootstrap/bootstrap.sql.in", StringComparison.Ordinal),
-            "fresh partition topology must exist before bootstrap deposits its first attestation");
-
-        Assert.DoesNotContain("generated/seed_relation_partitions.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/entities.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/physicalities.sql.in", upgrade);
         Assert.DoesNotContain("schema/tables/attestations.sql.in", upgrade);
@@ -30,22 +23,6 @@ public sealed class ExtensionManifestSeparationTests
         Assert.Contains("functions/identity/entity_interpretations_publish.sql.in", install);
         Assert.Contains("functions/identity/entity_interpretations_publish.sql.in", upgrade);
         Assert.Contains("drop_retired_", upgrade);
-    }
-
-    [Fact]
-    public void GeneratedTopology_IsFreshOnlyAndSchemaQualified()
-    {
-        var topology = Read(
-            "extension", "laplace_substrate", "sql", "generated",
-            "seed_relation_partitions.sql.in");
-
-        Assert.Contains("FROM laplace.consensus", topology);
-        Assert.Contains("FROM laplace.attestations", topology);
-        Assert.Contains("'laplace', part", topology);
-        Assert.DoesNotContain("current_schema()", topology);
-        Assert.DoesNotContain("DETACH PARTITION", topology);
-        Assert.DoesNotContain("RETURNING *", topology);
-        Assert.DoesNotContain("IF NOT EXISTS", topology);
     }
 
     [Fact]

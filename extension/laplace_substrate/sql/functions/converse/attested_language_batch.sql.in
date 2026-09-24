@@ -7,10 +7,9 @@
 -- drift. bubble_up then ran BOTH per call: the scalar once for the term, the inline
 -- copy once for the candidate set.
 --
--- WHY IT IS A BATCH. laplace.attestations is LIST (type_id) and this predicate is on
--- subject_id, so nothing prunes and every call pays the partition set. Measured:
--- the scalar costs 71.6 ms warm, so a per-term loop over a token stream pays that
--- per token, while one batched probe covers every id at once. Under auto_explain on
+-- WHY IT IS A BATCH. One batched probe covers every id at once; laplace.attestations
+-- is HASH (subject_id), so each id resolves inside its own leaf. A per-term loop
+-- would pay one statement per token. Under auto_explain on
 -- compose_batch, the per-token form showed cand_lang at 32,438 ms over 728 loops.
 --
 -- The definition is unchanged from the scalar: argmax over SUM(sum_score_fp1e9) per

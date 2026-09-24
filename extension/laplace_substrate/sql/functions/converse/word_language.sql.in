@@ -14,9 +14,8 @@
 -- So the set is the canonical body and the scalar delegates to it. One predicate, one
 -- place that spells HAS_LANGUAGE, and callers take the projection they need.
 --
--- WHY IT IS A BATCH: same reason as attested_language_batch. laplace.consensus is
--- LIST (type_id), this predicate is on subject_id, and a per-token loop pays the whole
--- partition set once per token.
+-- WHY IT IS A BATCH: one set probe covers every token; laplace.consensus is HASH
+-- (subject_id), so each subject resolves inside its own leaf.
 --
 -- The ORDER BY gains `lang` as a final tie-break. Without it two languages at equal
 -- eff_mu -- which is not hypothetical, it is what `glacier` does across eng and fra --

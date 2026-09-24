@@ -182,7 +182,6 @@ functions/lexical/word_case_variants.sql.in
 functions/converse/word_segment.sql.in
 functions/converse/word_segment_resolved.sql.in
 functions/converse/label_is_content.sql.in
-functions/inspect/consensus_partition_pressure.sql.in
 functions/converse/prompt_words.sql.in
 functions/converse/text_root_placements.sql.in
 functions/converse/attested_language_batch.sql.in

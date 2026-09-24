@@ -70,17 +70,4 @@ public sealed class LegacyUpgradeRegressionTests(LocalPgFixture pg)
         }
     }
 
-    [Fact]
-    public async Task PartitionPressure_ExecutesWithRealPgStatsFrequencyTypes()
-    {
-        // Text-presence tests missed round(double precision, integer), which
-        // PostgreSQL cannot resolve even when the MCV roster is empty.
-        await using var cmd = pg.DataSource.CreateCommand(
-            "SELECT tbl,relation,type_id,rows,pct_of_default FROM ops.consensus_partition_pressure()");
-        await using var rows = await cmd.ExecuteReaderAsync();
-        Assert.Equal(5, rows.FieldCount);
-        Assert.Equal("numeric", rows.GetDataTypeName(4));
-        while (await rows.ReadAsync())
-            Assert.InRange(rows.GetDecimal(4), 0m, 100m);
-    }
 }

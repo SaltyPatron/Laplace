@@ -661,30 +661,6 @@ public sealed class NpgsqlSubstrateReader : ISubstrateReader
         return outv;
     }
 
-    public async Task<IReadOnlyList<PartitionPressure>> PartitionPressureAsync(
-        CancellationToken ct = default)
-    {
-        // Planner-statistics estimation lives in consensus_partition_pressure() — one
-        // implementation on the layer that owns partition layout. An install predating
-        // the function degrades to "nothing to report" rather than sinking a finished run.
-        await using var cmd = _ds.CreateCommand(
-            "SELECT relation, rows, pct_of_default FROM ops.consensus_partition_pressure() "
-            + "WHERE tbl = 'consensus' ORDER BY rows DESC");
-        try
-        {
-            var outv = new List<PartitionPressure>();
-            await using var rdr = await cmd.ExecuteReaderAsync(ct);
-            while (await rdr.ReadAsync(ct))
-                outv.Add(new PartitionPressure(
-                    rdr.GetString(0), rdr.GetInt64(1), (double)rdr.GetDecimal(2)));
-            return outv;
-        }
-        catch (PostgresException)
-        {
-            return Array.Empty<PartitionPressure>();
-        }
-    }
-
     /// <summary>
     /// Retract a source's testimony and refold every cell it touched
     /// (<c>ops.evict_source</c>, GH #508). The procedure COMMITs per batch and

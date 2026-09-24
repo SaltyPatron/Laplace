@@ -947,7 +947,7 @@ public sealed partial class ConsensusAccumulatingWriter : ISubstrateWriter, ICon
         // a physical-locality fix, not a cosmetic one.
         //
         // consensus_pkey is btree (id, type_id, subject_id) -- id LEADS -- while
-        // consensus_rdefault is HASH (subject_id) mod 8. Sorting (type, subject,
+        // consensus is HASH (subject_id). Sorting (type, subject,
         // id) put the PK's leading column LAST, so a 65,536-cell chunk descended
         // the PK btree in an order uncorrelated with the btree, touching ~65,536
         // distinct random pages across 88GB of consensus against a 31GB

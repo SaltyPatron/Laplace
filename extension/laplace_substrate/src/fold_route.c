@@ -54,6 +54,7 @@
 #include "executor/spi.h"
 #include "miscadmin.h"
 #include "partitioning/partbounds.h"
+#include "hash_leaves.h"
 #include "partitioning/partdesc.h"
 #include "storage/fd.h"
 #include <inttypes.h>
@@ -103,15 +104,13 @@ static HTAB *evidence_write_plans = NULL;
  * alone still left eight leaves beneath the selected LIST partition, and a
  * join whose subject key came from unnest could probe/scan all eight for each
  * input row. Keep one exact-leaf plan per type/remainder instead. */
-#define CONSENSUS_HASH_LEAVES 8
 
 typedef struct PriorRouteEntry
 {
-    char       type_id[16];
-    Oid        hash_parent_oid;
-    Oid        leaf_oids[CONSENSUS_HASH_LEAVES];
-    SPIPlanPtr leaf_plans[CONSENSUS_HASH_LEAVES];
-    SPIPlanPtr update_plans[CONSENSUS_HASH_LEAVES];
+    char        type_id[16];
+    const LaplaceHashLeaves *leaves;
+    SPIPlanPtr *leaf_plans;    /* per leaf remainder */
+    SPIPlanPtr *update_plans;  /* per leaf remainder */
 } PriorRouteEntry;
 
 static HTAB *upsert_prior_routes = NULL;
@@ -205,88 +204,24 @@ prior_route_htab(void)
     return upsert_prior_routes;
 }
 
-/* Resolve the concrete HASH leaves that own one relation type. Named relation
- * types resolve to their dedicated LIST child; dynamic types resolve to the
- * DEFAULT child. Both have the same HASH(8) contract. Resolution happens once
- * per backend/type and the prepared plans retain normal PostgreSQL dependency
- * invalidation. */
+/* Consensus is HASH(subject_id); a relation type owns no partition of its own.
+ * The per-type entry carries only that type's prepared leaf plans. */
 static PriorRouteEntry *
 prior_route(const uint8_t *type16, Datum type_datum, const char *label)
 {
     PriorRouteEntry *entry;
     bool             found;
 
+    (void) type_datum;
     entry = (PriorRouteEntry *) hash_search(prior_route_htab(), type16,
                                              HASH_ENTER, &found);
     if (!found)
     {
-        Oid                namespace_oid;
-        Oid                root_oid;
-        Oid                hash_parent_oid;
-        Relation           root;
-        Relation           hash_parent;
-        PartitionKey       key;
-        PartitionDesc      desc;
-        PartitionBoundInfo bounds;
-        bool               equal;
-        int                datum_index;
-        int                part_index;
-        int                remainder;
-
-        memset(((char *) entry) + sizeof(entry->type_id), 0,
-               sizeof(*entry) - sizeof(entry->type_id));
-        namespace_oid = get_namespace_oid("laplace", false);
-        root_oid = get_relname_relid("consensus", namespace_oid);
-        if (!OidIsValid(root_oid))
-            ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_TABLE),
-                     errmsg("%s: laplace.consensus does not exist", label)));
-
-        root = table_open(root_oid, AccessShareLock);
-        key = RelationGetPartitionKey(root);
-        desc = RelationGetPartitionDesc(root, false);
-        if (key == NULL || key->strategy != PARTITION_STRATEGY_LIST ||
-            key->partnatts != 1 || desc == NULL)
-            ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                     errmsg("%s: laplace.consensus must be LIST(type_id) partitioned",
-                            label)));
-        bounds = desc->boundinfo;
-        datum_index = partition_list_bsearch(key->partsupfunc,
-                                              key->partcollation,
-                                              bounds, type_datum, &equal);
-        part_index = equal ? bounds->indexes[datum_index]
-                           : bounds->default_index;
-        if (part_index < 0 || part_index >= desc->nparts)
-            ereport(ERROR,
-                    (errcode(ERRCODE_CHECK_VIOLATION),
-                     errmsg("%s: relation type has no consensus partition", label)));
-        hash_parent_oid = desc->oids[part_index];
-        table_close(root, AccessShareLock);
-
-        hash_parent = table_open(hash_parent_oid, AccessShareLock);
-        key = RelationGetPartitionKey(hash_parent);
-        desc = RelationGetPartitionDesc(hash_parent, false);
-        if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
-            key->partnatts != 1 || desc == NULL ||
-            desc->nparts != CONSENSUS_HASH_LEAVES ||
-            desc->boundinfo->nindexes != CONSENSUS_HASH_LEAVES)
-            ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                     errmsg("%s: consensus relation partition must be HASH(subject_id, %d)",
-                            label, CONSENSUS_HASH_LEAVES)));
-        for (remainder = 0; remainder < CONSENSUS_HASH_LEAVES; remainder++)
-        {
-            part_index = desc->boundinfo->indexes[remainder];
-            if (part_index < 0 || part_index >= desc->nparts)
-                ereport(ERROR,
-                        (errcode(ERRCODE_CHECK_VIOLATION),
-                         errmsg("%s: consensus HASH partition is missing remainder %d",
-                                label, remainder)));
-            entry->leaf_oids[remainder] = desc->oids[part_index];
-        }
-        entry->hash_parent_oid = hash_parent_oid;
-        table_close(hash_parent, AccessShareLock);
+        entry->leaves = laplace_hash_leaves("consensus", label);
+        entry->leaf_plans = MemoryContextAllocZero(
+            TopMemoryContext, sizeof(SPIPlanPtr) * entry->leaves->count);
+        entry->update_plans = MemoryContextAllocZero(
+            TopMemoryContext, sizeof(SPIPlanPtr) * entry->leaves->count);
     }
     return entry;
 }
@@ -300,42 +235,21 @@ prior_route(const uint8_t *type16, Datum type_datum, const char *label)
 Datum
 pg_laplace_consensus_partition_leaf(PG_FUNCTION_ARGS)
 {
-    const char      *label = "consensus.partition_leaf";
-    Datum            type_datum;
-    const uint8_t   *type16;
-    PriorRouteEntry *route;
-    Relation         hash_parent;
-    PartitionKey     key;
-    Datum            values[1];
-    bool             nulls[1] = {false};
-    uint64           hash;
-    int              remainder;
+    const char *label = "consensus.partition_leaf";
+    const LaplaceHashLeaves *leaves;
+    Datum subject;
+    int remainder;
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
         ereport(ERROR,
                 (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                  errmsg("%s: type and subject must not be NULL", label)));
-
-    type_datum = PG_GETARG_DATUM(0);
-    type16 = bytea16(type_datum, label);
+    (void) bytea16(PG_GETARG_DATUM(0), label);
     (void) bytea16(PG_GETARG_DATUM(1), label);
-    route = prior_route(type16, type_datum, label);
-
-    hash_parent = table_open(route->hash_parent_oid, AccessShareLock);
-    key = RelationGetPartitionKey(hash_parent);
-    if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
-        key->partnatts != 1)
-        ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                 errmsg("%s: cached consensus route is no longer HASH partitioned",
-                        label)));
-    values[0] = PG_GETARG_DATUM(1);
-    hash = compute_partition_hash_value(
-        1, key->partsupfunc, key->partcollation, values, nulls);
-    table_close(hash_parent, AccessShareLock);
-
-    remainder = (int) (hash % CONSENSUS_HASH_LEAVES);
-    PG_RETURN_OID(route->leaf_oids[remainder]);
+    leaves = laplace_hash_leaves("consensus", label);
+    subject = PG_GETARG_DATUM(1);
+    laplace_hash_leaf_route(leaves, &subject, 1, &remainder, label);
+    PG_RETURN_OID(leaves->leaf_oids[remainder]);
 }
 
 static SPIPlanPtr
@@ -355,8 +269,8 @@ prior_leaf_plan(PriorRouteEntry *route, int remainder,
         int              i;
 
         namespace_name = get_namespace_name(
-            get_rel_namespace(route->leaf_oids[remainder]));
-        relation_name = get_rel_name(route->leaf_oids[remainder]);
+            get_rel_namespace(route->leaves->leaf_oids[remainder]));
+        relation_name = get_rel_name(route->leaves->leaf_oids[remainder]);
         if (namespace_name == NULL || relation_name == NULL)
             ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_TABLE),
@@ -608,8 +522,8 @@ update_leaf_plan(PriorRouteEntry *route, int remainder, const char *label)
         static const Oid argtypes[7] = {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
             TIMESTAMPTZARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
         char *namespace_name = get_namespace_name(
-            get_rel_namespace(route->leaf_oids[remainder]));
-        char *relation_name = get_rel_name(route->leaf_oids[remainder]);
+            get_rel_namespace(route->leaves->leaf_oids[remainder]));
+        char *relation_name = get_rel_name(route->leaves->leaf_oids[remainder]);
         StringInfoData sql;
 
         if (namespace_name == NULL || relation_name == NULL)
@@ -651,38 +565,21 @@ read_run_priors(const uint8_t *type16, Datum type_datum,
                 int run_start, int run_n, const char *label)
 {
     PriorRouteEntry *route = prior_route(type16, type_datum, label);
-    Relation         hash_parent;
-    PartitionKey     key;
-    PriorLeafBatch   batches[CONSENSUS_HASH_LEAVES];
+    int               nleaves = route->leaves->count;
+    PriorLeafBatch   *batches = palloc0(sizeof(PriorLeafBatch) * nleaves);
     FoldPriorStates *states = fold_prior_states_create(run_n);
-    bool              nulls[1] = {false};
     int              *remainder_by_row = (int *) palloc(sizeof(int) * run_n);
     int               i;
 
-    memset(batches, 0, sizeof(batches));
-    hash_parent = table_open(route->hash_parent_oid, AccessShareLock);
-    key = RelationGetPartitionKey(hash_parent);
-    if (key == NULL || key->strategy != PARTITION_STRATEGY_HASH ||
-        key->partnatts != 1)
-        ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                 errmsg("%s: cached consensus route is no longer HASH partitioned",
-                        label)));
-
+    laplace_hash_leaf_route(route->leaves, subjects->elems + run_start, run_n,
+                            remainder_by_row, label);
     for (i = 0; i < run_n; i++)
     {
-        Datum  value[1] = {subjects->elems[run_start + i]};
-        uint64 hash = compute_partition_hash_value(
-            1, key->partsupfunc, key->partcollation, value, nulls);
-        int remainder = (int) (hash % CONSENSUS_HASH_LEAVES);
-
-        remainder_by_row[i] = remainder;
-        states->leaves[i] = remainder;
-        batches[remainder].n++;
+        states->leaves[i] = remainder_by_row[i];
+        batches[remainder_by_row[i]].n++;
     }
-    table_close(hash_parent, AccessShareLock);
 
-    for (i = 0; i < CONSENSUS_HASH_LEAVES; i++)
+    for (i = 0; i < nleaves; i++)
     {
         if (batches[i].n == 0)
             continue;
@@ -700,7 +597,7 @@ read_run_priors(const uint8_t *type16, Datum type_datum,
         batch->positions[at] = i;
     }
 
-    for (i = 0; i < CONSENSUS_HASH_LEAVES; i++)
+    for (i = 0; i < nleaves; i++)
     {
         PriorLeafBatch *batch = &batches[i];
         Datum           vals[2];
@@ -1956,7 +1853,7 @@ write_run(const uint8_t *type16, Datum type, ArrayType *ids,
             deconstruct_array(folds->rating_array, INT8OID, 8, true, 'd', &rat, &nul, &cnt);
             deconstruct_array(folds->rd_array, INT8OID, 8, true, 'd', &rds, &nul, &cnt);
             deconstruct_array(folds->volatility_array, INT8OID, 8, true, 'd', &vol, &nul, &cnt);
-            for (int leaf = 0; leaf < CONSENSUS_HASH_LEAVES; ++leaf)
+            for (int leaf = 0; leaf < route->leaves->count; ++leaf)
             {
                 int m = 0;
                 for (int i = 0; i < n; ++i)

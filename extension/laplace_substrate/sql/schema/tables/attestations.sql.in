@@ -1,19 +1,13 @@
--- attestations: provenance rows, LIST-partitioned along the same HIGHWAY axis
--- as consensus (type_id). Evidence-backed folds select the exact touched cells
--- through the relation index, after locking their consensus targets. Fully
--- replayable testimony is one canonical neutral-prior period independent of
--- storage batching; mixed transient cells retain their exact score delta.
--- A modality's bulk load writes only the partitions of the relations it emits,
--- with indexes LIVE. Per-relation partitions come from
--- generated/seed_relation_partitions.sql.in; dynamic relations land in DEFAULT.
+-- attestations: attributable testimony, HASH-partitioned on subject_id exactly
+-- like consensus, so a working set's testimony and the cells it folds route to
+-- the same leaf number. Relation types are content ids and unbounded; the layout
+-- never depends on which relations exist. Leaf count is declared once here;
+-- native routing reads it from the partition descriptor.
 --
--- The highway GIN/partial indexes are dropped: with edges partitioned per
--- relation, the partition IS the bit — the entity-side highway_mask + the
--- perfcache do the routing. The column itself stays for now because the native
--- intent-stage tuple layout emits it (IntentStage.CopyColumnList); removing the
--- 32B/row dead weight is a follow-up native change.
+-- The highway_mask column stays because the native intent-stage tuple layout
+-- emits it (IntentStage.CopyColumnList).
 --
--- PK includes the partition keys; FKs dropped (see consensus.sql.in).
+-- PK includes the partition key; no FKs (see consensus.sql.in).
 -- Additive witness fields must also migrate existing evidence in place.
 CREATE TABLE IF NOT EXISTS attestations (
     id                bytea         NOT NULL CHECK (octet_length(id) = 16),
@@ -56,25 +50,32 @@ CREATE TABLE IF NOT EXISTS attestations (
     fold_replayable    boolean       NOT NULL DEFAULT true,
     highway_mask      bytea         CHECK (highway_mask IS NULL OR octet_length(highway_mask) = 32),
     PRIMARY KEY (id, type_id, subject_id)
-) PARTITION BY LIST (type_id);
+) PARTITION BY HASH (subject_id);
 
 
 DO $$
+DECLARE
+    b int;
+    suffix text;
+    strategy "char";
+    opts constant text := ' SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)';
 BEGIN
-    IF (SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = current_schema() AND c.relname = 'attestations') = 'p'
-       AND to_regclass(current_schema() || '.attestations_rdefault') IS NULL THEN
-        -- Hash-sharded like every named sibling (#1008): flat, the default held
-        -- 57% of all attestations (3.8M measured) — the dynamic families'
-        -- (DEP_*/EDEP_*/FEAT_*) only landing zone was the one unsharded heap.
-        CREATE TABLE attestations_rdefault PARTITION OF attestations DEFAULT
-            PARTITION BY HASH (subject_id);
-        FOR i IN 0..7 LOOP
-            EXECUTE format('CREATE TABLE attestations_rdefault_h%s PARTITION OF attestations_rdefault'
-                           || ' FOR VALUES WITH (MODULUS 8, REMAINDER %s)', i, i);
-            EXECUTE format('ALTER TABLE attestations_rdefault_h%s SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 100000)', i);
-        END LOOP;
+    SELECT p.partstrat INTO strategy
+    FROM pg_partitioned_table p
+    WHERE p.partrelid = (current_schema() || '.attestations')::regclass;
+    IF strategy IS DISTINCT FROM 'h' THEN
+        RAISE EXCEPTION
+            'attestations uses an obsolete partition layout; this version requires HASH(subject_id). Create a new canonical database.';
     END IF;
+    IF to_regclass(current_schema() || '.attestations_h00') IS NOT NULL THEN
+        RETURN;
+    END IF;
+    FOR b IN 0..63 LOOP
+        suffix := lpad(to_hex(b), 2, '0');
+        EXECUTE format('CREATE TABLE attestations_h%s PARTITION OF attestations FOR VALUES WITH (MODULUS 64, REMAINDER %s)',
+                       suffix, b);
+        EXECUTE format('ALTER TABLE attestations_h%s', suffix) || opts;
+    END LOOP;
 END $$;
 
 
