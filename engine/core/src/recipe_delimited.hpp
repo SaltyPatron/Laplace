@@ -192,9 +192,9 @@ class recipe_delimited_stream {
                 auto cell = row.find(ref.column);
                 if (cell == row.end() || cell->second.empty() || cell->second == "_") continue;
                 if (ref.pair_separator.empty()) {
-                    std::string target = resolve_reference(ref, by_key, cell->second);
-                    if (target.empty()) fail("in-group reference " + ref.column + " names a row without surface content");
-                    cell->second = std::move(target);
+                    // A head at a row without surface content has no endpoint, so
+                    // the reference carries no testimony, exactly as a dropped pair item.
+                    cell->second = resolve_reference(ref, by_key, cell->second);
                     continue;
                 }
                 std::string rebuilt;
