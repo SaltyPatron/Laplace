@@ -24,7 +24,8 @@ public sealed record ResolvedSourceGeneration(
     IngestArtifactGraph Graph,
     Hash128 GenerationId,
     IReadOnlyList<ResolvedSourceArtifact> Bindings,
-    IReadOnlyList<string> ExecutionErrors);
+    IReadOnlyList<string> ExecutionErrors,
+    bool CoversGeneration = true);
 
 /// <summary>
 /// Resolves the complete physical file set before execution, following the source
@@ -33,14 +34,35 @@ public sealed record ResolvedSourceGeneration(
 /// </summary>
 public static class SourceGenerationResolver
 {
-    public static async Task<ResolvedSourceGeneration> ResolveAsync(
+    public static Task<ResolvedSourceGeneration> ResolveAsync(
         SourceGenerationRecipe recipe, string root, CancellationToken ct = default)
+        => ResolveAsync(recipe, root, scope: null, ct);
+
+    /// <summary>
+    /// Resolves the generation at <paramref name="root"/>. A <paramref name="scope"/> at or
+    /// beneath the root executes only the admitted artifacts under it plus their dependency
+    /// closure; artifact paths, artifact ids and the generation id stay those of the whole
+    /// generation, so a scoped run commits the same per-file facts a full run would.
+    /// </summary>
+    public static async Task<ResolvedSourceGeneration> ResolveAsync(
+        SourceGenerationRecipe recipe, string root, string? scope, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(recipe);
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         root = Path.GetFullPath(root);
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
         RejectLink(new DirectoryInfo(root));
+        string? scopePath = null;
+        if (!string.IsNullOrWhiteSpace(scope))
+        {
+            scopePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(scope));
+            if (!Contains(root, scopePath))
+                throw new ArgumentException($"Scope '{scopePath}' is not within source-generation root '{root}'.", nameof(scope));
+            if (!Directory.Exists(scopePath) && !File.Exists(scopePath))
+                throw new FileNotFoundException("Source-generation scope does not exist.", scopePath);
+            if (string.Equals(scopePath, Path.TrimEndingDirectorySeparator(root), StringComparison.Ordinal))
+                scopePath = null;
+        }
         var rules = DependencyOrder(recipe.Rules);
         var matchers = rules.ToDictionary(static rule => rule.Artifact.Selector,
             static rule => Selector(rule.Artifact.Selector), StringComparer.Ordinal);
@@ -160,6 +182,26 @@ public static class SourceGenerationResolver
             }
         }
 
+        bool covers = scopePath is null;
+        IReadOnlyList<ResolvedSourceArtifact> executed = bindings;
+        if (scopePath is not null)
+        {
+            var byId = bindings.ToDictionary(static binding => binding.ArtifactId);
+            var selected = new HashSet<Hash128>();
+            var frontier = new Stack<ResolvedSourceArtifact>(
+                bindings.Where(binding => Contains(scopePath, binding.Artifact.Path)));
+            while (frontier.TryPop(out var binding))
+            {
+                if (!selected.Add(binding.ArtifactId)) continue;
+                foreach (Hash128 dependency in binding.Dependencies)
+                    if (byId.TryGetValue(dependency, out var required)) frontier.Push(required);
+            }
+            executed = bindings.Where(binding => selected.Contains(binding.ArtifactId)).ToArray();
+            if (executed.Count == 0)
+                executionErrors.Add($"Scope '{scopePath}' selects no admitted artifact of {recipe.SourceName}/{recipe.Release}.");
+            covers = executed.Count == bindings.Count;
+        }
+
         var graph = new IngestArtifactGraph(artifacts.OrderBy(static a => a.RelativePath, StringComparer.Ordinal));
         // A resolved generation is a composition: the generation document's content, then
         // the content ids of the semantic recipes it binds, then the admitted artifacts.
@@ -174,7 +216,14 @@ public static class SourceGenerationResolver
         foreach (var binding in bindings.OrderBy(static b => b.Artifact.RelativePath, StringComparer.Ordinal))
             constituents.Add(binding.ArtifactId);
         Hash128 generation = Hash128.Merkle(EntityTier.Document, constituents.ToArray());
-        return new(recipe, root, graph, generation, bindings.AsReadOnly(), executionErrors.AsReadOnly());
+        return new(recipe, root, graph, generation, executed, executionErrors.AsReadOnly(), covers);
+    }
+
+    private static bool Contains(string directory, string path)
+    {
+        string parent = Path.TrimEndingDirectorySeparator(directory);
+        return string.Equals(path, parent, StringComparison.Ordinal)
+            || path.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     private static IngestArtifact MakeArtifact(SourceGenerationRecipe recipe, string relative, string path,

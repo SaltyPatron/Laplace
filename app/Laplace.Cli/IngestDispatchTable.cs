@@ -217,9 +217,11 @@ internal static class IngestDispatchTable
         {
             // A selected generation resumes per file and owns its layer: once every
             // admitted artifact commits, the runner records HasLayerCompleted for the
-            // source so the next layer's precondition can see it.
+            // source so the next layer's precondition can see it. A scoped run commits
+            // only its files and leaves the layer to a run over the whole generation.
+            bool scoped = configured is Laplace.Decomposers.Structured.Decomposer<Laplace.Decomposers.Structured.SourceGenerationRecipe> { IsScoped: true };
             task = IngestCommands.IngestViaRunnerAsync(configured, sourceRoot,
-                skipLayerCheck: configured.LayerOrder == 0, cli, skipSourceCompletion: false);
+                skipLayerCheck: configured.LayerOrder == 0, cli, skipSourceCompletion: scoped);
             return true;
         }
         if (Routes.TryGetValue(sourceKey, out var handler))

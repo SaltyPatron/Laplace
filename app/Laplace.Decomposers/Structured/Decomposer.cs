@@ -382,6 +382,7 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
 {
     private readonly TRecipe _recipe;
     private readonly string _root;
+    private readonly string? _scope;
     private readonly RecipeSyntaxProviderRegistry _providers;
     private ResolvedSourceGeneration? _resolved;
     private IReadOnlyCollection<string> _canonicalNames = [];
@@ -389,10 +390,12 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
     private readonly Dictionary<Hash128, IRecipeSyntaxExecutor> _executors = [];
     private readonly List<string> _executionErrors = [];
 
-    public Decomposer(TRecipe recipe, string root, RecipeSyntaxProviderRegistry? providers = null)
+    public Decomposer(TRecipe recipe, string root, RecipeSyntaxProviderRegistry? providers = null,
+        string? scope = null)
     {
         _recipe = recipe ?? throw new ArgumentNullException(nameof(recipe));
         _root = Path.GetFullPath(root);
+        _scope = string.IsNullOrWhiteSpace(scope) ? null : Path.GetFullPath(scope);
         _providers = providers ?? RecipeSyntaxProviderRegistry.CreateDefault();
     }
 
@@ -401,11 +404,17 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
     public override int LayerOrder => _recipe.LayerOrder;
     public override Hash128 TrustClassId => SubstrateCanonicalIds.TrustClass(_recipe.TrustClass);
     public bool PerFileCompletion => true;
+
+    /// <summary>
+    /// A scoped run executes the admitted artifacts beneath its scope: it commits those
+    /// files but does not establish the source's layer.
+    /// </summary>
+    public bool IsScoped => _scope is not null;
     public override IReadOnlyCollection<string> CanonicalNamesForReadback => _canonicalNames;
     public override IReadOnlyList<string> DeclaredRelations => _relations;
 
     public async Task<ResolvedSourceGeneration> ResolveAsync(CancellationToken ct = default)
-        => _resolved ??= await SourceGenerationResolver.ResolveAsync(_recipe, _root, ct).ConfigureAwait(false);
+        => _resolved ??= await SourceGenerationResolver.ResolveAsync(_recipe, _root, _scope, ct).ConfigureAwait(false);
 
     public async Task<IngestArtifactGraph?> DescribeArtifactsAsync(string ecosystemPath,
         DecomposerOptions options, CancellationToken ct = default)

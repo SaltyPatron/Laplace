@@ -116,8 +116,21 @@ public sealed class SeedDecomposerResolver : ISeedDecomposerResolver
         { decomposer = null!; resolvedRoot = ""; return false; }
         string? requested = string.IsNullOrWhiteSpace(root) ? null : root;
         string? generationRoot = string.IsNullOrWhiteSpace(recipe.Root) ? null : recipe.Root;
-        resolvedRoot = Path.GetFullPath(requested ?? generationRoot ?? Path.GetDirectoryName(recipe.ManifestPath)!);
-        decomposer = new Structured.Decomposer<SourceGenerationRecipe>(recipe, resolvedRoot);
+        string declared = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(generationRoot ?? Path.GetDirectoryName(recipe.ManifestPath)!));
+        string? scope = null;
+        resolvedRoot = declared;
+        if (requested is not null)
+        {
+            string path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(requested));
+            // A path beneath the declared root selects part of the same generation; any
+            // other path is another copy of the generation and becomes its root.
+            if (path.StartsWith(declared + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                scope = path;
+            else if (!string.Equals(path, declared, StringComparison.Ordinal))
+                resolvedRoot = path;
+        }
+        decomposer = new Structured.Decomposer<SourceGenerationRecipe>(recipe, resolvedRoot, scope: scope);
         return true;
     }
 
