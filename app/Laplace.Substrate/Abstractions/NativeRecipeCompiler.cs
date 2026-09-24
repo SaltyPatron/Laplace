@@ -15,6 +15,7 @@ public static class NativeRecipeCompiler
     private const uint Rcp3 = 0x33504352u;
     private const uint Rcp4 = 0x34504352u;
     private const uint Rcp5 = 0x35504352u;
+    private const uint Rcp6 = 0x36504352u;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     public static byte[] Compile(SemanticSourceRecipe recipe, int recordDepth = 2)
@@ -45,7 +46,11 @@ public static class NativeRecipeCompiler
             || recipe.ProviderRoutes.Any(route => route.StructurePaths.Count != 0);
         bool hasInheritedAttributes = recipe.ProviderRoutes.Any(
             static route => route.InheritParentAttributes);
-        uint version = hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
+        bool grouped = recipe.DelimitedSyntax?.IsGrouped == true
+            || recipe.Fields.Any(static field => field.SubjectMode != SourceSubjectMode.Record
+                || field.PairMode != SourcePairMode.None || field.RelationField is not null
+                || field.GroupOnce || field.OmitWhenEqualsSubject);
+        uint version = grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
         writer.Write(version);
@@ -70,6 +75,31 @@ public static class NativeRecipeCompiler
             WriteText(writer, syntax.RangeLastField);
             writer.Write(checked((uint)syntax.MinimumColumns));
             writer.Write(syntax.AllowTrailingEmptyColumn ? 1u : 0u);
+            if (version == Rcp6)
+            {
+                writer.Write(syntax.GroupBlankLines ? 1u : 0u);
+                WriteText(writer, syntax.GroupAttributeSeparator);
+                WriteText(writer, syntax.SkipKeyColumn);
+                WriteText(writer, syntax.SkipKeyCharacters);
+                writer.Write(checked((uint)(syntax.References?.Count ?? 0)));
+                foreach (SourceDelimitedReference reference in syntax.References ?? [])
+                {
+                    WriteText(writer, reference.Column);
+                    WriteText(writer, reference.KeyColumn);
+                    WriteText(writer, reference.TargetColumn);
+                    WriteText(writer, reference.RootValue);
+                    WriteText(writer, reference.PairSeparator);
+                    WriteText(writer, reference.PairValueSeparator);
+                }
+                var constants = (syntax.Constants ?? new Dictionary<string, string>())
+                    .OrderBy(static pair => pair.Key, StringComparer.Ordinal).ToArray();
+                writer.Write(checked((uint)constants.Length));
+                foreach (var constant in constants)
+                {
+                    WriteText(writer, constant.Key);
+                    WriteText(writer, constant.Value);
+                }
+            }
         }
         writer.Write(checked((uint)recipe.Fields.Count));
         foreach (SourceRecipeField field in recipe.Fields)
@@ -78,13 +108,14 @@ public static class NativeRecipeCompiler
                 throw new InvalidDataException($"Unknown native recipe opcode at '{field.SyntaxPath}'.");
 
             bool testimony = field.Disposition.HasFlag(SourceFieldDisposition.Testimony);
-            var relation = testimony
+            bool dynamicRelation = field.PairMode != SourcePairMode.None || field.RelationField is not null;
+            var relation = testimony && !dynamicRelation
                 ? RelationTypeRegistry.Resolve(field.RelationName ?? field.PropertyName)
                 : default;
-            double rank = field.RelationRank ?? (testimony ? relation.Rank : 1);
+            double rank = field.RelationRank ?? (testimony && !dynamicRelation ? relation.Rank : 1);
             if (!double.IsFinite(rank) || rank is < 0 or > 1)
                 throw new InvalidDataException($"Invalid relation rank at '{field.SyntaxPath}'.");
-            Hash128 parent = !testimony ? Hash128.Zero : field.RelationParent is { } parentName
+            Hash128 parent = !testimony || dynamicRelation ? Hash128.Zero : field.RelationParent is { } parentName
                 ? RelationTypeRegistry.Resolve(parentName).Id : relation.ParentId ?? Hash128.Zero;
             Hash128 lexical = Hash128.Zero;
             if (testimony && field.PreserveLexicalValue)
@@ -103,20 +134,35 @@ public static class NativeRecipeCompiler
             WriteText(writer, field.ObjectNamespace ?? $"recipe/value/{field.PropertyName}");
             WriteHash(writer, relation.Id);
             WriteHash(writer, parent);
-            WriteHash(writer, EntityTypeRegistry.Id(field.ObjectEntityType));
+            // An empty object entity type declares no classification testimony.
+            WriteHash(writer, string.IsNullOrEmpty(field.ObjectEntityType)
+                ? Hash128.Zero : EntityTypeRegistry.Id(field.ObjectEntityType));
             WriteHash(writer, lexical);
             writer.Write(rank);
             WriteAliases(writer, aliases, field.ValueAliasProperty ?? field.PropertyName);
-            if (version is Rcp3 or Rcp4 or Rcp5)
+            if (version is Rcp3 or Rcp4 or Rcp5 or Rcp6)
             {
                 writer.Write(field.DefaultValue is null ? 0u : 1u);
                 WriteText(writer, field.DefaultValue);
                 writer.Write(field.OmitDefaultTestimony ? 1u : 0u);
             }
             if (hasExtendedHeader) WriteText(writer, field.ContextField);
+            if (version == Rcp6)
+            {
+                if (dynamicRelation && field.RelationResolver == SourceRelationResolver.None)
+                    throw new InvalidDataException($"Dynamic relation at '{field.SyntaxPath}' declares no resolver.");
+                writer.Write((uint)field.SubjectMode);
+                writer.Write((uint)field.PairMode);
+                writer.Write((uint)field.RelationResolver);
+                WriteText(writer, field.RelationField);
+                WriteText(writer, field.TrunkField);
+                WriteText(writer, field.PairValueSeparator);
+                writer.Write(field.OmitWhenEqualsSubject ? 1u : 0u);
+                writer.Write(field.GroupOnce ? 1u : 0u);
+            }
         }
 
-        if (version is Rcp4 or Rcp5)
+        if (version is Rcp4 or Rcp5 or Rcp6)
         {
             writer.Write(checked((uint)recipe.Structures.Count));
             foreach (SourceRecipeStructure structure in recipe.Structures)
@@ -158,7 +204,8 @@ public static class NativeRecipeCompiler
             WriteText(writer, subject.EntityNamespace);
             WriteText(writer, subject.SequenceSeparator ?? identity?.SequenceSeparator ?? " ");
             writer.Write((uint)subjectCodec);
-            WriteHash(writer, EntityTypeRegistry.Id(subject.EntityType));
+            WriteHash(writer, string.IsNullOrEmpty(subject.EntityType)
+                ? Hash128.Zero : EntityTypeRegistry.Id(subject.EntityType));
             writer.Write(checked((uint)(route.ChildFieldPrefixes?.Count ?? 0)));
             if (route.ChildFieldPrefixes is { } children)
                 foreach (var child in children.OrderBy(static p => p.Key, StringComparer.Ordinal))
@@ -184,7 +231,7 @@ public static class NativeRecipeCompiler
                 ? identity.ValueAliasProperty ?? identity.PropertyName
                 : recipe.CanonicalProperty(subject.IdentityField);
             WriteAliases(writer, aliases, property);
-            if (version is Rcp4 or Rcp5)
+            if (version is Rcp4 or Rcp5 or Rcp6)
             {
                 writer.Write(checked((uint)route.StructurePaths.Count));
                 foreach (string structurePath in route.StructurePaths)
@@ -194,7 +241,7 @@ public static class NativeRecipeCompiler
                             $"Route '{route.RecordName}' references unknown structure '{structurePath}'.");
                     WriteText(writer, structurePath);
                 }
-                if (version == Rcp5)
+                if (version is Rcp5 or Rcp6)
                     writer.Write(route.InheritParentAttributes ? 1u : 0u);
             }
         }

@@ -111,6 +111,7 @@ typedef struct PriorRouteEntry
     Oid        hash_parent_oid;
     Oid        leaf_oids[CONSENSUS_HASH_LEAVES];
     SPIPlanPtr leaf_plans[CONSENSUS_HASH_LEAVES];
+    SPIPlanPtr update_plans[CONSENSUS_HASH_LEAVES];
 } PriorRouteEntry;
 
 static HTAB *upsert_prior_routes = NULL;
@@ -528,6 +529,7 @@ typedef struct FoldPriorStates
     Datum  *volatilities;
     int     n;
     uint64  matched_n;
+    int    *leaves;     /* exact HASH leaf remainder of each row */
 } FoldPriorStates;
 
 typedef struct PriorLeafBatch
@@ -545,6 +547,7 @@ fold_prior_states_create(int n)
     FoldPriorStates *states = (FoldPriorStates *) palloc(sizeof(*states));
 
     states->matched = (bool *) palloc0(sizeof(bool) * n);
+    states->leaves = (int *) palloc0(sizeof(int) * n);
     states->ratings = (Datum *) palloc(sizeof(Datum) * n);
     states->rds = (Datum *) palloc(sizeof(Datum) * n);
     states->volatilities = (Datum *) palloc(sizeof(Datum) * n);
@@ -592,6 +595,51 @@ fold_prior_states_add(FoldPriorStates *states, SPITupleTable *rows,
     }
 }
 
+/* Existing cells update in exactly the HASH leaf that owns them: one keyed
+ * UPDATE per touched leaf, the same routing the locked prior read used. The
+ * delta folds onto the locked prior, so witnesses accumulate. */
+static SPIPlanPtr
+update_leaf_plan(PriorRouteEntry *route, int remainder, const char *label)
+{
+    SPIPlanPtr plan = route->update_plans[remainder];
+
+    if (plan == NULL)
+    {
+        static const Oid argtypes[7] = {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
+            TIMESTAMPTZARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
+        char *namespace_name = get_namespace_name(
+            get_rel_namespace(route->leaf_oids[remainder]));
+        char *relation_name = get_rel_name(route->leaf_oids[remainder]);
+        StringInfoData sql;
+
+        if (namespace_name == NULL || relation_name == NULL)
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_TABLE),
+                     errmsg("%s: consensus HASH leaf disappeared", label)));
+        initStringInfo(&sql);
+        appendStringInfo(&sql,
+            "UPDATE ONLY %s AS c SET rating=b.rating, rd=b.rd, volatility=b.volatility,"
+            " witness_count=c.witness_count+b.games,"
+            " last_observed_at=GREATEST(c.last_observed_at,b.ts) "
+            "FROM unnest($1::bytea[],$2::bytea[],$3::int8[],$4::timestamptz[],"
+            " $5::int8[],$6::int8[],$7::int8[]) AS b(id,s,games,ts,rating,rd,volatility) "
+            "WHERE c.id=b.id AND c.subject_id=b.s",
+            quote_qualified_identifier(namespace_name, relation_name));
+        plan = SPI_prepare(sql.data, 7, (Oid *) argtypes);
+        if (plan == NULL)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf update SPI_prepare failed: %s",
+                            label, SPI_result_code_string(SPI_result))));
+        if (SPI_keepplan(plan) != 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("%s: exact-leaf update SPI_keepplan failed", label)));
+        route->update_plans[remainder] = plan;
+    }
+    return plan;
+}
+
 /* Route each subject through PostgreSQL's own partition support function,
  * then read its stored state from exactly the one physical leaf that owns it.
  * The batch is partitioned once in native memory. Every exact-leaf statement
@@ -629,6 +677,7 @@ read_run_priors(const uint8_t *type16, Datum type_datum,
         int remainder = (int) (hash % CONSENSUS_HASH_LEAVES);
 
         remainder_by_row[i] = remainder;
+        states->leaves[i] = remainder;
         batches[remainder].n++;
     }
     table_close(hash_parent, AccessShareLock);
@@ -1883,88 +1932,6 @@ write_evidence_states(const uint8_t *type16, ArrayType *ids,
     return affected;
 }
 
-/* Existing cells of one type run take their evidence-derived state in one keyed
- * UPDATE. A cell whose durable testimony is not replayable keeps the delta fold
- * over its locked prior and accumulates its witnesses. */
-static const char *EVIDENCE_MATCHED_UPDATE_SQL =
-    "UPDATE laplace.consensus AS c SET "
-    " rating=b.rating, rd=b.rd, volatility=b.volatility,"
-    " witness_count=CASE WHEN b.recomputed THEN b.games ELSE c.witness_count+b.games END,"
-    " last_observed_at=CASE WHEN b.recomputed THEN b.ts"
-    "  ELSE GREATEST(c.last_observed_at,b.ts) END "
-    "FROM unnest($1::bytea[],$2::bytea[],$3::int8[],$4::timestamptz[],$5::bool[],"
-    " $6::int8[],$7::int8[],$8::int8[]) AS b(id,s,games,ts,recomputed,rating,rd,volatility) "
-    "WHERE c.type_id='\\x%s'::bytea AND c.id=b.id AND c.subject_id=b.s";
-
-static HTAB *evidence_matched_plans = NULL;
-
-/* Fold the existing (locked) cells of a run from their durable evidence. Only
- * the matched subset is read back; novel cells never touch the evidence table. */
-static FoldEvidenceStates *
-read_matched_evidence(const uint8_t *type16, const InArray *subjects,
-                      const InArray *objects, const InArray *games,
-                      const InArray *ts, FoldPriorStates *priors,
-                      const char *label)
-{
-    int n = subjects->n, m = 0;
-    FoldEvidenceStates *out = palloc(sizeof(*out));
-    out->recomputed = palloc0(sizeof(bool) * n);
-    out->counts = palloc(sizeof(Datum) * n);
-    out->timestamps = palloc(sizeof(Datum) * n);
-    memcpy(out->counts, games->elems, sizeof(Datum) * n);
-    memcpy(out->timestamps, ts->elems, sizeof(Datum) * n);
-
-    int *index = palloc(sizeof(int) * priors->matched_n);
-    Datum *s = palloc(sizeof(Datum) * priors->matched_n);
-    Datum *o = palloc(sizeof(Datum) * priors->matched_n);
-    bool *onull = palloc(sizeof(bool) * priors->matched_n);
-    Datum *g = palloc(sizeof(Datum) * priors->matched_n);
-    Datum *t = palloc(sizeof(Datum) * priors->matched_n);
-    for (int i = 0; i < n; ++i)
-        if (priors->matched[i])
-        {
-            index[m] = i;
-            s[m] = subjects->elems[i];
-            o[m] = objects->elems[i];
-            onull[m] = objects->nulls[i];
-            g[m] = games->elems[i];
-            t[m] = ts->elems[i];
-            ++m;
-        }
-
-    int dims[1] = {m}, lbs[1] = {1};
-    InArray ms, mo, mg, mt;
-    ms.elems = s; ms.nulls = NULL; ms.n = m;
-    ms.array = construct_array(s, m, BYTEAOID, -1, false, 'i');
-    mo.elems = o; mo.nulls = onull; mo.n = m;
-    mo.array = construct_md_array(o, onull, 1, dims, lbs, BYTEAOID, -1, false, 'i');
-    mg.elems = g; mg.nulls = NULL; mg.n = m; mg.array = NULL;
-    mt.elems = t; mt.nulls = NULL; mt.n = m; mt.array = NULL;
-
-    FoldPriorStates *sub = fold_prior_states_create(m);
-    for (int k = 0; k < m; ++k)
-    {
-        sub->matched[k] = true;
-        sub->ratings[k] = priors->ratings[index[k]];
-        sub->rds[k] = priors->rds[index[k]];
-        sub->volatilities[k] = priors->volatilities[index[k]];
-    }
-    sub->matched_n = m;
-    FoldEvidenceStates *ev = read_evidence_states(type16, &ms, &mo, &mg, &mt,
-                                                  sub, label, false);
-    for (int k = 0; k < m; ++k)
-    {
-        int i = index[k];
-        out->recomputed[i] = ev->recomputed[k];
-        out->counts[i] = ev->counts[k];
-        out->timestamps[i] = ev->timestamps[k];
-        priors->ratings[i] = sub->ratings[k];
-        priors->rds[i] = sub->rds[k];
-        priors->volatilities[i] = sub->volatilities[k];
-    }
-    return out;
-}
-
 /* One set write per run: existing cells by keyed UPDATE, novel cells by native
  * COPY into their leaves. */
 static void
@@ -1975,20 +1942,13 @@ write_run(const uint8_t *type16, Datum type, ArrayType *ids,
 {
     int n = subjects->n;
     uint64 matched_n = priors->matched_n;
-    Datum *flags = palloc(sizeof(Datum) * n);
-    for (int i = 0; i < n; ++i) flags[i] = BoolGetDatum(evidence->recomputed[i]);
     ArrayType *counts = construct_array(evidence->counts, n, INT8OID, 8, true, 'd');
     ArrayType *times = construct_array(evidence->timestamps, n, TIMESTAMPTZOID, 8, true, 'd');
     uint64 done = 0;
     {
         if (matched_n > 0)
         {
-            static const Oid args[8] = {BYTEAARRAYOID, BYTEAARRAYOID, INT8ARRAYOID,
-                TIMESTAMPTZARRAYOID, BOOLARRAYOID, INT8ARRAYOID, INT8ARRAYOID, INT8ARRAYOID};
-            Datum *mid = palloc(sizeof(Datum) * matched_n), *ms = palloc(sizeof(Datum) * matched_n);
-            Datum *mg = palloc(sizeof(Datum) * matched_n), *mt = palloc(sizeof(Datum) * matched_n);
-            Datum *mf = palloc(sizeof(Datum) * matched_n), *mr = palloc(sizeof(Datum) * matched_n);
-            Datum *md = palloc(sizeof(Datum) * matched_n), *mv = palloc(sizeof(Datum) * matched_n);
+            PriorRouteEntry *route = prior_route(type16, type, label);
             Datum *all_ids, *rat, *rds, *vol;
             bool *nul;
             int cnt;
@@ -1996,34 +1956,40 @@ write_run(const uint8_t *type16, Datum type, ArrayType *ids,
             deconstruct_array(folds->rating_array, INT8OID, 8, true, 'd', &rat, &nul, &cnt);
             deconstruct_array(folds->rd_array, INT8OID, 8, true, 'd', &rds, &nul, &cnt);
             deconstruct_array(folds->volatility_array, INT8OID, 8, true, 'd', &vol, &nul, &cnt);
-            int m = 0;
-            for (int i = 0; i < n; ++i)
-                if (priors->matched[i])
-                {
-                    mid[m] = all_ids[i]; ms[m] = subjects->elems[i];
-                    mg[m] = evidence->counts[i]; mt[m] = evidence->timestamps[i];
-                    mf[m] = flags[i]; mr[m] = rat[i]; md[m] = rds[i]; mv[m] = vol[i];
-                    ++m;
-                }
-            Datum vals[8] = {
-                PointerGetDatum(construct_array(mid, m, BYTEAOID, -1, false, 'i')),
-                PointerGetDatum(construct_array(ms, m, BYTEAOID, -1, false, 'i')),
-                PointerGetDatum(construct_array(mg, m, INT8OID, 8, true, 'd')),
-                PointerGetDatum(construct_array(mt, m, TIMESTAMPTZOID, 8, true, 'd')),
-                PointerGetDatum(construct_array(mf, m, BOOLOID, 1, true, 'c')),
-                PointerGetDatum(construct_array(mr, m, INT8OID, 8, true, 'd')),
-                PointerGetDatum(construct_array(md, m, INT8OID, 8, true, 'd')),
-                PointerGetDatum(construct_array(mv, m, INT8OID, 8, true, 'd'))};
-            SPIPlanPtr plan = typed_plan(&evidence_matched_plans,
-                "consensus evidence matched updates", type16,
-                EVIDENCE_MATCHED_UPDATE_SQL, 8, args);
-            int rc = SPI_execute_plan(plan, vals, NULL, false, 0);
-            if (rc != SPI_OK_UPDATE || SPI_processed != matched_n)
-                ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
-                    errmsg("%s: keyed matched update affected %lu of %lu rows",
-                           label, (unsigned long) SPI_processed,
-                           (unsigned long) matched_n)));
-            done += SPI_processed;
+            for (int leaf = 0; leaf < CONSENSUS_HASH_LEAVES; ++leaf)
+            {
+                int m = 0;
+                for (int i = 0; i < n; ++i)
+                    if (priors->matched[i] && priors->leaves[i] == leaf) ++m;
+                if (m == 0) continue;
+                Datum *mid = palloc(sizeof(Datum) * m), *ms = palloc(sizeof(Datum) * m);
+                Datum *mg = palloc(sizeof(Datum) * m), *mt = palloc(sizeof(Datum) * m);
+                Datum *mr = palloc(sizeof(Datum) * m), *md = palloc(sizeof(Datum) * m);
+                Datum *mv = palloc(sizeof(Datum) * m);
+                int k = 0;
+                for (int i = 0; i < n; ++i)
+                    if (priors->matched[i] && priors->leaves[i] == leaf)
+                    {
+                        mid[k] = all_ids[i]; ms[k] = subjects->elems[i];
+                        mg[k] = evidence->counts[i]; mt[k] = evidence->timestamps[i];
+                        mr[k] = rat[i]; md[k] = rds[i]; mv[k] = vol[i];
+                        ++k;
+                    }
+                Datum vals[7] = {
+                    PointerGetDatum(construct_array(mid, m, BYTEAOID, -1, false, 'i')),
+                    PointerGetDatum(construct_array(ms, m, BYTEAOID, -1, false, 'i')),
+                    PointerGetDatum(construct_array(mg, m, INT8OID, 8, true, 'd')),
+                    PointerGetDatum(construct_array(mt, m, TIMESTAMPTZOID, 8, true, 'd')),
+                    PointerGetDatum(construct_array(mr, m, INT8OID, 8, true, 'd')),
+                    PointerGetDatum(construct_array(md, m, INT8OID, 8, true, 'd')),
+                    PointerGetDatum(construct_array(mv, m, INT8OID, 8, true, 'd'))};
+                int rc = SPI_execute_plan(update_leaf_plan(route, leaf, label), vals, NULL, false, 0);
+                if (rc != SPI_OK_UPDATE || SPI_processed != (uint64) m)
+                    ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                        errmsg("%s: exact-leaf update affected %lu of %d rows",
+                               label, (unsigned long) SPI_processed, m)));
+                done += SPI_processed;
+            }
         }
         if (matched_n < (uint64) n)
         {
@@ -2180,17 +2146,14 @@ pg_laplace_consensus_merge_evidence(PG_FUNCTION_ARGS)
             DirectFunctionCall1(pg_advisory_xact_lock_int8, Int64GetDatum((int64) key));
         }
 
-        /* Lock existing cells in their exact leaves, fold novel cells from this
-         * delta (the delta is their complete accepted testimony), refold only
-         * existing cells from durable evidence, then one keyed UPDATE and one
-         * native COPY. */
+        /* Lock existing cells in their exact leaves, fold the delta onto each
+         * prior (novel cells from the neutral prior), then one keyed UPDATE per
+         * touched leaf and one native COPY of the novel cells. */
         priors = read_run_priors(type16, types.elems[run_start], cell_ids,
                                  &run_subjects, 0, run_subjects.n, label);
-        evidence = priors->matched_n > 0
-            ? read_matched_evidence(type16, &run_subjects, &run_objects,
-                                    &run_games, &run_ts, priors, label)
-            : NULL;
-        if (evidence == NULL)
+        /* The delta folds onto each locked prior: one Glicko-2 rating period per
+         * working set, in commit order. Durable evidence is never re-read. */
+        evidence = NULL;
         {
             evidence = palloc(sizeof(*evidence));
             evidence->recomputed = palloc0(sizeof(bool) * run_subjects.n);

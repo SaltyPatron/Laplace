@@ -10,8 +10,30 @@
 // Adapted from Laplace-Refactor's decomposition_delimited.cpp separator/record
 // recovery. Streaming retains an unfinished record across feeds. This provider
 // recovers syntax only; recipe_stream owns all shared semantic lowering.
+// One declared in-group reference: a column whose value names another row of
+// the same group by its key column. The provider replaces the pointer with the
+// referenced row's target value; the source's pointer numbers are never content.
+// A value equal to root_value names the group trunk itself. Pair columns carry
+// several "key<pair_value_separator>value" items; only the key is a reference.
+struct recipe_delimited_reference {
+    std::string column, key_column, target_column, root_value;
+    std::string pair_separator, pair_value_separator;
+};
+
+// Resolved reference values travel to the recipe VM with in-memory markers that
+// cannot occur in source text lines.
+inline constexpr char recipe_group_trunk_value[] = "\x01";
+inline constexpr char recipe_pair_item_separator = '\x1e';
+inline constexpr char recipe_pair_value_separator = '\x1f';
+
 struct recipe_delimited_config {
     std::string record_name, namespace_uri, separator, comment_prefix;
+    // Grouped records (blank-line blocks such as CoNLL-U sentences).
+    bool group_blank_lines = false;
+    std::string group_attribute_separator;
+    std::string skip_key_column, skip_key_characters;
+    std::vector<recipe_delimited_reference> references;
+    std::map<std::string, std::string> constants;
     std::string directive_prefix, directive_record_name;
     std::string range_column, range_separator, range_first_field, range_last_field;
     bool trim_fields = true;
@@ -24,6 +46,11 @@ class recipe_delimited_stream {
     std::string pending_;
     uint64_t line_ = 0;
     bool final_ = false;
+    std::map<std::string, std::string> group_attributes_;
+    std::vector<std::map<std::string, std::string>> group_rows_;
+    // Rows skipped by key (multiword ranges, empty nodes) are not records, but
+    // other rows may still point at them.
+    std::vector<std::map<std::string, std::string>> group_skipped_;
 
     static std::string_view trim(std::string_view text) {
         auto first = text.find_first_not_of(" \t\r");
@@ -38,10 +65,23 @@ class recipe_delimited_stream {
         if (line_ == 1 && text.size() >= 3 && text.substr(0, 3) == "\xef\xbb\xbf") text.remove_prefix(3);
         if (!text.empty() && text.back() == '\r') text.remove_suffix(1);
         auto nonspace = trim(text);
-        if (nonspace.empty()) return;
+        if (nonspace.empty()) {
+            if (config.group_blank_lines) flush_group(emit);
+            return;
+        }
         bool directive = false;
         if (!config.comment_prefix.empty() && nonspace.find(config.comment_prefix) == 0) {
             auto body = trim(nonspace.substr(config.comment_prefix.size()));
+            if (config.group_blank_lines && !config.group_attribute_separator.empty()) {
+                const auto split_at = body.find(config.group_attribute_separator);
+                if (split_at != std::string_view::npos) {
+                    auto key = trim(body.substr(0, split_at));
+                    auto value = trim(body.substr(split_at + config.group_attribute_separator.size()));
+                    if (!key.empty())
+                        group_attributes_["group:" + std::string(key)] = std::string(value);
+                }
+                return;
+            }
             if (!config.directive_prefix.empty() && body.find(config.directive_prefix) == 0) {
                 directive = true;
                 text = body.substr(config.directive_prefix.size());
@@ -54,7 +94,7 @@ class recipe_delimited_stream {
             directive = true;
             text = nonspace.substr(config.directive_prefix.size());
         }
-        if (!config.comment_prefix.empty()) {
+        if (!config.comment_prefix.empty() && !config.group_blank_lines) {
             auto comment = text.find(config.comment_prefix);
             if (comment != std::string_view::npos) text = text.substr(0, comment);
         }
@@ -99,8 +139,91 @@ class recipe_delimited_stream {
                 }
             }
         }
+        for (const auto& constant : config.constants)
+            if (!values.emplace(constant.first, constant.second).second)
+                fail("constant collides with a declared column: " + constant.first);
+        if (config.group_blank_lines && !directive) {
+            if (!config.skip_key_column.empty()) {
+                const auto key = values.find(config.skip_key_column);
+                if (key != values.end()
+                    && key->second.find_first_of(config.skip_key_characters) != std::string::npos) {
+                    group_skipped_.push_back(std::move(values));
+                    return;
+                }
+            }
+            group_rows_.push_back(std::move(values));
+            return;
+        }
         emit(directive ? config.directive_record_name : config.record_name,
              config.namespace_uri, std::move(values));
+    }
+
+    std::string resolve_reference(const recipe_delimited_reference& ref,
+        const std::map<std::string, const std::map<std::string, std::string>*>& by_key,
+        const std::string& pointer) const {
+        if (pointer == ref.root_value) return recipe_group_trunk_value;
+        const auto row = by_key.find(pointer);
+        if (row == by_key.end()) fail("in-group reference " + ref.column + "=" + pointer + " names no row");
+        const auto target = row->second->find(ref.target_column);
+        // A pointer at a row without surface content (an empty node) carries no
+        // endpoint; the caller drops that item.
+        if (target == row->second->end() || target->second.empty() || target->second == "_")
+            return {};
+        return target->second;
+    }
+
+    template<class Emit> void flush_group(Emit& emit) {
+        if (group_rows_.empty()) { group_attributes_.clear(); group_skipped_.clear(); return; }
+        std::map<std::string, const std::map<std::string, std::string>*> by_key;
+        for (const auto& ref : config.references) {
+            for (const auto& row : group_rows_) {
+                const auto key = row.find(ref.key_column);
+                if (key != row.end()) by_key.emplace(key->second, &row);
+            }
+            for (const auto& row : group_skipped_) {
+                const auto key = row.find(ref.key_column);
+                if (key != row.end()) by_key.emplace(key->second, &row);
+            }
+        }
+        std::vector<std::map<std::string, std::string>> resolved = group_rows_;
+        for (size_t i = 0; i < resolved.size(); ++i) {
+            auto& row = resolved[i];
+            for (const auto& ref : config.references) {
+                auto cell = row.find(ref.column);
+                if (cell == row.end() || cell->second.empty() || cell->second == "_") continue;
+                if (ref.pair_separator.empty()) {
+                    std::string target = resolve_reference(ref, by_key, cell->second);
+                    if (target.empty()) fail("in-group reference " + ref.column + " names a row without surface content");
+                    cell->second = std::move(target);
+                    continue;
+                }
+                std::string rebuilt;
+                size_t start = 0;
+                for (;;) {
+                    const size_t end = cell->second.find(ref.pair_separator, start);
+                    std::string item = cell->second.substr(start, end == std::string::npos ? end : end - start);
+                    const size_t split_at = item.find(ref.pair_value_separator);
+                    if (split_at == std::string::npos || split_at == 0 || split_at + ref.pair_value_separator.size() >= item.size())
+                        fail("malformed reference pair in " + ref.column + ": " + item);
+                    std::string target = resolve_reference(ref, by_key, item.substr(0, split_at));
+                    if (!target.empty()) {
+                        if (!rebuilt.empty()) rebuilt += recipe_pair_item_separator;
+                        rebuilt += target;
+                        rebuilt += recipe_pair_value_separator;
+                        rebuilt += item.substr(split_at + ref.pair_value_separator.size());
+                    }
+                    if (end == std::string::npos) break;
+                    start = end + ref.pair_separator.size();
+                }
+                cell->second = std::move(rebuilt);
+            }
+            for (const auto& attribute : group_attributes_) row.emplace(attribute.first, attribute.second);
+            row["group:first"] = i == 0 ? "1" : "0";
+            emit(config.record_name, config.namespace_uri, std::move(row));
+        }
+        group_rows_.clear();
+        group_skipped_.clear();
+        group_attributes_.clear();
     }
 
 public:
@@ -131,6 +254,7 @@ public:
         if (final) {
             if (!pending_.empty()) record(pending_, emit);
             pending_.clear();
+            if (config.group_blank_lines) flush_group(emit);
             final_ = true;
         }
     }

@@ -1,0 +1,67 @@
+{
+  "authority": "UD",
+  "release": "2.18",
+  "sourceName": "UD",
+  "trust": 1,
+  "trustClass": "AcademicCurated",
+  "layerOrder": 2,
+  "selected": true,
+  "root": "/vault/Data/.refresh-20260903/UD-Treebanks",
+  "aliases": ["ud"],
+  "artifacts": [
+    {
+      "selector": "ud-treebanks-v2.18.tgz",
+      "disposition": "equivalent-packaging",
+      "required": true,
+      "reason": "Compressed release of the same treebanks as extracted/ud-treebanks-v2.18/."
+    },
+    {
+      "selector": "extracted/ud-treebanks-v2.18/*/*.conllu",
+      "disposition": "admitted",
+      "required": true,
+      "provider": "laplace/native-streaming-delimited-recipe/v1",
+      "syntax": "CoNLL-U",
+      "recipePath": "conllu.recipe.json",
+      "recordDepth": 2,
+      "configuration": {
+        "constants": { "language": { "pathPattern": "/([a-z]+)_[a-z0-9]+-ud-[a-z]+\\.conllu$" } }
+      }
+    },
+    {
+      "selector": "extracted/ud-treebanks-v2.18/*/*-ud-*.txt",
+      "disposition": "equivalent-packaging",
+      "required": false,
+      "reason": "Raw text of the same sentences; every CoNLL-U block carries it as # text."
+    },
+    {
+      "selector": "extracted/ud-treebanks-v2.18/*/stats.xml",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Counts derived from the treebank itself; not testimony."
+    },
+    {
+      "selector": "extracted/ud-treebanks-v2.18/*/LICENSE.txt",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Licence text; provenance, not linguistic testimony."
+    },
+    {
+      "selector": "extracted/ud-treebanks-v2.18/*/README.*",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Treebank documentation; not linguistic testimony."
+    },
+    {
+      "selector": "extracted/ud-treebanks-v2.18/*/*.jar",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Build tooling shipped inside one treebank."
+    },
+    {
+      "selector": "extracted/ud-treebanks-v2.18/*/*.py",
+      "disposition": "excluded-with-reason",
+      "required": false,
+      "reason": "Build tooling shipped inside one treebank."
+    }
+  ]
+}

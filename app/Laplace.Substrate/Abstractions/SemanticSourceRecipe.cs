@@ -72,7 +72,54 @@ public sealed record SourceRecipeField(
     string? ValueAliasProperty = null,
     string? ContextField = null,
     string? DefaultValue = null,
-    bool OmitDefaultTestimony = false);
+    bool OmitDefaultTestimony = false,
+    SourceSubjectMode SubjectMode = SourceSubjectMode.Record,
+    SourcePairMode PairMode = SourcePairMode.None,
+    SourceRelationResolver RelationResolver = SourceRelationResolver.None,
+    string? RelationField = null,
+    string? TrunkField = null,
+    string? PairValueSeparator = null,
+    bool OmitWhenEqualsSubject = false,
+    bool GroupOnce = false);
+
+/// <summary>Which entity a grouped testimony field speaks about.</summary>
+public enum SourceSubjectMode
+{
+    /// <summary>The record's subject; the field value is the object.</summary>
+    Record = 0,
+    /// <summary>The field value is the subject; the record's subject is the object.</summary>
+    Value = 1,
+    /// <summary>The group trunk (for example a sentence's text) is the subject.</summary>
+    Trunk = 2,
+}
+
+/// <summary>How a field carrying several items is split.</summary>
+public enum SourcePairMode
+{
+    None = 0,
+    /// <summary>Items "key&lt;separator&gt;value": the key names the relation, the value is the object.</summary>
+    RelationKeyObjectValue = 1,
+    /// <summary>Resolved reference items: the referenced row is the subject, the value names the relation.</summary>
+    SubjectReferenceRelationValue = 2,
+}
+
+/// <summary>The relation vocabulary a source label resolves through.</summary>
+public enum SourceRelationResolver
+{
+    None = 0,
+    Deprel = 1,
+    EnhancedDeprel = 2,
+    Feature = 3,
+}
+
+/// <summary>An in-group pointer column resolved by the provider to the referenced row's value.</summary>
+public sealed record SourceDelimitedReference(
+    string Column,
+    string KeyColumn,
+    string TargetColumn,
+    string RootValue = "",
+    string PairSeparator = "",
+    string PairValueSeparator = "");
 
 public sealed record SourceRecipeStructure(
     string SyntaxPath,
@@ -149,7 +196,16 @@ public sealed record SourceDelimitedSyntax(
     string RangeFirstField = "first",
     string RangeLastField = "last",
     int MinimumColumns = 0,
-    bool AllowTrailingEmptyColumn = false);
+    bool AllowTrailingEmptyColumn = false,
+    bool GroupBlankLines = false,
+    string GroupAttributeSeparator = "",
+    string SkipKeyColumn = "",
+    string SkipKeyCharacters = "",
+    IReadOnlyList<SourceDelimitedReference>? References = null,
+    IReadOnlyDictionary<string, string>? Constants = null)
+{
+    public bool IsGrouped => GroupBlankLines || (References?.Count ?? 0) != 0 || (Constants?.Count ?? 0) != 0;
+}
 
 /// <summary>
 /// Versioned, deterministic semantic recipe.  It is independent of batching,
@@ -185,7 +241,9 @@ public sealed class SemanticSourceRecipe
         if (delimitedSyntax is { } delimited)
         {
             Required(delimited.RecordName, nameof(delimitedSyntax));
-            Required(delimited.Separator, nameof(delimitedSyntax));
+            // A tab is a real separator; only an absent separator is invalid.
+            if (string.IsNullOrEmpty(delimited.Separator))
+                throw new ArgumentException("Delimited syntax requires a separator.", nameof(delimitedSyntax));
             if (delimited.Columns.Count == 0 || delimited.Columns.Any(string.IsNullOrWhiteSpace)
                 || delimited.Columns.Distinct(StringComparer.Ordinal).Count() != delimited.Columns.Count
                 || delimited.Separator.IndexOfAny(['\r', '\n']) >= 0
@@ -280,6 +338,12 @@ public sealed class SemanticSourceRecipe
 
     private readonly Lazy<string> _canonicalForm;
     private readonly Lazy<Hash128> _recipeId;
+
+    /// <summary>The same recipe over a different concrete delimited syntax (for example
+    /// with per-artifact record constants).</summary>
+    public SemanticSourceRecipe WithDelimitedSyntax(SourceDelimitedSyntax syntax) =>
+        new(Authority, Release, Provider, Syntax, Fields, Structures, ValueAliases,
+            ProviderRoutes, Artifacts, syntax);
 
     public string Authority { get; }
     public string Release { get; }

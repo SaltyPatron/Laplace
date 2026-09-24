@@ -6,6 +6,7 @@
 #include "laplace/core/attestation_engine.h"
 #include "laplace/core/ordered_composition.h"
 #include "laplace/core/trajectory.h"
+#include "laplace/core/relation_law.h"
 #include "recipe_delimited.hpp"
 #include <algorithm>
 #include <cmath>
@@ -49,6 +50,14 @@ struct image_reader {
 };
 struct field_rule {
     std::string path, absent, separator, object_namespace, context_field, default_value;
+    // Grouped-record lowering (RCP6). subject_mode: 0 record subject; 1 the value
+    // is the subject and the record subject the object; 2 the group trunk is the
+    // subject. pair_mode: 0 single value; 1 items "key\x1fvalue" with the key as
+    // relation and the value as object; 2 items "reference\x1fvalue" with the
+    // referenced row as subject and the value as relation.
+    std::string relation_field, trunk_field, pair_value_separator;
+    uint32_t subject_mode = 0, pair_mode = 0, relation_resolver = 0;
+    bool omit_equal_subject = false, group_once = false;
     uint32_t kind, disposition, codec;
     bool has_default = false, omit_default_testimony = false;
     hash128_t relation, parent, entity_type, lexical_relation;
@@ -82,8 +91,9 @@ struct ordinal_span {
     uint32_t first = 0, last = 0;
 };
 struct fact {
-    hash128_t relation{}, object{}, context{};
+    hash128_t relation{}, object{}, context{}, subject{};
     bool has_object = false, has_context = false, confirm = true, explicit_rank = false;
+    bool has_subject = false;
     double rank = 1;
 };
 struct content_form {
@@ -171,7 +181,7 @@ struct laplace_recipe_stream {
     double trust = 0;
     int depth = 2;
     bool final = false, failed = false, active = false;
-    std::string error, record_context;
+    std::string error, record_context, current_identity;
     std::unordered_map<std::string, field_rule> fields;
     std::unordered_map<std::string, structure_rule> structures;
     std::unordered_map<std::string, route_rule> routes;
@@ -254,6 +264,7 @@ struct laplace_recipe_stream {
     }
 
     void build_attestation(hash128_t subj, const fact& f, laplace_attestation_staged_t& row) {
+        if (f.has_subject) subj = f.subject;
         const laplace_relation_def_t* definition = nullptr;
         double weight = laplace_relation_lookup(&f.relation, &definition) == 0 && definition
             ? trust : trust * f.rank;
@@ -382,6 +393,14 @@ struct laplace_recipe_stream {
             context_value = &context->second;
         }
         if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
+        if (rule.group_once) {
+            const auto first = attributes.find("group:first");
+            if (first != attributes.end() && first->second != "1") return;
+        }
+        if (rule.subject_mode != 0 || rule.pair_mode != 0 || !rule.relation_field.empty()) {
+            lower_grouped(stage, rule, raw, context_value, attributes);
+            return;
+        }
         const bool testimony = (rule.disposition & (1u << 6)) != 0;
         const bool ordinary_content = (rule.disposition & (1u << 1)) != 0;
         const bool reference = (rule.disposition & (1u << 5)) != 0;
@@ -468,11 +487,108 @@ struct laplace_recipe_stream {
         }
         emit_fact(f);
     }
+    hash128_t resolve_relation(const field_rule& rule, const std::string& name, double* rank, bool* flip) {
+        hash128_t id{}, parent{}; laplace_rel_symmetry_t symmetry{}; uint8_t flipped = 0;
+        double resolved_rank = 1.0;
+        int rc = -1;
+        switch (rule.relation_resolver) {
+        case 1: rc = laplace_relation_resolve_deprel(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
+        case 2: rc = laplace_relation_resolve_enhanced_deprel(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
+        case 3: rc = laplace_relation_resolve_feature(name.c_str(), &id, &resolved_rank, &symmetry, &flipped, &parent); break;
+        default: throw std::runtime_error("relation resolver is not declared");
+        }
+        if (rc < 0 || !nonzero(id)) throw std::runtime_error("relation vocabulary has no entry for " + name);
+        *rank = resolved_rank; *flip = flipped != 0;
+        return id;
+    }
+    hash128_t endpoint(intent_stage_t* stage, const field_rule& rule, const std::string& value,
+                       const std::map<std::string, std::string>& attributes) {
+        if (value == recipe_group_trunk_value) return trunk(stage, rule, attributes);
+        return content(stage, value);
+    }
+    hash128_t trunk(intent_stage_t* stage, const field_rule& rule,
+                    const std::map<std::string, std::string>& attributes) {
+        const auto text = attributes.find(rule.trunk_field);
+        if (rule.trunk_field.empty() || text == attributes.end() || text->second.empty())
+            throw std::runtime_error("group trunk field is absent");
+        return content(stage, text->second);
+    }
+    void grouped_fact(const field_rule& rule, hash128_t subj, hash128_t relation, hash128_t object,
+                      double rank, bool flip, const std::string* context_value, intent_stage_t* stage) {
+        fact f;
+        f.relation = relation; f.rank = rank; f.explicit_rank = true;
+        f.subject = flip ? object : subj; f.object = flip ? subj : object;
+        f.has_subject = true; f.has_object = true;
+        if (context_value && !context_value->empty()) {
+            f.context = content(stage, *context_value); f.has_context = true;
+        }
+        (void)rule;
+        facts.push_back(f);
+    }
+    void lower_grouped(intent_stage_t* stage, const field_rule& rule, const std::string& raw,
+                       const std::string* context_value,
+                       const std::map<std::string, std::string>& attributes) {
+        if ((rule.disposition & (1u << 6)) == 0)
+            throw std::runtime_error("grouped lowering requires a testimony disposition");
+        auto sibling = [&](const std::string& name) -> std::string {
+            const auto v = attributes.find(name);
+            return v == attributes.end() ? std::string{} : v->second;
+        };
+        if (rule.pair_mode != 0) {
+            // Provider-resolved reference pairs use in-memory separators; source
+            // pairs use the separators the recipe declares.
+            const std::string item_separator = rule.pair_mode == 2
+                ? std::string(1, recipe_pair_item_separator) : rule.separator;
+            const std::string value_separator = rule.pair_mode == 2
+                ? std::string(1, recipe_pair_value_separator) : rule.pair_value_separator;
+            if (item_separator.empty() || value_separator.empty())
+                throw std::runtime_error("pair field declares no item/value separators");
+            if (raw.empty()) return;
+            size_t start = 0;
+            for (;;) {
+                const size_t end = raw.find(item_separator, start);
+                const std::string item = raw.substr(start, end == std::string::npos ? end : end - start);
+                const size_t split_at = item.find(value_separator);
+                const size_t skip = value_separator.size();
+                if (split_at == std::string::npos || split_at == 0 || split_at + skip >= item.size())
+                    throw std::runtime_error("malformed pair item: " + item);
+                const std::string left = item.substr(0, split_at), right = item.substr(split_at + skip);
+                double rank = rule.rank; bool flip = false;
+                if (rule.pair_mode == 1) {
+                    const hash128_t relation = resolve_relation(rule, left, &rank, &flip);
+                    grouped_fact(rule, subject, relation, content(stage, right), rank, flip, context_value, stage);
+                } else {
+                    const hash128_t relation = resolve_relation(rule, right, &rank, &flip);
+                    grouped_fact(rule, endpoint(stage, rule, left, attributes), relation, subject,
+                                 rank, flip, context_value, stage);
+                }
+                if (end == std::string::npos) break;
+                start = end + item_separator.size();
+            }
+            return;
+        }
+        if (rule.omit_equal_subject && raw == current_identity) return;
+        double rank = rule.rank; bool flip = false;
+        hash128_t relation = rule.relation;
+        if (!rule.relation_field.empty()) {
+            const std::string name = sibling(rule.relation_field);
+            if (name.empty() || name == "_") return;
+            relation = resolve_relation(rule, name, &rank, &flip);
+        }
+        if (!nonzero(relation)) throw std::runtime_error("grouped testimony has no relation");
+        switch (rule.subject_mode) {
+        case 0: grouped_fact(rule, subject, relation, endpoint(stage, rule, raw, attributes), rank, flip, context_value, stage); break;
+        case 1: grouped_fact(rule, endpoint(stage, rule, raw, attributes), relation, subject, rank, flip, context_value, stage); break;
+        case 2: grouped_fact(rule, trunk(stage, rule, attributes), relation, endpoint(stage, rule, raw, attributes), rank, flip, context_value, stage); break;
+        default: throw std::runtime_error("unknown subject mode");
+        }
+    }
     void prepare(intent_stage_t* stage) {
         const node& record = pending.front(); auto route_it = routes.find(record.name);
         if (route_it == routes.end()) throw std::runtime_error("recipe has no record route for " + record.name);
         const auto& route = route_it->second;
         const std::string identity = record.get(route.identity);
+        current_identity = identity;
         record_context = record.name + " [" + (identity.empty()
             ? route.first + "=" + record.get(route.first) + ", " + route.last + "=" + record.get(route.last)
             : route.identity + "=" + identity.substr(0, 160) + (identity.size() > 160 ? "..." : "")) + "]";
@@ -516,6 +632,10 @@ struct laplace_recipe_stream {
         }
         facts.clear();
         for (const auto& a : record.attributes) {
+            // Group comment lines vary by corpus (sent_id, newdoc, translit, genre...).
+            // Only those the recipe declares are lowered; the rest are packaging.
+            if (a.first.rfind("group:", 0) == 0 && fields.find(route.prefix + "/@" + a.first) == fields.end())
+                continue;
             const bool bound = a.first == route.identity || a.first == route.first || a.first == route.last ||
                 a.first == route.range_first || a.first == route.range_last;
             field(stage, route.prefix + "/@" + a.first, a.second, bound, record.attributes);
@@ -540,8 +660,9 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
         s = std::make_unique<laplace_recipe_stream>(); s->witness = *witness; s->trust = trust;
         image_reader r{program,n};
         const uint32_t version = r.number();
+        const bool rcp6 = version == 0x36504352u;
         const bool rcp2_or_later = version == 0x32504352u || version == 0x33504352u
-            || version == 0x34504352u || version == 0x35504352u;
+            || version == 0x34504352u || version == 0x35504352u || rcp6;
         if (version != 0x31504352u && !rcp2_or_later)
             throw std::runtime_error("unsupported recipe instruction version");
         s->depth = int(r.number());
@@ -568,6 +689,29 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 const uint32_t trailing_empty = r.number();
                 if (trailing_empty > 1) throw std::runtime_error("invalid trailing-column instruction");
                 config.allow_trailing_empty_column = trailing_empty != 0;
+                if (rcp6) {
+                    const uint32_t grouped = r.number();
+                    if (grouped > 1) throw std::runtime_error("invalid record-group instruction");
+                    config.group_blank_lines = grouped != 0;
+                    config.group_attribute_separator = r.text();
+                    config.skip_key_column = r.text(); config.skip_key_characters = r.text();
+                    const uint32_t references = r.number();
+                    for (uint32_t k = 0; k < references; ++k) {
+                        recipe_delimited_reference ref;
+                        ref.column = r.text(); ref.key_column = r.text(); ref.target_column = r.text();
+                        ref.root_value = r.text(); ref.pair_separator = r.text(); ref.pair_value_separator = r.text();
+                        if (ref.column.empty() || ref.key_column.empty() || ref.target_column.empty()
+                            || ref.pair_separator.empty() != ref.pair_value_separator.empty())
+                            throw std::runtime_error("invalid in-group reference instruction");
+                        config.references.push_back(std::move(ref));
+                    }
+                    const uint32_t constants = r.number();
+                    for (uint32_t k = 0; k < constants; ++k) {
+                        auto key = r.text(); auto value = r.text();
+                        if (!config.constants.emplace(std::move(key), std::move(value)).second)
+                            throw std::runtime_error("duplicate record constant");
+                    }
+                }
                 s->delimited = std::make_unique<recipe_delimited_stream>(std::move(config));
             }
         }
@@ -579,7 +723,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             f.relation = r.hash(); f.parent = r.hash(); f.entity_type = r.hash(); f.lexical_relation = r.hash(); f.rank = r.real();
             uint32_t aliases = r.number();
             for (uint32_t a = 0; a < aliases; ++a) { auto k = r.text(); auto v = r.text(); if (!f.aliases.emplace(alias_key(k),v).second) throw std::runtime_error("duplicate value alias instruction"); }
-            if (version == 0x33504352u || version == 0x34504352u || version == 0x35504352u) {
+            if (version == 0x33504352u || version == 0x34504352u || version == 0x35504352u || rcp6) {
                 const uint32_t has_default = r.number();
                 if (has_default > 1) throw std::runtime_error("invalid semantic-default instruction");
                 f.has_default = has_default != 0;
@@ -592,12 +736,22 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                     throw std::runtime_error("default testimony omission requires a semantic default");
             }
             if (rcp2_or_later) f.context_field = r.text();
+            if (rcp6) {
+                f.subject_mode = r.number(); f.pair_mode = r.number(); f.relation_resolver = r.number();
+                f.relation_field = r.text(); f.trunk_field = r.text(); f.pair_value_separator = r.text();
+                const uint32_t omit_equal = r.number(), once = r.number();
+                if (f.subject_mode > 2 || f.pair_mode > 2 || f.relation_resolver > 3 || omit_equal > 1 || once > 1)
+                    throw std::runtime_error("invalid grouped-field instruction at " + f.path);
+                f.omit_equal_subject = omit_equal != 0; f.group_once = once != 0;
+                if ((f.pair_mode != 0 || !f.relation_field.empty()) && f.relation_resolver == 0)
+                    throw std::runtime_error("dynamic relation requires a declared resolver at " + f.path);
+            }
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
             std::string key = f.path;
             if (!s->fields.emplace(key,std::move(f)).second) throw std::runtime_error("duplicate field instruction");
         }
-        if (version == 0x34504352u || version == 0x35504352u) {
+        if (version == 0x34504352u || version == 0x35504352u || rcp6) {
             count = r.number();
             for (uint32_t j = 0; j < count; ++j) {
                 structure_rule structure;
@@ -624,7 +778,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if (!route.aliases.emplace(key, value).second)
                     throw std::runtime_error("duplicate subject alias instruction");
             }
-            if (version == 0x34504352u || version == 0x35504352u) {
+            if (version == 0x34504352u || version == 0x35504352u || rcp6) {
                 const uint32_t structures = r.number();
                 route.structures.reserve(structures);
                 for (uint32_t k = 0; k < structures; ++k) {
@@ -633,7 +787,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                         throw std::runtime_error("route references unknown structure " + path);
                     route.structures.push_back(std::move(path));
                 }
-                if (version == 0x35504352u) {
+                if (version == 0x35504352u || rcp6) {
                     const uint32_t inherit = r.number();
                     if (inherit > 1) throw std::runtime_error("invalid parent-attribute inheritance instruction");
                     route.inherit_parent_attributes = inherit != 0;

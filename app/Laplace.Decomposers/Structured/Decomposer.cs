@@ -51,7 +51,10 @@ public sealed class RecipeSyntaxProviderRegistry
 
     private sealed class NativeXmlExecutor : IRecipeSyntaxExecutor
     {
-        private readonly NativeSourceRecipe _runtime;
+        private readonly NativeSourceRecipe? _runtime;
+        private readonly SemanticSourceRecipe _recipe;
+        private readonly int _recordDepth;
+        private readonly IReadOnlyList<(string Name, System.Text.RegularExpressions.Regex Pattern)> _pathConstants = [];
         internal NativeXmlExecutor(RecipeProviderBinding binding, bool delimited)
         {
             SemanticSourceRecipe recipe = binding.Recipe
@@ -62,17 +65,53 @@ public sealed class RecipeSyntaxProviderRegistry
                 : "laplace/native-streaming-xml-recipe/v1";
             if (!string.Equals(recipe.Provider, expected, StringComparison.Ordinal))
                 throw new InvalidDataException($"The selected syntax provider requires recipe provider '{expected}', received '{recipe.Provider}'.");
-            if (binding.Configuration.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null)
-                && (binding.Configuration.ValueKind != JsonValueKind.Object || binding.Configuration.EnumerateObject().Any()))
-                throw new InvalidDataException("Native XML/delimited provider configuration belongs in the semantic recipe; unknown execution configuration was supplied.");
-            _runtime = new NativeSourceRecipe(recipe, binding.RecordDepth);
+            _recipe = recipe;
+            _recordDepth = binding.RecordDepth;
+            if (binding.Configuration.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
+            {
+                // The only execution configuration is per-artifact record constants
+                // recovered from the artifact path (for example a treebank's language
+                // code in its file name): {"constants": {"name": {"pathPattern": "..."}}}.
+                var constants = new List<(string, System.Text.RegularExpressions.Regex)>();
+                foreach (JsonProperty property in binding.Configuration.EnumerateObject())
+                {
+                    if (property.Name != "constants" || !delimited)
+                        throw new InvalidDataException(
+                            $"Native provider configuration '{property.Name}' is not an execution setting.");
+                    foreach (JsonProperty constant in property.Value.EnumerateObject())
+                    {
+                        string pattern = constant.Value.GetProperty("pathPattern").GetString()
+                            ?? throw new InvalidDataException($"Constant '{constant.Name}' has no path pattern.");
+                        constants.Add((constant.Name, new System.Text.RegularExpressions.Regex(
+                            pattern, System.Text.RegularExpressions.RegexOptions.CultureInvariant)));
+                    }
+                }
+                _pathConstants = constants;
+            }
+            if (_pathConstants.Count == 0) _runtime = new NativeSourceRecipe(recipe, binding.RecordDepth);
         }
 
         public IAsyncEnumerable<SubstrateChange> ReadChangesAsync(Stream input, RecipeExecutionOptions options,
             string artifactLabel, CancellationToken ct = default)
-            => _runtime.ReadChangesAsync(input, options.SourceId, options.Trust, artifactLabel,
+            => (_runtime ?? ForArtifact(artifactLabel)).ReadChangesAsync(input, options.SourceId, options.Trust, artifactLabel,
                 IngestSizing.ResolveApplyTransactionRows(), IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
                 IngestSizing.ResolveSequentialIoBufferBytes(), ct: ct);
+
+        private NativeSourceRecipe ForArtifact(string artifactLabel)
+        {
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach ((string name, System.Text.RegularExpressions.Regex pattern) in _pathConstants)
+            {
+                var match = pattern.Match(artifactLabel.Replace('\\', '/'));
+                if (!match.Success || match.Groups.Count < 2 || match.Groups[1].Value.Length == 0)
+                    throw new InvalidDataException(
+                        $"Artifact '{artifactLabel}' does not carry record constant '{name}' ({pattern}).");
+                values[name] = match.Groups[1].Value;
+            }
+            SourceDelimitedSyntax syntax = _recipe.DelimitedSyntax!;
+            var recipe = _recipe.WithDelimitedSyntax(syntax with { Constants = values });
+            return new NativeSourceRecipe(recipe, _recordDepth);
+        }
     }
 }
 
@@ -162,7 +201,11 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
         Hash128[] requires = new[] { identity.ArtifactId, recipeIdentity }
             .Concat(_generationRoot is { } generation ? [generation] : Array.Empty<Hash128>())
             .Concat(_dependencies).Distinct().ToArray();
-        Hash128 generationId = SourceArtifactProvenance.RecipeId(SourceName, _release, recipeName, requires);
+        Hash128 recipeUse = SourceArtifactProvenance.RecipeId(SourceName, _release, recipeName, requires);
+        // One file's execution is the composition of the artifact content and the recipe
+        // applied to it. Files sharing a recipe (every treebank of one CoNLL-U recipe)
+        // therefore complete, resume and bind independently.
+        Hash128 generationId = Hash128.Merkle(EntityTier.Document, [identity.ArtifactId, recipeUse]);
         var observability = Laplace.Ingestion.IngestObservabilityScope.Current;
         if (!options.ReObservePresent
             && await context.Reader.HasFileCompletedAsync(generationId, SourceId, LayerOrder, ct).ConfigureAwait(false))
@@ -323,6 +366,7 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
     internal static string[] TypesFor(SemanticSourceRecipe? recipe) => (recipe?.Fields ?? [])
         .Select(static field => field.ObjectEntityType)
         .Concat((recipe?.ProviderRoutes ?? []).Select(static route => route.Subject.EntityType))
+        .Where(static type => !string.IsNullOrEmpty(type))
         .Concat((recipe?.Structures ?? []).Select(static structure => structure.SemanticType))
         .Concat(["Codepoint", "Recipe_Value", "Recipe_Subject"])
         .Distinct(StringComparer.Ordinal).ToArray();
