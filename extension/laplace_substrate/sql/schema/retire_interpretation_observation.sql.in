@@ -1,0 +1,18 @@
+-- Extension update. These objects are not part of the substrate. An installed
+-- database still has them; CREATE OR REPLACE cannot change a function row type,
+-- and CREATE TABLE IF NOT EXISTS will not remove a column. This runs only on
+-- UPDATE, before the current definitions.
+DROP TRIGGER IF EXISTS entity_identity_capture ON laplace.entities;
+DROP TRIGGER IF EXISTS entity_identity_admit ON laplace.entities;
+DROP FUNCTION IF EXISTS laplace.entity_identity_capture_statement();
+DROP FUNCTION IF EXISTS laplace.entity_identity_admit();
+DROP FUNCTION IF EXISTS laplace.entity_write_lock();
+DROP FUNCTION IF EXISTS laplace.entity_interpretations_publish(bytea[], smallint[], bytea[], bytea[], boolean[]);
+DROP FUNCTION IF EXISTS structural.model_recipes();
+DROP FUNCTION IF EXISTS laplace.model_recipes();
+DROP FUNCTION IF EXISTS ops.physicality_descriptor_materialize(
+    bytea[], bytea[], bytea[], bytea[], bytea[], bytea[],
+    bytea[], bytea[], double precision[], bigint, bigint, integer, bigint);
+DROP TABLE IF EXISTS laplace.entity_interpretations;
+DROP TABLE IF EXISTS laplace.physicality_observations;
+ALTER TABLE laplace.entities DROP COLUMN IF EXISTS first_observed_by;
