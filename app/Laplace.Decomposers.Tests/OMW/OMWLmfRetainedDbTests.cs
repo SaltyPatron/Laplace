@@ -28,7 +28,6 @@ public sealed class OMWLmfRetainedDbTests
         Skip.IfNot(Directory.Exists(LexiconRoot), "complete OMW 2.0 Italian lexicon is not mounted");
 
         CodepointPerfcache.LoadDefault();
-        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
 
         var graph = Assert.IsType<IngestArtifactGraph>(
             OMWLmfArtifacts.Build(LexiconRoot, DecomposerOptions.Default));

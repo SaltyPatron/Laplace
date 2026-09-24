@@ -48,7 +48,6 @@ public sealed class LanguageFilter
 
     public static LanguageFilter FromSpec(string commaSeparated)
     {
-        LanguageReference.EnsureLoaded();
         var canon = new HashSet<string>(StringComparer.Ordinal);
         var unresolved = new List<string>();
         foreach (var part in commaSeparated.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))

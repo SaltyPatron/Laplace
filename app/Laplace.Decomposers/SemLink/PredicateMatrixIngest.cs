@@ -308,7 +308,6 @@ internal static class PredicateMatrixIngest
         {
             _sourceId = sourceId;
             _trust = trust;
-            LanguageReference.EnsureLoaded();
         }
 
         // Parsing already produced the row's compact projection. All admission is a cheap,

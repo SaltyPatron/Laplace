@@ -237,7 +237,6 @@ internal static class QueryCommands
         // (prompt_coherence), shape dispatch, the band lens, the responder family,
         // and converse_about. A CLI answer and an API answer to the same prompt were
         // produced by different machinery and could not be compared.
-        LanguageReference.EnsureLoaded();
         var languageCode = LanguageReference.ResolveSystemCode();
         var language = languageCode is null
             ? null

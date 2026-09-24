@@ -16,7 +16,6 @@ public sealed class UdSentenceEmitterTests
     static UdSentenceEmitterTests()
     {
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
-        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 
     [Fact]

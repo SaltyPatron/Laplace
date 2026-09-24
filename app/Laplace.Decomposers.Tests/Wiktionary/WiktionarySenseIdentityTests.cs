@@ -13,7 +13,6 @@ public sealed class WiktionarySenseIdentityTests
     static WiktionarySenseIdentityTests()
     {
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
-        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 
     private static readonly Hash128 HasSense = RelationTypeRegistry.RelationTypeId("HAS_SENSE");

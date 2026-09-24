@@ -16,7 +16,6 @@ public class WiktionaryFeatureSetTests
     static WiktionaryFeatureSetTests()
     {
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(TestInstall.ResolvePerfcacheOrThrow());
-        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 
     private static readonly Hash128 HasFeature =

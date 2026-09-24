@@ -683,8 +683,6 @@ internal static partial class IngestCommands
         // witness throw and blocked the floor.
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolveBlob());
         HighwayPerfcache.LoadDefault();
-        if (!(dec.LayerOrder == 0 && dec.SourceId == UnicodeSource.SourceId))
-            LanguageReference.EnsureLoaded();
         var topo = IngestTopology.EnsureReady();
 
         NativeCorpusRuntime? corpusRuntime = dec is RepoDecomposer { VerifiedRepository: not null }

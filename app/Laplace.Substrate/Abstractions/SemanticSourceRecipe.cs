@@ -266,10 +266,20 @@ public sealed class SemanticSourceRecipe
                     nameof(artifacts));
         }
 
-        CanonicalForm = BuildCanonicalForm(
-            fieldArray, Structures, _valueAliases, ProviderRoutes, Artifacts);
-        RecipeId = Hash128.OfCanonical(CanonicalForm);
+        _canonicalForm = new Lazy<string>(() =>
+        {
+            using var document = new MemoryStream();
+            LaplaceCookbookJson.WriteJson(this, document);
+            return System.Text.Encoding.UTF8.GetString(document.ToArray());
+        });
+        // The recipe is a document; its identity is that document's content.
+        _recipeId = new Lazy<Hash128>(() => ContentEmitter.RootId(CanonicalForm)
+            ?? throw new InvalidOperationException(
+                $"Recipe {Authority}/{Release} could not be composed as content."));
     }
+
+    private readonly Lazy<string> _canonicalForm;
+    private readonly Lazy<Hash128> _recipeId;
 
     public string Authority { get; }
     public string Release { get; }
@@ -281,8 +291,9 @@ public sealed class SemanticSourceRecipe
     public IReadOnlyDictionary<string, string> ValueAliases => _valueAliases;
     public IReadOnlyList<SourceRecipeProviderRoute> ProviderRoutes { get; }
     public IReadOnlyList<SourceRecipeArtifact> Artifacts { get; }
-    public string CanonicalForm { get; }
-    public Hash128 RecipeId { get; }
+    /// <summary>The recipe document in its canonical JSON form.</summary>
+    public string CanonicalForm => _canonicalForm.Value;
+    public Hash128 RecipeId => _recipeId.Value;
 
     public SourceRecipeField Field(string syntaxPath) =>
         _fields.TryGetValue(syntaxPath, out SourceRecipeField? field)
@@ -325,128 +336,6 @@ public sealed class SemanticSourceRecipe
             ? artifact
             : throw new KeyNotFoundException(
                 $"Recipe {Authority}/{Release} has no artifact disposition for '{selector}'.");
-
-    private string BuildCanonicalForm(
-        IEnumerable<SourceRecipeField> fields,
-        IEnumerable<SourceRecipeStructure> structures,
-        IReadOnlyDictionary<string, string> valueAliases,
-        IEnumerable<SourceRecipeProviderRoute> providerRoutes,
-        IEnumerable<SourceRecipeArtifact> artifacts)
-    {
-        var canonical = new StringBuilder("laplace/source-recipe/v1");
-        Append(canonical, Authority);
-        Append(canonical, Release);
-        Append(canonical, Provider);
-        Append(canonical, Syntax);
-        if (DelimitedSyntax is { } delimited)
-        {
-            canonical.Append("|delimited/v1");
-            Append(canonical, delimited.RecordName);
-            Append(canonical, delimited.NamespaceUri);
-            Append(canonical, delimited.Separator);
-            Append(canonical, delimited.CommentPrefix);
-            Append(canonical, delimited.TrimFields ? "1" : "0");
-            Append(canonical, delimited.DirectivePrefix);
-            Append(canonical, delimited.DirectiveRecordName);
-            Append(canonical, delimited.Columns.Count.ToString(CultureInfo.InvariantCulture));
-            foreach (string column in delimited.Columns) Append(canonical, column);
-            Append(canonical, (delimited.DirectiveColumns?.Count ?? 0).ToString(CultureInfo.InvariantCulture));
-            foreach (string column in delimited.DirectiveColumns ?? []) Append(canonical, column);
-            Append(canonical, delimited.RangeColumn);
-            Append(canonical, delimited.RangeSeparator);
-            Append(canonical, delimited.RangeFirstField);
-            Append(canonical, delimited.RangeLastField);
-            Append(canonical, delimited.MinimumColumns.ToString(CultureInfo.InvariantCulture));
-            Append(canonical, delimited.AllowTrailingEmptyColumn ? "1" : "0");
-        }
-        foreach (SourceRecipeField field in fields.OrderBy(static f => f.SyntaxPath, StringComparer.Ordinal))
-        {
-            canonical.Append("|f");
-            Append(canonical, field.SyntaxPath);
-            Append(canonical, field.PropertyName);
-            Append(canonical, field.ValueKind.ToString());
-            Append(canonical, ((int)field.Disposition).ToString(System.Globalization.CultureInfo.InvariantCulture));
-            Append(canonical, field.AbsentSentinel ?? "");
-            Append(canonical, field.SequenceSeparator ?? "");
-            Append(canonical, field.RelationName ?? "");
-            Append(canonical, field.ObjectNamespace ?? "");
-            Append(canonical, field.ObjectEntityType);
-            Append(canonical, field.ReferenceCodec.ToString());
-            Append(canonical, field.PreserveLexicalValue ? "1" : "0");
-            Append(canonical, field.RelationParent ?? "");
-            Append(canonical, field.RelationRank?.ToString("R", CultureInfo.InvariantCulture) ?? "");
-            Append(canonical, field.LexicalRelationName ?? "");
-            Append(canonical, field.ValueAliasProperty ?? "");
-            if (field.ContextField is not null)
-            {
-                canonical.Append("|context");
-                Append(canonical, field.ContextField);
-            }
-            if (field.DefaultValue is not null || field.OmitDefaultTestimony)
-            {
-                canonical.Append("|default");
-                Append(canonical, field.DefaultValue ?? "");
-                Append(canonical, field.OmitDefaultTestimony ? "1" : "0");
-            }
-        }
-        foreach (SourceRecipeStructure structure in structures)
-        {
-            canonical.Append("|s");
-            Append(canonical, structure.SyntaxPath);
-            Append(canonical, structure.SemanticType);
-            Append(canonical, ((int)structure.Disposition).ToString(System.Globalization.CultureInfo.InvariantCulture));
-        }
-        foreach ((string key, string value) in valueAliases.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
-        {
-            canonical.Append("|a");
-            Append(canonical, key);
-            Append(canonical, value);
-        }
-        foreach (SourceRecipeProviderRoute route in providerRoutes)
-        {
-            canonical.Append("|r");
-            Append(canonical, route.RecordName);
-            Append(canonical, route.NamespaceUri);
-            Append(canonical, route.FieldPrefix);
-            Append(canonical, route.Subject.Kind.ToString());
-            Append(canonical, route.Subject.IdentityField);
-            Append(canonical, route.Subject.RangeStartField ?? "");
-            Append(canonical, route.Subject.LastField ?? "");
-            Append(canonical, route.Subject.EntityNamespace ?? "");
-            Append(canonical, route.Subject.EntityType);
-            Append(canonical, route.Subject.SequenceSeparator ?? "");
-            Append(canonical, route.RangeRelationProperty ?? "");
-            Append(canonical, route.RangeRelationName ?? "");
-            Append(canonical, route.RangeStartField ?? "");
-            Append(canonical, route.RangeEndField ?? "");
-            Append(canonical, route.InheritParentAttributes ? "1" : "0");
-            foreach (string path in route.StructurePaths.Order(StringComparer.Ordinal)) Append(canonical, path);
-            foreach ((string child, string prefix) in (route.ChildFieldPrefixes
-                         ?? new Dictionary<string, string>()).OrderBy(static pair => pair.Key, StringComparer.Ordinal))
-            {
-                Append(canonical, child);
-                Append(canonical, prefix);
-            }
-        }
-        foreach (SourceRecipeArtifact artifact in artifacts)
-        {
-            canonical.Append("|g");
-            Append(canonical, artifact.Selector);
-            Append(canonical, artifact.Provider);
-            Append(canonical, artifact.Syntax);
-            Append(canonical, artifact.Disposition.ToString());
-            Append(canonical, artifact.Required ? "1" : "0");
-            Append(canonical, artifact.Reason ?? "");
-            foreach (string dependency in (artifact.DependsOn ?? []).Order(StringComparer.Ordinal))
-                Append(canonical, dependency);
-            foreach (string route in (artifact.ProviderRoutes ?? []).Order(StringComparer.Ordinal))
-                Append(canonical, route);
-        }
-        return canonical.ToString();
-    }
-
-    private static void Append(StringBuilder target, string value) =>
-        target.Append('|').Append(value.Length).Append(':').Append(value);
 
     private static string Required(string value, string parameter)
     {

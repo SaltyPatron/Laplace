@@ -54,7 +54,7 @@ public sealed class UdSentenceEmitContext
         double witnessWeight = SourceTrust.AcademicCurated,
         Hash128? sourceFileContext = null)
     {
-        Hash128 admittedLang = LanguageReference.EmitResolvedCode(
+        Hash128 admittedLang = LanguageReference.Emit(
             b, langCode, sourceId, witnessWeight);
         if (admittedLang != langId)
             throw new InvalidOperationException(

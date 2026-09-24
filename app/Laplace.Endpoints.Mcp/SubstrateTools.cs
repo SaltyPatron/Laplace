@@ -727,7 +727,6 @@ internal sealed class SubstrateTools : IMcpTools
         var elaborate = args?["elaborate"]?.GetValue<bool>() ?? false;
         var languageInput = Opt(args, "language");
         byte[]? language = null;
-        LanguageReference.EnsureLoaded();
         var languageCode = languageInput is null
             ? LanguageReference.ResolveSystemCode()
             : LanguageReference.ResolveCode(languageInput);

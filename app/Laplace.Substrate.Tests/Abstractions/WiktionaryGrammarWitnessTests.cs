@@ -13,7 +13,6 @@ public sealed class WiktionaryGrammarWitnessTests
     public void JsonLine_ComposesAnd_WitnessAttestsWithoutContentEmitter()
     {
         CodepointPerfcache.LoadDefault();
-        LanguageReference.EnsureLoaded();
         const string line = """
         {"word":"filter","lang_code":"en","pos":"noun","senses":[{"glosses":["a device"]}]}
         """;
@@ -51,7 +50,6 @@ public sealed class WiktionaryGrammarWitnessTests
             return;
 
         CodepointPerfcache.LoadDefault();
-        LanguageReference.EnsureLoaded();
 
         const string line = """
         {"word":"dog","lang_code":"en","pos":"noun","senses":[{"glosses":["animal"],"links":[["WordNet","30-01313093-n"]]}]}

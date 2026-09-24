@@ -11,7 +11,6 @@ internal readonly record struct OperatorLanguage(string Code, byte[] Id, string 
         out OperatorLanguage? language,
         out string? invalidExplicitLanguage)
     {
-        LanguageReference.EnsureLoaded();
         language = null;
         invalidExplicitLanguage = null;
 

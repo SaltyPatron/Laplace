@@ -13,7 +13,6 @@ public sealed class WiktionaryJsonFilterTests
     {
         if (!File.Exists(Path.Combine(IsoDir, "iso-639-3.tab")))
             throw new InvalidOperationException($"ISO639 data not found at {IsoDir}");
-        LanguageReference.Load(IsoDir);
     }
 
 

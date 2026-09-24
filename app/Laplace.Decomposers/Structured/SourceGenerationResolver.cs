@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Text.Json;
 using Laplace.Decomposers.Abstractions;
 using Laplace.Engine.Core;
+using Laplace.SubstrateCRUD;
 
 namespace Laplace.Decomposers.Structured;
 
@@ -160,21 +161,19 @@ public static class SourceGenerationResolver
         }
 
         var graph = new IngestArtifactGraph(artifacts.OrderBy(static a => a.RelativePath, StringComparer.Ordinal));
-        var canonical = new StringBuilder(recipe.CanonicalForm);
-        foreach (var item in semantic.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
-        { Append(canonical, item.Key); Append(canonical, Convert.ToHexStringLower(item.Value.RecipeId.ToBytes())); }
-        foreach (var artifact in graph.Artifacts)
+        // A resolved generation is a composition: the generation document's content, then
+        // the content ids of the semantic recipes it binds, then the admitted artifacts.
+        var constituents = new List<Hash128>
         {
-            Append(canonical, artifact.RelativePath);
-            Append(canonical, artifact.DispositionName);
-            Append(canonical, artifact.Sha256);
-            Append(canonical, artifact.Bytes?.ToString(CultureInfo.InvariantCulture) ?? "");
-            Append(canonical, artifact.Notes);
-        }
-        Hash128 configurationId = Hash128.OfCanonical(canonical.ToString());
-        Hash128 generation = SourceArtifactProvenance.RecipeId(recipe.SourceName, recipe.Release,
-            $"source-generation/{Convert.ToHexStringLower(configurationId.ToBytes())}",
-            bindings.Select(static binding => binding.ArtifactId).ToArray());
+            ContentEmitter.RootId(recipe.CanonicalForm)
+                ?? throw new InvalidOperationException(
+                    $"source generation {recipe.SourceName}/{recipe.Release} could not be composed as content"),
+        };
+        foreach (var item in semantic.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+            constituents.Add(item.Value.RecipeId);
+        foreach (var binding in bindings.OrderBy(static b => b.Artifact.RelativePath, StringComparer.Ordinal))
+            constituents.Add(binding.ArtifactId);
+        Hash128 generation = Hash128.Merkle(EntityTier.Document, constituents.ToArray());
         return new(recipe, root, graph, generation, bindings.AsReadOnly(), executionErrors.AsReadOnly());
     }
 
@@ -273,5 +272,4 @@ public static class SourceGenerationResolver
         return sorted;
     }
 
-    private static void Append(StringBuilder target, string value) => target.Append('|').Append(value.Length).Append(':').Append(value);
 }

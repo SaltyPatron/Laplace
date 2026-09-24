@@ -12,7 +12,6 @@ public sealed class OMWLmfTests
     static OMWLmfTests()
     {
         CodepointPerfcache.LoadDefault();
-        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 
     [Fact]

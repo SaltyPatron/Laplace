@@ -23,7 +23,6 @@ public sealed class OmwPlacementEntityParityTests(ITestOutputHelper output)
         Skip.IfNot(Directory.Exists(WnsDir), $"dataset absent: {WnsDir}");
 
         CodepointPerfcache.LoadDefault();
-        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
 
         string? tab = OMWTabFiles.EnumerateTabFiles(WnsDir, langs: null)
             .OrderBy(p => p, StringComparer.Ordinal)

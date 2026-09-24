@@ -25,7 +25,6 @@ public sealed class TatoebaDecomposerTests
     static TatoebaDecomposerTests()
     {
         if (!CodepointPerfcache.IsLoaded) CodepointPerfcache.Load(ResolvePerfcacheBlob());
-        LanguageReference.EnsureLoaded(TestIngestPaths.Iso639);
     }
 
     private static string ResolvePerfcacheBlob() => TestInstall.ResolvePerfcacheOrThrow();

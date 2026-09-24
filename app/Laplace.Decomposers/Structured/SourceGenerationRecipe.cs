@@ -63,7 +63,7 @@ public class SourceGenerationRecipe
         });
         using var bytes = new MemoryStream();
         using (var writer = new Utf8JsonWriter(bytes)) WriteCanonical(writer, configuration);
-        CanonicalForm = "laplace/source-generation/v1\n" + Encoding.UTF8.GetString(bytes.ToArray());
+        CanonicalForm = Encoding.UTF8.GetString(bytes.ToArray());
     }
 
     public static SourceGenerationRecipe Load(string path)

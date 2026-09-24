@@ -13,7 +13,6 @@ public sealed class UdIngestPipelineTests
 {
     private static readonly Hash128 UdSource = UDDecomposer.Source;
 
-    static UdIngestPipelineTests() => LanguageReference.EnsureLoaded();
 
     [Fact]
     public async Task UdPipeline_BatchedProbe_OneDescentPerChunk()

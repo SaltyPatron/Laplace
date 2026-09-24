@@ -29,7 +29,6 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
     public async Task AuthoredAntonymExemplar_AdmitsCompleteSourceWithNativeParseProvenance()
     {
         CodepointPerfcache.LoadDefault();
-        LanguageReference.EnsureLoaded();
         const string relative = "seeds/operational/exemplars/en_antonym.conllu";
         const string text = "The opposite of empty is";
         string directory = Path.Combine(Path.GetTempPath(), "laplace-antonym-exemplar-" + Guid.NewGuid().ToString("N"));
@@ -210,7 +209,6 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
     private async Task<object> AssertAntonymExecution(bool inputIsStoredSubject)
     {
         CodepointPerfcache.LoadDefault();
-        LanguageReference.EnsureLoaded();
         var fixture = SelectAntonymFixture(inputIsStoredSubject);
         string scope = fixture.Scope;
         string directory = Path.Combine(Path.GetTempPath(), "laplace-antonym-execution-" + scope);
@@ -461,7 +459,6 @@ public sealed class OperationalSourceExecutionTests(LocalPgFixture pg)
     private async Task AssertSourceExecution(bool throughWordNetSense)
     {
         CodepointPerfcache.LoadDefault();
-        LanguageReference.EnsureLoaded();
         string scope = Guid.NewGuid().ToString("N");
         string directory = Path.Combine(Path.GetTempPath(), "laplace-operational-execution-" + scope);
         Directory.CreateDirectory(directory);
