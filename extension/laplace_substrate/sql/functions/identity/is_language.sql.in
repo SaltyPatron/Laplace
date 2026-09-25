@@ -1,0 +1,15 @@
+-- laplace.is_language(id): a language is its governed ISO 639-3 code, identified by
+-- the code's content ("eng") and witnessed by ISO 639-3, which attests every code's
+-- scope. Legacy ladder seeds typed a separate Language entity; both read as a
+-- language until those seeds are retired. One indexed probe per id; inlined.
+CREATE OR REPLACE FUNCTION laplace.is_language(p_id bytea)
+    RETURNS boolean
+    LANGUAGE sql STABLE PARALLEL SAFE
+    RETURN EXISTS (
+               SELECT 1 FROM laplace.consensus c
+               WHERE c.subject_id = p_id
+                 AND c.type_id = laplace.relation_type_id('HAS_LANGUAGE_SCOPE'))
+        OR EXISTS (
+               SELECT 1 FROM laplace.entities e
+               WHERE e.id = p_id
+                 AND e.type_id = laplace.entity_type_id('Language'));

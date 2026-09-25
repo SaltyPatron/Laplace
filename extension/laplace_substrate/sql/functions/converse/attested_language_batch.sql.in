@@ -28,9 +28,8 @@ CREATE OR REPLACE FUNCTION converse.attested_language_batch(p_ids bytea[])
 BEGIN ATOMIC
     SELECT DISTINCT ON (a.subject_id) a.subject_id, a.context_id
     FROM laplace.attestations a
-    JOIN laplace.entities e ON e.id = a.context_id
-                           AND e.type_id = laplace.entity_type_id('Language')
     WHERE a.subject_id = ANY (p_ids)
+      AND laplace.is_language(a.context_id)
     GROUP BY a.subject_id, a.context_id
     ORDER BY a.subject_id, SUM(a.sum_score_fp1e9) DESC, a.context_id;
 END;

@@ -28,11 +28,7 @@ BEGIN
     IF p_temp IS NULL OR p_temp < 0 THEN
         RAISE EXCEPTION 'bubble_down: temperature must be non-negative';
     END IF;
-    IF p_lang IS NOT NULL AND NOT EXISTS (
-        SELECT 1
-        FROM laplace.entities i
-        WHERE i.id = p_lang
-          AND i.type_id = laplace.entity_type_id('Language')) THEN
+    IF p_lang IS NOT NULL AND NOT laplace.is_language(p_lang) THEN
         RAISE EXCEPTION 'bubble_down: language % is not a Language entity', encode(p_lang, 'hex');
     END IF;
     IF p_k = 0 OR COALESCE(cardinality(p_concepts), 0) = 0 THEN
@@ -154,10 +150,8 @@ BEGIN
         SELECT DISTINCT a.subject_id AS surface_id
         FROM candidate_ids ci
         JOIN laplace.attestations a ON a.subject_id = ANY(ci.ids)
-        JOIN laplace.entities i
-          ON i.id = a.context_id
-         AND i.type_id = laplace.entity_type_id('Language')
         WHERE p_lang IS NOT NULL
+          AND laplace.is_language(a.context_id)
     ),
     lang_hit AS MATERIALIZED (
         SELECT DISTINCT a.subject_id AS surface_id

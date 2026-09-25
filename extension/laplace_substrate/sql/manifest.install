@@ -176,6 +176,7 @@ functions/lexical/define_bootstrap.sql.in
 functions/lexical/define_with_context_bootstrap.sql.in
 functions/converse/word_id.sql.in
 functions/identity/witness_id.sql.in
+functions/identity/is_language.sql.in
 functions/readback/grammar_source_id.sql.in
 functions/readback/render_bytes.sql.in
 functions/readback/reconstruct_content.sql.in
