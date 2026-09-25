@@ -87,7 +87,7 @@ PURPOSE = {
 
 TABLES = {
     "entities", "physicalities", "attestations", "consensus", "canonical_names",
-    "ingest_run_journal", "ingest_flush_journal", "index_cycle_journal",
+    "ingest_run_journal", "ingest_flush_journal",
     "highway_mask_dirty", "consensus_id",
 }
 

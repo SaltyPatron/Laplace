@@ -24,19 +24,12 @@ public sealed class ExtensionManifestSeparationTests
     }
 
     [Fact]
-    public void RecoveredIndexPaths_FailLoudWithoutSessionSearchPath()
+    public void IndexHealthPaths_FailLoudWithoutSessionSearchPath()
     {
-        var cycle = Read(
-            "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIndexCycle.cs");
         var entityIndex = Read(
             "extension", "laplace_substrate", "sql", "indexes",
             "physicalities_entity_btree.sql.in");
         var floor = Read("scripts", "check-substrate-floor.sh");
-
-        Assert.DoesNotContain("SET search_path", cycle);
-        Assert.DoesNotContain("CREATE INDEX IF NOT EXISTS", cycle);
-        Assert.Contains("RebuildOneValidAsync", cycle);
-        Assert.Contains("IndexValidityAsync", cycle);
 
         Assert.Contains("(entity_id, id)", entityIndex);
         Assert.DoesNotContain("IF NOT EXISTS", entityIndex);
@@ -49,25 +42,16 @@ public sealed class ExtensionManifestSeparationTests
     {
         var writer = Read(
             "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlWorkingSetApply.cs");
-        var recovery = Read(
-            "app", "Laplace.Substrate", "Crud", "Npgsql", "NpgsqlIndexCycle.cs");
         var program = Read("app", "Laplace.Cli", "Program.cs");
         var seedWorkflow = Read(".github", "workflows", "seed.yml");
         var foundation = Read("scripts", "ensure-foundation.sh");
-        var foundationIndexes = Read("scripts", "foundation-bulk-indexes.sh");
 
-        Assert.DoesNotContain("DropSecondariesAsync", recovery);
-        Assert.DoesNotContain("JournalAndDropAsync", recovery);
-        Assert.DoesNotContain("RecoveryDeferred", recovery);
-        Assert.DoesNotContain("LAPLACE_INDEX_RECOVERY_DEFER", recovery);
         Assert.DoesNotContain("cycle.BeginAsync", writer);
         Assert.DoesNotContain("DropIndexesCommand", program);
         Assert.DoesNotContain("LAPLACE_INDEX_CYCLE", seedWorkflow);
         Assert.DoesNotContain("drop-indexes", seedWorkflow);
-        Assert.DoesNotContain("foundation-bulk-indexes.sh\" begin", foundation);
+        Assert.DoesNotContain("foundation-bulk-indexes", foundation);
         Assert.DoesNotContain("LAPLACE_INDEX_RECOVERY_DEFER", foundation);
-        Assert.Contains("foundation-bulk-indexes.sh\" recover", foundation);
-        Assert.DoesNotContain("DROP INDEX", foundationIndexes);
     }
 
     [Fact]

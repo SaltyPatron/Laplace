@@ -28,7 +28,6 @@ DECLARE
     n         int := 0;
     t0        timestamptz := clock_timestamp();
     t_index   timestamptz;
-    recovery_definition text;
 BEGIN
     FOR ix IN
         SELECT h.index_name, h.table_name, h.schema_name,
@@ -48,23 +47,13 @@ BEGIN
         -- %I on identifiers the catalog itself supplied, never caller text. The
         -- schema is load-bearing: index names are unique per schema, and the four
         -- substrate schemas hold same-named indexes on partitioned mirrors.
-        IF to_regclass(format('%I.%I', ix.schema_name, ix.index_name)) IS NULL THEN
-            SELECT j.index_def INTO STRICT recovery_definition
-            FROM laplace.index_cycle_journal j WHERE j.index_name = ix.index_name;
-            -- Journal definitions are the retained installed DDL, not caller SQL.
-            -- ON ONLY would restore an unusable empty partitioned shell.
-            EXECUTE replace(recovery_definition, ' ON ONLY ', ' ON ');
-        ELSE
-            EXECUTE format('REINDEX INDEX %I.%I', ix.schema_name, ix.index_name);
-        END IF;
+        EXECUTE format('REINDEX INDEX %I.%I', ix.schema_name, ix.index_name);
         IF NOT EXISTS (
             SELECT FROM pg_catalog.pg_index i
             WHERE i.indexrelid = to_regclass(format('%I.%I', ix.schema_name, ix.index_name))
               AND i.indisvalid AND i.indisready) THEN
             RAISE EXCEPTION 'index recovery did not produce a usable %.%', ix.schema_name, ix.index_name;
         END IF;
-        DELETE FROM laplace.index_cycle_journal j
-        WHERE ix.schema_name = 'laplace' AND j.index_name = ix.index_name;
         COMMIT;
         RAISE LOG 'reindex_invalid: % rebuilt in %s',
             ix.index_name, round(extract(epoch FROM clock_timestamp() - t_index)::numeric, 1);

@@ -181,14 +181,8 @@ class SeedHostOwnership(unittest.TestCase):
 
     def test_foundation_keeps_o_tier_secondary_indexes_online(self):
         foundation = (ROOT / "scripts" / "ensure-foundation.sh").read_text(encoding="utf-8")
-        helper = (ROOT / "scripts" / "foundation-bulk-indexes.sh").read_text(encoding="utf-8")
-        cycle = (ROOT / "app" / "Laplace.Substrate" / "Crud" / "Npgsql" / "NpgsqlIndexCycle.cs").read_text(encoding="utf-8")
-        self.assertNotIn('foundation-bulk-indexes.sh" begin', foundation)
+        self.assertNotIn("foundation-bulk-indexes", foundation)
         self.assertNotIn("LAPLACE_INDEX_RECOVERY_DEFER", foundation)
-        self.assertNotIn("DROP INDEX", helper)
-        self.assertIn('foundation-bulk-indexes.sh" recover', foundation)
-        self.assertNotIn("RecoveryDeferred", cycle)
-        self.assertNotIn("LAPLACE_INDEX_RECOVERY_DEFER", cycle)
 
 class FoundationCompletion(unittest.TestCase):
     """Execute the real ladder shell with explicit ingest/psql test boundaries."""
@@ -246,11 +240,6 @@ elif "laplace.ingest_run_journal" in query:
     print("test journal: ingest returned without fabricating a completion marker")
 else:
     raise SystemExit("unexpected SQL in fixture: " + query)
-''')
-        self.write_command(scripts / "foundation-bulk-indexes.sh", r'''
-import sys
-if len(sys.argv) != 2 or sys.argv[1] not in ("recover", "end"):
-    raise SystemExit("foundation index fixture expects recover|end")
 ''')
         self.write_command(scripts / "ingest-source.sh", r'''
 import json, os, sys

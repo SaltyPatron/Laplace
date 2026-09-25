@@ -183,11 +183,6 @@
       "fc8b1dafbca499963b9df170890ed0c656b6f23640886da495d50baedbcb17ea": 1,
       "fd4904fdfe7521f6ea4c839506ea1f9ce3b33962a7734b1c594f6fb0ae2137a2": 1
     },
-    "app/Laplace.Substrate/Crud/Npgsql/NpgsqlIndexCycle.cs": {
-      "6953c80dff3c987f85b1622fd03544ee03911cb44623a688679a131dac241a55": 1,
-      "bb129e4418d8e33e9997a2bd58d832e3b2948306fc0d3ff16dffdc1331eed65d": 1,
-      "dae733c4164e5c84801c9c4310f9af74be83a2f8da7481f75947b50f318234eb": 1
-    },
     "app/Laplace.Substrate/Crud/Npgsql/NpgsqlIngestObservability.cs": {
       "02b96fe4be2282f066d086b73cbcb842e9d4aa46ac3e4e40e960afb15add6f33": 1,
       "0722137471171b1f0399d498fd8feb5c6286203fd5cecc07533826f7f3545cae": 1,

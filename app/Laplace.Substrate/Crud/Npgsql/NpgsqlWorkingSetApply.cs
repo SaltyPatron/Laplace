@@ -183,9 +183,6 @@ public sealed partial class NpgsqlSubstrateWriter
 
     public async Task BeginBulkRunAsync(CancellationToken ct = default)
     {
-        // Repair any index an older, interrupted index-cycle run left absent.
-        // Current ingest never drops indexes: the production read surface stays online.
-        await NpgsqlIndexCycle.RecoverAsync(_ds, _log, ct);
         _persistedEntityIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _persistedPhysIds = new System.Collections.Concurrent.ConcurrentDictionary<Hash128, byte>();
         _persistedEntityCount = 0;

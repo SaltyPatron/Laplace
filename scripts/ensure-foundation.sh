@@ -114,12 +114,6 @@ done
 
 if [[ ${#CHAIN[@]} -gt 0 ]]; then
   echo "ingest foundation chain (${#CHAIN[@]} source(s)): ${CHAIN[*]}"
-
-  # O(tier) admission depends on the production secondary indexes for indexed
-  # presence, tier/type and physicality lookups. Repair any journal left by an
-  # older interrupted campaign before the first source, then keep every secondary
-  # online for the entire ladder.
-  "$SCRIPTS/foundation-bulk-indexes.sh" recover
   "$SCRIPTS/ingest-source.sh" chain "${CHAIN[@]}"
 fi
 

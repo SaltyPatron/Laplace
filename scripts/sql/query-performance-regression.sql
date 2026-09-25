@@ -31,26 +31,3 @@ BEGIN
 END $test$;
 ROLLBACK;
 
-CREATE TABLE laplace.query_perf_index_fixture(id integer) PARTITION BY HASH(id);
-CREATE TABLE laplace.query_perf_index_fixture_0 PARTITION OF laplace.query_perf_index_fixture
-    FOR VALUES WITH (modulus 1,remainder 0);
-INSERT INTO laplace.index_cycle_journal(index_name,table_name,index_def)
-VALUES ('query_perf_index_fixture_idx','query_perf_index_fixture',
-        'CREATE INDEX query_perf_index_fixture_idx ON ONLY laplace.query_perf_index_fixture(id)');
-DO $test$ BEGIN
-    ASSERT EXISTS (SELECT FROM ops.index_health()
-                   WHERE index_name='query_perf_index_fixture_idx' AND NOT valid AND leaf_count=0);
-END $test$;
-CALL ops.reindex_invalid(true);
-DO $test$ BEGIN
-    ASSERT to_regclass('laplace.query_perf_index_fixture_idx') IS NULL;
-END $test$;
-CALL ops.reindex_invalid();
-DO $test$ BEGIN
-    ASSERT EXISTS (SELECT FROM pg_index WHERE indexrelid='laplace.query_perf_index_fixture_idx'::regclass
-                  AND indisvalid AND indisready);
-    ASSERT (SELECT count(*)=1 FROM pg_inherits WHERE inhparent='laplace.query_perf_index_fixture_idx'::regclass);
-    ASSERT NOT EXISTS (SELECT FROM laplace.index_cycle_journal WHERE index_name='query_perf_index_fixture_idx');
-    ASSERT NOT EXISTS (SELECT FROM ops.index_health() WHERE index_name='query_perf_index_fixture_idx');
-END $test$;
-DROP TABLE laplace.query_perf_index_fixture;

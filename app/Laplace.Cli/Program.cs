@@ -100,7 +100,6 @@ internal static class Program
             config.AddCommand<StatsCommand>("stats");
             config.AddCommand<EvictCommand>("evict");
             config.AddCommand<RebuildPhysIndexesCommand>("rebuild-phys-indexes");
-            config.AddCommand<RecoverIndexesCommand>("recover-indexes");
             config.AddCommand<CloseRunCommand>("close-run");
             config.AddCommand<SourceBootstrapCommand>("source-bootstrap");
             config.AddCommand<CpuTopologyCommand>("cpu-topology");

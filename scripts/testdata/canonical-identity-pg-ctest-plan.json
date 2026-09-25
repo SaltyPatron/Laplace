@@ -357,7 +357,6 @@
         "task_shapes",
         "steer_semantic_precedence",
         "converse",
-        "relation_bands_summary",
         "chat_loop",
         "word_law",
         "identity_law",

@@ -161,13 +161,11 @@ elif "SELECT extversion FROM pg_extension" in query:
     print(os.environ["FAKE_DATABASE_EXTENSION"])
 elif "string_agg(name" in query:
     print("")
-elif "to_regclass('converse.relation_band_live_counts')" in query:
-    print("t")
 elif "pg_get_functiondef('converse.relation_bands()'::regprocedure)" in query:
     if os.environ.get("FAKE_STALE_RELATION_BANDS") == "1":
         print("CREATE FUNCTION converse.relation_bands() RETURNS SETOF record LANGUAGE sql AS $$ SELECT * FROM laplace.consensus $$;")
     else:
-        print("CREATE FUNCTION converse.relation_bands() RETURNS SETOF record LANGUAGE sql AS $$ SELECT * FROM converse.relation_band_live_counts $$;")
+        print("CREATE FUNCTION converse.relation_bands() RETURNS SETOF record LANGUAGE sql AS $$ SELECT * FROM laplace.relation_registry() $$;")
 elif "FROM laplace.attestations WHERE false" in query:
     if os.environ.get("FAKE_PSQL_MISSING_WRITER_COLUMN") == "1":
         print('column "fold_replayable" does not exist', file=sys.stderr)

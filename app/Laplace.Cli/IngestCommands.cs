@@ -802,36 +802,6 @@ internal static partial class IngestCommands
         return present ? 0 : 1;
     }
 
-    // Restore secondary indexes a legacy killed/crashed index-cycle ingest left absent and
-    // journaled. Current ingest never drops indexes; this remains only to repair an upgraded
-    // database already in that state. Refresh planner statistics after recovery.
-    public static async Task<int> RecoverCycledIndexesAsync()
-    {
-        await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);
-
-        long pending = await NpgsqlIngestOps.IndexCycleJournalCountAsync(ds);
-        if (pending == 0)
-        {
-            Console.WriteLine("index-cycle journal empty — nothing to recover");
-            return 0;
-        }
-
-        Console.WriteLine($"recovering {pending} journaled secondary index(es) — serial builds ...");
-        var log = CliRuntime.LoggerFactory.CreateLogger("index-cycle");
-        var sw = Stopwatch.StartNew();
-        await NpgsqlIndexCycle.RebuildJournaledAsync(ds, log, CancellationToken.None);
-
-        Console.WriteLine("refreshing planner statistics ...");
-        await NpgsqlIngestOps.AnalyzeCoreWriteTablesAsync(ds);
-        sw.Stop();
-
-        long remaining = await NpgsqlIngestOps.IndexCycleJournalCountAsync(ds);
-        Console.WriteLine(
-            $"recovered {pending - remaining}/{pending} index(es) in {sw.Elapsed.TotalSeconds:F0}s"
-            + (remaining > 0 ? $" — {remaining} still journaled (rerun)" : ""));
-        return remaining == 0 ? 0 : 1;
-    }
-
     public static async Task<int> RebuildPhysIndexesAsync()
     {
         await using var ds = LaplaceDataSource.Create(SubstrateAccess.Ingest, ConnString);

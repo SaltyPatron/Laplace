@@ -62,15 +62,6 @@ public static class NpgsqlIngestOps
         return v is true;
     }
 
-    public static async Task<long> IndexCycleJournalCountAsync(
-        NpgsqlDataSource ds, CancellationToken ct = default)
-    {
-        var v = await NpgsqlRead.ExecuteScalarAsync<object>(ds,
-            "SELECT count(*)::bigint FROM laplace.index_cycle_journal",
-            ct: ct, label: "index_cycle_journal_count").ConfigureAwait(false);
-        return AsLong(v);
-    }
-
     public static Task AnalyzeCoreWriteTablesAsync(
         NpgsqlDataSource ds, CancellationToken ct = default) =>
         NpgsqlRead.ExecuteNonQueryAsync(ds, """

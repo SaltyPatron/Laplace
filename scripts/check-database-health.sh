@@ -93,18 +93,12 @@ FROM required
 WHERE to_regclass(name) IS NULL;")
 [[ -z "$missing" ]] || fail "required substrate relations missing: $missing"
 
-# relation_bands() used to aggregate the complete consensus tree at read time. The
-# current implementation maintains exact counts transactionally in a compact catalog.
-# Verify the live function body and supporting relation after extension synchronization
-# so an old full-scan definition cannot continue serving traffic unnoticed.
-relation_band_counts=$("${PSQL[@]}" -d "$DB" -tAc \
-  "SELECT to_regclass('converse.relation_band_live_counts') IS NOT NULL;")
-[[ "$relation_band_counts" == "t" ]] || \
-  fail "relation-band live-count catalog is missing; extension upgrade is incomplete"
+# relation_bands() reads band membership from the relation registry and row estimates
+# from planner statistics; it must never aggregate the consensus tree on a request.
 relation_bands_def=$("${PSQL[@]}" -d "$DB" -tAc \
   "SELECT pg_get_functiondef('converse.relation_bands()'::regprocedure);")
-[[ "$relation_bands_def" == *"relation_band_live_counts"* ]] || \
-  fail "converse.relation_bands() is stale and does not use maintained live counts"
+[[ "$relation_bands_def" == *"relation_registry"* ]] || \
+  fail "converse.relation_bands() is stale and does not read the relation registry"
 [[ "$relation_bands_def" != *"FROM laplace.consensus"* ]] || \
   fail "converse.relation_bands() still performs a full consensus-tree read"
 
