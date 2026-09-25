@@ -132,80 +132,8 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
 
 
         using var stagingDiagnostic = MeasureApplyPhase("managed-staging");
-        using IntentStage? managedStage = managedEntitiesAttempted > 0 || managedPhysAttempted > 0 || managedAttAttempted > 0
-            ? IntentStage.New(Math.Max(Math.Max(managedEntitiesAttempted, managedPhysAttempted), managedAttAttempted))
-            : null;
-        if (managedStage is not null)
-        {
-            var seenEntity = new HashSet<Hash128>();
-            var seenPhys = new HashSet<Hash128>();
-
-            // One canonical row per content id: the first managed row for an id
-            // owns its staged tuple, so COPY cannot manufacture a second entity.
-            foreach (var c in changes)
-                foreach (var e in c.Entities)
-                {
-                    if (!seenEntity.Add(e.Id)) continue;
-                    managedStage.AddEntity(e.Id, e.Tier, e.TypeId);
-                }
-            var selectedPhysicalities = new List<PhysicalityRow>(managedPhysAttempted);
-            foreach (var c in changes)
-                foreach (var p in c.Physicalities)
-                {
-                    if (!seenPhys.Add(p.Id)) continue;
-                    selectedPhysicalities.Add(p);
-                }
-            if (selectedPhysicalities.Count != 0)
-                StageManagedPhysicalities(managedStage,
-                    System.Runtime.InteropServices.CollectionsMarshal.AsSpan(selectedPhysicalities),
-                    IngestSizing.ResolveWorkingSetBudgetBytes(), ct);
-            // No dedup here: duplicate attestation ids across changes carry
-            // real observation counts. The apply core collapses them exactly
-            // like apply_batch did (latest-ts representative, summed games)
-            // instead of dropping the later observations on the floor.
-            // Bulk door: marshal each change's attestations into the native arena in
-            // BOUNDED chunks. `atts.Length * 32` is int*int and the arrays are MANAGED, so a
-            // monolithic change (the tier-0 completeness preamble, or a UD/ConceptNet flush =
-            // tens of millions of rows) would overflow int AND blow the ~2 GiB managed-array
-            // limit in ONE marshal. AttestationStagedBatchAdd APPENDS to the arena, so N
-            // chunked calls stage the exact same content as one call -- bit-identical, just
-            // wall-safe. Buffers are sized once to the first chunk and reused across chunks
-            // (n <= cap always, so no re-alloc and no LOH churn); the native call only reads
-            // the first `n` rows / `n*32` mask bytes.
-            int stagedBytes = System.Runtime.InteropServices.Marshal.SizeOf<AttestationStagedNative>();
-            int maxAttsPerMarshal = (int)Math.Max(1, Math.Min(
-                Array.MaxLength / 32L,
-                IngestSizing.ResolveWorkingSetFlushEnvelopeBytes()
-                    / Math.Max(1L, stagedBytes + 32L)));
-            foreach (var c in changes)
-            {
-                var atts = c.Attestations;
-                if (atts.IsEmpty) continue;
-                int cap = Math.Min(maxAttsPerMarshal, atts.Length);
-                var stagedRows = new AttestationStagedNative[cap];
-                var masksFlat = new byte[cap * 32];
-                for (int chunkStart = 0; chunkStart < atts.Length; chunkStart += maxAttsPerMarshal)
-                {
-                    int n = Math.Min(maxAttsPerMarshal, atts.Length - chunkStart);
-                    for (int i = 0; i < n; i++)
-                    {
-                        var a = atts[chunkStart + i];
-                        stagedRows[i] = StageAttestation(a);
-                        int off = i * 32;
-                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                            masksFlat.AsSpan(off), a.QualifierMask.W0);
-                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                            masksFlat.AsSpan(off + 8), a.QualifierMask.W1);
-                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                            masksFlat.AsSpan(off + 16), a.QualifierMask.W2);
-                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                            masksFlat.AsSpan(off + 24), a.QualifierMask.W3);
-                    }
-                    managedStage.AddAttestationsStaged(stagedRows, n, masksFlat);
-                }
-            }
-        }
-
+        using IntentStage? managedStage = BuildManagedStage(changes,
+            managedEntitiesAttempted, managedPhysAttempted, managedAttAttempted, ct);
         stagingDiagnostic?.Complete();
 
         var sourceStages = new List<IntentStage>(prebuiltStages.Count + 1);
@@ -502,6 +430,98 @@ public sealed partial class NpgsqlSubstrateWriter : ISubstrateWriter
                 { Value = layers, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Integer });
                 await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
+        }
+    }
+
+    /// <summary>
+    /// Stages the managed rows of <paramref name="changes"/> into one native stage: the
+    /// first managed row per entity and physicality id, and every attestation row (the
+    /// apply core, or the source reducer, merges repeated attestation ids). Null when the
+    /// changes carry no managed rows.
+    /// </summary>
+    internal static IntentStage? BuildManagedStage(IReadOnlyList<SubstrateChange> changes,
+        int managedEntitiesAttempted, int managedPhysAttempted, int managedAttAttempted,
+        CancellationToken ct)
+    {
+        if (managedEntitiesAttempted <= 0 && managedPhysAttempted <= 0 && managedAttAttempted <= 0)
+            return null;
+        var managedStage = IntentStage.New(
+            Math.Max(Math.Max(managedEntitiesAttempted, managedPhysAttempted), managedAttAttempted));
+        try
+        {
+            var seenEntity = new HashSet<Hash128>();
+            var seenPhys = new HashSet<Hash128>();
+
+            // One canonical row per content id: the first managed row for an id
+            // owns its staged tuple, so COPY cannot manufacture a second entity.
+            foreach (var c in changes)
+                foreach (var e in c.Entities)
+                {
+                    if (!seenEntity.Add(e.Id)) continue;
+                    managedStage.AddEntity(e.Id, e.Tier, e.TypeId);
+                }
+            var selectedPhysicalities = new List<PhysicalityRow>(managedPhysAttempted);
+            foreach (var c in changes)
+                foreach (var p in c.Physicalities)
+                {
+                    if (!seenPhys.Add(p.Id)) continue;
+                    selectedPhysicalities.Add(p);
+                }
+            if (selectedPhysicalities.Count != 0)
+                StageManagedPhysicalities(managedStage,
+                    System.Runtime.InteropServices.CollectionsMarshal.AsSpan(selectedPhysicalities),
+                    IngestSizing.ResolveWorkingSetBudgetBytes(), ct);
+            // No dedup here: duplicate attestation ids across changes carry
+            // real observation counts. The apply core collapses them exactly
+            // like apply_batch did (latest-ts representative, summed games)
+            // instead of dropping the later observations on the floor.
+            // Bulk door: marshal each change's attestations into the native arena in
+            // BOUNDED chunks. `atts.Length * 32` is int*int and the arrays are MANAGED, so a
+            // monolithic change (the tier-0 completeness preamble, or a UD/ConceptNet flush =
+            // tens of millions of rows) would overflow int AND blow the ~2 GiB managed-array
+            // limit in ONE marshal. AttestationStagedBatchAdd APPENDS to the arena, so N
+            // chunked calls stage the exact same content as one call -- bit-identical, just
+            // wall-safe. Buffers are sized once to the first chunk and reused across chunks
+            // (n <= cap always, so no re-alloc and no LOH churn); the native call only reads
+            // the first `n` rows / `n*32` mask bytes.
+            int stagedBytes = System.Runtime.InteropServices.Marshal.SizeOf<AttestationStagedNative>();
+            int maxAttsPerMarshal = (int)Math.Max(1, Math.Min(
+                Array.MaxLength / 32L,
+                IngestSizing.ResolveWorkingSetFlushEnvelopeBytes()
+                    / Math.Max(1L, stagedBytes + 32L)));
+            foreach (var c in changes)
+            {
+                var atts = c.Attestations;
+                if (atts.IsEmpty) continue;
+                int cap = Math.Min(maxAttsPerMarshal, atts.Length);
+                var stagedRows = new AttestationStagedNative[cap];
+                var masksFlat = new byte[cap * 32];
+                for (int chunkStart = 0; chunkStart < atts.Length; chunkStart += maxAttsPerMarshal)
+                {
+                    int n = Math.Min(maxAttsPerMarshal, atts.Length - chunkStart);
+                    for (int i = 0; i < n; i++)
+                    {
+                        var a = atts[chunkStart + i];
+                        stagedRows[i] = StageAttestation(a);
+                        int off = i * 32;
+                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                            masksFlat.AsSpan(off), a.QualifierMask.W0);
+                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                            masksFlat.AsSpan(off + 8), a.QualifierMask.W1);
+                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                            masksFlat.AsSpan(off + 16), a.QualifierMask.W2);
+                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                            masksFlat.AsSpan(off + 24), a.QualifierMask.W3);
+                    }
+                    managedStage.AddAttestationsStaged(stagedRows, n, masksFlat);
+                }
+            }
+            return managedStage;
+        }
+        catch
+        {
+            managedStage.Dispose();
+            throw;
         }
     }
 
