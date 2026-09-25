@@ -80,7 +80,8 @@ public sealed record SourceRecipeField(
     string? TrunkField = null,
     string? PairValueSeparator = null,
     bool OmitWhenEqualsSubject = false,
-    bool GroupOnce = false);
+    bool GroupOnce = false,
+    string? IdentityTable = null);
 
 /// <summary>Which entity a grouped testimony field speaks about.</summary>
 public enum SourceSubjectMode
@@ -146,7 +147,23 @@ public sealed record SourceRecipeSubjectBinding(
     string? LastField = null,
     string? EntityNamespace = null,
     string EntityType = "Recipe_Subject",
-    string? SequenceSeparator = null);
+    string? SequenceSeparator = null,
+    string? IdentityTable = null);
+
+/// <summary>
+/// A source's own identifier table, collected from the artifact before lowering. A
+/// source that names things by packaging ids (a WN-LMF synset "oewn-02084071-n", a
+/// sense "oewn-dog__1.05.00..") also states what those ids denote (the synset's ILI,
+/// the sense's word). References resolve through that statement so every lexicon
+/// converges on the same concepts and words; an id whose value is absent stands for
+/// itself. KeyPath/ValuePath are record-relative ("@id", "Sense/@id", "Lemma/@writtenForm").
+/// </summary>
+public sealed record SourceIdentityTable(
+    string Name,
+    string RecordName,
+    string KeyPath,
+    string ValuePath,
+    IReadOnlyList<string>? AbsentValues = null);
 
 public sealed record SourceRecipeProviderRoute(
     string RecordName,
@@ -233,7 +250,8 @@ public sealed class SemanticSourceRecipe
         IReadOnlyDictionary<string, string>? valueAliases = null,
         IEnumerable<SourceRecipeProviderRoute>? providerRoutes = null,
         IEnumerable<SourceRecipeArtifact>? artifacts = null,
-        SourceDelimitedSyntax? delimitedSyntax = null)
+        SourceDelimitedSyntax? delimitedSyntax = null,
+        IEnumerable<SourceIdentityTable>? identityTables = null)
     {
         Authority = Required(authority, nameof(authority));
         Release = Required(release, nameof(release));
@@ -326,6 +344,22 @@ public sealed class SemanticSourceRecipe
                     nameof(artifacts));
         }
 
+        IdentityTables = (identityTables ?? []).ToArray();
+        var tableNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (SourceIdentityTable table in IdentityTables)
+        {
+            Required(table.Name, nameof(identityTables));
+            Required(table.RecordName, nameof(identityTables));
+            Required(table.KeyPath, nameof(identityTables));
+            Required(table.ValuePath, nameof(identityTables));
+            tableNames.Add(table.Name);
+        }
+        foreach (string? used in fieldArray.Select(static f => f.IdentityTable)
+                     .Concat(ProviderRoutes.Select(static r => r.Subject.IdentityTable)))
+            if (used is not null && !tableNames.Contains(used))
+                throw new ArgumentException($"Recipe references undeclared identity table '{used}'.",
+                    nameof(identityTables));
+
         _canonicalForm = new Lazy<string>(() =>
         {
             using var document = new MemoryStream();
@@ -345,7 +379,7 @@ public sealed class SemanticSourceRecipe
     /// with per-artifact record constants).</summary>
     public SemanticSourceRecipe WithDelimitedSyntax(SourceDelimitedSyntax syntax) =>
         new(Authority, Release, Provider, Syntax, Fields, Structures, ValueAliases,
-            ProviderRoutes, Artifacts, syntax);
+            ProviderRoutes, Artifacts, syntax, IdentityTables);
 
     public string Authority { get; }
     public string Release { get; }
@@ -357,6 +391,7 @@ public sealed class SemanticSourceRecipe
     public IReadOnlyDictionary<string, string> ValueAliases => _valueAliases;
     public IReadOnlyList<SourceRecipeProviderRoute> ProviderRoutes { get; }
     public IReadOnlyList<SourceRecipeArtifact> Artifacts { get; }
+    public IReadOnlyList<SourceIdentityTable> IdentityTables { get; }
     /// <summary>The recipe document in its canonical JSON form.</summary>
     public string CanonicalForm => _canonicalForm.Value;
     public Hash128 RecipeId => _recipeId.Value;

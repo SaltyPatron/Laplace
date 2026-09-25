@@ -16,6 +16,8 @@ public static class NativeRecipeCompiler
     private const uint Rcp4 = 0x34504352u;
     private const uint Rcp5 = 0x35504352u;
     private const uint Rcp6 = 0x36504352u;
+    // Rcp7: Rcp6 plus the source's identity tables and the fields/subjects resolved through them.
+    private const uint Rcp7 = 0x37504352u;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     public static byte[] Compile(SemanticSourceRecipe recipe, int recordDepth = 2)
@@ -50,7 +52,8 @@ public static class NativeRecipeCompiler
             || recipe.Fields.Any(static field => field.SubjectMode != SourceSubjectMode.Record
                 || field.PairMode != SourcePairMode.None || field.RelationField is not null
                 || field.GroupOnce || field.OmitWhenEqualsSubject);
-        uint version = grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
+        bool identityTables = recipe.IdentityTables.Count != 0;
+        uint version = identityTables ? Rcp7 : grouped ? Rcp6 : hasInheritedAttributes ? Rcp5 : hasStructures ? Rcp4
             : hasDefaultSemantics ? Rcp3 : extended ? Rcp2 : Rcp1;
         bool hasExtendedHeader = version != Rcp1;
         writer.Write(version);
@@ -75,7 +78,7 @@ public static class NativeRecipeCompiler
             WriteText(writer, syntax.RangeLastField);
             writer.Write(checked((uint)syntax.MinimumColumns));
             writer.Write(syntax.AllowTrailingEmptyColumn ? 1u : 0u);
-            if (version == Rcp6)
+            if (version >= Rcp6)
             {
                 writer.Write(syntax.GroupBlankLines ? 1u : 0u);
                 WriteText(writer, syntax.GroupAttributeSeparator);
@@ -140,14 +143,14 @@ public static class NativeRecipeCompiler
             WriteHash(writer, lexical);
             writer.Write(rank);
             WriteAliases(writer, aliases, field.ValueAliasProperty ?? field.PropertyName);
-            if (version is Rcp3 or Rcp4 or Rcp5 or Rcp6)
+            if (version >= Rcp3)
             {
                 writer.Write(field.DefaultValue is null ? 0u : 1u);
                 WriteText(writer, field.DefaultValue);
                 writer.Write(field.OmitDefaultTestimony ? 1u : 0u);
             }
             if (hasExtendedHeader) WriteText(writer, field.ContextField);
-            if (version == Rcp6)
+            if (version >= Rcp6)
             {
                 if (dynamicRelation && field.RelationResolver == SourceRelationResolver.None)
                     throw new InvalidDataException($"Dynamic relation at '{field.SyntaxPath}' declares no resolver.");
@@ -160,9 +163,10 @@ public static class NativeRecipeCompiler
                 writer.Write(field.OmitWhenEqualsSubject ? 1u : 0u);
                 writer.Write(field.GroupOnce ? 1u : 0u);
             }
+            if (version >= Rcp7) WriteText(writer, field.IdentityTable);
         }
 
-        if (version is Rcp4 or Rcp5 or Rcp6)
+        if (version >= Rcp4)
         {
             writer.Write(checked((uint)recipe.Structures.Count));
             foreach (SourceRecipeStructure structure in recipe.Structures)
@@ -231,7 +235,7 @@ public static class NativeRecipeCompiler
                 ? identity.ValueAliasProperty ?? identity.PropertyName
                 : recipe.CanonicalProperty(subject.IdentityField);
             WriteAliases(writer, aliases, property);
-            if (version is Rcp4 or Rcp5 or Rcp6)
+            if (version >= Rcp4)
             {
                 writer.Write(checked((uint)route.StructurePaths.Count));
                 foreach (string structurePath in route.StructurePaths)
@@ -241,8 +245,23 @@ public static class NativeRecipeCompiler
                             $"Route '{route.RecordName}' references unknown structure '{structurePath}'.");
                     WriteText(writer, structurePath);
                 }
-                if (version is Rcp5 or Rcp6)
+                if (version >= Rcp5)
                     writer.Write(route.InheritParentAttributes ? 1u : 0u);
+            }
+            if (version >= Rcp7) WriteText(writer, subject.IdentityTable);
+        }
+
+        if (version >= Rcp7)
+        {
+            writer.Write(checked((uint)recipe.IdentityTables.Count));
+            foreach (SourceIdentityTable table in recipe.IdentityTables)
+            {
+                WriteText(writer, table.Name);
+                WriteText(writer, table.RecordName);
+                WriteText(writer, table.KeyPath);
+                WriteText(writer, table.ValuePath);
+                writer.Write(checked((uint)(table.AbsentValues?.Count ?? 0)));
+                foreach (string absent in table.AbsentValues ?? []) WriteText(writer, absent);
             }
         }
 

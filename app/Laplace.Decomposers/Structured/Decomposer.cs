@@ -17,8 +17,10 @@ public sealed record RecipeProviderBinding(SemanticSourceRecipe? Recipe, int Rec
 /// <summary>A provider owns syntax recovery; the shared decomposer owns file execution and persistence.</summary>
 public interface IRecipeSyntaxExecutor
 {
+    /// <param name="openPrescan">Opens an independent read of the same artifact bytes, for
+    /// recipes that collect the source's identity tables before lowering.</param>
     IAsyncEnumerable<SubstrateChange> ReadChangesAsync(Stream input, RecipeExecutionOptions options,
-        string artifactLabel, CancellationToken ct = default);
+        string artifactLabel, Func<Stream>? openPrescan = null, CancellationToken ct = default);
 }
 
 public sealed class RecipeSyntaxProviderRegistry
@@ -92,10 +94,10 @@ public sealed class RecipeSyntaxProviderRegistry
         }
 
         public IAsyncEnumerable<SubstrateChange> ReadChangesAsync(Stream input, RecipeExecutionOptions options,
-            string artifactLabel, CancellationToken ct = default)
+            string artifactLabel, Func<Stream>? openPrescan = null, CancellationToken ct = default)
             => (_runtime ?? ForArtifact(artifactLabel)).ReadChangesAsync(input, options.SourceId, options.Trust, artifactLabel,
                 IngestSizing.ResolveApplyTransactionRows(), IngestSizing.ResolveWorkingSetFlushEnvelopeBytes(),
-                IngestSizing.ResolveSequentialIoBufferBytes(), ct: ct);
+                IngestSizing.ResolveSequentialIoBufferBytes(), openPrescan: openPrescan, ct: ct);
 
         private NativeSourceRecipe ForArtifact(string artifactLabel)
         {
@@ -247,11 +249,13 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
         {
             passHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             parseInput = new HashingReadStream(input, passHash);
+            // A gzip member is the same artifact bytes; the digest still covers the file.
+            if (IsGzip(_inputPath)) entry = parseInput = new GZipStream(parseInput, CompressionMode.Decompress, leaveOpen: true);
         }
         try
         {
             await foreach (SubstrateChange change in _runtime.ReadChangesAsync(
-                               parseInput, _options, label, ct).ConfigureAwait(false))
+                               parseInput, _options, label, () => OpenIndependentRead(_inputPath), ct).ConfigureAwait(false))
             {
                 records += change.Metadata.InputUnitsConsumed;
                 foreach (IntentStage stage in change.IntentStages)
@@ -270,6 +274,10 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
         }
         if (passHash is not null)
         {
+            // Bytes past the last decoded member still belong to the artifact digest.
+            byte[] rest = new byte[64 * 1024];
+            var tail = new HashingReadStream(input, passHash);
+            while (await tail.ReadAsync(rest, ct).ConfigureAwait(false) > 0) { }
             byte[] parsedDigest = passHash.GetHashAndReset();
             passHash.Dispose();
             if (!CryptographicOperations.FixedTimeEquals(parsedDigest, expectedDigest))
@@ -311,6 +319,18 @@ public sealed class SingleArtifactRecipeDecomposer : IDecomposer, IIngestArtifac
     }
     public ValueTask DisposeAsync() => _input?.DisposeAsync() ?? ValueTask.CompletedTask;
     private static string Hex(Hash128 id) => Convert.ToHexStringLower(id.ToBytes());
+
+    private static bool IsGzip(string path) => path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase);
+
+    // An independent read of the artifact for recipes that collect identity tables first.
+    private static Stream OpenIndependentRead(string path)
+    {
+        if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"Identity-table prescan is not available for zip artifact '{path}'.");
+        var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return IsGzip(path) ? new GZipStream(file, CompressionMode.Decompress, leaveOpen: false) : file;
+    }
 
     private sealed class BlockingReadStream : Stream
     {

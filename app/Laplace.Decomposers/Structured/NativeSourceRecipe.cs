@@ -27,6 +27,7 @@ public sealed class NativeSourceRecipe
         long maximumBytes,
         int readBufferBytes,
         int commitEpoch = 0,
+        Func<Stream>? openPrescan = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(input);
@@ -42,6 +43,22 @@ public sealed class NativeSourceRecipe
         long batch = 0;
         try
         {
+            if (native.RequiresPrescan)
+            {
+                // The source's own id tables (synset -> ILI, sense -> word) precede
+                // lowering, so every reference resolves to what it denotes.
+                if (openPrescan is null)
+                    throw new InvalidDataException(
+                        $"Recipe {Recipe.Authority}/{Recipe.Release} declares identity tables; '{artifactLabel}' must be readable twice.");
+                await using Stream scan = openPrescan();
+                bool scanned = false;
+                while (!scanned)
+                {
+                    int count = await scan.ReadAsync(buffer.AsMemory(0, feedBytes), ct).ConfigureAwait(false);
+                    scanned = count == 0;
+                    native.Prescan(buffer.AsSpan(0, count), scanned);
+                }
+            }
             bool final = false;
             while (!final)
             {

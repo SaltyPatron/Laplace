@@ -792,6 +792,16 @@ symmetry = "asymmetric"
 parent = null
 family_root = "HAS_TITLE"
 
+# A lexicon's statement that a sense/concept is (or, refuted, is not) lexicalized in its
+# language (WN-LMF lexicalized="false": a concept with no word of its own).
+[[relation]]
+canonical = "IS_LEXICALIZED"
+bit = 225
+rank = "lexical_glue"
+symmetry = "asymmetric"
+parent = null
+family_root = "IS_LEXICALIZED"
+
 [[relation]]
 canonical = "HAS_UPPERCASE_MAPPING"
 bit = 124

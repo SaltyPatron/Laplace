@@ -64,6 +64,11 @@ struct field_rule {
     hash128_t relation, parent, entity_type, lexical_relation;
     double rank;
     std::unordered_map<std::string, std::string> aliases;
+    std::string identity_table;
+};
+struct identity_table_rule {
+    std::string name, record, key_path, value_path;
+    std::unordered_set<std::string> absent;
 };
 struct structure_rule {
     std::string path, semantic_type;
@@ -79,11 +84,14 @@ struct route_rule {
     std::unordered_map<std::string, std::string> children;
     std::vector<std::string> structures;
     bool inherit_parent_attributes = false;
+    std::string identity_table;
 };
 struct node {
     std::string name, ns;
     std::map<std::string, std::string> attributes;
     std::vector<node> children;
+    // Element character data, exactly as the source wrote it.
+    std::string text;
     // Recovered source structure in source order: a delimited line's raw cells,
     // or an XML element's own (name, value) attributes. `group` is carried by the
     // last row of a delimited group and lists the group's lines in order.
@@ -186,6 +194,22 @@ static std::string sequence_text(const std::string& raw, const std::string& sepa
     }
     return out;
 }
+static bool has_text(const std::string& text) {
+    return text.find_first_not_of(" \r\n\t") != std::string::npos;
+}
+// Record-relative path: "@attr" on the record itself or "Child/.../@attr" on every
+// matching descendant, in source order.
+static void collect(const node& n, const std::string& path, std::vector<std::string>& out) {
+    if (path.rfind("@", 0) == 0) {
+        auto i = n.attributes.find(path.substr(1));
+        if (i != n.attributes.end() && !i->second.empty()) out.push_back(i->second);
+        return;
+    }
+    const size_t slash = path.find('/');
+    if (slash == std::string::npos) throw std::runtime_error("invalid identity table path " + path);
+    const std::string child = path.substr(0, slash), rest = path.substr(slash + 1);
+    for (const auto& c : n.children) if (c.name == child) collect(c, rest, out);
+}
 static size_t rows(const intent_stage_t* s) {
     return intent_stage_entity_count(s) + intent_stage_physicality_count(s) + intent_stage_attestation_count(s);
 }
@@ -193,6 +217,11 @@ static size_t rows(const intent_stage_t* s) {
 
 struct laplace_recipe_stream {
     laplace_xml_stream_t* parser = nullptr;
+    laplace_xml_stream_t* prescan_parser = nullptr;
+    std::vector<identity_table_rule> table_rules;
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> tables;
+    std::vector<node> prescan_stack;
+    bool prescanned = false;
     std::unique_ptr<recipe_delimited_stream> delimited;
     hash128_t witness{};
     double trust = 0;
@@ -219,7 +248,34 @@ struct laplace_recipe_stream {
     std::unordered_map<std::string, content_form> content_cache;
     size_t content_cache_bytes = 0, content_cache_limit = 0, content_cache_entries = 0;
 
-    ~laplace_recipe_stream() { laplace_xml_stream_free(parser); }
+    ~laplace_recipe_stream() { laplace_xml_stream_free(parser); laplace_xml_stream_free(prescan_parser); }
+    // A reference names what the source says its id denotes; an unlisted id is a
+    // dangling source reference, never silently kept as packaging.
+    const std::string& identify(const std::string& table, const std::string& key) const {
+        if (table.empty()) return key;
+        const auto t = tables.find(table);
+        if (t == tables.end()) throw std::runtime_error("identity table " + table + " is not declared");
+        const auto i = t->second.find(key);
+        if (i == t->second.end()) throw std::runtime_error("unresolved " + table + " reference: " + key);
+        return i->second;
+    }
+    void harvest(const node& record) {
+        for (const auto& rule : table_rules) {
+            if (rule.record != record.name) continue;
+            std::vector<std::string> keys, values;
+            collect(record, rule.key_path, keys);
+            collect(record, rule.value_path, values);
+            std::string value = values.empty() ? std::string{} : values.front();
+            if (rule.absent.count(value)) value.clear();
+            auto& table = tables[rule.name];
+            for (const auto& key : keys) {
+                const std::string& denoted = value.empty() ? key : value;
+                const auto placed = table.emplace(key, denoted);
+                if (!placed.second && placed.first->second != denoted)
+                    throw std::runtime_error("identity table " + rule.name + " states two values for " + key);
+            }
+        }
+    }
     void check(int result, const char* action) {
         if (result != 0) throw std::runtime_error(std::string("recipe ") + action + " failed (" + std::to_string(result) + ")");
     }
@@ -428,6 +484,7 @@ struct laplace_recipe_stream {
             content_form composed;
             if (compose_element(stage, child, &composed)) parts.push_back(component(composed));
         }
+        if (has_text(element.text)) parts.push_back(component(compose_content(stage, element.text)));
         *out = compose_ordered(stage, parts);
         return true;
     }
@@ -464,10 +521,9 @@ struct laplace_recipe_stream {
         if (rule.disposition & (1u << 10)) return;
         const std::string* context_value = nullptr;
         if (!rule.context_field.empty()) {
+            // A declared context the record does not carry leaves the claim unqualified.
             const auto context = attributes.find(rule.context_field);
-            if (context == attributes.end())
-                throw std::runtime_error("missing declared context field " + rule.context_field);
-            context_value = &context->second;
+            if (context != attributes.end()) context_value = &context->second;
         }
         if (raw.empty() || (!rule.absent.empty() && raw == rule.absent)) return;
         if (rule.group_once) {
@@ -508,8 +564,11 @@ struct laplace_recipe_stream {
         }
         f.has_object = true;
         if (rule.codec == 4) {
-            f.object = content(stage, raw);
-            emit_fact(f);
+            const auto values = rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
+            for (const auto& value : values) {
+                f.object = content(stage, identify(rule.identity_table, value));
+                emit_fact(f);
+            }
             return;
         }
         if (rule.codec == 3) {
@@ -543,11 +602,13 @@ struct laplace_recipe_stream {
             return;
         }
         else if (rule.kind == 8 || rule.kind == 9) {
-            f.object = content(stage, raw);
+            f.object = content(stage, identify(rule.identity_table, raw));
         }
         else {
-            auto values = rule.kind == 3 ? split(raw, rule.separator) : std::vector<std::string>{raw};
+            auto values = rule.kind == 3 || (rule.kind == 0 && !rule.separator.empty())
+                ? split(raw, rule.separator) : std::vector<std::string>{raw};
             for (auto value : values) {
+                value = identify(rule.identity_table, value);
                 auto alias = rule.aliases.find(alias_key(value)); if (alias != rule.aliases.end()) value = alias->second;
                 f.object = classifier(stage, value); emit_fact(f);
             }
@@ -573,7 +634,7 @@ struct laplace_recipe_stream {
     hash128_t endpoint(intent_stage_t* stage, const field_rule& rule, const std::string& value,
                        const std::map<std::string, std::string>& attributes) {
         if (value == recipe_group_trunk_value) return trunk(stage, rule, attributes);
-        return content(stage, value);
+        return content(stage, identify(rule.identity_table, value));
     }
     hash128_t trunk(intent_stage_t* stage, const field_rule& rule,
                     const std::map<std::string, std::string>& attributes) {
@@ -650,11 +711,14 @@ struct laplace_recipe_stream {
             relation = resolve_relation(rule, name, &rank, &flip);
         }
         if (!nonzero(relation)) throw std::runtime_error("grouped testimony has no relation");
-        switch (rule.subject_mode) {
-        case 0: grouped_fact(rule, subject, relation, endpoint(stage, rule, raw, attributes), rank, flip, context_value, stage); break;
-        case 1: grouped_fact(rule, endpoint(stage, rule, raw, attributes), relation, subject, rank, flip, context_value, stage); break;
-        case 2: grouped_fact(rule, trunk(stage, rule, attributes), relation, endpoint(stage, rule, raw, attributes), rank, flip, context_value, stage); break;
-        default: throw std::runtime_error("unknown subject mode");
+        const auto values = rule.separator.empty() ? std::vector<std::string>{raw} : split(raw, rule.separator);
+        for (const auto& value : values) {
+            switch (rule.subject_mode) {
+            case 0: grouped_fact(rule, subject, relation, endpoint(stage, rule, value, attributes), rank, flip, context_value, stage); break;
+            case 1: grouped_fact(rule, endpoint(stage, rule, value, attributes), relation, subject, rank, flip, context_value, stage); break;
+            case 2: grouped_fact(rule, trunk(stage, rule, attributes), relation, endpoint(stage, rule, value, attributes), rank, flip, context_value, stage); break;
+            default: throw std::runtime_error("unknown subject mode");
+            }
         }
     }
     void prepare(intent_stage_t* stage) {
@@ -683,7 +747,7 @@ struct laplace_recipe_stream {
             subject = interval_subject(stage, first, last);
         } else if (route.kind == 1) {
             const std::string value = record.get(route.identity);
-            if (route.subject_codec == 0) subject = content(stage, value);
+            if (route.subject_codec == 0) subject = content(stage, identify(route.identity_table, value));
             else if (route.subject_codec == 2)
                 subject = content(stage, sequence_text(value, route.separator));
             else if (route.subject_codec == 1) {
@@ -693,7 +757,7 @@ struct laplace_recipe_stream {
                     INTENT_STAGE_PG_EPOCH_UNIX_US), "subject floor physicality");
             } else throw std::runtime_error("unsupported subject reference codec");
         } else if (route.kind == 2) {
-            auto value = record.get(route.identity);
+            auto value = identify(route.identity_table, record.get(route.identity));
             const auto alias = route.aliases.find(alias_key(value));
             if (alias != route.aliases.end()) value = alias->second;
             subject = classifier(stage, value);
@@ -714,14 +778,21 @@ struct laplace_recipe_stream {
                 a.first == route.range_first || a.first == route.range_last;
             field(stage, route.prefix + "/@" + a.first, a.second, bound, record.attributes);
         }
-        for (const auto& child : record.children) {
-            auto prefix = route.children.find(child.name);
-            if (prefix == route.children.end()) throw std::runtime_error("recipe has no child disposition: " + child.name);
-            if (child.ns != route.ns || !child.children.empty()) throw std::runtime_error("unaccounted nested structure");
-            for (const auto& a : child.attributes)
-                field(stage, prefix->second + "/@" + a.first, a.second, false, child.attributes);
-        }
+        if (has_text(record.text)) field(stage, route.prefix, record.text, false, record.attributes);
+        for (const auto& child : record.children) lower_child(stage, route, child, child.name);
         active = true;
+    }
+    // Nested elements lower against the record's subject under the prefix the route
+    // declares for their path ("Sense", "Sense/SenseRelation").
+    void lower_child(intent_stage_t* stage, const route_rule& route, const node& child, const std::string& path) {
+        auto prefix = route.children.find(path);
+        if (prefix == route.children.end()) throw std::runtime_error("recipe has no child disposition: " + path);
+        if (child.ns != route.ns) throw std::runtime_error("unaccounted nested structure: " + path);
+        for (const auto& a : child.attributes)
+            field(stage, prefix->second + "/@" + a.first, a.second, false, child.attributes);
+        if (has_text(child.text)) field(stage, prefix->second, child.text, false, child.attributes);
+        for (const auto& grandchild : child.children)
+            lower_child(stage, route, grandchild, path + "/" + grandchild.name);
     }
 };
 
@@ -734,11 +805,12 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
         s = std::make_unique<laplace_recipe_stream>(); s->witness = *witness; s->trust = trust;
         image_reader r{program,n};
         const uint32_t version = r.number();
-        const bool rcp6 = version == 0x36504352u;
-        const bool rcp2_or_later = version == 0x32504352u || version == 0x33504352u
-            || version == 0x34504352u || version == 0x35504352u || rcp6;
-        if (version != 0x31504352u && !rcp2_or_later)
+        // "RCPn": the generation digit is the high byte; each generation extends the last.
+        const int generation = int(version >> 24) - '0';
+        if ((version & 0x00ffffffu) != 0x00504352u || generation < 1 || generation > 7)
             throw std::runtime_error("unsupported recipe instruction version");
+        const bool rcp6 = generation >= 6, rcp7 = generation >= 7;
+        const bool rcp2_or_later = generation >= 2;
         s->depth = int(r.number());
         if (s->depth < 0 || s->depth > 128) throw std::runtime_error("invalid record depth");
         uint32_t provider_kind = 0;
@@ -797,7 +869,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
             f.relation = r.hash(); f.parent = r.hash(); f.entity_type = r.hash(); f.lexical_relation = r.hash(); f.rank = r.real();
             uint32_t aliases = r.number();
             for (uint32_t a = 0; a < aliases; ++a) { auto k = r.text(); auto v = r.text(); if (!f.aliases.emplace(alias_key(k),v).second) throw std::runtime_error("duplicate value alias instruction"); }
-            if (version == 0x33504352u || version == 0x34504352u || version == 0x35504352u || rcp6) {
+            if (generation >= 3) {
                 const uint32_t has_default = r.number();
                 if (has_default > 1) throw std::runtime_error("invalid semantic-default instruction");
                 f.has_default = has_default != 0;
@@ -820,12 +892,13 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if ((f.pair_mode != 0 || !f.relation_field.empty()) && f.relation_resolver == 0)
                     throw std::runtime_error("dynamic relation requires a declared resolver at " + f.path);
             }
+            if (rcp7) f.identity_table = r.text();
             if (!f.context_field.empty() && f.codec == 3)
                 throw std::runtime_error("field context conflicts with qualified-reference context at " + f.path);
             std::string key = f.path;
             if (!s->fields.emplace(key,std::move(f)).second) throw std::runtime_error("duplicate field instruction");
         }
-        if (version == 0x34504352u || version == 0x35504352u || rcp6) {
+        if (generation >= 4) {
             count = r.number();
             for (uint32_t j = 0; j < count; ++j) {
                 structure_rule structure;
@@ -852,7 +925,7 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                 if (!route.aliases.emplace(key, value).second)
                     throw std::runtime_error("duplicate subject alias instruction");
             }
-            if (version == 0x34504352u || version == 0x35504352u || rcp6) {
+            if (generation >= 4) {
                 const uint32_t structures = r.number();
                 route.structures.reserve(structures);
                 for (uint32_t k = 0; k < structures; ++k) {
@@ -861,17 +934,40 @@ extern "C" int laplace_recipe_stream_new(const uint8_t* program, size_t n,
                         throw std::runtime_error("route references unknown structure " + path);
                     route.structures.push_back(std::move(path));
                 }
-                if (version == 0x35504352u || rcp6) {
+                if (generation >= 5) {
                     const uint32_t inherit = r.number();
                     if (inherit > 1) throw std::runtime_error("invalid parent-attribute inheritance instruction");
                     route.inherit_parent_attributes = inherit != 0;
                 }
             }
+            if (rcp7) route.identity_table = r.text();
             if (route.kind > 3 || route.subject_codec > 2 || (route.range_first.empty() != route.range_last.empty()) ||
                 (!route.range_first.empty() && (route.kind == 0 || !nonzero(route.range_relation))))
                 throw std::runtime_error("invalid record route instruction");
             auto key = route.name;
             if (!s->routes.emplace(key,std::move(route)).second) throw std::runtime_error("duplicate route instruction");
+        }
+        if (rcp7) {
+            count = r.number();
+            for (uint32_t j = 0; j < count; ++j) {
+                identity_table_rule table;
+                table.name = r.text(); table.record = r.text();
+                table.key_path = r.text(); table.value_path = r.text();
+                const uint32_t absent = r.number();
+                for (uint32_t k = 0; k < absent; ++k) table.absent.insert(r.text());
+                if (table.name.empty() || table.record.empty() || table.key_path.empty() || table.value_path.empty())
+                    throw std::runtime_error("invalid identity table instruction");
+                s->tables[table.name];
+                s->table_rules.push_back(std::move(table));
+            }
+            if (!s->table_rules.empty() && s->delimited)
+                throw std::runtime_error("identity tables require the XML provider");
+            for (const auto& f : s->fields)
+                if (!f.second.identity_table.empty() && !s->tables.count(f.second.identity_table))
+                    throw std::runtime_error("field references undeclared identity table at " + f.first);
+            for (const auto& route : s->routes)
+                if (!route.second.identity_table.empty() && !s->tables.count(route.second.identity_table))
+                    throw std::runtime_error("route references undeclared identity table " + route.first);
         }
         if (r.remaining) throw std::runtime_error("trailing recipe instructions");
         if (provider_kind == 0)
@@ -888,8 +984,46 @@ static std::string attribute_key(const laplace_xml_event_t& e) {
         throw std::runtime_error("namespaced attribute has no prefix: " + std::string(e.name));
     return std::string(e.prefix) + ":" + e.name;
 }
+extern "C" int laplace_recipe_stream_requires_prescan(const laplace_recipe_stream_t* s) {
+    return s && !s->table_rules.empty() ? 1 : 0;
+}
+extern "C" int laplace_recipe_stream_prescan(laplace_recipe_stream_t* s, const uint8_t* bytes, size_t n, int final) {
+    if (!s || s->failed || s->prescanned || s->table_rules.empty()) return -1;
+    try {
+        if (!s->prescan_parser) s->check(laplace_xml_stream_new(&s->prescan_parser), "XML prescan creation");
+        const laplace_xml_event_t* events = nullptr; size_t count = 0;
+        if (laplace_xml_stream_feed(s->prescan_parser, bytes, n, final, &events, &count) != 0)
+            throw std::runtime_error(laplace_xml_stream_error(s->prescan_parser));
+        auto& stack = s->prescan_stack;
+        for (size_t i = 0; i < count; ++i) {
+            const auto& e = events[i];
+            if (e.depth < s->depth) continue;
+            if (e.kind == 1) stack.push_back(node{e.name, e.namespace_uri ? e.namespace_uri : "", {}, {}});
+            else if (e.kind == 4) {
+                if (stack.empty()) throw std::runtime_error("attribute outside record");
+                stack.back().attributes.emplace(attribute_key(e), std::string(e.value, e.value_len));
+            } else if (e.kind == 2) {
+                if (stack.empty()) throw std::runtime_error("unbalanced record");
+                node done = std::move(stack.back()); stack.pop_back();
+                if (stack.empty()) s->harvest(done);
+                else stack.back().children.push_back(std::move(done));
+            }
+        }
+        if (final) {
+            if (!stack.empty()) throw std::runtime_error("prescan ended inside a record");
+            s->prescanned = true;
+            laplace_xml_stream_free(s->prescan_parser); s->prescan_parser = nullptr;
+        }
+        return 0;
+    } catch (const std::exception& e) { s->failed = true; try { s->error = e.what(); } catch (...) {} return -2; }
+    catch (...) { s->failed = true; return -3; }
+}
 extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint8_t* bytes, size_t n, int final) {
     if (!s || s->failed || s->final || !s->pending.empty() || s->active || s->ready) return -1;
+    if (!s->table_rules.empty() && !s->prescanned) {
+        s->error = "recipe identity tables were not collected before feed";
+        return -1;
+    }
     try {
         if (s->delimited) {
             s->delimited->feed(bytes, n, final != 0,
@@ -1008,9 +1142,10 @@ extern "C" int laplace_recipe_stream_feed(laplace_recipe_stream_t* s, const uint
                     s->pending.push_back(std::move(done));
                 } else s->stack.back().children.push_back(std::move(done));
             } else if (e.kind == 3) {
-                for (size_t b = 0; b < e.value_len; ++b)
-                    if (e.value[b] != ' ' && e.value[b] != '\r' && e.value[b] != '\n' && e.value[b] != '\t')
-                        throw std::runtime_error("recipe has no text-node disposition");
+                // Character data belongs to its element; the recipe decides its disposition.
+                if (!s->stack.empty()) s->stack.back().text.append(e.value, e.value_len);
+                else if (has_text(std::string(e.value, e.value_len)))
+                    throw std::runtime_error("recipe has no text-node disposition");
             }
         }
         s->final = final != 0; return 0;

@@ -171,6 +171,7 @@ CREATE OR REPLACE FUNCTION consensus.relation_family_ids(p_family text)
         WHEN 'IS_INSTANCE_OF' THEN ARRAY[laplace.relation_type_id('IS_INSTANCE_OF')]
         WHEN 'IS_LANGUAGE_CODE' THEN ARRAY[laplace.relation_type_id('IS_LANGUAGE_CODE')]
         WHEN 'IS_LEMMA_OF' THEN ARRAY[laplace.relation_type_id('IS_LEMMA_OF')]
+        WHEN 'IS_LEXICALIZED' THEN ARRAY[laplace.relation_type_id('IS_LEXICALIZED')]
         WHEN 'IS_PARTICIPLE_OF' THEN ARRAY[laplace.relation_type_id('IS_PARTICIPLE_OF')]
         WHEN 'IS_PIXEL_OF' THEN ARRAY[laplace.relation_type_id('IS_PIXEL_OF')]
         WHEN 'IS_SENSE_OF' THEN ARRAY[laplace.relation_type_id('IS_SENSE_OF')]

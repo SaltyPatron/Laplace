@@ -113,14 +113,28 @@ internal static class CookbookCommands
         string outputDirectory = Path.GetFullPath(args[3]);
         if (Directory.Exists(outputDirectory) && Directory.EnumerateFileSystemEntries(outputDirectory).Any())
             throw new IOException($"Output directory is not empty: {outputDirectory}");
-        using var input = new FileStream(args[2], FileMode.Open, FileAccess.Read, FileShare.Read,
+        using var file = new FileStream(args[2], FileMode.Open, FileAccess.Read, FileShare.Read,
             64 * 1024, FileOptions.SequentialScan);
         using NativeRecipeStream stream = NativeRecipeStream.Open(program, witness, trust);
+        bool gzip = args[2].EndsWith(".gz", StringComparison.OrdinalIgnoreCase);
+        if (stream.RequiresPrescan)
+        {
+            using var scanFile = new FileStream(args[2], FileMode.Open, FileAccess.Read, FileShare.Read,
+                64 * 1024, FileOptions.SequentialScan);
+            using Stream scan = gzip ? new System.IO.Compression.GZipStream(
+                scanFile, System.IO.Compression.CompressionMode.Decompress) : scanFile;
+            byte[] block = new byte[64 * 1024];
+            int n;
+            while ((n = scan.Read(block)) != 0) stream.Prescan(block.AsSpan(0, n), final: false);
+            stream.Prescan([], final: true);
+        }
+        using var hashing = new HashingInput(file);
+        using Stream input = gzip ? new System.IO.Compression.GZipStream(
+            hashing, System.IO.Compression.CompressionMode.Decompress) : hashing;
         Directory.CreateDirectory(outputDirectory);
         using var entities = new TupleOutput(outputDirectory, "entities", IntentStage.CopyColumnList(IntentStageTable.Entities));
         using var physicalities = new TupleOutput(outputDirectory, "physicalities", IntentStage.CopyColumnList(IntentStageTable.Physicalities));
         using var attestations = new TupleOutput(outputDirectory, "attestations", IntentStage.CopyColumnList(IntentStageTable.Attestations));
-        using var inputHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var stopwatch = Stopwatch.StartNew();
         byte[] buffer = new byte[64 * 1024];
         long inputBytes = 0;
@@ -135,7 +149,6 @@ internal static class CookbookCommands
             while ((read = input.Read(buffer)) != 0)
             {
                 if (Volatile.Read(ref cancelled)) throw new OperationCanceledException("Materialization cancelled.");
-                inputHash.AppendData(buffer.AsSpan(0, read));
                 inputBytes += read;
                 stream.Feed(buffer.AsSpan(0, read), final: false);
                 Drain();
@@ -154,7 +167,7 @@ internal static class CookbookCommands
                 programSha256 = Convert.ToHexStringLower(SHA256.HashData(program)),
                 input = Path.GetFullPath(args[2]),
                 inputBytes,
-                inputSha256 = Convert.ToHexStringLower(inputHash.GetHashAndReset()),
+                inputSha256 = Convert.ToHexStringLower(hashing.Digest()),
                 witnessSourceId = Hex(witness),
                 trust,
                 recordDepth,
@@ -192,6 +205,34 @@ internal static class CookbookCommands
     }
 
     private static string Hex(Hash128 id) => Convert.ToHexStringLower(id.ToBytes());
+
+    // The receipt names the artifact file's digest, whatever codec its bytes are decoded through.
+    private sealed class HashingInput(Stream inner) : Stream
+    {
+        private readonly IncrementalHash _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        public byte[] Digest()
+        {
+            byte[] rest = new byte[64 * 1024];
+            while (Read(rest, 0, rest.Length) > 0) { }
+            return _hash.GetHashAndReset();
+        }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int read = inner.Read(buffer, offset, count);
+            if (read > 0) _hash.AppendData(buffer.AsSpan(offset, read));
+            return read;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing) { if (disposing) _hash.Dispose(); base.Dispose(disposing); }
+    }
 
     private static async Task<int> IngestAsync(string[] args)
     {

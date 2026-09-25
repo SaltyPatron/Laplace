@@ -53,6 +53,36 @@ public sealed class NativeRecipeStream : SafeHandle
         }
     }
 
+    /// <summary>True when the recipe declares identity tables: the artifact is read once
+    /// through <see cref="Prescan"/> before <see cref="Feed"/>.</summary>
+    public bool RequiresPrescan
+    {
+        get
+        {
+            lock (LaplaceCoreGate.Native)
+            {
+                ObjectDisposedException.ThrowIf(IsClosed, this);
+                bool required = NativeInterop.RecipeStreamRequiresPrescan(handle) == 1;
+                GC.KeepAlive(this);
+                return required;
+            }
+        }
+    }
+
+    public unsafe void Prescan(ReadOnlySpan<byte> bytes, bool final)
+    {
+        lock (LaplaceCoreGate.Native)
+        {
+            ObjectDisposedException.ThrowIf(IsClosed, this);
+            fixed (byte* input = bytes)
+            {
+                int result = NativeInterop.RecipeStreamPrescan(handle, input, (nuint)bytes.Length, final ? 1 : 0);
+                if (result != 0) throw new InvalidDataException(Error(handle, result));
+            }
+            GC.KeepAlive(this);
+        }
+    }
+
     /// <summary>The caller owns and must dispose each returned stage.</summary>
     public unsafe IntentStage? Drain(int maximumRows, long maximumBytes, out ulong recordsCompleted)
     {
@@ -104,6 +134,10 @@ public static unsafe partial class NativeInterop
         double trust, IntPtr* output);
     [LibraryImport(Library, EntryPoint = "laplace_recipe_stream_feed")]
     internal static partial int RecipeStreamFeed(IntPtr stream, byte* bytes, nuint size, int final);
+    [LibraryImport(Library, EntryPoint = "laplace_recipe_stream_requires_prescan")]
+    internal static partial int RecipeStreamRequiresPrescan(IntPtr stream);
+    [LibraryImport(Library, EntryPoint = "laplace_recipe_stream_prescan")]
+    internal static partial int RecipeStreamPrescan(IntPtr stream, byte* bytes, nuint size, int final);
     [LibraryImport(Library, EntryPoint = "laplace_recipe_stream_drain")]
     internal static partial int RecipeStreamDrain(IntPtr stream, nuint maximumRows, nuint maximumBytes,
         IntPtr* stage, ulong* completed);

@@ -15,6 +15,12 @@ int laplace_recipe_stream_new(const uint8_t* program, size_t program_bytes,
  * once through the recipe-selected XML or delimited syntax provider. Both
  * providers recover records for the same field/subject/value executor. */
 int laplace_recipe_stream_feed(laplace_recipe_stream_t*, const uint8_t*, size_t, int final);
+/* A recipe that declares identity tables (Rcp7) reads the artifact once through
+ * prescan before feed: the source's own statements of what its ids denote (a
+ * synset id's ILI, a sense id's word) are collected so references resolve to
+ * the denoted content. Returns 1 when the recipe declares tables, else 0. */
+int laplace_recipe_stream_requires_prescan(const laplace_recipe_stream_t*);
+int laplace_recipe_stream_prescan(laplace_recipe_stream_t*, const uint8_t*, size_t, int final);
 /* 1: batch produced, 0: needs input/end, negative: failure. Output stage ownership
  * transfers to the caller. Every batch respects the explicit tuple-row envelope.
  * A large source interval resumes at its exact next subject/fact, not by reparsing.

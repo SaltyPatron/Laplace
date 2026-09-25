@@ -22,7 +22,7 @@
       "provider": "laplace/native-streaming-xml-recipe/v1",
       "syntax": "WN-LMF/1.4",
       "recipePath": "wn-lmf-1.4.recipe.json",
-      "recordDepth": 3
+      "recordDepth": 2
     },
     {
       "selector": "extracted/omw-2.0/*/README",
