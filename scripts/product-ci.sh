@@ -117,9 +117,11 @@ run_build() {
   local need_native=0 need_managed=0 need_web=0
 
   [[ "${LAPLACE_FULL_CLEAN:-}" != 1 ]] || args+=(--force-rebuild)
+  # Force codegen only when an output codegen actually writes is missing (the retired
+  # seed_*.sql.in files no longer exist, so checking them forced codegen every run).
   if [[ "${LAPLACE_FORCE_CODEGEN:-}" == 1 || \
-        ! -f extension/laplace_substrate/sql/generated/seed_relation_types.sql.in || \
-        ! -f extension/laplace_substrate/sql/generated/seed_pos.sql.in ]]; then
+        ! -f extension/laplace_substrate/sql/generated/relation_family_ids.sql.in || \
+        ! -f extension/laplace_substrate/sql/generated/relation_set_ids.sql.in ]]; then
     args+=(--force-codegen)
   fi
 
