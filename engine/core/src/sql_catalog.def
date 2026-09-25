@@ -315,6 +315,112 @@ SQL_QUERY("write.commit_settings", "",
     "current_setting('full_page_writes')::boolean")
 SQL_QUERY("write.advance_epoch", "", "SELECT nextval('laplace.apply_write_epoch')")
 
+/* Source reduction writes (engine/core source_reduce.cpp, SourceReducedApplyWriter).
+ * Each lane moves one native binary COPY stream per table into partitions no other
+ * lane touches; the primary keys resolve conflicts. The Highway OR is four 64-bit
+ * words: bytea <-> bigint casts are byte-exact big-endian, so the stored bytes equal
+ * the native mask writer's. */
+SQL_QUERY("source_reduce.partition_moduli", "",
+    "SELECT t.relname,coalesce(max(substring(pg_get_expr(p.relpartbound,p.oid) "
+    "FROM 'modulus (\\d+)')::int),0) FROM pg_partitioned_table pt "
+    "JOIN pg_class t ON t.oid=pt.partrelid "
+    "JOIN pg_namespace n ON n.oid=t.relnamespace AND n.nspname='laplace' "
+    "JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=pt.partattrs[0] "
+    "JOIN pg_inherits i ON i.inhparent=t.oid JOIN pg_class p ON p.oid=i.inhrelid "
+    "WHERE pt.partstrat='h' AND pt.partnatts=1 AND ((t.relname IN ('entities','physicalities') "
+    "AND a.attname='id') OR (t.relname='attestations' AND a.attname='subject_id')) "
+    "GROUP BY t.relname")
+SQL_QUERY("source_reduce.row_tables", "",
+    "CREATE TEMP TABLE laplace_reduce_entity (id bytea,tier smallint,type_id bytea,placed boolean,"
+    "highway_mask bytea) ON COMMIT DROP; "
+    "CREATE TEMP TABLE laplace_reduce_physicality (id bytea,entity_id bytea,type smallint,"
+    "coord geometry,hilbert_index bytea,trajectory geometry,n_constituents integer,"
+    "alignment_residual double precision,source_dim integer,observed_at timestamptz) ON COMMIT DROP; "
+    "CREATE TEMP TABLE laplace_reduce_mask (id bytea,mask bytea) ON COMMIT DROP; "
+    "SET LOCAL enable_hashjoin=off; SET LOCAL enable_mergejoin=off")
+SQL_QUERY("source_reduce.entity_copy", "", "COPY laplace_reduce_entity FROM STDIN (FORMAT BINARY)")
+SQL_QUERY("source_reduce.physicality_copy", "", "COPY laplace_reduce_physicality FROM STDIN (FORMAT BINARY)")
+SQL_QUERY("source_reduce.mask_copy", "", "COPY laplace_reduce_mask FROM STDIN (FORMAT BINARY)")
+/* Returns admitted entities, stored entities whose mask gained a bit, and admitted
+ * entities no physicality of the reduction realizes. */
+SQL_QUERY("source_reduce.entity_admit", "",
+    "WITH written AS (INSERT INTO laplace.entities AS e (id,tier,type_id,highway_mask) "
+    "SELECT id,tier,type_id,highway_mask FROM laplace_reduce_entity ORDER BY id "
+    "ON CONFLICT (id) DO UPDATE SET highway_mask="
+    "(substr(coalesce(e.highway_mask,decode(repeat('00',32),'hex')),1,8)::bigint|substr(EXCLUDED.highway_mask,1,8)::bigint)::bytea||"
+    "(substr(coalesce(e.highway_mask,decode(repeat('00',32),'hex')),9,8)::bigint|substr(EXCLUDED.highway_mask,9,8)::bigint)::bytea||"
+    "(substr(coalesce(e.highway_mask,decode(repeat('00',32),'hex')),17,8)::bigint|substr(EXCLUDED.highway_mask,17,8)::bigint)::bytea||"
+    "(substr(coalesce(e.highway_mask,decode(repeat('00',32),'hex')),25,8)::bigint|substr(EXCLUDED.highway_mask,25,8)::bigint)::bytea "
+    "WHERE EXCLUDED.highway_mask IS NOT NULL AND (e.highway_mask IS NULL OR ("
+    "(substr(e.highway_mask,1,8)::bigint|substr(EXCLUDED.highway_mask,1,8)::bigint)::bytea||"
+    "(substr(e.highway_mask,9,8)::bigint|substr(EXCLUDED.highway_mask,9,8)::bigint)::bytea||"
+    "(substr(e.highway_mask,17,8)::bigint|substr(EXCLUDED.highway_mask,17,8)::bigint)::bytea||"
+    "(substr(e.highway_mask,25,8)::bigint|substr(EXCLUDED.highway_mask,25,8)::bigint)::bytea)<>e.highway_mask) "
+    "RETURNING e.id,old.id IS NULL AS admitted) "
+    "SELECT count(*) FILTER (WHERE admitted),count(*) FILTER (WHERE NOT admitted),"
+    "count(*) FILTER (WHERE admitted AND id IN (SELECT id FROM laplace_reduce_entity WHERE NOT placed)) "
+    "FROM written")
+SQL_QUERY("source_reduce.physicality_admit", "",
+    "INSERT INTO laplace.physicalities (id,entity_id,type,coord,hilbert_index,trajectory,"
+    "n_constituents,alignment_residual,source_dim,observed_at) "
+    "SELECT id,entity_id,type,coord,hilbert_index,trajectory,n_constituents,alignment_residual,"
+    "source_dim,observed_at FROM laplace_reduce_physicality ORDER BY hilbert_index "
+    "ON CONFLICT (id) DO NOTHING")
+SQL_QUERY("source_reduce.mask_update", "",
+    "UPDATE laplace.entities AS e SET highway_mask="
+    "(substr(coalesce(e.highway_mask,decode(repeat('00',32),'hex')),1,8)::bigint|substr(m.mask,1,8)::bigint)::bytea||"
+    "(substr(coalesce(e.highway_mask,decode(repeat('00',32),'hex')),9,8)::bigint|substr(m.mask,9,8)::bigint)::bytea||"
+    "(substr(coalesce(e.highway_mask,decode(repeat('00',32),'hex')),17,8)::bigint|substr(m.mask,17,8)::bigint)::bytea||"
+    "(substr(coalesce(e.highway_mask,decode(repeat('00',32),'hex')),25,8)::bigint|substr(m.mask,25,8)::bigint)::bytea "
+    "FROM laplace_reduce_mask m WHERE e.id=m.id AND (e.highway_mask IS NULL OR ("
+    "(substr(e.highway_mask,1,8)::bigint|substr(m.mask,1,8)::bigint)::bytea||"
+    "(substr(e.highway_mask,9,8)::bigint|substr(m.mask,9,8)::bigint)::bytea||"
+    "(substr(e.highway_mask,17,8)::bigint|substr(m.mask,17,8)::bigint)::bytea||"
+    "(substr(e.highway_mask,25,8)::bigint|substr(m.mask,25,8)::bigint)::bytea)<>e.highway_mask)")
+SQL_QUERY("source_reduce.claim_copy", "",
+    "COPY laplace.attestations (id,subject_id,type_id,object_id,source_id,context_id,outcome,"
+    "last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,"
+    "fold_replayable,qualifier_mask) FROM STDIN (FORMAT BINARY)")
+SQL_QUERY("source_reduce.claim_tables", "",
+    "CREATE TEMP TABLE laplace_reduce_claim (id bytea,subject_id bytea,type_id bytea,object_id bytea,"
+    "source_id bytea,context_id bytea,outcome smallint,last_observed_at timestamptz,"
+    "observation_count bigint,sum_score_fp1e9 bigint,opponent_rd_fp1e9 bigint,"
+    "opponent_rating_fp1e9 bigint,fold_replayable boolean,qualifier_mask bytea) ON COMMIT DROP; "
+    "CREATE TEMP TABLE laplace_reduce_admitted (id bytea) ON COMMIT DROP")
+SQL_QUERY("source_reduce.claim_stage_copy", "", "COPY laplace_reduce_claim FROM STDIN (FORMAT BINARY)")
+SQL_QUERY("source_reduce.claim_admit", "",
+    "WITH admitted AS (INSERT INTO laplace.attestations (id,subject_id,type_id,object_id,source_id,"
+    "context_id,outcome,last_observed_at,observation_count,sum_score_fp1e9,opponent_rd_fp1e9,"
+    "opponent_rating_fp1e9,fold_replayable,qualifier_mask) "
+    "SELECT id,subject_id,type_id,object_id,source_id,context_id,outcome,last_observed_at,"
+    "observation_count,sum_score_fp1e9,opponent_rd_fp1e9,opponent_rating_fp1e9,fold_replayable,"
+    "qualifier_mask FROM laplace_reduce_claim ORDER BY subject_id,id "
+    "ON CONFLICT (id,type_id,subject_id) DO NOTHING RETURNING id) "
+    "INSERT INTO laplace_reduce_admitted SELECT id FROM admitted")
+SQL_QUERY("source_reduce.admitted_copy", "", "COPY laplace_reduce_admitted TO STDOUT (FORMAT BINARY)")
+SQL_QUERY("source_reduce.cell_tables", "",
+    "CREATE TEMP TABLE laplace_reduce_cell (id bytea,subject_id bytea,type_id bytea) ON COMMIT DROP; "
+    "CREATE TEMP TABLE laplace_reduce_standing (id bytea,subject_id bytea,type_id bytea,object_id bytea,"
+    "rating bigint,rd bigint,volatility bigint,witness_count bigint,last_observed_at timestamptz) "
+    "ON COMMIT DROP; SET LOCAL enable_hashjoin=off; SET LOCAL enable_mergejoin=off")
+SQL_QUERY("source_reduce.cell_copy", "", "COPY laplace_reduce_cell FROM STDIN (FORMAT BINARY)")
+/* Prior standing, read once per cell of the source and row-locked in id order. */
+SQL_QUERY("source_reduce.prior_standing", "",
+    "COPY (SELECT c.id,c.subject_id,c.rating,c.rd,c.volatility FROM laplace_reduce_cell k "
+    "JOIN laplace.consensus c ON c.id=k.id AND c.type_id=k.type_id AND c.subject_id=k.subject_id "
+    "ORDER BY c.id FOR UPDATE OF c) TO STDOUT (FORMAT BINARY)")
+SQL_QUERY("source_reduce.standing_copy", "", "COPY laplace_reduce_standing FROM STDIN (FORMAT BINARY)")
+SQL_QUERY("source_reduce.standing_update", "",
+    "UPDATE laplace.consensus AS c SET rating=s.rating,rd=s.rd,volatility=s.volatility,"
+    "witness_count=c.witness_count+s.witness_count,"
+    "last_observed_at=GREATEST(c.last_observed_at,s.last_observed_at) "
+    "FROM laplace_reduce_standing s WHERE c.id=s.id AND c.type_id=s.type_id AND c.subject_id=s.subject_id")
+SQL_QUERY("source_reduce.consensus_copy", "",
+    "COPY laplace.consensus (id,subject_id,type_id,object_id,rating,rd,volatility,witness_count,"
+    "last_observed_at) FROM STDIN (FORMAT BINARY)")
+SQL_QUERY("source_reduce.dynamic_masks", "bytea[],bytea[]",
+    "SELECT consensus.highway_mask_deposit($1,$2)")
+
 SQL_QUERY("ingest.physicality_descriptor_provider_metadata", "bytea[]",
     "SELECT p.id,p.entity_id,p.type,p.coord,p.hilbert_index,p.trajectory,"
     "p.n_constituents,p.alignment_residual,p.source_dim,p.observed_at "

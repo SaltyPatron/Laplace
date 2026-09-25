@@ -447,7 +447,17 @@ public sealed class Decomposer<TRecipe> : DecomposerMultiPhase, IDecomposer,
 
     public async Task<IngestArtifactGraph?> DescribeArtifactsAsync(string ecosystemPath,
         DecomposerOptions options, CancellationToken ct = default)
-        => (await ResolveAsync(ct).ConfigureAwait(false)).Graph;
+    {
+        ResolvedSourceGeneration resolved = await ResolveAsync(ct).ConfigureAwait(false);
+        if (_scope is null) return resolved.Graph;
+        // A scoped run's inventory is the admitted artifacts beneath its scope (and their
+        // dependencies). Admitted artifacts outside it belong to another run of the same
+        // generation, so they are not part of this run's selected set.
+        var executed = resolved.Bindings.Select(static binding => binding.Artifact.Path)
+            .ToHashSet(StringComparer.Ordinal);
+        return new IngestArtifactGraph(resolved.Graph.Artifacts
+            .Where(artifact => !artifact.IsSelected || executed.Contains(artifact.Path)));
+    }
 
     public async Task<IngestInventory?> DescribeInputAsync(IDecomposerContext context,
         DecomposerOptions options, CancellationToken ct = default)

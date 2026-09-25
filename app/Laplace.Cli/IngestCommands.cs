@@ -695,6 +695,17 @@ internal static partial class IngestCommands
             persistEvidence: persistEvidence,
             logger: loggerFactory.CreateLogger<ConsensusAccumulatingWriter>());
         var writer = (ISubstrateWriter)accumulator;
+        // A recipe source's rows are native stages: reduce and fold them natively per
+        // source and write each partition-owning lane as set-level operations
+        // (SourceReducedApplyWriter). LAPLACE_RECIPE_APPLY=working-set selects the
+        // per-working-set probe/COPY/merge writer the other sources still use, which is
+        // how the two orders of operations are compared on the same sources.
+        await using var sourceReduced = UsesSourceReduction(dec)
+            ? new SourceReducedApplyWriter(accumulator, ds, innerWriter.Durability,
+                IngestTopology.Current.ApplyPartitions, IngestSizing.ResolveWorkingSetBudgetBytes(),
+                loggerFactory.CreateLogger<SourceReducedApplyWriter>())
+            : null;
+        if (sourceReduced is not null) writer = sourceReduced;
         var reader = new NpgsqlSubstrateReader(ds);
         var runner = new IngestRunner(writer, reader, loggerFactory,
             new NpgsqlIngestObservability(ds, persistEvidence));
@@ -726,8 +737,8 @@ internal static partial class IngestCommands
 
 
         await RegisterDynamicCanonicalsAsync(ds, dec);
-        Console.WriteLine($"consensus: {accumulator.CellsFolded:N0} cells materialized during ingest "
-                        + $"from {accumulator.ObservationsAccumulated:N0} observations "
+        Console.WriteLine($"consensus: {((IConsensusFoldMetrics)writer).CellsFolded:N0} cells materialized during ingest "
+                        + $"from {((IConsensusFoldMetrics)writer).ObservationsAccumulated:N0} observations "
                         + "(queued folds drained before success)");
 
         // Zero-novel re-ingest: ANALYZE + validation counts are multi-second (or hang) on a
@@ -748,6 +759,12 @@ internal static partial class IngestCommands
                 corpusRuntime ?? throw new InvalidDataException("Missing loaded runtime identity."));
         return 0;
     }
+
+    private static bool UsesSourceReduction(IDecomposer decomposer)
+        => decomposer is Laplace.Decomposers.Structured.Decomposer<Laplace.Decomposers.Structured.SourceGenerationRecipe>
+                or Laplace.Decomposers.Structured.SingleArtifactRecipeDecomposer
+            && !string.Equals(Environment.GetEnvironmentVariable("LAPLACE_RECIPE_APPLY"), "working-set",
+                StringComparison.OrdinalIgnoreCase);
 
     public static async Task<int> StatsAsync(string? sourceKey = null)
     {
