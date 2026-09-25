@@ -10,4 +10,5 @@ The map is [`README.md`](README.md).
 - [`../AGENTS.md`](../AGENTS.md)
 - [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md)
 - [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md)
+- [`specs/39_Personality_Firmware.md`](specs/39_Personality_Firmware.md)
 - [`INVENTORY.md`](INVENTORY.md)

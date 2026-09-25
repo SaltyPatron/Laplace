@@ -25,6 +25,7 @@ Binding contracts, read under the invention:
 - [`specs/36_Laplace_Forward_Pass.md`](specs/36_Laplace_Forward_Pass.md)
 - [`specs/37_Substrate_Operation_ISA.md`](specs/37_Substrate_Operation_ISA.md)
 - [`specs/38_Collections_Are_Compositions.md`](specs/38_Collections_Are_Compositions.md)
+- [`specs/39_Personality_Firmware.md`](specs/39_Personality_Firmware.md)
 
 The forward program is:
 
