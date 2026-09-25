@@ -370,3 +370,36 @@ canonical = "WordNet_Sense"
 
 [[type]]
 canonical = "WordNet_Synset"
+
+[[type]]
+canonical = "Unicode_Block_Catalog"
+
+[[type]]
+canonical = "Unicode_CJK_Radical_Catalog"
+
+[[type]]
+canonical = "Unicode_Character"
+
+[[type]]
+canonical = "Unicode_Do_Not_Emit_Catalog"
+
+[[type]]
+canonical = "Unicode_Named_Sequence_Catalog"
+
+[[type]]
+canonical = "Unicode_Noncharacter_Range"
+
+[[type]]
+canonical = "Unicode_Property_Group"
+
+[[type]]
+canonical = "Unicode_Repertoire"
+
+[[type]]
+canonical = "Unicode_Reserved_Range"
+
+[[type]]
+canonical = "Unicode_Standardized_Variant_Catalog"
+
+[[type]]
+canonical = "Unicode_Surrogate_Range"
